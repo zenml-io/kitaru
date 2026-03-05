@@ -38,20 +38,17 @@ Every checkpoint is persisted and replayable. `wait()` suspends at zero compute 
 
 ## Development
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and [just](https://github.com/casey/just).
 
 ```bash
-uv sync
-uv run pytest
-uv run ruff check .
-uv run ty check
+uv sync                # Install dependencies
+just --list            # Show all available recipes
+just check             # Run all checks (format, lint, typecheck, typos, yaml)
+just test              # Run tests
+just fix               # Auto-fix formatting, lint, and yaml
 ```
 
-Typo checking is done with [`typos`](https://github.com/crate-ci/typos) using `./.typos.toml`.
-
-```bash
-typos --config ./.typos.toml .
-```
+Typo checking uses [`typos`](https://github.com/crate-ci/typos) (config in `.typos.toml`, run via `just typos`).
 
 ### Claude Code skills
 

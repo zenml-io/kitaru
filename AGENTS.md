@@ -10,15 +10,15 @@ Kitaru is a Python 3.12+ project for durable AI agent execution on ZenML. Use a 
 At the moment, the repository is still bootstrapping; place new production code under `src/kitaru/` and tests under `tests/`.
 
 ## Build, Test, and Development Commands
-Use `uv` for all Python environment and tooling commands.
+Use `uv` for dependency management and `just` as the command runner.
 - `uv sync`: install and sync dependencies
-- `uv run pytest`: run full test suite
-- `uv run pytest tests/test_file.py::test_name`: run one test
-- `uv run ruff check .`: run lint checks
-- `uv run ruff check . --fix`: auto-fix lint issues
-- `uv run ruff format .`: apply formatting
-- `uv run ty check`: run static type checks
-- `typos --config ./.typos.toml .`: run typo/spelling checks
+- `just check`: run all checks (format, lint, typecheck, typos, yaml)
+- `just test`: run full test suite
+- `just test tests/test_file.py::test_name`: run one test
+- `just fix`: auto-fix formatting, lint issues, and yaml
+- `just lint`: run lint checks only
+- `just typecheck`: run static type checks only
+- `just typos`: run typo/spelling checks only
 
 ## Coding Style & Naming Conventions
 - Follow US English spelling in code and docs (`initialize`, `serialize`, `color`).
@@ -46,8 +46,8 @@ For pull requests, use a clear human-readable title and include:
 Link related issues (for example `Fixes #123`) when applicable.
 
 ## CI
-CI (`.github/workflows/ci.yml`) runs lint, type check, and tests on push/PR against Python 3.12 and 3.13.
-Spell checking runs in `.github/workflows/spellcheck.yml` via `crate-ci/typos` using `./.typos.toml`.
+CI (`.github/workflows/ci.yml`) runs lint, type check, typos, and tests on push/PR against Python 3.12 and 3.13.
+Typo checking uses `crate-ci/typos` with config in `.typos.toml`.
 
 ## Security & Configuration Notes
 Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv` (not raw `pip`) for dependency management to keep environments reproducible.
