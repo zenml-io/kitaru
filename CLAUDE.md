@@ -73,10 +73,14 @@ Kitaru emits OpenTelemetry spans. It does **not** own the tracing backend — us
 
 - **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize"
 - **Comments explain *why*, not *what*.** No change-tracking comments ("Updated from X", "Refactored this"). No narrating obvious code (`x = x + 1  # increment x`). Add comments only for intent, trade-offs, constraints, edge cases, or non-obvious decisions. Prefer expressive names and small functions over inline commentary.
+- **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
+- **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Use standalone util files only for truly generic functions used across unrelated modules.
+- **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
 
 ## Conventions
 
 - Python 3.12+
+- Type hint all function parameters and return values
 - Use modern type annotations: `list[str]` not `List[str]`, `str | None` not `Optional[str]`, `dict[str, int]` not `Dict[str, int]` — no `from typing import` for these
 - src layout (`src/kitaru/`)
 - Use `uv` for all package management (never raw pip)
@@ -85,3 +89,4 @@ Kitaru emits OpenTelemetry spans. It does **not** own the tracing backend — us
 - Prefer Pydantic models for data structures
 - Return values from checkpoints must be serializable (prefer Pydantic models or JSON-compatible types)
 - Design docs live in `design/` — this folder is gitignored and must never be committed
+- Follow Google Python style for docstrings
