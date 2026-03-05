@@ -18,6 +18,7 @@ Use `uv` for all Python environment and tooling commands.
 - `uv run ruff check . --fix`: auto-fix lint issues
 - `uv run ruff format .`: apply formatting
 - `uv run ty check`: run static type checks
+- `typos --config ./.typos.toml .`: run typo/spelling checks
 
 ## Coding Style & Naming Conventions
 - Follow US English spelling in code and docs (`initialize`, `serialize`, `color`).
@@ -46,6 +47,7 @@ Link related issues (for example `Fixes #123`) when applicable.
 
 ## CI
 CI (`.github/workflows/ci.yml`) runs lint, type check, and tests on push/PR against Python 3.12 and 3.13.
+Spell checking runs in `.github/workflows/spellcheck.yml` via `crate-ci/typos` using `./.typos.toml`.
 
 ## Security & Configuration Notes
 Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv` (not raw `pip`) for dependency management to keep environments reproducible.
