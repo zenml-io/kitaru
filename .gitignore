@@ -215,6 +215,7 @@ design/
 # Claude
 **/.claude/settings.local.json
 .claude/*
+!.claude/settings.json
 !.claude/skills/
 
 # Codex
