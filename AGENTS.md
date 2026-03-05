@@ -23,8 +23,12 @@ Use `uv` for all Python environment and tooling commands.
 - Follow US English spelling in code and docs (`initialize`, `serialize`, `color`).
 - Use type hints on all public functions and return values.
 - Prefer modern annotations (`list[str]`, `str | None`) over legacy `typing` aliases.
+- Follow Google Python style for docstrings.
 - Keep comments focused on *why* (intent/trade-offs), not line-by-line narration.
 - Treat leading underscore names as private to module/class boundaries.
+- Prefer Protocols/ABCs or `isinstance` over `getattr`/`hasattr` for capability checks.
+- Put helpers on the class when tied to its behavior; use standalone utils only for generic cross-module functions.
+- Prefer Pydantic models for data structures; checkpoint return values must be serializable.
 
 ## Testing Guidelines
 Use `pytest` for unit and integration tests. Name files `test_*.py` and test functions `test_*`. Mirror source paths (example: `src/kitaru/runtime.py` -> `tests/test_runtime.py`). Every bug fix should include a regression test that fails before the fix and passes after it.
@@ -39,6 +43,9 @@ For pull requests, use a clear human-readable title and include:
 - reviewer focus areas
 
 Link related issues (for example `Fixes #123`) when applicable.
+
+## CI
+CI (`.github/workflows/ci.yml`) runs lint, type check, and tests on push/PR against Python 3.12 and 3.13.
 
 ## Security & Configuration Notes
 Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv` (not raw `pip`) for dependency management to keep environments reproducible.
