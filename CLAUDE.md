@@ -38,6 +38,8 @@ uv run ruff format .                  # Format
 uv run ty check                       # Type check with ty
 ```
 
+CI runs lint, type check, and tests on push/PR (`.github/workflows/ci.yml`). Tests run against Python 3.12 and 3.13.
+
 When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ruff to ensure best practices are followed.
 
 ## Architecture
