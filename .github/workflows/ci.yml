@@ -1,11 +1,10 @@
+---
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -15,7 +14,7 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-
+      - run: uv run yamlfix --check --exclude '.venv/**' .
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -23,12 +22,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
       - run: uv run ty check
-
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ['3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
