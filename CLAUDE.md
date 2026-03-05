@@ -77,10 +77,11 @@ Kitaru emits OpenTelemetry spans. It does **not** own the tracing backend — us
 - **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Use standalone util files only for truly generic functions used across unrelated modules.
 - **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
 
-## Commit messages
+## Commits and PRs
 
-- Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature"
-- Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`)
+- **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
+- **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
+- **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
 
 ## Conventions
 
