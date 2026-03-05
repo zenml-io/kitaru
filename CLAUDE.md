@@ -21,24 +21,28 @@ design/               # Design docs, meeting notes (gitignored, never commit)
 
 ## Development commands
 
+This project uses [just](https://github.com/casey/just) as a command runner. Run `just --list` to see all recipes.
+
 ```bash
 # Setup
 uv sync                              # Install dependencies
-uv run pytest                         # Run all tests
-uv run pytest tests/test_foo.py       # Run a single test file
-uv run pytest tests/test_foo.py::test_bar  # Run a single test
-uv run pytest -x                      # Stop on first failure
 
-# Linting & formatting
-uv run ruff check .                   # Lint
-uv run ruff check . --fix             # Lint + auto-fix
-uv run ruff format .                  # Format
+# Common workflows
+just check                            # Run all checks (format, lint, typecheck, typos, yaml)
+just test                             # Run all tests
+just test tests/test_foo.py           # Run a single test file
+just test tests/test_foo.py::test_bar # Run a single test
+just test -x                          # Stop on first failure
+just fix                              # Auto-fix formatting, lint, and yaml
 
-# Type checking
-uv run ty check                       # Type check with ty
+# Individual checks
+just lint                             # Lint only
+just typecheck                        # Type check only
+just typos                            # Typo check only
+just format-check                     # Check formatting without modifying
 ```
 
-CI runs lint, type check, and tests on push/PR (`.github/workflows/ci.yml`). Tests run against Python 3.12 and 3.13.
+CI runs lint, type check, typos, and tests on push/PR (`.github/workflows/ci.yml`). Tests run against Python 3.12 and 3.13.
 
 When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ruff to ensure best practices are followed.
 

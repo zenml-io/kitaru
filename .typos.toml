@@ -3,6 +3,7 @@ extend-exclude = [
     "*.json",
     "*.js",
     "*.ipynb",
+    "uv.lock",
 ]
 
 [default.extend-identifiers]
