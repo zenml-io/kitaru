@@ -1,0 +1,43 @@
+#############################  Runtime  #############################
+
+# Maximum number of retries before a link is declared dead
+max_retries = 3
+
+# Maximum number of concurrent link checks
+max_concurrency = 14
+
+#############################  Requests  ############################
+
+# Timeout for each request
+timeout = 30
+
+# User agent for HTTP requests
+user_agent = "lychee/kitaru-ci (https://github.com/zenml-io/kitaru)"
+
+#############################  Exclusions  ##########################
+
+# Skip private/internal IP ranges
+exclude_all_private = true
+
+# Don't check email addresses
+include_mail = false
+
+# URL patterns to exclude (regex)
+exclude = [
+    # Sites that block automated requests
+    "^https://linkedin\\.com",
+    "^https://www\\.linkedin\\.com",
+    "^https://x\\.com",
+    "^https://twitter\\.com",
+]
+
+# Paths to exclude from scanning
+exclude_path = [
+    ".venv",
+    "design",
+]
+
+#############################  Checking  ############################
+
+# Also check URL fragments/anchors (e.g. #section-name)
+include_fragments = true
