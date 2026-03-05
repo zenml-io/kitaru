@@ -2,8 +2,8 @@
 default:
     @just --list
 
-# Run all checks (format, lint, typecheck, typos, yaml)
-check: format-check lint typecheck typos yaml-check
+# Run all checks (format, lint, typecheck, typos, yaml, links)
+check: format-check lint typecheck typos yaml-check links
 
 # Check code formatting without modifying files
 format-check:
@@ -24,6 +24,10 @@ typos:
 # Check YAML formatting
 yaml-check:
     uv run yamlfix --check --exclude '.venv/**' .
+
+# Check links in markdown files (requires lychee: brew install lychee)
+links:
+    lychee --root-dir . './**/*.md'
 
 # Auto-fix formatting, lint issues, and YAML
 fix:
