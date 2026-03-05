@@ -47,6 +47,12 @@ uv run ruff check .
 uv run ty check
 ```
 
+Typo checking is done with [`typos`](https://github.com/crate-ci/typos) using `./.typos.toml`.
+
+```bash
+typos --config ./.typos.toml .
+```
+
 ### Claude Code skills
 
 Install the official Astral skills for ty, ruff and uv:
