@@ -1,0 +1,16 @@
+[files]
+extend-exclude = [
+    "*.json",
+    "*.js",
+    "*.ipynb",
+]
+
+[default.extend-identifiers]
+HashiCorp = "HashiCorp"
+
+[default.extend-words]
+# Don't correct the surname "Teh"
+aks = "aks"
+
+[default]
+locale = "en-us"
