@@ -69,6 +69,11 @@ The PydanticAI adapter (`kitaru.adapters.pydantic_ai`) wraps agents so each mode
 
 Kitaru emits OpenTelemetry spans. It does **not** own the tracing backend — users configure their own OTel exporter (Logfire, Datadog, etc.).
 
+## Code style
+
+- **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize"
+- **Comments explain *why*, not *what*.** No change-tracking comments ("Updated from X", "Refactored this"). No narrating obvious code (`x = x + 1  # increment x`). Add comments only for intent, trade-offs, constraints, edge cases, or non-obvious decisions. Prefer expressive names and small functions over inline commentary.
+
 ## Conventions
 
 - Python 3.12+
