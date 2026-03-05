@@ -34,10 +34,10 @@ packages = ["src/kitaru"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0",
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
+    "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",
 ]
@@ -76,3 +76,4 @@ root = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-vv"
