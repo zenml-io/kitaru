@@ -20,6 +20,7 @@ Use `uv` for dependency management and `just` as the command runner.
 - `just lint`: run lint checks only
 - `just typecheck`: run static type checks only
 - `just typos`: run typo/spelling checks only
+- `just build`: build wheel and sdist locally
 
 ## Coding Style & Naming Conventions
 - Follow US English spelling in code and docs (`initialize`, `serialize`, `color`).
