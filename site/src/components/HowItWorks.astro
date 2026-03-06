@@ -1,0 +1,79 @@
+---
+// HowItWorks.astro — Three-step section
+---
+
+<section class="how-section" id="how">
+  <div class="how-inner">
+    <div class="how-header" data-reveal>
+      <span class="section-eyebrow">How it works</span>
+      <h2 class="section-title">Three steps to observability</h2>
+      <p class="section-desc">Integrate in minutes. No agent framework lock-in. Works with LangChain, CrewAI, AutoGen, or your own stack.</p>
+    </div>
+
+    <div class="how-steps">
+      <div class="how-step" data-reveal data-reveal-delay="1">
+        <div class="how-step-number">01</div>
+        <h3>Install the SDK</h3>
+        <p>Add the Kitaru SDK to your project. A single <code>pip install kitaru</code> and two lines of config.</p>
+      </div>
+      <div class="how-step" data-reveal data-reveal-delay="2">
+        <div class="how-step-number">02</div>
+        <h3>Run your agents</h3>
+        <p>Kitaru instruments LLM calls, tool invocations, and gate checks automatically — zero code changes to your agent logic.</p>
+      </div>
+      <div class="how-step" data-reveal data-reveal-delay="3">
+        <div class="how-step-number">03</div>
+        <h3>Observe and optimize</h3>
+        <p>Open the dashboard to trace runs, compare versions, find prompt regressions, and cut costs — all in real time.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .how-section {
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border-light);
+    border-bottom: 1px solid var(--color-border-light);
+  }
+  .how-inner {
+    max-width: 1200px; margin: 0 auto;
+    padding: 120px 48px;
+  }
+  .how-header { margin-bottom: 72px; }
+
+  .how-steps {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 48px;
+    position: relative;
+  }
+  .how-steps::before {
+    content: '';
+    position: absolute; top: 28px; left: calc(16.66% + 28px); right: calc(16.66% + 28px);
+    height: 1px; background: var(--color-border);
+  }
+  .how-step { position: relative; }
+  .how-step-number {
+    width: 56px; height: 56px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-size: 18px; font-weight: 600;
+    color: var(--color-accent);
+    background: var(--color-bg); border: 1px solid var(--color-border);
+    border-radius: 50%; margin-bottom: 24px;
+    position: relative; z-index: 2;
+  }
+  .how-step h3 {
+    font-size: 18px; font-weight: 600; margin-bottom: 8px;
+    letter-spacing: -0.01em;
+  }
+  .how-step p {
+    font-size: 14px; line-height: 1.6; color: var(--color-secondary);
+  }
+  .how-step code {
+    font-family: var(--font-mono); font-size: 12px;
+    background: var(--color-bg); padding: 2px 6px; border-radius: 3px;
+  }
+
+  @media (max-width: 768px) {
+    .how-inner { padding: 80px 20px; }
+  }
+</style>

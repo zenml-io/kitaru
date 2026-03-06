@@ -41,11 +41,11 @@ yaml-check:
 
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
-    lychee --offline --root-dir . --exclude-path 'docs/node_modules' --exclude-path 'design' './**/*.md'
+    lychee --offline --root-dir . --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
 
 # Check links including external URLs (slow, used in CI)
 links-external:
-    lychee --root-dir . --exclude-path 'docs/node_modules' --exclude-path 'design' './**/*.md'
+    lychee --root-dir . --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
 
 # Auto-fix formatting, lint issues, and YAML
 fix:
@@ -74,6 +74,23 @@ docs:
 docs-build:
     cd docs && pnpm run build
 
-# Check docs build (used in CI-like local validation)
-docs-check:
-    cd docs && pnpm run build
+# Preview landing page locally
+site:
+    cd site && pnpm run dev
+
+# Build landing page only (no docs merge)
+site-build-only:
+    cd site && pnpm run build
+
+# Build full unified site: generate docs → build docs → build site → merge
+site-build:
+    @printf '─── Generate Docs ──────────────────────────────\n'
+    @just generate-docs
+    @printf '\n─── Build Docs ─────────────────────────────────\n'
+    @just docs-build
+    @printf '\n─── Build Site ─────────────────────────────────\n'
+    @just site-build-only
+    @printf '\n─── Merge Docs into Site ────────────────────────\n'
+    bash scripts/merge_site.sh
+    @printf '\n─────────────────────────────────────────────────\n'
+    @printf 'Unified site built at site/dist/\n'

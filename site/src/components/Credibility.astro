@@ -1,0 +1,77 @@
+---
+// Credibility.astro — ZenML social proof strip
+---
+
+<section class="credibility-section" data-reveal>
+  <div class="section-inner">
+    <div class="credibility-strip">
+      <div class="cred-item">
+        <div class="cred-number">4 years</div>
+        <div class="cred-label">shipping orchestration in prod</div>
+      </div>
+      <div class="cred-sep"></div>
+      <div class="cred-item">
+        <div class="cred-number">10k+</div>
+        <div class="cred-label">production pipelines managed</div>
+      </div>
+      <div class="cred-sep"></div>
+      <div class="cred-item">
+        <div class="cred-number">Every cloud</div>
+        <div class="cred-label">K8s, AWS, GCP, Azure — been there</div>
+      </div>
+      <div class="cred-sep"></div>
+      <div class="cred-item">
+        <div class="cred-number">Open source</div>
+        <div class="cred-label">Apache 2.0 — always</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .credibility-section {
+    padding: 48px clamp(24px, 5vw, 80px);
+  }
+
+  .credibility-strip {
+    display: flex;
+    justify-content: center;
+    gap: 48px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .cred-item {
+    text-align: center;
+  }
+
+  .cred-number {
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    font-weight: 700;
+    color: var(--color-accent);
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+
+  .cred-label {
+    font-size: 0.72rem;
+    color: var(--color-muted);
+    margin-top: 6px;
+    letter-spacing: 0.03em;
+  }
+
+  .cred-sep {
+    width: 1px;
+    height: 40px;
+    background: var(--color-border-light);
+  }
+
+  @media (max-width: 600px) {
+    .credibility-strip {
+      gap: 24px;
+    }
+    .cred-sep {
+      display: none;
+    }
+  }
+</style>

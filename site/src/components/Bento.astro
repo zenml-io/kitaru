@@ -1,0 +1,398 @@
+---
+// Bento.astro — Feature bento grid with interactive UI mockups
+---
+
+<section class="section" id="features">
+  <div class="features-header" data-reveal>
+    <span class="section-eyebrow">Features</span>
+    <h2 class="section-title" style="text-align:center">Everything you need to<br>understand your agents</h2>
+    <p class="section-desc" style="text-align:center">From a high-level overview down to individual prompt diffs — Kitaru surfaces what matters.</p>
+  </div>
+
+  <div class="bento">
+
+    <!-- 1. Run Overview (wide — 8 cols) -->
+    <div class="bento-card bento-wide" data-reveal data-reveal-delay="1">
+      <h3>Run overview</h3>
+      <p class="bento-desc">Every step at a glance — status, type, cost, and latency in one view.</p>
+      <div class="bento-preview">
+        <div class="bento-steps">
+          <div class="bento-step">
+            <span class="bento-step-dot green"></span>
+            <span class="bento-step-name">plan_research</span>
+            <span class="bento-step-badge llm">LLM</span>
+            <span class="bento-step-meta">$0.12 &middot; 18s</span>
+          </div>
+          <div class="bento-step">
+            <span class="bento-step-dot green"></span>
+            <span class="bento-step-name">search_web</span>
+            <span class="bento-step-badge tool">Tool</span>
+            <span class="bento-step-meta">$0.02 &middot; 340ms</span>
+          </div>
+          <div class="bento-step">
+            <span class="bento-step-dot blue"></span>
+            <span class="bento-step-name">analyze_results</span>
+            <span class="bento-step-badge llm">LLM</span>
+            <span class="bento-step-meta">$0.18 &middot; 34s</span>
+          </div>
+          <div class="bento-step">
+            <span class="bento-step-dot gray"></span>
+            <span class="bento-step-name">draft_report</span>
+            <span class="bento-step-badge llm">LLM</span>
+            <span class="bento-step-meta">&mdash;</span>
+          </div>
+          <div class="bento-step">
+            <span class="bento-step-dot gray"></span>
+            <span class="bento-step-name">human_review</span>
+            <span class="bento-step-badge gate">Gate</span>
+            <span class="bento-step-meta">&mdash;</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Cost Tracking (narrow — 4 cols) -->
+    <div class="bento-card bento-narrow" data-reveal data-reveal-delay="2">
+      <h3>Cost tracking</h3>
+      <p class="bento-desc">Per-step cost breakdown with model-level granularity.</p>
+      <div class="bento-preview">
+        <div class="bento-cost-stack">
+          <div class="bento-cost-item">
+            <div>
+              <div class="bento-cost-label">plan_research</div>
+              <div class="bento-cost-bar" style="width:100px"><div class="bento-cost-bar-fill bar-accent" style="--bar-w:38%"></div></div>
+            </div>
+            <span class="bento-cost-val">$0.12</span>
+          </div>
+          <div class="bento-cost-item">
+            <div>
+              <div class="bento-cost-label">search_web</div>
+              <div class="bento-cost-bar" style="width:100px"><div class="bento-cost-bar-fill bar-blue" style="--bar-w:6%"></div></div>
+            </div>
+            <span class="bento-cost-val">$0.02</span>
+          </div>
+          <div class="bento-cost-item">
+            <div>
+              <div class="bento-cost-label">analyze_results</div>
+              <div class="bento-cost-bar" style="width:100px"><div class="bento-cost-bar-fill bar-accent" style="--bar-w:57%"></div></div>
+            </div>
+            <span class="bento-cost-val">$0.18</span>
+          </div>
+          <div class="bento-cost-item">
+            <div>
+              <div class="bento-cost-label">draft_report</div>
+              <div class="bento-cost-bar" style="width:100px"><div class="bento-cost-bar-fill bar-accent" style="--bar-w:47%"></div></div>
+            </div>
+            <span class="bento-cost-val">$0.15</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Prompt Diff (half — 6 cols) -->
+    <div class="bento-card bento-half" data-reveal data-reveal-delay="1">
+      <h3>Prompt diff</h3>
+      <p class="bento-desc">Track prompt changes across runs with a familiar diff view.</p>
+      <div class="bento-preview">
+        <div class="bento-diff-header">
+          Prompt changed in <strong style="margin-left:4px">plan_research</strong>
+          <span class="bento-diff-badge add">+3 lines</span>
+          <span class="bento-diff-badge del">&minus;1 line</span>
+        </div>
+        <div style="padding:6px 0;">
+          <span class="bento-diff-line ctx">You are a research assistant...</span>
+          <span class="bento-diff-line del">&minus; Find relevant papers on the topic.</span>
+          <span class="bento-diff-line add">+ Find relevant papers. Prioritize last 2 years.</span>
+          <span class="bento-diff-line add">+ Include citation counts when available.</span>
+          <span class="bento-diff-line add">+ Add source type annotations.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Compare Runs (half — 6 cols) -->
+    <div class="bento-card bento-half" data-reveal data-reveal-delay="2">
+      <h3>Run comparison</h3>
+      <p class="bento-desc">Side-by-side diffs with inline deltas for every metric.</p>
+      <div class="bento-preview">
+        <div class="bento-compare">
+          <div class="bento-compare-header">
+            <span class="bento-compare-col">Run #46</span>
+            <span class="bento-compare-col">Run #47</span>
+          </div>
+          <div class="bento-compare-row">
+            <span class="bento-compare-cell">$0.10</span>
+            <span class="bento-compare-cell">$0.12 <span class="bento-inline-delta up">+$0.02</span></span>
+          </div>
+          <div class="bento-compare-row">
+            <span class="bento-compare-cell">420ms</span>
+            <span class="bento-compare-cell">340ms <span class="bento-inline-delta down">-80ms</span></span>
+          </div>
+          <div class="bento-compare-row">
+            <span class="bento-compare-cell">2.6K tok</span>
+            <span class="bento-compare-cell">3.1K tok <span class="bento-inline-delta up">+500</span></span>
+          </div>
+          <div class="bento-compare-row">
+            <span class="bento-compare-cell">28s</span>
+            <span class="bento-compare-cell">34s <span class="bento-inline-delta up">+6s</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Live Monitoring (third — 4 cols) -->
+    <div class="bento-card bento-third" data-reveal data-reveal-delay="1">
+      <h3>Live monitoring</h3>
+      <p class="bento-desc">Watch runs as they happen.</p>
+      <div class="bento-preview">
+        <div class="bento-live-stack">
+          <div class="bento-live-row">
+            <span class="bento-live-pulse"></span>
+            <span class="bento-live-ts">14:02</span>
+            <span class="bento-live-event"><strong>plan_research</strong> completed</span>
+          </div>
+          <div class="bento-live-row">
+            <span class="bento-live-pulse"></span>
+            <span class="bento-live-ts">14:02</span>
+            <span class="bento-live-event"><strong>search_web</strong> started</span>
+          </div>
+          <div class="bento-live-row">
+            <span class="bento-live-pulse"></span>
+            <span class="bento-live-ts">14:02</span>
+            <span class="bento-live-event">12 sources found</span>
+          </div>
+          <div class="bento-live-row">
+            <span class="bento-live-pulse"></span>
+            <span class="bento-live-ts">14:03</span>
+            <span class="bento-live-event"><strong>analyze_results</strong> streaming</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Structured Logs (third — 4 cols) -->
+    <div class="bento-card bento-third" data-reveal data-reveal-delay="2">
+      <h3>Structured logs</h3>
+      <p class="bento-desc">Full context for every call.</p>
+      <div class="bento-preview">
+        <div class="bento-log-stack">
+          <div class="bento-log-line"><span class="log-level info">INFO</span> LLM call GPT-4o started</div>
+          <div class="bento-log-line"><span class="log-level info">INFO</span> Tokens: 2.4K in, 180 out</div>
+          <div class="bento-log-line"><span class="log-level ok">OK&nbsp;&nbsp;</span> plan_research completed 18s</div>
+          <div class="bento-log-line"><span class="log-level info">INFO</span> Tool search_web invoked</div>
+          <div class="bento-log-line"><span class="log-level warn">WARN</span> Rate limit: 2 retries</div>
+          <div class="bento-log-line"><span class="log-level ok">OK&nbsp;&nbsp;</span> search_web returned 12 sources</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. Model Breakdown (third — 4 cols) -->
+    <div class="bento-card bento-third" data-reveal data-reveal-delay="3">
+      <h3>Model breakdown</h3>
+      <p class="bento-desc">Cost and tokens by model.</p>
+      <div class="bento-preview">
+        <div class="bento-cost-stack">
+          <div class="bento-cost-item">
+            <div>
+              <div class="bento-cost-label">GPT-4o</div>
+              <div class="bento-cost-bar" style="width:80px"><div class="bento-cost-bar-fill bar-accent" style="--bar-w:72%"></div></div>
+            </div>
+            <span class="bento-cost-val">$0.30</span>
+          </div>
+          <div class="bento-cost-item">
+            <div>
+              <div class="bento-cost-label">Claude 3.5</div>
+              <div class="bento-cost-bar" style="width:80px"><div class="bento-cost-bar-fill bar-blue" style="--bar-w:36%"></div></div>
+            </div>
+            <span class="bento-cost-val">$0.15</span>
+          </div>
+          <div class="bento-cost-item">
+            <div>
+              <div class="bento-cost-label">Tools</div>
+              <div class="bento-cost-bar" style="width:80px"><div class="bento-cost-bar-fill bar-success" style="--bar-w:5%"></div></div>
+            </div>
+            <span class="bento-cost-val">$0.02</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<style>
+  .section {
+    padding: 120px 48px;
+    max-width: 1200px; margin: 0 auto;
+  }
+  .features-header {
+    text-align: center; display: flex; flex-direction: column; align-items: center;
+    margin-bottom: 64px;
+  }
+
+  /* Bento grid */
+  .bento {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    grid-auto-rows: minmax(200px, auto);
+    gap: 16px;
+  }
+  .bento-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-light);
+    border-radius: 10px;
+    padding: 28px 24px;
+    overflow: hidden; position: relative;
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+                box-shadow 0.35s, border-color 0.35s;
+    display: flex; flex-direction: column;
+  }
+  .bento-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 40px rgba(26,23,20,0.06);
+    border-color: var(--color-border);
+  }
+  .bento-card h3 {
+    font-size: 15px; font-weight: 600; margin-bottom: 4px;
+    letter-spacing: -0.01em;
+  }
+  .bento-card .bento-desc {
+    font-size: 13px; line-height: 1.5; color: var(--color-secondary);
+    margin-bottom: 16px;
+  }
+  .bento-preview {
+    flex: 1; display: flex; flex-direction: column;
+    background: var(--color-bg); border-radius: 6px;
+    border: 1px solid var(--color-border-light); overflow: hidden;
+    font-size: 12px; position: relative;
+  }
+
+  /* Sizes */
+  .bento-wide { grid-column: span 8; }
+  .bento-narrow { grid-column: span 4; }
+  .bento-half { grid-column: span 6; }
+  .bento-third { grid-column: span 4; }
+
+  /* Steps */
+  .bento-steps { display: flex; flex-direction: column; flex: 1; }
+  .bento-step {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-bottom: 1px solid var(--color-border-light);
+  }
+  .bento-step:last-child { border-bottom: none; }
+  .bento-step-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .bento-step-dot.green { background: var(--color-success); }
+  .bento-step-dot.blue { background: var(--color-blue); animation: pulse-blue 2s infinite; }
+  .bento-step-dot.gray { background: var(--color-border); }
+  .bento-step-name { font-family: var(--font-mono); font-weight: 500; font-size: 12px; color: var(--color-primary); }
+  .bento-step-badge {
+    font-size: 9px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; padding: 2px 5px; border-radius: 3px;
+  }
+  .bento-step-badge.llm { color: #2563EB; background: #EFF6FF; }
+  .bento-step-badge.tool { color: #A07848; background: #F5EDE4; }
+  .bento-step-badge.gate { color: #2563EB; background: #EFF6FF; }
+  .bento-step-meta {
+    margin-left: auto; font-family: var(--font-mono); font-size: 11px;
+    color: var(--color-muted); font-variant-numeric: tabular-nums;
+  }
+
+  /* Step hover animation */
+  .bento-card:hover .bento-step { animation: stepFade 0.4s ease both; }
+  .bento-card:hover .bento-step:nth-child(1) { animation-delay: 0s; }
+  .bento-card:hover .bento-step:nth-child(2) { animation-delay: 0.06s; }
+  .bento-card:hover .bento-step:nth-child(3) { animation-delay: 0.12s; }
+  .bento-card:hover .bento-step:nth-child(4) { animation-delay: 0.18s; }
+  .bento-card:hover .bento-step:nth-child(5) { animation-delay: 0.24s; }
+
+  /* Cost tracking */
+  .bento-cost-stack { display: flex; flex-direction: column; gap: 0; flex: 1; }
+  .bento-cost-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-bottom: 1px solid var(--color-border-light);
+  }
+  .bento-cost-item:last-child { border-bottom: none; }
+  .bento-cost-label { font-family: var(--font-mono); font-size: 11px; color: var(--color-secondary); }
+  .bento-cost-val { font-family: var(--font-mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bento-cost-bar { height: 3px; background: var(--color-border-light); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+  .bento-cost-bar-fill { height: 100%; border-radius: 2px; transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1); width: 0; }
+  .bento-card:hover .bento-cost-bar-fill { width: var(--bar-w); }
+  .bar-accent { background: var(--color-accent); }
+  .bar-blue { background: var(--color-blue); }
+  .bar-success { background: var(--color-success); }
+
+  /* Prompt diff */
+  .bento-diff-line {
+    display: block; padding: 3px 10px; margin: 1px 4px;
+    border-radius: 3px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+  }
+  .bento-diff-line.ctx { color: var(--color-muted); }
+  .bento-diff-line.del { background: #FEF3F4; color: #9A3412; }
+  .bento-diff-line.add { background: #F2FFF5; color: #166534; }
+  .bento-diff-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 12px; border-bottom: 1px solid var(--color-border-light);
+    font-size: 12px; font-weight: 500; color: var(--color-secondary);
+  }
+  .bento-diff-badge {
+    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+    padding: 1px 5px; border-radius: 3px;
+  }
+  .bento-diff-badge.add { background: #F2FFF5; color: #166534; }
+  .bento-diff-badge.del { background: #FEF3F4; color: #9A3412; }
+
+  /* Compare runs */
+  .bento-compare { display: flex; flex-direction: column; flex: 1; }
+  .bento-compare-header { display: flex; border-bottom: 1px solid var(--color-border-light); }
+  .bento-compare-col {
+    flex: 1; padding: 8px 12px; font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-muted);
+  }
+  .bento-compare-col + .bento-compare-col { border-left: 1px solid var(--color-border-light); }
+  .bento-compare-col:first-child { background: #FCFCFC; }
+  .bento-compare-row { display: flex; border-bottom: 1px solid var(--color-border-light); }
+  .bento-compare-row:last-child { border-bottom: none; }
+  .bento-compare-cell {
+    flex: 1; padding: 6px 12px;
+    font-family: var(--font-mono); font-size: 11px;
+    font-variant-numeric: tabular-nums; color: var(--color-primary);
+  }
+  .bento-compare-cell:first-child { background: #FCFCFC; color: var(--color-muted); }
+  .bento-compare-cell + .bento-compare-cell { border-left: 1px solid var(--color-border-light); }
+  .bento-inline-delta { font-size: 9px; font-weight: 600; padding: 1px 4px; border-radius: 3px; margin-left: 4px; }
+  .bento-inline-delta.up { background: var(--color-cost-up-bg); color: var(--color-cost-up); }
+  .bento-inline-delta.down { background: var(--color-success-bg); color: var(--color-success); }
+
+  /* Live monitoring */
+  .bento-live-stack { display: flex; flex-direction: column; gap: 0; flex: 1; }
+  .bento-live-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; border-bottom: 1px solid var(--color-border-light); font-size: 11px;
+  }
+  .bento-live-row:last-child { border-bottom: none; }
+  .bento-live-ts { font-family: var(--font-mono); font-size: 10px; color: var(--color-muted); font-variant-numeric: tabular-nums; width: 48px; flex-shrink: 0; }
+  .bento-live-event { color: var(--color-secondary); }
+  .bento-live-event strong { color: var(--color-primary); font-weight: 500; }
+  .bento-live-pulse {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--color-success); flex-shrink: 0;
+    animation: livePulse 1.5s ease infinite;
+  }
+
+  /* Structured logs */
+  .bento-log-stack {
+    display: flex; flex-direction: column; gap: 0; flex: 1;
+    font-family: var(--font-mono); font-size: 10px; line-height: 1.7;
+  }
+  .bento-log-line {
+    padding: 2px 10px; color: var(--color-muted);
+    border-bottom: 1px solid rgba(0,0,0,0.02);
+  }
+  .bento-log-line .log-level { font-weight: 600; margin-right: 4px; }
+  .log-level.info { color: var(--color-blue); }
+  .log-level.warn { color: var(--color-accent); }
+  .log-level.ok { color: var(--color-success); }
+
+  @media (max-width: 768px) {
+    .section { padding: 80px 20px; }
+  }
+</style>

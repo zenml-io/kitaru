@@ -1,0 +1,329 @@
+---
+// CodingAgent.astro — Vertical timeline showing a real agent with checkpoints and wait states
+---
+
+<section class="coding-agent-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>See it in action</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">A real agent. Seven checkpoints. One timeline.</h2>
+
+    <div class="timeline-wrapper" id="agentTimeline">
+      <div class="timeline-line"></div>
+
+      <div class="tl-node" data-step="1">
+        <div class="tl-dot"><span>1</span></div>
+        <div class="tl-content">
+          <div class="tl-header">
+            <code class="tl-fn">analyze_issue</code>
+            <span class="tl-badge tl-checkpoint">@checkpoint</span>
+          </div>
+          <div class="tl-meta">12s</div>
+        </div>
+      </div>
+
+      <div class="tl-node" data-step="2">
+        <div class="tl-dot"><span>2</span></div>
+        <div class="tl-content">
+          <div class="tl-header">
+            <code class="tl-fn">explore_codebase</code>
+            <span class="tl-badge tl-checkpoint">@checkpoint</span>
+          </div>
+          <div class="tl-meta">8s</div>
+        </div>
+      </div>
+
+      <div class="tl-node tl-wait-node" data-step="3">
+        <div class="tl-dot tl-dot-wait"><span>3</span></div>
+        <div class="tl-content">
+          <div class="tl-header">
+            <code class="tl-fn">plan_approval</code>
+            <span class="tl-badge tl-wait">kitaru.wait()</span>
+          </div>
+          <div class="tl-meta tl-meta-wait">23 min — <span class="tl-cost">$0 compute</span></div>
+        </div>
+      </div>
+
+      <div class="tl-node" data-step="4">
+        <div class="tl-dot"><span>4</span></div>
+        <div class="tl-content">
+          <div class="tl-header">
+            <code class="tl-fn">code + test loop</code>
+            <span class="tl-badge tl-checkpoint">parallel iterations</span>
+          </div>
+          <div class="tl-meta">3 iterations &middot; 45s</div>
+          <div class="tl-loop-dots">
+            <span class="loop-dot"></span>
+            <span class="loop-arrow">&rarr;</span>
+            <span class="loop-dot"></span>
+            <span class="loop-arrow">&rarr;</span>
+            <span class="loop-dot loop-dot-final"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-node tl-wait-node" data-step="5">
+        <div class="tl-dot tl-dot-wait"><span>5</span></div>
+        <div class="tl-content">
+          <div class="tl-header">
+            <code class="tl-fn">human_review</code>
+            <span class="tl-badge tl-wait">kitaru.wait()</span>
+          </div>
+          <div class="tl-meta tl-meta-wait">1h 12m — <span class="tl-cost">$0 compute</span></div>
+        </div>
+      </div>
+
+      <div class="tl-node" data-step="6">
+        <div class="tl-dot"><span>6</span></div>
+        <div class="tl-content">
+          <div class="tl-header">
+            <code class="tl-fn">create_pr</code>
+            <span class="tl-badge tl-checkpoint">@checkpoint</span>
+          </div>
+          <div class="tl-meta">3s</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="replay-callout" id="replayCallout">
+      <div class="replay-icon">&#8634;</div>
+      <div class="replay-text">
+        <strong>Tests failed?</strong> Replay from step 4. Steps 1–3 use cached artifacts.
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .coding-agent-section {
+    background: #1A1714;
+  }
+
+  .coding-agent-section .section-eyebrow,
+  .coding-agent-section .section-title {
+    color: #E8E4DE;
+  }
+
+  .coding-agent-section .section-eyebrow {
+    color: var(--color-accent);
+  }
+
+  .timeline-wrapper {
+    position: relative;
+    max-width: 560px;
+    margin: 48px auto 0;
+    padding-left: 36px;
+  }
+
+  .timeline-line {
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: rgba(255,255,255,0.08);
+  }
+
+  .tl-node {
+    position: relative;
+    padding: 0 0 32px 28px;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+  }
+
+  .timeline-wrapper.visible .tl-node:nth-child(2) { transition-delay: 0s; }
+  .timeline-wrapper.visible .tl-node:nth-child(3) { transition-delay: 0.12s; }
+  .timeline-wrapper.visible .tl-node:nth-child(4) { transition-delay: 0.24s; }
+  .timeline-wrapper.visible .tl-node:nth-child(5) { transition-delay: 0.36s; }
+  .timeline-wrapper.visible .tl-node:nth-child(6) { transition-delay: 0.48s; }
+  .timeline-wrapper.visible .tl-node:nth-child(7) { transition-delay: 0.60s; }
+
+  .timeline-wrapper.visible .tl-node {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .tl-dot {
+    position: absolute;
+    left: -28px;
+    top: 2px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #1A1714;
+    border: 1.5px solid rgba(255,255,255,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+  }
+
+  .tl-dot span {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    color: rgba(255,255,255,0.4);
+  }
+
+  .timeline-wrapper.visible .tl-dot {
+    border-color: var(--color-accent);
+    background: rgba(241,120,41,0.1);
+  }
+
+  .timeline-wrapper.visible .tl-dot span {
+    color: var(--color-accent);
+  }
+
+  .tl-dot-wait {
+    border-color: #E8A840 !important;
+    background: rgba(232,168,64,0.1) !important;
+    animation: pausePulse 1.5s ease infinite;
+  }
+
+  .tl-dot-wait span {
+    color: #E8A840 !important;
+  }
+
+  @keyframes pausePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(232,168,64,0.25); }
+    50% { box-shadow: 0 0 0 8px rgba(232,168,64,0); }
+  }
+
+  .tl-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .tl-fn {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: #E8E4DE;
+    font-weight: 500;
+  }
+
+  .tl-badge {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.03em;
+  }
+
+  .tl-checkpoint {
+    color: var(--color-accent);
+    background: rgba(241,120,41,0.1);
+    border: 1px solid rgba(241,120,41,0.2);
+  }
+
+  .tl-wait {
+    color: #E8A840;
+    background: rgba(232,168,64,0.1);
+    border: 1px solid rgba(232,168,64,0.2);
+  }
+
+  .tl-meta {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: rgba(255,255,255,0.3);
+    margin-top: 4px;
+  }
+
+  .tl-meta-wait {
+    color: rgba(232,168,64,0.6);
+  }
+
+  .tl-cost {
+    color: #34d399;
+  }
+
+  .tl-loop-dots {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .loop-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(241,120,41,0.15);
+    border: 1px solid rgba(241,120,41,0.3);
+  }
+
+  .loop-dot-final {
+    background: rgba(61,140,92,0.15);
+    border-color: rgba(61,140,92,0.4);
+  }
+
+  .loop-arrow {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.2);
+  }
+
+  /* Replay callout */
+  .replay-callout {
+    max-width: 560px;
+    margin: 8px auto 0;
+    padding: 16px 20px;
+    background: rgba(241,120,41,0.06);
+    border: 1px solid rgba(241,120,41,0.15);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.4s ease 0.8s, transform 0.4s ease 0.8s;
+  }
+
+  .replay-callout.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .replay-icon {
+    font-size: 1.4rem;
+    color: var(--color-accent);
+    flex-shrink: 0;
+  }
+
+  .replay-text {
+    font-size: 0.82rem;
+    color: rgba(255,255,255,0.6);
+    line-height: 1.5;
+  }
+
+  .replay-text strong {
+    color: #E8E4DE;
+    font-weight: 500;
+  }
+
+  @media (max-width: 600px) {
+    .timeline-wrapper {
+      padding-left: 28px;
+    }
+    .tl-dot {
+      left: -24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+</style>
+
+<script>
+  const tlObs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        // Also show the replay callout
+        document.getElementById('replayCallout')?.classList.add('visible');
+        tlObs.disconnect();
+      }
+    });
+  }, { threshold: 0.15 });
+
+  const tl = document.getElementById('agentTimeline');
+  if (tl) tlObs.observe(tl);
+</script>

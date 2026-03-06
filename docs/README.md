@@ -1,7 +1,7 @@
 # Kitaru Documentation
 
 This directory contains the [FumaDocs](https://fumadocs.dev/) documentation site
-for Kitaru, deployed at [docs.kitaru.ai](https://docs.kitaru.ai).
+for Kitaru, served at [kitaru.ai/docs](https://kitaru.ai/docs).
 
 ## Prerequisites
 
@@ -22,7 +22,6 @@ From the **repo root** (recommended):
 ```bash
 just docs           # Start dev server at localhost:3000
 just docs-build     # Full static build (output in docs/out/)
-just docs-check     # Validate docs build
 just generate-docs  # Generate CLI reference from Python source
 ```
 
@@ -48,18 +47,19 @@ components.
 
 ## CI / Deployment
 
-The docs site is deployed to [docs.kitaru.ai](https://docs.kitaru.ai) via
-Cloudflare Pages. The `.github/workflows/docs.yml` workflow handles:
+The docs site is part of the unified deployment at
+[kitaru.ai](https://kitaru.ai). The `.github/workflows/site.yml` workflow
+builds docs as a static export and merges them into the Astro landing page's
+Worker deployment under the `/docs` subpath.
 
-- **Production deploy:** Automatically on every push to `main` (i.e. after a
-  release). CI generates docs content, builds the static site, and deploys
-  `docs/out/` to Cloudflare Pages.
-- **PR previews:** On PRs to `main` or `develop` that touch docs-related files.
-  A sticky comment is posted with the preview URL.
+- **Production deploy:** Automatically on every push to `main`.
+- **PR previews:** On PRs to `main` or `develop` that touch site or docs files.
 
 CI runs doc generation automatically before building. Locally, you must run
 `just generate-docs` yourself before `just docs-build` when generated content
 (CLI reference, changelog) may have changed.
+
+To build the full unified site locally: `just site-build`
 
 ## What's Generated vs Hand-Written
 

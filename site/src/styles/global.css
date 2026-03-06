@@ -1,0 +1,183 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════
+   KITARU LANDING — Warm light theme
+   Ported from kitaru-landing.html reference
+   ═══════════════════════════════════════════════════ */
+
+@theme {
+  /* Backgrounds */
+  --color-bg: #FAFAF8;
+  --color-surface: #FFFFFF;
+  --color-surface-warm: #FCFCFA;
+
+  /* Text hierarchy */
+  --color-primary: #1A1714;
+  --color-secondary: #6B6560;
+  --color-muted: #9E9790;
+
+  /* Accents */
+  --color-accent: #F17829;
+  --color-accent-warm: #C4956A;
+  --color-accent-deep: #A07848;
+  --color-accent-light: #F5EDE4;
+
+  /* Status */
+  --color-success: #3D8C5C;
+  --color-success-bg: #EDF5E9;
+  --color-blue: #2563EB;
+  --color-blue-bg: #EFF6FF;
+  --color-cost-up: #DC4A3D;
+  --color-cost-up-bg: #FDDDE6;
+
+  /* Borders */
+  --color-border: #E5E2DC;
+  --color-border-light: #F0EDE8;
+
+  /* Fonts */
+  --font-ui: 'DM Sans', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* ═══════════════════════════════════════════════════
+   Base
+   ═══════════════════════════════════════════════════ */
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-ui);
+  background: var(--color-bg);
+  color: var(--color-primary);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Grain overlay */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+}
+
+::selection {
+  background: rgba(241,120,41,0.15);
+}
+
+/* ═══════════════════════════════════════════════════
+   Scroll reveal
+   ═══════════════════════════════════════════════════ */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: opacity 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-reveal].revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+[data-reveal-delay="1"] { transition-delay: 0.1s; }
+[data-reveal-delay="2"] { transition-delay: 0.2s; }
+[data-reveal-delay="3"] { transition-delay: 0.3s; }
+[data-reveal-delay="4"] { transition-delay: 0.4s; }
+
+/* ═══════════════════════════════════════════════════
+   Keyframes
+   ═══════════════════════════════════════════════════ */
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ring-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0.3); }
+  50% { box-shadow: 0 0 0 4px rgba(37,99,235,0); }
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(61,140,92,0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(61,140,92,0); }
+}
+@keyframes stepFade {
+  from { opacity: 0.6; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* ═══════════════════════════════════════════════════
+   Shared layout
+   ═══════════════════════════════════════════════════ */
+.section-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.section-eyebrow {
+  display: block;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--color-accent);
+  margin-bottom: 16px;
+}
+
+.divider-line {
+  height: 1px;
+  background: var(--color-border-light);
+}
+
+/* Gradient dividers */
+.gradient-divider {
+  height: 1px;
+  max-width: 600px;
+  margin: 0 auto;
+  background: linear-gradient(90deg, transparent, var(--color-border), transparent);
+}
+
+.section-title {
+  font-size: clamp(32px, 4vw, 48px);
+  font-weight: 700; letter-spacing: -0.03em; line-height: 1.1;
+  max-width: 600px;
+}
+
+.section-desc {
+  font-size: 17px; line-height: 1.6; color: var(--color-secondary);
+  max-width: 480px; margin-top: 16px;
+}
+
+/* Buttons */
+.btn-primary {
+  font-family: var(--font-ui); font-size: 15px; font-weight: 600;
+  color: #fff; background: var(--color-primary);
+  padding: 14px 32px; border-radius: 8px; border: none;
+  cursor: pointer; transition: opacity 0.2s, transform 0.15s;
+  text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+}
+.btn-primary:hover { opacity: 0.85; transform: translateY(-1px); }
+.btn-primary svg { width: 16px; height: 16px; }
+
+.btn-secondary {
+  font-family: var(--font-ui); font-size: 15px; font-weight: 500;
+  color: var(--color-secondary); background: var(--color-surface);
+  padding: 14px 28px; border-radius: 8px;
+  border: 1px solid var(--color-border);
+  cursor: pointer; transition: all 0.2s;
+  text-decoration: none;
+}
+.btn-secondary:hover {
+  border-color: var(--color-muted);
+  color: var(--color-primary);
+}
+
+/* ═══════════════════════════════════════════════════
+   Responsive
+   ═══════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .cta-input-row { flex-direction: column; }
+}

@@ -152,8 +152,8 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
+# mkdocs documentation (disabled — site/ now holds the Astro landing page)
+# /site
 
 # mypy
 .mypy_cache/
@@ -206,6 +206,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Site (Astro landing page) build artifacts
+site/node_modules/
+site/dist/
+site/.astro/
+site/.wrangler/
 
 # Design docs
 design/

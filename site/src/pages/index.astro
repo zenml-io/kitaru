@@ -1,0 +1,42 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Hero from '../components/Hero.astro';
+import Primitives from '../components/Primitives.astro';
+import Credibility from '../components/Credibility.astro';
+import CodingAgent from '../components/CodingAgent.astro';
+import Features from '../components/Features.astro';
+import Versioned from '../components/Versioned.astro';
+import ZeroToProduction from '../components/ZeroToProduction.astro';
+import Cta from '../components/Cta.astro';
+import Footer from '../components/Footer.astro';
+---
+
+<Base>
+  <Nav />
+  <main>
+    <!-- 1. Hero -->
+    <Hero />
+    <div class="gradient-divider"></div>
+    <!-- 2. Primitives -->
+    <Primitives />
+    <div class="gradient-divider"></div>
+    <!-- 3. Credibility -->
+    <Credibility />
+    <div class="gradient-divider"></div>
+    <!-- 4. Coding Agent timeline -->
+    <CodingAgent />
+    <div class="gradient-divider"></div>
+    <!-- 5. Features (animated cards) -->
+    <Features />
+    <!-- 6. Versioned (ZenML DNA) -->
+    <Versioned />
+    <div class="gradient-divider"></div>
+    <!-- 7. Zero to production -->
+    <ZeroToProduction />
+    <div class="gradient-divider"></div>
+    <!-- 8. CTA -->
+    <Cta />
+  </main>
+  <Footer />
+</Base>

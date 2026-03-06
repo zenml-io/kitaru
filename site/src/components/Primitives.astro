@@ -1,0 +1,127 @@
+---
+// Primitives.astro — "Eight primitives. That's the whole SDK." 2×4 grid
+---
+
+<section class="primitives-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>The entire API</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Eight primitives. That's the whole SDK.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2">No DSL. No config language. No new abstractions to learn. Eight Python functions that give your agents crash recovery, human oversight, and production deployment.</p>
+
+    <div class="primitives-grid" id="primitivesGrid">
+      <div class="prim-card">
+        <code class="prim-sig">@saga</code>
+        <span class="prim-desc">Define a durable agent workflow</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">@checkpoint</code>
+        <span class="prim-desc">Persist a step's output for replay</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">llm()</code>
+        <span class="prim-desc">Call any model with cost tracking</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">wait()</code>
+        <span class="prim-desc">Pause for human input, release compute</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">sleep()</code>
+        <span class="prim-desc">Durable delay — survives restarts</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">parallel()</code>
+        <span class="prim-desc">Fan out branches, each checkpointed</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">log()</code>
+        <span class="prim-desc">Structured logging with full context</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">configure()</code>
+        <span class="prim-desc">Named environments and model routing</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .primitives-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-top: 48px;
+  }
+
+  .prim-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 0.4s ease, transform 0.4s ease, border-color 0.3s;
+  }
+
+  .primitives-grid.visible .prim-card:nth-child(1) { transition-delay: 0s; }
+  .primitives-grid.visible .prim-card:nth-child(2) { transition-delay: 0.06s; }
+  .primitives-grid.visible .prim-card:nth-child(3) { transition-delay: 0.12s; }
+  .primitives-grid.visible .prim-card:nth-child(4) { transition-delay: 0.18s; }
+  .primitives-grid.visible .prim-card:nth-child(5) { transition-delay: 0.24s; }
+  .primitives-grid.visible .prim-card:nth-child(6) { transition-delay: 0.30s; }
+  .primitives-grid.visible .prim-card:nth-child(7) { transition-delay: 0.36s; }
+  .primitives-grid.visible .prim-card:nth-child(8) { transition-delay: 0.42s; }
+
+  .primitives-grid.visible .prim-card {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .prim-card:hover {
+    border-color: var(--color-muted);
+  }
+
+  .prim-sig {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    color: var(--color-accent);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .prim-desc {
+    font-size: 0.78rem;
+    color: var(--color-secondary);
+    line-height: 1.45;
+    font-weight: 300;
+  }
+
+  @media (max-width: 900px) {
+    .primitives-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 480px) {
+    .primitives-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  const primGridObs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        primGridObs.disconnect();
+      }
+    });
+  }, { threshold: 0.15 });
+
+  const primGrid = document.getElementById('primitivesGrid');
+  if (primGrid) primGridObs.observe(primGrid);
+</script>

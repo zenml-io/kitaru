@@ -1,0 +1,128 @@
+---
+// DiffPreview.astro — Run comparison side-by-side
+---
+
+<section class="diff-section" id="diff">
+  <div class="diff-grid">
+    <div class="diff-text" data-reveal>
+      <span class="section-eyebrow">Run comparison</span>
+      <h2 class="section-title">Spot regressions before your users do</h2>
+      <p class="section-desc">Compare any two runs side by side. Inline deltas show exactly what changed — cost spikes, latency improvements, prompt edits — in a single view.</p>
+    </div>
+    <div class="diff-visual" data-reveal data-reveal-delay="2">
+      <div class="diff-mock-header">
+        <div class="diff-mock-col">
+          <div class="diff-mock-col-label">Baseline</div>
+          <div class="diff-mock-col-title">Run #46</div>
+        </div>
+        <div class="diff-mock-col">
+          <div class="diff-mock-col-label">Current</div>
+          <div class="diff-mock-col-title">Run #47</div>
+        </div>
+      </div>
+      <div class="diff-mock-delta-bar">
+        Cost <span class="diff-mock-delta up" style="margin-left:6px">+$0.08</span>
+        <span style="margin-left:12px">Tokens</span> <span class="diff-mock-delta up" style="margin-left:6px">+1.5K</span>
+        <span style="margin-left:12px">Duration</span> <span class="diff-mock-delta down" style="margin-left:6px">-12s</span>
+      </div>
+      <div class="diff-mock-rows">
+        <div class="diff-mock-row">
+          <span class="diff-mock-row-name">plan_research</span>
+          <div class="diff-mock-row-vals">
+            <span class="diff-mock-row-val">$0.10</span>
+            <span class="diff-mock-row-val changed">$0.12 <span class="inline-delta up">+$0.02</span></span>
+          </div>
+        </div>
+        <div class="diff-mock-row">
+          <span class="diff-mock-row-name">search_web</span>
+          <div class="diff-mock-row-vals">
+            <span class="diff-mock-row-val">420ms</span>
+            <span class="diff-mock-row-val changed">340ms <span class="inline-delta down">-80ms</span></span>
+          </div>
+        </div>
+        <div class="diff-mock-row">
+          <span class="diff-mock-row-name">analyze_results</span>
+          <div class="diff-mock-row-vals">
+            <span class="diff-mock-row-val">$0.14</span>
+            <span class="diff-mock-row-val changed">$0.18 <span class="inline-delta up">+$0.04</span></span>
+          </div>
+        </div>
+        <div class="diff-mock-row">
+          <span class="diff-mock-row-name">draft_report</span>
+          <div class="diff-mock-row-vals">
+            <span class="diff-mock-row-val">$0.12</span>
+            <span class="diff-mock-row-val changed">$0.15 <span class="inline-delta up">+$0.03</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .diff-section {
+    max-width: 1200px; margin: 0 auto;
+    padding: 120px 48px;
+  }
+  .diff-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 80px;
+    align-items: center;
+  }
+  .diff-visual {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 8px 40px rgba(26,23,20,0.06);
+  }
+  .diff-mock-header {
+    display: flex; border-bottom: 1px solid var(--color-border);
+  }
+  .diff-mock-col {
+    flex: 1; padding: 16px 20px; background: #FCFCFC;
+  }
+  .diff-mock-col + .diff-mock-col { border-left: 1px solid var(--color-border); }
+  .diff-mock-col-label {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--color-muted); margin-bottom: 4px;
+  }
+  .diff-mock-col-title {
+    font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+  }
+  .diff-mock-delta-bar {
+    display: flex; gap: 16px; padding: 12px 20px;
+    background: #F5F3F0; border-bottom: 1px solid var(--color-border-light);
+    font-size: 12px; color: var(--color-secondary);
+  }
+  .diff-mock-delta {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 4px;
+  }
+  .diff-mock-delta.up { background: var(--color-cost-up-bg); color: var(--color-cost-up); }
+  .diff-mock-delta.down { background: var(--color-success-bg); color: var(--color-success); }
+  .diff-mock-row {
+    display: flex; align-items: center; padding: 10px 20px;
+    border-bottom: 1px solid var(--color-border-light); font-size: 12px;
+  }
+  .diff-mock-row:last-child { border-bottom: none; }
+  .diff-mock-row-name {
+    width: 120px; flex-shrink: 0;
+    font-family: var(--font-mono); font-weight: 500; font-size: 12px;
+  }
+  .diff-mock-row-vals {
+    flex: 1; display: flex; gap: 20px;
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--color-muted); font-variant-numeric: tabular-nums;
+  }
+  .diff-mock-row-val { flex: 1; }
+  .diff-mock-row-val.changed { color: var(--color-primary); font-weight: 500; }
+  .inline-delta {
+    font-size: 10px; font-weight: 600;
+    padding: 1px 5px; border-radius: 3px; margin-left: 4px;
+  }
+  .inline-delta.up { background: var(--color-cost-up-bg); color: var(--color-cost-up); }
+  .inline-delta.down { background: var(--color-success-bg); color: var(--color-success); }
+
+  @media (max-width: 768px) {
+    .diff-section { padding: 80px 20px; }
+  }
+</style>

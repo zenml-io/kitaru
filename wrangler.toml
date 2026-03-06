@@ -1,0 +1,9 @@
+name = "kitaru-site"
+compatibility_date = "2025-09-27"
+
+[assets]
+directory = "./site/dist"
+
+[[kv_namespaces]]
+binding = "WAITLIST_KV"
+id = "7a952406df5543418f0cb8c4552ee65f"

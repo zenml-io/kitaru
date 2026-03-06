@@ -1,0 +1,91 @@
+---
+// Frameworks.astro — Framework compatibility strip with logos
+---
+
+<section class="text-center" style="padding: 40px clamp(24px, 5vw, 80px) 0;">
+  <div class="section-inner" style="border-top: 1px solid var(--border-subtle); padding-top: 40px;">
+    <div class="text-muted text-sm mb-6" style="letter-spacing: 0.03em;">Works with your existing stack</div>
+    <div class="flex justify-center items-center gap-12 flex-wrap" data-reveal>
+      <div class="framework-item">
+        <div class="framework-icon">
+          <!-- PydanticAI — Pydantic shield logo -->
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+            <path d="M12 2L4 6.5v11L12 22l8-4.5v-11L12 2z" fill="#e6007a" opacity="0.9"/>
+            <path d="M12 6l-4 2.3v6.4L12 17l4-2.3V8.3L12 6z" fill="white" opacity="0.9"/>
+          </svg>
+        </div>
+        PydanticAI
+      </div>
+      <div class="framework-item">
+        <div class="framework-icon">
+          <!-- OpenAI logo mark -->
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+            <path d="M22.2 8.8a5.6 5.6 0 00-.5-4.6 5.7 5.7 0 00-6.1-2.7A5.6 5.6 0 0011.3 0a5.7 5.7 0 00-5.4 3.9 5.6 5.6 0 00-3.8 2.7 5.7 5.7 0 00.7 6.7 5.6 5.6 0 00.5 4.6 5.7 5.7 0 006.1 2.7 5.6 5.6 0 004.2 1.9 5.7 5.7 0 005.4-3.9 5.6 5.6 0 003.8-2.7 5.7 5.7 0 00-.7-6.7z" fill="white" opacity="0.85"/>
+            <path d="M9.8 21.4a4.3 4.3 0 01-2.7-1l-.1-.1 3.1-1.8a.5.5 0 00.3-.4v-4.5l1.3.8v3.7a4.3 4.3 0 01-2 3.3zm-5.6-4.8a4.2 4.2 0 01-.5-2.9v-.2l3.1 1.8a.5.5 0 00.5 0l3.8-2.2v1.5l-3.2 1.8a4.3 4.3 0 01-3.7.2zM3 8.7a4.3 4.3 0 012.3-1.9v3.7c0 .2.1.3.2.4l3.8 2.2L8 14l-3.2-1.8A4.3 4.3 0 013 8.7zm13.2 3.1l-3.8-2.2 1.3-.8 3.2 1.8a4.3 4.3 0 01-.3 7.6v-3.7a.5.5 0 00-.2-.4zm1.3-2.9v.2l-3.1-1.8a.5.5 0 00-.5 0l-3.8 2.2V7.9l3.2-1.8a4.3 4.3 0 014.2 5.8zm-8.2 2.7L8 10.8v-3.7a4.3 4.3 0 017-3.3l.1.1-3.1 1.8a.5.5 0 00-.3.4v4.5z" fill="#0a091c"/>
+          </svg>
+        </div>
+        OpenAI Agents SDK
+      </div>
+      <div class="framework-item">
+        <div class="framework-icon">
+          <!-- CrewAI -->
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+            <rect x="3" y="3" width="18" height="18" rx="4" fill="#f55036" opacity="0.9"/>
+            <path d="M8 12a2.5 2.5 0 105 0 2.5 2.5 0 00-5 0z" fill="white"/>
+            <path d="M13 10a2.5 2.5 0 104 1" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        CrewAI
+      </div>
+      <div class="framework-item">
+        <div class="framework-icon">
+          <!-- Anthropic — A mark -->
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+            <path d="M13.8 3h2.9l5.3 18h-2.9L13.8 3zM2 21l5.3-18h2.9l5.3 18h-2.9l-1.1-4H6.1L5 21H2zm4.8-6.8h4.4L9 7l-2.2 7.2z" fill="#d4a27f" opacity="0.9"/>
+          </svg>
+        </div>
+        Anthropic SDK
+      </div>
+      <div class="framework-item">
+        <div class="framework-icon">
+          <!-- Python logo -->
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+            <path d="M11.9 2C7 2 7.3 4.2 7.3 4.2v2.3h4.7v.7H5.3S2 6.8 2 11.9s2.9 4.9 2.9 4.9h1.7v-2.4s-.1-2.9 2.9-2.9h4.9s2.8 0 2.8-2.7V4.7S17.7 2 11.9 2zm-2.7 1.6a.9.9 0 110 1.8.9.9 0 010-1.8z" fill="#3776ab"/>
+            <path d="M12.1 22c4.9 0 4.6-2.2 4.6-2.2v-2.3h-4.7v-.7h6.7S22 17.2 22 12.1s-2.9-4.9-2.9-4.9h-1.7v2.4s.1 2.9-2.9 2.9H9.6s-2.8 0-2.8 2.7v4.1S6.3 22 12.1 22zm2.7-1.6a.9.9 0 110-1.8.9.9 0 010 1.8z" fill="#ffd43b"/>
+          </svg>
+        </div>
+        Any Python agent
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .framework-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-dim);
+    font-size: 0.85rem;
+    font-weight: 400;
+    opacity: 0.6;
+    transition: opacity 0.25s;
+  }
+
+  .framework-item:hover { opacity: 1; }
+
+  .framework-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--color-elevated);
+    border: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  @media (max-width: 768px) {
+    .flex.gap-12 { gap: 24px; }
+  }
+</style>

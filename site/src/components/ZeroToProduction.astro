@@ -1,0 +1,251 @@
+---
+// ZeroToProduction.astro — Start local, deploy anywhere. No distributed systems.
+---
+
+<section style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>Zero to production</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Start local. Deploy anywhere.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2"><code style="font-family: var(--font-mono); font-size: 0.85em; color: var(--color-accent);">kitaru dev</code> on your laptop, then <code style="font-family: var(--font-mono); font-size: 0.85em; color: var(--color-accent);">kitaru deploy</code> when you're ready. Same agent, same checkpoints, production infrastructure.</p>
+
+    <div class="deploy-grid" data-reveal data-reveal-delay="3">
+      <!-- Terminal showing the flow -->
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+          <span class="terminal-title">Terminal</span>
+        </div>
+        <div class="terminal-body">
+          <div class="prompt-line"><span class="prompt-char">$ </span>pip install kitaru</div>
+          <div class="output dim">Installed kitaru-0.1.0</div>
+          <div class="output">&nbsp;</div>
+          <div class="prompt-line"><span class="prompt-char">$ </span>kitaru dev</div>
+          <div class="output"><span class="success">&#9679;</span> Local server running at <span class="term-bright">localhost:8080</span></div>
+          <div class="output"><span class="success">&#9679;</span> Dashboard at <span class="term-bright">localhost:8080/dashboard</span></div>
+          <div class="output dim">Ready. Run your agent.</div>
+          <div class="output">&nbsp;</div>
+          <div class="prompt-line"><span class="prompt-char">$ </span>kitaru deploy --schedule "daily 9am"</div>
+          <div class="output"><span class="success">&#10003;</span> Deployed to <span class="term-bright">kitaru.mycompany.com</span></div>
+          <div class="output"><span class="success">&#10003;</span> Webhook: <span class="dim">https://kitaru.mycompany.com/hook/abc-123</span></div>
+          <div class="output"><span class="success">&#10003;</span> Schedule: <span class="dim">daily at 9:00 AM UTC</span></div>
+        </div>
+      </div>
+
+      <!-- What you get -->
+      <div class="you-get">
+        <h3>What you get</h3>
+        <ul>
+          <li>
+            <span class="check-icon">&#10003;</span>
+            <div>
+              <strong>Automatic crash recovery and restart</strong>
+              <span>Agent dies mid-run? It picks up from the last checkpoint.</span>
+            </div>
+          </li>
+          <li>
+            <span class="check-icon">&#10003;</span>
+            <div>
+              <strong>Cost tracking per execution and per LLM call</strong>
+              <span>Know exactly what each agent run costs, broken down by model.</span>
+            </div>
+          </li>
+          <li>
+            <span class="check-icon">&#10003;</span>
+            <div>
+              <strong>Artifact browser with full lineage</strong>
+              <span>Browse every output, trace it back to the config and input that produced it.</span>
+            </div>
+          </li>
+          <li>
+            <span class="check-icon">&#10003;</span>
+            <div>
+              <strong>Named config environments (dev/staging/prod)</strong>
+              <span>Switch models, stores, and settings with a single flag.</span>
+            </div>
+          </li>
+          <li>
+            <span class="check-icon">&#10003;</span>
+            <div>
+              <strong>OpenTelemetry spans to your existing stack</strong>
+              <span>Plug into Datadog, Grafana, or any OTel-compatible backend.</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Framework + deploy logos -->
+    <div class="logos-strip" data-reveal data-reveal-delay="4">
+      <div class="logos-row">
+        <span class="logos-label">Wrap any agent:</span>
+        <span class="logo-name">PydanticAI</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-name">OpenAI Agents SDK</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-name">CrewAI</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-name">Anthropic SDK</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-name">any Python agent</span>
+      </div>
+      <div class="logos-row">
+        <span class="logos-label">Deploy to:</span>
+        <span class="logo-name">AWS</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-name">GCP</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-name">Azure</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-name">Kubernetes</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-name">Local</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .deploy-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 48px;
+    align-items: start;
+  }
+
+  /* Terminal (dark) */
+  .terminal {
+    background: #1A1714;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 40px rgba(26,23,20,0.12);
+  }
+
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: rgba(26,23,20,0.95);
+  }
+
+  .code-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .code-dot:nth-child(1) { background: #E85540; }
+  .code-dot:nth-child(2) { background: #E8A840; }
+  .code-dot:nth-child(3) { background: #40C840; }
+
+  .terminal-title {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.35);
+    margin-left: 12px;
+  }
+
+  .terminal-body {
+    padding: 20px 24px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.8;
+    color: #E8E4DE;
+  }
+
+  .terminal-body .prompt-line { color: #b7b5a9; }
+  .terminal-body .prompt-char { color: #F17829; user-select: none; }
+  .terminal-body .output { color: #b7b5a9; }
+  .terminal-body .output.dim { color: rgba(255,255,255,0.3); }
+  .terminal-body .success { color: #34d399; }
+  .terminal-body .cmt { color: rgba(255,255,255,0.3); font-style: italic; }
+  .terminal-body .term-bright { color: #E8E4DE; }
+
+  /* What you get */
+  .you-get h3 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 24px;
+    color: var(--color-primary);
+  }
+
+  .you-get ul {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .you-get li {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+
+  .check-icon {
+    color: var(--color-success, #3D8C5C);
+    font-size: 0.9rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-weight: 600;
+  }
+
+  .you-get li strong {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-primary);
+    margin-bottom: 2px;
+  }
+
+  .you-get li span {
+    font-size: 0.82rem;
+    color: var(--color-secondary);
+    line-height: 1.5;
+  }
+
+  /* Logos strip */
+  .logos-strip {
+    margin-top: 48px;
+    padding-top: 32px;
+    border-top: 1px solid var(--color-border-light);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+
+  .logos-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+  }
+
+  .logos-label {
+    color: var(--color-muted);
+    font-weight: 400;
+    margin-right: 4px;
+  }
+
+  .logo-name {
+    color: var(--color-secondary);
+    font-weight: 400;
+  }
+
+  .logo-sep {
+    color: var(--color-muted);
+    opacity: 0.4;
+  }
+
+  @media (max-width: 768px) {
+    .deploy-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

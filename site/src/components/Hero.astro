@@ -1,0 +1,345 @@
+---
+// Hero.astro — Hero section with side-by-side layout + tabbed code
+---
+
+<section class="hero-section" style="padding: 120px clamp(24px, 5vw, 80px) 80px;">
+  <div class="section-inner">
+    <div class="hero-grid">
+      <!-- Left: copy + form -->
+      <div class="hero-left">
+        <div class="hero-badge" data-reveal>
+          <span class="dot"></span>
+          Coming soon — early access March 2026
+        </div>
+
+        <h1
+          style="font-weight: 700; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1.08; letter-spacing: -0.03em; margin-bottom: 24px;"
+          data-reveal data-reveal-delay="1"
+        >
+          Your agent runs.<br>Now make it <em class="gradient-text" style="font-style: normal;">survive.</em>
+        </h1>
+
+        <p
+          style="font-size: clamp(1rem, 1.8vw, 1.15rem); max-width: 480px; line-height: 1.65; margin-bottom: 36px; font-weight: 300; color: var(--color-secondary);"
+          data-reveal data-reveal-delay="2"
+        >
+          Eight primitives for durable AI agents in Python.
+          Crash recovery, <strong style="font-weight: 500; color: var(--color-primary);">artifact versioning</strong>, human-in-the-loop, and replay —
+          without the distributed systems baggage.
+        </p>
+
+        <div data-reveal data-reveal-delay="3">
+          <form class="hero-form" id="hero-waitlist-form">
+            <input type="email" placeholder="you@company.com" required>
+            <button type="submit">Get Early Access</button>
+          </form>
+          <p style="font-size: 0.75rem; margin-top: 12px; color: var(--color-muted);">Open source. Free to start. No credit card required.</p>
+        </div>
+      </div>
+
+      <!-- Right: tabbed code snippet -->
+      <div class="hero-right" data-reveal data-reveal-delay="3">
+        <div class="code-window hero-code-window">
+          <div class="code-header">
+            <span class="code-dot"></span>
+            <span class="code-dot"></span>
+            <span class="code-dot"></span>
+            <div class="code-tabs">
+              <button class="code-tab active" data-tab="plain">Plain Python</button>
+              <button class="code-tab" data-tab="framework">With a framework</button>
+            </div>
+          </div>
+          <!-- Plain Python tab -->
+          <div class="code-tab-content active" id="tab-plain">
+            <pre class="code-pre"><code><span class="cmt"># No framework needed — just primitives</span>
+<span class="kw">import</span> kitaru
+
+<span class="dec">@kitaru.checkpoint</span>
+<span class="kw">async def</span> <span class="fn">analyze</span>(code: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    <span class="kw">return await</span> kitaru.<span class="fn">llm</span>(
+        <span class="str">f"Review this code:\n{'{'}code{'}'}"</span>,
+        model<span class="op">=</span><span class="str">'gpt-4o'</span>,
+    )
+
+<span class="dec">@kitaru.saga</span>
+<span class="kw">async def</span> <span class="fn">review</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
+    diff <span class="op">=</span> <span class="kw">await</span> <span class="fn">fetch_pr</span>(pr_id)
+    result <span class="op">=</span> <span class="kw">await</span> <span class="fn">analyze</span>(diff)
+    <span class="kw">await</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Approve?'</span>)
+    <span class="kw">return</span> result</code></pre>
+          </div>
+          <!-- Framework tab -->
+          <div class="code-tab-content" id="tab-framework">
+            <pre class="code-pre"><code><span class="cmt"># Wrap any agent framework</span>
+<span class="kw">import</span> kitaru
+<span class="kw">from</span> kitaru.adapters <span class="kw">import</span> pydantic_ai <span class="kw">as</span> kp
+<span class="kw">from</span> pydantic_ai <span class="kw">import</span> Agent
+
+<span class="var">agent</span> <span class="op">=</span> Agent(<span class="str">'openai:gpt-4o'</span>, tools<span class="op">=</span>[search, read])
+<span class="var">durable</span> <span class="op">=</span> kp.<span class="fn">wrap</span>(agent)
+
+<span class="dec">@kitaru.saga</span>
+<span class="kw">async def</span> <span class="fn">review_pr</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
+    result <span class="op">=</span> <span class="kw">await</span> durable.<span class="fn">run</span>(<span class="str">f"Review PR #{'{'}pr_id{'}'}"</span>)
+    approved <span class="op">=</span> <span class="kw">await</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Ship it?'</span>)
+    <span class="kw">return</span> result.output</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    gap: 60px;
+    align-items: center;
+  }
+
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px 6px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 100px;
+    font-size: 0.8rem;
+    color: var(--color-secondary);
+    margin-bottom: 28px;
+    background: var(--color-surface);
+  }
+
+  .hero-badge .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(241,120,41,0.4); }
+    50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(241,120,41,0); }
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-deep) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-form {
+    display: flex;
+    gap: 10px;
+    max-width: 420px;
+  }
+
+  .hero-form input {
+    flex: 1;
+    padding: 14px 18px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-primary);
+    font-family: var(--font-ui);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .hero-form input::placeholder {
+    color: var(--color-muted);
+  }
+
+  .hero-form input:focus {
+    border-color: var(--color-accent);
+  }
+
+  .hero-form button {
+    padding: 14px 24px;
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.25s;
+    white-space: nowrap;
+    font-family: var(--font-ui);
+  }
+
+  .hero-form button:hover {
+    opacity: 0.85;
+    transform: translateY(-1px);
+  }
+
+  /* Code window */
+  .code-window {
+    background: #1A1714;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 40px rgba(26,23,20,0.12);
+  }
+
+  .code-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: rgba(26,23,20,0.95);
+  }
+
+  .code-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .code-dot:nth-child(1) { background: #E85540; }
+  .code-dot:nth-child(2) { background: #E8A840; }
+  .code-dot:nth-child(3) { background: #40C840; }
+
+  .code-pre {
+    margin: 0;
+    padding: 24px 28px;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    line-height: 1.75;
+    color: #E8E4DE;
+    overflow-x: auto;
+    background: transparent;
+  }
+
+  .code-pre code {
+    font-family: inherit;
+  }
+
+  .code-pre .kw { color: #C792EA; }
+  .code-pre .fn { color: #82AAFF; }
+  .code-pre .str { color: #C3E88D; }
+  .code-pre .var { color: #F78C6C; }
+  .code-pre .op { color: #89DDFF; }
+  .code-pre .num { color: #F78C6C; }
+  .code-pre .dec { color: #FFCB6B; }
+  .code-pre .cmt { color: #546E7A; font-style: italic; }
+
+  /* Tabs */
+  .code-tabs {
+    display: flex;
+    gap: 0;
+    margin-left: auto;
+  }
+
+  .code-tab {
+    background: none;
+    border: none;
+    padding: 4px 14px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.35);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+
+  .code-tab:hover {
+    color: rgba(255,255,255,0.6);
+  }
+
+  .code-tab.active {
+    background: rgba(241,120,41,0.15);
+    color: #F17829;
+  }
+
+  .code-tab-content {
+    display: none;
+  }
+
+  .code-tab-content.active {
+    display: block;
+  }
+
+  .hero-code-window {
+    width: 100%;
+  }
+
+  .code-filename {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.35);
+    margin-left: 12px;
+  }
+
+  .divider-line {
+    height: 1px;
+    background: var(--color-border-light);
+  }
+
+  @media (max-width: 900px) {
+    .hero-grid {
+      grid-template-columns: 1fr;
+      gap: 40px;
+    }
+
+    .hero-section {
+      padding-top: 80px !important;
+      padding-bottom: 60px !important;
+    }
+
+    .hero-form {
+      flex-direction: column;
+      max-width: 100%;
+    }
+  }
+</style>
+
+<script>
+  // Tab switching
+  document.querySelectorAll('.code-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      const target = tab.getAttribute('data-tab');
+      document.getElementById(`tab-${target}`)?.classList.add('active');
+    });
+  });
+
+  // Waitlist form
+  const heroForm = document.getElementById('hero-waitlist-form') as HTMLFormElement;
+  heroForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = heroForm.querySelector('button')!;
+    const input = heroForm.querySelector('input')! as HTMLInputElement;
+    const email = input.value.trim();
+
+    btn.textContent = 'Submitting...';
+    btn.setAttribute('disabled', 'true');
+
+    try {
+      const res = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      if (res.ok) {
+        btn.textContent = "You're in \u2713";
+        btn.style.background = '#3D8C5C';
+        input.disabled = true;
+      } else {
+        btn.textContent = 'Try again';
+        btn.removeAttribute('disabled');
+      }
+    } catch (_err) {
+      btn.textContent = 'Try again';
+      btn.removeAttribute('disabled');
+    }
+  });
+</script>
