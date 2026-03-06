@@ -91,7 +91,6 @@ jobs:
           header: site-preview
           message: |
             ## Site Preview
-
             | | |
             |---|---|
             | **Preview URL** | https://kitaru-site-preview-${{ github.event.pull_request.number }}.zenml-migration.workers.dev |
@@ -109,4 +108,5 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
-          command: delete --name kitaru-site-preview-${{ github.event.pull_request.number }} --force
+          command: delete --name kitaru-site-preview-${{ github.event.pull_request.number }}
+            --force
