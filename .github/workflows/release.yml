@@ -1,0 +1,166 @@
+---
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release (e.g. 0.2.0)
+        required: true
+        type: string
+      dry-run:
+        description: Dry run (build and test but do not publish or push)
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags: [v*]
+permissions:
+  contents: write
+  id-token: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' && '' || 'pypi' }}
+    steps:
+      # --- Determine version and trigger mode ---
+      - name: Set version from dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "VERSION=${{ github.event.inputs.version }}" >> "$GITHUB_ENV"
+      - name: Set version from tag
+        if: github.event_name == 'push'
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # --- Validate version ---
+      - name: Validate semver format
+        run: |
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid version format: $VERSION (expected semver like 1.2.3 or 1.2.3-rc.1)"
+            exit 1
+          fi
+      - name: Check tag does not already exist (dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q .; then
+            echo "::error::Tag v$VERSION already exists"
+            exit 1
+          fi
+
+      # --- Checkout ---
+      - name: Checkout develop (dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout tagged commit (tag push)
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # --- Configure git ---
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # --- Bump version (dispatch only) ---
+      - name: Bump version in pyproject.toml
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          echo "Updated pyproject.toml to version $VERSION"
+          grep '^version' pyproject.toml
+      - name: Update CHANGELOG.md
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $DATE/" CHANGELOG.md
+          echo "Updated CHANGELOG.md for $VERSION ($DATE)"
+      - name: Commit release changes
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git add pyproject.toml CHANGELOG.md
+          git commit -m "Release $VERSION"
+
+      # --- Verify version matches (tag push only) ---
+      - name: Verify tag matches pyproject.toml version
+        if: github.event_name == 'push'
+        run: |
+          TOML_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          if [ "$TOML_VERSION" != "$VERSION" ]; then
+            echo "::error::Tag version ($VERSION) does not match pyproject.toml ($TOML_VERSION)"
+            exit 1
+          fi
+
+      # --- Run CI checks ---
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Type check
+        run: uv run ty check
+      - name: Test
+        run: uv run pytest
+
+      # --- Build ---
+      - name: Build package
+        run: uv build
+      - name: List build artifacts
+        run: ls -lh dist/
+
+      # --- Publish (skip on dry-run) ---
+      - name: Publish to PyPI
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      # --- Push release commit to develop (dispatch only, skip on dry-run) ---
+      - name: Push release commit to develop
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
+        run: git push origin HEAD:develop
+
+      # --- Create release branch and update main (skip on dry-run) ---
+      - name: Create release branch
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        run: |
+          git checkout -b "release/$VERSION"
+          git push origin "release/$VERSION"
+      - name: Update main to release
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        run: git push --force origin "release/$VERSION:main"
+
+      # --- Tag (dispatch only, skip on dry-run) ---
+      - name: Create and push tag
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
+        run: |
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+      # --- GitHub Release (skip on dry-run) ---
+      - name: Create GitHub Release
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v$VERSION" dist/* \
+            --title "v$VERSION" \
+            --generate-notes
+
+      # --- Dry-run summary ---
+      - name: Dry-run summary
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
+        run: |-
+          echo "## Dry-run complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "Version: $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "Build artifacts:" >> "$GITHUB_STEP_SUMMARY"
+          ls dist/ >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "No changes were pushed, published, or tagged." >> "$GITHUB_STEP_SUMMARY"
