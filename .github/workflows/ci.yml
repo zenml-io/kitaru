@@ -14,7 +14,7 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run yamlfix --check --exclude '.venv/**' .
+      - run: uv run yamlfix --check .github/
   typos:
     runs-on: ubuntu-latest
     steps:

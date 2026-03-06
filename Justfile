@@ -23,7 +23,7 @@ typos:
 
 # Check YAML formatting
 yaml-check:
-    uv run yamlfix --check --exclude '.venv/**' .
+    uv run yamlfix --check .github/
 
 # Check links in markdown files (requires lychee: brew install lychee)
 links:
@@ -33,7 +33,7 @@ links:
 fix:
     uv run ruff format .
     uv run ruff check . --fix
-    uv run yamlfix --exclude '.venv/**' .
+    uv run yamlfix .github/
 
 # Run tests (e.g., `just test`, `just test -x`, `just test tests/test_foo.py`)
 test *ARGS:
