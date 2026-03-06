@@ -4,6 +4,9 @@ extend-exclude = [
     "*.js",
     "*.ipynb",
     "uv.lock",
+    "docs/pnpm-lock.yaml",
+    "docs/.source/",
+    "docs/node_modules/",
 ]
 
 [default.extend-identifiers]
@@ -12,6 +15,15 @@ HashiCorp = "HashiCorp"
 [default.extend-words]
 # Don't correct the surname "Teh"
 aks = "aks"
+# FumaDocs / Next.js / React terms
+fumadocs = "fumadocs"
+mdx = "mdx"
+tsx = "tsx"
+mjs = "mjs"
+unoptimized = "unoptimized"
+prerendered = "prerendered"
+# Kitaru product terms
+kitaru = "kitaru"
 
 [default]
 locale = "en-us"
