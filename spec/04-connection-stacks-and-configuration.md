@@ -1,15 +1,93 @@
 # 4. Connection, Stacks, and Configuration
 
-One of the most important clarifications in Kitaru is that these are different concerns:
+## Unified configuration
 
-- **connection** — how the SDK talks to a Kitaru or ZenML server
-- **stack** — where an execution runs and persists data
-- **app config** — project-level runtime defaults
-- **execution overrides** — per-flow, per-checkpoint, or per-call choices
+Kitaru uses a **single unified configuration object** that gathers all settings — connection, stack selection, image/environment, execution behavior — into one coherent structure. This config object inherits from multiple scopes (global, project, runtime) and is the single source of truth for how an execution runs.
 
-These should not be collapsed into one giant config hierarchy.
+The way to think about configuration is in two temporal phases:
 
-For the MVP, configuration should stay close to ZenML's existing primitives: stored stack/component config on one side, runtime-provided settings on the other. The only innovation needed is mapping Kitaru's compute and artifact primitives to the underlying ZenML stack components.
+- **Pre-execution settings** — things configured before a run starts: the active stack, image definition, global log settings, cache behavior, connection credentials. These are static for the duration of an execution.
+- **Runtime overrides** — things specified at invocation time or in decorators: per-flow stack choice, per-checkpoint retries, environment variable overrides, Docker settings. These override the pre-execution defaults.
+
+This mirrors what ZenML calls "configuration and settings": a base layer of static config, plus a runtime layer of overrides that get merged at execution time.
+
+### The `@flow` decorator as the main config surface
+
+The `@kitaru.flow` decorator is the primary place where configuration flows into an execution. It accepts:
+
+- stack selection
+- image / Docker settings
+- execution behavior overrides (cache, retries)
+- environment variables
+
+Connection credentials (server URL, auth token) are part of the unified config object but are **not** passed through the `@flow` decorator — they are resolved from the environment, user config, or explicit `connect()` calls before any flow runs.
+
+### Config object structure
+
+The unified config object contains these sub-objects:
+
+```python
+# Conceptual structure — not necessarily the literal API
+KitaruConfig(
+    # Connection
+    server_url="https://kitaru.mycompany.com",
+    auth_token="...",
+
+    # Stack selection
+    stack="prod",
+
+    # Image / environment
+    image=ImageSettings(
+        base_image="python:3.12-slim",
+        requirements=["pydantic", "httpx"],
+        environment={"API_TIMEOUT": "30"},
+    ),
+
+    # Execution behavior
+    cache=True,
+    retries=0,
+
+    # Project
+    local_dir=".kitaru",
+    project="my-project",
+)
+```
+
+## Config sources and precedence
+
+Configuration can come from multiple sources. More specific sources override less specific ones.
+
+### Sources (most specific wins)
+
+1. **Invocation-time overrides** — `my_flow.start(..., stack="prod")`
+2. **Decorator defaults** — `@kitaru.flow(stack="prod")`
+3. **`kitaru.configure()` calls** — explicit runtime configuration
+4. **Environment variables** — `KITARU_STACK`, `KITARU_SERVER_URL`, etc.
+5. **Project config file** — checked into the repo
+6. **User config** — stored on the machine (active stack, auth token)
+7. **Built-in defaults** — implicit `local` stack, default settings
+
+### Project config files
+
+Project-level config can live in any of:
+
+- `pyproject.toml` under `[tool.kitaru]`
+- `kitaru.toml`
+- `.kitaru/` folder (for active project/stack state)
+
+Project-local config shadows global or user-level defaults for settings relevant to that project. This gives a clean experience when switching between projects that target different servers or stacks.
+
+### User config
+
+Stored on the machine (not in the repo):
+
+- server URL
+- active stack
+- auth token or token path
+
+### Shadowing
+
+If a setting is defined in project config, it takes precedence over the globally active user config for that setting.
 
 ## Connection
 
@@ -17,18 +95,13 @@ Connection state is about talking to a Kitaru server.
 
 Under the hood, the Kitaru server **is** the ZenML server. The user does not need to know this — from their perspective, they connect to a Kitaru URL and use Kitaru concepts. The SDK maps Kitaru operations to ZenML API calls internally.
 
-It owns:
+Connection owns:
 
 - server URL
 - auth token or API key
-- possibly workspace or project later
+- workspace or project (later)
 
-It does **not** own:
-
-- model aliases
-- default model
-- flow retry policy
-- business logic defaults
+Connection is part of the unified config object but resolves separately from execution-time settings — it must be established before any flow can target a remote stack.
 
 ### Python
 
@@ -46,24 +119,57 @@ kitaru status
 kitaru logout
 ```
 
+### Connection precedence
+
+1. explicit `connect()` or client args
+2. environment variables
+3. user config
+4. none (local-only mode)
+
 ## Stacks
 
-A **stack** is a named execution target or infrastructure profile.
+A **stack** is a named execution target — a bundle of infrastructure components that defines where and how an execution runs.
 
-A stack answers questions like:
+### Stack components
 
-- does this run locally or remotely?
-- what runner is used?
-- where do artifacts and execution journal data go?
-- what runtime capabilities are available?
+Kitaru exposes four to five core components:
 
-A stack should **not** define:
+| Component | What it covers | ZenML mapping |
+| --- | --- | --- |
+| **Runner** | Where and how code executes — combines orchestration, step execution, and optionally sandboxed execution | Orchestrator + Step Operator + Sandbox |
+| **Artifact store** | Where artifacts, checkpoint outputs, and execution journal data are persisted | Artifact Store |
+| **Container registry** | Where built images are pushed and pulled from | Container Registry |
+| **LLM model** | Model provider configuration used by `kitaru.llm()` | New ZenML component |
 
-- model aliases
-- default retry policy
-- business logic defaults
+A possible fifth component (e.g. sandbox as a standalone component separate from runner) may be added as the architecture solidifies.
 
-## Built-in local stack
+### Stack-first approach
+
+The path from local to remote should be **stack-first**, not bottom-up component assembly.
+
+Instead of asking users to:
+
+1. create a service connector
+2. create individual components
+3. assemble them into a stack
+
+Kitaru should focus on **creating and selecting stacks** as the primary operation:
+
+```bash
+# The user thinks in terms of stacks, not components
+kitaru stack create prod \
+    --runner kubernetes \
+    --artifact-store s3://my-bucket \
+    --container-registry ghcr.io/myorg
+
+kitaru stack use prod
+```
+
+Component and service connector configuration happens **as part of stack creation**, not as separate prerequisite steps. Advanced users and platform admins can still work with individual components, but the default workflow is stack-centric.
+
+Service connectors (for cloud credential management) should eventually be exposed, but the priority is making stack creation simple and self-contained.
+
+### Built-in local stack
 
 Kitaru always has an implicit built-in `local` stack.
 
@@ -83,7 +189,7 @@ This works because Kitaru can resolve a built-in local execution target that:
 
 Conceptually, `local` is a real stack, not a special-case hack.
 
-## Remote stacks
+### Remote stacks
 
 In connected mode, remote stacks are typically **server-managed**.
 
@@ -99,137 +205,64 @@ Ordinary developers should mostly **select stacks**, not assemble them from infr
 
 More advanced stack authoring can remain a platform or admin concern.
 
-## App config
+### Stack selection precedence
 
-App config is **project-level runtime configuration**, not connection state and not infrastructure selection.
+1. `my_flow.start(..., stack="prod")` — invocation-time override
+2. `@kitaru.flow(stack="prod")` — decorator default
+3. environment variable override
+4. active user-selected stack
+5. implicit `local`
 
-For MVP, it should stay narrow.
+## Image and environment settings
 
-### Good uses
-
-- local runtime directory
-- project-level defaults that influence execution behavior
-
-### Example
+When running remotely, Kitaru needs to know what Docker image to use and what environment to set up. This is configured through **image** settings (called "Docker settings" in ZenML).
 
 ```python
-kitaru.configure(
-    local_dir=".kitaru",
+@kitaru.flow(
+    image=ImageSettings(
+        base_image="python:3.12-slim",
+        requirements=["pydantic", "httpx"],
+        dockerfile="Dockerfile.agent",
+        environment={"API_KEY": "{{secrets.api_key}}"},
+    ),
 )
+def my_agent(prompt: str) -> str:
+    ...
 ```
 
-### LLM provider configuration
+Image settings include:
 
-Kitaru needs an abstraction layer over model providers to support `kitaru.llm()`.
+- base image
+- additional Python requirements
+- custom Dockerfile
+- environment variables injected into the runtime
+- build-time vs runtime environment separation
 
-The MVP direction is likely a wrapper over an existing multi-provider SDK (e.g. a LiteLLM-like approach), but the exact provider/backend shape is **not yet finalized**.
+These are part of the unified config object and can be set at the project level, the `@flow` decorator level, or overridden at invocation time.
 
-What is clear:
+## Execution behavior settings
 
-- `kitaru.llm()` remains the thin user-facing call surface
-- model/provider credentials likely belong closer to stack/secret configuration than to `kitaru.configure()` alone
-- call-time `model=` overrides are a valid surface
+These control how an execution runs, separate from where it runs:
 
-What is still being decided:
+- **cache** — whether checkpoint outputs should be reused from previous executions (note: this is distinct from replay, which reuses outputs within the same execution lineage)
+- **retries** — automatic retry count on failure
+- **timeout** — execution time limits (future)
 
-- whether the provider abstraction is a stack component flavor or a lightweight wrapper
-- whether `kitaru.configure(models={...})` is the right place for model aliases, or whether that belongs in stack/secret config
-- the exact mapping between provider config and ZenML secret/component primitives
-
-For MVP, avoid over-specifying the LLM config architecture. The user-facing `kitaru.llm()` contract is stable; the infrastructure/config plumbing behind it is intentionally flexible.
+These can be set at the project level or overridden per-flow or per-checkpoint.
 
 ### Notes
 
 - secrets are referenced by environment variable name or stored in stack/secret config, not resolved directly in app config
 - durability is a core runtime behavior, so it should not be described as optional "cache" behavior
 
-## Config files
-
-Kitaru should conceptually split config into two levels.
-
-### Project config
-
-Checked into the repo:
-
-- local data dir
-- project-level defaults
-
-This can live in:
-
-- `pyproject.toml`
-- or `kitaru.toml`
-
-Project-local config can shadow global or user-level defaults for settings that are relevant to that project.
-
-### User config
-
-Stored on the machine:
-
-- server URL
-- active stack
-- auth token or token path
-
-This should not normally live in project config.
-
-### Shadowing
-
-If a setting is defined in project config, it should take precedence over the globally active user config for that setting. This gives a cleaner experience when switching between projects that target different servers or stacks.
-
-## Execution overrides
-
-These are per-run or per-call choices.
-
-Examples:
-
-- `@flow(stack="prod")`
-- `@flow(retries=2)`
-- `@checkpoint(retries=3)`
-- `kitaru.llm(model="fast")`
-- `flow.start(..., stack="local")`
-
-These are runtime choices, not global project settings.
-
-## Precedence rules by namespace
-
-Kitaru should use **separate precedence rules** for different kinds of settings.
-
-### Connection precedence
-
-1. explicit `connect()` or client args
-2. environment variables
-3. user config
-4. none
-
-### Stack selection precedence
-
-1. `my_flow.start(..., stack="prod")` — invocation-time override
-2. `@kitaru.flow(stack="prod")` — decorator default (simple to enable; 1-liner in the decorator implementation)
-3. environment variable override
-4. active user-selected stack
-5. implicit `local`
-
-### App config precedence
-
-1. `kitaru.configure(...)`
-2. project config file
-3. built-in defaults
-
-### Execution behavior precedence
-
-For things like retries:
-
-1. explicit decorator or call-time values
-2. framework defaults
-
-Stacks should not secretly change logical behavior like retry policy in the MVP.
-
 ## Frozen resolved execution spec
 
-At flow start, Kitaru should compute a **fully resolved execution spec** and persist it with the execution.
+At flow start, Kitaru computes a **fully resolved execution spec** and persists it with the execution.
 
-This spec should include the resolved snapshot of:
+This spec is the merged result of all config sources and includes:
 
 - selected stack
+- resolved image settings
 - app config used by the execution
 - flow-level defaults
 - connection context if relevant
