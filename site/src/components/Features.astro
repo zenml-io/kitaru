@@ -1,0 +1,763 @@
+---
+// Features.astro — Four feature cards with animated visual areas (2×2 grid)
+---
+
+<section id="features" style="padding: 60px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>How it works</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Four things. Not forty.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2">Everything your agents need to ship. Nothing extra to learn.</p>
+
+    <div class="features-grid" id="featuresGrid">
+
+      <!-- Card 1: Pause & Resume -->
+      <div class="feature-card">
+        <div class="card-glow"></div>
+        <div class="feature-visual">
+          <div class="anim-pause-resume" id="animPause">
+            <div class="timeline-track"></div>
+            <div class="progress-fill" id="progressFill"></div>
+            <div class="pr-step" style="left:15%" data-idx="0">1</div>
+            <div class="pr-step" style="left:30%" data-idx="1">2</div>
+            <div class="pr-step" style="left:45%" data-idx="2">3</div>
+            <div class="pr-step" style="left:60%" data-idx="3">4</div>
+            <div class="pr-step" style="left:75%" data-idx="4">5</div>
+            <div class="pr-step" style="left:90%" data-idx="5">6</div>
+            <div class="human-badge" id="humanBadge">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="3.5" r="2.5" stroke="var(--color-accent-warm)" stroke-width="1"/><path d="M1 11c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="var(--color-accent-warm)" stroke-width="1"/></svg>
+              Waiting for human input...
+            </div>
+          </div>
+        </div>
+        <div class="feature-text">
+          <div class="feature-number">01 — Pause & Resume</div>
+          <h3>Your agent asks. You answer. It continues.</h3>
+          <p>Pauses at decision points, releases compute, and picks up exactly where it left off. Hours or days later.</p>
+        </div>
+      </div>
+
+      <!-- Card 2: Replay from Failure -->
+      <div class="feature-card">
+        <div class="card-glow"></div>
+        <div class="feature-visual">
+          <div class="anim-replay" id="animReplay">
+            <div class="replay-row">
+              <div class="rstep" data-idx="0">1</div>
+              <div class="rstep" data-idx="1">2</div>
+              <div class="rstep" data-idx="2">3</div>
+              <div class="rstep" data-idx="3">4</div>
+              <div class="rstep" data-idx="4">5</div>
+              <div class="rstep" data-idx="5">6</div>
+              <div class="rstep" data-idx="6">7</div>
+            </div>
+            <div class="replay-status" id="replayStatus">Running agent...</div>
+            <div class="cost-saved" id="costSaved">$12.40 in tokens saved</div>
+          </div>
+        </div>
+        <div class="feature-text">
+          <div class="feature-number">02 — Replay from Failure</div>
+          <h3>Crash at step 7? Resume from step 7.</h3>
+          <p>Every step is checkpointed. Fix the issue and pick up where you left off — no re-burning tokens.</p>
+        </div>
+      </div>
+
+      <!-- Card 3: Bring Your Framework -->
+      <div class="feature-card">
+        <div class="card-glow"></div>
+        <div class="feature-visual">
+          <div class="anim-framework" id="animFramework">
+            <div class="framework-orbit"></div>
+            <div class="kitaru-core">kitaru</div>
+            <div class="fw-item" style="top: 12%; left: 50%; transform: translateX(-50%);">PydanticAI</div>
+            <div class="fw-item" style="top: 50%; right: 5%; transform: translateY(-50%);">OpenAI SDK</div>
+            <div class="fw-item" style="bottom: 12%; left: 50%; transform: translateX(-50%);">Your code</div>
+            <div class="fw-item" style="top: 50%; left: 5%; transform: translateY(-50%);">CrewAI</div>
+          </div>
+        </div>
+        <div class="feature-text">
+          <div class="feature-number">03 — Bring Your Framework</div>
+          <h3>PydanticAI. Your own code. Whatever.</h3>
+          <p>Wrap it with Kitaru and it becomes durable. No lock-in. No opinions. Your framework, our infrastructure.</p>
+        </div>
+      </div>
+
+      <!-- Card 4: Parallel Branches -->
+      <div class="feature-card">
+        <div class="card-glow"></div>
+        <div class="feature-visual">
+          <div class="anim-parallel" id="animParallel">
+            <div class="par-source"></div>
+            <div class="par-branch" data-idx="0">
+              <div class="par-line"></div>
+              <div class="par-dot" data-dot="0"></div>
+              <div class="par-dot" data-dot="1"></div>
+              <div class="par-dot" data-dot="2"></div>
+            </div>
+            <div class="par-branch" data-idx="1">
+              <div class="par-line"></div>
+              <div class="par-dot" data-dot="0"></div>
+              <div class="par-dot" data-dot="1"></div>
+              <div class="par-dot" data-dot="2"></div>
+            </div>
+            <div class="par-branch" data-idx="2">
+              <div class="par-line"></div>
+              <div class="par-dot" data-dot="0"></div>
+              <div class="par-dot" data-dot="1"></div>
+              <div class="par-dot" data-dot="2"></div>
+            </div>
+          </div>
+        </div>
+        <div class="feature-text">
+          <div class="feature-number">04 — Parallel Branches</div>
+          <h3>Fan out. Each branch checkpoints independently.</h3>
+          <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">kitaru.parallel()</code> runs branches concurrently. Each has its own checkpoint history. Replay just the failed branch.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<style>
+  .features-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 48px;
+  }
+
+  .feature-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 0;
+    transition: border-color 0.3s, transform 0.3s;
+    position: relative;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.5s ease, transform 0.5s ease, border-color 0.3s;
+  }
+
+  .features-grid.visible .feature-card:nth-child(1) { transition-delay: 0s; }
+  .features-grid.visible .feature-card:nth-child(2) { transition-delay: 0.1s; }
+  .features-grid.visible .feature-card:nth-child(3) { transition-delay: 0.2s; }
+  .features-grid.visible .feature-card:nth-child(4) { transition-delay: 0.3s; }
+
+  .features-grid.visible .feature-card {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .feature-card:hover {
+    border-color: var(--color-muted);
+    transform: translateY(-2px);
+  }
+
+  .feature-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-accent), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .feature-card:hover::before {
+    opacity: 1;
+  }
+
+  /* Card hover glow — follows cursor */
+  .card-glow {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(241,120,41,0.04), transparent 60%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 1;
+  }
+
+  .feature-card:hover .card-glow {
+    opacity: 1;
+  }
+
+  /* Feature visual area (animation container) */
+  .feature-visual {
+    height: 200px;
+    background: #1A1714;
+    border-bottom: 1px solid var(--color-border);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .feature-text {
+    padding: 20px 24px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .feature-number {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .feature-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+  }
+
+  .feature-card p {
+    color: var(--color-secondary);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    font-weight: 300;
+  }
+
+  /* ═══ ANIMATION: Pause & Resume ═══ */
+  .anim-pause-resume {
+    width: 100%;
+    height: 100%;
+    position: relative;
+  }
+
+  .anim-pause-resume .timeline-track {
+    position: absolute;
+    top: 50%;
+    left: 10%;
+    right: 10%;
+    height: 2px;
+    background: rgba(255,255,255,0.1);
+    transform: translateY(-50%);
+  }
+
+  .anim-pause-resume .progress-fill {
+    position: absolute;
+    top: 50%;
+    left: 10%;
+    height: 2px;
+    background: var(--color-accent);
+    transform: translateY(-50%);
+    transition: width 0.5s ease;
+    opacity: 0.5;
+  }
+
+  .anim-pause-resume .pr-step {
+    position: absolute;
+    top: 50%;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #1A1714;
+    border: 1.5px solid rgba(255,255,255,0.15);
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    color: rgba(255,255,255,0.3);
+    transition: all 0.4s ease;
+    z-index: 2;
+  }
+
+  .pr-step.completed {
+    border-color: var(--color-accent);
+    background: rgba(241,120,41,0.1);
+    color: var(--color-accent);
+  }
+
+  .pr-step.active {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: #1A1714;
+    box-shadow: 0 0 20px rgba(241,120,41,0.3);
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+
+  .pr-step.paused {
+    border-color: #E8A840;
+    background: rgba(232,168,64,0.1);
+    color: #E8A840;
+    animation: pausePulse 1.5s ease infinite;
+  }
+
+  @keyframes pausePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(232,168,64,0.25); }
+    50% { box-shadow: 0 0 0 8px rgba(232,168,64,0); }
+  }
+
+  .human-badge {
+    position: absolute;
+    top: 18%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(232,168,64,0.12);
+    border: 1px solid rgba(232,168,64,0.3);
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    color: #E8A840;
+    opacity: 0;
+    transition: opacity 0.4s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .human-badge.visible {
+    opacity: 1;
+  }
+
+  /* ═══ ANIMATION: Replay ═══ */
+  .anim-replay {
+    width: 100%;
+    height: 100%;
+    position: relative;
+  }
+
+  .replay-row {
+    position: absolute;
+    top: 45%;
+    left: 8%;
+    right: 8%;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transform: translateY(-50%);
+  }
+
+  .rstep {
+    flex: 1;
+    height: 32px;
+    border-radius: 4px;
+    background: #1A1714;
+    border: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    color: rgba(255,255,255,0.2);
+    transition: all 0.3s ease;
+  }
+
+  .rstep.ok {
+    border-color: rgba(61,140,92,0.4);
+    background: rgba(61,140,92,0.08);
+    color: var(--color-success);
+  }
+
+  .rstep.fail {
+    border-color: var(--color-cost-up);
+    background: rgba(220,74,61,0.12);
+    color: var(--color-cost-up);
+    animation: failShake 0.4s ease;
+  }
+
+  @keyframes failShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+  }
+
+  .rstep.replay {
+    border-color: var(--color-accent);
+    background: rgba(241,120,41,0.12);
+    color: var(--color-accent);
+    box-shadow: 0 0 12px rgba(241,120,41,0.2);
+  }
+
+  .replay-status {
+    position: absolute;
+    bottom: 18%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.3);
+    white-space: nowrap;
+    transition: all 0.3s;
+  }
+
+  .replay-status.error { color: var(--color-cost-up); }
+  .replay-status.success { color: var(--color-success); }
+
+  .cost-saved {
+    position: absolute;
+    top: 15%;
+    right: 10%;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--color-success);
+    opacity: 0;
+    transition: opacity 0.4s;
+  }
+
+  .cost-saved.visible { opacity: 1; }
+
+  /* ═══ ANIMATION: Framework Orbit ═══ */
+  .anim-framework {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .kitaru-core {
+    width: 70px;
+    height: 70px;
+    border: 2px solid var(--color-accent);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--color-accent);
+    letter-spacing: 0.1em;
+    position: relative;
+    z-index: 2;
+    background: #1A1714;
+  }
+
+  .framework-orbit {
+    position: absolute;
+    width: 170px;
+    height: 170px;
+    border: 1px dashed rgba(255,255,255,0.1);
+    border-radius: 50%;
+  }
+
+  .fw-item {
+    position: absolute;
+    background: #1A1714;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    color: rgba(255,255,255,0.4);
+    white-space: nowrap;
+    transition: all 0.5s ease;
+  }
+
+  .fw-item.active {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+    background: rgba(241,120,41,0.06);
+  }
+
+  /* ═══ ANIMATION: Parallel Branches ═══ */
+  .anim-parallel {
+    width: 100%;
+    height: 100%;
+    position: relative;
+  }
+
+  .par-source {
+    position: absolute;
+    left: 12%;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    transform: translateY(-50%);
+    z-index: 2;
+  }
+
+  .par-branch {
+    position: absolute;
+    left: 18%;
+    right: 12%;
+    height: 2px;
+    display: flex;
+    align-items: center;
+  }
+
+  .par-branch[data-idx="0"] { top: 28%; }
+  .par-branch[data-idx="1"] { top: 50%; }
+  .par-branch[data-idx="2"] { top: 72%; }
+
+  .par-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: rgba(255,255,255,0.08);
+  }
+
+  .par-dot {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #1A1714;
+    border: 1.5px solid rgba(255,255,255,0.15);
+    transition: all 0.4s ease;
+    z-index: 2;
+  }
+
+  .par-dot[data-dot="0"] { left: 20%; }
+  .par-dot[data-dot="1"] { left: 50%; }
+  .par-dot[data-dot="2"] { left: 80%; }
+
+  .par-dot.ok {
+    border-color: rgba(61,140,92,0.6);
+    background: rgba(61,140,92,0.15);
+  }
+
+  .par-dot.fail {
+    border-color: var(--color-cost-up);
+    background: rgba(220,74,61,0.15);
+    animation: failShake 0.4s ease;
+  }
+
+  .par-dot.replay {
+    border-color: var(--color-accent);
+    background: rgba(241,120,41,0.15);
+    box-shadow: 0 0 8px rgba(241,120,41,0.25);
+  }
+
+  @media (max-width: 768px) {
+    .features-grid {
+      grid-template-columns: 1fr;
+    }
+    .feature-visual {
+      height: 160px;
+    }
+  }
+</style>
+
+<script>
+  // ═══ Card hover glow tracking ═══
+  document.querySelectorAll('.feature-card').forEach(card => {
+    card.addEventListener('mousemove', (e: MouseEvent) => {
+      const rect = (card as HTMLElement).getBoundingClientRect();
+      (card as HTMLElement).style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');
+      (card as HTMLElement).style.setProperty('--mouse-y', ((e.clientY - rect.top) / rect.height * 100) + '%');
+    });
+    card.addEventListener('mouseleave', () => {
+      (card as HTMLElement).style.setProperty('--mouse-x', '50%');
+      (card as HTMLElement).style.setProperty('--mouse-y', '50%');
+    });
+  });
+
+  // ═══ Feature grid stagger reveal ═══
+  const gridObs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        startFeatureAnimations();
+        gridObs.disconnect();
+      }
+    });
+  }, { threshold: 0.15 });
+
+  const grid = document.getElementById('featuresGrid');
+  if (grid) gridObs.observe(grid);
+
+  // ═══ Feature Animations ═══
+  let featureTimers: number[] = [];
+
+  function startFeatureAnimations() {
+    runPauseResumeAnim();
+    runReplayAnim();
+    runFrameworkAnim();
+    runParallelAnim();
+  }
+
+  // --- Pause & Resume ---
+  function runPauseResumeAnim() {
+    const container = document.getElementById('animPause');
+    if (!container) return;
+    const steps = container.querySelectorAll('.pr-step');
+    const badge = document.getElementById('humanBadge');
+    const progress = document.getElementById('progressFill');
+
+    steps.forEach(s => { s.className = 'pr-step'; });
+    badge?.classList.remove('visible');
+    if (progress) progress.style.width = '0%';
+
+    const positions = [15, 30, 45, 60, 75, 90];
+    let i = 0;
+
+    function nextStep() {
+      if (i < steps.length) {
+        if (i > 0) { steps[i-1].classList.remove('active'); steps[i-1].classList.add('completed'); }
+        steps[i].classList.add('active');
+        if (progress) progress.style.width = (positions[i] - positions[0] + 2) + '%';
+
+        if (i === 3) {
+          const t1 = setTimeout(() => {
+            steps[i].classList.remove('active');
+            steps[i].classList.add('paused');
+            badge?.classList.add('visible');
+            const t2 = setTimeout(() => {
+              badge?.classList.remove('visible');
+              steps[i].classList.remove('paused');
+              steps[i].classList.add('completed');
+              i++;
+              nextStep();
+            }, 2000);
+            featureTimers.push(t2);
+          }, 600);
+          featureTimers.push(t1);
+        } else {
+          const t = setTimeout(() => { i++; nextStep(); }, 600);
+          featureTimers.push(t);
+        }
+      } else {
+        steps[steps.length - 1].classList.remove('active');
+        steps[steps.length - 1].classList.add('completed');
+        if (progress) progress.style.width = '82%';
+        const t = setTimeout(() => runPauseResumeAnim(), 2000);
+        featureTimers.push(t);
+      }
+    }
+    const t = setTimeout(nextStep, 500);
+    featureTimers.push(t);
+  }
+
+  // --- Replay from Failure ---
+  function runReplayAnim() {
+    const container = document.getElementById('animReplay');
+    if (!container) return;
+    const steps = container.querySelectorAll('.rstep');
+    const status = document.getElementById('replayStatus');
+    const cost = document.getElementById('costSaved');
+
+    steps.forEach(s => { s.className = 'rstep'; });
+    if (status) { status.textContent = 'Running agent...'; status.className = 'replay-status'; }
+    cost?.classList.remove('visible');
+
+    let i = 0;
+    function nextRStep() {
+      if (i < steps.length) {
+        if (i === 5) {
+          steps[i].classList.add('fail');
+          if (status) { status.textContent = '✗ Step 6 failed — API timeout'; status.classList.add('error'); }
+          const t1 = setTimeout(() => {
+            if (status) { status.textContent = '↻ Replaying from step 6...'; status.className = 'replay-status'; }
+            steps[i].className = 'rstep';
+            const t2 = setTimeout(() => {
+              steps[i].classList.add('replay');
+              cost?.classList.add('visible');
+              const t3 = setTimeout(() => {
+                steps[i].classList.remove('replay');
+                steps[i].classList.add('ok');
+                i++;
+                nextRStep();
+              }, 800);
+              featureTimers.push(t3);
+            }, 600);
+            featureTimers.push(t2);
+          }, 1500);
+          featureTimers.push(t1);
+        } else {
+          steps[i].classList.add('ok');
+          i++;
+          const t = setTimeout(nextRStep, 350);
+          featureTimers.push(t);
+        }
+      } else {
+        if (status) { status.textContent = '✓ All steps complete'; status.classList.add('success'); }
+        const t = setTimeout(() => runReplayAnim(), 2500);
+        featureTimers.push(t);
+      }
+    }
+    const t = setTimeout(nextRStep, 500);
+    featureTimers.push(t);
+  }
+
+  // --- Framework Orbit ---
+  function runFrameworkAnim() {
+    const container = document.getElementById('animFramework');
+    if (!container) return;
+    const items = container.querySelectorAll('.fw-item');
+    let current = 0;
+
+    function highlight() {
+      items.forEach(it => it.classList.remove('active'));
+      items[current].classList.add('active');
+      current = (current + 1) % items.length;
+      const t = setTimeout(highlight, 1500);
+      featureTimers.push(t);
+    }
+    const t = setTimeout(highlight, 800);
+    featureTimers.push(t);
+  }
+
+  // --- Parallel Branches ---
+  function runParallelAnim() {
+    const container = document.getElementById('animParallel');
+    if (!container) return;
+    const branches = container.querySelectorAll('.par-branch');
+    const allDots = container.querySelectorAll('.par-dot');
+
+    allDots.forEach(d => { d.className = 'par-dot'; });
+
+    let step = 0;
+    const failBranch = 2; // third branch fails
+    const failDot = 1;    // at second dot
+
+    function nextStep() {
+      if (step < 3) {
+        branches.forEach((branch, bIdx) => {
+          const dot = branch.querySelector(`.par-dot[data-dot="${step}"]`);
+          if (!dot) return;
+          if (bIdx === failBranch && step === failDot) {
+            const t1 = setTimeout(() => {
+              dot.classList.add('fail');
+              // After failure, replay
+              const t2 = setTimeout(() => {
+                dot.classList.remove('fail');
+                dot.classList.add('replay');
+                const t3 = setTimeout(() => {
+                  dot.classList.remove('replay');
+                  dot.classList.add('ok');
+                  step++;
+                  nextStep();
+                }, 600);
+                featureTimers.push(t3);
+              }, 800);
+              featureTimers.push(t2);
+            }, 200);
+            featureTimers.push(t1);
+          } else {
+            dot.classList.add('ok');
+          }
+        });
+        if (!(failBranch >= 0 && step === failDot)) {
+          step++;
+          const t = setTimeout(nextStep, 500);
+          featureTimers.push(t);
+        }
+      } else {
+        const t = setTimeout(() => runParallelAnim(), 2500);
+        featureTimers.push(t);
+      }
+    }
+    const t = setTimeout(nextStep, 500);
+    featureTimers.push(t);
+  }
+</script>

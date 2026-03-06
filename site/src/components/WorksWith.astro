@@ -1,0 +1,153 @@
+---
+// WorksWith.astro — Combined framework logos + deploy targets
+---
+
+<section class="text-center" style="padding: 60px clamp(24px, 5vw, 80px) 40px;">
+  <div class="section-inner">
+    <!-- Frameworks -->
+    <div style="margin-bottom: 48px;">
+      <div class="text-muted text-sm mb-6" style="letter-spacing: 0.03em;" data-reveal>Wrap any agent framework</div>
+      <div class="flex justify-center items-center gap-12 flex-wrap" data-reveal data-reveal-delay="1">
+        <div class="framework-item">
+          <div class="framework-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+              <path d="M12 2L4 6.5v11L12 22l8-4.5v-11L12 2z" fill="#e6007a" opacity="0.9"/>
+              <path d="M12 6l-4 2.3v6.4L12 17l4-2.3V8.3L12 6z" fill="white" opacity="0.9"/>
+            </svg>
+          </div>
+          PydanticAI
+        </div>
+        <div class="framework-item">
+          <div class="framework-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+              <path d="M22.2 8.8a5.6 5.6 0 00-.5-4.6 5.7 5.7 0 00-6.1-2.7A5.6 5.6 0 0011.3 0a5.7 5.7 0 00-5.4 3.9 5.6 5.6 0 00-3.8 2.7 5.7 5.7 0 00.7 6.7 5.6 5.6 0 00.5 4.6 5.7 5.7 0 006.1 2.7 5.6 5.6 0 004.2 1.9 5.7 5.7 0 005.4-3.9 5.6 5.6 0 003.8-2.7 5.7 5.7 0 00-.7-6.7z" fill="white" opacity="0.85"/>
+              <path d="M9.8 21.4a4.3 4.3 0 01-2.7-1l-.1-.1 3.1-1.8a.5.5 0 00.3-.4v-4.5l1.3.8v3.7a4.3 4.3 0 01-2 3.3zm-5.6-4.8a4.2 4.2 0 01-.5-2.9v-.2l3.1 1.8a.5.5 0 00.5 0l3.8-2.2v1.5l-3.2 1.8a4.3 4.3 0 01-3.7.2zM3 8.7a4.3 4.3 0 012.3-1.9v3.7c0 .2.1.3.2.4l3.8 2.2L8 14l-3.2-1.8A4.3 4.3 0 013 8.7zm13.2 3.1l-3.8-2.2 1.3-.8 3.2 1.8a4.3 4.3 0 01-.3 7.6v-3.7a.5.5 0 00-.2-.4zm1.3-2.9v.2l-3.1-1.8a.5.5 0 00-.5 0l-3.8 2.2V7.9l3.2-1.8a4.3 4.3 0 014.2 5.8zm-8.2 2.7L8 10.8v-3.7a4.3 4.3 0 017-3.3l.1.1-3.1 1.8a.5.5 0 00-.3.4v4.5z" fill="#0a091c"/>
+            </svg>
+          </div>
+          OpenAI Agents SDK
+        </div>
+        <div class="framework-item">
+          <div class="framework-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+              <rect x="3" y="3" width="18" height="18" rx="4" fill="#f55036" opacity="0.9"/>
+              <path d="M8 12a2.5 2.5 0 105 0 2.5 2.5 0 00-5 0z" fill="white"/>
+              <path d="M13 10a2.5 2.5 0 104 1" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          CrewAI
+        </div>
+        <div class="framework-item">
+          <div class="framework-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+              <path d="M13.8 3h2.9l5.3 18h-2.9L13.8 3zM2 21l5.3-18h2.9l5.3 18h-2.9l-1.1-4H6.1L5 21H2zm4.8-6.8h4.4L9 7l-2.2 7.2z" fill="#d4a27f" opacity="0.9"/>
+            </svg>
+          </div>
+          Anthropic SDK
+        </div>
+        <div class="framework-item">
+          <div class="framework-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+              <path d="M11.9 2C7 2 7.3 4.2 7.3 4.2v2.3h4.7v.7H5.3S2 6.8 2 11.9s2.9 4.9 2.9 4.9h1.7v-2.4s-.1-2.9 2.9-2.9h4.9s2.8 0 2.8-2.7V4.7S17.7 2 11.9 2zm-2.7 1.6a.9.9 0 110 1.8.9.9 0 010-1.8z" fill="#3776ab"/>
+              <path d="M12.1 22c4.9 0 4.6-2.2 4.6-2.2v-2.3h-4.7v-.7h6.7S22 17.2 22 12.1s-2.9-4.9-2.9-4.9h-1.7v2.4s.1 2.9-2.9 2.9H9.6s-2.8 0-2.8 2.7v4.1S6.3 22 12.1 22zm2.7-1.6a.9.9 0 110-1.8.9.9 0 010 1.8z" fill="#ffd43b"/>
+            </svg>
+          </div>
+          Any Python agent
+        </div>
+      </div>
+    </div>
+
+    <!-- Deploy targets -->
+    <div style="border-top: 1px solid var(--border-subtle); padding-top: 32px;">
+      <div class="text-muted text-sm mb-6" style="letter-spacing: 0.03em;" data-reveal>Deploy to your cloud</div>
+      <div class="flex justify-center items-center gap-10 flex-wrap" data-reveal data-reveal-delay="1">
+        <div class="deploy-item">
+          <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+            <path d="M7.1 13.4c0 .3 0 .5.1.7 .1.2.2.3.3.5.1.1.1.2.1.2 0 .1-.1.2-.2.3l-.7.5c-.1.1-.2.1-.3.1-.1 0-.2-.1-.3-.2-.1-.2-.3-.3-.4-.5-.1-.2-.2-.4-.4-.6-1 1.1-2.2 1.7-3.6 1.7-1 0-1.9-.3-2.5-.9s-.9-1.4-.9-2.4c0-1.1.4-1.9 1.2-2.6.8-.6 1.8-1 3.2-1 .4 0 .9 0 1.4.1s1 .2 1.5.3v-.9c0-1-.2-1.7-.6-2.1-.4-.4-1.2-.6-2.2-.6-.5 0-1 .1-1.5.2s-1 .3-1.5.5c-.2.1-.4.2-.5.2h-.2c-.2 0-.3-.1-.3-.4v-.6c0-.2 0-.4.1-.5s.2-.2.4-.3c.5-.3 1.1-.5 1.7-.6.7-.2 1.4-.3 2.1-.3 1.6 0 2.8.4 3.5 1.1.7.7 1.1 1.9 1.1 3.3v4.4zm-5-.8c.4 0 .9-.1 1.3-.2.5-.2.9-.4 1.2-.8.2-.2.3-.5.4-.8.1-.3.1-.7.1-1.1v-.5c-.4-.1-.8-.2-1.2-.2s-.8-.1-1.2-.1c-.9 0-1.5.2-1.9.5-.4.3-.6.8-.6 1.4 0 .6.1 1 .4 1.3.3.3.7.5 1.3.5z" fill="currentColor" transform="translate(4.5,3)"/>
+          </svg>
+          <span>AWS</span>
+        </div>
+        <div class="deploy-item">
+          <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+            <path d="M12 5l-1.5 2.5h-3L6 10l1.5 2.5L6 15l1.5 2.5h3L12 20l1.5-2.5h3L18 15l-1.5-2.5L18 10l-1.5-2.5h-3L12 5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+            <circle cx="12" cy="12.5" r="2" stroke="currentColor" stroke-width="1.2"/>
+          </svg>
+          <span>GCP</span>
+        </div>
+        <div class="deploy-item">
+          <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+            <path d="M6 4l5 16h2L8.5 10.5 18 18H6L6 4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          </svg>
+          <span>Azure</span>
+        </div>
+        <div class="deploy-item">
+          <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+            <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M12 5v3M12 16v3M5 12h3M16 12h3M7.1 7.1l2.1 2.1M14.8 14.8l2.1 2.1M7.1 16.9l2.1-2.1M14.8 9.2l2.1-2.1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+          </svg>
+          <span>Kubernetes</span>
+        </div>
+        <div class="deploy-item">
+          <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+            <rect x="4" y="6" width="16" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            <circle cx="12" cy="11" r="0.8" fill="currentColor"/>
+          </svg>
+          <span>Local</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .framework-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-dim);
+    font-size: 0.85rem;
+    font-weight: 400;
+    opacity: 0.6;
+    transition: opacity 0.25s;
+  }
+
+  .framework-item:hover { opacity: 1; }
+
+  .framework-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--color-elevated);
+    border: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .deploy-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-dim);
+    font-size: 0.82rem;
+    font-weight: 400;
+    opacity: 0.5;
+    transition: opacity 0.25s;
+  }
+
+  .deploy-item:hover { opacity: 0.9; }
+
+  .deploy-item svg {
+    color: var(--color-muted);
+  }
+
+  .deploy-item:hover svg {
+    color: var(--color-accent-bright);
+  }
+
+  @media (max-width: 768px) {
+    .flex.gap-12 { gap: 24px; }
+    .flex.gap-10 { gap: 20px; }
+  }
+</style>

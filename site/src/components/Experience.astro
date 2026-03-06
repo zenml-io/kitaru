@@ -1,0 +1,374 @@
+---
+// Experience.astro — Stylized UI mockup showing the dashboard experience
+---
+
+<section style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <div class="section-label" data-reveal>The experience</div>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Understand your agent<br>at a glance.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2">No 500-line event history. No distributed tracing PhD. A clean dashboard that shows exactly what your agent did, what it cost, and where it went wrong.</p>
+
+    <div class="ui-mockup" data-reveal data-reveal-delay="3">
+      <!-- Mock dashboard -->
+      <div class="mock-window">
+        <div class="mock-header">
+          <div class="mock-dots">
+            <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+          </div>
+          <span class="mock-url">app.kitaru.ai/runs/run-847</span>
+        </div>
+        <div class="mock-body">
+          <!-- Sidebar -->
+          <div class="mock-sidebar">
+            <div class="sidebar-item active">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M2 4h12M2 8h12M2 12h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              Runs
+            </div>
+            <div class="sidebar-item">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              Compare
+            </div>
+            <div class="sidebar-item">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.2"/><path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              Costs
+            </div>
+          </div>
+
+          <!-- Main content -->
+          <div class="mock-main">
+            <!-- Run header -->
+            <div class="run-header">
+              <div class="run-title">
+                <span class="run-id">run-847</span>
+                <span class="run-status success">completed</span>
+              </div>
+              <div class="run-meta">
+                <span>code_reviewer</span>
+                <span class="sep">/</span>
+                <span class="cost-badge">$0.42</span>
+                <span class="sep">/</span>
+                <span>3m 12s</span>
+              </div>
+            </div>
+
+            <!-- Step DAG -->
+            <div class="steps-flow">
+              <div class="step-node done">
+                <div class="step-icon">&#10003;</div>
+                <div class="step-info">
+                  <strong>fetch_pr</strong>
+                  <span>0.2s / $0.00</span>
+                </div>
+              </div>
+              <div class="step-arrow">&rarr;</div>
+              <div class="step-node done llm">
+                <div class="step-icon">&#10003;</div>
+                <div class="step-info">
+                  <strong>analyze_code</strong>
+                  <span>45s / $0.38</span>
+                </div>
+                <div class="step-badge">LLM</div>
+              </div>
+              <div class="step-arrow">&rarr;</div>
+              <div class="step-node waiting">
+                <div class="step-icon">&#9679;</div>
+                <div class="step-info">
+                  <strong>wait_for_approval</strong>
+                  <span>awaiting input</span>
+                </div>
+                <div class="step-badge human">HITL</div>
+              </div>
+              <div class="step-arrow dim">&rarr;</div>
+              <div class="step-node pending">
+                <div class="step-icon">&#9675;</div>
+                <div class="step-info">
+                  <strong>apply_fixes</strong>
+                  <span>pending</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Approval prompt -->
+            <div class="approval-box">
+              <div class="approval-label">Human input required</div>
+              <p>Agent wants to apply 3 fixes to <code>src/auth.py</code>. Approve?</p>
+              <div class="approval-actions">
+                <button class="approve-btn">Approve</button>
+                <button class="reject-btn">Reject</button>
+                <button class="modify-btn">Modify input</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .ui-mockup {
+    margin-top: 8px;
+  }
+
+  .mock-window {
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #09081a;
+  }
+
+  .mock-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    gap: 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: rgba(15,14,34,0.6);
+  }
+
+  .mock-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .mock-url {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--color-muted);
+  }
+
+  .mock-body {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    min-height: 360px;
+  }
+
+  .mock-sidebar {
+    border-right: 1px solid var(--border-subtle);
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    border-radius: 6px;
+    cursor: default;
+  }
+
+  .sidebar-item.active {
+    background: rgba(122, 62, 244, 0.1);
+    color: var(--color-accent-bright);
+  }
+
+  .mock-main {
+    padding: 24px;
+  }
+
+  .run-header {
+    margin-bottom: 28px;
+  }
+
+  .run-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .run-id {
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--color-warm);
+  }
+
+  .run-status {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .run-status.success {
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--color-syn-green);
+  }
+
+  .run-meta {
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .run-meta .sep { opacity: 0.3; }
+
+  .cost-badge {
+    color: #fbbf24;
+    font-family: var(--font-mono);
+    font-weight: 500;
+  }
+
+  /* Steps flow */
+  .steps-flow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .step-node {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--color-card);
+    position: relative;
+    white-space: nowrap;
+  }
+
+  .step-node.done { border-color: rgba(52, 211, 153, 0.3); }
+  .step-node.waiting { border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.04); }
+  .step-node.pending { border-color: var(--border-subtle); opacity: 0.5; }
+
+  .step-icon {
+    font-size: 0.75rem;
+    width: 18px;
+    text-align: center;
+  }
+
+  .step-node.done .step-icon { color: var(--color-syn-green); }
+  .step-node.waiting .step-icon { color: #fbbf24; }
+  .step-node.pending .step-icon { color: var(--color-muted); }
+
+  .step-info strong {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--color-warm);
+    font-family: var(--font-mono);
+  }
+
+  .step-info span {
+    font-size: 0.68rem;
+    color: var(--color-muted);
+  }
+
+  .step-badge {
+    position: absolute;
+    top: -8px;
+    right: -4px;
+    font-size: 0.58rem;
+    font-family: var(--font-mono);
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(122, 62, 244, 0.2);
+    color: var(--color-accent-bright);
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+
+  .step-badge.human {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+  }
+
+  .step-arrow {
+    color: var(--color-muted);
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+
+  .step-arrow.dim { opacity: 0.3; }
+
+  /* Approval box */
+  .approval-box {
+    border: 1px solid rgba(251, 191, 36, 0.2);
+    border-radius: 8px;
+    padding: 16px 20px;
+    background: rgba(251, 191, 36, 0.03);
+  }
+
+  .approval-label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #fbbf24;
+    margin-bottom: 8px;
+  }
+
+  .approval-box p {
+    font-size: 0.85rem;
+    color: var(--color-dim);
+    margin-bottom: 14px;
+  }
+
+  .approval-box code {
+    font-family: var(--font-mono);
+    color: var(--color-accent-bright);
+    font-size: 0.82em;
+  }
+
+  .approval-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .approval-actions button {
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: default;
+    border: 1px solid var(--border-subtle);
+    font-family: var(--font-body);
+  }
+
+  .approve-btn {
+    background: rgba(52, 211, 153, 0.15);
+    color: var(--color-syn-green);
+    border-color: rgba(52, 211, 153, 0.3) !important;
+  }
+
+  .reject-btn {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--color-syn-red);
+    border-color: rgba(239, 68, 68, 0.2) !important;
+  }
+
+  .modify-btn {
+    background: var(--color-card);
+    color: var(--color-dim);
+  }
+
+  @media (max-width: 768px) {
+    .mock-body {
+      grid-template-columns: 1fr;
+    }
+    .mock-sidebar {
+      flex-direction: row;
+      border-right: none;
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 8px;
+    }
+    .steps-flow {
+      flex-wrap: wrap;
+    }
+    .step-arrow { display: none; }
+  }
+</style>

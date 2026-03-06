@@ -10,6 +10,6 @@ export default function robots(): MetadataRoute.Robots {
         allow: '/',
       },
     ],
-    sitemap: 'https://docs.kitaru.ai/sitemap.xml',
+    sitemap: 'https://kitaru.ai/docs/sitemap.xml',
   };
 }

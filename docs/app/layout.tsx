@@ -8,7 +8,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://docs.kitaru.ai'),
+  metadataBase: new URL('https://kitaru.ai'),
   title: {
     default: 'Kitaru Documentation',
     template: '%s | Kitaru',

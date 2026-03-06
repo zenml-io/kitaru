@@ -1,0 +1,161 @@
+---
+// Scale.astro — Social proof and scale section, built on ZenML
+---
+
+<section style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <div class="section-label" data-reveal>Built to scale</div>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Built on the foundation of ZenML.<br>Battle-tested at scale.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2">Kitaru is built by the team behind <a href="https://zenml.io" target="_blank" rel="noopener" class="zenml-link">ZenML</a> — the open-source MLOps framework trusted by hundreds of teams to orchestrate production ML pipelines. The same engine that runs thousands of pipelines now powers your agents.</p>
+
+    <!-- Stats -->
+    <div class="stats-grid" data-reveal data-reveal-delay="3">
+      <div class="stat-card">
+        <div class="stat-num">9,000+</div>
+        <div class="stat-label">GitHub stars</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">500+</div>
+        <div class="stat-label">Production teams</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">Millions</div>
+        <div class="stat-label">Pipeline runs orchestrated</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">3 years</div>
+        <div class="stat-label">Production-hardened</div>
+      </div>
+    </div>
+
+    <!-- Case studies -->
+    <div class="proof-grid" data-reveal data-reveal-delay="4">
+      <a href="https://zenml.io/case-studies/jetbrains" target="_blank" rel="noopener" class="proof-card">
+        <div class="proof-company">JetBrains</div>
+        <p>Centralized their AI platform on Kubernetes with ZenML's orchestration engine.</p>
+        <span class="proof-link">Read case study &rarr;</span>
+      </a>
+      <a href="https://zenml.io/case-studies/leroy-merlin" target="_blank" rel="noopener" class="proof-card">
+        <div class="proof-company">Leroy Merlin</div>
+        <p>Decreased time-to-market from 2 months to 2 weeks with ZenML pipelines.</p>
+        <span class="proof-link">Read case study &rarr;</span>
+      </a>
+      <a href="https://zenml.io/case-studies/brevo" target="_blank" rel="noopener" class="proof-card">
+        <div class="proof-company">Brevo</div>
+        <p>Accelerated model development by 80% using ZenML's orchestration layer.</p>
+        <span class="proof-link">Read case study &rarr;</span>
+      </a>
+    </div>
+
+    <p class="zenml-note" data-reveal data-reveal-delay="5">
+      Kitaru uses the same checkpoint engine, metadata store, and cloud connectors that power ZenML — now purpose-built for AI agents that need to run for hours, survive crashes, and scale to thousands of concurrent executions.
+    </p>
+  </div>
+</section>
+
+<style>
+  .zenml-link {
+    color: var(--color-accent-bright);
+    text-decoration: underline;
+    text-decoration-color: var(--color-accent-dim);
+    text-underline-offset: 3px;
+    transition: color 0.2s;
+  }
+  .zenml-link:hover {
+    color: var(--color-accent);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 48px;
+  }
+
+  .stat-card {
+    padding: 32px 24px;
+    background: var(--color-card);
+    text-align: center;
+  }
+
+  .stat-num {
+    font-family: var(--font-display);
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--color-warm);
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+  }
+
+  .stat-label {
+    font-size: 0.82rem;
+    color: var(--color-muted);
+    font-weight: 400;
+  }
+
+  .proof-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 40px;
+  }
+
+  .proof-card {
+    padding: 28px 24px;
+    background: var(--color-card);
+    transition: background 0.3s;
+    text-decoration: none;
+    display: block;
+  }
+
+  .proof-card:hover {
+    background: var(--color-elevated);
+  }
+
+  .proof-company {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--color-warm);
+    margin-bottom: 8px;
+  }
+
+  .proof-card p {
+    font-size: 0.85rem;
+    color: var(--color-dim);
+    line-height: 1.55;
+    margin-bottom: 12px;
+  }
+
+  .proof-link {
+    font-size: 0.78rem;
+    color: var(--color-accent-bright);
+    font-weight: 500;
+  }
+
+  .zenml-note {
+    text-align: center;
+    max-width: 700px;
+    margin: 0 auto;
+    font-size: 0.9rem;
+    color: var(--color-dim);
+    line-height: 1.65;
+    font-weight: 300;
+  }
+
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .proof-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

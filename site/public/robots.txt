@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://kitaru.ai/sitemap-index.xml
+Sitemap: https://kitaru.ai/docs/sitemap.xml

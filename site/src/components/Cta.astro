@@ -1,0 +1,100 @@
+---
+// Cta.astro — Waitlist CTA section
+---
+
+<section class="cta-section" id="cta">
+  <div class="cta-inner" data-reveal>
+    <h2>For agents that run longer than a demo.</h2>
+    <p>We're looking for Python engineers hitting the reliability wall with production agents. No pitch deck. No sales call. Just early access.</p>
+    <form class="cta-input-row" id="waitlist-form">
+      <input type="email" class="cta-input" placeholder="you@company.com" required>
+      <button type="submit" class="cta-btn">Get early access</button>
+    </form>
+    <p style="font-size: 0.75rem; margin-top: 14px; color: var(--color-muted);">Open source (Apache 2.0). Free to start. No credit card required.</p>
+  </div>
+</section>
+
+<style>
+  .cta-section {
+    padding: 120px 48px; text-align: center;
+    position: relative; overflow: hidden;
+  }
+  .cta-section::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background:
+      radial-gradient(ellipse at 30% 50%, rgba(241,120,41,0.05) 0%, transparent 50%),
+      radial-gradient(ellipse at 70% 50%, rgba(37,99,235,0.03) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  .cta-inner {
+    position: relative; z-index: 1;
+    max-width: 600px; margin: 0 auto;
+  }
+  .cta-inner h2 {
+    font-size: clamp(32px, 4vw, 48px);
+    font-weight: 700; letter-spacing: -0.03em; line-height: 1.1;
+    margin-bottom: 16px;
+  }
+  .cta-inner p {
+    font-size: 17px; line-height: 1.6; color: var(--color-secondary);
+    margin-bottom: 32px;
+  }
+  .cta-input-row {
+    display: flex; gap: 8px; max-width: 420px; margin: 0 auto;
+  }
+  .cta-input {
+    flex: 1; font-family: var(--font-ui); font-size: 14px;
+    padding: 14px 16px; border-radius: 8px;
+    border: 1px solid var(--color-border); background: var(--color-surface);
+    color: var(--color-primary); outline: none;
+    transition: border-color 0.2s;
+  }
+  .cta-input::placeholder { color: var(--color-muted); }
+  .cta-input:focus { border-color: var(--color-accent); }
+  .cta-btn {
+    font-family: var(--font-ui); font-size: 14px; font-weight: 600;
+    color: #fff; background: var(--color-primary);
+    padding: 14px 24px; border-radius: 8px; border: none;
+    cursor: pointer; white-space: nowrap;
+    transition: opacity 0.2s, transform 0.15s;
+  }
+  .cta-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+
+  @media (max-width: 768px) {
+    .cta-section { padding: 80px 20px; }
+  }
+</style>
+
+<script>
+  const form = document.getElementById('waitlist-form') as HTMLFormElement;
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button')!;
+    const input = form.querySelector('input')! as HTMLInputElement;
+    const email = input.value.trim();
+
+    btn.textContent = 'Submitting...';
+    btn.setAttribute('disabled', 'true');
+
+    try {
+      const res = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      if (res.ok) {
+        btn.textContent = "You're in \u2713";
+        btn.style.background = '#3D8C5C';
+        input.disabled = true;
+      } else {
+        btn.textContent = 'Try again';
+        btn.removeAttribute('disabled');
+      }
+    } catch {
+      btn.textContent = 'Try again';
+      btn.removeAttribute('disabled');
+    }
+  });
+</script>
