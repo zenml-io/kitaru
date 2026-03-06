@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
   workflow_call:
   push:
-    branches: [main]
+    branches: [develop]
   pull_request:
+    branches: [develop]
     types: [opened, synchronize, reopened, ready_for_review]
 concurrency:
   # New commit on branch cancels running workflows of the same branch

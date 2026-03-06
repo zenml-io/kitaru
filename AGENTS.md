@@ -50,8 +50,16 @@ For pull requests, use a clear human-readable title and include:
 Link related issues (for example `Fixes #123`) when applicable.
 
 ## CI
-CI (`.github/workflows/ci.yml`) runs lint, type check, typos, and tests on push/PR against Python 3.12 and 3.13.
+CI (`.github/workflows/ci.yml`) runs lint, type check, typos, and tests on push/PR to `develop` against Python 3.12 and 3.13.
 Typo checking uses `crate-ci/typos` with config in `.typos.toml`.
+
+## Branching and Release Strategy
+
+- Default branch is `develop`. All PRs target `develop`.
+- `main` tracks the latest released version only; do not push directly.
+- Releases are cut via the Release workflow (`workflow_dispatch` on `develop` or `v*` tag push).
+- Release branches (`release/X.Y.Z`) and tags (`vX.Y.Z`) are created automatically.
+- Version is maintained in `pyproject.toml` and bumped by the release workflow.
 
 ## Security & Configuration Notes
 Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv` (not raw `pip`) for dependency management to keep environments reproducible.

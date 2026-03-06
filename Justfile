@@ -38,3 +38,7 @@ fix:
 # Run tests (e.g., `just test`, `just test -x`, `just test tests/test_foo.py`)
 test *ARGS:
     uv run pytest {{ ARGS }}
+
+# Build the package locally (does not publish)
+build:
+    uv build

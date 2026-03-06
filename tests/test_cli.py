@@ -1,5 +1,7 @@
 """Tests for the kitaru CLI."""
 
+from importlib.metadata import version as get_version
+
 import pytest
 
 from kitaru.cli import app
@@ -11,7 +13,8 @@ def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
         app(["--version"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    assert "0.1.0" in captured.out
+    expected_version = get_version("kitaru")
+    assert expected_version in captured.out
 
 
 def test_short_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
@@ -20,7 +23,8 @@ def test_short_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
         app(["-V"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    assert "0.1.0" in captured.out
+    expected_version = get_version("kitaru")
+    assert expected_version in captured.out
 
 
 def test_help_flag(capsys: pytest.CaptureFixture[str]) -> None:

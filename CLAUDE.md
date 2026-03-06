@@ -20,6 +20,20 @@ tests/                # pytest tests
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
 
+## Branching strategy
+
+- **`develop`** is the default branch and the target for all PRs.
+- **`main`** contains only released versions. Updated by force-pushing during releases. Never push directly to `main`.
+- **`release/X.Y.Z`** branches are archival snapshots created during the release process.
+- **Tags** follow `vX.Y.Z` (e.g. `v0.1.0`).
+
+### Releasing a new version
+
+1. Ensure `develop` has all changes for the release.
+2. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
+3. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
+4. The workflow bumps version, runs CI, publishes to PyPI, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
+
 ## Development commands
 
 This project uses [just](https://github.com/casey/just) as a command runner. Run `just --list` to see all recipes.
@@ -43,7 +57,7 @@ just typos                            # Typo check only
 just format-check                     # Check formatting without modifying
 ```
 
-CI runs lint, type check, typos, and tests on push/PR (`.github/workflows/ci.yml`). Tests run against Python 3.12 and 3.13.
+CI runs lint, type check, typos, and tests on push/PR to `develop` (`.github/workflows/ci.yml`). Tests run against Python 3.12 and 3.13.
 
 When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ruff to ensure best practices are followed.
 
