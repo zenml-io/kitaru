@@ -1,0 +1,64 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+---
+
+<Base title="Page not found — Kitaru" description="The page you're looking for doesn't exist.">
+  <Nav />
+  <main class="not-found">
+    <div class="not-found-inner">
+      <span class="not-found-code">404</span>
+      <h1 class="not-found-title">Page not found</h1>
+      <p class="not-found-desc">
+        The page you're looking for doesn't exist or has been moved.
+      </p>
+      <div class="not-found-links">
+        <a href="/" class="btn-primary">Back to home</a>
+        <a href="/docs" class="btn-secondary">Browse docs</a>
+      </div>
+    </div>
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .not-found {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - 64px - 140px);
+    padding: 80px 24px;
+    text-align: center;
+  }
+  .not-found-inner {
+    max-width: 480px;
+  }
+  .not-found-code {
+    display: block;
+    font-size: clamp(72px, 12vw, 120px);
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: var(--color-border);
+    margin-bottom: 16px;
+  }
+  .not-found-title {
+    font-size: clamp(24px, 4vw, 36px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  .not-found-desc {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--color-secondary);
+    margin-bottom: 32px;
+  }
+  .not-found-links {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+</style>
