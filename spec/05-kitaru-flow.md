@@ -191,6 +191,13 @@ That includes:
 - helper functions
 - local variable recomputation between checkpoints
 
+## ZenML defaults
+
+Kitaru sets two underlying ZenML defaults that should always be active:
+
+- **Dynamic pipeline mode is on by default.** Every Kitaru flow maps to a ZenML dynamic pipeline. This is not user-configurable — Kitaru requires dynamic mode for its execution model to work.
+- **Cache is on by default.** Checkpoint outputs are reused from previous executions unless explicitly disabled with `cache=False`. This is the safe default — most agent workflows benefit from not re-executing expensive checkpoints unnecessarily.
+
 ## Notes for MVP
 
 - direct composition via `other_flow.start()` is cleaner than pretending nested flows are a single execution
