@@ -6,7 +6,7 @@ import cyclopts
 
 app = cyclopts.App(
     name="kitaru",
-    help="Durable execution for AI agents, built on ZenML.",
+    help="Durable execution for AI agents.",
     version=version("kitaru"),
     version_flags=["--version", "-V"],
 )

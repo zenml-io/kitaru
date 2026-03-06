@@ -20,8 +20,9 @@ Python tooling (except for generated content).
 
 - **Never add Node.js tooling to the repo root.** No root `package.json`,
   no root `node_modules`, no workspace config.
-- **Never hand-edit generated directories:** `content/docs/cli/` and
-  `content/docs/reference/python/` are created by Python scripts and gitignored.
+- **Never hand-edit generated files:** `content/docs/cli.mdx` (or `cli/`),
+  `content/docs/changelog.mdx`, and `content/docs/reference/python/` are
+  created by Python scripts and gitignored.
 - **Respect static export constraints:** No server-side features (middleware,
   rewrites, cookies, ISR). All content must be buildable at build time.
 - **Only document shipped features.** No "Coming Soon" sections for unimplemented
@@ -35,12 +36,12 @@ Python tooling (except for generated content).
 
 ```
 content/docs/
-  meta.json              # Top-level sidebar ordering (hand-written sections only)
+  meta.json              # Top-level sidebar ordering
   index.mdx              # "What is Kitaru?" overview
   getting-started/       # Installation + quickstart
-  cli/                   # AUTO-GENERATED (gitignored)
-  contributing/          # Links to repo CONTRIBUTING.md
-  changelog/             # Release history
+  cli.mdx                # AUTO-GENERATED (flat; becomes cli/ when subcommands exist)
+  contributing.mdx       # Links to repo CONTRIBUTING.md
+  changelog.mdx          # AUTO-GENERATED from CHANGELOG.md
   reference/python/      # AUTO-GENERATED (gitignored, deferred)
 ```
 
@@ -60,7 +61,7 @@ These are registered globally in `mdx-components.tsx`:
 # From repo root:
 just docs           # Start dev server at localhost:3000
 just docs-build     # Full static build
-just generate-docs  # Generate CLI docs from Python source (Phase 2)
+just generate-docs  # Generate CLI + changelog docs from Python source
 
 # Or from docs/:
 pnpm run dev        # Dev server

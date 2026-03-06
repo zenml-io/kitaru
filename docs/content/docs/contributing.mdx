@@ -3,11 +3,27 @@ title: Contributing
 description: How to contribute to Kitaru
 ---
 
-We welcome contributions to Kitaru. For detailed guidelines, see the
+We welcome contributions to Kitaru! For full guidelines, see
 [CONTRIBUTING.md](https://github.com/zenml-io/kitaru/blob/develop/CONTRIBUTING.md)
-file in the repository.
+in the repository.
 
-## Quick Links
+## Quick Start
+
+```bash
+git clone https://github.com/zenml-io/kitaru.git
+cd kitaru
+uv sync
+just check   # Run all checks
+just test    # Run tests
+```
+
+## Key Details
+
+- **Default branch:** `develop` — all PRs target this branch
+- **Checks:** `just check` runs formatting, linting, type checking, typos, and YAML validation
+- **Docs:** Run `just generate-docs` then `just docs` to preview locally
+
+## Links
 
 - [GitHub Repository](https://github.com/zenml-io/kitaru)
 - [Issue Tracker](https://github.com/zenml-io/kitaru/issues)

@@ -3,33 +3,34 @@ title: What is Kitaru?
 description: Durable execution for AI agents
 ---
 
-Kitaru provides primitives that make AI agent workflows **persistent**,
+Kitaru is a framework for making AI agent workflows **persistent**,
 **replayable**, and **observable** — without requiring you to learn a graph DSL
 or change your Python control flow.
 
-## Core Primitives
+## Vision
 
-| Primitive | Purpose |
-| --- | --- |
-| `@kitaru.saga` | Outer boundary — marks a durable execution |
-| `@kitaru.checkpoint` | Checkpointed unit of work |
-| `kitaru.wait()` | Suspend until an external event arrives |
-| `kitaru.log()` | Attach typed metadata to current checkpoint |
+Kitaru will provide a small set of primitives — sagas, checkpoints, wait
+points, and structured logging — that let you write normal Python code while
+getting durable execution guarantees underneath. When something fails halfway
+through a multi-step agent workflow, Kitaru replays from the last checkpoint
+instead of starting over.
 
-## Quick Example
+<Callout type="info">
+  Kitaru is in early development. The package is installable and provides a CLI,
+  but the SDK primitives are not yet available. This documentation covers what
+  you can use today.
+</Callout>
 
-```python
-import kitaru
+## Current Status
 
-@kitaru.saga
-def onboard_user(email: str):
-    user = create_account(email)
+Kitaru **0.1.0** includes:
 
-    approval = kitaru.wait("manager-approval", timeout="48h")
+- The `kitaru` CLI with `--help` and `--version`
+- Project infrastructure (CI, testing, linting, type checking)
 
-    if approval.approved:
-        provision_access(user)
-```
+The SDK primitives and framework adapters are under active development.
+
+## Next Steps
 
 <Cards>
   <Card
@@ -38,8 +39,8 @@ def onboard_user(email: str):
     href="/docs/getting-started/installation"
   />
   <Card
-    title="Quickstart"
-    description="Run your first saga in 5 minutes"
-    href="/docs/getting-started/quickstart"
+    title="CLI Reference"
+    description="Available commands and options"
+    href="/docs/cli"
   />
 </Cards>
