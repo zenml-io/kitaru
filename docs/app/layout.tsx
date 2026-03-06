@@ -33,7 +33,7 @@ export default function Layout({ children }: LayoutProps<'/'>) {
       <head>
         <script
           async
-          src="https://plausible.io/js/pa-Hii8j2wmtBMkcWoTIEWm6.js"
+          src="https://plausible.io/js/pa-ndWEQcsUsU-PbMUClN4jg.js"
         />
         <script
           dangerouslySetInnerHTML={{

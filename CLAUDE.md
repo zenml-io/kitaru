@@ -17,6 +17,10 @@ src/kitaru/           # Main package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapters (e.g. pydantic_ai)
 tests/                # pytest tests
+docs/                 # FumaDocs Next.js app (kitaru.ai/docs)
+site/                 # Astro landing page (kitaru.ai/)
+scripts/              # Doc generation + site merge scripts
+wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
 
