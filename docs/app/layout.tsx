@@ -15,6 +15,9 @@ export const metadata: Metadata = {
   },
   description:
     'Durable execution for AI agents. Primitives that make agent workflows persistent, replayable, and observable.',
+  icons: {
+    icon: '/favicon.svg',
+  },
   openGraph: {
     siteName: 'Kitaru Documentation',
     type: 'website',
