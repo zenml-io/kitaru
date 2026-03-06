@@ -1,0 +1,3 @@
+# Exclude our own site URLs from link checking — they may not be deployed yet
+# on the branch being tested (site deploys only from main)
+https://kitaru.ai/.*
