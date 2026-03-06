@@ -244,7 +244,7 @@ These are part of the unified config object and can be set at the project level,
 
 These control how an execution runs, separate from where it runs:
 
-- **cache** — whether checkpoint outputs should be reused from previous executions (note: this is distinct from replay, which reuses outputs within the same execution lineage)
+- **cache** — whether checkpoint outputs should be reused from previous executions. **On by default** — most agent workflows benefit from not re-executing expensive checkpoints. (Note: this is distinct from replay, which reuses outputs within the same execution lineage.)
 - **retries** — automatic retry count on failure
 - **timeout** — execution time limits (future)
 
