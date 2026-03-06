@@ -46,9 +46,14 @@ just --list            # Show all available recipes
 just check             # Run all checks (format, lint, typecheck, typos, yaml)
 just test              # Run tests
 just fix               # Auto-fix formatting, lint, and yaml
+just build             # Build wheel + sdist locally
 ```
 
 Typo checking uses [`typos`](https://github.com/crate-ci/typos) (config in `.typos.toml`, run via `just typos`).
+
+### Contributing
+
+The default branch is `develop` — all PRs should target it. `main` only contains released versions and is updated automatically by the release workflow.
 
 ### Claude Code skills
 
