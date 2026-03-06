@@ -4,12 +4,17 @@ FumaDocs-specific instructions for AI-assisted development in the docs app.
 
 ## Architecture
 
-This is a **self-contained Next.js/FumaDocs app** for Kitaru's documentation.
+This is a **self-contained Next.js/FumaDocs app** for Kitaru's documentation,
+served at **`kitaru.ai/docs`** as part of the unified site deployment.
+
 It lives entirely within `docs/` and has no dependency on the root repo's
-Python tooling (except for generated content).
+Python tooling (except for generated content). The static export is merged
+into the Astro landing page build (`site/dist/docs/`) and deployed as a
+single Cloudflare Worker.
 
 - **Framework:** FumaDocs (fumadocs-ui + fumadocs-mdx + fumadocs-core)
-- **Runtime:** Next.js with static export (`output: 'export'`)
+- **Runtime:** Next.js with static export (`output: 'export'`, `basePath: '/docs'`)
+- **Domain:** `kitaru.ai/docs` (subpath of the unified site, not a subdomain)
 - **Package manager:** pnpm (lockfile committed)
 - **Node version:** 22+ (pinned in `.node-version`)
 - **Styling:** Tailwind CSS v4 (CSS-based config, not JS config file)
