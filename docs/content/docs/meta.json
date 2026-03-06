@@ -3,6 +3,8 @@
   "pages": [
     "---Getting Started---",
     "getting-started",
+    "---Reference---",
+    "cli",
     "---Project---",
     "contributing",
     "changelog"

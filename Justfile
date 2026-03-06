@@ -25,9 +25,13 @@ typos:
 yaml-check:
     uv run yamlfix --check .github/
 
-# Check links in markdown files (requires lychee: brew install lychee)
+# Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
-    lychee --root-dir . './**/*.md'
+    lychee --offline --root-dir . --exclude-path 'docs/node_modules' --exclude-path 'design' './**/*.md'
+
+# Check links including external URLs (slow, used in CI)
+links-external:
+    lychee --root-dir . --exclude-path 'docs/node_modules' --exclude-path 'design' './**/*.md'
 
 # Auto-fix formatting, lint issues, and YAML
 fix:
@@ -45,8 +49,7 @@ build:
 
 # Generate CLI reference docs from Python source
 generate-docs:
-    @echo "CLI doc generation not yet implemented (Phase 2)."
-    @echo "See: scripts/generate_cli_docs.py (to be created)"
+    uv run python scripts/generate_cli_docs.py
 
 # Preview docs locally (run generate-docs first if CLI pages needed)
 docs:
