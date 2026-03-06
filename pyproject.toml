@@ -48,7 +48,7 @@ dev = [
 
 [tool.ruff]
 target-version = "py312"
-src = ["src", "test"]
+src = ["src", "scripts", "tests"]
 line-length = 88
 exclude= [
     ".git",
@@ -76,8 +76,9 @@ known-first-party = ["kitaru"]
 
 [tool.ty.environment]
 python-version = "3.12"
-root = ["src"]
+root = ["src", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-vv"
+pythonpath = ["scripts"]
