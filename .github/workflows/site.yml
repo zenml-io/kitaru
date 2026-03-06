@@ -14,6 +14,8 @@ on:
       - CHANGELOG.md
       - wrangler.toml
       - .github/workflows/site.yml
+  pull_request_target:
+    types: [closed]
 permissions:
   contents: read
   pull-requests: write
@@ -23,6 +25,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build-deploy:
+    if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +71,7 @@ jobs:
           wranglerVersion: '4'
           command: deploy
 
-      # --- Deploy preview (same-repo PRs only) ---
+      # --- Deploy preview Worker (same-repo PRs only) ---
       - name: Deploy preview
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
           == github.repository
@@ -78,7 +81,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
-          command: versions upload
+          command: deploy --name kitaru-site-preview-${{ github.event.pull_request.number }}
 
       # --- Sticky PR comment with preview URL ---
       - name: Comment preview URL
@@ -86,5 +89,24 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: site-preview
-          message: |-
-            **Site preview deployed.** Use `wrangler versions deploy` to promote, or check the Cloudflare dashboard for the preview URL.
+          message: |
+            ## Site Preview
+
+            | | |
+            |---|---|
+            | **Preview URL** | https://kitaru-site-preview-${{ github.event.pull_request.number }}.zenml-migration.workers.dev |
+            | **Branch** | `${{ github.head_ref }}` |
+            | **Commit** | `${{ github.sha }}` |
+
+  # --- Clean up preview Worker when PR closes ---
+  cleanup-preview:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete preview Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: delete --name kitaru-site-preview-${{ github.event.pull_request.number }} --force
