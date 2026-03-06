@@ -100,8 +100,12 @@ jobs:
       # --- Run CI checks ---
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
       - name: Install dependencies
         run: uv sync --frozen
+      - name: Check typos
+        uses: crate-ci/typos@v1
       - name: Lint
         run: |
           uv run ruff check .
