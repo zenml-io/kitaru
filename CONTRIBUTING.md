@@ -27,8 +27,9 @@ The docs site lives in `docs/` and requires Node.js 22+ and pnpm.
 
 ```bash
 cd docs && pnpm install
-just docs       # Start dev server at localhost:3000
-just docs-build # Full static build
+just generate-docs  # Generate CLI reference + changelog from source
+just docs           # Start dev server at localhost:3000
+just docs-build     # Full static build
 ```
 
 See `docs/README.md` for detailed documentation authoring guidelines.

@@ -1,14 +1,46 @@
 ---
 title: Quickstart
-description: Run your first saga in 5 minutes
+description: Get up and running with Kitaru in five minutes
 ---
 
-<Callout type="info">
-  Kitaru is in early development. This quickstart will be expanded as features
-  ship.
-</Callout>
+This guide walks you through installing Kitaru and verifying that everything
+works.
 
-## Coming Up
+## Install
 
-This page will walk you through creating your first durable saga once the SDK
-is available.
+<Tabs items={["uv (recommended)", "pip"]}>
+  <Tab value="uv (recommended)">
+    ```bash
+    uv add kitaru
+    ```
+  </Tab>
+  <Tab value="pip">
+    ```bash
+    pip install kitaru
+    ```
+  </Tab>
+</Tabs>
+
+## Verify
+
+Check that the CLI is available:
+
+```bash
+kitaru --version
+```
+
+You should see the installed version number (e.g. `0.1.0`).
+
+Run `--help` to see available commands:
+
+```bash
+kitaru --help
+```
+
+## What's Next
+
+Kitaru's SDK primitives are under active development. Once they ship, this
+guide will expand to cover creating your first durable workflow.
+
+In the meantime, check the [CLI Reference](/docs/cli) for available commands,
+or see the [Changelog](/docs/changelog) for the latest updates.

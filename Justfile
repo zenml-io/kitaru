@@ -61,9 +61,10 @@ test *ARGS:
 build:
     uv build
 
-# Generate CLI reference docs from Python source
+# Generate all docs content from Python source (CLI reference + changelog)
 generate-docs:
     uv run python scripts/generate_cli_docs.py
+    uv run python scripts/generate_changelog_docs.py
 
 # Preview docs locally (run generate-docs first if CLI pages needed)
 docs:
