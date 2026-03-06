@@ -14,6 +14,7 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 
 ```
 src/kitaru/           # Main package (src layout)
+  cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapters (e.g. pydantic_ai)
 tests/                # pytest tests
 design/               # Design docs, meeting notes (gitignored, never commit)
@@ -88,6 +89,15 @@ Kitaru emits OpenTelemetry spans. It does **not** own the tracing backend — us
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
 - **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
+
+## CLI
+
+The CLI uses [cyclopts](https://cyclopts.readthedocs.io/) (`src/kitaru/cli.py`). The `kitaru` console script is registered in `pyproject.toml` under `[project.scripts]`.
+
+- Add new subcommands with `@app.command` in `cli.py`
+- Version is read automatically from package metadata via `importlib.metadata.version()`
+- When testing CLI commands, always pass an explicit arg list: `app(["--help"])`, never bare `app()` (which reads `sys.argv`)
+- CLI commands raise `SystemExit(0)` on success — wrap in `pytest.raises(SystemExit)` in tests
 
 ## Conventions
 
