@@ -1,0 +1,182 @@
+---
+// Architecture.astro — Layered stack diagram showing Kitaru's architecture
+---
+
+<section class="arch-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>Architecture</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">
+      Orchestration layer. <em class="arch-italic">Not a framework.</em>
+    </h2>
+
+    <div class="arch-stack" data-reveal data-reveal-delay="2">
+      <div class="arch-layer arch-layer-agent">
+        <div class="arch-layer-label">Your Agent Code</div>
+        <div class="arch-layer-pills">
+          <span class="arch-pill">PydanticAI</span>
+          <span class="arch-pill">OpenAI SDK</span>
+          <span class="arch-pill">CrewAI</span>
+          <span class="arch-pill">Raw Python</span>
+        </div>
+        <div class="arch-layer-note">Write agents your way</div>
+      </div>
+
+      <div class="arch-layer arch-layer-sdk">
+        <div class="arch-layer-label">Kitaru SDK</div>
+        <div class="arch-layer-pills">
+          <span class="arch-pill">@flow</span>
+          <span class="arch-pill">@checkpoint</span>
+          <span class="arch-pill">wait()</span>
+          <span class="arch-pill">log()</span>
+          <span class="arch-pill">configure()</span>
+        </div>
+        <div class="arch-layer-note">Five primitives add everything</div>
+      </div>
+
+      <div class="arch-layer arch-layer-engine">
+        <div class="arch-layer-label">Kitaru Engine</div>
+        <div class="arch-layer-pills">
+          <span class="arch-pill">Checkpointer</span>
+          <span class="arch-pill">DAG Builder</span>
+          <span class="arch-pill">Replay</span>
+          <span class="arch-pill">Cost Engine</span>
+        </div>
+        <div class="arch-layer-note">Powered by ZenML</div>
+      </div>
+
+      <div class="arch-layer arch-layer-infra">
+        <div class="arch-layer-label">Infrastructure</div>
+        <div class="arch-layer-pills">
+          <span class="arch-pill">Kubernetes</span>
+          <span class="arch-pill">AWS / GCP / Azure</span>
+          <span class="arch-pill">S3 / GCS</span>
+          <span class="arch-pill">Postgres</span>
+        </div>
+        <div class="arch-layer-note">Your cloud</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .arch-section {
+    background: var(--color-bg);
+  }
+
+  .arch-italic {
+    font-style: italic;
+    font-weight: 300;
+    color: var(--color-secondary);
+  }
+
+  .arch-stack {
+    max-width: 720px;
+    margin: 48px auto 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .arch-layer {
+    display: grid;
+    grid-template-columns: 140px 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+  }
+
+  .arch-layer-agent {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.3);
+  }
+
+  .arch-layer-sdk {
+    background: rgba(241, 120, 41, 0.12);
+    border-color: rgba(241, 120, 41, 0.3);
+  }
+
+  .arch-layer-engine {
+    background: rgba(168, 130, 255, 0.12);
+    border-color: rgba(168, 130, 255, 0.3);
+  }
+
+  .arch-layer-infra {
+    background: rgba(60, 60, 60, 0.06);
+    border-color: rgba(60, 60, 60, 0.2);
+  }
+
+  .arch-layer-label {
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    white-space: nowrap;
+  }
+
+  .arch-layer-agent .arch-layer-label { color: rgba(56, 189, 248, 0.95); }
+  .arch-layer-sdk .arch-layer-label { color: rgba(241, 120, 41, 0.95); }
+  .arch-layer-engine .arch-layer-label { color: rgba(168, 130, 255, 0.95); }
+  .arch-layer-infra .arch-layer-label { color: rgba(40, 40, 40, 0.8); }
+
+  .arch-layer-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .arch-pill {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 3px 10px;
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .arch-layer-agent .arch-pill {
+    color: rgba(56, 189, 248, 0.95);
+    background: rgba(56, 189, 248, 0.14);
+    border-color: rgba(56, 189, 248, 0.3);
+  }
+
+  .arch-layer-sdk .arch-pill {
+    color: rgba(241, 120, 41, 0.95);
+    background: rgba(241, 120, 41, 0.14);
+    border-color: rgba(241, 120, 41, 0.3);
+  }
+
+  .arch-layer-engine .arch-pill {
+    color: rgba(168, 130, 255, 0.95);
+    background: rgba(168, 130, 255, 0.14);
+    border-color: rgba(168, 130, 255, 0.3);
+  }
+
+  .arch-layer-infra .arch-pill {
+    color: rgba(40, 40, 40, 0.7);
+    background: rgba(60, 60, 60, 0.06);
+    border-color: rgba(60, 60, 60, 0.18);
+  }
+
+  .arch-layer-note {
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    font-style: italic;
+    color: var(--color-muted);
+    white-space: nowrap;
+    text-align: right;
+  }
+
+  @media (max-width: 700px) {
+    .arch-layer {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .arch-layer-note {
+      text-align: left;
+    }
+  }
+</style>

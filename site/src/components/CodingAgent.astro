@@ -5,7 +5,7 @@
 <section class="coding-agent-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
   <div class="section-inner">
     <span class="section-eyebrow" data-reveal>See it in action</span>
-    <h2 class="section-title" data-reveal data-reveal-delay="1">A real agent. Seven checkpoints. One timeline.</h2>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">A real agent. Six checkpoints. One timeline.</h2>
 
     <div class="timeline-wrapper" id="agentTimeline">
       <div class="timeline-line"></div>
@@ -29,6 +29,23 @@
             <span class="tl-badge tl-checkpoint">@checkpoint</span>
           </div>
           <div class="tl-meta">8s</div>
+          <div class="tl-dispatch tl-dispatch-sandbox">
+            <div class="tl-dispatch-row">
+              <span class="tl-dispatch-label">agent</span>
+              <span class="tl-dispatch-arrow">&rarr;</span>
+              <span class="tl-dispatch-label">sandbox</span>
+            </div>
+            <div class="tl-dispatch-pills">
+              <span class="tl-pill tl-pill-sandbox">E2B</span>
+              <span class="tl-pill tl-pill-sandbox">Daytona</span>
+              <span class="tl-pill tl-pill-sandbox">Modal</span>
+            </div>
+            <div class="tl-dispatch-row">
+              <span class="tl-dispatch-label">agent</span>
+              <span class="tl-dispatch-arrow">&larr;</span>
+              <span class="tl-dispatch-label">result</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -57,6 +74,25 @@
             <span class="loop-dot"></span>
             <span class="loop-arrow">&rarr;</span>
             <span class="loop-dot loop-dot-final"></span>
+          </div>
+          <div class="tl-dispatch tl-dispatch-infra">
+            <div class="tl-dispatch-row">
+              <span class="tl-dispatch-label">agent</span>
+              <span class="tl-dispatch-arrow">&rarr;</span>
+              <span class="tl-dispatch-label">compute</span>
+            </div>
+            <div class="tl-dispatch-pills">
+              <span class="tl-pill tl-pill-infra">AWS</span>
+              <span class="tl-pill tl-pill-infra">GCP</span>
+              <span class="tl-pill tl-pill-infra">Azure</span>
+              <span class="tl-pill tl-pill-infra">K8s</span>
+              <span class="tl-pill tl-pill-infra">Cloudflare</span>
+            </div>
+            <div class="tl-dispatch-row">
+              <span class="tl-dispatch-label">agent</span>
+              <span class="tl-dispatch-arrow">&larr;</span>
+              <span class="tl-dispatch-label">result</span>
+            </div>
           </div>
         </div>
       </div>
@@ -260,6 +296,78 @@
   .loop-arrow {
     font-size: 0.6rem;
     color: rgba(255,255,255,0.2);
+  }
+
+  /* Dispatch cards */
+  .tl-dispatch {
+    margin-top: 10px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tl-dispatch-sandbox {
+    background: rgba(56, 189, 248, 0.04);
+    border: 1px solid rgba(56, 189, 248, 0.12);
+  }
+
+  .tl-dispatch-infra {
+    background: rgba(168, 130, 255, 0.04);
+    border: 1px solid rgba(168, 130, 255, 0.12);
+  }
+
+  .tl-dispatch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tl-dispatch-label {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.3);
+  }
+
+  .tl-dispatch-arrow {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.15);
+  }
+
+  .tl-dispatch-sandbox .tl-dispatch-arrow {
+    color: rgba(56, 189, 248, 0.35);
+  }
+
+  .tl-dispatch-infra .tl-dispatch-arrow {
+    color: rgba(168, 130, 255, 0.35);
+  }
+
+  .tl-dispatch-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding-left: 2px;
+  }
+
+  .tl-pill {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    padding: 1px 7px;
+    border-radius: 3px;
+    letter-spacing: 0.02em;
+  }
+
+  .tl-pill-sandbox {
+    color: rgba(56, 189, 248, 0.7);
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.15);
+  }
+
+  .tl-pill-infra {
+    color: rgba(168, 130, 255, 0.7);
+    background: rgba(168, 130, 255, 0.08);
+    border: 1px solid rgba(168, 130, 255, 0.15);
   }
 
   /* Replay callout */
