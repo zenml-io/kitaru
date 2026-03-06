@@ -3,6 +3,7 @@
 ## Project Structure & Module Organization
 Kitaru is a Python 3.12+ project for durable AI agent execution on ZenML. Use a `src` layout:
 - `src/kitaru/`: core package and runtime primitives
+- `src/kitaru/cli.py`: CLI entry point using [cyclopts](https://cyclopts.readthedocs.io/)
 - `src/kitaru/adapters/`: framework integrations (for example PydanticAI)
 - `tests/`: `pytest` test suite, mirroring package paths
 - `design/`: design notes and meeting docs (ignored by git; do not commit)
@@ -30,6 +31,9 @@ Use `uv` for dependency management and `just` as the command runner.
 - Prefer Protocols/ABCs or `isinstance` over `getattr`/`hasattr` for capability checks.
 - Put helpers on the class when tied to its behavior; use standalone utils only for generic cross-module functions.
 - Prefer Pydantic models for data structures; checkpoint return values must be serializable.
+
+## CLI
+The `kitaru` console script is defined in `pyproject.toml` under `[project.scripts]` and implemented with cyclopts in `src/kitaru/cli.py`. Add subcommands via `@app.command`. When testing CLI commands, always pass an explicit arg list (`app(["--help"])`, not bare `app()`). CLI invocations raise `SystemExit(0)` on success.
 
 ## Testing Guidelines
 Use `pytest` for unit and integration tests. Name files `test_*.py` and test functions `test_*`. Mirror source paths (example: `src/kitaru/runtime.py` -> `tests/test_runtime.py`). Every bug fix should include a regression test that fails before the fix and passes after it.

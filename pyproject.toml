@@ -17,9 +17,13 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
+    "cyclopts>=3.0",
     "pydantic>=2.0",
     "zenml>=0.94.0"
 ]
+
+[project.scripts]
+kitaru = "kitaru.cli:cli"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
