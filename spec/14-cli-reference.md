@@ -17,6 +17,7 @@ The CLI should mirror the core runtime model rather than invent a separate one.
 ```bash
 kitaru login https://kitaru.mycompany.com
 kitaru status
+kitaru info
 kitaru logout
 ```
 
@@ -24,6 +25,7 @@ kitaru logout
 
 - `login` stores connection/auth state for the current user
 - `status` shows the current connection and active stack context
+- `info` shows detailed environment information: connection, active stack, project config, SDK version, and server version
 - `logout` clears stored auth state
 
 ## Stack selection
@@ -208,7 +210,7 @@ It should avoid pretending that all config belongs to one flat hierarchy.
 
 For March, the CLI should stay focused on the core lifecycle:
 
-- login / status / logout
+- login / status / info / logout
 - stack list / use / current
 - run
 - executions list / get / logs / input / retry / replay / cancel

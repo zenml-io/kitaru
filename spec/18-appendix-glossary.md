@@ -321,6 +321,28 @@ Examples include:
 
 Child events are useful for visibility, artifacts, and metadata, but they are not independent replay boundaries in the MVP.
 
+## Sandbox
+
+A **sandbox** is a stack component that provides isolated compute for agent execution.
+
+It is relevant for use cases where agents run arbitrary code (e.g., coding agents), and you need:
+
+- isolated execution environment
+- resource limits
+- protection from unsafe tool calls
+
+The sandbox is an MVP deliverable. Its exact shape is still being defined.
+
+## Concurrency / Futures
+
+**Concurrency** in Kitaru uses the `.submit()` + `.result()` pattern (ZenML futures), not a dedicated primitive.
+
+- `.submit()` kicks off a checkpoint and returns a future immediately
+- `.result()` blocks until that checkpoint completes
+- multiple `.submit()` calls run concurrently
+
+On replay, concurrently submitted checkpoints replay their recorded outcomes just like sequential ones.
+
 ## Idempotency
 
 **Idempotency** means an operation can be safely repeated without causing duplicate side effects.

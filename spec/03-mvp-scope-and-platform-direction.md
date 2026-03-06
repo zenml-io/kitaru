@@ -17,6 +17,7 @@ The March MVP is centered on the durable execution core:
 - `kitaru.log()`
 - `kitaru.configure()` (narrow scope — local dir, project defaults)
 - stack selection (close to ZenML primitives)
+- sandbox stack component for isolated agent execution
 - PydanticAI adapter
 - `KitaruClient` basics (list, get, input/resume, retry, replay)
 - core CLI for login, status, stack selection, execution inspection, retry, replay, and input
@@ -48,6 +49,7 @@ Kitaru may expand later with:
 - more advanced dashboard and lineage tooling
 - more ergonomic local and remote developer workflows
 - user-facing snapshot inspection
+- richer event sources for `wait()` (internal events, time-based triggers, third-party integrations)
 
 ## OSS vs Pro considerations
 

@@ -170,6 +170,19 @@ That is an important distinction:
 
 Kitaru needs both.
 
+## Parallel execution
+
+Checkpoints support concurrent execution via `.submit()`:
+
+```python
+future = my_checkpoint.submit(arg1, arg2)
+result = future.result()
+```
+
+This returns a future that resolves when the checkpoint completes. Multiple checkpoints can be submitted concurrently — see section 5 for the full concurrency pattern.
+
+On replay, concurrently submitted checkpoints replay their recorded outcomes just like sequential ones. The replay model does not change for concurrent execution.
+
 ## Rules
 
 - sync is the primary and recommended path for MVP
