@@ -1,0 +1,3 @@
+# Cloudflare Pages redirects
+# Format: /old-path /new-path STATUS_CODE
+# See: https://developers.cloudflare.com/pages/configuration/redirects/

@@ -1,0 +1,30 @@
+# deps
+/node_modules
+
+# generated content (fumadocs-mdx)
+.source
+
+# build output
+/coverage
+/.next/
+/out/
+/build
+*.tsbuildinfo
+
+# auto-generated docs content (created by scripts, not hand-written)
+content/docs/cli/
+content/docs/reference/python/
+
+# misc
+.DS_Store
+*.pem
+/.pnp
+.pnp.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env
+.env*.local
+.vercel
+next-env.d.ts

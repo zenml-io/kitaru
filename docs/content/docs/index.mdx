@@ -1,0 +1,45 @@
+---
+title: What is Kitaru?
+description: Durable execution for AI agents
+---
+
+Kitaru provides primitives that make AI agent workflows **persistent**,
+**replayable**, and **observable** — without requiring you to learn a graph DSL
+or change your Python control flow.
+
+## Core Primitives
+
+| Primitive | Purpose |
+| --- | --- |
+| `@kitaru.saga` | Outer boundary — marks a durable execution |
+| `@kitaru.checkpoint` | Checkpointed unit of work |
+| `kitaru.wait()` | Suspend until an external event arrives |
+| `kitaru.log()` | Attach typed metadata to current checkpoint |
+
+## Quick Example
+
+```python
+import kitaru
+
+@kitaru.saga
+def onboard_user(email: str):
+    user = create_account(email)
+
+    approval = kitaru.wait("manager-approval", timeout="48h")
+
+    if approval.approved:
+        provision_access(user)
+```
+
+<Cards>
+  <Card
+    title="Installation"
+    description="Install Kitaru with uv or pip"
+    href="/docs/getting-started/installation"
+  />
+  <Card
+    title="Quickstart"
+    description="Run your first saga in 5 minutes"
+    href="/docs/getting-started/quickstart"
+  />
+</Cards>

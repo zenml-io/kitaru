@@ -42,3 +42,20 @@ test *ARGS:
 # Build the package locally (does not publish)
 build:
     uv build
+
+# Generate CLI reference docs from Python source
+generate-docs:
+    @echo "CLI doc generation not yet implemented (Phase 2)."
+    @echo "See: scripts/generate_cli_docs.py (to be created)"
+
+# Preview docs locally (run generate-docs first if CLI pages needed)
+docs:
+    cd docs && pnpm run dev
+
+# Build docs (full static export)
+docs-build:
+    cd docs && pnpm run build
+
+# Check docs build (used in CI-like local validation)
+docs-check:
+    cd docs && pnpm run build

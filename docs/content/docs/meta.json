@@ -1,0 +1,10 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "---Getting Started---",
+    "getting-started",
+    "---Project---",
+    "contributing",
+    "changelog"
+  ]
+}
