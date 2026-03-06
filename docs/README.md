@@ -46,6 +46,21 @@ optional JSX components).
 See `CLAUDE.md` in this directory for detailed conventions and available
 components.
 
+## CI / Deployment
+
+The docs site is deployed to [docs.kitaru.ai](https://docs.kitaru.ai) via
+Cloudflare Pages. The `.github/workflows/docs.yml` workflow handles:
+
+- **Production deploy:** Automatically on every push to `main` (i.e. after a
+  release). CI generates docs content, builds the static site, and deploys
+  `docs/out/` to Cloudflare Pages.
+- **PR previews:** On PRs to `main` or `develop` that touch docs-related files.
+  A sticky comment is posted with the preview URL.
+
+CI runs doc generation automatically before building. Locally, you must run
+`just generate-docs` yourself before `just docs-build` when generated content
+(CLI reference, changelog) may have changed.
+
 ## What's Generated vs Hand-Written
 
 | File / Directory | Source | Committed? |
