@@ -1,12 +1,13 @@
 # 11. Per-Flow and Per-Checkpoint Overrides
 
-Overrides are runtime-level controls that let you tune how a flow or checkpoint executes without turning global config into a dumping ground.
+Overrides are runtime-level controls that let you tune how a flow or checkpoint executes.
 
-These are different from:
+Kitaru uses a [unified config object](04-connection-stacks-and-configuration.md) that gathers all settings into one structure. Within that object, overrides are the **runtime layer** — per-decorator or per-invocation choices that override the pre-execution defaults.
 
-- **connection settings** — how the SDK talks to a server
-- **stack selection** — where execution runs
-- **app config** — project defaults
+Overrides are distinct from:
+
+- **connection settings** — resolved before any flow runs
+- **pre-execution settings** — stack selection, image config, project defaults set before the run
 - **replay overrides** — replacing historical outcomes during replay
 
 This section is about **execution-time behavior** on flows, checkpoints, and individual calls.
@@ -30,6 +31,8 @@ Flow-level overrides apply to the whole execution.
 Typical examples:
 
 - `stack`
+- `image`
+- `cache`
 - `retries`
 
 ### Example
@@ -37,6 +40,11 @@ Typical examples:
 ```python
 @kitaru.flow(
     stack="prod",
+    image=ImageSettings(
+        base_image="python:3.12-slim",
+        requirements=["pydantic"],
+    ),
+    cache=False,
     retries=2,
 )
 def heavy_flow(data: str) -> str:
@@ -46,6 +54,8 @@ def heavy_flow(data: str) -> str:
 ### What they control
 
 - which stack the execution should use
+- what Docker image and environment to use for remote execution
+- whether checkpoint outputs can be reused from previous executions
 - whether the flow should retry after uncaught failure (same-execution retry, not replay)
 
 ### What they should not control
@@ -193,8 +203,8 @@ If per-checkpoint compute selection comes later, it should be introduced as a se
 
 For March, the most useful override surface is:
 
-- flow: `stack`, `retries`
+- flow: `stack`, `image`, `cache`, `retries`
 - checkpoint: `retries`, `type`
 - `kitaru.llm()`: `model`, plus normal per-call LLM parameters
 
-That is enough to make the runtime flexible without turning the config model into a maze.
+These are all part of the [unified config object](04-connection-stacks-and-configuration.md) — overrides are just the runtime layer that sits on top of pre-execution defaults.

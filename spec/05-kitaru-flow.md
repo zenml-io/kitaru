@@ -99,12 +99,20 @@ def content_pipeline(topic: str) -> str:
     return draft
 ```
 
+## The flow as the main config surface
+
+The `@kitaru.flow` decorator is the primary place where configuration enters an execution. All execution-relevant settings — infrastructure, image, behavior — flow through it. Connection credentials (server URL, auth) are resolved separately before any flow runs; they do not belong in the decorator.
+
+See [Chapter 4](04-connection-stacks-and-configuration.md) for the full unified configuration model.
+
 ## Parameters
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
+| `stack` | `str` | `None` | Named stack to use for this execution |
+| `image` | `ImageSettings` | `None` | Docker image and environment settings for remote execution |
+| `cache` | `bool` | `True` | Whether checkpoint outputs can be reused from previous executions |
 | `retries` | `int` | `0` | Number of automatic retries on unhandled failure |
-| `stack` | `str` | `None` | Named stack to use |
 
 ## Flow retry semantics
 

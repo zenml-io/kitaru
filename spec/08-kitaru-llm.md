@@ -107,13 +107,13 @@ What is stable:
 - `model=` accepts either an alias or a concrete `provider:model` string
 - cost, token, and latency tracking are core requirements
 
+The current direction is that the provider abstraction is an **LLM model stack component** — one of the four to five core components in a Kitaru stack (see [Chapter 4](04-connection-stacks-and-configuration.md)). This means model provider credentials and configuration live in the stack, alongside the runner, artifact store, and container registry.
+
 What is still being decided:
 
-- whether the provider abstraction is a stack component flavor or a lightweight SDK wrapper
-- where credentials and provider config live (stack/secret config vs `kitaru.configure()`)
+- the exact flavor system for different providers (OpenAI, Anthropic, etc.)
 - whether to build the provider layer in-house or wrap an existing library
-
-The spec should not over-specify the provider/config architecture. The user-facing API contract is stable; the infrastructure plumbing is intentionally flexible.
+- the interaction between stack-level model config and call-time `model=` overrides
 
 ## Model resolution
 

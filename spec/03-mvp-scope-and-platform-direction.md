@@ -15,8 +15,9 @@ The March MVP is centered on the durable execution core:
 - typed artifacts for dashboard rendering
 - `kitaru.llm()` with provider abstraction
 - `kitaru.log()`
-- `kitaru.configure()` (narrow scope — local dir, project defaults)
-- stack selection (close to ZenML primitives)
+- unified configuration object (connection, stack, image, execution behavior)
+- stack-first creation and selection (runner, artifact store, container registry, LLM model)
+- image/environment settings for remote execution
 - sandbox stack component for isolated agent execution
 - PydanticAI adapter
 - `KitaruClient` basics (list, get, input/resume, retry, replay)
