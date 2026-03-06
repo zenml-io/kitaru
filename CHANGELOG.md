@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-03-06
+
 ### Added
 - Initial project scaffolding with uv, ruff, ty, and CI
 - CLI with cyclopts (`kitaru --version`, `kitaru --help`)
