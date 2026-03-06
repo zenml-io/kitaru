@@ -1,12 +1,12 @@
 ---
-// ZeroToProduction.astro — Start local, deploy anywhere. No distributed systems.
+// ZeroToProduction.astro — Combined: versioning + local-to-deploy
 ---
 
 <section style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
   <div class="section-inner">
     <span class="section-eyebrow" data-reveal>Zero to production</span>
-    <h2 class="section-title" data-reveal data-reveal-delay="1">Start local. Deploy anywhere.</h2>
-    <p class="section-desc" data-reveal data-reveal-delay="2"><code style="font-family: var(--font-mono); font-size: 0.85em; color: var(--color-accent);">kitaru dev</code> on your laptop, then <code style="font-family: var(--font-mono); font-size: 0.85em; color: var(--color-accent);">kitaru deploy</code> when you're ready. Same agent, same checkpoints, production infrastructure.</p>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Start local. Deploy anywhere.<br>Everything versioned.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2"><code style="font-family: var(--font-mono); font-size: 0.85em; color: var(--color-accent);">kitaru dev</code> on your laptop, then <code style="font-family: var(--font-mono); font-size: 0.85em; color: var(--color-accent);">kitaru deploy</code> when you're ready. Every artifact, config, and execution is versioned automatically.</p>
 
     <div class="deploy-grid" data-reveal data-reveal-delay="3">
       <!-- Terminal showing the flow -->
@@ -38,67 +38,39 @@
           <li>
             <span class="check-icon">&#10003;</span>
             <div>
-              <strong>Automatic crash recovery and restart</strong>
-              <span>Agent dies mid-run? It picks up from the last checkpoint.</span>
+              <strong>Crash recovery from last checkpoint</strong>
+              <span>Agent dies mid-run? It picks up where it left off.</span>
             </div>
           </li>
           <li>
             <span class="check-icon">&#10003;</span>
             <div>
-              <strong>Cost tracking per execution and per LLM call</strong>
-              <span>Know exactly what each agent run costs, broken down by model.</span>
+              <strong>Every artifact and config versioned</strong>
+              <span>Browse outputs, trace lineage, compare runs.</span>
             </div>
           </li>
           <li>
             <span class="check-icon">&#10003;</span>
             <div>
-              <strong>Artifact browser with full lineage</strong>
-              <span>Browse every output, trace it back to the config and input that produced it.</span>
+              <strong>Cost tracking per execution and LLM call</strong>
+              <span>Know exactly what each agent run costs, by model.</span>
             </div>
           </li>
           <li>
             <span class="check-icon">&#10003;</span>
             <div>
-              <strong>Named config environments (dev/staging/prod)</strong>
-              <span>Switch models, stores, and settings with a single flag.</span>
+              <strong>Named environments (dev / staging / prod)</strong>
+              <span>Switch models, stores, and settings with one flag.</span>
             </div>
           </li>
           <li>
             <span class="check-icon">&#10003;</span>
             <div>
               <strong>OpenTelemetry spans to your existing stack</strong>
-              <span>Plug into Datadog, Grafana, or any OTel-compatible backend.</span>
+              <span>Plug into Datadog, Grafana, or any OTel backend.</span>
             </div>
           </li>
         </ul>
-      </div>
-    </div>
-
-    <!-- Framework + deploy logos -->
-    <div class="logos-strip" data-reveal data-reveal-delay="4">
-      <div class="logos-row">
-        <span class="logos-label">Wrap any agent:</span>
-        <span class="logo-name">PydanticAI</span>
-        <span class="logo-sep">/</span>
-        <span class="logo-name">OpenAI Agents SDK</span>
-        <span class="logo-sep">/</span>
-        <span class="logo-name">CrewAI</span>
-        <span class="logo-sep">/</span>
-        <span class="logo-name">Anthropic SDK</span>
-        <span class="logo-sep">/</span>
-        <span class="logo-name">any Python agent</span>
-      </div>
-      <div class="logos-row">
-        <span class="logos-label">Deploy to:</span>
-        <span class="logo-name">AWS</span>
-        <span class="logo-sep">/</span>
-        <span class="logo-name">GCP</span>
-        <span class="logo-sep">/</span>
-        <span class="logo-name">Azure</span>
-        <span class="logo-sep">/</span>
-        <span class="logo-name">Kubernetes</span>
-        <span class="logo-sep">/</span>
-        <span class="logo-name">Local</span>
       </div>
     </div>
   </div>
@@ -160,7 +132,6 @@
   .terminal-body .output { color: #b7b5a9; }
   .terminal-body .output.dim { color: rgba(255,255,255,0.3); }
   .terminal-body .success { color: #34d399; }
-  .terminal-body .cmt { color: rgba(255,255,255,0.3); font-style: italic; }
   .terminal-body .term-bright { color: #E8E4DE; }
 
   /* What you get */
@@ -205,42 +176,6 @@
     font-size: 0.82rem;
     color: var(--color-secondary);
     line-height: 1.5;
-  }
-
-  /* Logos strip */
-  .logos-strip {
-    margin-top: 48px;
-    padding-top: 32px;
-    border-top: 1px solid var(--color-border-light);
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    text-align: center;
-  }
-
-  .logos-row {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    font-size: 0.82rem;
-  }
-
-  .logos-label {
-    color: var(--color-muted);
-    font-weight: 400;
-    margin-right: 4px;
-  }
-
-  .logo-name {
-    color: var(--color-secondary);
-    font-weight: 400;
-  }
-
-  .logo-sep {
-    color: var(--color-muted);
-    opacity: 0.4;
   }
 
   @media (max-width: 768px) {

@@ -9,23 +9,21 @@
       <div class="hero-left">
         <div class="hero-badge" data-reveal>
           <span class="dot"></span>
-          Coming soon — early access March 2026
+          From the makers of <a href="https://zenml.io" target="_blank" rel="noopener" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;">ZenML</a> — early access March 2026
         </div>
 
         <h1
           style="font-weight: 700; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1.08; letter-spacing: -0.03em; margin-bottom: 24px;"
           data-reveal data-reveal-delay="1"
         >
-          Your agent runs.<br>Now make it <em class="gradient-text" style="font-style: normal;">survive.</em>
+          Agents get harder as they grow.<br>Infrastructure <em class="gradient-text" style="font-style: normal;">shouldn't.</em>
         </h1>
 
         <p
           style="font-size: clamp(1rem, 1.8vw, 1.15rem); max-width: 480px; line-height: 1.65; margin-bottom: 36px; font-weight: 300; color: var(--color-secondary);"
           data-reveal data-reveal-delay="2"
         >
-          Eight primitives for durable AI agents in Python.
-          Crash recovery, <strong style="font-weight: 500; color: var(--color-primary);">artifact versioning</strong>, human-in-the-loop, and replay —
-          without the distributed systems baggage.
+          Durable execution, <strong style="font-weight: 500; color: var(--color-primary);">human-in-the-loop</strong>, and crash recovery for Python agents.
         </p>
 
         <div data-reveal data-reveal-delay="3">
@@ -55,17 +53,18 @@
 <span class="kw">import</span> kitaru
 
 <span class="dec">@kitaru.checkpoint</span>
-<span class="kw">async def</span> <span class="fn">analyze</span>(code: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
-    <span class="kw">return await</span> kitaru.<span class="fn">llm</span>(
-        <span class="str">f"Review this code:\n{'{'}code{'}'}"</span>,
+<span class="kw">def</span> <span class="fn">analyze</span>(code: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    client <span class="op">=</span> openai.OpenAI()
+    <span class="kw">return</span> client.chat.completions.<span class="fn">create</span>(
         model<span class="op">=</span><span class="str">'gpt-4o'</span>,
-    )
+        messages<span class="op">=</span>[{'{'}<span class="str">'role'</span>: <span class="str">'user'</span>, <span class="str">'content'</span>: code{'}'}],
+    ).choices[<span class="num">0</span>].message.content
 
-<span class="dec">@kitaru.saga</span>
-<span class="kw">async def</span> <span class="fn">review</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
-    diff <span class="op">=</span> <span class="kw">await</span> <span class="fn">fetch_pr</span>(pr_id)
-    result <span class="op">=</span> <span class="kw">await</span> <span class="fn">analyze</span>(diff)
-    <span class="kw">await</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Approve?'</span>)
+<span class="dec">@kitaru.flow</span>
+<span class="kw">def</span> <span class="fn">review</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
+    diff <span class="op">=</span> <span class="fn">fetch_pr</span>(pr_id)
+    result <span class="op">=</span> <span class="fn">analyze</span>(diff)
+    kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Approve?'</span>)
     <span class="kw">return</span> result</code></pre>
           </div>
           <!-- Framework tab -->
@@ -78,10 +77,10 @@
 <span class="var">agent</span> <span class="op">=</span> Agent(<span class="str">'openai:gpt-4o'</span>, tools<span class="op">=</span>[search, read])
 <span class="var">durable</span> <span class="op">=</span> kp.<span class="fn">wrap</span>(agent)
 
-<span class="dec">@kitaru.saga</span>
-<span class="kw">async def</span> <span class="fn">review_pr</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
-    result <span class="op">=</span> <span class="kw">await</span> durable.<span class="fn">run</span>(<span class="str">f"Review PR #{'{'}pr_id{'}'}"</span>)
-    approved <span class="op">=</span> <span class="kw">await</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Ship it?'</span>)
+<span class="dec">@kitaru.flow</span>
+<span class="kw">def</span> <span class="fn">review_pr</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
+    result <span class="op">=</span> durable.<span class="fn">run_sync</span>(<span class="str">f"Review PR #{'{'}pr_id{'}'}"</span>)
+    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Ship it?'</span>)
     <span class="kw">return</span> result.output</code></pre>
           </div>
         </div>
@@ -333,6 +332,12 @@
         btn.textContent = "You're in \u2713";
         btn.style.background = '#3D8C5C';
         input.disabled = true;
+        window.analytics?.track('Waitlist Signup', {
+          email,
+          source: 'hero',
+          page: window.location.pathname,
+        });
+        window.analytics?.identify(email, { email });
       } else {
         btn.textContent = 'Try again';
         btn.removeAttribute('disabled');

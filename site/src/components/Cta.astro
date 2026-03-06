@@ -88,6 +88,12 @@
         btn.textContent = "You're in \u2713";
         btn.style.background = '#3D8C5C';
         input.disabled = true;
+        window.analytics?.track('Waitlist Signup', {
+          email,
+          source: 'cta',
+          page: window.location.pathname,
+        });
+        window.analytics?.identify(email, { email });
       } else {
         btn.textContent = 'Try again';
         btn.removeAttribute('disabled');
