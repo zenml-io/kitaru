@@ -25,9 +25,10 @@ single Cloudflare Worker.
 
 - **Never add Node.js tooling to the repo root.** No root `package.json`,
   no root `node_modules`, no workspace config.
-- **Never hand-edit generated files:** `content/docs/cli.mdx` (or `cli/`),
-  `content/docs/changelog.mdx`, and `content/docs/reference/python/` are
-  created by Python scripts and gitignored.
+- **Never hand-edit generated files:** `content/docs/cli.mdx` (or `cli/`)
+  and `content/docs/changelog.mdx` are created by Python scripts and gitignored.
+  `content/docs/reference/python/` is reserved for future SDK reference generation
+  (also gitignored) but no generator exists yet.
 - **Respect static export constraints:** No server-side features (middleware,
   rewrites, cookies, ISR). All content must be buildable at build time.
 - **Only document shipped features.** No "Coming Soon" sections for unimplemented
@@ -64,14 +65,22 @@ These are registered globally in `mdx-components.tsx`:
 
 ```bash
 # From repo root:
+just generate-docs  # Generate CLI + changelog docs from Python source (run first on fresh clone)
 just docs           # Start dev server at localhost:3000
 just docs-build     # Full static build
-just generate-docs  # Generate CLI + changelog docs from Python source
+just site-build     # Full unified build (generate + docs + site + merge)
 
 # Or from docs/:
 pnpm run dev        # Dev server
 pnpm run build      # Static build
+pnpm run types:check # TypeScript type checking
+pnpm run lint       # Biome lint
+pnpm run format     # Biome format
 ```
+
+**Important:** Generated content (CLI reference, changelog) is gitignored. On a fresh
+clone, run `just generate-docs` before `just docs` or `just docs-build`, otherwise
+those pages will be missing from the sidebar.
 
 ## File Responsibilities
 
@@ -79,6 +88,6 @@ pnpm run build      # Static build
 |---|---|
 | `content/docs/**/*.mdx` | Python developers (content) |
 | `content/docs/**/meta.json` | Python developers (navigation) |
-| `app/`, `components/`, `lib/` | Designer / frontend (layout, theme) |
+| `app/`, `components/`, `lib/` | Designer / frontend (layout, theme, routes, metadata) |
 | `global.css` | Designer (branding) |
 | `mdx-components.tsx` | Shared (component registration) |

@@ -13,16 +13,35 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 ## Project layout
 
 ```
-src/kitaru/           # Main package (src layout)
+src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
-  adapters/           # Framework adapters (e.g. pydantic_ai)
+  adapters/           # Framework adapter stubs (not yet implemented)
 tests/                # pytest tests
-docs/                 # FumaDocs Next.js app (kitaru.ai/docs)
-site/                 # Astro landing page (kitaru.ai/)
+docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
+  content/docs/       # Documentation content (MDX files)
+  app/                # Next.js app routes, layout, metadata, search, sitemap
+site/                 # Astro landing page + Cloudflare runtime shell at kitaru.ai/
+  src/pages/api/      # Server-side API routes (/api/waitlist with KV)
 scripts/              # Doc generation + site merge scripts
+  generate_cli_docs.py       # Generates CLI reference MDX from cyclopts introspection
+  generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
+  merge_site.sh              # Merges docs static export into Astro build output
+spec/                 # SDK design specifications (temporary, deleted once implemented)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
+
+### Unified site deployment
+
+The docs and landing page deploy as **one Cloudflare Worker** from `site/dist/`:
+
+1. Python scripts generate docs content (CLI reference + changelog)
+2. `docs/` builds a static export into `docs/out/` (Next.js with `basePath: '/docs'`)
+3. `site/` builds the Astro app into `site/dist/` (owns runtime `/api/waitlist` + KV)
+4. `scripts/merge_site.sh` copies `docs/out/*` into `site/dist/docs/`
+5. Root `wrangler.toml` deploys the merged bundle
+
+The site workflow (`.github/workflows/site.yml`) runs this pipeline on `main` pushes (production) and creates preview Workers for PRs.
 
 ## Branching strategy
 
@@ -46,8 +65,8 @@ This project uses [just](https://github.com/casey/just) as a command runner. Run
 # Setup
 uv sync                              # Install dependencies
 
-# Common workflows
-just check                            # Run all checks (format, lint, typecheck, typos, yaml)
+# Common Python workflows
+just check                            # Run all checks (format, lint, typecheck, typos, yaml, links)
 just test                             # Run all tests
 just test tests/test_foo.py           # Run a single test file
 just test tests/test_foo.py::test_bar # Run a single test
@@ -59,16 +78,36 @@ just lint                             # Lint only
 just typecheck                        # Type check only
 just typos                            # Typo check only
 just format-check                     # Check formatting without modifying
+just yaml-check                       # Check YAML formatting
+just links                            # Check markdown links offline (requires lychee)
 just build                            # Build wheel + sdist locally
+
+# Docs/site workflows (require Node 22+ and pnpm)
+just generate-docs                    # Generate CLI reference + changelog from Python source
+just docs                             # Preview docs dev server (localhost:3000)
+just docs-build                       # Build docs static export
+just site                             # Preview landing page dev server (localhost:4321)
+just site-build-only                  # Build landing page only (no docs merge)
+just site-build                       # Full unified build (generate + build + merge)
 ```
 
-CI runs lint, type check, typos, and tests on push/PR to `develop` (`.github/workflows/ci.yml`). Tests run against Python 3.12 and 3.13.
+### CI/CD workflows
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, links, typecheck, tests (3.12 + 3.13) |
+| `site.yml` | Push to `main`; PRs touching docs/site/scripts | Build + deploy unified site; PR preview Workers |
+| `release.yml` | Workflow dispatch or `v*` tag | Version bump, PyPI publish, GitHub Release |
+| `spellcheck.yml` | Push/PR to `develop` | Separate typo/spell checking |
+| `image-optimiser.yml` | PRs only | Image compression for docs assets |
 
 When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ruff to ensure best practices are followed.
 
 ## Architecture
 
-### MVP primitives
+> **Note:** The SDK primitives below are **specified but not yet implemented**. The detailed design lives in `spec/` (temporary files, deleted once implemented). The current codebase has the CLI and package scaffolding; the runtime primitives are being built.
+
+### Planned MVP primitives
 
 | Primitive | Purpose |
 |---|---|
@@ -79,7 +118,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.save()` | Explicit named artifact (inside checkpoint only) |
 | `kitaru.load()` | Cross-execution artifact loading (requires exec_id) |
 
-### Key patterns
+### Key design patterns
 
 - **Sagas cannot nest** — no `@kitaru.saga` inside another saga
 - **Checkpoints can nest** — each independently persisted
@@ -87,13 +126,13 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 - **Replay** works by re-running the saga from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
 - **Artifact overrides** let you swap a checkpoint's cached output during replay
 
-### Framework adapters
+### Framework adapters (planned)
 
-The PydanticAI adapter (`kitaru.adapters.pydantic_ai`) wraps agents so each model request → `checkpoint(type='llm_call')` and each tool call → `checkpoint(type='tool_call')` automatically.
+The `adapters/` directory is scaffolded but empty. The planned PydanticAI adapter will wrap agents so each model request → `checkpoint(type='llm_call')` and each tool call → `checkpoint(type='tool_call')` automatically.
 
-### Observability
+### Observability (planned)
 
-Kitaru emits OpenTelemetry spans. It does **not** own the tracing backend — users configure their own OTel exporter (Logfire, Datadog, etc.).
+Kitaru will emit OpenTelemetry spans. It will **not** own the tracing backend — users configure their own OTel exporter (Logfire, Datadog, etc.).
 
 ## Code style
 
