@@ -30,6 +30,18 @@ export const metadata: Metadata = {
 export default function Layout({ children }: LayoutProps<'/'>) {
   return (
     <html lang="en" className={inter.className} suppressHydrationWarning>
+      <head>
+        <script
+          async
+          src="https://plausible.io/js/pa-Hii8j2wmtBMkcWoTIEWm6.js"
+        />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)};plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()',
+          }}
+        />
+      </head>
       <body className="flex flex-col min-h-screen">
         <Provider>{children}</Provider>
       </body>
