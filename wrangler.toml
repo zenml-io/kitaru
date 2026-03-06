@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [assets]
 directory = "./site/dist"
+not_found_handling = "404-page"
 
 [[kv_namespaces]]
 binding = "WAITLIST_KV"
