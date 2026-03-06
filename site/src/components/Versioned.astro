@@ -16,12 +16,13 @@
         <div class="v-code-block">
           <pre class="v-pre"><code><span class="cmt"># Checkpoint outputs auto-persisted</span>
 <span class="dec">@kitaru.checkpoint</span>
-<span class="kw">async def</span> <span class="fn">analyze</span>(code):
-    result <span class="op">=</span> <span class="kw">await</span> kitaru.<span class="fn">llm</span>(...)
-    <span class="kw">return</span> result  <span class="cmt"># versioned</span>
+<span class="kw">def</span> <span class="fn">analyze</span>(code: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    <span class="kw">return</span> call_llm(code)  <span class="cmt"># versioned</span>
 
 <span class="cmt"># Load across executions</span>
-prev <span class="op">=</span> kitaru.<span class="fn">load</span>(<span class="str">"analyze"</span>, version<span class="op">=</span><span class="num">3</span>)</code></pre>
+prev <span class="op">=</span> kitaru.<span class="fn">load</span>(
+    exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>, name<span class="op">=</span><span class="str">"analyze"</span>
+)</code></pre>
         </div>
         <p class="v-desc">Every checkpoint output is automatically persisted and versioned. Load any previous result by name and version.</p>
       </div>
@@ -32,13 +33,15 @@ prev <span class="op">=</span> kitaru.<span class="fn">load</span>(<span class="
         <div class="v-code-block">
           <pre class="v-pre"><code><span class="cmt"># Named environments</span>
 kitaru.<span class="fn">configure</span>(
-    name<span class="op">=</span><span class="str">"production"</span>,
-    model<span class="op">=</span><span class="str">"gpt-4o"</span>,
+    name<span class="op">=</span><span class="str">"prod"</span>,
+    server<span class="op">=</span><span class="str">"https://kitaru.co"</span>,
     store<span class="op">=</span><span class="str">"s3://bucket/prod"</span>,
+    compute<span class="op">=</span><span class="str">"kubernetes"</span>,
 )
 
-<span class="cmt"># Switch with one flag</span>
-<span class="cmt"># kitaru dev --config production</span></code></pre>
+<span class="cmt"># Use by name</span>
+<span class="dec">@kitaru.flow</span>(config<span class="op">=</span><span class="str">'prod'</span>)
+<span class="kw">def</span> <span class="fn">my_agent</span>(): ...</code></pre>
         </div>
         <p class="v-desc">Named dev/staging/prod configs with automatic versioning. Model routing profiles included.</p>
       </div>
@@ -48,15 +51,16 @@ kitaru.<span class="fn">configure</span>(
         <div class="v-card-header">Lineage</div>
         <div class="v-code-block">
           <pre class="v-pre"><code><span class="cmt"># Every execution records:</span>
-<span class="cmt"># - which config was active</span>
+<span class="cmt"># - which config version was active</span>
 <span class="cmt"># - which artifacts were produced</span>
 <span class="cmt"># - who provided human input</span>
 <span class="cmt"># - full dependency graph</span>
 
-<span class="cmt"># Query any run</span>
-run <span class="op">=</span> kitaru.<span class="fn">get_run</span>(<span class="str">"abc-123"</span>)
-run.artifacts  <span class="cmt"># all outputs</span>
-run.config     <span class="cmt"># frozen config</span></code></pre>
+<span class="cmt"># Query any execution</span>
+client <span class="op">=</span> KitaruClient()
+ex <span class="op">=</span> client.executions.<span class="fn">get</span>(<span class="str">"kr-a8f3c2"</span>)
+ex.checkpoints  <span class="cmt"># timeline</span>
+ex.artifacts    <span class="cmt"># all outputs</span></code></pre>
         </div>
         <p class="v-desc">Every execution records what config, what artifacts, who provided input. Full reproducibility.</p>
       </div>
