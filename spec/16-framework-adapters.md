@@ -90,7 +90,13 @@ def research(topic: str) -> str:
 
 At a high level, the adapter should make framework activity visible and durable in a way that fits Kitaru's execution model.
 
-That means it should help capture:
+The core mapping is:
+
+- **agent tool calls** map to checkpoint child events (type `tool_call`)
+- **agent model requests** map to checkpoint child events (type `llm_call`)
+- **agent loop iterations** map to the enclosing checkpoint's execution timeline
+
+The adapter should help capture:
 
 - model requests
 - tool calls

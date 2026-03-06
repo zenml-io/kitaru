@@ -130,6 +130,47 @@ Flow retries are **not** replay. They use fixed code, fixed config, and no user 
 - can start other flows, but those are separate executions
 - owns the execution journal and replay cursor for everything inside it
 
+## Concurrency
+
+Kitaru does not have a dedicated `parallel` primitive. Instead, concurrency uses the **`.submit()` + `.result()`** pattern (ZenML futures).
+
+```python
+@kitaru.checkpoint
+def research(topic: str) -> str:
+    ...
+
+@kitaru.checkpoint
+def gather_data(topic: str) -> dict:
+    ...
+
+@kitaru.flow
+def parallel_research(topic: str) -> str:
+    # Submit both checkpoints — they run concurrently
+    research_future = research.submit(topic)
+    data_future = gather_data.submit(topic)
+
+    # Collect results — blocks until both complete
+    notes = research_future.result()
+    data = data_future.result()
+
+    return combine(notes, data)
+```
+
+### How it works
+
+- `.submit()` kicks off the checkpoint and returns a future immediately
+- `.result()` blocks until that checkpoint completes and returns its output
+- multiple `.submit()` calls run concurrently
+- the order of `.result()` calls does not matter — both futures resolve independently
+
+### What concurrency applies to
+
+Concurrency applies to **checkpoints within a flow**. Flows themselves cannot run concurrently within a single execution — starting another flow creates a separate execution.
+
+### Dashboard representation
+
+When multiple checkpoints are submitted concurrently, the dashboard should show them as parallel branches in the execution timeline, with a join point where results are collected.
+
 ## Control flow stays normal Python
 
 Because replay works by rerunning from the top and replaying recorded outcomes at durable boundaries, Python control flow behaves naturally across resume and replay.

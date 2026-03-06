@@ -15,6 +15,8 @@ For the MVP, configuration should stay close to ZenML's existing primitives: sto
 
 Connection state is about talking to a Kitaru server.
 
+Under the hood, the Kitaru server **is** the ZenML server. The user does not need to know this — from their perspective, they connect to a Kitaru URL and use Kitaru concepts. The SDK maps Kitaru operations to ZenML API calls internally.
+
 It owns:
 
 - server URL

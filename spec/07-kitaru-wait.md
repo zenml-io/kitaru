@@ -336,6 +336,18 @@ Dashboard input, CLI input, API input, and webhook input are best thought of as 
 
 This keeps the runtime smaller and cleaner.
 
+## Future: event sources beyond webhook
+
+For the MVP, all wait inputs arrive through the same mechanism: an external API call (from a human via the dashboard, CLI, Python client, or a webhook).
+
+In the future, `wait()` may support richer event sources:
+
+- **internal events** — e.g., waiting for another pipeline run to complete, triggered automatically by ZenML's internal event system
+- **time-based events** — e.g., `wait(timeout_event=3600)` to resume after a delay (this would subsume the removed `sleep()` primitive)
+- **third-party integrations** — e.g., waiting for a Slack reaction, a GitHub PR merge, or an external system callback
+
+When these arrive, the syntax might expand with a `source=` or `event=` parameter. But for the MVP, all waits resolve through the same external-input API path.
+
 ## Notes for MVP
 
 - durable external resume generally requires connected or server-backed mode
