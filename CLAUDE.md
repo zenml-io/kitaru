@@ -89,6 +89,10 @@ just docs-build                       # Build docs static export
 just site                             # Preview landing page dev server (localhost:4321)
 just site-build-only                  # Build landing page only (no docs merge)
 just site-build                       # Full unified build (generate + build + merge)
+
+# Manual deploy to Cloudflare
+unset CF_API_TOKEN CLOUDFLARE_API_TOKEN  # Clear stale tokens (use wrangler login credentials)
+just site-build && npx wrangler deploy   # Build + deploy
 ```
 
 ### CI/CD workflows
