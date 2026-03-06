@@ -60,7 +60,8 @@ Typo checking uses `crate-ci/typos` with config in `.typos.toml`.
 - `main` tracks the latest released version only; do not push directly.
 - Releases are cut via the Release workflow (`workflow_dispatch` on `develop` or `v*` tag push).
 - Release branches (`release/X.Y.Z`) and tags (`vX.Y.Z`) are created automatically.
-- Version is maintained in `pyproject.toml` and bumped by the release workflow.
+- Version is maintained in `pyproject.toml` and bumped by the release workflow. Never hardcode it — use `importlib.metadata.version("kitaru")`.
+- Update `CHANGELOG.md` under `[Unreleased]` when making user-facing changes.
 
 ## Security & Configuration Notes
 Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv` (not raw `pip`) for dependency management to keep environments reproducible.

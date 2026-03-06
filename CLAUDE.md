@@ -55,6 +55,7 @@ just lint                             # Lint only
 just typecheck                        # Type check only
 just typos                            # Typo check only
 just format-check                     # Check formatting without modifying
+just build                            # Build wheel + sdist locally
 ```
 
 CI runs lint, type check, typos, and tests on push/PR to `develop` (`.github/workflows/ci.yml`). Tests run against Python 3.12 and 3.13.
@@ -97,6 +98,12 @@ Kitaru emits OpenTelemetry spans. It does **not** own the tracing backend — us
 - **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
 - **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Use standalone util files only for truly generic functions used across unrelated modules.
 - **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
+
+## Versioning and changelog
+
+- **Single source of truth:** the `version` field in `pyproject.toml`. The release workflow bumps it automatically — never change it by hand.
+- **Never hardcode the version** in tests or application code. Use `importlib.metadata.version("kitaru")` to read it at runtime.
+- **Update `CHANGELOG.md`** when making user-facing changes. Add entries under the `[Unreleased]` heading. The release workflow moves `[Unreleased]` to a versioned heading (e.g. `[0.2.0] - 2026-04-01`) at release time.
 
 ## Commits and PRs
 
