@@ -49,39 +49,41 @@
           </div>
           <!-- Plain Python tab -->
           <div class="code-tab-content active" id="tab-plain">
-            <pre class="code-pre"><code><span class="cmt"># No framework needed — just primitives</span>
-<span class="kw">import</span> kitaru
-
-<span class="dec">@kitaru.checkpoint</span>
-<span class="kw">def</span> <span class="fn">analyze</span>(code: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
-    client <span class="op">=</span> openai.OpenAI()
-    <span class="kw">return</span> client.chat.completions.<span class="fn">create</span>(
-        model<span class="op">=</span><span class="str">'gpt-4o'</span>,
-        messages<span class="op">=</span>[{'{'}<span class="str">'role'</span>: <span class="str">'user'</span>, <span class="str">'content'</span>: code{'}'}],
-    ).choices[<span class="num">0</span>].message.content
+            <pre class="code-pre"><code><span class="kw">import</span> kitaru
 
 <span class="dec">@kitaru.flow</span>
-<span class="kw">def</span> <span class="fn">review</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
-    diff <span class="op">=</span> <span class="fn">fetch_pr</span>(pr_id)
-    result <span class="op">=</span> <span class="fn">analyze</span>(diff)
-    kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Approve?'</span>)
-    <span class="kw">return</span> result</code></pre>
+<span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    plan <span class="op">=</span> <span class="fn">analyze_issue</span>(issue)    <span class="cmt"># cached on replay</span>
+    patch <span class="op">=</span> <span class="fn">write_code</span>(plan)      <span class="cmt"># cached on replay</span>
+
+    <span class="cmt"># Pauses. Resumes when a human responds.</span>
+    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">"Merge this PR?"</span>)
+    <span class="kw">if</span> approved:
+        <span class="fn">merge</span>(patch)
+    <span class="kw">return</span> patch
+
+<span class="cmt"># Replay — completed steps are cached.</span>
+coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>, issue<span class="op">=</span><span class="str">"New bug"</span>)
+<span class="cmt"># Same code, any infra.</span>
+coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"aws-sandbox"</span>)</code></pre>
           </div>
           <!-- Framework tab -->
           <div class="code-tab-content" id="tab-framework">
-            <pre class="code-pre"><code><span class="cmt"># Wrap any agent framework</span>
-<span class="kw">import</span> kitaru
+            <pre class="code-pre"><code><span class="kw">import</span> kitaru
 <span class="kw">from</span> kitaru.adapters <span class="kw">import</span> pydantic_ai <span class="kw">as</span> kp
-<span class="kw">from</span> pydantic_ai <span class="kw">import</span> Agent
 
-<span class="var">agent</span> <span class="op">=</span> Agent(<span class="str">'openai:gpt-4o'</span>, tools<span class="op">=</span>[search, read])
-<span class="var">durable</span> <span class="op">=</span> kp.<span class="fn">wrap</span>(agent)
+<span class="cmt"># Every LLM call + tool use is checkpointed.</span>
+<span class="cmt"># Human approval happens inside the agent loop.</span>
+coder <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span class="str">"claude-sonnet-4-6"</span>, tools<span class="op">=</span>[edit, test, approve]))
 
 <span class="dec">@kitaru.flow</span>
-<span class="kw">def</span> <span class="fn">review_pr</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
-    result <span class="op">=</span> durable.<span class="fn">run_sync</span>(<span class="str">f"Review PR #{'{'}pr_id{'}'}"</span>)
-    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Ship it?'</span>)
-    <span class="kw">return</span> result.output</code></pre>
+<span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    <span class="kw">return</span> coder.<span class="fn">run_sync</span>(<span class="str">f"Fix: </span>{'{'}issue{'}'}<span class="str">"</span>).output
+
+<span class="cmt"># Replay — completed steps are cached.</span>
+coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>, issue<span class="op">=</span><span class="str">"New bug"</span>)
+<span class="cmt"># Same code, any infra.</span>
+coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"gcp-production"</span>)</code></pre>
           </div>
         </div>
       </div>
@@ -299,11 +301,12 @@
 </style>
 
 <script>
-  // Tab switching
-  document.querySelectorAll('.code-tab').forEach(tab => {
+  // Tab switching — scoped to hero code window
+  const heroWindow = document.querySelector('.hero-code-window');
+  heroWindow?.querySelectorAll('.code-tab').forEach(tab => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
+      heroWindow.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+      heroWindow.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
       tab.classList.add('active');
       const target = tab.getAttribute('data-tab');
       document.getElementById(`tab-${target}`)?.classList.add('active');
