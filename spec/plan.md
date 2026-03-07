@@ -46,7 +46,7 @@ not "reimplement from scratch."
 
 ---
 
-## Phase 2: Login, logout, status CLI
+## Phase 2: Login, logout, status CLI --- DONE
 
 **Goal:** First real CLI commands. This unblocks everything that needs a server connection.
 
