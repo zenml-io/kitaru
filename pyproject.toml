@@ -80,6 +80,12 @@ known-first-party = ["kitaru"]
 python-version = "3.12"
 root = ["src", "scripts"]
 
+[[tool.ty.overrides]]
+include = ["scripts/generate_sdk_docs.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-vv"

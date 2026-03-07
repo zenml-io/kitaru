@@ -20,18 +20,16 @@ Usage:
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 try:
     import griffe
     from fumapy.mksource import CustomEncoder, parse_module
     from griffe_typingdoc import TypingDocExtension
-except ImportError as e:
-    print(f"ERROR: Missing dependency: {e}")
-    print("  Install fumapy: uv pip install ./docs/node_modules/fumadocs-python")
-    print("  (requires 'pnpm install' in docs/ first)")
-    sys.exit(1)
+
+    _HAS_GRIFFE = True
+except ImportError:
+    _HAS_GRIFFE = False
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = REPO_ROOT / "docs" / ".generated"
@@ -99,6 +97,13 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
 
 def extract_api(module_name: str) -> dict:
     """Extract the public API of a Python module using griffe."""
+    if not _HAS_GRIFFE:
+        msg = (
+            "Missing dependency: fumapy (and griffe).\n"
+            "  Install: uv pip install ./docs/node_modules/fumadocs-python\n"
+            "  (requires 'pnpm install' in docs/ first)"
+        )
+        raise ImportError(msg)
     extensions = griffe.load_extensions(TypingDocExtension)
     loaded = griffe.load(
         module_name,
@@ -120,6 +125,12 @@ def extract_api(module_name: str) -> dict:
 
 def main() -> int:
     """Extract and filter the Kitaru SDK API to JSON."""
+    if not _HAS_GRIFFE:
+        print("ERROR: Missing dependency: fumapy (and griffe).")
+        print("  Install: uv pip install ./docs/node_modules/fumadocs-python")
+        print("  (requires 'pnpm install' in docs/ first)")
+        return 1
+
     for module_name in PUBLIC_MODULES:
         try:
             __import__(module_name)
