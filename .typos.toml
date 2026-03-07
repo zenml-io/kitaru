@@ -7,6 +7,8 @@ extend-exclude = [
     "docs/pnpm-lock.yaml",
     "docs/.source/",
     "docs/node_modules/",
+    "design/",
+    "spec/"
 ]
 
 [default.extend-identifiers]
