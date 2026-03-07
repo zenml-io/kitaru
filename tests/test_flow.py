@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, call, patch
@@ -88,6 +89,31 @@ def test_flow_decorator_creates_callable_with_start_and_deploy() -> None:
         retry=None,
         settings=None,
     )
+
+
+def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    def my_example_flow(value: int) -> int:
+        return value
+
+    alias = "__kitaru_pipeline_source_my_example_flow"
+
+    with patch("kitaru.flow.pipeline", return_value=zenml_decorator):
+        flow(my_example_flow)
+
+    wrapped_entrypoint = zenml_decorator.call_args.args[0]
+    assert wrapped_entrypoint.__name__ == alias
+
+    module = sys.modules[my_example_flow.__module__]
+    try:
+        assert getattr(module, alias) is base_pipeline
+    finally:
+        delattr(module, alias)
 
 
 def test_deploy_is_start_sugar_with_stack_override() -> None:
@@ -278,6 +304,44 @@ def test_flow_handle_get_returns_none_when_no_outputs() -> None:
         result = handle.get()
 
     assert result is None
+
+
+def test_flow_handle_get_falls_back_to_terminal_step_outputs() -> None:
+    completed = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("final_step", "output", "done")],
+    )
+    completed.snapshot.pipeline_spec.outputs = []
+
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = completed
+
+    handle = FlowHandle(_as_pipeline_run(completed))
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        result = handle.get()
+
+    assert result == "done"
+
+
+def test_flow_handle_get_raises_on_ambiguous_terminal_fallback() -> None:
+    completed = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[
+            ("final_a", "output", "a"),
+            ("final_b", "output", "b"),
+        ],
+    )
+    completed.snapshot.pipeline_spec.outputs = []
+
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = completed
+
+    handle = FlowHandle(_as_pipeline_run(completed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        pytest.raises(RuntimeError, match="fallback extraction is ambiguous"),
+    ):
+        handle.get()
 
 
 def test_flow_handle_get_raises_when_step_metadata_is_missing() -> None:

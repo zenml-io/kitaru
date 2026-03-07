@@ -6,11 +6,13 @@ function whose execution becomes durable, replayable, and observable.
 
 from __future__ import annotations
 
+import re
+import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from functools import update_wrapper, wraps
-from typing import Any, overload
+from typing import Any, cast, overload
 
 from zenml.client import Client
 from zenml.config.constants import DOCKER_SETTINGS_KEY
@@ -44,6 +46,47 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
         yield
     finally:
         client.activate_stack(old_stack_id)
+
+
+def _pipeline_source_alias_name(func: Callable[..., Any]) -> str:
+    """Build a stable module-level alias for ZenML source loading.
+
+    Args:
+        func: User flow function.
+
+    Returns:
+        Alias name used to expose the ZenML pipeline object.
+    """
+    flow_name = getattr(func, "__name__", func.__class__.__name__)
+    normalized_name = re.sub(r"\W", "_", flow_name)
+    if not normalized_name:
+        normalized_name = "flow"
+    if normalized_name[0].isdigit():
+        normalized_name = f"flow_{normalized_name}"
+    return f"__kitaru_pipeline_source_{normalized_name}"
+
+
+def _register_pipeline_source_alias(
+    *,
+    func: Callable[..., Any],
+    alias: str,
+    pipeline_obj: Pipeline,
+) -> None:
+    """Register the ZenML pipeline object under a module-level alias.
+
+    ZenML dynamic runs reload pipelines from their source import path. Kitaru
+    wraps ZenML pipelines, so we expose the underlying pipeline object under a
+    dedicated alias and point source resolution there.
+
+    Args:
+        func: User flow function.
+        alias: Module-level alias name.
+        pipeline_obj: Underlying ZenML pipeline object.
+    """
+    module = sys.modules.get(func.__module__)
+    if module is None:
+        return
+    setattr(module, alias, pipeline_obj)
 
 
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -123,26 +166,15 @@ def _build_settings(image: ImageSetting | None) -> dict[str, DockerSettings] | N
     return {DOCKER_SETTINGS_KEY: docker_settings}
 
 
-def _extract_flow_result(run: PipelineRunResponse) -> Any:
-    """Extract user-facing flow return value from a finished pipeline run.
-
-    Args:
-        run: The pipeline run.
-
-    Raises:
-        RuntimeError: If run output metadata is missing.
-
-    Returns:
-        The flow result (`None`, a single value, or a tuple of values).
-    """
+def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
+    """Extract return values using explicit pipeline output specs."""
     hydrated_run = run.get_hydrated_version()
 
     snapshot = hydrated_run.snapshot
     pipeline_spec = snapshot.pipeline_spec if snapshot else None
     output_specs = pipeline_spec.outputs if pipeline_spec else []
-
     if not output_specs:
-        return None
+        return []
 
     step_runs = hydrated_run.steps
     values: list[Any] = []
@@ -163,6 +195,74 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
 
         values.append(artifact.load())
 
+    return values
+
+
+def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
+    """Extract return values from terminal step outputs as a fallback.
+
+    This fallback is intentionally conservative to avoid returning values in an
+    incorrect order when ZenML pipeline-level output specs are unavailable.
+    """
+    hydrated_run = run.get_hydrated_version()
+    step_runs = hydrated_run.steps
+    if not step_runs:
+        return []
+
+    upstream_step_names: set[str] = set()
+    for step_run in step_runs.values():
+        step_spec = getattr(step_run, "spec", None)
+        if step_spec is None:
+            continue
+        upstream_step_names.update(getattr(step_spec, "upstream_steps", []) or [])
+
+    terminal_step_names = sorted(
+        step_name for step_name in step_runs if step_name not in upstream_step_names
+    )
+    if not terminal_step_names:
+        return []
+    if len(terminal_step_names) > 1:
+        raise RuntimeError(
+            "Execution output metadata is missing and fallback extraction is "
+            "ambiguous because multiple terminal steps were found."
+        )
+
+    terminal_step_name = terminal_step_names[0]
+    terminal_step = step_runs[terminal_step_name]
+    if not terminal_step.regular_outputs:
+        raise RuntimeError(
+            f"Execution {hydrated_run.id} has no regular outputs on terminal "
+            f"step '{terminal_step_name}'."
+        )
+    if len(terminal_step.regular_outputs) > 1:
+        raise RuntimeError(
+            "Execution output metadata is missing and fallback extraction is "
+            "ambiguous because the terminal step has multiple outputs."
+        )
+
+    output_name = next(iter(terminal_step.regular_outputs))
+    artifact = terminal_step.regular_outputs[output_name]
+    return [artifact.load()]
+
+
+def _extract_flow_result(run: PipelineRunResponse) -> Any:
+    """Extract user-facing flow return value from a finished pipeline run.
+
+    Args:
+        run: The pipeline run.
+
+    Raises:
+        RuntimeError: If run output metadata is missing.
+
+    Returns:
+        The flow result (`None`, a single value, or a tuple of values).
+    """
+    values = _extract_values_from_output_specs(run)
+    if not values:
+        values = _extract_values_from_terminal_steps(run)
+
+    if not values:
+        return None
     if len(values) == 1:
         return values[0]
     return tuple(values)
@@ -280,8 +380,19 @@ class _FlowDefinition:
         self._default_image = image
         self._default_cache = cache
         self._default_retries = _normalize_retries(retries)
+
         wrapped_entrypoint = _wrap_flow_entrypoint(func)
+        source_alias = _pipeline_source_alias_name(func)
+        aliasable_entrypoint = cast(Any, wrapped_entrypoint)
+        aliasable_entrypoint.__name__ = source_alias
+        aliasable_entrypoint.__qualname__ = source_alias
+
         self._pipeline: Pipeline = pipeline(dynamic=True)(wrapped_entrypoint)
+        _register_pipeline_source_alias(
+            func=func,
+            alias=source_alias,
+            pipeline_obj=self._pipeline,
+        )
         update_wrapper(self, func)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
