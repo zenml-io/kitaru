@@ -105,8 +105,8 @@ code, kbd, pre, .font-mono {
    inherit light text colors on the dark background.
    ═══════════════════════════════════════════════════ */
 
-/* Standalone code blocks */
-figure:has(pre) {
+/* Standalone code blocks (> pre ensures PyFunction <figure>s aren't matched) */
+figure:has(> pre) {
   --color-fd-card: #2D2A26;
   --color-fd-secondary: #3A3632;
   --color-fd-muted-foreground: #9E9790;
@@ -118,9 +118,10 @@ figure:has(pre) {
   background: #2D2A26 !important;
 }
 
-/* Tabbed code blocks: darken the entire tabs wrapper
-   (the Tabs container that holds both the tab list and code figures) */
-:has(> [role="tablist"]):has(figure pre) {
+/* Tabbed code blocks: darken the entire tabs wrapper.
+   The > figure > pre chain avoids matching SDK reference tabs where
+   pre is deeply nested inside PyFunction/PySourceCode collapsibles. */
+:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre) {
   --color-fd-card: #2D2A26;
   --color-fd-secondary: #3A3632;
   --color-fd-muted-foreground: #9E9790;
@@ -134,12 +135,12 @@ figure:has(pre) {
 }
 
 /* Tabbed code blocks: divider between tab bar and code */
-:has(> [role="tablist"]):has(figure pre) [role="tablist"] {
+:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre) [role="tablist"] {
   border-bottom: 1px solid #4A4540;
 }
 
 /* Override Shiki inline background to match warm dark */
-figure:has(pre) pre {
+figure:has(> pre) pre {
   background: transparent !important;
 }
 
