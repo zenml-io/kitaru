@@ -5,6 +5,12 @@ on:
     branches: [develop]
   pull_request:
     branches: [develop]
+env:
+  ZENML_ANALYTICS_OPT_IN: false
+  ZENML_LOGGING_VERBOSITY: INFO
+  ZENML_MCP_ANALYTICS_DEV: true
+  AUTO_OPEN_DASHBOARD: false
+  ZENML_ENABLE_RICH_TRACEBACK: false
 jobs:
   lint:
     runs-on: ubuntu-latest
