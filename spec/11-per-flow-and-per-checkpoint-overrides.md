@@ -152,8 +152,10 @@ Examples:
 
 ### LLM model precedence
 
-1. `kitaru.llm(..., model="fast")` — call-time override (alias or concrete model)
-2. stack-defined default model alias (from the `llm_model` stack component)
+1. `kitaru.llm(..., model="fast")` — call-time override (alias or concrete LiteLLM identifier)
+2. locally configured default alias/model (from the local model registry)
+
+Credential resolution is separate from model selection: provider env vars in the execution environment and/or local model registry entries.
 
 ### Retry precedence
 

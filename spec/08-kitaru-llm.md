@@ -87,55 +87,76 @@ This avoids muddy nested checkpoint semantics while still giving visibility in t
 
 `kitaru.llm()` should:
 
-- resolve the model through the provider abstraction layer
-- make one model call
+- resolve the model through the local model registry or as a concrete LiteLLM identifier
+- normalize the prompt into LiteLLM's message format
+- make one model call via `litellm.completion()`
 - create prompt and response artifacts
-- log usage metadata such as tokens, cost, and latency
+- log usage metadata via `kitaru.log()` (tokens, cost, latency, resolved model)
 - return the model's text response
 
 In other words, it is a tracked one-shot model call, not a workflow engine.
 
-## Provider abstraction: `llm_model` stack component
+## Backend engine: LiteLLM
 
-`kitaru.llm()` is a thin wrapper around a ZenML **`llm_model` stack component** that exposes:
+`kitaru.llm()` is a thin wrapper around [LiteLLM](https://docs.litellm.ai/)'s `completion()` API. LiteLLM provides:
 
-- the **chat completion API** — a unified interface to model providers (OpenAI, Anthropic, etc.)
-- the **token cost counting API** — automatic tracking of token usage and costs
+- a **unified chat completion API** across 100+ model providers (OpenAI, Anthropic, Cohere, Bedrock, etc.)
+- **token counting and cost tracking** out of the box
+- **native environment variable support** — LiteLLM reads standard provider env vars like `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.
 
-The `llm_model` component is one of the four to five core components in a Kitaru stack (see [Chapter 4](04-connection-stacks-and-configuration.md)). Model provider credentials and configuration live in the stack, alongside the runner, artifact store, and container registry.
+LiteLLM is the sole backend engine. There is no separate in-house provider abstraction layer.
 
-**Stacks define default LLM model aliases** (e.g. `fast`, `smart`, `default`). These aliases let user code reference models by role rather than specific provider/model name. The stack resolves aliases to concrete model configurations.
+## Local model registry
 
-Most of the heavy lifting for provider abstraction, cost tracking, and model routing happens in ZenML. Kitaru wraps that surface to provide a simpler developer experience.
+Model aliases and optional credential configuration live in **local user config**, independent of stacks. This is managed via the `kitaru model register` CLI command.
 
-What is stable:
+The registry conceptually stores:
 
-- `kitaru.llm()` is the user-facing call surface
-- `model=` accepts either a stack-defined alias or a concrete `provider:model` string
-- cost, token, and latency tracking are core requirements
-- the `llm_model` stack component owns provider credentials and configuration
+```json
+{
+  "aliases": {
+    "fast": { "model": "openai/gpt-4o-mini" },
+    "smart": { "model": "anthropic/claude-sonnet-4-20250514" }
+  },
+  "default": "fast"
+}
+```
 
-What is still being decided:
+The exact on-disk schema and storage path (e.g. `~/.config/kitaru/models.json`) are not frozen yet.
 
-- the exact flavor system for different providers (OpenAI, Anthropic, etc.)
-- whether to build the provider layer in-house or wrap an existing library
-- the interaction between stack-level model config and call-time `model=` overrides
-- how token costs are tracked and stored in the ZenML database (Michael will have opinions on this)
+**Zero-config path:** Users who already have provider environment variables set (e.g. `OPENAI_API_KEY`) can use `kitaru.llm()` without registering anything — LiteLLM reads those env vars natively. The registry adds convenience (aliases, defaults) but is not required.
+
+**Stacks do not own model configuration.** Model aliases and credentials are user-local config, not part of a stack's component list. This keeps stacks focused on execution infrastructure (runner, artifact store, container registry).
 
 ## Model resolution
 
 `model=` may be:
 
-- a **stack-defined model alias** such as `"fast"` or `"smart"` (resolved by the `llm_model` stack component)
-- a concrete provider/model string such as `"openai:gpt-4o"`
+- a **locally registered alias** such as `"fast"` or `"smart"` (resolved through the local model registry)
+- a concrete LiteLLM model identifier such as `"openai/gpt-4o"` or `"anthropic/claude-sonnet-4-20250514"`
 
-Model resolution should happen against the **frozen execution spec**, not ambient runtime globals.
+Resolution logic:
 
-That means:
+1. If `model=` is provided:
+   - If it matches a local alias, resolve alias to concrete LiteLLM model string
+   - Otherwise treat it as a concrete LiteLLM identifier
+2. If `model=` is omitted:
+   - Use the locally configured default alias/model if one exists
+   - Otherwise fail with a clear configuration error
 
-- resume is stable
-- replay provenance is clear
-- the dashboard can show the actual resolved model used
+Credential resolution is separate:
+
+- Provider env vars in the execution environment (read natively by LiteLLM)
+- Optional local credential/config entries from the model registry
+- Future: a ZenML-backed credential source behind the same resolver
+
+**Provenance:** The **resolved concrete model** used for each call must always be recorded as metadata (alongside the alias, if one was used). This ensures replay provenance is clear and dashboards remain auditable, even as aliases change over time.
+
+**Remote execution note:** Model aliases and credentials are user-local. When executing on a remote stack, the remote environment needs the relevant provider credentials (typically via environment variables in the execution environment). The local registry does not automatically propagate secrets to remote runners.
+
+## Future migration path
+
+A future ZenML-backed `llm_model` stack component may later become an additional credential-resolution backend. This would change where credentials are resolved from, but would not change the `kitaru.llm()` API. The migration is an implementation swap behind the same interface.
 
 ## Examples
 
@@ -231,13 +252,16 @@ In practice:
 
 - `kitaru.llm()` is for **one call**, not an agent loop
 - inside a checkpoint, it should not become a nested replay boundary in the MVP
-- model resolution should work through the provider abstraction layer
-- usage metadata should be recorded automatically
+- model resolution works through the local model registry or concrete LiteLLM identifiers
+- usage metadata should be recorded automatically via `kitaru.log()`
 - prompt and response should become typed artifacts
+- the resolved concrete model must always be recorded as metadata for provenance
 
 ## MVP notes
 
 - keep the API narrow and single-call
 - do not overload `kitaru.llm()` with tool loops or conversation state
 - nested-boundary semantics should stay simple: standalone in flow, child event in checkpoint
-- provider/config architecture should remain intentionally flexible — do not fossilize implementation details that are still being decided
+- LiteLLM is the sole backend engine — no in-house provider abstraction
+- model aliases and credentials are user-local config, not stack-owned
+- usage/cost metadata is recorded when available from LiteLLM/provider responses

@@ -145,7 +145,19 @@ kitaru executions cancel kr-a8f3c2
 kitaru executions logs kr-a8f3c2 --follow
 ```
 
-## Tier 3: stack authoring, artifacts, and config (later)
+## Tier 3: model registration, stack authoring, artifacts, and config (later)
+
+### Model registration
+
+Model aliases and optional credentials are managed locally, independent of stacks:
+
+```bash
+kitaru model register fast --model openai/gpt-4o-mini
+kitaru model register smart --model anthropic/claude-sonnet-4-20250514
+kitaru model list
+```
+
+This is **local user config** — it is not synced to a server or tied to a stack. Provider credentials can also come from standard environment variables (e.g. `OPENAI_API_KEY`) which LiteLLM reads natively. The exact flags for provider-specific credential registration are not frozen yet.
 
 ### Stack creation
 

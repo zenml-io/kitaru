@@ -354,28 +354,36 @@ matters — build the most-needed operations first, not the easiest.
 
 ## Phase 12: `kitaru.llm()`
 
-**Goal:** Tracked LLM calls wrapping the ZenML `llm_model` stack component.
+**Goal:** Tracked LLM calls using LiteLLM as the backend engine, with a local model registry for aliases and credentials.
 
 **What to do:**
 - Implement `kitaru.llm(prompt, model=None, system=None, temperature=None, max_tokens=None, name=None)`
 - Two modes based on context:
   - Inside flow (outside checkpoint): creates a synthetic durable call boundary
   - Inside checkpoint: creates a child event (tracked but not a replay boundary)
+- Backend: wrap `litellm.completion()` as the sole provider engine
 - Auto-create artifacts: prompt artifact + response artifact
-- Auto-log metadata: token usage, cost, latency
-- Model resolution: alias handling (`fast`, `smart`) and concrete `provider:model` format
-- Resolve model against the frozen execution spec / stack config
-- Provider abstraction and routing are largely handled by the ZenML `llm_model`
-  stack component — Kitaru wraps it, not reimplements it
+- Auto-log metadata via `kitaru.log()`: token usage, cost, latency, resolved model
+- Model resolution: alias handling (`fast`, `smart`) via local model registry, or
+  concrete LiteLLM identifiers (`openai/gpt-4o`, `anthropic/claude-sonnet-4-20250514`)
+- Implement local model registry:
+  - CLI: `kitaru model register <alias> --model <litellm_model_id>`
+  - CLI: `kitaru model list`
+  - Storage: local user config (e.g. `~/.config/kitaru/models.json`)
+  - Aliases and optional credential config, independent of stacks
+- Zero-config path: provider env vars (`OPENAI_API_KEY`, etc.) work without
+  registration because LiteLLM reads them natively
+- Always record the resolved concrete model as metadata for provenance
 
 **Spec references:** [08-kitaru-llm.md] (full contract),
-[04-connection-stacks-and-configuration.md] (model aliases, llm_model stack component)
+[14-cli-reference.md] (model registration CLI)
 
-**External note:** The `llm_model` ZenML stack component may not exist yet.
-You may need a temporary shim or design spike before this phase.
+**Note:** This phase has no upstream ZenML dependency. LiteLLM + local registry
+is the MVP implementation. A future ZenML `llm_model` stack component may later
+become an additional credential-resolution backend, but it is not needed for this phase.
 
-**Estimated size:** Medium-large. The wrapping is straightforward if the ZenML
-component exists; model resolution is the complex part.
+**Estimated size:** Medium. The LiteLLM wrapping is straightforward; the local
+registry and alias resolution are the main work.
 
 ---
 
@@ -532,7 +540,7 @@ for isolated agent execution.
 
 **What to do:**
 - SDK: stack creation API
-- CLI: `kitaru stack create <name> --runner ... --artifact-store ... [--llm-model ...]`
+- CLI: `kitaru stack create <name> --runner ... --artifact-store ... --container-registry ...`
 - This is NOT a thin ZenML wrapper — it needs a higher-level UX:
   - Map user-friendly flags to ZenML flavors + components + service connectors
   - Assemble the stack from those components
@@ -622,7 +630,7 @@ Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- DONE
 Phase 9  -- Stack selection ------------------------------------------- DONE
 Phase 10 -- Configuration --------------------------------------------- DONE
 Phase 11 -- KitaruClient (execution mgmt first) ---------------------- Medium
-Phase 12 -- kitaru.llm() ---------------------------------------------- Medium (may need upstream)
+Phase 12 -- kitaru.llm() (LiteLLM + local registry) ------------------- Medium
 Phase 13 -- Error handling --------------------------------------------- Medium
 Phase 14 -- CLI commands (tiered) ------------------------------------- Medium
 Phase 15 -- kitaru.wait() + resume ------------------------------------ BLOCKED (ZenML branch)
@@ -653,8 +661,8 @@ If that branch isn't accessible yet:
 2. Stub `wait()` with a clear `NotImplementedError("Requires ZenML wait/resume support")`
 3. Stub `client.executions.input(...)`, `.replay(...)` similarly
 4. When the branch becomes available, come back and implement Phases 15-16
-5. Phase 12 (`kitaru.llm()`) may also need an upstream `llm_model` stack component —
-   if it's not ready, stub the model resolution and hard-code a direct provider call
+5. Phase 12 (`kitaru.llm()`) uses LiteLLM + a local model registry and has no
+   upstream ZenML dependency
 
 ## How to use this plan
 

@@ -81,19 +81,18 @@ If model registration and sandbox registration become separate concepts (see bel
 
 Future work: once model and sandbox registration decisions are made, revisit whether "stack" should be narrowed/renamed to "runtime" to avoid overloading the concept. The naming decision depends on how many things end up living inside vs outside the stack.
 
-### Decide whether models need their own registry
+### Model registry — RESOLVED
 
-The current spec (chapter 8) binds model config to a stack-owned `llm_model` component. Hamza proposed an alternative: a **separate model registration flow**:
+**Decision:** Models use a **local model registry** with LiteLLM as the backend engine. Model config is **not** stack-owned. See updated spec chapter 8.
 
-```
-kitaru model register --type openai --openai_key ABCDEDCEDED
-```
+The MVP uses `kitaru model register` to store aliases and optional credentials locally. Provider env vars (`OPENAI_API_KEY`, etc.) also work as a zero-config path since LiteLLM reads them natively. A future ZenML `llm_model` stack component may later become an additional credential-resolution backend, but it is not part of the MVP.
 
-This would act as a credential/model store independent of stacks. There might be a default type that allows generically adding credentials. In the backend, this could store either a stack component type or even just some secrets with a special prefix in ZenML, so they can always be fetched back.
-
-Alex confirmed the intent: registered models would be "available for use in `kitaru.llm()`" — Hamza: "yeah, it's just a store of credentials."
-
-This affects: credential ownership, alias resolution, model portability across stacks, and CLI shape. Future work: decide between stack-owned `llm_model` vs standalone model registry before implementing `kitaru.llm()`.
+**Remaining future work for the model registry:**
+- Richer registry UX (`kitaru model show`, `kitaru model remove`, `kitaru model test`)
+- Import/export or team-sharing of alias configurations
+- Migration or optional fallback to ZenML-backed credential resolution
+- Secret storage hardening (non-plaintext approaches)
+- How remote/connected environments consume locally defined model settings
 
 ### Decide whether sandbox providers should be registered separately
 
