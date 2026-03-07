@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Generator
 from pathlib import Path
 
@@ -42,6 +43,13 @@ def isolated_zenml_global_config(
     for env_name in list(os.environ):
         if env_name.startswith(ENV_ZENML_STORE_PREFIX):
             monkeypatch.delenv(env_name, raising=False)
+
+    # xdist workers lack __main__.__file__, which ZenML needs for source root
+    main = sys.modules.get("__main__")
+    if main is not None and not getattr(main, "__file__", None):
+        monkeypatch.setattr(
+            main, "__file__", str(Path(__file__).resolve().parent), raising=False
+        )
 
     GlobalConfiguration._reset_instance()
     Client._reset_instance()
