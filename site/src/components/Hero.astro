@@ -55,19 +55,15 @@
 <span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
     plan <span class="op">=</span> <span class="fn">analyze_issue</span>(issue)    <span class="cmt"># cached on replay</span>
     patch <span class="op">=</span> <span class="fn">write_code</span>(plan)      <span class="cmt"># cached on replay</span>
-    tests <span class="op">=</span> <span class="fn">run_tests</span>(patch)      <span class="cmt"># cached on replay</span>
 
     <span class="cmt"># Pauses. Resumes when a human responds.</span>
-    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(
-        schema<span class="op">=</span><span class="var">bool</span>, prompt<span class="op">=</span><span class="str">"Merge this PR?"</span>
-    )
+    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">"Merge this PR?"</span>)
     <span class="kw">if</span> approved:
         <span class="fn">merge</span>(patch)
-    <span class="kw">return</span> tests
+    <span class="kw">return</span> patch
 
-<span class="cmt"># Replay with new inputs — completed steps are cached.</span>
+<span class="cmt"># Replay — completed steps are cached.</span>
 coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>)
-
 <span class="cmt"># Same code, any infra.</span>
 coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"aws-sandbox"</span>)</code></pre>
           </div>
@@ -76,23 +72,16 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
             <pre class="code-pre"><code><span class="kw">import</span> kitaru
 <span class="kw">from</span> kitaru.adapters <span class="kw">import</span> pydantic_ai <span class="kw">as</span> kp
 
-coder <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span class="str">"claude-sonnet-4-6"</span>, tools<span class="op">=</span>[edit, test]))
+<span class="cmt"># Every LLM call + tool use is checkpointed.</span>
+<span class="cmt"># Human approval happens inside the agent loop.</span>
+coder <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span class="str">"claude-sonnet-4-6"</span>, tools<span class="op">=</span>[edit, test, approve]))
 
 <span class="dec">@kitaru.flow</span>
 <span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
-    result <span class="op">=</span> coder.<span class="fn">run_sync</span>(<span class="str">f"Fix: </span>{'{'}issue{'}'}<span class="str">"</span>)
+    <span class="kw">return</span> coder.<span class="fn">run_sync</span>(<span class="str">f"Fix: </span>{'{'}issue{'}'}<span class="str">"</span>).output
 
-    <span class="cmt"># Pauses. Resumes when a human responds.</span>
-    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(
-        schema<span class="op">=</span><span class="var">bool</span>, prompt<span class="op">=</span><span class="str">"Merge this PR?"</span>
-    )
-    <span class="kw">if</span> approved:
-        <span class="fn">merge</span>(result.output)
-    <span class="kw">return</span> result.output
-
-<span class="cmt"># Replay with new inputs — completed steps are cached.</span>
+<span class="cmt"># Replay — completed steps are cached.</span>
 coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>)
-
 <span class="cmt"># Same code, any infra.</span>
 coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"gcp-production"</span>)</code></pre>
           </div>
