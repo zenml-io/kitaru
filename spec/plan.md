@@ -9,9 +9,11 @@ Start at Phase 1 and work forward. Don't skip ahead.
 1. **Easy stuff first.** The early phases are small wins that build momentum.
 2. **SDK before CLI** (except login). The CLI wraps the SDK, so build the SDK first.
 
-**External blocker:** Phases marked with a lock icon require the ZenML
-`feature/pause-pipeline-runs` branch. Skip them until that branch is accessible,
-then come back. There is plenty to build without them.
+**External blocker (updated March 2026):** The ZenML `feature/pause-pipeline-runs`
+branch now has working `wait()` and resume support, so Phase 15 is **unblocked**.
+Phase 16 remains **partially blocked** because the retry CLI command exists but
+doesn't work yet. See the "What to do when you're blocked" section at the bottom
+for current status.
 
 **Ownership boundary:** ZenML owns the hard durability machinery (retry, resume,
 replay, snapshots, divergence detection). Kitaru defines the user-visible contract
@@ -341,8 +343,9 @@ precedence, frozen spec, secrets), [11-per-flow-and-per-checkpoint-overrides.md]
     - `client.artifacts.get(artifact_id)`
     - `artifact.load()` — materialize to Python value
 - Translate ZenML data models into Kitaru's cleaner domain models
-- For Tier 1 methods that depend on the ZenML branch (`input`, `replay`),
-  stub with `NotImplementedError` until the branch is accessible
+- **Updated March 2026:** `input` (resume) now works on the ZenML branch and can
+  be implemented. `replay` and `retry` should remain stubbed — retry CLI exists
+  upstream but doesn't work yet, and replay depends on retry machinery
 
 **Spec references:** [13-client-api.md] (client API surface and **priority order**),
 [18-appendix-glossary.md] (execution, call record, artifact definitions)
@@ -473,7 +476,13 @@ many commands to wire up.
 
 ## Phase 15: `kitaru.wait()` + resume
 
-**Goal:** Durable suspension and resume. **Requires ZenML `feature/pause-pipeline-runs` branch.**
+**Goal:** Durable suspension and resume. **Wraps ZenML `feature/pause-pipeline-runs` branch.**
+
+**Branch status (March 2026):** `zenml.wait(...)` works and pauses an in-progress
+run. Resume works but has two paths:
+- **Pro servers with snapshots:** run auto-resumes when the wait condition is resolved
+- **Non-Pro / local:** users must manually resume via a ZenML CLI command (already exists on the branch)
+- Wait resolution is currently **human input only** (no automated triggers yet)
 
 **What to do:**
 - Implement `kitaru.wait(schema=..., name=..., question=..., timeout=..., metadata=...)`
@@ -485,12 +494,15 @@ many commands to wire up.
   - Invalid input fails validation and leaves the execution in `waiting`
 - Resume happens via a single mechanism surfaced through multiple clients:
   dashboard, CLI, API, Python SDK — all go through `client.executions.input(...)`
+- **Handle the two resume paths:** on Pro servers resume is automatic; on non-Pro /
+  local, Kitaru must surface a manual resume command (wrapping the existing ZenML
+  CLI command) so users don't need to interact with ZenML directly
 - Wait timeout means **resource-release timeout**, not expiration — the execution
   stays waiting even after timeout, but compute may be released
 - Wrap ZenML's wait/resume implementation, don't reimplement
 
 **Spec references:** [07-kitaru-wait.md] (full contract and lifecycle),
-[19-implementation-guide.md] (blocked by ZenML branch)
+[19-implementation-guide.md] (branch capabilities)
 
 **Estimated size:** Large. This is the hardest primitive. Wrap ZenML's implementation,
 don't reimplement.
@@ -501,6 +513,12 @@ don't reimplement.
 
 **Goal:** Create new executions derived from previous ones. **Partially blocked by ZenML branch.**
 
+**Branch status (March 2026):**
+- **Replay:** depends on retry/resume machinery — assess once retry is functional
+- **Retry:** a ZenML CLI command to retry failed runs **exists but does not work yet**.
+  Stub `client.executions.retry(...)` until the upstream fix lands.
+- **Resume/input:** works (see Phase 15)
+
 **What to do:**
 - Client methods:
   - `client.executions.replay(exec_id, from_=..., **flow_inputs, overrides=...)`
@@ -510,7 +528,7 @@ don't reimplement.
 - Flow-object replay: `my_flow.replay(exec_id=..., from_=..., topic="New topic")`
 - CLI commands:
   - `kitaru executions replay <exec_id> --from <call_name> [--input key=val] [--override ...]`
-  - `kitaru executions retry <exec_id>`
+  - `kitaru executions retry <exec_id>` — **stub until ZenML retry command is fixed**
   - `kitaru executions cancel <exec_id>`
 - Replay-point resolution to durable call instance IDs
 - **Divergence detection** is ZenML-backed — Kitaru surfaces clear errors when the
@@ -660,8 +678,8 @@ Phase 11.5-- Secrets surface (wraps ZenML secrets) -------------------- Small-Me
 Phase 12 -- kitaru.llm() (LiteLLM + registry + secrets) --------------- Medium
 Phase 13 -- Error handling --------------------------------------------- Medium
 Phase 14 -- CLI commands (tiered) ------------------------------------- Medium
-Phase 15 -- kitaru.wait() + resume ------------------------------------ BLOCKED (ZenML branch)
-Phase 16 -- Replay + overrides (direct kwargs) ------------------------ BLOCKED (ZenML branch)
+Phase 15 -- kitaru.wait() + resume ------------------------------------ UNBLOCKED (wait+resume work on branch)
+Phase 16 -- Replay + overrides (direct kwargs) ------------------------ PARTIALLY BLOCKED (retry CLI broken)
 Phase 17 -- PydanticAI adapter (incl HITL tools) ---------------------- Medium
 Phase 18 -- Stack creation + sandbox ---------------------------------- Large
 Phase 19 -- Agent-native integrations (MCP + skill) ------------------- Medium
@@ -681,15 +699,27 @@ Phase 20 -- Examples, docs, polish ------------------------------------ Final
 
 ## What to do when you're blocked
 
-Phases 15 and 16 require the ZenML `feature/pause-pipeline-runs` branch.
-If that branch isn't accessible yet:
+**Updated March 2026:** The ZenML `feature/pause-pipeline-runs` branch now has
+working `wait()` and resume. Phase 15 is **unblocked**. Phase 16 is **partially
+blocked** (retry CLI exists but doesn't work yet).
 
-1. Build Phases 1-14 and 17 (plenty of work there)
-2. Stub `wait()` with a clear `NotImplementedError("Requires ZenML wait/resume support")`
-3. Stub `client.executions.input(...)`, `.replay(...)` similarly
-4. When the branch becomes available, come back and implement Phases 15-16
-5. Phase 11.5 (secrets) wraps ZenML's existing secret store — no upstream dependency
-6. Phase 12 (`kitaru.llm()`) uses LiteLLM + a local model registry + ZenML secrets
+### Current blocker status
+
+| Phase | Status | What's blocked |
+|---|---|---|
+| Phase 15 (`kitaru.wait()`) | **Unblocked** | `zenml.wait(...)` works; resume works (auto on Pro, manual elsewhere) |
+| Phase 16 (replay) | **Partially blocked** | Replay depends on retry; retry CLI exists but is broken upstream |
+| Phase 16 (retry) | **Blocked** | ZenML retry CLI command exists but doesn't work yet |
+| Phase 16 (resume/input) | **Unblocked** | Works via `client.executions.input(...)` |
+
+### What to do now
+
+1. **Phase 15 can be built now.** Wrap `zenml.wait(...)` and handle the two resume
+   paths (auto on Pro, manual elsewhere)
+2. **Stub `client.executions.retry(...)`** until the upstream ZenML retry command is fixed
+3. **Replay** should be assessed once retry is functional — it depends on the same machinery
+4. Phase 11.5 (secrets) wraps ZenML's existing secret store — no upstream dependency
+5. Phase 12 (`kitaru.llm()`) uses LiteLLM + a local model registry + ZenML secrets
    for remote credentials — depends on Phase 11.5 but has no upstream ZenML branch dependency
 
 ## How to use this plan

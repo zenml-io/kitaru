@@ -55,12 +55,29 @@ This means the MVP demo uses a Pro-capable ZenML server image presented as the K
 A large portion of the replay / pause / continue / wait functionality is implemented in a ZenML branch:
 
 - **Branch:** `feature/pause-pipeline-runs` on `github.com/zenml-io/zenml`
-- **Status:** Wait/resume already works on this branch
+- **Status:** Wait/resume already works on this branch (see current capabilities below)
 - **Staging workspace:** Michael has a staging workspace in his org with the latest changes (https://staging.cloud.zenml.io/workspaces/pause-resume/projects) (`zenml login pause-resume --pro-api-url https://staging.cloudapi.zenml.io/`) with server URL: `https://b95f9b55-zenml.staging.cloudinfra.zenml.io`
 
-**Implementation guidance:** Start coding everything **except** replay / pause / continue / wait. There is plenty to build outside those features. The wait/resume/replay implementation should be built against the ZenML branch once it is accessible.
+### Current branch capabilities (as of March 2026)
 
-When implementing wait/resume/replay, the Kitaru SDK should look at the ZenML SDK and **defer to / wrap** its logic rather than reimplementing from scratch.
+| Capability | Status | Notes |
+|---|---|---|
+| `zenml.wait(...)` — pause an in-progress run | **Working** | Pauses a running pipeline run |
+| Resume after wait (Pro / snapshot servers) | **Working (auto)** | On remote orchestrators running on servers that support snapshots, the run automatically resumes once the wait condition is resolved |
+| Resume after wait (non-Pro / local) | **Working (manual)** | On non-Pro servers or local orchestrators, users must manually resume via a ZenML CLI command that already exists on the branch |
+| Wait condition resolution | **Human input only** | Currently only resolvable by human input; no webhook/automated triggers yet |
+| Retry failed run (CLI command) | **Exists but broken** | A ZenML CLI command to retry any failed run exists on the branch, but does not work yet |
+
+### Implications for Kitaru implementation
+
+- **`kitaru.wait()` (Phase 15) is unblocked.** The ZenML `wait(...)` primitive works. Kitaru can wrap it now.
+- **Resume has two paths** that Kitaru must handle:
+  - **Auto-resume:** On Pro servers with snapshot execution, the run resumes automatically when input is provided. This is the seamless experience.
+  - **Manual resume:** On non-Pro servers or local orchestrators, the user must trigger resume explicitly. Kitaru should surface this via `kitaru executions resume` (wrapping the existing ZenML CLI command) so users don't need to interact with ZenML directly.
+- **Retry (Phase 16) is partially blocked.** The ZenML retry CLI command exists but doesn't work yet. Kitaru should stub `client.executions.retry(...)` until the upstream fix lands.
+- **Replay** depends on retry/resume machinery and should be assessed once retry is functional.
+
+**Implementation guidance:** `kitaru.wait()` and resume can now be implemented by wrapping the ZenML branch. Retry should remain stubbed until the upstream command is fixed. When implementing, the Kitaru SDK should look at the ZenML SDK and **defer to / wrap** its logic rather than reimplementing from scratch.
 
 ## Implementation order
 

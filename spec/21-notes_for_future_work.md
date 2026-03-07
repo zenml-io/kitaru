@@ -149,6 +149,22 @@ Alex's rationale for 3.12: it's the typing dividing line (modern `type` statemen
 
 **Consensus:** Ship with 3.12+ for MVP, but plan to add 3.11 support eventually. This will require auditing type annotations and any 3.12-specific syntax. The main cost is typing ergonomics (e.g. `type` statement, some PEP 695 features).
 
+### ZenML branch capability status (March 2026)
+
+The `feature/pause-pipeline-runs` branch has the following status:
+
+- **`zenml.wait(...)`** — works, pauses in-progress runs
+- **Resume (Pro/snapshot servers)** — automatic resume when wait condition is resolved
+- **Resume (non-Pro/local)** — manual resume required via ZenML CLI command (exists on branch)
+- **Wait resolution** — human input only (no webhook/automated triggers yet)
+- **Retry failed runs** — ZenML CLI command exists but **does not work yet**
+
+Kitaru implications:
+- `kitaru.wait()` is unblocked and can wrap the ZenML primitive now
+- Kitaru needs to handle the two resume paths (auto vs manual) and expose a user-friendly `kitaru executions resume` command for the manual path
+- `client.executions.retry(...)` should remain stubbed until upstream retry is fixed
+- Future work: automated wait resolution via webhooks/events (currently human-only)
+
 ### Docs: code snippet contrast and sidebar nesting
 
 Two docs issues flagged:
