@@ -18,7 +18,7 @@ handle = my_agent.deploy("Build a CLI tool", stack="aws-sandbox")
 Hamza said the following:
 
 result = my_agent("Build a CLI tool") -> lets get rid of this one
-handle = my_agent.start("Build a CLI tool") -> this is subsumed by execute? or run. i think run is the common one that langgraph uses .. start and execute are probaly not as common
+handle = my_agent.start("Build a CLI tool") -> this is subsumed by execute? or run. i think run is the common one that langgraph uses .. start and execute are probably not as common
 
 ## Config directory when logging in
 
