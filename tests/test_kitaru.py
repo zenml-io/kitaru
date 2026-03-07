@@ -43,6 +43,15 @@ class TestPublicExports:
     def test_connect_exists(self) -> None:
         assert hasattr(kitaru, "connect")
 
+    def test_list_stacks_exists(self) -> None:
+        assert hasattr(kitaru, "list_stacks")
+
+    def test_current_stack_exists(self) -> None:
+        assert hasattr(kitaru, "current_stack")
+
+    def test_use_stack_exists(self) -> None:
+        assert hasattr(kitaru, "use_stack")
+
     def test_kitaru_client_exists(self) -> None:
         assert hasattr(kitaru, "KitaruClient")
 
@@ -50,14 +59,18 @@ class TestPublicExports:
         expected = {
             "FlowHandle",
             "KitaruClient",
+            "StackInfo",
             "checkpoint",
             "configure",
             "connect",
+            "current_stack",
             "flow",
+            "list_stacks",
             "llm",
             "load",
             "log",
             "save",
+            "use_stack",
             "wait",
         }
         assert set(kitaru.__all__) == expected
@@ -154,6 +167,17 @@ class TestImplementedConnectionPrimitive:
     def test_connect_rejects_invalid_urls(self) -> None:
         with pytest.raises(ValueError, match="Invalid Kitaru server URL"):
             kitaru.connect("example.com")
+
+    def test_current_stack_returns_stack_info(self) -> None:
+        with patch("kitaru.config.Client") as client_cls:
+            client_cls.return_value.active_stack_model.id = "stack-prod-id"
+            client_cls.return_value.active_stack_model.name = "prod"
+
+            stack = kitaru.current_stack()
+
+        assert stack.name == "prod"
+        assert stack.id == "stack-prod-id"
+        assert stack.is_active is True
 
 
 class TestPlaceholderBehavior:

@@ -100,11 +100,15 @@ handle = my_agent.start("https://example.com", retries=3, cache=True)
 |---|---|---|
 | `retries` | `0` | Number of automatic retries on failure |
 | `cache` | `True` | Whether checkpoint results can be reused from previous runs |
-| `stack` | `None` | Target execution environment |
+| `stack` | `None` | Target execution environment for this run (overrides the active stack default) |
 | `image` | `None` | Container image for remote execution (string, mapping, or settings object) |
 
 Per-run values override decorator defaults. If you don't pass an override, the
 decorator default applies.
+
+When neither per-run nor decorator `stack` values are set, Kitaru uses your
+active stack. You can inspect or change it with `kitaru stack current` and
+`kitaru stack use <name-or-id>` (or the matching SDK helpers).
 
 ## Rules to know
 

@@ -61,7 +61,14 @@ def test_help_flag_lists_available_commands(
     assert exc_info.value.code == 0
     output = capsys.readouterr().out.lower()
     assert "kitaru" in output
-    for command in ("login", "logout", "status", "info", "log-store"):
+    for command in (
+        "login",
+        "logout",
+        "status",
+        "info",
+        "log-store",
+        "stack",
+    ):
         assert command in output
 
 
@@ -444,6 +451,88 @@ def test_log_store_set_surfaces_validation_errors(
 
     assert exc_info.value.code == 1
     assert "Invalid log-store endpoint" in capsys.readouterr().err
+
+
+def test_stack_list_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru stack list` should render visible stacks and active marker."""
+    with (
+        patch("kitaru.cli.get_available_stacks") as mock_list_stacks,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_stacks.return_value = [
+            SimpleNamespace(id="stack-local-id", name="local", is_active=False),
+            SimpleNamespace(id="stack-prod-id", name="prod", is_active=True),
+        ]
+        app(["stack", "list"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru stacks" in output
+    assert "local: stack-local-id" in output
+    assert "prod: stack-prod-id (active)" in output
+
+
+def test_stack_current_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru stack current` should show active stack details."""
+    with (
+        patch("kitaru.cli.get_current_stack") as mock_current_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_current_stack.return_value = SimpleNamespace(
+            id="stack-prod-id",
+            name="prod",
+            is_active=True,
+        )
+        app(["stack", "current"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru stack" in output
+    assert "Active stack: prod" in output
+    assert "Stack ID: stack-prod-id" in output
+
+
+def test_stack_use_delegates_to_config(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru stack use` should activate and report the selected stack."""
+    with (
+        patch("kitaru.cli.set_active_stack") as mock_use_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_use_stack.return_value = SimpleNamespace(
+            id="stack-prod-id",
+            name="prod",
+            is_active=True,
+        )
+        app(["stack", "use", "prod"])
+
+    assert exc_info.value.code == 0
+    mock_use_stack.assert_called_once_with("prod")
+    output = capsys.readouterr().out
+    assert "Activated stack: prod" in output
+    assert "Stack ID: stack-prod-id" in output
+
+
+def test_stack_use_surfaces_validation_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stack validation errors should surface as CLI-friendly failures."""
+    with (
+        patch(
+            "kitaru.cli.set_active_stack",
+            side_effect=ValueError("Stack name or ID cannot be empty."),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["stack", "use", "prod"])
+
+    assert exc_info.value.code == 1
+    assert "Stack name or ID cannot be empty." in capsys.readouterr().err
 
 
 def test_status_renders_compact_snapshot(

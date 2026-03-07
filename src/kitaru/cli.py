@@ -22,10 +22,20 @@ from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
 from kitaru.config import (
     ResolvedLogStore,
+    StackInfo,
     login_to_server,
     reset_global_log_store,
     resolve_log_store,
     set_global_log_store,
+)
+from kitaru.config import (
+    current_stack as get_current_stack,
+)
+from kitaru.config import (
+    list_stacks as get_available_stacks,
+)
+from kitaru.config import (
+    use_stack as set_active_stack,
 )
 
 SDK_VERSION = get_version("kitaru")
@@ -47,7 +57,12 @@ log_store_app = cyclopts.App(
     name="log-store",
     help="Manage global runtime log-store settings.",
 )
+stack_app = cyclopts.App(
+    name="stack",
+    help="Inspect and switch the active stack.",
+)
 app.command(log_store_app)
+app.command(stack_app)
 
 
 @dataclass
@@ -356,6 +371,28 @@ def _log_store_detail(snapshot: ResolvedLogStore) -> str:
     return f"Effective backend: {snapshot.backend} (from {snapshot.source} settings)"
 
 
+def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru stack list`."""
+    if not stacks:
+        return [("Stacks", "none found")]
+
+    return [
+        (
+            stack.name,
+            f"{stack.id}{' (active)' if stack.is_active else ''}",
+        )
+        for stack in stacks
+    ]
+
+
+def _current_stack_rows(stack: StackInfo) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru stack current`."""
+    return [
+        ("Active stack", stack.name),
+        ("Stack ID", stack.id),
+    ]
+
+
 def _render_plain_snapshot(
     title: str,
     rows: list[tuple[str, str]],
@@ -543,6 +580,47 @@ def reset() -> None:
     _print_success(
         "Cleared global log-store override.",
         detail=_log_store_detail(snapshot),
+    )
+
+
+@stack_app.command
+def list_() -> None:
+    """List stacks visible to the current user."""
+    try:
+        stacks = get_available_stacks()
+    except Exception as exc:  # pragma: no cover - exercised via CLI behavior
+        _exit_with_error(str(exc))
+
+    _emit_snapshot("Kitaru stacks", _stack_list_rows(stacks))
+
+
+@stack_app.command
+def current() -> None:
+    """Show the currently active stack."""
+    try:
+        stack = get_current_stack()
+    except Exception as exc:  # pragma: no cover - exercised via CLI behavior
+        _exit_with_error(str(exc))
+
+    _emit_snapshot("Kitaru stack", _current_stack_rows(stack))
+
+
+@stack_app.command
+def use(
+    stack: Annotated[
+        str,
+        Parameter(help="Stack name or ID to activate."),
+    ],
+) -> None:
+    """Set the active stack by name or ID."""
+    try:
+        selected_stack = set_active_stack(stack)
+    except Exception as exc:  # pragma: no cover - exercised via CLI behavior
+        _exit_with_error(str(exc))
+
+    _print_success(
+        f"Activated stack: {selected_stack.name}",
+        detail=f"Stack ID: {selected_stack.id}",
     )
 
 

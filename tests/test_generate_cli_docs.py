@@ -46,6 +46,7 @@ class TestBuildCommandTree:
             "log-store",
             "login",
             "logout",
+            "stack",
             "status",
         ]
 
@@ -208,6 +209,7 @@ class TestWriteDocsTree:
             "log-store",
             "login",
             "logout",
+            "stack",
             "status",
         ]
 
@@ -235,12 +237,18 @@ class TestWriteDocsTree:
             assert not (output_dir / command / "index.mdx").exists()
             assert not (output_dir / command / "meta.json").exists()
 
-        # log-store has nested subcommands, so it should be a directory
-        assert (output_dir / "log-store" / "index.mdx").exists()
-        assert (output_dir / "log-store" / "meta.json").exists()
+        # log-store and stack have nested subcommands, so they should be directories
+        for command in ("log-store", "stack"):
+            assert (output_dir / command / "index.mdx").exists()
+            assert (output_dir / command / "meta.json").exists()
+
         for command in ("set", "show", "reset"):
             assert (output_dir / "log-store" / f"{command}.mdx").exists()
             assert f"log-store/{command}.mdx" in files
+
+        for command in ("current", "list", "use"):
+            assert (output_dir / "stack" / f"{command}.mdx").exists()
+            assert f"stack/{command}.mdx" in files
 
     def test_nested_subcommands_create_directories(self, output_dir: Path) -> None:
         import cyclopts
