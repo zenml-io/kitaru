@@ -115,6 +115,20 @@ kitaru executions replay kr-a8f3c2 \
   --override wait.approve=false
 ```
 
+Flow inputs can be passed directly:
+
+```bash
+kitaru executions replay kr-a8f3c2 \
+  --from write_draft \
+  --input topic='"New topic"'
+```
+
+The exact CLI shape can be refined, but the semantics should remain:
+
+- replay creates a new execution
+- the old execution is unchanged
+- overrides replace selected reused outcomes
+
 ### Cancel
 
 ```bash

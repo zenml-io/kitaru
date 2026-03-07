@@ -185,13 +185,13 @@ replayed = client.executions.replay(
 )
 ```
 
-Or conceptually:
+Or with new flow inputs passed directly:
 
 ```python
 replayed = ex.replay(
     from_="write_draft",
+    topic="New topic",
     overrides={
-        "flow.input.topic": "New topic",
         "checkpoint.research": "Edited notes",
     },
 )
@@ -212,8 +212,8 @@ client.executions.input(exec_id, wait="review", value=...)
 # Retry: same execution, recover from failure
 client.executions.retry(exec_id)
 
-# Replay: new execution, optionally with changes
-client.executions.replay(exec_id, from_="write_draft", overrides={...})
+# Replay: new execution, optionally with new inputs or overrides
+client.executions.replay(exec_id, from_="write_draft", topic="New topic")
 ```
 
 These three operations map directly to the execution model's three distinct concepts.
@@ -294,11 +294,11 @@ client = KitaruClient()
 # Find the latest successful run
 prev = client.executions.latest(flow="content_pipeline", status="completed")
 
-# Replay from the draft step with one override
+# Replay from the draft step with a new input
 new_ex = client.executions.replay(
     prev.exec_id,
     from_="write_draft",
-    overrides={"flow.input.topic": "AI observability"},
+    topic="AI observability",
 )
 
 # Inspect the new execution

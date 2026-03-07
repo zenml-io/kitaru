@@ -59,7 +59,7 @@ Configuration can come from multiple sources. More specific sources override les
 
 ### Sources (most specific wins)
 
-1. **Invocation-time overrides** — `my_flow.start(..., stack="prod")`
+1. **Invocation-time overrides** — `my_flow.deploy(..., stack="prod")` or `my_flow.start(..., stack="prod")`
 2. **Decorator defaults** — `@kitaru.flow(stack="prod")`
 3. **`kitaru.configure()` calls** — explicit runtime configuration
 4. **Environment variables** — `KITARU_STACK`, `KITARU_SERVER_URL`, etc.
@@ -256,7 +256,7 @@ More advanced stack authoring can remain a platform or admin concern.
 
 ### Stack selection precedence
 
-1. `my_flow.start(..., stack="prod")` — invocation-time override
+1. `my_flow.deploy(..., stack="prod")` or `my_flow.start(..., stack="prod")` — invocation-time override
 2. `@kitaru.flow(stack="prod")` — decorator default
 3. environment variable override
 4. active user-selected stack (from global config)

@@ -122,6 +122,9 @@ For example:
 
 ```python
 handle = my_flow.start(task="demo", stack="local")
+
+# Or equivalently, using .deploy() when targeting remote infra:
+handle = my_flow.deploy(task="demo", stack="aws-sandbox")
 ```
 
 This lets the caller choose execution-time behavior without editing the decorator.
@@ -142,7 +145,7 @@ Examples:
 
 ### Flow stack precedence
 
-1. `my_flow.start(..., stack="prod")` — invocation-time override
+1. `my_flow.deploy(..., stack="prod")` or `my_flow.start(..., stack="prod")` — invocation-time override
 2. `@kitaru.flow(stack="prod")` — decorator default
 3. selected active stack
 4. implicit `local`
