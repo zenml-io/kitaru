@@ -168,7 +168,7 @@ Kitaru implications:
 ### Docs: code snippet contrast and sidebar nesting
 
 Two docs issues flagged:
-- Code snippets are hard to read in **light mode** — contrast/colors need adjustment
+- ~~Code snippets are hard to read in **light mode** — contrast/colors need adjustment~~ **FIXED**: Switched Shiki themes to `github-light` + `github-dark` and forced code blocks to use the dark variant via `var(--shiki-dark)`, giving high-contrast dark code blocks on the light site.
 - The left sidebar has a **double nesting** issue: "Core Concepts > Core Concepts" looks weird
 
-Future work: fix both in the FumaDocs theme/config. These are cosmetic but affect first impressions.
+Remaining work: fix the sidebar nesting issue in the FumaDocs theme/config.
