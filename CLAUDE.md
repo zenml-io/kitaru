@@ -113,7 +113,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, core connection/login CLI paths, and `kitaru log-store set/show/reset` are functional. Other primitives remain in progress.
+> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), core connection/login CLI paths, `kitaru stack list/current/use`, and `kitaru log-store set/show/reset` are functional. Other primitives remain in progress.
 
 ### Current MVP primitives
 
@@ -125,6 +125,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.log()` | Implemented |
 | `kitaru.save()` | Implemented |
 | `kitaru.load()` | Implemented |
+| Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
 
 ### Key design patterns
 

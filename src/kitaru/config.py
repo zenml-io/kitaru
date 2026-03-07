@@ -15,6 +15,9 @@ Configuration precedence (highest to lowest):
 
 Phase 7b adds global log-store configuration helpers used by
 ``kitaru log-store set/show/reset``.
+
+Phase 9 adds active stack selection helpers used by
+``kitaru stack list/current/use``.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ import importlib
 import logging
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -35,6 +38,7 @@ from pydantic import BaseModel, ValidationError, field_validator
 from zenml.cli.login import connect_to_pro_server as _zenml_connect_to_pro_server
 from zenml.cli.login import connect_to_server as _zenml_connect_to_server
 from zenml.cli.login import is_pro_server as _zenml_is_pro_server
+from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.exceptions import AuthorizationException
 from zenml.utils import io_utils, yaml_utils
@@ -126,6 +130,14 @@ class _KitaruGlobalConfig(BaseModel):
 
     version: int = 1
     log_store: LogStoreOverride | None = None
+
+
+class StackInfo(BaseModel):
+    """Public stack information exposed by Kitaru SDK helpers."""
+
+    id: str
+    name: str
+    is_active: bool
 
 
 def _normalize_server_url(server_url: str) -> str:
@@ -426,6 +438,114 @@ def reset_global_log_store() -> ResolvedLogStore:
     _write_kitaru_global_config(_KitaruGlobalConfig())
 
     return resolve_log_store()
+
+
+def _normalize_stack_selector(name_or_id: str) -> str:
+    """Validate and normalize a stack selector provided by a user."""
+    normalized_selector = name_or_id.strip()
+    if not normalized_selector:
+        raise ValueError("Stack name or ID cannot be empty.")
+
+    return normalized_selector
+
+
+def _stack_info_from_model(
+    stack_model: Any,
+    *,
+    active_stack_id: str | None,
+) -> StackInfo:
+    """Convert a runtime stack model to Kitaru's public stack shape."""
+    try:
+        stack_id = str(stack_model.id)
+        stack_name = str(stack_model.name)
+    except AttributeError as exc:
+        raise RuntimeError(
+            "Unable to read stack information from the configured runtime."
+        ) from exc
+
+    return StackInfo(
+        id=stack_id,
+        name=stack_name,
+        is_active=stack_id == active_stack_id,
+    )
+
+
+def _iter_available_stacks(client: Client) -> Iterable[Any]:
+    """Return all available stacks from the runtime, including later pages."""
+    first_page = client.list_stacks()
+    if not isinstance(first_page, Iterable) or isinstance(first_page, (str, bytes)):
+        raise RuntimeError(
+            "Unexpected stack list response from the configured runtime."
+        )
+
+    stack_models = list(first_page)
+
+    total_pages_raw = getattr(first_page, "total_pages", 1)
+    page_size_raw = getattr(first_page, "max_size", 1)
+    try:
+        total_pages = int(total_pages_raw)
+    except (TypeError, ValueError):
+        total_pages = 1
+
+    try:
+        page_size = int(page_size_raw)
+    except (TypeError, ValueError):
+        page_size = 1
+
+    for page_number in range(2, total_pages + 1):
+        page_result = client.list_stacks(page=page_number, size=page_size)
+        if not isinstance(page_result, Iterable) or isinstance(
+            page_result, (str, bytes)
+        ):
+            raise RuntimeError(
+                "Unexpected stack list response from the configured runtime."
+            )
+        stack_models.extend(page_result)
+
+    return stack_models
+
+
+def current_stack() -> StackInfo:
+    """Return the currently active stack.
+
+    The active stack is managed by the underlying runtime and persisted in the
+    runtime's global user configuration.
+    """
+    active_stack_model = Client().active_stack_model
+    active_stack_id = str(active_stack_model.id)
+    return _stack_info_from_model(
+        active_stack_model,
+        active_stack_id=active_stack_id,
+    )
+
+
+def list_stacks() -> list[StackInfo]:
+    """List stacks visible to the current user and mark the active one."""
+    client = Client()
+    active_stack_id = str(client.active_stack_model.id)
+
+    return [
+        _stack_info_from_model(stack_model, active_stack_id=active_stack_id)
+        for stack_model in _iter_available_stacks(client)
+    ]
+
+
+def use_stack(name_or_id: str) -> StackInfo:
+    """Set the active stack and return the resulting active stack info.
+
+    Args:
+        name_or_id: Stack name or stack ID.
+
+    Returns:
+        Information about the newly active stack.
+
+    Raises:
+        ValueError: If the selector is empty.
+    """
+    selector = _normalize_stack_selector(name_or_id)
+    client = Client()
+    client.activate_stack(selector)
+    return current_stack()
 
 
 def _login_to_server_target(

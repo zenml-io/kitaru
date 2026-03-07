@@ -1,0 +1,64 @@
+---
+title: Select an Active Stack
+description: List, inspect, and switch the active stack used by Kitaru executions
+---
+
+This guide shows how to choose the active stack for your Kitaru environment.
+
+## What the active stack does
+
+The active stack is your default execution target.
+
+When you run a flow without passing `stack=...`, Kitaru uses the active stack.
+
+## Show the current stack
+
+```bash
+kitaru stack current
+```
+
+## List available stacks
+
+```bash
+kitaru stack list
+```
+
+The list includes each stack ID and marks the active one.
+
+## Switch to another stack
+
+```bash
+kitaru stack use production
+```
+
+You can pass either a stack name or a stack ID.
+
+The selected stack is persisted as your default until you switch it again.
+
+## Use the Python SDK
+
+```python
+import kitaru
+
+print(kitaru.current_stack())
+print(kitaru.list_stacks())
+kitaru.use_stack("production")
+```
+
+Each stack entry is returned as `StackInfo(id, name, is_active)`.
+
+## Precedence with flow-level stack overrides
+
+The active stack is a default. Per-flow overrides still win:
+
+```python
+handle = my_flow.start(..., stack="gpu-cluster")
+```
+
+In this case, `gpu-cluster` is used for that run even if your active stack is
+something else.
+
+## Related pages
+
+- [Flows](/concepts/flows)
+- [CLI stack commands](/cli/stack)

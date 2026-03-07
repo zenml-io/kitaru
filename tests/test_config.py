@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, call, patch
 
 import pytest
 from zenml.config.global_config import GlobalConfiguration
@@ -11,10 +14,31 @@ from zenml.utils import yaml_utils
 from kitaru.config import (
     KITARU_LOG_STORE_BACKEND_ENV,
     KITARU_LOG_STORE_ENDPOINT_ENV,
+    current_stack,
+    list_stacks,
     reset_global_log_store,
     resolve_log_store,
     set_global_log_store,
+    use_stack,
 )
+
+
+class _FakeStackPage:
+    """Simple iterable page used to test stack pagination behavior."""
+
+    def __init__(
+        self,
+        *,
+        items: list[SimpleNamespace],
+        total_pages: int,
+        max_size: int,
+    ) -> None:
+        self.items = items
+        self.total_pages = total_pages
+        self.max_size = max_size
+
+    def __iter__(self) -> Iterator[SimpleNamespace]:
+        return iter(self.items)
 
 
 def _kitaru_config_path() -> Path:
@@ -160,3 +184,81 @@ def test_set_overwrites_invalid_persisted_config() -> None:
 
     assert snapshot.backend == "datadog"
     assert snapshot.source == "global user config"
+
+
+def test_current_stack_returns_active_stack_info() -> None:
+    """current_stack should expose the currently active stack."""
+    active_stack = SimpleNamespace(id="stack-local-id", name="local")
+    client_mock = SimpleNamespace(active_stack_model=active_stack)
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        stack = current_stack()
+
+    assert stack.id == "stack-local-id"
+    assert stack.name == "local"
+    assert stack.is_active is True
+
+
+def test_list_stacks_marks_active_stack() -> None:
+    """list_stacks should flag only the active stack in the returned list."""
+    local = SimpleNamespace(id="stack-local-id", name="local")
+    prod = SimpleNamespace(id="stack-prod-id", name="prod")
+    client_mock = SimpleNamespace(
+        active_stack_model=prod,
+        list_stacks=lambda: [local, prod],
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        stacks = list_stacks()
+
+    assert [(stack.name, stack.is_active) for stack in stacks] == [
+        ("local", False),
+        ("prod", True),
+    ]
+
+
+def test_list_stacks_fetches_all_pages() -> None:
+    """list_stacks should collect stacks from all pages exposed by the runtime."""
+    local = SimpleNamespace(id="stack-local-id", name="local")
+    staging = SimpleNamespace(id="stack-staging-id", name="staging")
+    prod = SimpleNamespace(id="stack-prod-id", name="prod")
+    client_mock = Mock()
+    client_mock.active_stack_model = prod
+    client_mock.list_stacks.side_effect = [
+        _FakeStackPage(items=[local], total_pages=2, max_size=1),
+        _FakeStackPage(items=[staging, prod], total_pages=2, max_size=1),
+    ]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        stacks = list_stacks()
+
+    assert [stack.name for stack in stacks] == ["local", "staging", "prod"]
+    assert [stack.is_active for stack in stacks] == [False, False, True]
+    client_mock.list_stacks.assert_has_calls([call(), call(page=2, size=1)])
+
+
+def test_use_stack_switches_active_stack() -> None:
+    """use_stack should delegate activation and return the new active stack."""
+    local_stack = SimpleNamespace(id="stack-local-id", name="local")
+    prod_stack = SimpleNamespace(id="stack-prod-id", name="prod")
+    client_mock = SimpleNamespace(active_stack_model=local_stack)
+
+    def _activate_stack(_: str) -> None:
+        client_mock.active_stack_model = prod_stack
+
+    activate_stack = Mock(side_effect=_activate_stack)
+    client_mock.activate_stack = activate_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        selected = use_stack("prod")
+
+    activate_stack.assert_called_once_with("prod")
+    assert selected.name == "prod"
+    assert selected.id == "stack-prod-id"
+    assert selected.is_active is True
+
+
+def test_use_stack_rejects_empty_selector() -> None:
+    """use_stack should fail fast on empty stack names/IDs."""
+    with pytest.raises(ValueError, match="cannot be empty"):
+        use_stack("   ")

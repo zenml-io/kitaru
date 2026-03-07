@@ -180,3 +180,12 @@ class TestExtractApi:
         # CLI and adapters should never appear in filtered output
         assert "cli" not in filtered.get("modules", {})
         assert "adapters" not in filtered.get("modules", {})
+
+    def test_filtered_extraction_includes_stack_helpers(self) -> None:
+        raw = extract_api("kitaru")
+        filtered = _filter_module(raw, is_root=True)
+
+        exported_functions = set(filtered.get("functions", {}).keys())
+        assert {"list_stacks", "current_stack", "use_stack"}.issubset(
+            exported_functions
+        )

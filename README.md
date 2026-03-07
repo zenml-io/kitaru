@@ -6,7 +6,7 @@ Kitaru makes agent workflows **persistent, replayable, and observable** using a 
 
 ## What works today
 
-Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, the Phase 5 first working workflow milestone is complete, `kitaru.log()` attaches structured metadata to executions/checkpoints, and `kitaru.save()` / `kitaru.load()` now support explicit artifact persistence and cross-execution reuse inside checkpoints. Runtime log storage also has a global default/override model via `kitaru log-store ...`.
+Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, the Phase 5 first working workflow milestone is complete, `kitaru.log()` attaches structured metadata to executions/checkpoints, and `kitaru.save()` / `kitaru.load()` now support explicit artifact persistence and cross-execution reuse inside checkpoints. Runtime log storage also has a global default/override model via `kitaru log-store ...`, and you can now inspect/switch your active stack with `kitaru stack ...` (or `kitaru.list_stacks()`, `kitaru.current_stack()`, `kitaru.use_stack()`).
 
 ### SDK primitives
 
@@ -95,6 +95,10 @@ kitaru login <server> --api-key <key>
 kitaru logout                 Log out and clear stored auth state
 kitaru status                 Show connection state and active stack
 kitaru info                   Show detailed environment information
+
+kitaru stack list             List visible stacks
+kitaru stack current          Show the active stack
+kitaru stack use <name-or-id> Switch active stack
 
 kitaru log-store show         Show effective global runtime log backend
 kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]

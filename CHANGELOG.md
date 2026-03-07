@@ -13,11 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Artifact taxonomy validation for explicit `kitaru.save(..., type=...)` values (`prompt`, `response`, `context`, `input`, `output`, `blob`)
 - Phase 8 example workflow: `examples/flow_with_artifacts.py`
 - Global log-store configuration with `kitaru log-store set/show/reset`
+- Active stack selection in SDK via `kitaru.list_stacks()`, `kitaru.current_stack()`, and `kitaru.use_stack()`
+- Active stack CLI commands: `kitaru stack list/current/use`
 - Persisted Kitaru user config (`kitaru.yaml`) for log-store override state
 - Environment override support for runtime log-store resolution
 
 ### Changed
-- Updated README, CLAUDE guide, docs landing pages, and getting-started docs to reflect implemented `kitaru.save()` / `kitaru.load()` behavior
+- Updated README, CLAUDE guide, and docs pages to reflect shipped stack selection and current implemented primitive status
 
 ## [0.1.0] - 2026-03-06
 
