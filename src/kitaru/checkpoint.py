@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable, Sequence
+from contextlib import ExitStack
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 
@@ -18,7 +19,17 @@ from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
 from zenml.steps.step_decorator import step
 
-from kitaru.runtime import _checkpoint_scope, _is_inside_flow
+from kitaru.runtime import (
+    _checkpoint_scope,
+    _flow_scope,
+    _get_current_checkpoint_id,
+    _get_current_execution_id,
+    _get_current_flow,
+    _get_zenml_checkpoint_id,
+    _get_zenml_execution_id,
+    _get_zenml_flow_name,
+    _is_inside_flow,
+)
 
 _CHECKPOINT_OUTSIDE_FLOW_ERROR = "Checkpoints can only run inside a @kitaru.flow."
 _CHECKPOINT_NESTED_ERROR = (
@@ -86,10 +97,27 @@ def _wrap_entrypoint(
 
     @wraps(func)
     def _wrapped(*args: Any, **kwargs: Any) -> Any:
-        with _checkpoint_scope(
-            name=checkpoint_name,
-            checkpoint_type=checkpoint_type,
-        ):
+        current_flow = _get_current_flow()
+        execution_id = _get_current_execution_id() or _get_zenml_execution_id()
+        checkpoint_id = _get_current_checkpoint_id() or _get_zenml_checkpoint_id()
+
+        with ExitStack() as scope_stack:
+            if current_flow is None:
+                scope_stack.enter_context(
+                    _flow_scope(
+                        name=_get_zenml_flow_name(),
+                        execution_id=execution_id,
+                    )
+                )
+
+            scope_stack.enter_context(
+                _checkpoint_scope(
+                    name=checkpoint_name,
+                    checkpoint_type=checkpoint_type,
+                    execution_id=execution_id,
+                    checkpoint_id=checkpoint_id,
+                )
+            )
             return func(*args, **kwargs)
 
     return _wrapped

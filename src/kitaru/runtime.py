@@ -10,14 +10,18 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import NoReturn
+from typing import Any, NoReturn
+
+from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
+from zenml.steps.step_context import StepContext
 
 
 @dataclass(frozen=True)
 class _FlowScope:
     """Internal runtime context for the currently executing flow."""
 
-    name: str
+    name: str | None
+    execution_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,8 @@ class _CheckpointScope:
 
     name: str
     type: str | None
+    execution_id: str | None = None
+    checkpoint_id: str | None = None
 
 
 _CURRENT_FLOW_SCOPE: ContextVar[_FlowScope | None] = ContextVar(
@@ -38,10 +44,78 @@ _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
 )
 
 
+_PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
+
+
+def _to_optional_str(value: Any) -> str | None:
+    """Convert IDs from ZenML objects into optional strings."""
+    if value is None:
+        return None
+    return str(value)
+
+
+def _normalize_flow_name(value: Any) -> str | None:
+    """Normalize flow names derived from ZenML runtime context."""
+    if value is None:
+        return None
+
+    flow_name = str(value)
+    if not flow_name:
+        return None
+
+    if flow_name.startswith(_PIPELINE_SOURCE_ALIAS_PREFIX):
+        flow_name = flow_name.removeprefix(_PIPELINE_SOURCE_ALIAS_PREFIX)
+
+    return flow_name or None
+
+
+def _get_zenml_execution_id() -> str | None:
+    """Resolve the active execution ID from ZenML runtime contexts."""
+    if step_context := StepContext.get():
+        return _to_optional_str(getattr(step_context.pipeline_run, "id", None))
+
+    if run_context := DynamicPipelineRunContext.get():
+        return _to_optional_str(getattr(run_context.run, "id", None))
+
+    return None
+
+
+def _get_zenml_checkpoint_id() -> str | None:
+    """Resolve the active checkpoint invocation ID from ZenML step context."""
+    if step_context := StepContext.get():
+        return _to_optional_str(getattr(step_context.step_run, "id", None))
+
+    return None
+
+
+def _get_zenml_flow_name() -> str | None:
+    """Resolve the active flow name from ZenML runtime contexts, if available."""
+    if step_context := StepContext.get():
+        pipeline = getattr(step_context.pipeline_run, "pipeline", None)
+        if flow_name := _normalize_flow_name(getattr(pipeline, "name", None)):
+            return flow_name
+
+    if (run_context := DynamicPipelineRunContext.get()) and (
+        flow_name := _normalize_flow_name(getattr(run_context.pipeline, "name", None))
+    ):
+        return flow_name
+
+    return None
+
+
 @contextmanager
-def _flow_scope(*, name: str) -> Iterator[None]:
+def _flow_scope(
+    *,
+    name: str | None,
+    execution_id: str | None = None,
+) -> Iterator[None]:
     """Set flow runtime scope for the active execution context."""
-    token = _CURRENT_FLOW_SCOPE.set(_FlowScope(name=name))
+    resolved_execution_id = (
+        execution_id if execution_id is not None else _get_zenml_execution_id()
+    )
+    token = _CURRENT_FLOW_SCOPE.set(
+        _FlowScope(name=name, execution_id=resolved_execution_id)
+    )
     try:
         yield
     finally:
@@ -49,10 +123,27 @@ def _flow_scope(*, name: str) -> Iterator[None]:
 
 
 @contextmanager
-def _checkpoint_scope(*, name: str, checkpoint_type: str | None) -> Iterator[None]:
+def _checkpoint_scope(
+    *,
+    name: str,
+    checkpoint_type: str | None,
+    execution_id: str | None = None,
+    checkpoint_id: str | None = None,
+) -> Iterator[None]:
     """Set checkpoint runtime scope for the active execution context."""
+    resolved_execution_id = (
+        execution_id if execution_id is not None else _get_zenml_execution_id()
+    )
+    resolved_checkpoint_id = (
+        checkpoint_id if checkpoint_id is not None else _get_zenml_checkpoint_id()
+    )
     token = _CURRENT_CHECKPOINT_SCOPE.set(
-        _CheckpointScope(name=name, type=checkpoint_type)
+        _CheckpointScope(
+            name=name,
+            type=checkpoint_type,
+            execution_id=resolved_execution_id,
+            checkpoint_id=resolved_checkpoint_id,
+        )
     )
     try:
         yield
@@ -78,6 +169,29 @@ def _get_current_checkpoint() -> _CheckpointScope | None:
 def _is_inside_checkpoint() -> bool:
     """Check whether code is currently running inside a checkpoint."""
     return _get_current_checkpoint() is not None
+
+
+def _get_current_execution_id() -> str | None:
+    """Get the current execution ID from active Kitaru scopes, if available."""
+    if (
+        checkpoint_scope := _get_current_checkpoint()
+    ) and checkpoint_scope.execution_id:
+        return checkpoint_scope.execution_id
+
+    if (flow_scope := _get_current_flow()) and flow_scope.execution_id:
+        return flow_scope.execution_id
+
+    return None
+
+
+def _get_current_checkpoint_id() -> str | None:
+    """Get the current checkpoint invocation ID from active Kitaru scope."""
+    if (
+        checkpoint_scope := _get_current_checkpoint()
+    ) and checkpoint_scope.checkpoint_id:
+        return checkpoint_scope.checkpoint_id
+
+    return None
 
 
 def _not_implemented(name: str) -> NoReturn:
