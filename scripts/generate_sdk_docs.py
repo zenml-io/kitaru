@@ -42,7 +42,7 @@ PUBLIC_MODULES = ["kitaru"]
 
 # Submodules to exclude from the reference even if they appear in a
 # public module's tree. These have their own docs or are not public.
-EXCLUDED_SUBMODULES = {"cli", "adapters"}
+EXCLUDED_SUBMODULES = {"cli", "adapters", "runtime"}
 
 
 def _is_private(name: str) -> bool:
