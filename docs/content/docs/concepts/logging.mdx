@@ -1,0 +1,128 @@
+---
+title: Logging and Metadata
+description: Attach structured data to executions and checkpoints
+---
+
+Kitaru has two separate observability channels. Understanding the difference
+between them avoids confusion:
+
+| Channel | What it does | How you use it |
+|---|---|---|
+| **Structured metadata** | Key-value data attached to a specific execution or checkpoint | `kitaru.log(key=value)` in Python |
+| **Runtime log storage** | Backend configuration for where runtime logs are sent | `kitaru log-store ...` in the CLI |
+
+This page focuses on structured metadata via `kitaru.log()`. For runtime log
+storage configuration, see
+[Configure Runtime Log Storage](/getting-started/log-store).
+
+## Attaching metadata with `kitaru.log()`
+
+Call `kitaru.log()` with keyword arguments to attach structured metadata:
+
+```python
+import kitaru
+
+@kitaru.checkpoint
+def call_model(prompt: str) -> str:
+    response = model.generate(prompt)
+    kitaru.log(
+        tokens=response.usage.total_tokens,
+        cost=response.usage.cost,
+        model=response.model,
+    )
+    return response.text
+```
+
+You can call `kitaru.log()` multiple times — metadata accumulates rather than
+replacing previous entries.
+
+## How targeting works
+
+`kitaru.log()` is **scope-sensitive**. It automatically detects where it is
+called and attaches metadata to the right target:
+
+```
+inside a checkpoint  →  metadata attaches to that checkpoint
+inside a flow only   →  metadata attaches to the execution
+outside a flow       →  raises RuntimeError
+```
+
+This means you can log at both levels in the same workflow:
+
+```python
+@kitaru.checkpoint
+def write_draft(topic: str) -> str:
+    draft = f"Draft about {topic}."
+    kitaru.log(draft_cost={"usd": 0.001})       # → checkpoint metadata
+    kitaru.log(model="demo-model", latency_ms=120)  # → checkpoint metadata
+    return draft
+
+@kitaru.flow
+def writing_agent(topic: str) -> str:
+    kitaru.log(topic=topic, stage="started")     # → execution metadata
+    draft = write_draft(topic)
+    kitaru.log(stage="completed")                # → execution metadata
+    return draft
+```
+
+Execution-level and checkpoint-level metadata remain separate — they do not mix
+together.
+
+## Repeated keys and merging behavior
+
+When you log the same key multiple times in the same scope, the behavior depends
+on the value type:
+
+| Value type | Behavior |
+|---|---|
+| **Dictionary** | Values are merged (keys from both calls are combined) |
+| **Scalar** (string, number, etc.) | The latest value wins |
+
+For example:
+
+```python
+@kitaru.checkpoint
+def tracked_step() -> str:
+    kitaru.log(cost={"usd": 0.001})
+    kitaru.log(cost={"tokens": 42})
+    # cost metadata is merged: {"usd": 0.001, "tokens": 42}
+
+    kitaru.log(status="draft")
+    kitaru.log(status="final")
+    # status metadata resolves to "final" (latest scalar wins)
+    return "done"
+```
+
+## What values are accepted
+
+Metadata values should be **JSON-serializable**:
+
+- Strings, numbers, booleans
+- Lists and dictionaries
+- Nested combinations of the above
+
+Standard keys like `cost`, `tokens`, `latency`, and `model` are common
+conventions, but you can use any key name that makes sense for your workflow.
+
+## Runtime log storage (separate system)
+
+Runtime log storage is a different system from structured metadata. It controls
+where runtime logs are sent and is configured via the CLI, not via
+`kitaru.log()`.
+
+The precedence for runtime log storage is:
+
+1. **Environment variables** (highest priority)
+2. **Global user config** (set via `kitaru log-store set`)
+3. **Built-in default** (the `artifact-store` backend)
+
+For full details, see [Configure Runtime Log Storage](/getting-started/log-store).
+
+## Next steps
+
+- Learn how executions run and surface results in the
+  [Execution Model](/concepts/execution-model)
+- See the full API in the
+  [Logging Reference](/reference/python/logging)
+- Configure runtime log backends with
+  [Log Store Setup](/getting-started/log-store)

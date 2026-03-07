@@ -3,6 +3,8 @@
   "pages": [
     "---Getting Started---",
     "getting-started",
+    "---Core Concepts---",
+    "concepts",
     "---Reference---",
     "cli",
     "reference/python",
