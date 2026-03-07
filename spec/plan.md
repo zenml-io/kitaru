@@ -317,7 +317,7 @@ precedence, frozen spec, secrets), [11-per-flow-and-per-checkpoint-overrides.md]
 
 ---
 
-## Phase 11: `KitaruClient` — execution management first
+## Phase 11: `KitaruClient` — execution management first --- DONE
 
 **Goal:** Programmatic API for managing and inspecting executions.
 
@@ -355,7 +355,7 @@ matters — build the most-needed operations first, not the easiest.
 
 ---
 
-## Phase 11.5: Secrets surface
+## Phase 11.5: Secrets surface --- DONE
 
 **Goal:** Wrap ZenML's centralized secret store with a Kitaru-shaped CLI surface. This unblocks remote credential resolution for `kitaru.llm()`.
 
@@ -673,8 +673,8 @@ Phase 7b -- Global log store ------------------------------------------ DONE
 Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- DONE
 Phase 9  -- Stack selection ------------------------------------------- DONE
 Phase 10 -- Configuration --------------------------------------------- DONE
-Phase 11  -- KitaruClient (execution mgmt first) ---------------------- Medium
-Phase 11.5-- Secrets surface (wraps ZenML secrets) -------------------- Small-Medium
+Phase 11  -- KitaruClient (execution mgmt first) ---------------------- DONE
+Phase 11.5-- Secrets surface (wraps ZenML secrets) -------------------- DONE
 Phase 12 -- kitaru.llm() (LiteLLM + registry + secrets) --------------- Medium
 Phase 13 -- Error handling --------------------------------------------- Medium
 Phase 14 -- CLI commands (tiered) ------------------------------------- Medium
