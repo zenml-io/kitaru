@@ -63,7 +63,7 @@
     <span class="kw">return</span> patch
 
 <span class="cmt"># Replay — completed steps are cached.</span>
-coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>)
+coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>, issue<span class="op">=</span><span class="str">"New bug"</span>)
 <span class="cmt"># Same code, any infra.</span>
 coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"aws-sandbox"</span>)</code></pre>
           </div>
@@ -81,7 +81,7 @@ coder <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span clas
     <span class="kw">return</span> coder.<span class="fn">run_sync</span>(<span class="str">f"Fix: </span>{'{'}issue{'}'}<span class="str">"</span>).output
 
 <span class="cmt"># Replay — completed steps are cached.</span>
-coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>)
+coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>, issue<span class="op">=</span><span class="str">"New bug"</span>)
 <span class="cmt"># Same code, any infra.</span>
 coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"gcp-production"</span>)</code></pre>
           </div>
