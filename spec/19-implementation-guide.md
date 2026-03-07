@@ -56,7 +56,7 @@ A large portion of the replay / pause / continue / wait functionality is impleme
 
 - **Branch:** `feature/pause-pipeline-runs` on `github.com/zenml-io/zenml`
 - **Status:** Wait/resume already works on this branch
-- **Staging workspace:** Michael has a staging workspace in his org with the latest changes
+- **Staging workspace:** Michael has a staging workspace in his org with the latest changes (https://staging.cloud.zenml.io/workspaces/pause-resume/projects) (`zenml login pause-resume --pro-api-url https://staging.cloudapi.zenml.io/`) with server URL: `https://b95f9b55-zenml.staging.cloudinfra.zenml.io`
 
 **Implementation guidance:** Start coding everything **except** replay / pause / continue / wait. There is plenty to build outside those features. The wait/resume/replay implementation should be built against the ZenML branch once it is accessible.
 
