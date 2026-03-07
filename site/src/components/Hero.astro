@@ -57,7 +57,7 @@
     patch <span class="op">=</span> <span class="fn">write_code</span>(plan)      <span class="cmt"># cached on replay</span>
 
     <span class="cmt"># Pauses. Resumes when a human responds.</span>
-    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">"Merge this PR?"</span>)
+    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, question<span class="op">=</span><span class="str">"Merge this PR?"</span>)
     <span class="kw">if</span> approved:
         <span class="fn">merge</span>(patch)
     <span class="kw">return</span> patch

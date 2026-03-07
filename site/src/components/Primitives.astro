@@ -5,8 +5,8 @@
 <section class="primitives-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
   <div class="section-inner">
     <span class="section-eyebrow" data-reveal>The entire API</span>
-    <h2 class="section-title" data-reveal data-reveal-delay="1">Six primitives. That's the whole SDK.</h2>
-    <p class="section-desc" data-reveal data-reveal-delay="2">No DSL. No config language. No new abstractions to learn. Six Python functions that give your agents crash recovery, human oversight, and production deployment.</p>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Eight primitives. That's the whole SDK.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2">No DSL. No config language. No new abstractions to learn. Eight Python functions that give your agents crash recovery, human oversight, and production deployment.</p>
 
     <div class="primitives-grid" id="primitivesGrid">
       <div class="prim-card">
@@ -23,11 +23,19 @@
       </div>
       <div class="prim-card">
         <code class="prim-sig">wait()</code>
-        <span class="prim-desc">Suspend for human input, webhook, or time</span>
+        <span class="prim-desc">Suspend for human input — schema-driven forms, enums, webhooks</span>
       </div>
       <div class="prim-card">
         <code class="prim-sig">log()</code>
         <span class="prim-desc">Attach metadata — cost, tokens, quality</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">save()</code>
+        <span class="prim-desc">Persist named artifacts inside a checkpoint</span>
+      </div>
+      <div class="prim-card">
+        <code class="prim-sig">load()</code>
+        <span class="prim-desc">Read artifacts from a previous execution</span>
       </div>
       <div class="prim-card">
         <code class="prim-sig">configure()</code>
@@ -40,7 +48,7 @@
 <style>
   .primitives-grid {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 16px;
     margin-top: 48px;
   }
@@ -59,11 +67,13 @@
   }
 
   .primitives-grid.visible .prim-card:nth-child(1) { transition-delay: 0s; }
-  .primitives-grid.visible .prim-card:nth-child(2) { transition-delay: 0.08s; }
-  .primitives-grid.visible .prim-card:nth-child(3) { transition-delay: 0.16s; }
-  .primitives-grid.visible .prim-card:nth-child(4) { transition-delay: 0.24s; }
-  .primitives-grid.visible .prim-card:nth-child(5) { transition-delay: 0.32s; }
-  .primitives-grid.visible .prim-card:nth-child(6) { transition-delay: 0.40s; }
+  .primitives-grid.visible .prim-card:nth-child(2) { transition-delay: 0.06s; }
+  .primitives-grid.visible .prim-card:nth-child(3) { transition-delay: 0.12s; }
+  .primitives-grid.visible .prim-card:nth-child(4) { transition-delay: 0.18s; }
+  .primitives-grid.visible .prim-card:nth-child(5) { transition-delay: 0.24s; }
+  .primitives-grid.visible .prim-card:nth-child(6) { transition-delay: 0.30s; }
+  .primitives-grid.visible .prim-card:nth-child(7) { transition-delay: 0.36s; }
+  .primitives-grid.visible .prim-card:nth-child(8) { transition-delay: 0.42s; }
 
   .primitives-grid.visible .prim-card {
     opacity: 1;
@@ -89,13 +99,7 @@
     font-weight: 300;
   }
 
-  @media (max-width: 900px) {
-    .primitives-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .primitives-grid {
       grid-template-columns: repeat(2, 1fr);
     }
