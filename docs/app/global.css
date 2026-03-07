@@ -100,20 +100,42 @@ code, kbd, pre, .font-mono {
 
 /* ═══════════════════════════════════════════════════
    Code Blocks
-   Scope dark-friendly tokens onto the figure so the
-   copy button, tab triggers, and title bar all inherit
-   light text colors on the dark background.
+   Scope dark-friendly tokens onto code containers so
+   the copy button, tab triggers, and title bar all
+   inherit light text colors on the dark background.
    ═══════════════════════════════════════════════════ */
 
+/* Standalone code blocks */
 figure:has(pre) {
-  --color-fd-card: #1A1714;
-  --color-fd-secondary: #252220;
+  --color-fd-card: #2D2A26;
+  --color-fd-secondary: #3A3632;
   --color-fd-muted-foreground: #9E9790;
   --color-fd-accent-foreground: #E8E4DE;
-  --color-fd-border: #3A3530;
+  --color-fd-border: #4A4540;
   --color-fd-ring: #F17829;
-  border-color: #3A3530 !important;
-  background: #1A1714 !important;
+  border: none !important;
+  border-radius: 11px !important;
+  background: #2D2A26 !important;
+}
+
+/* Tabbed code blocks: darken the entire tabs wrapper
+   (the Tabs container that holds both the tab list and code figures) */
+:has(> [role="tablist"]):has(figure pre) {
+  --color-fd-card: #2D2A26;
+  --color-fd-secondary: #3A3632;
+  --color-fd-muted-foreground: #9E9790;
+  --color-fd-accent-foreground: #E8E4DE;
+  --color-fd-primary: #F17829;
+  --color-fd-border: #4A4540;
+  --color-fd-ring: #F17829;
+  border: none !important;
+  border-radius: 11px !important;
+  background: #2D2A26 !important;
+}
+
+/* Tabbed code blocks: divider between tab bar and code */
+:has(> [role="tablist"]):has(figure pre) [role="tablist"] {
+  border-bottom: 1px solid #4A4540;
 }
 
 /* Override Shiki inline background to match warm dark */
