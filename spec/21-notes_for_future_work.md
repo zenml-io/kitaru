@@ -25,4 +25,7 @@ handle = my_agent.start("Build a CLI tool") -> this is subsumed by execute? or r
 - btw i can see that in phase 2 you have named the config directory still zenml, and we can see the active project which isnt a concept we've exposed in kitaru. 
 - default project should be used and the config path either hidden or the name kitaru used
 
-## 
+## Nice to haves
+
+- Make the step names look a bit nicer or have some sort of metadata in the step metadata which we can extract and use on the kitaru UI?
+- Swallow or have our own terminal logging for when we run a flow?
