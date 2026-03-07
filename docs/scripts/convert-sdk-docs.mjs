@@ -54,6 +54,10 @@ console.log(`Converting ${mod.name} API to MDX...`);
 const files = convert(mod, { baseUrl: `${baseUrl}/reference/python` });
 console.log(`Generated ${files.length} MDX file(s)`);
 
+// Flatten singleton module directories into flat files before writing.
+// This prevents redundant sidebar nesting (e.g. "artifacts" → "artifacts").
+flattenSingletonPaths(files);
+
 // Clean previous output
 if (existsSync(outputDir)) {
   await rm(outputDir, { recursive: true });
@@ -66,6 +70,59 @@ await write(files, { outDir: outputDir });
 await generateMetaFiles(files, outputDir);
 
 console.log(`Wrote ${files.length} MDX files + meta.json to ${outputDir}`);
+
+/**
+ * Flatten singleton module directories into flat files.
+ *
+ * When a module directory contains only its own index.mdx and no other
+ * descendants, rewrite its path from `root/module/index.mdx` to
+ * `root/module.mdx`. This prevents redundant sidebar nesting where
+ * clicking "artifacts" just reveals another "artifacts" entry.
+ *
+ * Mutates file objects in place.
+ */
+function flattenSingletonPaths(files) {
+  // Group files by their directory (after stripping the root module prefix,
+  // matching what write() does with .slice(1))
+  const dirContents = new Map();
+  for (const f of files) {
+    const parts = f.path.split("/").slice(1); // strip root module
+    const dir = parts.slice(0, -1).join("/") || ".";
+    if (!dirContents.has(dir)) {
+      dirContents.set(dir, []);
+    }
+    dirContents.get(dir).push(f);
+  }
+
+  // A directory is flattenable if:
+  // 1. It contains exactly one file (its own index.mdx)
+  // 2. No other directory is nested under it
+  const allDirs = new Set(dirContents.keys());
+
+  for (const [dir, dirFiles] of dirContents) {
+    if (dir === ".") continue;
+    if (dirFiles.length !== 1) continue;
+
+    const file = dirFiles[0];
+    const strippedPath = file.path.split("/").slice(1).join("/");
+    if (!strippedPath.endsWith("/index.mdx")) continue;
+
+    // Check no nested subdirectories exist under this dir
+    const hasNestedDirs = [...allDirs].some(
+      (d) => d !== dir && d.startsWith(dir + "/"),
+    );
+    if (hasNestedDirs) continue;
+
+    // Flatten: root/module/index.mdx → root/module.mdx
+    const rootPrefix = file.path.split("/")[0];
+    const moduleName = dir.split("/").pop();
+    const parentDir = dir.split("/").slice(0, -1).join("/");
+    const newPath = parentDir
+      ? `${rootPrefix}/${parentDir}/${moduleName}.mdx`
+      : `${rootPrefix}/${moduleName}.mdx`;
+    file.path = newPath;
+  }
+}
 
 /**
  * Generate meta.json files for the reference section sidebar.

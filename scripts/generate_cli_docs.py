@@ -301,25 +301,31 @@ def write_docs_tree(root: CommandDoc, output_dir: Path) -> list[str]:
     created: list[str] = []
 
     def _write_command(
-        cmd: CommandDoc, dir_path: Path, *, is_root: bool = False
+        cmd: CommandDoc, parent_dir: Path, *, is_root: bool = False
     ) -> None:
-        dir_path.mkdir(parents=True, exist_ok=True)
+        if is_root or cmd.subcommands:
+            # Directory node: has children, so needs index.mdx + meta.json
+            dir_path = parent_dir if is_root else parent_dir / cmd.slug
+            dir_path.mkdir(parents=True, exist_ok=True)
 
-        # Write the command's own page
-        page_path = dir_path / "index.mdx"
-        page_path.write_text(render_command_page(cmd, is_root=is_root))
-        created.append(str(page_path.relative_to(output_dir)))
+            page_path = dir_path / "index.mdx"
+            page_path.write_text(render_command_page(cmd, is_root=is_root))
+            created.append(str(page_path.relative_to(output_dir)))
 
-        # Write meta.json
-        title = "CLI Reference" if is_root else cmd.invocation
-        meta = render_meta(title, cmd.subcommands, default_open=is_root)
-        meta_path = dir_path / "meta.json"
-        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
-        created.append(str(meta_path.relative_to(output_dir)))
+            title = "CLI Reference" if is_root else cmd.invocation
+            meta = render_meta(title, cmd.subcommands, default_open=is_root)
+            meta_path = dir_path / "meta.json"
+            meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+            created.append(str(meta_path.relative_to(output_dir)))
 
-        # Recurse into subcommands
-        for sub in cmd.subcommands:
-            _write_command(sub, dir_path / sub.slug)
+            for sub in cmd.subcommands:
+                _write_command(sub, dir_path)
+        else:
+            # Leaf node: no children, write as flat .mdx file
+            parent_dir.mkdir(parents=True, exist_ok=True)
+            page_path = parent_dir / f"{cmd.slug}.mdx"
+            page_path.write_text(render_command_page(cmd, is_root=False))
+            created.append(str(page_path.relative_to(output_dir)))
 
     _write_command(root, output_dir, is_root=True)
     return created

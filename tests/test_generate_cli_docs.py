@@ -37,11 +37,16 @@ class TestBuildCommandTree:
         assert tree.invocation == "kitaru"
         assert tree.description
 
-    def test_root_has_no_subcommands_currently(self) -> None:
+    def test_root_has_phase_two_subcommands(self) -> None:
         from kitaru.cli import app
 
         tree = build_command_tree(app)
-        assert tree.subcommands == []
+        assert [sub.name for sub in tree.subcommands] == [
+            "info",
+            "login",
+            "logout",
+            "status",
+        ]
 
     def test_handles_subcommands(self) -> None:
         import cyclopts
@@ -196,7 +201,7 @@ class TestWriteDocsTree:
 
         meta = json.loads((output_dir / "meta.json").read_text())
         assert meta["title"] == "CLI Reference"
-        assert "index" in meta["pages"]
+        assert meta["pages"] == ["index", "info", "login", "logout", "status"]
 
     def test_frontmatter_present_in_generated_page(self, output_dir: Path) -> None:
         from kitaru.cli import app
@@ -208,6 +213,19 @@ class TestWriteDocsTree:
         assert content.startswith("---\n")
         assert "title:" in content
         assert "description:" in content
+
+    def test_leaf_subcommands_generate_flat_files(self, output_dir: Path) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        files = write_docs_tree(tree, output_dir)
+
+        for command in ("info", "login", "logout", "status"):
+            assert (output_dir / f"{command}.mdx").exists()
+            assert f"{command}.mdx" in files
+            # No directory or meta.json for leaf commands
+            assert not (output_dir / command / "index.mdx").exists()
+            assert not (output_dir / command / "meta.json").exists()
 
     def test_nested_subcommands_create_directories(self, output_dir: Path) -> None:
         import cyclopts
@@ -223,9 +241,12 @@ class TestWriteDocsTree:
         tree = build_command_tree(app)
         write_docs_tree(tree, output_dir)
 
+        # Parent with children remains a directory
         assert (output_dir / "agent" / "index.mdx").exists()
         assert (output_dir / "agent" / "meta.json").exists()
-        assert (output_dir / "agent" / "run" / "index.mdx").exists()
+        # Leaf child becomes a flat file, not a nested directory
+        assert (output_dir / "agent" / "run.mdx").exists()
+        assert not (output_dir / "agent" / "run" / "index.mdx").exists()
 
 
 class TestRenderMeta:
