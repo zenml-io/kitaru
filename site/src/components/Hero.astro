@@ -298,6 +298,32 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
       max-width: 100%;
     }
   }
+
+  @media (max-width: 900px) {
+    .hero-left, .hero-right {
+      min-width: 0;
+      overflow: hidden;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .hero-section {
+      padding-top: 72px !important;
+      padding-bottom: 40px !important;
+    }
+
+    .hero-grid { gap: 28px; }
+
+    .hero-badge { font-size: 0.7rem; margin-bottom: 20px; }
+
+    .code-pre {
+      font-size: 0.7rem;
+      padding: 16px 14px;
+      line-height: 1.6;
+    }
+
+    .code-tab { font-size: 0.62rem; padding: 3px 10px; }
+  }
 </style>
 
 <script>
