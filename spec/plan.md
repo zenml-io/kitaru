@@ -278,7 +278,7 @@ selection, stack selection precedence), [14-cli-reference.md] (stack CLI tier)
 
 ---
 
-## Phase 10: Configuration
+## Phase 10: Configuration --- DONE
 
 **Goal:** Unified configuration model with clear precedence.
 
@@ -620,7 +620,7 @@ Phase 7  -- kitaru.log() ---------------------------------------------- DONE
 Phase 7b -- Global log store ------------------------------------------ DONE
 Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- DONE
 Phase 9  -- Stack selection ------------------------------------------- DONE
-Phase 10 -- Configuration --------------------------------------------- Medium
+Phase 10 -- Configuration --------------------------------------------- DONE
 Phase 11 -- KitaruClient (execution mgmt first) ---------------------- Medium
 Phase 12 -- kitaru.llm() ---------------------------------------------- Medium (may need upstream)
 Phase 13 -- Error handling --------------------------------------------- Medium
