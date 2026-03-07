@@ -156,6 +156,7 @@ Kitaru will emit OpenTelemetry spans. It will **not** own the tracing backend â€
 
 ## Commits and PRs
 
+- **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally â€” do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, links, and tests.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
 - **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
