@@ -170,6 +170,15 @@ The CLI uses [cyclopts](https://cyclopts.readthedocs.io/) (`src/kitaru/cli.py`).
 - When testing CLI commands, always pass an explicit arg list: `app(["--help"])`, never bare `app()` (which reads `sys.argv`)
 - CLI commands raise `SystemExit(0)` on success — wrap in `pytest.raises(SystemExit)` in tests
 
+### CLI output styling
+
+CLI output uses [Rich](https://rich.readthedocs.io/) for styled terminal output with a **dual-mode pattern**: Rich panels/colors for interactive terminals, plain text for non-TTY output (pipes, CI, tests). The `_is_interactive()` helper controls mode selection.
+
+- Use `_emit_snapshot()` for key/value views (status, info), `_print_success()` for success messages, `_exit_with_error()` for errors
+- Use `rich.text.Text` objects for user-supplied values — never interpolate them into Rich markup strings (avoids `[`/`]` misinterpretation)
+- Create `Console()` lazily inside helpers, not at module level (pytest replaces streams after import)
+- Tests use `capsys` and assert on plain-text substrings — the non-TTY path keeps this stable
+
 ## Conventions
 
 - Python 3.12+
