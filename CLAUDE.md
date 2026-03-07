@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Kitaru?
 
-Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
+Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `save`, `load`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
@@ -17,7 +17,7 @@ src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapter stubs (not yet implemented)
 tests/                # pytest tests
-examples/             # Runnable SDK examples (Phase 5 first working flow)
+examples/             # Runnable SDK examples (Phase 5/7/8 milestones)
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -113,7 +113,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, core connection/login CLI paths, and `kitaru log-store set/show/reset` are functional. Other primitives remain in progress.
+> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, core connection/login CLI paths, and `kitaru log-store set/show/reset` are functional. Other primitives remain in progress.
 
 ### Current MVP primitives
 
@@ -123,8 +123,8 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `@kitaru.checkpoint` | Implemented |
 | `kitaru.wait()` | Scaffolded (not yet implemented) |
 | `kitaru.log()` | Implemented |
-| `kitaru.save()` | Scaffolded (not yet implemented) |
-| `kitaru.load()` | Scaffolded (not yet implemented) |
+| `kitaru.save()` | Implemented |
+| `kitaru.load()` | Implemented |
 
 ### Key design patterns
 

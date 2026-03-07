@@ -6,7 +6,7 @@ Kitaru makes agent workflows **persistent, replayable, and observable** using a 
 
 ## What works today
 
-Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, the Phase 5 first working workflow milestone is complete, and `kitaru.log()` now attaches structured metadata to executions/checkpoints. Runtime log storage now has a global default/override model via `kitaru log-store ...`.
+Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, the Phase 5 first working workflow milestone is complete, `kitaru.log()` attaches structured metadata to executions/checkpoints, and `kitaru.save()` / `kitaru.load()` now support explicit artifact persistence and cross-execution reuse inside checkpoints. Runtime log storage also has a global default/override model via `kitaru log-store ...`.
 
 ### SDK primitives
 
@@ -68,6 +68,22 @@ You can also run the integration test for this example:
 uv run pytest tests/test_phase5_example.py
 ```
 
+### Run the artifact save/load workflow
+
+The repository includes a runnable Phase 8 example at
+`examples/flow_with_artifacts.py`.
+
+```bash
+uv sync --extra local
+uv run python -m examples.flow_with_artifacts
+```
+
+You can also run the integration test for this example:
+
+```bash
+uv run pytest tests/test_phase8_artifacts_example.py
+```
+
 ### CLI
 
 ```
@@ -85,13 +101,11 @@ kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]
 kitaru log-store reset        Clear global runtime log backend override
 ```
 
-### Planned primitives (scaffolded, not yet implemented)
+### Primitives still in progress
 
 | Primitive | Purpose |
 |---|---|
 | `kitaru.wait()` | Suspend a flow until external input arrives (requires ZenML server support) |
-| `kitaru.save()` | Persist a named artifact inside a checkpoint |
-| `kitaru.load()` | Load a named artifact from a previous execution |
 | `kitaru.llm()` | Tracked LLM calls with automatic artifact and metadata capture |
 
 ## Development

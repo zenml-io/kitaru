@@ -9,7 +9,7 @@ src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapter stubs (not yet implemented)
 tests/                # pytest tests
-examples/             # Runnable SDK examples (Phase 5 first working flow)
+examples/             # Runnable SDK examples (Phase 5/7/8 milestones)
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)

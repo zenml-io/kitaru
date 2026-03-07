@@ -182,12 +182,12 @@ class TestPlaceholderBehavior:
         with pytest.raises(NotImplementedError, match="llm"):
             kitaru.llm("hello")
 
-    def test_save_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="save"):
+    def test_save_requires_checkpoint_context(self) -> None:
+        with pytest.raises(RuntimeError, match=r"inside a @kitaru\.checkpoint"):
             kitaru.save("name", "value")
 
-    def test_load_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="load"):
+    def test_load_requires_checkpoint_context(self) -> None:
+        with pytest.raises(RuntimeError, match=r"inside a @kitaru\.checkpoint"):
             kitaru.load("exec-123", "name")
 
     def test_log_requires_flow_context(self) -> None:
