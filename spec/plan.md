@@ -249,7 +249,7 @@ loading needs care.
 
 ---
 
-## Phase 9: Stack selection
+## Phase 9: Stack selection --- DONE
 
 **Goal:** Users can list, switch, and check their active stack.
 
@@ -619,7 +619,7 @@ Phase 6  -- Runtime context ------------------------------------------- DONE
 Phase 7  -- kitaru.log() ---------------------------------------------- DONE
 Phase 7b -- Global log store ------------------------------------------ DONE
 Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- DONE
-Phase 9  -- Stack selection ------------------------------------------- Easy win
+Phase 9  -- Stack selection ------------------------------------------- DONE
 Phase 10 -- Configuration --------------------------------------------- Medium
 Phase 11 -- KitaruClient (execution mgmt first) ---------------------- Medium
 Phase 12 -- kitaru.llm() ---------------------------------------------- Medium (may need upstream)
