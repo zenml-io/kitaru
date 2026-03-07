@@ -226,9 +226,20 @@ A stack determines things like:
 - local vs remote execution
 - where artifacts and execution journal data live
 - what runtime capabilities are available
-- default LLM model aliases (e.g. `fast`, `smart`)
 
-Stacks define **default LLM model aliases** and may include components for runner, artifact store, container registry, and LLM model. A stack is not the same thing as app config.
+Stacks include components for runner, artifact store, and container registry. A stack is not the same thing as app config.
+
+**Note:** LLM model configuration (aliases, credentials) is managed through the local model registry, not through stacks. See **Model registry** and **Model alias** below.
+
+## Model registry
+
+The **model registry** is user-local configuration that stores LLM model aliases and optional provider credentials. It is managed via `kitaru model register` and is independent of stack selection.
+
+The registry allows `kitaru.llm()` to resolve aliases like `fast` or `smart` to concrete LiteLLM model identifiers. It is stored on the user's machine, not in a stack or on the server.
+
+## Model alias
+
+A **model alias** is a short name (e.g. `fast`, `smart`) that maps to a concrete LiteLLM model identifier (e.g. `openai/gpt-4o-mini`). Aliases are defined in the local model registry and let user code reference models by role rather than specific provider/model name.
 
 ## App config
 

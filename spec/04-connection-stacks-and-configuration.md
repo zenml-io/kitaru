@@ -137,20 +137,17 @@ A **stack** is a named execution target — a bundle of infrastructure component
 
 ### Stack components
 
-Kitaru exposes four to five core components:
+Kitaru stacks focus on execution infrastructure:
 
 | Component | What it covers | ZenML mapping |
 | --- | --- | --- |
 | **Runner** | Where and how code executes — combines orchestration, step execution, and optionally sandboxed execution | Orchestrator + Step Operator + Sandbox |
 | **Artifact store** | Where artifacts, checkpoint outputs, execution journal data, and logs are persisted | Artifact Store |
 | **Container registry** | Where built images are pushed and pulled from | Container Registry |
-| **LLM model** | Model provider configuration used by `kitaru.llm()` — exposes the chat completion API and token cost counting | New ZenML component |
 
-A possible fifth component (e.g. sandbox as a standalone component separate from runner) may be added as the architecture solidifies.
+A possible fourth component (e.g. sandbox as a standalone component separate from runner) may be added as the architecture solidifies.
 
-### Default LLM model aliases
-
-Stacks define **default LLM model aliases** (e.g. `fast`, `smart`, `default`). These aliases let user code reference models by role rather than specific provider/model name. The stack resolves aliases to concrete model configurations.
+**Note:** LLM model configuration is **not** part of a stack. Model aliases and credentials are managed through the local model registry (`kitaru model register`) and are independent of stack selection. See [Chapter 8](08-kitaru-llm.md) for details.
 
 ### Stack-first approach
 
