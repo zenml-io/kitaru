@@ -122,3 +122,37 @@ The basic log-store configuration (`kitaru log-store set/show/reset`) is impleme
 Hamza wants Kitaru's terminal output to have its own distinct look and feel, different from ZenML: "I'd also like logs of kitaru to have a certain theme and feel different from zenml. By logs I mean what gets printed out when you run a flow... 'steps' should not be shown... I imagine a really sexy and more modern checkpoint by checkpoint interface."
 
 The existing "Nice to haves" section above mentions this briefly, but Hamza's vision is more specific: a modern, checkpoint-by-checkpoint progress display that completely hides the ZenML step abstraction underneath.
+
+### Import style: `@flow` / `@checkpoint` instead of `@kitaru.flow` / `@kitaru.checkpoint`
+
+Hamza's preference: `from kitaru import flow, checkpoint` then use `@flow` and `@checkpoint` directly, rather than the current `@kitaru.flow` / `@kitaru.checkpoint` style. This is a cosmetic API decision but affects every code example in the spec and docs.
+
+Future work: decide on the canonical import style and update all examples accordingly. Both styles can coexist (the module-level `kitaru.flow` is just an attribute), but the spec and docs should be consistent about which style is recommended.
+
+### Artifacts in Kitaru are fundamentally different from ZenML artifacts
+
+Hamza: "The notion of artifacts in kitaru needs to be meaningfully different from artifacts in zenml. In zenml artifacts usually are pandas dataframes, models etc, in kitaru they will be dicts/json/pydantic objects. That means we can easily show them by default in the dashboard and diff them and do all sorts of things with them that we couldn't do in a general way in zenml."
+
+This is an important product distinction. Because Kitaru artifacts are structured data (JSON/dicts/Pydantic models) rather than opaque blobs (DataFrames, ML models), the dashboard can:
+- Show artifact contents inline by default
+- Diff artifacts between executions or replay runs
+- Enable structured search/filtering over artifact values
+- Render artifacts without needing custom materializers
+
+Future work: make this distinction explicit in the artifact system design, dashboard rendering spec, and materializer strategy. The default serialization path should optimize for JSON-friendly types rather than the general-purpose materializer zoo that ZenML needs.
+
+### Python version support: eventually target 3.11+
+
+Current spec targets Python 3.12+ only. Hamza pushed back: "I would like same Python support as zenml (which I believe is >=3.10). A lot of users don't have 3.12." He noted LangGraph requires 3.10+, Temporal supports 3.8+.
+
+Alex's rationale for 3.12: it's the typing dividing line (modern `type` statement, cleaner generics syntax). Hamza accepted 3.12 for now but would have preferred 3.11.
+
+**Consensus:** Ship with 3.12+ for MVP, but plan to add 3.11 support eventually. This will require auditing type annotations and any 3.12-specific syntax. The main cost is typing ergonomics (e.g. `type` statement, some PEP 695 features).
+
+### Docs: code snippet contrast and sidebar nesting
+
+Two docs issues flagged:
+- Code snippets are hard to read in **light mode** — contrast/colors need adjustment
+- The left sidebar has a **double nesting** issue: "Core Concepts > Core Concepts" looks weird
+
+Future work: fix both in the FumaDocs theme/config. These are cosmetic but affect first impressions.
