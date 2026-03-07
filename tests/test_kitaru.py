@@ -225,6 +225,7 @@ class TestPlaceholderBehavior:
         assert snapshot.cache is False
         assert snapshot.retries == 2
 
-    def test_client_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="KitaruClient"):
-            kitaru.KitaruClient()
+    def test_client_exposes_namespaces(self) -> None:
+        client = kitaru.KitaruClient()
+        assert hasattr(client, "executions")
+        assert hasattr(client, "artifacts")
