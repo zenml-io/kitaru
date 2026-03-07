@@ -51,48 +51,32 @@
           <div class="code-tab-content active" id="tab-hitl">
             <pre class="code-pre"><code><span class="kw">import</span> kitaru
 
-<span class="dec">@kitaru.checkpoint</span>
-<span class="kw">def</span> <span class="fn">research</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>: ...
-
-<span class="dec">@kitaru.checkpoint</span>
-<span class="kw">def</span> <span class="fn">write_draft</span>(notes: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>: ...
-
 <span class="dec">@kitaru.flow</span>
 <span class="kw">def</span> <span class="fn">content_agent</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
-    notes <span class="op">=</span> <span class="fn">research</span>(topic)
-    draft <span class="op">=</span> <span class="fn">write_draft</span>(notes)
+    notes <span class="op">=</span> <span class="fn">research</span>(topic)       <span class="cmt"># persisted</span>
+    draft <span class="op">=</span> <span class="fn">write_draft</span>(notes)   <span class="cmt"># persisted</span>
 
-    <span class="cmt"># Pauses here. Resumes when a human responds.</span>
+    <span class="cmt"># Pauses. Resumes when a human responds.</span>
     feedback <span class="op">=</span> kitaru.<span class="fn">wait</span>(
-        schema<span class="op">=</span><span class="var">EditFeedback</span>,
-        prompt<span class="op">=</span><span class="str">"Review this draft"</span>,
+        schema<span class="op">=</span><span class="var">EditFeedback</span>, prompt<span class="op">=</span><span class="str">"Review this draft"</span>
     )
 
     <span class="kw">if not</span> feedback.approved:
         draft <span class="op">=</span> <span class="fn">revise</span>(draft, feedback.notes)
-
     <span class="kw">return</span> draft</code></pre>
           </div>
           <!-- Replay tab -->
           <div class="code-tab-content" id="tab-replay">
-            <pre class="code-pre"><code><span class="cmt"># Replay a past run — cached steps aren't re-executed</span>
+            <pre class="code-pre"><code><span class="cmt"># Re-run from a specific step — everything before is cached</span>
+content_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>, from_<span class="op">=</span><span class="str">"write_draft"</span>)
+
+<span class="cmt"># Swap inputs without re-running the whole thing</span>
 content_agent.<span class="fn">replay</span>(
-    exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>,
-    from_<span class="op">=</span><span class="str">"write_draft"</span>,  <span class="cmt"># re-run from here</span>
+    exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>, from_<span class="op">=</span><span class="str">"write_draft"</span>,
+    overrides<span class="op">=</span>{'{'}<span class="str">"wait.review"</span>: EditFeedback(approved<span class="op">=</span><span class="var">True</span>){'}'},
 )
 
-<span class="cmt"># Or override specific values</span>
-content_agent.<span class="fn">replay</span>(
-    exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>,
-    from_<span class="op">=</span><span class="str">"write_draft"</span>,
-    overrides<span class="op">=</span>{'{'}
-        <span class="str">"checkpoint.research"</span>: <span class="str">"Updated notes..."</span>,
-        <span class="str">"wait.review_draft"</span>: EditFeedback(approved<span class="op">=</span><span class="var">True</span>),
-    {'}'},
-)
-
-<span class="cmt"># Crash? Process killed? Just retry.</span>
-<span class="cmt"># Completed checkpoints replay from cache.</span>
+<span class="cmt"># Crash mid-run? Pick up where you left off.</span>
 content_agent.<span class="fn">retry</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>)</code></pre>
           </div>
         </div>
