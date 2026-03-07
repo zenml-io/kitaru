@@ -19,12 +19,14 @@ src/kitaru/           # Python SDK package (src layout)
 tests/                # pytest tests
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
+  scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
   app/                # Next.js app routes, layout, metadata, search, sitemap
 site/                 # Astro landing page + Cloudflare runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (/api/waitlist with KV)
 scripts/              # Doc generation + site merge scripts
   generate_cli_docs.py       # Generates CLI reference MDX from cyclopts introspection
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
+  generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
 spec/                 # SDK design specifications (temporary, deleted once implemented)
 wrangler.toml         # Unified Cloudflare Worker deployment config
@@ -35,7 +37,7 @@ design/               # Design docs, meeting notes (gitignored, never commit)
 
 The docs and landing page deploy as **one Cloudflare Worker** from `site/dist/`:
 
-1. Python scripts generate docs content (CLI reference + changelog)
+1. Python scripts generate docs content (CLI reference, changelog, SDK reference JSON)
 2. `docs/` builds a static export into `docs/out/` (Next.js with `basePath: '/docs'`)
 3. `site/` builds the Astro app into `site/dist/` (owns runtime `/api/waitlist` + KV)
 4. `scripts/merge_site.sh` copies `docs/out/*` into `site/dist/docs/`
@@ -83,7 +85,7 @@ just links                            # Check markdown links offline (requires l
 just build                            # Build wheel + sdist locally
 
 # Docs/site workflows (require Node 22+ and pnpm)
-just generate-docs                    # Generate CLI reference + changelog from Python source
+just generate-docs                    # Generate CLI reference + changelog + SDK reference docs
 just docs                             # Preview docs dev server (localhost:3000)
 just docs-build                       # Build docs static export
 just site                             # Preview landing page dev server (localhost:4321)

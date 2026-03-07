@@ -11,10 +11,11 @@ src/kitaru/           # Python SDK package (src layout)
 tests/                # pytest tests
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
+  scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
   app/                # Next.js app routes, layout, metadata
 site/                 # Astro landing page + runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (e.g. /api/waitlist with KV)
-scripts/              # Doc generation + site merge scripts
+scripts/              # Doc generation + site merge scripts (includes SDK reference extraction)
 spec/                 # SDK design specifications (planning material, not shipped code)
 design/               # Design docs, meeting notes (gitignored, never commit)
 wrangler.toml         # Unified Cloudflare Worker deployment config
@@ -24,7 +25,7 @@ wrangler.toml         # Unified Cloudflare Worker deployment config
 
 The docs and landing page deploy as **one Cloudflare Worker**:
 
-1. Python scripts generate docs content (`scripts/generate_cli_docs.py`, `scripts/generate_changelog_docs.py`)
+1. Python scripts generate docs content (`scripts/generate_cli_docs.py`, `scripts/generate_changelog_docs.py`, `scripts/generate_sdk_docs.py`)
 2. `docs/` builds a static export into `docs/out/` (Next.js with `basePath: '/docs'`)
 3. `site/` builds the Astro app into `site/dist/`
 4. `scripts/merge_site.sh` copies `docs/out/*` into `site/dist/docs/`
@@ -56,7 +57,7 @@ Use `uv` for Python dependency management and `just` as the command runner.
 
 These require Node 22+ and pnpm.
 
-- `just generate-docs`: generate CLI reference + changelog docs from Python source
+- `just generate-docs`: generate CLI reference + changelog + SDK reference docs
 - `just docs`: preview docs locally (dev server at localhost:3000)
 - `just docs-build`: build docs static export
 - `just site`: preview landing page locally (dev server at localhost:4321)
@@ -127,7 +128,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 
 - **Only document shipped features.** No "Coming Soon" sections.
 - **ZenML invisibility:** users should never need to know Kitaru is built on ZenML. Use Kitaru terminology (saga, checkpoint, storage), not ZenML terms (orchestrator, artifact store, pipeline).
-- **Generated content is gitignored:** CLI docs (`cli.mdx` or `cli/`), `changelog.mdx`, and `reference/python/` are created by Python scripts and must not be hand-edited or committed.
+- **Generated content is gitignored:** CLI docs (`cli.mdx` or `cli/`), `changelog.mdx`, and `reference/` are created by generation scripts and must not be hand-edited or committed. SDK reference uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
 - **Frontmatter required:** every `.mdx` page needs `title` and `description`.
 
 ## Security & Configuration Notes
