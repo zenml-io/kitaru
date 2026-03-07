@@ -146,9 +146,6 @@ async function generateMetaFiles(files, outDir) {
     ) + "\n",
   );
 
-  // Write reference/ parent meta.json (one level up)
-  await writeFile(
-    resolve(outDir, "..", "meta.json"),
-    JSON.stringify({ title: "Reference", pages: ["python"] }, null, 2) + "\n",
-  );
+  // Note: no reference/meta.json needed — the top-level meta.json
+  // references "reference/python" directly to avoid redundant nesting.
 }
