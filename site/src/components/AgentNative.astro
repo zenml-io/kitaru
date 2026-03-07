@@ -1,0 +1,226 @@
+---
+// AgentNative.astro — MCP server + AI assistant integration section
+---
+
+<section class="agent-native-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>Agent-native</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Your AI assistant manages your agents.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2">Kitaru ships an MCP server. Claude Code, Cursor, or any MCP-compatible assistant can list executions, approve waits, trigger replays, and browse artifacts — conversationally.</p>
+
+    <div class="an-grid" data-reveal data-reveal-delay="3">
+      <!-- Left: conversation mockup -->
+      <div class="conversation-window">
+        <div class="conv-header">
+          <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+          <span class="conv-title">Claude Code</span>
+        </div>
+        <div class="conv-body">
+          <div class="conv-msg conv-user">
+            <span class="conv-role">You</span>
+            <span class="conv-text">What Kitaru executions are waiting?</span>
+          </div>
+          <div class="conv-msg conv-assistant">
+            <span class="conv-role">Assistant</span>
+            <span class="conv-text">One execution waiting: <code>kr-a8f3c2</code> (coding_agent) at <code>plan_approval</code>. Question: "Merge this PR?"</span>
+          </div>
+          <div class="conv-msg conv-user">
+            <span class="conv-role">You</span>
+            <span class="conv-text">Approve it with notes "LGTM, ship it"</span>
+          </div>
+          <div class="conv-msg conv-assistant">
+            <span class="conv-role">Assistant</span>
+            <span class="conv-text">Done. Execution <code>kr-a8f3c2</code> has resumed.</span>
+            <span class="conv-tool">kitaru_executions_input(exec_id="kr-a8f3c2", wait="plan_approval", value={'{'}"approved": true, "notes": "LGTM, ship it"{'}'})</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: what MCP gives you -->
+      <div class="mcp-features">
+        <h3>MCP tools, not shell scripts</h3>
+        <ul>
+          <li>
+            <code>kitaru_executions_list</code>
+            <span>Filter by status, flow, or stack</span>
+          </li>
+          <li>
+            <code>kitaru_executions_input</code>
+            <span>Provide structured input to waiting flows</span>
+          </li>
+          <li>
+            <code>kitaru_executions_replay</code>
+            <span>Replay from a checkpoint with overrides</span>
+          </li>
+          <li>
+            <code>kitaru_artifacts_get</code>
+            <span>Browse outputs, prompts, and responses</span>
+          </li>
+        </ul>
+        <div class="mcp-install">
+          <code>pip install kitaru[mcp]</code>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .an-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 40px;
+    align-items: start;
+    margin-top: 48px;
+  }
+
+  /* Conversation mockup */
+  .conversation-window {
+    background: #1A1714;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 40px rgba(26,23,20,0.12);
+  }
+
+  .conv-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: rgba(26,23,20,0.95);
+  }
+
+  .code-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .code-dot:nth-child(1) { background: #E85540; }
+  .code-dot:nth-child(2) { background: #E8A840; }
+  .code-dot:nth-child(3) { background: #40C840; }
+
+  .conv-title {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.35);
+    margin-left: 12px;
+  }
+
+  .conv-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .conv-msg {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .conv-role {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .conv-user .conv-role { color: rgba(255,255,255,0.35); }
+  .conv-assistant .conv-role { color: var(--color-accent); }
+
+  .conv-text {
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: #E8E4DE;
+  }
+
+  .conv-text code {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-accent);
+    background: rgba(241,120,41,0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .conv-tool {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-top: 6px;
+    word-break: break-all;
+  }
+
+  /* MCP features list */
+  .mcp-features h3 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 24px;
+    color: var(--color-primary);
+  }
+
+  .mcp-features ul {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .mcp-features li {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mcp-features li code {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--color-accent);
+    font-weight: 500;
+  }
+
+  .mcp-features li span {
+    font-size: 0.82rem;
+    color: var(--color-secondary);
+    line-height: 1.5;
+  }
+
+  .mcp-install {
+    margin-top: 24px;
+    padding: 12px 16px;
+    background: var(--color-surface-warm);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+  }
+
+  .mcp-install code {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--color-primary);
+  }
+
+  @media (max-width: 768px) {
+    .an-grid {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .conv-body { padding: 14px; }
+    .conv-text { font-size: 0.78rem; }
+    .conv-tool { font-size: 0.58rem; }
+    .mcp-features li code { font-size: 0.78rem; }
+    .mcp-features li span { font-size: 0.78rem; }
+  }
+</style>
