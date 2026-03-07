@@ -100,58 +100,69 @@ code, kbd, pre, .font-mono {
 
 /* ═══════════════════════════════════════════════════
    Code Blocks
-   Scope dark-friendly tokens onto code containers so
-   the copy button, tab triggers, and title bar all
-   inherit light text colors on the dark background.
+   Uses Shiki dual-theme: github-light + github-dark.
+   Code containers force the dark Shiki variant via
+   --shiki-dark CSS variables so blocks render with
+   high-contrast dark tokens on a dark surface, while
+   the rest of the page stays light.
    ═══════════════════════════════════════════════════ */
 
 /* Standalone code blocks (> pre ensures PyFunction <figure>s aren't matched) */
 figure:has(> pre) {
-  --color-fd-card: #2D2A26;
-  --color-fd-secondary: #3A3632;
-  --color-fd-muted-foreground: #9E9790;
-  --color-fd-accent-foreground: #E8E4DE;
-  --color-fd-border: #4A4540;
+  --color-fd-card: #24292e;
+  --color-fd-secondary: #2f363d;
+  --color-fd-muted-foreground: #8b949e;
+  --color-fd-accent-foreground: #e1e4e8;
+  --color-fd-border: #3a4149;
   --color-fd-ring: #F17829;
   border: none !important;
   border-radius: 11px !important;
-  background: #2D2A26 !important;
+  background: #24292e !important;
 }
 
-/* Tabbed code blocks: darken the entire tabs wrapper.
-   The > figure > pre chain avoids matching SDK reference tabs where
-   pre is deeply nested inside PyFunction/PySourceCode collapsibles. */
-:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre) {
-  --color-fd-card: #2D2A26;
-  --color-fd-secondary: #3A3632;
-  --color-fd-muted-foreground: #9E9790;
-  --color-fd-accent-foreground: #E8E4DE;
-  --color-fd-primary: #F17829;
-  --color-fd-border: #4A4540;
-  --color-fd-ring: #F17829;
-  border: none !important;
-  border-radius: 11px !important;
-  background: #2D2A26 !important;
-}
-
-/* Tabbed code blocks: divider between tab bar and code */
-:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre) [role="tablist"] {
-  border-bottom: 1px solid #4A4540;
-}
-
-/* Override Shiki inline background to match warm dark */
+/* Force dark Shiki tokens inside code blocks */
 figure:has(> pre) pre {
   background: transparent !important;
 }
 
-/* Inline code: warm accent-light background */
+figure:has(> pre) code span {
+  color: var(--shiki-dark) !important;
+}
+
+/* Tabbed code blocks.
+   The > figure > pre chain avoids matching SDK reference tabs where
+   pre is deeply nested inside PyFunction/PySourceCode collapsibles. */
+:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre) {
+  --color-fd-card: #24292e;
+  --color-fd-secondary: #2f363d;
+  --color-fd-muted-foreground: #8b949e;
+  --color-fd-accent-foreground: #e1e4e8;
+  --color-fd-primary: #F17829;
+  --color-fd-border: #3a4149;
+  --color-fd-ring: #F17829;
+  border: none !important;
+  border-radius: 11px !important;
+  background: #24292e !important;
+}
+
+/* Force dark Shiki tokens in tabbed code blocks too */
+:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre) code span {
+  color: var(--shiki-dark) !important;
+}
+
+/* Tabbed code blocks: divider between tab bar and code */
+:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre) [role="tablist"] {
+  border-bottom: 1px solid #3a4149;
+}
+
+/* Inline code: warm accent-light background with high-contrast text */
 :not(pre) > code {
   background: #F5EDE4;
   color: #1A1714;
   padding: 0.15em 0.4em;
   border-radius: 4px;
   font-size: 0.85em;
-  border: 1px solid #F0EDE8;
+  border: 1px solid #E5E2DC;
 }
 
 /* ═══════════════════════════════════════════════════
