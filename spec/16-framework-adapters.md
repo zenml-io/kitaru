@@ -179,6 +179,40 @@ Depending on framework support, adapters may capture:
 
 These should be exposed in a way that helps inspection without confusing replay semantics.
 
+## Human-in-the-loop via adapter tools
+
+The MVP restriction that `wait()` cannot be called inside a checkpoint still holds. However, adapters can provide **tools that trigger a flow-level wait** when invoked by the agent.
+
+This means human-in-the-loop can happen *inside* the agent's reasoning loop without violating the durable boundary rules. The adapter tool does not call `wait()` inside a checkpoint — instead, it signals the runtime to suspend at the flow level and resume when input arrives.
+
+### Example: approval tool
+
+```python
+from pydantic_ai import Agent
+from kitaru.adapters import pydantic_ai as kp
+
+coder = kp.wrap(
+    Agent("claude-sonnet-4-6", tools=[edit, test, approve]),
+)
+
+@kitaru.flow
+def coding_agent(issue: str) -> str:
+    # The agent may call the `approve` tool during its loop.
+    # When it does, the flow suspends and resumes on human input.
+    return coder.run_sync(f"Fix: {issue}").output
+```
+
+Here, `approve` is a tool the agent can invoke. When the agent calls it, the adapter translates that into a flow-level `wait()` under the hood. The agent's reasoning loop pauses, the execution suspends, and the human provides input through the dashboard, CLI, or API.
+
+This keeps the durable boundary clean — `wait()` still only happens at the flow level — while letting the agent decide *when* to ask for human input as part of its own reasoning.
+
+### Rules for adapter-level wait tools
+
+- The adapter tool must translate to a flow-level `wait()`, not a checkpoint-internal one
+- The tool's schema defines the expected human input shape
+- On replay, the recorded wait input replays just like any other `wait()` call
+- This pattern is optional — flows can still use explicit `kitaru.wait()` calls directly
+
 ## Future adapters
 
 The broader platform may later support more adapters, but they should follow the same rule:

@@ -42,7 +42,7 @@ Instead, **retry**, **resume**, and **replay** all work by rerunning the flow fu
 
 ## Invocation
 
-There are two invocation patterns:
+There are three invocation patterns:
 
 ```python
 # Synchronous — blocks until complete
@@ -57,13 +57,28 @@ handle = my_agent.start("Build a CLI tool")
 print(handle.exec_id)
 print(handle.status)
 result = handle.wait()
+
+# Deploy — starts an execution on a named stack
+# Semantically identical to .start() with stack=, but communicates
+# intent more clearly when targeting remote infrastructure.
+handle = my_agent.deploy("Build a CLI tool", stack="aws-sandbox")
 ```
 
 ### Implementation note
 
-The `my_flow.start()` pattern works because the `@kitaru.flow` decorator returns a callable object that also exposes `.start()`. This is a small extension of the ZenML pattern (where you just call the function directly).
+The `my_flow.start()` and `my_flow.deploy()` patterns work because the `@kitaru.flow` decorator returns a callable object that also exposes `.start()` and `.deploy()`. This is a small extension of the ZenML pattern (where you just call the function directly).
 
 The alternative pattern `kitaru.start_flow(my_flow)` would require reworking how flows are resolved and imported across environments, so it should be avoided. Invocation should always go through the decorated function object itself.
+
+### `.deploy()` vs `.start()` with `stack=`
+
+`.deploy(...)` is sugar for `.start(..., stack=...)`. Both produce the same execution. `.deploy()` exists because it communicates intent more clearly in user-facing contexts — "deploy this agent on production infrastructure" reads better than "start with stack equals."
+
+```python
+# These are equivalent:
+handle = my_agent.start("Build a CLI tool", stack="gcp-production")
+handle = my_agent.deploy("Build a CLI tool", stack="gcp-production")
+```
 
 ### Start with runtime overrides
 
