@@ -65,10 +65,12 @@
     <span class="kw">return</span> draft
 
 <span class="cmt"># Replay with new inputs — completed steps are cached.</span>
-content_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>, topic<span class="op">=</span><span class="str">"New topic"</span>)
+content_agent.<span class="fn">replay</span>(
+    exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>, params<span class="op">=</span>{'{'}<span class="str">"topic"</span>: <span class="str">"New topic"</span>{'}'}
+)
 
 <span class="cmt"># Same code, any infra.</span>
-content_agent.<span class="fn">start</span>(<span class="str">"AGI"</span>, stack<span class="op">=</span><span class="str">"aws-sandbox"</span>)</code></pre>
+content_agent.<span class="fn">deploy</span>(<span class="str">"AGI"</span>, stack<span class="op">=</span><span class="str">"aws-sandbox"</span>)</code></pre>
           </div>
           <!-- Framework tab -->
           <div class="code-tab-content" id="tab-framework">
@@ -90,10 +92,12 @@ agent <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span clas
     <span class="kw">return</span> result.output
 
 <span class="cmt"># Replay with new inputs — completed steps are cached.</span>
-review_pr.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>, pr_id<span class="op">=</span><span class="num">99</span>)
+review_pr.<span class="fn">replay</span>(
+    exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>, params<span class="op">=</span>{'{'}<span class="str">"pr_id"</span>: <span class="num">99</span>{'}'}
+)
 
 <span class="cmt"># Same code, any infra.</span>
-review_pr.<span class="fn">start</span>(<span class="num">42</span>, stack<span class="op">=</span><span class="str">"gcp-production"</span>)
+review_pr.<span class="fn">deploy</span>(<span class="num">42</span>, stack<span class="op">=</span><span class="str">"gcp-production"</span>)
 review_pr.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>)</code></pre>
           </div>
         </div>
