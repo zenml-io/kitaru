@@ -36,7 +36,7 @@ class TestPrivateDetection:
         assert _is_private("__init__") is True
 
     def test_public_name(self) -> None:
-        assert _is_private("workflow") is False
+        assert _is_private("flow") is False
 
 
 class TestFilterModule:
@@ -107,7 +107,7 @@ class TestFilterModule:
             "classes": {},
             "functions": {},
             "attributes": [
-                {"name": "__all__", "value": "['workflow']"},
+                {"name": "__all__", "value": "['flow']"},
                 {"name": "VERSION", "value": "'1.0'"},
             ],
         }
@@ -145,6 +145,9 @@ class TestExcludedModules:
 
     def test_adapters_in_exclusions(self) -> None:
         assert "adapters" in EXCLUDED_SUBMODULES
+
+    def test_runtime_in_exclusions(self) -> None:
+        assert "runtime" in EXCLUDED_SUBMODULES
 
 
 class TestExtractApi:
