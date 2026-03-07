@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from importlib.metadata import version as get_version
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
+from zenml.exceptions import EntityExistsError
 
 from kitaru.cli import (
     RuntimeSnapshot,
     _build_runtime_snapshot,
     _describe_local_server,
     _logout_current_connection,
+    _parse_secret_assignments,
     app,
 )
 
@@ -68,6 +70,7 @@ def test_help_flag_lists_available_commands(
         "info",
         "log-store",
         "stack",
+        "secrets",
     ):
         assert command in output
 
@@ -451,6 +454,299 @@ def test_log_store_set_surfaces_validation_errors(
 
     assert exc_info.value.code == 1
     assert "Invalid log-store endpoint" in capsys.readouterr().err
+
+
+def test_parse_secret_assignments_accepts_equals_and_split_values() -> None:
+    """Secrets assignment parsing should support `--KEY=value` and split forms."""
+    parsed = _parse_secret_assignments(
+        [
+            "--OPENAI_API_KEY=sk-123",
+            "--ANTHROPIC_API_KEY",
+            "sk-ant-456",
+        ]
+    )
+
+    assert parsed == {
+        "OPENAI_API_KEY": "sk-123",
+        "ANTHROPIC_API_KEY": "sk-ant-456",
+    }
+
+
+def test_parse_secret_assignments_rejects_invalid_keys() -> None:
+    """Secrets assignment parsing should reject non env-var key names."""
+    with pytest.raises(ValueError, match="Invalid secret key"):
+        _parse_secret_assignments(["--OPENAI-API-KEY=sk-123"])
+
+
+def test_parse_secret_assignments_rejects_duplicate_keys() -> None:
+    """Duplicate secret keys in one command should fail fast."""
+    with pytest.raises(ValueError, match="Duplicate secret key"):
+        _parse_secret_assignments(
+            [
+                "--OPENAI_API_KEY=sk-123",
+                "--OPENAI_API_KEY=sk-456",
+            ]
+        )
+
+
+def test_parse_secret_assignments_rejects_empty_payload() -> None:
+    """A bare separator token should still fail with no parsed assignments."""
+    with pytest.raises(ValueError, match="Provide at least one secret assignment"):
+        _parse_secret_assignments(["--"])
+
+
+def test_parse_secret_assignments_rejects_missing_split_value() -> None:
+    """Split assignment values cannot be another assignment token."""
+    with pytest.raises(ValueError, match="Missing value for secret key"):
+        _parse_secret_assignments(
+            [
+                "--OPENAI_API_KEY",
+                "--ANTHROPIC_API_KEY=sk-ant-123",
+            ]
+        )
+
+
+def test_secrets_set_creates_secret(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets set` should create private secrets by default."""
+    fake_client = Mock()
+    fake_client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "--OPENAI_API_KEY=sk-123",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123"},
+        private=True,
+    )
+    output = capsys.readouterr().out
+    assert "Created secret: openai-creds" in output
+    assert "Secret ID: secret-id" in output
+
+
+def test_secrets_set_updates_existing_secret(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets set` should update existing secrets when already present."""
+    fake_client = Mock()
+    fake_client.create_secret.side_effect = EntityExistsError("already exists")
+    fake_client.get_secret.return_value = SimpleNamespace(id="secret-id")
+    fake_client.update_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "--OPENAI_API_KEY=sk-123",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.get_secret.assert_called_once_with(
+        name_id_or_prefix="openai-creds",
+        allow_partial_name_match=False,
+        allow_partial_id_match=False,
+    )
+    fake_client.update_secret.assert_called_once_with(
+        name_id_or_prefix="secret-id",
+        add_or_update_values={"OPENAI_API_KEY": "sk-123"},
+    )
+    output = capsys.readouterr().out
+    assert "Updated secret: openai-creds" in output
+
+
+def test_secrets_set_rejects_invalid_assignments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Secrets set should fail with a helpful error for invalid assignments."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "OPENAI_API_KEY=sk-123",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "Invalid secret assignment" in capsys.readouterr().err
+
+
+def test_secrets_show_hides_values_by_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets show` should not render raw values unless requested."""
+    fake_secret = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        values={"OPENAI_API_KEY": object()},
+        has_missing_values=False,
+        secret_values={"OPENAI_API_KEY": "sk-123"},
+    )
+    fake_client = Mock()
+    fake_client.get_secret.return_value = fake_secret
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "show", "openai-creds"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru secret" in output
+    assert "Name: openai-creds" in output
+    assert "Visibility: private" in output
+    assert "Keys: OPENAI_API_KEY" in output
+    assert "sk-123" not in output
+
+
+def test_secrets_show_displays_values_when_requested(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets show --show-values` should print value rows."""
+    fake_secret = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        values={"OPENAI_API_KEY": object()},
+        has_missing_values=False,
+        secret_values={"OPENAI_API_KEY": "sk-123"},
+    )
+    fake_client = Mock()
+    fake_client.get_secret.return_value = fake_secret
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "show", "openai-creds", "--show-values"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Value (OPENAI_API_KEY): sk-123" in output
+
+
+def test_secrets_list_renders_all_pages_sorted(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets list` should merge all pages and sort by secret name."""
+    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
+    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
+    fake_client = Mock()
+    fake_client.list_secrets.side_effect = [
+        SimpleNamespace(items=[secret_z], total_pages=2, max_size=1),
+        SimpleNamespace(items=[secret_a], total_pages=2, max_size=1),
+    ]
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list"])
+
+    assert exc_info.value.code == 0
+    fake_client.list_secrets.assert_has_calls(
+        [
+            call(page=1),
+            call(page=2, size=1),
+        ]
+    )
+    output = capsys.readouterr().out
+    assert "Kitaru secrets" in output
+    assert "alpha: secret-a (private)" in output
+    assert "zeta: secret-z (public)" in output
+    assert output.index("alpha: secret-a (private)") < output.index(
+        "zeta: secret-z (public)"
+    )
+
+
+def test_secrets_list_surfaces_client_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets list` should surface backend errors as CLI errors."""
+    with (
+        patch("kitaru.cli.Client", side_effect=RuntimeError("offline")),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list"])
+
+    assert exc_info.value.code == 1
+    assert "offline" in capsys.readouterr().err
+
+
+def test_secrets_delete_resolves_exact_secret_before_deleting(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets delete` should resolve exact secret and delete by ID."""
+    fake_client = Mock()
+    fake_client.get_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "delete", "openai-creds"])
+
+    assert exc_info.value.code == 0
+    fake_client.get_secret.assert_called_once_with(
+        name_id_or_prefix="openai-creds",
+        allow_partial_name_match=False,
+        allow_partial_id_match=False,
+    )
+    fake_client.delete_secret.assert_called_once_with(name_id_or_prefix="secret-id")
+    output = capsys.readouterr().out
+    assert "Deleted secret: openai-creds" in output
+
+
+def test_secrets_delete_surfaces_backend_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delete should map backend failures to a user-facing CLI error."""
+    fake_client = Mock()
+    fake_client.get_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+    )
+    fake_client.delete_secret.side_effect = KeyError("already deleted")
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "delete", "openai-creds"])
+
+    assert exc_info.value.code == 1
+    assert "already deleted" in capsys.readouterr().err
 
 
 def test_stack_list_renders_snapshot(
