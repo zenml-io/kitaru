@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `kitaru.llm()` implementation with LiteLLM backend, context-aware flow/checkpoint behavior, prompt/response artifact capture, and automatic usage/cost/latency metadata logging
+- Local model alias registry persisted in `kitaru.yaml`, including default alias behavior and model-resolution helpers for `kitaru.llm()`
+- Model registry CLI surface: `kitaru model register` and `kitaru model list`
+- Phase 12 example workflow: `examples/flow_with_llm.py`
+- Getting Started LLM docs page (`/getting-started/llm-calls`)
 - Secrets CLI surface: `kitaru secrets set/show/list/delete`
 - `kitaru secrets set` create-or-update behavior with private-by-default secret creation
 - Secret assignment parsing with env-var-style key validation (`--KEY=value`)
@@ -34,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Environment override support for runtime log-store resolution
 
 ### Changed
-- Updated README, CLAUDE guide, and docs pages to reflect shipped stack selection, secrets CLI behavior, and current implemented primitive status
+- Kitaru global config persistence now uses field-preserving updates, so log-store and model-registry settings no longer clobber each other
+- Updated README, CLAUDE guide, AGENTS guide, and docs pages to reflect shipped LLM/model-registry functionality and current implemented primitive status
 
 ## [0.1.0] - 2026-03-06
 

@@ -24,9 +24,12 @@ from zenml.utils.server_utils import connected_to_local_server, get_local_server
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
 from kitaru.config import (
+    ModelAliasEntry,
     ResolvedLogStore,
     StackInfo,
+    list_model_aliases,
     login_to_server,
+    register_model_alias,
     reset_global_log_store,
     resolve_log_store,
     set_global_log_store,
@@ -69,9 +72,14 @@ secrets_app = cyclopts.App(
     name="secrets",
     help="Manage centralized runtime secrets.",
 )
+model_app = cyclopts.App(
+    name="model",
+    help="Manage local model aliases for kitaru.llm().",
+)
 app.command(log_store_app)
 app.command(stack_app)
 app.command(secrets_app)
+app.command(model_app)
 
 
 @dataclass
@@ -400,6 +408,23 @@ def _current_stack_rows(stack: StackInfo) -> list[tuple[str, str]]:
         ("Active stack", stack.name),
         ("Stack ID", stack.id),
     ]
+
+
+def _model_rows(entries: list[ModelAliasEntry]) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru model list`."""
+    if not entries:
+        return [("Models", "none found")]
+
+    rows: list[tuple[str, str]] = []
+    for entry in entries:
+        detail = entry.model
+        if entry.secret:
+            detail += f" (secret={entry.secret})"
+        if entry.is_default:
+            detail += " [default]"
+        rows.append((entry.alias, detail))
+
+    return rows
 
 
 def _secret_visibility(secret: SecretResponse) -> str:
@@ -763,6 +788,55 @@ def use(
         f"Activated stack: {selected_stack.name}",
         detail=f"Stack ID: {selected_stack.id}",
     )
+
+
+@model_app.command
+def register(
+    alias: Annotated[
+        str,
+        Parameter(help="Local alias name (for example `fast`)."),
+    ],
+    *,
+    model: Annotated[
+        str,
+        Parameter(
+            help="Concrete LiteLLM model identifier (for example openai/gpt-4o-mini)."
+        ),
+    ],
+    secret: Annotated[
+        str | None,
+        Parameter(help="Optional secret name/ID containing provider credentials."),
+    ] = None,
+) -> None:
+    """Create or update a local model alias used by `kitaru.llm()`."""
+    try:
+        if secret is not None:
+            _resolve_secret_exact(Client(), secret)
+        alias_entry = register_model_alias(alias, model=model, secret=secret)
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    detail = f"Model: {alias_entry.model}"
+    if alias_entry.secret:
+        detail += f" | Secret: {alias_entry.secret}"
+    if alias_entry.is_default:
+        detail += " | Default alias"
+
+    _print_success(
+        f"Saved model alias: {alias_entry.alias}",
+        detail=detail,
+    )
+
+
+@model_app.command
+def list___() -> None:
+    """List local model aliases used by `kitaru.llm()`."""
+    try:
+        aliases = list_model_aliases()
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _emit_snapshot("Kitaru models", _model_rows(aliases))
 
 
 @secrets_app.command

@@ -71,6 +71,7 @@ def test_help_flag_lists_available_commands(
         "log-store",
         "stack",
         "secrets",
+        "model",
     ):
         assert command in output
 
@@ -504,6 +505,130 @@ def test_parse_secret_assignments_rejects_missing_split_value() -> None:
                 "--ANTHROPIC_API_KEY=sk-ant-123",
             ]
         )
+
+
+def test_model_register_persists_alias(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru model register` should save aliases with optional secret links."""
+    with (
+        patch("kitaru.cli._resolve_secret_exact") as mock_resolve_secret,
+        patch("kitaru.cli.register_model_alias") as mock_register,
+        patch("kitaru.cli.Client") as mock_client,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_register.return_value = SimpleNamespace(
+            alias="fast",
+            model="openai/gpt-4o-mini",
+            secret="openai-creds",
+            is_default=True,
+        )
+        app(
+            [
+                "model",
+                "register",
+                "fast",
+                "--model",
+                "openai/gpt-4o-mini",
+                "--secret",
+                "openai-creds",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    mock_resolve_secret.assert_called_once()
+    assert mock_resolve_secret.call_args.args[1] == "openai-creds"
+    mock_register.assert_called_once_with(
+        "fast",
+        model="openai/gpt-4o-mini",
+        secret="openai-creds",
+    )
+    mock_client.assert_called_once_with()
+    output = capsys.readouterr().out
+    assert "Saved model alias: fast" in output
+    assert "Model: openai/gpt-4o-mini" in output
+    assert "Secret: openai-creds" in output
+    assert "Default alias" in output
+
+
+def test_model_register_works_without_secret(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru model register` should support plain aliases without secret refs."""
+    with (
+        patch("kitaru.cli._resolve_secret_exact") as mock_resolve_secret,
+        patch("kitaru.cli.register_model_alias") as mock_register,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_register.return_value = SimpleNamespace(
+            alias="smart",
+            model="anthropic/claude-sonnet-4-20250514",
+            secret=None,
+            is_default=False,
+        )
+        app(
+            [
+                "model",
+                "register",
+                "smart",
+                "--model",
+                "anthropic/claude-sonnet-4-20250514",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    mock_resolve_secret.assert_not_called()
+    mock_register.assert_called_once_with(
+        "smart",
+        model="anthropic/claude-sonnet-4-20250514",
+        secret=None,
+    )
+    output = capsys.readouterr().out
+    assert "Saved model alias: smart" in output
+
+
+def test_model_list_renders_aliases(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru model list` should render aliases in a snapshot view."""
+    with (
+        patch("kitaru.cli.list_model_aliases") as mock_list_models,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_models.return_value = [
+            SimpleNamespace(
+                alias="fast",
+                model="openai/gpt-4o-mini",
+                secret="openai-creds",
+                is_default=True,
+            ),
+            SimpleNamespace(
+                alias="smart",
+                model="anthropic/claude-sonnet-4-20250514",
+                secret=None,
+                is_default=False,
+            ),
+        ]
+        app(["model", "list"])
+
+    assert exc_info.value.code == 0
+    mock_list_models.assert_called_once_with()
+    output = capsys.readouterr().out
+    assert "Kitaru models" in output
+    assert "fast: openai/gpt-4o-mini (secret=openai-creds) [default]" in output
+    assert "smart: anthropic/claude-sonnet-4-20250514" in output
+
+
+def test_model_list_renders_empty_state(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru model list` should show a helpful empty-state message."""
+    with (
+        patch("kitaru.cli.list_model_aliases", return_value=[]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["model", "list"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru models" in output
+    assert "Models: none found" in output
 
 
 def test_secrets_set_creates_secret(

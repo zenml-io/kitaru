@@ -1,0 +1,78 @@
+---
+title: Tracked LLM Calls
+description: Use kitaru.llm() with local model aliases and optional secret-backed credentials
+---
+
+`kitaru.llm()` lets you make a single tracked model call with automatic:
+
+- prompt artifact capture
+- response artifact capture
+- usage/cost/latency metadata logging
+
+## 1) Register a model alias
+
+```bash
+kitaru model register fast --model openai/gpt-4o-mini
+```
+
+You can also attach a secret for remote credential lookup:
+
+```bash
+kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+```
+
+List aliases:
+
+```bash
+kitaru model list
+```
+
+## 2) Configure credentials
+
+### Local quick path
+
+Set provider credentials in your environment (LiteLLM reads them directly):
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+### Secret-backed path
+
+Store provider keys in a Kitaru secret:
+
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+```
+
+When an alias includes `--secret openai-creds`, `kitaru.llm()` fetches that secret at runtime.
+
+## 3) Call `kitaru.llm()` in a flow
+
+```python
+import kitaru
+
+@kitaru.flow
+def writer(topic: str) -> str:
+    outline = kitaru.llm(
+        f"Create a 3-bullet outline about {topic}.",
+        model="fast",
+        name="outline_call",
+    )
+    return kitaru.llm(
+        f"Write a short paragraph using this outline:\n{outline}",
+        model="fast",
+        name="draft_call",
+    )
+```
+
+## Runtime behavior by context
+
+- **Inside a flow (outside checkpoints):** `kitaru.llm()` runs as a synthetic durable call boundary.
+- **Inside a checkpoint:** it is tracked as a child event; the enclosing checkpoint remains the replay boundary.
+
+## Related pages
+
+- [Manage Secrets](/getting-started/secrets)
+- [Configuration](/getting-started/configuration)
+- [CLI model commands](/cli/model)
