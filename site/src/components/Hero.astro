@@ -85,10 +85,10 @@ content_agent.<span class="fn">replay</span>(
 content_agent.<span class="fn">replay</span>(
     exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>,
     from_<span class="op">=</span><span class="str">"write_draft"</span>,
-    overrides<span class="op">=</span>{
+    overrides<span class="op">=</span>{'{'}
         <span class="str">"checkpoint.research"</span>: <span class="str">"Updated notes..."</span>,
         <span class="str">"wait.review_draft"</span>: EditFeedback(approved<span class="op">=</span><span class="var">True</span>),
-    },
+    {'}'},
 )
 
 <span class="cmt"># Crash? Process killed? Just retry.</span>
