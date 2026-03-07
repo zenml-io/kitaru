@@ -13,10 +13,11 @@ for Kitaru, served at [kitaru.ai/docs](https://kitaru.ai/docs).
 ```bash
 cd docs
 pnpm install
-
-# Install fumapy (Python companion for SDK reference generation)
-cd .. && uv pip install ./docs/node_modules/fumadocs-python
 ```
+
+> **Note:** SDK reference generation requires `fumapy` (bundled in the
+> `fumadocs-python` npm package). `just generate-docs` auto-installs it from
+> `docs/node_modules/fumadocs-python` — no manual step needed.
 
 ## Development
 

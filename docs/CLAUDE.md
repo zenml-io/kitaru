@@ -84,7 +84,8 @@ pnpm run format     # Biome format
 **Important:** Generated content (CLI reference, changelog, SDK reference) is gitignored.
 On a fresh clone, run `just generate-docs` before `just docs` or `just docs-build`,
 otherwise those pages will be missing from the sidebar. SDK reference generation
-requires `fumapy` to be installed: `uv pip install ./docs/node_modules/fumadocs-python`
+requires `fumapy` — `just generate-docs` auto-installs it from
+`docs/node_modules/fumadocs-python` (requires `pnpm install` in `docs/` first).
 
 ## File Responsibilities
 
