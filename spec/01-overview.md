@@ -10,7 +10,7 @@ It lets you write normal Python orchestration, while making the important bounda
 - **LLM calls** can be tracked with minimal ceremony
 - **artifacts and metadata** make replay, debugging, and dashboard rendering possible
 
-Kitaru is built on **ZenML**, but the user-facing model is intentionally simpler:
+Kitaru is built on **ZenML** — the hard durability machinery (retry, resume, replay, snapshots, divergence detection) is implemented in the ZenML backend. Kitaru provides a simpler developer-facing model on top:
 
 - plain Python control flow
 - explicit durable boundaries
@@ -18,6 +18,8 @@ Kitaru is built on **ZenML**, but the user-facing model is intentionally simpler
 - sync-first by default
 - zero-config local development
 - one-line path to connected/server-backed execution
+
+**OSS vs Pro:** The semantic contracts are stable across both paths. The polished dashboard-triggered experience (resume after compute release, checkpoint visualization, snapshot execution) depends on Pro-backed server capabilities. Local-first OSS versions of these features exist but are more manual. See chapter 3 for details.
 
 ## What Kitaru is
 

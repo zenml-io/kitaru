@@ -5,8 +5,8 @@ Artifacts and metadata are the substrate that make Kitaru useful for replay, deb
 They are related, but not the same thing.
 
 - **artifacts** are persisted values
-- **metadata** is structured information attached to executions or checkpoints
-- **logs** are the mechanism for attaching that metadata
+- **metadata** is structured information attached to executions or checkpoints via `kitaru.log()`
+- **logs** are runtime output (stdout/stderr and structured events) stored globally via the artifact store or a configurable log store
 
 ## Artifacts
 
@@ -185,9 +185,9 @@ This is important because retry and resume are same-execution operations. The ti
 
 Wait input recorded as an artifact belongs to the **same execution** — it does not imply a new execution was created.
 
-## `kitaru.log()` — metadata logging
+## `kitaru.log()` — structured metadata attachment
 
-`kitaru.log()` attaches structured metadata to the current execution context.
+`kitaru.log()` attaches structured metadata to the current execution context. This is **not** the same as runtime logging — `kitaru.log()` is for structured annotations (cost, quality scores, model info), while runtime logs (stdout/stderr) are handled by the global log store described below.
 
 ### Signature
 
@@ -248,9 +248,41 @@ Unknown keys should still be allowed as custom metadata.
 - known keys may receive richer dashboard treatment
 - unknown keys should still remain visible and queryable
 
+## Global logging and log store
+
+Kitaru uses a **global log-store model** for runtime logs (stdout/stderr, structured events). This is separate from `kitaru.log()` metadata — logs are runtime output, metadata is structured annotations.
+
+### Default behavior
+
+By default, all runtime logs are written to the **artifact store**. This requires no extra configuration — wherever the stack's artifact store is, that's where logs go.
+
+When Kitaru is deployed remotely (via Helm), a remote bucket is part of the deployment configuration, so logs have a remote destination from the start.
+
+### Optional global log store override
+
+Users can optionally switch the global log backend to an external provider (e.g. Datadog, or any OTel-compatible provider) using a global command:
+
+```bash
+kitaru log-store set datadog --endpoint https://logs.datadoghq.com --api-key {{ DATADOG_KEY }}
+```
+
+This is a **global setting** that applies to all flows and executions — not a per-checkpoint or per-flow logger component. There is no explicit local logger stack component in Kitaru.
+
+### Design rationale
+
+- The artifact store is always available (it's a required stack component), so logs have a home by default
+- Switching to an external provider is a one-time global configuration, not per-run boilerplate
+- This keeps the developer experience simple while supporting enterprise observability needs
+
+### Open question: log presentation
+
+How Kitaru displays and styles logs is an open product question. The default ZenML log presentation may not match Kitaru's simpler style. Whether logs can be styled or presented more simply than the default ZenML logs is still being explored.
+
 ## Dashboard rendering
 
-In the dashboard, artifacts and metadata should work together:
+Dashboard rendering decisions are delegated to the frontend team (Zuri). The spec defines what data is stored and its semantic meaning — the exact visual rendering is a frontend concern.
+
+In general, artifacts and metadata should work together in the dashboard:
 
 - checkpoints show their artifacts and metadata
 - waits show pending or provided input

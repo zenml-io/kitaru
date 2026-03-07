@@ -6,7 +6,7 @@ Marks a function as a **durable execution** — the top-level unit Kitaru manage
 
 A flow is the boundary around a long-running piece of Python logic that may span multiple checkpointed steps, survive process restarts, suspend for input, and later resume or replay.
 
-Under the hood, a Kitaru flow maps to a **dynamic ZenML pipeline**, but the user-facing model is simpler: a flow is just normal Python with durable boundaries inside it.
+Under the hood, a Kitaru flow maps to a **dynamic ZenML pipeline**, but the user-facing model is simpler: a flow is just normal Python with durable boundaries inside it. The heavy lifting for durability, retry, and resume is implemented in the ZenML backend — Kitaru provides the simpler developer-facing model.
 
 A flow is where Kitaru creates and owns the **execution record**: status, inputs, checkpoints, waits, artifacts, and replay history all live under that execution.
 
@@ -91,7 +91,7 @@ Kitaru does not impose a graph DSL. The flow body is plain Python. Durability co
 def content_pipeline(topic: str) -> str:
     research = research_step(topic)
     draft = write_step(research)
-    review = kitaru.wait(schema=ReviewDecision, prompt="Review?")
+    review = kitaru.wait(schema=ReviewDecision, question="Review?")
 
     if not review.approved:
         draft = revise_step(draft, review.notes)
@@ -201,5 +201,6 @@ Kitaru sets two underlying ZenML defaults that should always be active:
 ## Notes for MVP
 
 - direct composition via `other_flow.start()` is cleaner than pretending nested flows are a single execution
-- background durability after process exit depends on connected or server-backed mode, not local inline execution alone
+- background durability after process exit depends on connected or server-backed mode (Pro), not local inline execution alone
 - automatic scheduler-driven retries (e.g. a background process that retries failed flows) are desirable but may be scoped as future work beyond manual retry for the MVP
+- flow retry behavior is backed by ZenML step/pipeline retry machinery

@@ -95,31 +95,38 @@ This avoids muddy nested checkpoint semantics while still giving visibility in t
 
 In other words, it is a tracked one-shot model call, not a workflow engine.
 
-## Provider abstraction
+## Provider abstraction: `llm_model` stack component
 
-Kitaru needs an abstraction layer over model providers to make `kitaru.llm()` work across different providers (OpenAI, Anthropic, etc.).
+`kitaru.llm()` is a thin wrapper around a ZenML **`llm_model` stack component** that exposes:
 
-The MVP direction is likely a wrapper over an existing multi-provider SDK (e.g. a LiteLLM-like approach under the hood), but the exact backend shape is **not yet finalized**.
+- the **chat completion API** — a unified interface to model providers (OpenAI, Anthropic, etc.)
+- the **token cost counting API** — automatic tracking of token usage and costs
+
+The `llm_model` component is one of the four to five core components in a Kitaru stack (see [Chapter 4](04-connection-stacks-and-configuration.md)). Model provider credentials and configuration live in the stack, alongside the runner, artifact store, and container registry.
+
+**Stacks define default LLM model aliases** (e.g. `fast`, `smart`, `default`). These aliases let user code reference models by role rather than specific provider/model name. The stack resolves aliases to concrete model configurations.
+
+Most of the heavy lifting for provider abstraction, cost tracking, and model routing happens in ZenML. Kitaru wraps that surface to provide a simpler developer experience.
 
 What is stable:
 
 - `kitaru.llm()` is the user-facing call surface
-- `model=` accepts either an alias or a concrete `provider:model` string
+- `model=` accepts either a stack-defined alias or a concrete `provider:model` string
 - cost, token, and latency tracking are core requirements
-
-The current direction is that the provider abstraction is an **LLM model stack component** — one of the four to five core components in a Kitaru stack (see [Chapter 4](04-connection-stacks-and-configuration.md)). This means model provider credentials and configuration live in the stack, alongside the runner, artifact store, and container registry.
+- the `llm_model` stack component owns provider credentials and configuration
 
 What is still being decided:
 
 - the exact flavor system for different providers (OpenAI, Anthropic, etc.)
 - whether to build the provider layer in-house or wrap an existing library
 - the interaction between stack-level model config and call-time `model=` overrides
+- how token costs are tracked and stored in the ZenML database (Michael will have opinions on this)
 
 ## Model resolution
 
 `model=` may be:
 
-- a configured model alias such as `"fast"` or `"smart"`
+- a **stack-defined model alias** such as `"fast"` or `"smart"` (resolved by the `llm_model` stack component)
 - a concrete provider/model string such as `"openai:gpt-4o"`
 
 Model resolution should happen against the **frozen execution spec**, not ambient runtime globals.

@@ -135,7 +135,7 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
 
 ## Retry semantics
 
-Checkpoint retries are **same-execution, local retries** at the checkpoint boundary. They behave like ZenML step retries.
+Checkpoint retries are **same-execution, local retries** at the checkpoint boundary. They use ZenML step retry behavior underneath — Kitaru exposes and configures this, but the retry machinery itself is ZenML's.
 
 If a checkpoint has `retries=3`:
 

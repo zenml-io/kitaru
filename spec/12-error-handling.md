@@ -51,7 +51,7 @@ This should behave normally on first run and on replay, because the failure outc
 
 ## Checkpoint retries
 
-Checkpoint retries are the narrowest retry scope. They are **same-execution, local** retries that behave like ZenML step retries.
+Checkpoint retries are the narrowest retry scope. They are **same-execution, local** retries that use ZenML step retry behavior underneath.
 
 ```python
 @kitaru.checkpoint(retries=3)
@@ -137,9 +137,9 @@ There is no default "wait timed out and the execution fails" behavior. If a prod
 
 ## Divergence errors
 
-Replay divergence is its own class of failure.
+Replay divergence is its own class of failure. Divergence detection is implemented in the ZenML backend — Kitaru exposes the user-visible error.
 
-If the durable call sequence no longer matches the historical execution before the replay point, replay should fail with a clear divergence error rather than silently reusing the wrong outcomes.
+If the durable call sequence no longer matches the historical execution before the replay point, replay fails with a clear divergence error rather than silently reusing the wrong outcomes.
 
 Typical causes:
 

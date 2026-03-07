@@ -151,9 +151,9 @@ def content_pipeline(topic: str) -> str:
 
 This makes the replay boundary explicit and keeps the adapter's job mostly about visibility and convenience.
 
-## Observability with adapters
+## Observability with adapters (future)
 
-Adapters become especially valuable when paired with OpenTelemetry-native tracing.
+When OTel-native tracing is added (post-MVP), adapters become especially valuable.
 
 For example, with PydanticAI plus Logfire:
 
@@ -165,6 +165,8 @@ That gives users:
 
 - durable execution semantics from Kitaru
 - rich model/tool observability from the framework
+
+For the MVP, adapter observability relies on the global log store and `kitaru.log()` metadata rather than full OTel span emission.
 
 ## What adapters may capture
 

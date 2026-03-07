@@ -1,118 +1,45 @@
 # 15. Observability
 
-Kitaru does **not** own observability. It emits telemetry in a standard way so teams can use the backend they already prefer.
+Kitaru does **not** own observability. It provides structured logging and metadata, and defers to external backends for deeper tracing and visualization.
 
-The intended model is:
+## MVP: Global log store model
 
-- **Kitaru** owns durable execution semantics
-- **OpenTelemetry** owns tracing and export
-- your chosen backend owns storage, querying, and visualization
+For the MVP, observability is centered on the **global log store** concept (see chapter 9):
 
-This keeps the runtime focused and avoids inventing a parallel observability product.
+- Runtime logs default to the artifact store
+- Users can optionally switch the global log backend to an OTel-compatible provider (e.g. Datadog) via `kitaru log-store set`
+- `kitaru.log()` provides structured metadata attachment for cost, quality, usage, and custom annotations
+- The Kitaru dashboard shows execution timelines, artifacts, and metadata
 
-## Philosophy
+This gives teams basic observability without requiring additional infrastructure setup.
 
-Kitaru should be **OpenTelemetry-native**.
+## Why OTel is not MVP
 
-That means:
+Full OpenTelemetry-native tracing would require FastAPI middleware injection at the ZenML server level, which is not feasible for the MVP timeline. Rather than shipping half-baked OTel support, the MVP defers to the global log store model for basic observability needs.
+
+## Future direction: OpenTelemetry-native tracing
+
+In the future, Kitaru should become **OpenTelemetry-native**. That means:
 
 - no proprietary tracing model is required to use it
 - `kitaru.configure()` should not become a bag of tracing options
 - Kitaru spans should fit into normal OTel pipelines
 - tracing should compose well with frameworks like PydanticAI
 
-## What Kitaru should emit
+### What Kitaru would emit (future)
 
-Kitaru should emit spans and structured metadata around the major runtime boundaries.
+When OTel support is added, Kitaru should emit spans and structured metadata around the major runtime boundaries:
 
-### Flow spans
+- **Flow spans** — flow start, completion, failure, retry attempt
+- **Checkpoint spans** — checkpoint start, completion, failure, retry attempts
+- **Wait spans/events** — wait entered, execution suspended, active timeout reached, input received, execution resumed
+- **LLM spans** — model request, model response, usage and cost metadata
+- **Retry and resume events** — retry requested, retry attempt started, failed attempt segment, resume accepted, resumed continuation
 
-A flow should emit spans for:
-
-- flow start
-- flow completion
-- flow failure
-- flow retry attempt (same execution)
-
-Useful attributes include:
-
-- execution ID
-- flow name
-- status
-- stack
-- duration
-
-### Checkpoint spans
-
-A checkpoint should emit spans for:
-
-- checkpoint start
-- checkpoint completion
-- checkpoint failure
-- retry attempts if represented separately
-
-Useful attributes include:
-
-- checkpoint name
-- checkpoint type
-- execution ID
-- attempt count
-- duration
-- artifact references where appropriate
-
-### Wait spans
-
-A wait should emit spans or events for:
-
-- wait entered
-- execution suspended
-- active timeout reached / resources released
-- input received
-- execution resumed
-
-Useful attributes include:
-
-- wait name
-- schema
-- prompt
-- waiting duration
-- active timeout duration
-- actor or source metadata if available
-
-### LLM spans
-
-`kitaru.llm()` should emit spans or child events for:
-
-- model request
-- model response
-- usage and cost metadata
-
-Useful attributes include:
-
-- resolved model
-- provider
-- tokens input
-- tokens output
-- cost
-- latency
-
-### Retry and resume events
-
-Because retry and resume are same-execution operations, the telemetry model should represent them within one logical execution trace:
-
-- **retry requested** — a retry was initiated for a failed checkpoint or flow
-- **retry attempt started** — the actual retry execution began
-- **failed attempt segment** — marks a portion of the execution that failed before retry
-- **resume accepted** — wait input was provided and the execution will continue
-- **resumed continuation** — execution picked up again after suspend
-
-These events help observability backends show the Temporal-like "one execution with a visible gap/red segment" story rather than making retries look like separate executions.
-
-## Example setup
-
-### Logfire
+### Example setup (future)
 
 ```python
+# Logfire
 import logfire
 import kitaru
 
@@ -123,9 +50,8 @@ def my_agent(prompt: str) -> str:
     return kitaru.llm(prompt, model="fast")
 ```
 
-### Generic OTel
-
 ```python
+# Generic OTel
 from opentelemetry.sdk.trace.export import ConsoleSpanExporter
 # ... standard OTel setup ...
 
@@ -136,55 +62,30 @@ def my_agent(prompt: str) -> str:
     return kitaru.llm(prompt, model="fast")
 ```
 
-Kitaru should work with ordinary OTel configuration rather than requiring a Kitaru-specific tracing backend.
+## Dashboard vs tracing backend (future)
 
-## Dashboard vs tracing backend
+The Kitaru dashboard and an OTel backend serve different purposes:
 
-The Kitaru dashboard and an OTel backend serve different purposes.
-
-### Kitaru dashboard
-
-Best for:
-
-- execution status
-- timeline of durable calls
-- wait states
-- replay and inspection
-- artifacts and metadata
-
-### OTel backend
-
-Best for:
-
-- trace-level latency analysis
-- distributed system visibility
-- correlation with other services
-- long-term telemetry workflows
+- **Kitaru dashboard** — execution status, timeline of durable calls, wait states, replay and inspection, artifacts and metadata
+- **OTel backend** — trace-level latency analysis, distributed system visibility, correlation with other services, long-term telemetry workflows
 
 They complement each other rather than compete.
 
-## Framework composition
+## Framework composition (future)
 
-Observability becomes especially useful when Kitaru is used with framework adapters.
-
-For example, with PydanticAI:
+Observability becomes especially useful when Kitaru is used with framework adapters. For example, with PydanticAI:
 
 - Kitaru can provide flow/checkpoint/wait spans
 - PydanticAI can provide model/tool-level spans
 - both can show up in the same trace tree if wired through the same OTel setup
 
-That gives users a good combination of:
-
-- durable execution semantics
-- detailed framework-level tracing
-
 ## Rules
 
-- Kitaru should emit OTel-compatible spans and attributes
 - Kitaru should not require a proprietary observability backend
 - tracing config should remain outside `kitaru.configure()`
 - dashboard state and observability traces should remain complementary concerns
+- for MVP, rely on the global log store and structured metadata rather than full OTel span emission
 
 ## MVP notes
 
-For March, the important part is not a huge observability surface. It is that Kitaru emits clean enough spans and metadata that teams can plug it into existing OTel workflows without friction.
+For the MVP, the important part is that Kitaru stores structured metadata (via `kitaru.log()`) and runtime logs (via the global log store) in a way that teams can access and inspect. Full OTel-native span emission is deferred to a post-MVP release.
