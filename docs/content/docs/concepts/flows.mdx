@@ -1,0 +1,128 @@
+---
+title: Flows
+description: Define durable execution boundaries for your AI agent workflows
+---
+
+A **flow** is the outer durable boundary in Kitaru. It marks the top-level
+function whose execution becomes persistent, replayable, and observable.
+
+## Defining a flow
+
+Decorate your orchestration function with `@kitaru.flow`:
+
+```python
+import kitaru
+
+@kitaru.flow
+def my_agent(url: str) -> str:
+    data = fetch_data(url)
+    return process_data(data)
+```
+
+The decorated function becomes a callable wrapper object. Inside the flow body,
+you compose [checkpoints](/concepts/checkpoints) — the units of work whose
+outputs are persisted.
+
+## Three ways to run a flow
+
+Every `@kitaru.flow` supports three invocation styles. They all run the same
+underlying durable execution — they differ only in how you interact with the
+result.
+
+### Direct call (synchronous)
+
+```python
+result = my_agent("https://example.com")
+```
+
+This submits an execution, blocks until it finishes, and returns the result
+value. If the execution fails, it raises a `RuntimeError`.
+
+This is the simplest way to run a flow and is convenient for scripts, notebooks,
+and sequential workflows.
+
+### `.start()` (asynchronous handle)
+
+```python
+handle = my_agent.start("https://example.com")
+print(handle.exec_id)   # unique execution identifier
+# ... do other work ...
+result = handle.wait()   # block until finished
+```
+
+`.start()` submits the execution and immediately returns a `FlowHandle`. The
+flow runs in the background while your code continues. Call `handle.wait()` when
+you need the result.
+
+### `.deploy()` (remote intent)
+
+```python
+handle = my_agent.deploy("https://example.com", stack="production")
+```
+
+`.deploy()` is semantic sugar for `.start()` that signals remote execution
+intent. Today it behaves identically to `.start()` with a `stack` parameter —
+it exists to make your code more readable when the intent is deployment rather
+than local development.
+
+## FlowHandle
+
+A `FlowHandle` is returned by `.start()` and `.deploy()`. It gives you
+access to the running execution:
+
+| Property / Method | What it does |
+|---|---|
+| `handle.exec_id` | The unique execution identifier (a string you can store or log) |
+| `handle.status` | Current execution status (refreshed on each access) |
+| `handle.wait()` | Block until the execution finishes, then return the result |
+| `handle.get()` | Return the result immediately if finished, otherwise raise an error |
+
+<Callout type="info">
+  `handle.get()` does **not** wait. If the execution is still running, it raises
+  a `RuntimeError`. Use `handle.wait()` when you want to block.
+</Callout>
+
+## Runtime options
+
+You can configure execution behavior at the decorator level (defaults) or
+override per-run via `.start()` and `.deploy()`:
+
+```python
+@kitaru.flow(retries=2, cache=False)
+def my_agent(url: str) -> str:
+    ...
+
+# Override at call time
+handle = my_agent.start("https://example.com", retries=3, cache=True)
+```
+
+| Option | Default | What it controls |
+|---|---|---|
+| `retries` | `0` | Number of automatic retries on failure |
+| `cache` | `True` | Whether checkpoint results can be reused from previous runs |
+| `stack` | `None` | Target execution environment |
+| `image` | `None` | Container image for remote execution (string, mapping, or settings object) |
+
+Per-run values override decorator defaults. If you don't pass an override, the
+decorator default applies.
+
+## Rules to know
+
+- **Flows cannot nest.** You cannot call a `@kitaru.flow` from inside another
+  flow.
+- **Flow functions should compose checkpoints.** The flow body is the
+  orchestration layer — heavy work belongs in
+  [checkpoints](/concepts/checkpoints).
+- **Direct calls block.** A direct call (`my_agent(...)`) will not return until
+  the execution finishes. Use `.start()` if you need non-blocking behavior.
+- **Retries must be non-negative.** Passing a negative `retries` value raises a
+  `ValueError`.
+
+## Next steps
+
+- Learn how to break work into durable units with
+  [Checkpoints](/concepts/checkpoints)
+- Attach structured data to your executions with
+  [Logging and Metadata](/concepts/logging)
+- Understand how results and errors surface in the
+  [Execution Model](/concepts/execution-model)

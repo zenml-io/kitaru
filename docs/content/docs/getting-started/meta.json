@@ -1,5 +1,5 @@
 {
   "title": "Getting Started",
   "defaultOpen": true,
-  "pages": ["installation", "quickstart", "log-store"]
+  "pages": ["installation", "quickstart", "artifacts", "log-store"]
 }

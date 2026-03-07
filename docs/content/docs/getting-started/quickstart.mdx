@@ -39,14 +39,32 @@ kitaru --help
 
 ## What's Next
 
-Kitaru is still in active development, but you can already use:
+Now that Kitaru is installed, learn how the core primitives work:
 
-- durable execution primitives (`@kitaru.flow`, `@kitaru.checkpoint`)
-- structured metadata logging (`kitaru.log()`)
-- runtime log-store configuration (`kitaru log-store ...`)
-
-If you want to configure runtime logging now, read
-[Configure Runtime Log Storage](/getting-started/log-store).
-
-You can also browse the [CLI Reference](/cli) for command details,
-or see the [Changelog](/changelog) for the latest updates.
+<Cards>
+  <Card
+    title="Core Concepts"
+    description="Understand flows, checkpoints, and the execution model"
+    href="/concepts"
+  />
+  <Card
+    title="Flows"
+    description="Define durable execution boundaries"
+    href="/concepts/flows"
+  />
+  <Card
+    title="Checkpoints"
+    description="Break work into persisted units"
+    href="/concepts/checkpoints"
+  />
+  <Card
+    title="Artifacts"
+    description="Save and load named artifacts across executions"
+    href="/getting-started/artifacts"
+  />
+  <Card
+    title="Runtime Log Store"
+    description="Configure where runtime logs are sent"
+    href="/getting-started/log-store"
+  />
+</Cards>
