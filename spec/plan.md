@@ -206,7 +206,7 @@ with Kitaru semantics.
 
 ---
 
-## Phase 7b: Global log store
+## Phase 7b: Global log store --- DONE
 
 **Goal:** Runtime logs have a configurable backend.
 
@@ -617,7 +617,7 @@ Phase 4  -- @kitaru.checkpoint ---------------------------------------- DONE
 Phase 5  -- First working example ------------------------------------- DONE (Milestone)
 Phase 6  -- Runtime context ------------------------------------------- DONE
 Phase 7  -- kitaru.log() ---------------------------------------------- DONE
-Phase 7b -- Global log store ------------------------------------------ Core
+Phase 7b -- Global log store ------------------------------------------ DONE
 Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- Core
 Phase 9  -- Stack selection ------------------------------------------- Easy win
 Phase 10 -- Configuration --------------------------------------------- Medium
