@@ -20,6 +20,7 @@ from kitaru.config import (
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
 )
+from kitaru.errors import FailureOrigin, KitaruFeatureNotAvailableError
 
 
 def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
@@ -64,16 +65,24 @@ class _DummyStep:
         status: ZenMLExecutionStatus,
         outputs: dict[str, list[_DummyArtifact]],
         step_id: UUID | None = None,
+        original_step_run_id: UUID | None = None,
+        run_metadata: dict[str, Any] | None = None,
+        exception_traceback: str | None = None,
     ) -> None:
         self.id = step_id or uuid4()
         self.name = name
         self.status = status
         self.start_time = None
         self.end_time = None
-        self.run_metadata = {}
-        self.original_step_run_id = None
+        self.run_metadata = run_metadata or {}
+        self.original_step_run_id = original_step_run_id
         self.parent_step_ids: list[UUID] = []
         self.outputs = outputs
+        self.exception_info = (
+            SimpleNamespace(traceback=exception_traceback)
+            if exception_traceback is not None
+            else None
+        )
 
 
 class _DummyRun:
@@ -87,10 +96,12 @@ class _DummyRun:
         stack_name: str | None = "local",
         snapshot: Any = None,
         run_id: UUID | None = None,
+        status_reason: str | None = None,
+        exception_traceback: str | None = None,
     ) -> None:
         self.id = run_id or uuid4()
         self.status = status
-        self.status_reason = None
+        self.status_reason = status_reason
         self.start_time = None
         self.end_time = None
         self.run_metadata = run_metadata or {}
@@ -99,6 +110,11 @@ class _DummyRun:
         self.snapshot = snapshot
         self.original_run = None
         self._steps = steps or {}
+        self.exception_info = (
+            SimpleNamespace(traceback=exception_traceback)
+            if exception_traceback is not None
+            else None
+        )
 
     @property
     def steps(self) -> dict[str, _DummyStep]:
@@ -127,7 +143,10 @@ def test_client_initializes_namespaces() -> None:
 
 
 def test_client_rejects_connection_overrides() -> None:
-    with pytest.raises(NotImplementedError, match="Per-client connection overrides"):
+    with pytest.raises(
+        KitaruFeatureNotAvailableError,
+        match="Per-client connection overrides",
+    ):
         KitaruClient(server_url="https://example.com")
 
 
@@ -180,15 +199,145 @@ def test_get_maps_execution_details() -> None:
     assert execution.status == ExecutionStatus.COMPLETED
     assert execution.frozen_execution_spec is not None
     assert execution.frozen_execution_spec.resolved_execution.stack == "local"
+    assert execution.failure is None
 
     assert len(execution.checkpoints) == 1
     checkpoint = execution.checkpoints[0]
     assert checkpoint.name == "research"
+    assert checkpoint.failure is None
+    assert len(checkpoint.attempts) == 1
 
     assert len(execution.artifacts) == 1
     artifact_ref = execution.artifacts[0]
     assert artifact_ref.name == "research_context"
     assert artifact_ref.kind == "context"
+
+
+def test_get_surfaces_checkpoint_attempt_history() -> None:
+    attempt_one = _DummyStep(
+        name="__kitaru_checkpoint_source_research",
+        status=ZenMLExecutionStatus.RETRIED,
+        outputs={},
+        exception_traceback="Traceback\nValueError: boom",
+    )
+    attempt_two = _DummyStep(
+        name="__kitaru_checkpoint_source_research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+        original_step_run_id=attempt_one.id,
+    )
+
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+        steps={attempt_two.name: attempt_two},
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(
+            items=[_as_step_run(attempt_one), _as_step_run(attempt_two)]
+        )
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    checkpoint = execution.checkpoints[0]
+    assert len(checkpoint.attempts) == 2
+    assert checkpoint.attempts[0].status == ExecutionStatus.FAILED
+    assert checkpoint.attempts[0].failure is not None
+    assert checkpoint.attempts[0].failure.origin == FailureOrigin.USER_CODE
+    assert checkpoint.attempts[0].failure.exception_type == "ValueError"
+    assert checkpoint.failure is None
+
+
+def test_get_surfaces_execution_failure_origin() -> None:
+    failed_run = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+        status_reason="Serialization failure while materializing output.",
+        exception_traceback="Traceback\nRuntimeError: serialization failed",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(failed_run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.get(str(failed_run.id))
+
+    assert execution.failure is not None
+    assert execution.failure.origin == FailureOrigin.RUNTIME
+    assert "Serialization failure" in execution.failure.message
+
+
+def test_get_degrades_when_attempt_history_lookup_fails() -> None:
+    step = _DummyStep(
+        name="__kitaru_checkpoint_source_research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+        steps={step.name: step},
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.side_effect = RuntimeError("backend unavailable")
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    assert len(execution.checkpoints) == 1
+    assert len(execution.checkpoints[0].attempts) == 1
+
+
+def test_non_failed_execution_has_no_failure_payload() -> None:
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.STOPPED,
+        flow_name="flow_a",
+        status_reason="Stopped by user.",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    assert execution.status == ExecutionStatus.CANCELLED
+    assert execution.failure is None
 
 
 def test_list_filters_flow_status_and_limit() -> None:
@@ -360,10 +509,10 @@ def test_input_and_replay_raise_not_implemented() -> None:
     ):
         client = KitaruClient()
 
-    with pytest.raises(NotImplementedError, match="input"):
+    with pytest.raises(KitaruFeatureNotAvailableError, match="input"):
         client.executions.input("exec-1", wait="approval", value=True)
 
-    with pytest.raises(NotImplementedError, match="replay"):
+    with pytest.raises(KitaruFeatureNotAvailableError, match="replay"):
         client.executions.replay("exec-1", from_="checkpoint")
 
 

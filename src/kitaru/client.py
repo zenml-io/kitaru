@@ -15,6 +15,7 @@ Example::
 from __future__ import annotations
 
 import builtins
+from collections import defaultdict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -33,6 +34,17 @@ from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
     FrozenExecutionSpec,
     resolve_connection_config,
+)
+from kitaru.errors import (
+    FailureOrigin,
+    KitaruBackendError,
+    KitaruFeatureNotAvailableError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+    classify_failure_origin,
+    traceback_exception_type,
+    traceback_last_line,
 )
 
 _CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
@@ -59,6 +71,28 @@ class PendingWait:
     schema: dict[str, Any] | None
     metadata: dict[str, Any]
     entered_waiting_at: datetime | None
+
+
+@dataclass(frozen=True)
+class FailureInfo:
+    """Structured failure details for executions/checkpoints."""
+
+    message: str
+    exception_type: str | None
+    traceback: str | None
+    origin: FailureOrigin
+
+
+@dataclass(frozen=True)
+class CheckpointAttempt:
+    """One checkpoint attempt in retry/failure journaling history."""
+
+    attempt_id: str
+    status: ExecutionStatus
+    started_at: datetime | None
+    ended_at: datetime | None
+    metadata: dict[str, Any]
+    failure: FailureInfo | None
 
 
 @dataclass(frozen=True)
@@ -94,6 +128,8 @@ class CheckpointCall:
     metadata: dict[str, Any]
     original_call_id: str | None
     parent_call_ids: list[str]
+    failure: FailureInfo | None
+    attempts: list[CheckpointAttempt]
     artifacts: list[ArtifactRef]
 
 
@@ -109,6 +145,7 @@ class Execution:
     stack_name: str | None
     metadata: dict[str, Any]
     status_reason: str | None
+    failure: FailureInfo | None
     pending_wait: PendingWait | None
     frozen_execution_spec: FrozenExecutionSpec | None
     original_exec_id: str | None
@@ -219,7 +256,7 @@ def _to_public_status(status: ZenMLExecutionStatus) -> ExecutionStatus:
     }:
         return ExecutionStatus.CANCELLED
 
-    raise RuntimeError(
+    raise KitaruRuntimeError(
         f"Unsupported execution status mapping: {status!r} (value={status_value!r})."
     )
 
@@ -238,7 +275,7 @@ def _coerce_status_filter(
         return ExecutionStatus(normalized)
     except ValueError as exc:
         expected = ", ".join(item.value for item in ExecutionStatus)
-        raise ValueError(
+        raise KitaruUsageError(
             f"Unsupported status filter {status!r}. Expected one of: {expected}."
         ) from exc
 
@@ -254,6 +291,108 @@ def _parse_frozen_execution_spec(raw_value: Any) -> FrozenExecutionSpec | None:
         return FrozenExecutionSpec.model_validate(raw_value)
     except ValidationError:
         return None
+
+
+def _map_failure_info(
+    *,
+    status_reason: str | None,
+    exception_info: Any,
+    default_origin: FailureOrigin,
+    fallback_message: str | None = None,
+) -> FailureInfo | None:
+    """Build structured failure info from status + exception payloads."""
+    traceback_text: str | None = None
+    if exception_info is not None:
+        traceback_text = getattr(exception_info, "traceback", None)
+
+    traceback_tail = traceback_last_line(traceback_text)
+    message = status_reason or traceback_tail or fallback_message
+    if message is None:
+        return None
+
+    origin = classify_failure_origin(
+        status_reason=status_reason,
+        traceback=traceback_text,
+        default=default_origin,
+    )
+    return FailureInfo(
+        message=message,
+        exception_type=traceback_exception_type(traceback_text),
+        traceback=traceback_text,
+        origin=origin,
+    )
+
+
+def _checkpoint_lineage_key(step: StepRunResponse) -> str:
+    """Return the stable lineage key for checkpoint retry grouping."""
+    if step.original_step_run_id is not None:
+        return str(step.original_step_run_id)
+    return str(step.id)
+
+
+def _list_checkpoint_attempts_for_run(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+) -> dict[str, list[StepRunResponse]]:
+    """Fetch all step attempts for one execution, including retried runs."""
+    grouped_attempts: defaultdict[str, list[StepRunResponse]] = defaultdict(list)
+    page = 1
+    page_size = 200
+
+    try:
+        while True:
+            step_page = client._client().list_run_steps(
+                sort_by="asc:created",
+                page=page,
+                size=page_size,
+                pipeline_run_id=run.id,
+                project=client._project,
+                exclude_retried=False,
+                hydrate=True,
+            )
+            step_items = list(step_page.items)
+            if not step_items:
+                break
+
+            for step in step_items:
+                grouped_attempts[_checkpoint_lineage_key(step)].append(step)
+
+            if len(step_items) < page_size:
+                break
+            page += 1
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to fetch checkpoint attempts for execution {run.id}: {exc}"
+        ) from exc
+
+    return dict(grouped_attempts)
+
+
+def _map_checkpoint_attempt(step: StepRunResponse) -> CheckpointAttempt:
+    """Map one step run model into a checkpoint-attempt entry."""
+    public_status = _to_public_status(step.status)
+    checkpoint_name = _normalize_checkpoint_name(step.name)
+
+    failure = _map_failure_info(
+        status_reason=None,
+        exception_info=getattr(step, "exception_info", None),
+        default_origin=FailureOrigin.USER_CODE,
+        fallback_message=(
+            f"Checkpoint '{checkpoint_name}' failed."
+            if public_status == ExecutionStatus.FAILED
+            else None
+        ),
+    )
+
+    return CheckpointAttempt(
+        attempt_id=str(step.id),
+        status=public_status,
+        started_at=step.start_time,
+        ended_at=step.end_time,
+        metadata=_to_plain_dict(step.run_metadata),
+        failure=failure,
+    )
 
 
 def _map_artifact_ref(
@@ -279,7 +418,10 @@ def _map_artifact_ref(
 
 
 def _map_checkpoint_call(
-    *, step: StepRunResponse, client: KitaruClient
+    *,
+    step: StepRunResponse,
+    client: KitaruClient,
+    attempts_by_lineage: Mapping[str, list[StepRunResponse]],
 ) -> CheckpointCall:
     """Map a ZenML step run into a Kitaru checkpoint call."""
     producing_call = _normalize_checkpoint_name(step.name)
@@ -300,6 +442,14 @@ def _map_checkpoint_call(
                 )
             )
 
+    lineage_key = _checkpoint_lineage_key(step)
+    attempt_steps = attempts_by_lineage.get(lineage_key, [step])
+    attempts = [_map_checkpoint_attempt(attempt) for attempt in attempt_steps]
+
+    failure = None
+    if attempts:
+        failure = attempts[-1].failure
+
     original_call_id: str | None = None
     if step.original_step_run_id is not None:
         original_call_id = str(step.original_step_run_id)
@@ -313,6 +463,8 @@ def _map_checkpoint_call(
         metadata=_to_plain_dict(step.run_metadata),
         original_call_id=original_call_id,
         parent_call_ids=[str(parent_id) for parent_id in step.parent_step_ids],
+        failure=failure,
+        attempts=attempts,
         artifacts=artifacts,
     )
 
@@ -373,11 +525,54 @@ def _map_execution(
     """Map a ZenML pipeline run into a Kitaru execution model."""
     status = _to_public_status(run.status)
 
+    status_reason = getattr(run, "status_reason", None)
+    run_exception_info = getattr(run, "exception_info", None)
+
+    failure: FailureInfo | None = None
+    if status == ExecutionStatus.FAILED:
+        failure = _map_failure_info(
+            status_reason=status_reason,
+            exception_info=run_exception_info,
+            default_origin=(
+                FailureOrigin.USER_CODE
+                if run_exception_info is not None
+                else FailureOrigin.UNKNOWN
+            ),
+            fallback_message=f"Execution {run.id} failed.",
+        )
+
     checkpoints: list[CheckpointCall] = []
     artifacts: list[ArtifactRef] = []
     if include_details:
+        attempts_by_lineage: dict[str, list[StepRunResponse]] = {}
+        try:
+            attempts_by_lineage = _list_checkpoint_attempts_for_run(
+                run=run,
+                client=client,
+            )
+        except KitaruBackendError:
+            # Degrade gracefully: execution inspection should still work even
+            # when deep attempt history cannot be fetched.
+            attempts_by_lineage = {}
+
+        latest_steps_by_lineage: dict[str, StepRunResponse] = {}
+        for lineage_key, attempts in attempts_by_lineage.items():
+            if attempts:
+                latest_steps_by_lineage[lineage_key] = attempts[-1]
+
         for step in run.steps.values():
-            checkpoints.append(_map_checkpoint_call(step=step, client=client))
+            lineage_key = _checkpoint_lineage_key(step)
+            latest_steps_by_lineage.setdefault(lineage_key, step)
+            attempts_by_lineage.setdefault(lineage_key, [step])
+
+        for step in latest_steps_by_lineage.values():
+            checkpoints.append(
+                _map_checkpoint_call(
+                    step=step,
+                    client=client,
+                    attempts_by_lineage=attempts_by_lineage,
+                )
+            )
 
         seen_artifact_ids: set[str] = set()
         for checkpoint in checkpoints:
@@ -413,7 +608,8 @@ def _map_execution(
         ended_at=run.end_time,
         stack_name=stack_name,
         metadata=metadata,
-        status_reason=getattr(run, "status_reason", None),
+        status_reason=status_reason,
+        failure=failure,
         pending_wait=pending_wait,
         frozen_execution_spec=_parse_frozen_execution_spec(
             metadata.get(FROZEN_EXECUTION_SPEC_METADATA_KEY)
@@ -438,7 +634,7 @@ class _ExecutionsAPI:
         available for Kitaru's full resume semantics.
         """
         _ = (exec_id, wait, value)
-        raise NotImplementedError(
+        raise KitaruFeatureNotAvailableError(
             "client.executions.input() is not implemented yet. "
             "Waiting input/resume depends on pending ZenML wait/resume branch "
             "integration for Kitaru."
@@ -448,29 +644,34 @@ class _ExecutionsAPI:
         """Retry a failed execution as same-execution recovery."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         if run.status != ZenMLExecutionStatus.FAILED:
-            raise RuntimeError(
+            raise KitaruStateError(
                 "Only failed executions can be retried. "
                 f"Execution '{exec_id}' is currently '{run.status.value}'."
             )
 
         snapshot = run.snapshot
         if snapshot is None:
-            raise RuntimeError(
+            raise KitaruRuntimeError(
                 "Unable to retry execution because snapshot metadata is missing."
             )
         if snapshot.stack is None:
-            raise RuntimeError(
+            raise KitaruRuntimeError(
                 "Unable to retry execution because snapshot stack metadata is missing."
             )
 
-        with _temporary_active_stack(str(snapshot.stack.id)):
-            active_stack = self._client_ref._client().active_stack
-            orchestrator = cast(Any, active_stack.orchestrator)
-            orchestrator.restart(
-                snapshot=snapshot,
-                run=run,
-                stack=active_stack,
-            )
+        try:
+            with _temporary_active_stack(str(snapshot.stack.id)):
+                active_stack = self._client_ref._client().active_stack
+                orchestrator = cast(Any, active_stack.orchestrator)
+                orchestrator.restart(
+                    snapshot=snapshot,
+                    run=run,
+                    stack=active_stack,
+                )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to retry execution '{exec_id}': {exc}"
+            ) from exc
 
         return self.get(exec_id)
 
@@ -484,7 +685,7 @@ class _ExecutionsAPI:
     ) -> Execution:
         """Replay an execution from a prior checkpoint boundary."""
         _ = (exec_id, from_, overrides, flow_inputs)
-        raise NotImplementedError(
+        raise KitaruFeatureNotAvailableError(
             "client.executions.replay() is not implemented yet. "
             "Replay support remains branch-dependent and will be added once "
             "Kitaru can safely wrap the upstream replay APIs."
@@ -506,7 +707,7 @@ class _ExecutionsAPI:
         status_filter = _coerce_status_filter(status)
 
         if limit is not None and limit < 1:
-            raise ValueError("`limit` must be >= 1 when provided.")
+            raise KitaruUsageError("`limit` must be >= 1 when provided.")
 
         results: list[Execution] = []
         page = 1
@@ -588,7 +789,7 @@ class _ArtifactsAPI:
     ) -> builtins.list[ArtifactRef]:
         """List artifacts for an execution with optional filters."""
         if limit is not None and limit < 1:
-            raise ValueError("`limit` must be >= 1 when provided.")
+            raise KitaruUsageError("`limit` must be >= 1 when provided.")
 
         execution = self._client_ref.executions.get(exec_id)
         artifacts = execution.artifacts
@@ -649,8 +850,8 @@ class KitaruClient:
             project: Optional per-client project override (not yet supported).
 
         Raises:
-            NotImplementedError: If per-client connection overrides are
-                provided.
+            KitaruFeatureNotAvailableError: If per-client connection overrides
+                are provided.
         """
         explicit_overrides: dict[str, str] = {}
         if server_url is not None:
@@ -662,7 +863,7 @@ class KitaruClient:
 
         if explicit_overrides:
             supplied = ", ".join(sorted(explicit_overrides))
-            raise NotImplementedError(
+            raise KitaruFeatureNotAvailableError(
                 "Per-client connection overrides are not implemented yet "
                 f"(received: {supplied}). Use kitaru.connect(...) and active "
                 "project settings for now."
@@ -685,12 +886,17 @@ class KitaruClient:
         hydrate: bool,
     ) -> PipelineRunResponse:
         """Fetch a run by execution ID with strict ID matching."""
-        return self._client().get_pipeline_run(
-            name_id_or_prefix=exec_id,
-            allow_name_prefix_match=False,
-            project=self._project,
-            hydrate=hydrate,
-        )
+        try:
+            return self._client().get_pipeline_run(
+                name_id_or_prefix=exec_id,
+                allow_name_prefix_match=False,
+                project=self._project,
+                hydrate=hydrate,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to load execution '{exec_id}': {exc}"
+            ) from exc
 
     def _get_artifact_version(
         self,
@@ -699,18 +905,25 @@ class KitaruClient:
         hydrate: bool,
     ) -> ArtifactVersionResponse:
         """Fetch an artifact version by ID."""
-        return self._client().get_artifact_version(
-            name_id_or_prefix=artifact_id,
-            project=self._project,
-            hydrate=hydrate,
-        )
+        try:
+            return self._client().get_artifact_version(
+                name_id_or_prefix=artifact_id,
+                project=self._project,
+                hydrate=hydrate,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to load artifact '{artifact_id}': {exc}"
+            ) from exc
 
 
 __all__ = [
     "ArtifactRef",
+    "CheckpointAttempt",
     "CheckpointCall",
     "Execution",
     "ExecutionStatus",
+    "FailureInfo",
     "KitaruClient",
     "PendingWait",
 ]

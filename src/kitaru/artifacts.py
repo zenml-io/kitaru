@@ -32,6 +32,12 @@ from zenml.enums import ArtifactSaveType, ArtifactType
 from zenml.models import PipelineRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 
+from kitaru.errors import (
+    KitaruContextError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 from kitaru.runtime import (
     _get_current_checkpoint_id,
     _get_current_execution_id,
@@ -69,12 +75,12 @@ def _parse_scope_uuid(scope_id: str, *, scope_name: str, api_name: str) -> UUID:
         Parsed UUID.
 
     Raises:
-        RuntimeError: If the scope identifier is not a valid UUID.
+        KitaruStateError: If the scope identifier is not a valid UUID.
     """
     try:
         return UUID(scope_id)
     except ValueError as exc:
-        raise RuntimeError(
+        raise KitaruStateError(
             f"kitaru.{api_name}() found an invalid {scope_name} ID in runtime "
             f"scope: {scope_id!r}."
         ) from exc
@@ -90,23 +96,24 @@ def _require_checkpoint_scope(api_name: str) -> tuple[UUID, UUID]:
         Tuple of current execution UUID and checkpoint UUID.
 
     Raises:
-        RuntimeError: If scope is missing or scope IDs are missing/invalid.
+        KitaruContextError: If called outside checkpoint scope.
+        KitaruStateError: If scope IDs are missing or invalid.
     """
     if not _is_inside_checkpoint():
-        raise RuntimeError(
+        raise KitaruContextError(
             f"kitaru.{api_name}() can only be called inside a @kitaru.checkpoint."
         )
 
     execution_id = _get_current_execution_id()
     if execution_id is None:
-        raise RuntimeError(
+        raise KitaruStateError(
             f"kitaru.{api_name}() requires an active execution ID inside "
             "@kitaru.checkpoint."
         )
 
     checkpoint_id = _get_current_checkpoint_id()
     if checkpoint_id is None:
-        raise RuntimeError(
+        raise KitaruStateError(
             f"kitaru.{api_name}() requires an active checkpoint ID inside "
             "@kitaru.checkpoint."
         )
@@ -127,12 +134,12 @@ def _normalize_artifact_type(artifact_type: str) -> str:
         Normalized artifact type.
 
     Raises:
-        ValueError: If the type is unsupported.
+        KitaruUsageError: If the type is unsupported.
     """
     normalized = artifact_type.strip().lower()
     if normalized not in _ALLOWED_ARTIFACT_TYPES:
         allowed = ", ".join(sorted(_ALLOWED_ARTIFACT_TYPES))
-        raise ValueError(
+        raise KitaruUsageError(
             "Unsupported Kitaru artifact type "
             f"{artifact_type!r}. Expected one of: {allowed}."
         )
@@ -223,9 +230,9 @@ def save(
         tags: Optional tags for filtering and discovery.
 
     Raises:
-        RuntimeError: If called outside a checkpoint or with invalid runtime
-            scope IDs.
-        ValueError: If `type` is unsupported.
+        KitaruContextError: If called outside a checkpoint.
+        KitaruStateError: If runtime scope IDs are missing or invalid.
+        KitaruUsageError: If `type` is unsupported.
     """
     _require_checkpoint_scope("save")
     artifact_type = _normalize_artifact_type(type)
@@ -250,16 +257,17 @@ def load(exec_id: str, name: str) -> Any:
         The materialized artifact value.
 
     Raises:
-        RuntimeError: If called outside a checkpoint, if runtime scope is
-            invalid, if the artifact is not found, or if lookup is ambiguous.
-        ValueError: If `exec_id` is not a valid UUID.
+        KitaruContextError: If called outside a checkpoint.
+        KitaruStateError: If runtime scope is invalid.
+        KitaruRuntimeError: If lookup is not found or ambiguous.
+        KitaruUsageError: If `exec_id` is not a valid UUID.
     """
     _require_checkpoint_scope("load")
 
     try:
         target_execution_id = UUID(exec_id)
     except ValueError as exc:
-        raise ValueError(
+        raise KitaruUsageError(
             f"kitaru.load() expected `exec_id` to be a UUID, got {exec_id!r}."
         ) from exc
 
@@ -275,13 +283,13 @@ def load(exec_id: str, name: str) -> Any:
     )
 
     if not matches:
-        raise RuntimeError(
+        raise KitaruRuntimeError(
             f"No artifact named {name!r} was found in execution {target_execution_id}."
         )
 
     if len(matches) > 1:
         details = ", ".join(_format_match(match) for match in matches)
-        raise RuntimeError(
+        raise KitaruRuntimeError(
             f"Multiple artifacts named {name!r} were found in execution "
             f"{target_execution_id}. Please disambiguate by choosing a unique "
             f"artifact name. Matches: {details}."

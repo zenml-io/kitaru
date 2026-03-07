@@ -14,6 +14,7 @@ from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
 from kitaru.config import ResolvedExecutionConfig
+from kitaru.errors import FailureOrigin, KitaruStateError, KitaruUserCodeError
 from kitaru.flow import FlowHandle, _wrap_flow_entrypoint, flow
 from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
@@ -353,9 +354,11 @@ def test_flow_handle_get_raises_when_still_running() -> None:
     handle = FlowHandle(_as_pipeline_run(running))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="still running"),
+        pytest.raises(KitaruStateError, match="still running") as exc_info,
     ):
         handle.get()
+
+    assert exc_info.value.args
 
 
 def test_flow_handle_get_raises_with_failure_context() -> None:
@@ -370,9 +373,13 @@ def test_flow_handle_get_raises_with_failure_context() -> None:
     handle = FlowHandle(_as_pipeline_run(failed))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="upstream failure"),
+        pytest.raises(KitaruUserCodeError, match="upstream failure") as exc_info,
     ):
         handle.get()
+
+    assert exc_info.value.exec_id == str(failed.id)
+    assert exc_info.value.status == failed.status.value
+    assert exc_info.value.failure_origin == FailureOrigin.USER_CODE
 
 
 def test_flow_handle_get_returns_tuple_for_multiple_outputs() -> None:

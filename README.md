@@ -16,6 +16,8 @@ Phase 11.5 adds a Kitaru secrets CLI surface: `kitaru secrets set/show/list/dele
 
 Phase 12 adds `kitaru.llm()` with LiteLLM as the backend engine, automatic prompt/response artifact capture, usage/cost/latency metadata logging, and local model alias registration (`kitaru model register/list`) with optional secret-backed credential lookup.
 
+Phase 13 adds a typed Kitaru error hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.), clearer runtime-vs-user-code failure surfacing, and failure journaling in `KitaruClient` via `execution.failure` plus per-checkpoint attempt history in `checkpoint.attempts`.
+
 ### SDK primitives
 
 ```python

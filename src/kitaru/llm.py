@@ -17,6 +17,12 @@ from zenml.client import Client
 from kitaru.artifacts import save
 from kitaru.checkpoint import checkpoint
 from kitaru.config import ResolvedModelSelection, resolve_model_selection
+from kitaru.errors import (
+    KitaruBackendError,
+    KitaruContextError,
+    KitaruRuntimeError,
+    KitaruUsageError,
+)
 from kitaru.logging import log
 from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_call_name
 
@@ -68,7 +74,7 @@ def _normalize_call_name(name: str | None) -> str:
 
     normalized_name = re.sub(r"\W+", "_", name.strip())
     if not normalized_name:
-        raise ValueError("LLM call name cannot be empty.")
+        raise KitaruUsageError("LLM call name cannot be empty.")
     if normalized_name[0].isdigit():
         normalized_name = f"llm_{normalized_name}"
     return normalized_name
@@ -101,18 +107,17 @@ def _read_secret_values(secret_name: str) -> dict[str, str]:
             allow_partial_id_match=False,
         )
     except KeyError as exc:
-        raise RuntimeError(f"Secret `{secret_name}` was not found.") from exc
+        raise KitaruRuntimeError(f"Secret `{secret_name}` was not found.") from exc
     except Exception as exc:
-        raise RuntimeError(
+        raise KitaruBackendError(
             f"Failed to load secret `{secret_name}` for kitaru.llm(): {exc}"
         ) from exc
 
     secret_values = getattr(secret, "secret_values", None)
     if not isinstance(secret_values, Mapping) or not secret_values:
-        raise RuntimeError(
+        raise KitaruRuntimeError(
             f"Secret `{secret_name}` does not contain readable key/value pairs."
         )
-
     normalized_values: dict[str, str] = {}
     for key, value in secret_values.items():
         key_string = str(key).strip()
@@ -123,8 +128,9 @@ def _read_secret_values(secret_name: str) -> dict[str, str]:
         normalized_values[key_string] = str(value)
 
     if not normalized_values:
-        raise RuntimeError(f"Secret `{secret_name}` does not contain non-empty values.")
-
+        raise KitaruRuntimeError(
+            f"Secret `{secret_name}` does not contain non-empty values."
+        )
     return normalized_values
 
 
@@ -140,24 +146,22 @@ def _resolve_credential_overlay(
 
         if selection.secret is None:
             required_keys = ", ".join(provider_keys)
-            raise RuntimeError(
+            raise KitaruRuntimeError(
                 "No provider credentials found for "
                 f"`{selection.resolved_model}`. Set one of [{required_keys}] in the "
                 "environment or register an alias with `--secret` via "
                 "`kitaru model register ...`."
             )
-
         secret_values = _read_secret_values(selection.secret)
         if not any(
             secret_values.get(key) or os.environ.get(key) for key in provider_keys
         ):
             required_keys = ", ".join(provider_keys)
-            raise RuntimeError(
+            raise KitaruRuntimeError(
                 f"Secret `{selection.secret}` does not provide required credential "
                 f"keys for `{selection.resolved_model}`. Expected one of "
                 f"[{required_keys}]."
             )
-
         return secret_values, "secret"
 
     if selection.secret is None:
@@ -177,31 +181,30 @@ def _normalize_messages(
     if system is not None:
         system_prompt = system.strip()
         if not system_prompt:
-            raise ValueError("System prompt cannot be empty when provided.")
+            raise KitaruUsageError("System prompt cannot be empty when provided.")
         messages.append({"role": "system", "content": system_prompt})
 
     if isinstance(prompt, str):
         prompt_value = prompt.strip()
         if not prompt_value:
-            raise ValueError("Prompt cannot be empty.")
+            raise KitaruUsageError("Prompt cannot be empty.")
         messages.append({"role": "user", "content": prompt_value})
         return messages
 
     for message in prompt:
         if not isinstance(message, Mapping):
-            raise TypeError(
+            raise KitaruUsageError(
                 "Prompt message lists must contain dict-like items with `role` and "
                 "`content` keys."
             )
         if "role" not in message or "content" not in message:
-            raise ValueError(
+            raise KitaruUsageError(
                 "Each prompt message must contain `role` and `content` keys."
             )
         messages.append(dict(message))
 
     if not messages:
-        raise ValueError("Prompt message list cannot be empty.")
-
+        raise KitaruUsageError("Prompt message list cannot be empty.")
     return messages
 
 
@@ -212,8 +215,7 @@ def _extract_response_text(raw_response: Any) -> str:
         choices = raw_response.get("choices")
 
     if not isinstance(choices, Sequence) or not choices:
-        raise RuntimeError("LiteLLM returned no response choices.")
-
+        raise KitaruRuntimeError("LiteLLM returned no response choices.")
     first_choice = choices[0]
     if isinstance(first_choice, Mapping):
         message = first_choice.get("message")
@@ -240,7 +242,7 @@ def _extract_response_text(raw_response: Any) -> str:
         if text_parts:
             return "\n".join(text_parts)
 
-    raise RuntimeError("LiteLLM returned an unsupported response content format.")
+    raise KitaruRuntimeError("LiteLLM returned an unsupported response content format.")
 
 
 def _extract_usage(raw_response: Any) -> _LLMUsage:
@@ -316,8 +318,14 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         completion_kwargs["mock_response"] = mock_response
 
     started_at = time.perf_counter()
-    with _temporary_env(env_overlay):
-        raw_response = completion(**completion_kwargs)
+    try:
+        with _temporary_env(env_overlay):
+            raw_response = completion(**completion_kwargs)
+    except Exception as exc:
+        raise KitaruBackendError(
+            "kitaru.llm() failed while calling the provider backend "
+            f"for model `{model_selection.resolved_model}`: {exc}"
+        ) from exc
     latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
     response_text = _extract_response_text(raw_response)
@@ -378,8 +386,7 @@ def llm(
         ValueError: If prompt or model input is invalid.
     """
     if not _is_inside_flow():
-        raise RuntimeError(_LLM_OUTSIDE_FLOW_ERROR)
-
+        raise KitaruContextError(_LLM_OUTSIDE_FLOW_ERROR)
     request = _LLMRequest(
         prompt=prompt,
         model=model,

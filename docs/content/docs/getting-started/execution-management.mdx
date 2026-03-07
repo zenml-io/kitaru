@@ -23,6 +23,9 @@ execution = client.executions.get(exec_id)
 print(execution.exec_id)
 print(execution.flow_name)
 print(execution.status)  # running/waiting/completed/failed/cancelled
+
+if execution.failure:
+    print(execution.failure.origin, execution.failure.message)
 ```
 
 Execution details include:
@@ -31,6 +34,8 @@ Execution details include:
 - stack name
 - summary metadata
 - checkpoint calls
+- execution failure details (`execution.failure`) when status is `failed`
+- checkpoint retry/failure attempt history (`checkpoint.attempts`)
 - artifacts
 - frozen execution spec (when available)
 
@@ -44,6 +49,17 @@ completed_for_flow = client.executions.list(
     limit=10,
 )
 latest = client.executions.latest(flow="content_pipeline")
+```
+
+## Inspect checkpoint attempt history
+
+```python
+execution = client.executions.get(exec_id)
+for checkpoint in execution.checkpoints:
+    for attempt in checkpoint.attempts:
+        print(checkpoint.name, attempt.status)
+        if attempt.failure:
+            print("  ", attempt.failure.origin, attempt.failure.message)
 ```
 
 ## Retry and cancel

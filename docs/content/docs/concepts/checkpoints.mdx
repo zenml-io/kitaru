@@ -90,6 +90,10 @@ def call_model(prompt: str) -> str:
 
 Like flow options, `retries` must be non-negative.
 
+When retries are enabled, Kitaru records each failed attempt before the final
+checkpoint outcome. You can inspect this history through
+`KitaruClient().executions.get(exec_id).checkpoints[*].attempts`.
+
 ## Return values
 
 Checkpoint return values must be serializable — Kitaru persists them so they can
@@ -104,19 +108,19 @@ be reused in future executions. Prefer:
 Kitaru enforces several guardrails in the current release:
 
 - **Checkpoints only work inside a flow.** Calling a checkpoint outside a
-  `@kitaru.flow` raises a `RuntimeError`.
+  `@kitaru.flow` raises `KitaruContextError`.
 - **No nested checkpoints.** Calling one checkpoint from inside another is not
-  supported and raises a `RuntimeError`.
+  supported and raises `KitaruContextError`.
 - **`.submit()` requires a running flow.** Concurrent submission is only
   available during flow execution, not during flow compilation.
 - **`.map()` and `.product()` follow the same rules as `.submit()`** — they
   require a running flow context.
 
 ```python
-# This will raise RuntimeError — checkpoint called outside a flow
+# This raises KitaruContextError — checkpoint called outside a flow
 fetch_data("https://example.com")
 
-# This will raise RuntimeError — nested checkpoint
+# This also raises KitaruContextError — nested checkpoint
 @kitaru.checkpoint
 def outer():
     return inner()  # inner is also a checkpoint — not allowed

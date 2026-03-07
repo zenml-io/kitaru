@@ -27,6 +27,7 @@ from zenml.client import Client
 from zenml.enums import MetadataResourceTypes
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 
+from kitaru.errors import KitaruContextError, KitaruStateError
 from kitaru.runtime import (
     _get_current_checkpoint_id,
     _get_current_execution_id,
@@ -54,12 +55,12 @@ def _parse_scope_uuid(scope_id: str, *, scope_name: str) -> UUID:
         Parsed UUID.
 
     Raises:
-        RuntimeError: If the scope identifier is not a valid UUID.
+        KitaruStateError: If the scope identifier is not a valid UUID.
     """
     try:
         return UUID(scope_id)
     except ValueError as exc:
-        raise RuntimeError(
+        raise KitaruStateError(
             f"kitaru.log() found an invalid {scope_name} ID in runtime scope:"
             f" {scope_id!r}."
         ) from exc
@@ -70,8 +71,7 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
     if _is_inside_checkpoint():
         checkpoint_id = _get_current_checkpoint_id()
         if checkpoint_id is None:
-            raise RuntimeError(_LOG_MISSING_CHECKPOINT_ID_ERROR)
-
+            raise KitaruStateError(_LOG_MISSING_CHECKPOINT_ID_ERROR)
         checkpoint_uuid = _parse_scope_uuid(checkpoint_id, scope_name="checkpoint")
         return (
             RunMetadataResource(
@@ -84,8 +84,7 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
     if _is_inside_flow():
         execution_id = _get_current_execution_id()
         if execution_id is None:
-            raise RuntimeError(_LOG_MISSING_EXECUTION_ID_ERROR)
-
+            raise KitaruStateError(_LOG_MISSING_EXECUTION_ID_ERROR)
         execution_uuid = _parse_scope_uuid(execution_id, scope_name="execution")
         return (
             RunMetadataResource(
@@ -95,7 +94,7 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
             None,
         )
 
-    raise RuntimeError(_LOG_OUTSIDE_FLOW_ERROR)
+    raise KitaruContextError(_LOG_OUTSIDE_FLOW_ERROR)
 
 
 def log(**kwargs: Any) -> None:
@@ -114,8 +113,8 @@ def log(**kwargs: Any) -> None:
         **kwargs: Key-value pairs to attach as metadata.
 
     Raises:
-        RuntimeError: If called outside a flow, or if runtime scope IDs are
-            missing/invalid.
+        KitaruContextError: If called outside a flow.
+        KitaruStateError: If runtime scope IDs are missing/invalid.
     """
     resource, publisher_step_id = _resolve_log_target()
     Client().create_run_metadata(
