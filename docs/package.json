@@ -13,17 +13,20 @@
   },
   "dependencies": {
     "@orama/orama": "^3.1.18",
+    "@takumi-rs/image-response": "^0.69.5",
     "fumadocs-core": "16.6.9",
     "fumadocs-mdx": "14.2.9",
+    "fumadocs-python": "^0.0.9",
     "fumadocs-ui": "16.6.9",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "tailwind-merge": "^3.5.0",
-    "@takumi-rs/image-response": "^0.69.5"
+    "shiki": "^4.0.1",
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
     "@tailwindcss/postcss": "^4.2.1",
     "@types/mdx": "^2.0.13",
     "@types/node": "^25.3.3",
@@ -32,7 +35,6 @@
     "postcss": "^8.5.6",
     "serve": "^14.2.5",
     "tailwindcss": "^4.2.1",
-    "typescript": "^5.9.3",
-    "@biomejs/biome": "^2.4.4"
+    "typescript": "^5.9.3"
   }
 }

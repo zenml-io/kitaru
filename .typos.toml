@@ -24,6 +24,8 @@ unoptimized = "unoptimized"
 prerendered = "prerendered"
 # Kitaru product terms
 kitaru = "kitaru"
+fumapy = "fumapy"
+griffe = "griffe"
 # British spelling in the actual workflow filename (image-optimiser.yml)
 optimiser = "optimiser"
 
