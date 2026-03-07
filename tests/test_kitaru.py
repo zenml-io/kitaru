@@ -190,8 +190,8 @@ class TestPlaceholderBehavior:
         with pytest.raises(NotImplementedError, match="load"):
             kitaru.load("exec-123", "name")
 
-    def test_log_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="log"):
+    def test_log_requires_flow_context(self) -> None:
+        with pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"):
             kitaru.log(cost=0.01)
 
     def test_configure_raises(self) -> None:
