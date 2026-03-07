@@ -48,6 +48,7 @@ class TestPublicExports:
 
     def test_all_exports_match(self) -> None:
         expected = {
+            "FlowHandle",
             "KitaruClient",
             "checkpoint",
             "configure",
@@ -158,9 +159,11 @@ class TestImplementedConnectionPrimitive:
 class TestPlaceholderBehavior:
     """Verify scaffolded primitives still raise NotImplementedError."""
 
-    def test_flow_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="flow"):
-            kitaru.flow(lambda: None)
+    def test_flow_returns_callable_with_start_and_deploy(self) -> None:
+        wrapped = kitaru.flow(lambda: None)
+        assert callable(wrapped)
+        assert hasattr(wrapped, "start")
+        assert hasattr(wrapped, "deploy")
 
     def test_checkpoint_raises(self) -> None:
         with pytest.raises(NotImplementedError, match="checkpoint"):

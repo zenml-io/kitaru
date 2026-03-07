@@ -28,12 +28,13 @@ from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
 from kitaru.client import KitaruClient
 from kitaru.config import configure, connect
-from kitaru.flow import flow
+from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
 from kitaru.wait import wait
 
 __all__ = [
+    "FlowHandle",
     "KitaruClient",
     "checkpoint",
     "configure",
