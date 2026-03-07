@@ -50,20 +50,15 @@
           <!-- Plain Python tab -->
           <div class="code-tab-content active" id="tab-plain">
             <pre class="code-pre"><code><span class="kw">import</span> kitaru
-<span class="kw">from</span> pydantic <span class="kw">import</span> BaseModel
-
-<span class="kw">class</span> <span class="var">Review</span>(BaseModel):
-    approved: <span class="var">bool</span>
-    notes: <span class="var">str</span> <span class="op">=</span> <span class="str">""</span>
 
 <span class="dec">@kitaru.flow</span>
 <span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
     plan <span class="op">=</span> <span class="fn">analyze_issue</span>(issue)    <span class="cmt"># cached on replay</span>
     patch <span class="op">=</span> <span class="fn">write_code</span>(plan)      <span class="cmt"># cached on replay</span>
 
-    <span class="cmt"># Pauses. Dashboard renders a form from the schema.</span>
-    review <span class="op">=</span> kitaru.<span class="fn">wait</span>(schema<span class="op">=</span><span class="var">Review</span>, question<span class="op">=</span><span class="str">"Merge this PR?"</span>)
-    <span class="kw">if</span> review.approved:
+    <span class="cmt"># Pauses. Resumes when a human responds.</span>
+    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, question<span class="op">=</span><span class="str">"Merge this PR?"</span>)
+    <span class="kw">if</span> approved:
         <span class="fn">merge</span>(patch)
     <span class="kw">return</span> patch
 
