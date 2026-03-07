@@ -1,0 +1,85 @@
+---
+title: Manage Executions with KitaruClient
+description: Inspect execution status, browse artifacts, and manage retries/cancellation
+---
+
+`KitaruClient` is the programmatic API for managing and inspecting executions
+outside your flow functions.
+
+## Create a client
+
+```python
+import kitaru
+
+client = kitaru.KitaruClient()
+```
+
+The client uses your current Kitaru connection/project context.
+
+## Inspect a single execution
+
+```python
+execution = client.executions.get(exec_id)
+print(execution.exec_id)
+print(execution.flow_name)
+print(execution.status)  # running/waiting/completed/failed/cancelled
+```
+
+Execution details include:
+
+- start/end timestamps
+- stack name
+- summary metadata
+- checkpoint calls
+- artifacts
+- frozen execution spec (when available)
+
+## List and query executions
+
+```python
+recent = client.executions.list(limit=20)
+completed_for_flow = client.executions.list(
+    flow="content_pipeline",
+    status="completed",
+    limit=10,
+)
+latest = client.executions.latest(flow="content_pipeline")
+```
+
+## Retry and cancel
+
+```python
+# Same-execution retry (failed executions only)
+retried = client.executions.retry(exec_id)
+
+# Cancel a running execution
+cancelled = client.executions.cancel(exec_id)
+```
+
+## Browse and load artifacts
+
+```python
+artifacts = client.artifacts.list(exec_id)
+for artifact in artifacts:
+    print(artifact.name, artifact.kind, artifact.save_type)
+
+context_artifact = client.artifacts.get(artifact_id)
+value = context_artifact.load()
+```
+
+## Current limitations
+
+`KitaruClient` intentionally stubs these APIs for now:
+
+- `client.executions.input(...)`
+- `client.executions.replay(...)`
+
+These require wait/replay backend support that is still being integrated.
+
+## Try the Phase 11 example
+
+```bash
+uv sync --extra local
+uv run python -m examples.client_execution_management
+uv run pytest tests/test_phase11_client_example.py
+```

@@ -152,14 +152,13 @@ handle = my_agent.start("https://example.com", cache=False)
 Kitaru is under active development. The following are not yet available as
 user-facing APIs:
 
-- **Replay** — Re-running a flow from a specific checkpoint is part of the
-  design model but does not have a public API yet
+- **Replay** — `client.executions.replay(...)` is not yet implemented
+- **Resume input** — `client.executions.input(...)` is not yet implemented
 - **`kitaru.wait()`** — Suspending a flow until external input arrives
 - **`kitaru.llm()`** — Tracked LLM calls with automatic metadata capture
-- **`KitaruClient`** — Programmatic access to executions and metadata
 
-`kitaru.configure()` and `kitaru.save()` / `kitaru.load()` are now available in
-the SDK.
+`kitaru.configure()`, `kitaru.save()` / `kitaru.load()`, and the first
+`KitaruClient` execution/artifact browsing APIs are now available in the SDK.
 
 ## Next steps
 

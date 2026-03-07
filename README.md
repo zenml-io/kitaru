@@ -10,6 +10,8 @@ Kitaru is under active development. The core flow and checkpoint decorators are 
 
 Phase 10 configuration is now implemented via `kitaru.configure(...)`, environment variables, and project-level `[tool.kitaru]` settings in `pyproject.toml`, with precedence resolved at flow start time and persisted as a frozen execution spec on each run.
 
+Phase 11 introduces the first real `KitaruClient` surface for execution management. You can now inspect executions (`get`, `list`, `latest`), perform same-execution recovery (`retry`), cancel running executions (`cancel`), and browse/load artifacts (`client.artifacts.list/get`, `artifact.load()`). `client.executions.input(...)` and replay are still intentionally deferred.
+
 ### SDK primitives
 
 ```python
@@ -100,6 +102,22 @@ You can also run the integration test for this example:
 
 ```bash
 uv run pytest tests/test_phase8_artifacts_example.py
+```
+
+### Run the execution management workflow
+
+The repository includes a runnable Phase 11 example at
+`examples/client_execution_management.py`.
+
+```bash
+uv sync --extra local
+uv run python -m examples.client_execution_management
+```
+
+You can also run the integration test for this example:
+
+```bash
+uv run pytest tests/test_phase11_client_example.py
 ```
 
 ### CLI
