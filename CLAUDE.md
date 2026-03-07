@@ -113,7 +113,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, and core connection/login CLI paths are functional. Other primitives are scaffolded and still in progress.
+> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, core connection/login CLI paths, and `kitaru log-store set/show/reset` are functional. Other primitives remain in progress.
 
 ### Current MVP primitives
 
@@ -122,7 +122,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `@kitaru.flow` | Implemented |
 | `@kitaru.checkpoint` | Implemented |
 | `kitaru.wait()` | Scaffolded (not yet implemented) |
-| `kitaru.log()` | Scaffolded (not yet implemented) |
+| `kitaru.log()` | Implemented |
 | `kitaru.save()` | Scaffolded (not yet implemented) |
 | `kitaru.load()` | Scaffolded (not yet implemented) |
 
@@ -138,9 +138,15 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 The `adapters/` directory is scaffolded but empty. The planned PydanticAI adapter will wrap agents so each model request → `checkpoint(type='llm_call')` and each tool call → `checkpoint(type='tool_call')` automatically.
 
-### Observability (planned)
+### Observability (current MVP + planned)
 
-Kitaru will emit OpenTelemetry spans. It will **not** own the tracing backend — users configure their own OTel exporter (Logfire, Datadog, etc.).
+Current MVP observability includes:
+
+- `kitaru.log()` for structured metadata on executions/checkpoints
+- Global runtime log-store configuration via `kitaru log-store set/show/reset`
+  (defaults to `artifact-store`, supports global external backend override)
+
+Future work will add richer OpenTelemetry-native tracing and exporter integration.
 
 ## Code style
 

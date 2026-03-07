@@ -6,7 +6,7 @@ Kitaru makes agent workflows **persistent, replayable, and observable** using a 
 
 ## What works today
 
-Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, and the Phase 5 first working workflow milestone is complete. Several additional primitives (`wait`, `log`, `save`, `load`, `llm`) are scaffolded but not yet implemented.
+Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, the Phase 5 first working workflow milestone is complete, and `kitaru.log()` now attaches structured metadata to executions/checkpoints. Runtime log storage now has a global default/override model via `kitaru log-store ...`.
 
 ### SDK primitives
 
@@ -79,6 +79,10 @@ kitaru login <server> --api-key <key>
 kitaru logout                 Log out and clear stored auth state
 kitaru status                 Show connection state and active stack
 kitaru info                   Show detailed environment information
+
+kitaru log-store show         Show effective global runtime log backend
+kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]
+kitaru log-store reset        Clear global runtime log backend override
 ```
 
 ### Planned primitives (scaffolded, not yet implemented)
@@ -86,7 +90,6 @@ kitaru info                   Show detailed environment information
 | Primitive | Purpose |
 |---|---|
 | `kitaru.wait()` | Suspend a flow until external input arrives (requires ZenML server support) |
-| `kitaru.log()` | Attach structured metadata (cost, tokens, latency) to checkpoints |
 | `kitaru.save()` | Persist a named artifact inside a checkpoint |
 | `kitaru.load()` | Load a named artifact from a previous execution |
 | `kitaru.llm()` | Tracked LLM calls with automatic artifact and metadata capture |

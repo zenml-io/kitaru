@@ -16,19 +16,22 @@ through a multi-step agent workflow, Kitaru replays from the last checkpoint
 instead of starting over.
 
 <Callout type="info">
-  Kitaru is in early development. The package is installable and provides a CLI,
-  but the SDK primitives are not yet available. This documentation covers what
-  you can use today.
+  Kitaru is in early development. Core SDK primitives are now available
+  (`@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`), and the CLI supports
+  global runtime log-store configuration via `kitaru log-store ...`.
 </Callout>
 
 ## Current Status
 
 Kitaru **0.1.0** includes:
 
-- The `kitaru` CLI with `--help` and `--version`
+- Core SDK execution primitives: `@kitaru.flow` and `@kitaru.checkpoint`
+- Structured metadata logging with `kitaru.log()`
+- CLI connection commands (`login`, `logout`, `status`, `info`)
+- Global runtime log-store commands (`log-store set/show/reset`)
 - Project infrastructure (CI, testing, linting, type checking)
 
-The SDK primitives and framework adapters are under active development.
+Additional SDK primitives and framework adapters are under active development.
 
 ## Next Steps
 
@@ -42,5 +45,10 @@ The SDK primitives and framework adapters are under active development.
     title="CLI Reference"
     description="Available commands and options"
     href="/cli"
+  />
+  <Card
+    title="Runtime Log Store"
+    description="Configure global runtime log backend behavior"
+    href="/getting-started/log-store"
   />
 </Cards>

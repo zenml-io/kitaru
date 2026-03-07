@@ -18,10 +18,14 @@ Example::
         data = fetch_data(url)
         return data.upper()
 
-Note: most SDK primitives are still scaffolded and raise
-``NotImplementedError``. The early connection primitive ``connect()`` is
-implemented so you can authenticate with a Kitaru server before the rest of the
-runtime lands.
+Current status:
+
+- Implemented: ``@kitaru.flow``, ``@kitaru.checkpoint``, ``kitaru.log()``,
+  and ``connect()``
+- In progress: ``wait()``, ``save()``, ``load()``, and ``llm()``
+
+The CLI also supports global runtime log-store configuration via
+``kitaru log-store set/show/reset``.
 """
 
 from kitaru.artifacts import load, save

@@ -37,12 +37,13 @@ class TestBuildCommandTree:
         assert tree.invocation == "kitaru"
         assert tree.description
 
-    def test_root_has_phase_two_subcommands(self) -> None:
+    def test_root_has_current_subcommands(self) -> None:
         from kitaru.cli import app
 
         tree = build_command_tree(app)
         assert [sub.name for sub in tree.subcommands] == [
             "info",
+            "log-store",
             "login",
             "logout",
             "status",
@@ -201,7 +202,14 @@ class TestWriteDocsTree:
 
         meta = json.loads((output_dir / "meta.json").read_text())
         assert meta["title"] == "CLI Reference"
-        assert meta["pages"] == ["index", "info", "login", "logout", "status"]
+        assert meta["pages"] == [
+            "index",
+            "info",
+            "log-store",
+            "login",
+            "logout",
+            "status",
+        ]
 
     def test_frontmatter_present_in_generated_page(self, output_dir: Path) -> None:
         from kitaru.cli import app
@@ -226,6 +234,13 @@ class TestWriteDocsTree:
             # No directory or meta.json for leaf commands
             assert not (output_dir / command / "index.mdx").exists()
             assert not (output_dir / command / "meta.json").exists()
+
+        # log-store has nested subcommands, so it should be a directory
+        assert (output_dir / "log-store" / "index.mdx").exists()
+        assert (output_dir / "log-store" / "meta.json").exists()
+        for command in ("set", "show", "reset"):
+            assert (output_dir / "log-store" / f"{command}.mdx").exists()
+            assert f"log-store/{command}.mdx" in files
 
     def test_nested_subcommands_create_directories(self, output_dir: Path) -> None:
         import cyclopts

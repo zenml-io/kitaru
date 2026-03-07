@@ -20,7 +20,13 @@ from zenml.login.credentials_store import get_credentials_store
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
-from kitaru.config import login_to_server
+from kitaru.config import (
+    ResolvedLogStore,
+    login_to_server,
+    reset_global_log_store,
+    resolve_log_store,
+    set_global_log_store,
+)
 
 SDK_VERSION = get_version("kitaru")
 AUTH_ENV_VARS = (
@@ -36,6 +42,12 @@ app = cyclopts.App(
     version=SDK_VERSION,
     version_flags=["--version", "-V"],
 )
+
+log_store_app = cyclopts.App(
+    name="log-store",
+    help="Manage global runtime log-store settings.",
+)
+app.command(log_store_app)
 
 
 @dataclass
@@ -326,6 +338,24 @@ def _info_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
     ]
 
 
+def _log_store_rows(snapshot: ResolvedLogStore) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru log-store show`."""
+    return [
+        ("Backend", snapshot.backend),
+        ("Endpoint", snapshot.endpoint or "not set"),
+        ("API key", "configured" if snapshot.api_key else "not set"),
+        ("Source", snapshot.source),
+    ]
+
+
+def _log_store_detail(snapshot: ResolvedLogStore) -> str:
+    """Build a follow-up detail line for set/reset success messages."""
+    if snapshot.source == "global user config":
+        return f"Effective backend: {snapshot.backend}"
+
+    return f"Effective backend: {snapshot.backend} (from {snapshot.source} settings)"
+
+
 def _render_plain_snapshot(
     title: str,
     rows: list[tuple[str, str]],
@@ -457,6 +487,63 @@ def logout() -> None:
     """Log out from the current Kitaru server and clear stored auth state."""
     _ensure_no_auth_environment_overrides()
     _print_success(_logout_current_connection())
+
+
+@log_store_app.command
+def set(
+    backend: Annotated[
+        str,
+        Parameter(help="External runtime log backend name (for example datadog)."),
+    ],
+    *,
+    endpoint: Annotated[
+        str,
+        Parameter(help="HTTP(S) endpoint for the configured log backend."),
+    ],
+    api_key: Annotated[
+        str | None,
+        Parameter(help="Optional API key or secret placeholder."),
+    ] = None,
+) -> None:
+    """Set the global runtime log-store backend override."""
+    try:
+        snapshot = set_global_log_store(
+            backend,
+            endpoint=endpoint,
+            api_key=api_key,
+        )
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+
+    _print_success(
+        "Saved global log-store override.",
+        detail=_log_store_detail(snapshot),
+    )
+
+
+@log_store_app.command
+def show() -> None:
+    """Show the effective global runtime log-store configuration."""
+    try:
+        snapshot = resolve_log_store()
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+
+    _emit_snapshot("Kitaru log store", _log_store_rows(snapshot))
+
+
+@log_store_app.command
+def reset() -> None:
+    """Clear the persisted global runtime log-store override."""
+    try:
+        snapshot = reset_global_log_store()
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+
+    _print_success(
+        "Cleared global log-store override.",
+        detail=_log_store_detail(snapshot),
+    )
 
 
 @app.command

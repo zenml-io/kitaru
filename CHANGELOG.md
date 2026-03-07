@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Global log-store configuration with `kitaru log-store set/show/reset`
+- Persisted Kitaru user config (`kitaru.yaml`) for log-store override state
+- Environment override support for runtime log-store resolution
+
+### Changed
+- Updated README, CLAUDE guide, and docs landing page to reflect implemented `kitaru.log()` and log-store CLI behavior
+
 ## [0.1.0] - 2026-03-06
 
 ### Added

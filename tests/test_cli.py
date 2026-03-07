@@ -52,16 +52,16 @@ def test_short_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     assert expected_version in captured.out
 
 
-def test_help_flag_lists_phase_two_commands(
+def test_help_flag_lists_available_commands(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """--help prints help text, including the new Phase 2 commands."""
+    """--help prints help text, including the currently supported commands."""
     with pytest.raises(SystemExit) as exc_info:
         app(["--help"])
     assert exc_info.value.code == 0
     output = capsys.readouterr().out.lower()
     assert "kitaru" in output
-    for command in ("login", "logout", "status", "info"):
+    for command in ("login", "logout", "status", "info", "log-store"):
         assert command in output
 
 
@@ -275,6 +275,175 @@ def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
         "http://127.0.0.1:8237"
     )
     assert "local fallback unavailable" in message
+
+
+def test_log_store_set_delegates_to_config(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru log-store set` delegates persistence to config helpers."""
+    with (
+        patch("kitaru.cli.set_global_log_store") as mock_set,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_set.return_value = SimpleNamespace(
+            backend="datadog",
+            endpoint="https://logs.datadoghq.com",
+            api_key="{{ DATADOG_KEY }}",
+            source="global user config",
+        )
+        app(
+            [
+                "log-store",
+                "set",
+                "datadog",
+                "--endpoint",
+                "https://logs.datadoghq.com",
+                "--api-key",
+                "{{ DATADOG_KEY }}",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    mock_set.assert_called_once_with(
+        "datadog",
+        endpoint="https://logs.datadoghq.com",
+        api_key="{{ DATADOG_KEY }}",
+    )
+    output = capsys.readouterr().out
+    assert "Saved global log-store override." in output
+    assert "Effective backend: datadog" in output
+
+
+def test_log_store_show_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru log-store show` prints the resolved backend snapshot."""
+    with (
+        patch("kitaru.cli.resolve_log_store") as mock_resolve,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_resolve.return_value = SimpleNamespace(
+            backend="datadog",
+            endpoint="https://logs.datadoghq.com",
+            api_key="top-secret",
+            source="environment",
+        )
+        app(["log-store", "show"])
+
+    assert exc_info.value.code == 0
+    mock_resolve.assert_called_once_with()
+    output = capsys.readouterr().out
+    assert "Kitaru log store" in output
+    assert "Backend: datadog" in output
+    assert "Endpoint: https://logs.datadoghq.com" in output
+    assert "API key: configured" in output
+    assert "top-secret" not in output
+    assert "Source: environment" in output
+
+
+def test_log_store_set_reports_environment_override(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Set should explain when environment settings still win."""
+    with (
+        patch("kitaru.cli.set_global_log_store") as mock_set,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_set.return_value = SimpleNamespace(
+            backend="honeycomb",
+            endpoint="https://api.honeycomb.io",
+            api_key="env-secret",
+            source="environment",
+        )
+        app(
+            [
+                "log-store",
+                "set",
+                "datadog",
+                "--endpoint",
+                "https://logs.datadoghq.com",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    mock_set.assert_called_once_with(
+        "datadog",
+        endpoint="https://logs.datadoghq.com",
+        api_key=None,
+    )
+    output = capsys.readouterr().out
+    assert "Saved global log-store override." in output
+    assert "Effective backend: honeycomb (from environment settings)" in output
+
+
+def test_log_store_reset_clears_override(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru log-store reset` clears persisted log-store override state."""
+    with (
+        patch("kitaru.cli.reset_global_log_store") as mock_reset,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_reset.return_value = SimpleNamespace(
+            backend="artifact-store",
+            endpoint=None,
+            api_key=None,
+            source="default",
+        )
+        app(["log-store", "reset"])
+
+    assert exc_info.value.code == 0
+    mock_reset.assert_called_once_with()
+    output = capsys.readouterr().out
+    assert "Cleared global log-store override." in output
+    assert "Effective backend: artifact-store (from default settings)" in output
+
+
+def test_log_store_reset_reports_environment_override(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reset should explain when env settings still override persisted config."""
+    with (
+        patch("kitaru.cli.reset_global_log_store") as mock_reset,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_reset.return_value = SimpleNamespace(
+            backend="datadog",
+            endpoint="https://logs.datadoghq.com",
+            api_key="env-secret",
+            source="environment",
+        )
+        app(["log-store", "reset"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Cleared global log-store override." in output
+    assert "Effective backend: datadog (from environment settings)" in output
+
+
+def test_log_store_set_surfaces_validation_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid log-store settings should exit with a user-friendly error."""
+    with (
+        patch(
+            "kitaru.cli.set_global_log_store",
+            side_effect=ValueError("Invalid log-store endpoint"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "log-store",
+                "set",
+                "datadog",
+                "--endpoint",
+                "not-a-url",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "Invalid log-store endpoint" in capsys.readouterr().err
 
 
 def test_status_renders_compact_snapshot(

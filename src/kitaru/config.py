@@ -13,34 +13,119 @@ Configuration precedence (highest to lowest):
 6. Global user config
 7. Built-in defaults
 
-Example::
-
-    kitaru.configure(cache=False)
-    kitaru.connect("https://my-server.example.com")
-
-Note: runtime configuration is still scaffolding. Only ``connect()`` is
-implemented in this phase.
+Phase 7b adds global log-store configuration helpers used by
+``kitaru log-store set/show/reset``.
 """
 
 from __future__ import annotations
 
 import importlib
 import logging
+import os
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 from unittest.mock import patch
 from urllib.parse import urlparse
 
 import click
+from pydantic import BaseModel, ValidationError, field_validator
 from zenml.cli.login import connect_to_pro_server as _zenml_connect_to_pro_server
 from zenml.cli.login import connect_to_server as _zenml_connect_to_server
 from zenml.cli.login import is_pro_server as _zenml_is_pro_server
+from zenml.config.global_config import GlobalConfiguration
 from zenml.exceptions import AuthorizationException
+from zenml.utils import io_utils, yaml_utils
 
 from kitaru.runtime import _not_implemented
 
 zenml_cli_utils = importlib.import_module("zenml.cli.utils")
+
+_DEFAULT_LOG_STORE_BACKEND = "artifact-store"
+_KITARU_GLOBAL_CONFIG_FILENAME = "kitaru.yaml"
+_LOG_STORE_SOURCE_DEFAULT = "default"
+_LOG_STORE_SOURCE_ENVIRONMENT = "environment"
+_LOG_STORE_SOURCE_GLOBAL_USER_CONFIG = "global user config"
+_LOG_STORE_BACKEND_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+KITARU_LOG_STORE_BACKEND_ENV = "KITARU_LOG_STORE_BACKEND"
+KITARU_LOG_STORE_ENDPOINT_ENV = "KITARU_LOG_STORE_ENDPOINT"
+KITARU_LOG_STORE_API_KEY_ENV = "KITARU_LOG_STORE_API_KEY"
+
+
+class LogStoreOverride(BaseModel):
+    """Global log-store override values for non-default backends."""
+
+    backend: str
+    endpoint: str
+    api_key: str | None = None
+
+    @field_validator("backend")
+    @classmethod
+    def _validate_backend(cls, value: str) -> str:
+        normalized_value = value.strip().lower()
+        if not normalized_value:
+            raise ValueError("Log-store backend cannot be empty.")
+
+        if not _LOG_STORE_BACKEND_PATTERN.fullmatch(normalized_value):
+            raise ValueError(
+                "Invalid log-store backend. Use lowercase letters, numbers, "
+                "dots, underscores, or hyphens."
+            )
+
+        return normalized_value
+
+    @field_validator("endpoint")
+    @classmethod
+    def _validate_endpoint(cls, value: str) -> str:
+        normalized_value = value.strip().rstrip("/")
+        if not normalized_value:
+            raise ValueError("Log-store endpoint cannot be empty.")
+
+        parsed = urlparse(normalized_value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(
+                "Invalid log-store endpoint. Please use an http:// or https:// URL."
+            )
+
+        return normalized_value
+
+    @field_validator("api_key")
+    @classmethod
+    def _validate_api_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("Log-store API key cannot be empty.")
+
+        return normalized_value
+
+
+class ResolvedLogStore(BaseModel):
+    """Effective log-store configuration after applying precedence rules."""
+
+    backend: str
+    endpoint: str | None = None
+    api_key: str | None = None
+    source: Literal[
+        "default",
+        "environment",
+        "global user config",
+    ]
+
+
+class _KitaruGlobalConfig(BaseModel):
+    """Persisted Kitaru global configuration.
+
+    This currently stores only the optional runtime log-store override.
+    """
+
+    version: int = 1
+    log_store: LogStoreOverride | None = None
 
 
 def _normalize_server_url(server_url: str) -> str:
@@ -131,6 +216,216 @@ def _suppress_zenml_cli_messages() -> Iterator[None]:
             yield
     finally:
         logging.disable(previous_disable_level)
+
+
+def _kitaru_global_config_path() -> Path:
+    """Return the path to Kitaru's global config file."""
+    config_directory = Path(GlobalConfiguration().config_directory)
+    return config_directory / _KITARU_GLOBAL_CONFIG_FILENAME
+
+
+def _read_kitaru_global_config() -> _KitaruGlobalConfig:
+    """Read Kitaru global config from disk.
+
+    Returns:
+        Parsed Kitaru global config.
+
+    Raises:
+        ValueError: If the config file exists but is malformed.
+    """
+    config_path = _kitaru_global_config_path()
+    if not config_path.exists():
+        return _KitaruGlobalConfig()
+
+    config_values = yaml_utils.read_yaml(str(config_path))
+    if config_values is None:
+        return _KitaruGlobalConfig()
+
+    if not isinstance(config_values, dict):
+        raise ValueError(
+            "The Kitaru global config file is invalid. Expected a YAML mapping at "
+            f"{config_path}."
+        )
+
+    try:
+        return _KitaruGlobalConfig.model_validate(config_values)
+    except ValidationError as exc:
+        raise ValueError(
+            "The Kitaru global config file is invalid. Fix or delete "
+            f"{config_path} and try again."
+        ) from exc
+
+
+def _write_kitaru_global_config(config: _KitaruGlobalConfig) -> None:
+    """Write Kitaru global config to disk."""
+    config_path = _kitaru_global_config_path()
+    io_utils.create_dir_recursive_if_not_exists(str(config_path.parent))
+    yaml_utils.write_yaml(
+        str(config_path), config.model_dump(mode="json", exclude_none=True)
+    )
+
+
+def _read_log_store_env_override() -> ResolvedLogStore | None:
+    """Parse an optional log-store override from environment variables.
+
+    Returns:
+        A resolved override if configured via environment variables, otherwise
+        ``None``.
+
+    Raises:
+        ValueError: If the environment variables are set incompletely or with
+            invalid values.
+    """
+    raw_backend = os.environ.get(KITARU_LOG_STORE_BACKEND_ENV)
+    raw_endpoint = os.environ.get(KITARU_LOG_STORE_ENDPOINT_ENV)
+    raw_api_key = os.environ.get(KITARU_LOG_STORE_API_KEY_ENV)
+
+    if raw_backend is None and raw_endpoint is None and raw_api_key is None:
+        return None
+
+    if raw_backend is None:
+        raise ValueError(
+            f"{KITARU_LOG_STORE_BACKEND_ENV} must be set when defining a log-store "
+            "environment override."
+        )
+
+    normalized_backend = raw_backend.strip().lower()
+    if normalized_backend == _DEFAULT_LOG_STORE_BACKEND:
+        if raw_endpoint not in (None, ""):
+            raise ValueError(
+                f"{KITARU_LOG_STORE_ENDPOINT_ENV} must be unset when "
+                f"{KITARU_LOG_STORE_BACKEND_ENV}=artifact-store."
+            )
+        if raw_api_key not in (None, ""):
+            raise ValueError(
+                f"{KITARU_LOG_STORE_API_KEY_ENV} must be unset when "
+                f"{KITARU_LOG_STORE_BACKEND_ENV}=artifact-store."
+            )
+
+        return ResolvedLogStore(
+            backend=_DEFAULT_LOG_STORE_BACKEND,
+            endpoint=None,
+            api_key=None,
+            source=_LOG_STORE_SOURCE_ENVIRONMENT,
+        )
+
+    if raw_endpoint is None:
+        raise ValueError(
+            f"{KITARU_LOG_STORE_ENDPOINT_ENV} must be set when "
+            f"{KITARU_LOG_STORE_BACKEND_ENV} is configured."
+        )
+
+    override = LogStoreOverride(
+        backend=normalized_backend,
+        endpoint=raw_endpoint,
+        api_key=raw_api_key,
+    )
+    return _resolved_log_store_from_override(
+        override,
+        source=_LOG_STORE_SOURCE_ENVIRONMENT,
+    )
+
+
+def _resolved_log_store_from_override(
+    override: LogStoreOverride,
+    *,
+    source: Literal[
+        "environment",
+        "global user config",
+    ],
+) -> ResolvedLogStore:
+    """Convert a persisted/env override into a resolved log-store view."""
+    return ResolvedLogStore(
+        backend=override.backend,
+        endpoint=override.endpoint,
+        api_key=override.api_key,
+        source=source,
+    )
+
+
+def resolve_log_store() -> ResolvedLogStore:
+    """Resolve the effective runtime log-store backend.
+
+    Resolution order (highest to lowest):
+    1. Environment variables
+    2. Kitaru global user config
+    3. Built-in default (artifact store)
+
+    Returns:
+        The effective log-store configuration.
+
+    Raises:
+        ValueError: If persisted or environment config is malformed.
+    """
+    env_override = _read_log_store_env_override()
+    if env_override is not None:
+        return env_override
+
+    global_config = _read_kitaru_global_config()
+    if global_config.log_store is not None:
+        return _resolved_log_store_from_override(
+            global_config.log_store,
+            source=_LOG_STORE_SOURCE_GLOBAL_USER_CONFIG,
+        )
+
+    return ResolvedLogStore(
+        backend=_DEFAULT_LOG_STORE_BACKEND,
+        endpoint=None,
+        api_key=None,
+        source=_LOG_STORE_SOURCE_DEFAULT,
+    )
+
+
+def set_global_log_store(
+    backend: str,
+    *,
+    endpoint: str,
+    api_key: str | None = None,
+) -> ResolvedLogStore:
+    """Persist a global log-store override backend.
+
+    Args:
+        backend: External runtime log backend name (for example ``datadog``).
+        endpoint: HTTP(S) endpoint for the log backend.
+        api_key: Optional API key or secret placeholder.
+
+    Returns:
+        The effective resolved log-store configuration after persisting.
+
+    Raises:
+        ValueError: If validation fails.
+    """
+    if backend.strip().lower() == _DEFAULT_LOG_STORE_BACKEND:
+        raise ValueError(
+            "The artifact-store backend is already the default. Use "
+            "`kitaru log-store reset` to return to defaults."
+        )
+
+    _write_kitaru_global_config(
+        _KitaruGlobalConfig(
+            log_store=LogStoreOverride(
+                backend=backend,
+                endpoint=endpoint,
+                api_key=api_key,
+            )
+        )
+    )
+
+    return resolve_log_store()
+
+
+def reset_global_log_store() -> ResolvedLogStore:
+    """Clear the persisted global log-store override.
+
+    Returns:
+        The effective resolved log-store configuration after clearing.
+
+    Raises:
+        ValueError: If persisted or environment config is malformed.
+    """
+    _write_kitaru_global_config(_KitaruGlobalConfig())
+
+    return resolve_log_store()
 
 
 def _login_to_server_target(
