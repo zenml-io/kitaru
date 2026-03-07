@@ -1,5 +1,9 @@
 """Tests for the Kitaru package public API surface."""
 
+from __future__ import annotations
+
+from unittest.mock import patch
+
 import pytest
 
 import kitaru
@@ -58,8 +62,101 @@ class TestPublicExports:
         assert set(kitaru.__all__) == expected
 
 
+class TestImplementedConnectionPrimitive:
+    """Verify the early Phase 2 connection primitive works as intended."""
+
+    def test_connect_delegates_to_login_router(self) -> None:
+        with patch("kitaru.config._login_to_server_target") as mock_login:
+            kitaru.connect(
+                "https://example.com/",
+                api_key="secret-key",
+                refresh=True,
+                project="demo-project",
+                no_verify_ssl=True,
+            )
+
+        mock_login.assert_called_once_with(
+            "https://example.com",
+            api_key="secret-key",
+            refresh=True,
+            project="demo-project",
+            verify_ssl=False,
+            cloud_api_url=None,
+        )
+
+    def test_connect_routes_pro_urls_to_managed_login(self) -> None:
+        with (
+            patch(
+                "kitaru.config._zenml_is_pro_server",
+                return_value=(True, "https://cloudapi.example.com"),
+            ),
+            patch("kitaru.config._zenml_connect_to_pro_server") as mock_pro_login,
+            patch("kitaru.config._zenml_connect_to_server") as mock_direct_login,
+        ):
+            kitaru.connect("https://example.com/")
+
+        mock_direct_login.assert_not_called()
+        mock_pro_login.assert_called_once_with(
+            pro_server="https://example.com",
+            api_key=None,
+            refresh=False,
+            pro_api_url="https://cloudapi.example.com",
+            verify_ssl=True,
+            project=None,
+        )
+
+    def test_login_to_server_routes_workspace_names_to_managed_login(self) -> None:
+        with (
+            patch("kitaru.config._zenml_connect_to_pro_server") as mock_pro_login,
+            patch("kitaru.config._zenml_connect_to_server") as mock_direct_login,
+        ):
+            from kitaru.config import login_to_server
+
+            login_to_server(
+                "pause-resume",
+                project="kitaru",
+                cloud_api_url="https://staging.cloudapi.zenml.io/",
+            )
+
+        mock_direct_login.assert_not_called()
+        mock_pro_login.assert_called_once_with(
+            pro_server="pause-resume",
+            api_key=None,
+            refresh=False,
+            pro_api_url="https://staging.cloudapi.zenml.io/",
+            verify_ssl=True,
+            project="kitaru",
+        )
+
+    def test_login_to_server_uses_managed_login_for_url_with_cloud_api(self) -> None:
+        with (
+            patch("kitaru.config._zenml_connect_to_pro_server") as mock_pro_login,
+            patch("kitaru.config._zenml_connect_to_server") as mock_direct_login,
+        ):
+            from kitaru.config import login_to_server
+
+            login_to_server(
+                "https://example.com/",
+                cloud_api_url="https://staging.cloudapi.zenml.io/",
+            )
+
+        mock_direct_login.assert_not_called()
+        mock_pro_login.assert_called_once_with(
+            pro_server="https://example.com",
+            api_key=None,
+            refresh=False,
+            pro_api_url="https://staging.cloudapi.zenml.io/",
+            verify_ssl=True,
+            project=None,
+        )
+
+    def test_connect_rejects_invalid_urls(self) -> None:
+        with pytest.raises(ValueError, match="Invalid Kitaru server URL"):
+            kitaru.connect("example.com")
+
+
 class TestPlaceholderBehavior:
-    """Verify unimplemented primitives raise NotImplementedError."""
+    """Verify scaffolded primitives still raise NotImplementedError."""
 
     def test_flow_raises(self) -> None:
         with pytest.raises(NotImplementedError, match="flow"):
@@ -92,10 +189,6 @@ class TestPlaceholderBehavior:
     def test_configure_raises(self) -> None:
         with pytest.raises(NotImplementedError, match="configure"):
             kitaru.configure(cache=False)
-
-    def test_connect_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="connect"):
-            kitaru.connect("https://example.com")
 
     def test_client_raises(self) -> None:
         with pytest.raises(NotImplementedError, match="KitaruClient"):

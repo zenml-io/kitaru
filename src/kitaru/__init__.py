@@ -18,8 +18,10 @@ Example::
         data = fetch_data(url)
         return data.upper()
 
-Note: The SDK primitives are scaffolded but not yet implemented.
-Calling any primitive will raise ``NotImplementedError``.
+Note: most SDK primitives are still scaffolded and raise
+``NotImplementedError``. The early connection primitive ``connect()`` is
+implemented so you can authenticate with a Kitaru server before the rest of the
+runtime lands.
 """
 
 from kitaru.artifacts import load, save

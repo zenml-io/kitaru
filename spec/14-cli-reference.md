@@ -4,6 +4,10 @@ The CLI is the command-line entry point for interacting with Kitaru. It should m
 
 **Implementation order:** The SDK is built first — the CLI wraps the SDK. The exception is `kitaru login`, which is needed early to unblock everything else.
 
+## Output styling
+
+CLI output uses Rich for styled terminal rendering (panels, colored labels, underlined URLs) when the output stream is an interactive terminal. Non-TTY output (pipes, redirects, CI) falls back to plain text to remain machine-friendly and test-stable. New commands should use the shared output helpers (`_emit_snapshot`, `_print_success`, `_exit_with_error`) rather than bare `print()`.
+
 ## Tier 1: basics (build first)
 
 ### Auth and connection
