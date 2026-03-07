@@ -378,7 +378,7 @@ matters — build the most-needed operations first, not the easiest.
 
 ---
 
-## Phase 12: `kitaru.llm()`
+## Phase 12: `kitaru.llm()` --- DONE
 
 **Goal:** Tracked LLM calls using LiteLLM as the backend engine, with a local model registry for aliases and ZenML secrets for remote credentials.
 
@@ -416,7 +416,7 @@ registry, alias resolution, and credential fetching are the main work.
 
 ---
 
-## Phase 13: Error handling and failure journaling
+## Phase 13: Error handling and failure journaling --- DONE
 
 **Goal:** Clean error behavior across the SDK.
 
@@ -675,8 +675,8 @@ Phase 9  -- Stack selection ------------------------------------------- DONE
 Phase 10 -- Configuration --------------------------------------------- DONE
 Phase 11  -- KitaruClient (execution mgmt first) ---------------------- DONE
 Phase 11.5-- Secrets surface (wraps ZenML secrets) -------------------- DONE
-Phase 12 -- kitaru.llm() (LiteLLM + registry + secrets) --------------- Medium
-Phase 13 -- Error handling --------------------------------------------- Medium
+Phase 12 -- kitaru.llm() (LiteLLM + registry + secrets) --------------- DONE
+Phase 13 -- Error handling --------------------------------------------- DONE
 Phase 14 -- CLI commands (tiered) ------------------------------------- Medium
 Phase 15 -- kitaru.wait() + resume ------------------------------------ UNBLOCKED (wait+resume work on branch)
 Phase 16 -- Replay + overrides (direct kwargs) ------------------------ PARTIALLY BLOCKED (retry CLI broken)
