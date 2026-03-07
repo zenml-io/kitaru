@@ -68,7 +68,7 @@ not "reimplement from scratch."
 
 ---
 
-## Phase 3: `@kitaru.flow` — the outer boundary
+## Phase 3: `@kitaru.flow` — the outer boundary --- DONE
 
 **Goal:** The flow decorator works and maps to a ZenML dynamic pipeline.
 
@@ -98,7 +98,7 @@ sync result extraction, FlowHandle, and `.deploy()` sugar need careful design.
 
 ---
 
-## Phase 4: `@kitaru.checkpoint` — the durable outcome boundary
+## Phase 4: `@kitaru.checkpoint` — the durable outcome boundary --- DONE
 
 **Goal:** Checkpoints work inside flows and persist durable outcomes (not just outputs).
 
@@ -609,9 +609,9 @@ MVP tool set, packaging requirements)
 
 ```
 Phase 1  -- Naming + skeleton ---------------------------------------- DONE
-Phase 2  -- Login/logout/status CLI ----------------------------------- Easy win
-Phase 3  -- @kitaru.flow (incl .deploy()) ----------------------------- Core
-Phase 4  -- @kitaru.checkpoint ---------------------------------------- Core
+Phase 2  -- Login/logout/status CLI ----------------------------------- DONE
+Phase 3  -- @kitaru.flow (incl .deploy()) ----------------------------- DONE
+Phase 4  -- @kitaru.checkpoint ---------------------------------------- DONE
 Phase 5  -- First working example ------------------------------------- Milestone!
 Phase 6  -- Runtime context ------------------------------------------- Plumbing
 Phase 7  -- kitaru.log() ---------------------------------------------- Core
