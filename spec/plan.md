@@ -230,7 +230,7 @@ the switchable backend adds a config layer.
 
 ---
 
-## Phase 8: `kitaru.save()` and `kitaru.load()`
+## Phase 8: `kitaru.save()` and `kitaru.load()` --- DONE
 
 **Goal:** Explicit named artifacts inside checkpoints.
 
@@ -618,7 +618,7 @@ Phase 5  -- First working example ------------------------------------- DONE (Mi
 Phase 6  -- Runtime context ------------------------------------------- DONE
 Phase 7  -- kitaru.log() ---------------------------------------------- DONE
 Phase 7b -- Global log store ------------------------------------------ DONE
-Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- Core
+Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- DONE
 Phase 9  -- Stack selection ------------------------------------------- Easy win
 Phase 10 -- Configuration --------------------------------------------- Medium
 Phase 11 -- KitaruClient (execution mgmt first) ---------------------- Medium
