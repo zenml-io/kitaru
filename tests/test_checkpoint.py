@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -12,7 +13,15 @@ import pytest
 from zenml.config.retry_config import StepRetryConfig
 
 from kitaru.checkpoint import checkpoint
-from kitaru.runtime import _get_current_checkpoint, _is_inside_checkpoint
+from kitaru.runtime import (
+    _flow_scope,
+    _get_current_checkpoint,
+    _get_current_checkpoint_id,
+    _get_current_execution_id,
+    _get_current_flow,
+    _is_inside_checkpoint,
+    _is_inside_flow,
+)
 
 
 class _FakeStep:
@@ -256,12 +265,31 @@ def test_submit_returns_zenml_future_object() -> None:
 
 
 def test_checkpoint_runtime_scope_is_set_while_user_code_runs() -> None:
+    fake_step_context = SimpleNamespace(
+        pipeline_run=SimpleNamespace(
+            id="exec-123",
+            pipeline=SimpleNamespace(name="__kitaru_pipeline_source_my_flow"),
+        ),
+        step_run=SimpleNamespace(id="checkpoint-456"),
+    )
+
     def _user_step(value: str) -> str:
+        assert _is_inside_flow()
+        flow_scope = _get_current_flow()
+        assert flow_scope is not None
+        assert flow_scope.name == "my_flow"
+        assert flow_scope.execution_id == "exec-123"
+
         assert _is_inside_checkpoint()
-        current = _get_current_checkpoint()
-        assert current is not None
-        assert current.name == "_user_step"
-        assert current.type == "llm_call"
+        checkpoint_scope = _get_current_checkpoint()
+        assert checkpoint_scope is not None
+        assert checkpoint_scope.name == "_user_step"
+        assert checkpoint_scope.type == "llm_call"
+        assert checkpoint_scope.execution_id == "exec-123"
+        assert checkpoint_scope.checkpoint_id == "checkpoint-456"
+
+        assert _get_current_execution_id() == "exec-123"
+        assert _get_current_checkpoint_id() == "checkpoint-456"
         return value.upper()
 
     wrapped, _ = _build_checkpoint(
@@ -269,13 +297,89 @@ def test_checkpoint_runtime_scope_is_set_while_user_code_runs() -> None:
         checkpoint_type="llm_call",
     )
 
-    with _zenml_contexts(
-        step_active=False,
-        dynamic_run_active=True,
-        flow_active=True,
+    with (
+        patch("kitaru.runtime.StepContext.get", return_value=fake_step_context),
+        _zenml_contexts(
+            step_active=False,
+            dynamic_run_active=True,
+            flow_active=True,
+        ),
     ):
         result = wrapped("hi")
 
     assert result == "HI"
+    assert not _is_inside_flow()
+    assert _get_current_flow() is None
+    assert _get_current_execution_id() is None
+    assert not _is_inside_checkpoint()
+    assert _get_current_checkpoint() is None
+    assert _get_current_checkpoint_id() is None
+
+
+def test_checkpoint_runtime_scope_allows_unknown_flow_name() -> None:
+    fake_step_context = SimpleNamespace(
+        pipeline_run=SimpleNamespace(
+            id="exec-123",
+            pipeline=SimpleNamespace(name=None),
+        ),
+        step_run=SimpleNamespace(id="checkpoint-456"),
+    )
+
+    def _user_step(value: str) -> str:
+        flow_scope = _get_current_flow()
+        assert flow_scope is not None
+        assert flow_scope.name is None
+        assert _get_current_execution_id() == "exec-123"
+        return value.upper()
+
+    wrapped, _ = _build_checkpoint(_user_step)
+
+    with (
+        patch("kitaru.runtime.StepContext.get", return_value=fake_step_context),
+        _zenml_contexts(
+            step_active=False,
+            dynamic_run_active=True,
+            flow_active=True,
+        ),
+    ):
+        result = wrapped("hello")
+
+    assert result == "HELLO"
+    assert _get_current_flow() is None
+
+
+def test_checkpoint_runtime_scope_restores_existing_flow_scope() -> None:
+    def _user_step(value: str) -> str:
+        assert _is_inside_flow()
+        flow_scope = _get_current_flow()
+        assert flow_scope is not None
+        assert flow_scope.name == "outer_flow"
+        assert flow_scope.execution_id == "outer-exec"
+
+        assert _is_inside_checkpoint()
+        checkpoint_scope = _get_current_checkpoint()
+        assert checkpoint_scope is not None
+        assert checkpoint_scope.execution_id == "outer-exec"
+        return value.upper()
+
+    wrapped, _ = _build_checkpoint(_user_step)
+
+    with _flow_scope(name="outer_flow", execution_id="outer-exec"):
+        with _zenml_contexts(
+            step_active=False,
+            dynamic_run_active=True,
+            flow_active=True,
+        ):
+            result = wrapped("hello")
+
+        assert _is_inside_flow()
+        restored = _get_current_flow()
+        assert restored is not None
+        assert restored.name == "outer_flow"
+        assert restored.execution_id == "outer-exec"
+
+    assert result == "HELLO"
+    assert not _is_inside_flow()
+    assert _get_current_flow() is None
     assert not _is_inside_checkpoint()
     assert _get_current_checkpoint() is None

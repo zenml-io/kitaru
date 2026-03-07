@@ -13,7 +13,8 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
-from kitaru.flow import FlowHandle, flow
+from kitaru.flow import FlowHandle, _wrap_flow_entrypoint, flow
+from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
 
 def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
@@ -378,3 +379,55 @@ def test_flow_handle_get_raises_when_output_artifact_is_missing() -> None:
         pytest.raises(RuntimeError, match="missing output 'output'"),
     ):
         handle.get()
+
+
+def test_flow_runtime_scope_sets_execution_id_from_zenml_run_context() -> None:
+    def _user_flow() -> str:
+        assert _is_inside_flow()
+        current = _get_current_flow()
+        assert current is not None
+        assert current.name == "_user_flow"
+        assert current.execution_id == "exec-123"
+        assert _get_current_execution_id() == "exec-123"
+        return "ok"
+
+    wrapped = _wrap_flow_entrypoint(_user_flow)
+
+    with patch(
+        "kitaru.runtime.DynamicPipelineRunContext.get",
+        return_value=SimpleNamespace(run=SimpleNamespace(id="exec-123")),
+    ):
+        result = wrapped()
+
+    assert result == "ok"
+    assert not _is_inside_flow()
+    assert _get_current_flow() is None
+
+
+def test_flow_runtime_scope_keeps_execution_id_none_without_zenml_context() -> None:
+    def _user_flow() -> None:
+        assert _is_inside_flow()
+        current = _get_current_flow()
+        assert current is not None
+        assert current.execution_id is None
+        assert _get_current_execution_id() is None
+
+    wrapped = _wrap_flow_entrypoint(_user_flow)
+
+    with (
+        patch("kitaru.runtime.StepContext.get", return_value=None),
+        patch("kitaru.runtime.DynamicPipelineRunContext.get", return_value=None),
+    ):
+        wrapped()
+
+    assert not _is_inside_flow()
+    assert _get_current_flow() is None
+    assert _get_current_execution_id() is None
+
+
+def test_execution_id_lookup_requires_active_kitaru_scope() -> None:
+    with patch(
+        "kitaru.runtime.DynamicPipelineRunContext.get",
+        return_value=SimpleNamespace(run=SimpleNamespace(id="exec-raw-context")),
+    ):
+        assert _get_current_execution_id() is None
