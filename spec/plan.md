@@ -15,7 +15,7 @@ then come back. There is plenty to build without them.
 
 ---
 
-## Phase 1: Align the package with the spec
+## Phase 1: Align the package with the spec --- DONE
 
 **Goal:** Fix naming, create module skeleton, update exports.
 
@@ -466,7 +466,7 @@ deploy-time defaults, capability checks)
 ## Visual overview
 
 ```
-Phase 1  ── Naming + skeleton ─────────────────────────── Easy win
+Phase 1  ── Naming + skeleton ─────────────────────────── DONE
 Phase 2  ── Login/logout/status CLI ───────────────────── Easy win
 Phase 3  ── @kitaru.flow ──────────────────────────────── Core
 Phase 4  ── @kitaru.checkpoint ────────────────────────── Core
