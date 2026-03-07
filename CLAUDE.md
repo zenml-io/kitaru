@@ -113,7 +113,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.configure()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), the first `KitaruClient` execution/artifact browsing surface, core connection/login CLI paths, `kitaru stack list/current/use`, and `kitaru log-store set/show/reset` are functional. Other primitives remain in progress.
+> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.configure()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), the first `KitaruClient` execution/artifact browsing surface, core connection/login CLI paths, `kitaru stack list/current/use`, `kitaru log-store set/show/reset`, and `kitaru secrets set/show/list/delete` are functional. Other primitives remain in progress.
 
 ### Current MVP primitives
 
@@ -128,6 +128,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
 | `kitaru.configure()` + Phase 10 config precedence | Implemented |
 | `KitaruClient` (`get/list/latest/cancel/retry` + artifact browsing) | Implemented |
+| Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
 | `KitaruClient.input()` / replay | Stubbed (branch-dependent) |
 
 ### Key design patterns

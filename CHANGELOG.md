@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Secrets CLI surface: `kitaru secrets set/show/list/delete`
+- `kitaru secrets set` create-or-update behavior with private-by-default secret creation
+- Secret assignment parsing with env-var-style key validation (`--KEY=value`)
 - `KitaruClient` execution management API with Kitaru domain models (`Execution`, `ExecutionStatus`, `CheckpointCall`, `ArtifactRef`)
 - Execution management operations: `client.executions.get/list/latest/cancel/retry`
 - Artifact browsing operations: `client.artifacts.list/get` and `artifact.load()`
@@ -31,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Environment override support for runtime log-store resolution
 
 ### Changed
-- Updated README, CLAUDE guide, and docs pages to reflect shipped stack selection and current implemented primitive status
+- Updated README, CLAUDE guide, and docs pages to reflect shipped stack selection, secrets CLI behavior, and current implemented primitive status
 
 ## [0.1.0] - 2026-03-06
 

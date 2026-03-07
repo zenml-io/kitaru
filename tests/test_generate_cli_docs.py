@@ -46,6 +46,7 @@ class TestBuildCommandTree:
             "log-store",
             "login",
             "logout",
+            "secrets",
             "stack",
             "status",
         ]
@@ -209,6 +210,7 @@ class TestWriteDocsTree:
             "log-store",
             "login",
             "logout",
+            "secrets",
             "stack",
             "status",
         ]
@@ -237,14 +239,21 @@ class TestWriteDocsTree:
             assert not (output_dir / command / "index.mdx").exists()
             assert not (output_dir / command / "meta.json").exists()
 
-        # log-store and stack have nested subcommands, so they should be directories
-        for command in ("log-store", "stack"):
+        # log-store, secrets, and stack have nested subcommands.
+        for command in ("log-store", "secrets", "stack"):
             assert (output_dir / command / "index.mdx").exists()
             assert (output_dir / command / "meta.json").exists()
 
         for command in ("set", "show", "reset"):
             assert (output_dir / "log-store" / f"{command}.mdx").exists()
             assert f"log-store/{command}.mdx" in files
+
+        for command in ("delete", "list", "set", "show"):
+            assert (output_dir / "secrets" / f"{command}.mdx").exists()
+            assert f"secrets/{command}.mdx" in files
+
+        secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
+        assert "--KEY=value" in secrets_set_content
 
         for command in ("current", "list", "use"):
             assert (output_dir / "stack" / f"{command}.mdx").exists()

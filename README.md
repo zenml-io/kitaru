@@ -12,6 +12,8 @@ Phase 10 configuration is now implemented via `kitaru.configure(...)`, environme
 
 Phase 11 introduces the first real `KitaruClient` surface for execution management. You can now inspect executions (`get`, `list`, `latest`), perform same-execution recovery (`retry`), cancel running executions (`cancel`), and browse/load artifacts (`client.artifacts.list/get`, `artifact.load()`). `client.executions.input(...)` and replay are still intentionally deferred.
 
+Phase 11.5 adds a Kitaru secrets CLI surface: `kitaru secrets set/show/list/delete`. Secrets are private by default, `set` behaves as create-or-update, and key names should use env-var style identifiers such as `OPENAI_API_KEY`.
+
 ### SDK primitives
 
 ```python
@@ -139,6 +141,11 @@ kitaru stack use <name-or-id> Switch active stack
 kitaru log-store show         Show effective global runtime log backend
 kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]
 kitaru log-store reset        Clear global runtime log backend override
+
+kitaru secrets set <name> --KEY=value [--KEY=value ...]
+kitaru secrets show <name-or-id> [--show-values]
+kitaru secrets list
+kitaru secrets delete <name-or-id>
 ```
 
 ### Primitives still in progress

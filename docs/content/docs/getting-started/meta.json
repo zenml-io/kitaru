@@ -8,6 +8,7 @@
     "execution-management",
     "artifacts",
     "stack-selection",
-    "log-store"
+    "log-store",
+    "secrets"
   ]
 }
