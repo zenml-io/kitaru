@@ -51,6 +51,7 @@ dev = [
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",
+    "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
 ]
@@ -95,5 +96,5 @@ unresolved-import = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-vv"
+addopts = "-vv -n auto"
 pythonpath = ["scripts"]
