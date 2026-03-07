@@ -160,7 +160,7 @@ with Kitaru semantics.
 
 ---
 
-## Phase 6: Runtime context
+## Phase 6: Runtime context --- DONE
 
 **Goal:** Track what's currently executing so that `log()`, `save()`, and `load()` know where they are.
 
@@ -182,7 +182,7 @@ with Kitaru semantics.
 
 ---
 
-## Phase 7: `kitaru.log()`
+## Phase 7: `kitaru.log()` --- DONE
 
 **Goal:** Attach structured metadata to checkpoints and executions.
 
@@ -615,8 +615,8 @@ Phase 2  -- Login/logout/status CLI ----------------------------------- DONE
 Phase 3  -- @kitaru.flow (incl .deploy()) ----------------------------- DONE
 Phase 4  -- @kitaru.checkpoint ---------------------------------------- DONE
 Phase 5  -- First working example ------------------------------------- DONE (Milestone)
-Phase 6  -- Runtime context ------------------------------------------- Plumbing
-Phase 7  -- kitaru.log() ---------------------------------------------- Core
+Phase 6  -- Runtime context ------------------------------------------- DONE
+Phase 7  -- kitaru.log() ---------------------------------------------- DONE
 Phase 7b -- Global log store ------------------------------------------ Core
 Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- Core
 Phase 9  -- Stack selection ------------------------------------------- Easy win
