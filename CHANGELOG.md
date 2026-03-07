@@ -8,12 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `kitaru.save()` for explicit named artifact persistence inside checkpoints
+- `kitaru.load()` for cross-execution artifact loading inside checkpoints
+- Artifact taxonomy validation for explicit `kitaru.save(..., type=...)` values (`prompt`, `response`, `context`, `input`, `output`, `blob`)
+- Phase 8 example workflow: `examples/flow_with_artifacts.py`
 - Global log-store configuration with `kitaru log-store set/show/reset`
 - Persisted Kitaru user config (`kitaru.yaml`) for log-store override state
 - Environment override support for runtime log-store resolution
 
 ### Changed
-- Updated README, CLAUDE guide, and docs landing page to reflect implemented `kitaru.log()` and log-store CLI behavior
+- Updated README, CLAUDE guide, docs landing pages, and getting-started docs to reflect implemented `kitaru.save()` / `kitaru.load()` behavior
 
 ## [0.1.0] - 2026-03-06
 

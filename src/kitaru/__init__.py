@@ -21,8 +21,8 @@ Example::
 Current status:
 
 - Implemented: ``@kitaru.flow``, ``@kitaru.checkpoint``, ``kitaru.log()``,
-  and ``connect()``
-- In progress: ``wait()``, ``save()``, ``load()``, and ``llm()``
+  ``save()``, ``load()``, and ``connect()``
+- In progress: ``wait()`` and ``llm()``
 
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset``.
