@@ -1,6 +1,7 @@
 ---
 name: Site
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -70,7 +71,7 @@ jobs:
 
       # --- Deploy unified Worker (production) ---
       - name: Deploy production
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
