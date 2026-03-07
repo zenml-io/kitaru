@@ -16,30 +16,23 @@ import kitaru
 @kitaru.checkpoint
 def fetch_data(url: str) -> str:
     """A checkpoint is a unit of work whose outcome is persisted."""
-    return requests.get(url).text
+    _ = url
+    return "some data"
 
-@kitaru.checkpoint(retries=3, type="llm_call")
-def summarize(text: str) -> str:
-    """Checkpoints support retries and type annotations for dashboard rendering."""
-    return call_llm(text)
+@kitaru.checkpoint
+def process_data(data: str) -> str:
+    """Checkpoints are composed inside a flow."""
+    return data.upper()
 
 @kitaru.flow
 def my_agent(url: str) -> str:
     """A flow is the outer durable execution boundary."""
     data = fetch_data(url)
-    return summarize(data)
+    return process_data(data)
 
 # Run synchronously — blocks until complete, returns the result
 result = my_agent("https://example.com")
-
-# Or start without blocking and get a handle
-handle = my_agent.start("https://example.com")
-print(handle.exec_id)       # execution identifier
-print(handle.status)         # current status
-result = handle.wait()       # block until done
-
-# .deploy() signals remote-execution intent (sugar for .start(stack=...))
-handle = my_agent.deploy("https://example.com", stack="prod")
+print(result)  # SOME DATA
 ```
 
 #### Concurrent checkpoints
@@ -51,6 +44,22 @@ Checkpoints support `.submit()` for concurrent execution inside a flow:
 def parallel_agent(urls: list[str]) -> list[str]:
     futures = [fetch_data.submit(url) for url in urls]
     return [f.result() for f in futures]
+```
+
+### Run the first working workflow
+
+The repository includes a runnable Phase 5 example at
+`examples/first_working_flow.py`.
+
+```bash
+uv sync --extra local
+uv run python -m examples.first_working_flow
+```
+
+Expected output:
+
+```text
+SOME DATA
 ```
 
 ### CLI
@@ -82,6 +91,7 @@ Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and [just](https://gith
 
 ```bash
 uv sync                # Install dependencies
+uv sync --extra local  # Include local ZenML runtime components
 just --list            # Show all available recipes
 just check             # Run all checks (format, lint, typecheck, typos, yaml)
 just test              # Run tests

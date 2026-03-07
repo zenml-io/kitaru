@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
@@ -122,6 +123,25 @@ def test_checkpoint_maps_retries_and_type_to_step_config() -> None:
 def test_checkpoint_allows_zero_retries_without_retry_config() -> None:
     _, captured = _build_checkpoint(lambda: "ok", retries=0)
     assert captured["retry"] is None
+
+
+def test_checkpoint_registers_source_alias_for_step_reload() -> None:
+    def my_example_checkpoint(value: int) -> int:
+        return value
+
+    wrapped, captured = _build_checkpoint(my_example_checkpoint)
+
+    alias = "__kitaru_checkpoint_source_my_example_checkpoint"
+    step_obj = captured["step"]
+    assert step_obj is not None
+
+    module = sys.modules[my_example_checkpoint.__module__]
+    try:
+        assert getattr(module, alias) is step_obj
+    finally:
+        delattr(module, alias)
+
+    assert callable(wrapped)
 
 
 def test_checkpoint_rejects_negative_retries() -> None:

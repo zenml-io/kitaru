@@ -6,9 +6,11 @@ Successful outputs become artifacts; failures are recorded for retry.
 
 from __future__ import annotations
 
+import re
+import sys
 from collections.abc import Callable, Sequence
 from functools import update_wrapper, wraps
-from typing import Any, overload
+from typing import Any, cast, overload
 
 from zenml.config.retry_config import StepRetryConfig
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
@@ -25,6 +27,30 @@ _CHECKPOINT_NESTED_ERROR = (
 _CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR = (
     "Concurrent checkpoint execution is only available inside a running @kitaru.flow."
 )
+
+
+def _checkpoint_source_alias_name(func: Callable[..., Any]) -> str:
+    """Build a stable module-level alias for ZenML step source loading."""
+    checkpoint_name = getattr(func, "__name__", func.__class__.__name__)
+    normalized_name = re.sub(r"\W", "_", checkpoint_name)
+    if not normalized_name:
+        normalized_name = "checkpoint"
+    if normalized_name[0].isdigit():
+        normalized_name = f"checkpoint_{normalized_name}"
+    return f"__kitaru_checkpoint_source_{normalized_name}"
+
+
+def _register_checkpoint_source_alias(
+    *,
+    func: Callable[..., Any],
+    alias: str,
+    step_obj: Any,
+) -> None:
+    """Register the ZenML step object under a module-level alias."""
+    module = sys.modules.get(func.__module__)
+    if module is None:
+        return
+    setattr(module, alias, step_obj)
 
 
 def _normalize_retries(retries: int) -> int:
@@ -88,10 +114,20 @@ class _CheckpointDefinition:
             func,
             checkpoint_type=checkpoint_type,
         )
+        source_alias = _checkpoint_source_alias_name(func)
+        aliasable_entrypoint = cast(Any, wrapped_entrypoint)
+        aliasable_entrypoint.__name__ = source_alias
+        aliasable_entrypoint.__qualname__ = source_alias
+
         self._step = step(
             retry=_to_retry_config(self._default_retries),
             extra=_build_checkpoint_extra(checkpoint_type),
         )(wrapped_entrypoint)
+        _register_checkpoint_source_alias(
+            func=func,
+            alias=source_alias,
+            step_obj=self._step,
+        )
 
         update_wrapper(self, func)
 
