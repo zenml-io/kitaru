@@ -61,10 +61,12 @@ test *ARGS:
 build:
     uv build
 
-# Generate all docs content from Python source (CLI reference + changelog)
+# Generate all docs content from Python source (CLI reference + changelog + SDK reference)
 generate-docs:
     uv run python scripts/generate_cli_docs.py
     uv run python scripts/generate_changelog_docs.py
+    uv run python scripts/generate_sdk_docs.py
+    cd docs && node scripts/convert-sdk-docs.mjs
 
 # Preview docs locally (run generate-docs first if CLI pages needed)
 docs:

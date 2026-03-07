@@ -1,3 +1,161 @@
 @import 'tailwindcss';
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
+@import 'fumadocs-python/preset.css';
+
+/* ═══════════════════════════════════════════════════
+   Kitaru Brand Overrides
+   Colors matched to site/src/styles/global.css
+   ═══════════════════════════════════════════════════ */
+
+@theme {
+  --color-fd-background: #FAFAF8;
+  --color-fd-foreground: #1A1714;
+  --color-fd-muted: #F0EDE8;
+  --color-fd-muted-foreground: #6B6560;
+  --color-fd-popover: #FFFFFF;
+  --color-fd-popover-foreground: #1A1714;
+  --color-fd-card: #FCFCFA;
+  --color-fd-card-foreground: #1A1714;
+  --color-fd-border: #E5E2DC;
+  --color-fd-primary: #F17829;
+  --color-fd-primary-foreground: #FFFFFF;
+  --color-fd-secondary: #FCFCFA;
+  --color-fd-secondary-foreground: #6B6560;
+  --color-fd-accent: #F5EDE4;
+  --color-fd-accent-foreground: #1A1714;
+  --color-fd-ring: #F17829;
+  --color-fd-overlay: hsla(20, 10%, 10%, 0.2);
+}
+
+/* Safety net: force light palette even if .dark class is applied */
+.dark {
+  --color-fd-background: #FAFAF8;
+  --color-fd-foreground: #1A1714;
+  --color-fd-muted: #F0EDE8;
+  --color-fd-muted-foreground: #6B6560;
+  --color-fd-popover: #FFFFFF;
+  --color-fd-popover-foreground: #1A1714;
+  --color-fd-card: #FCFCFA;
+  --color-fd-card-foreground: #1A1714;
+  --color-fd-border: #E5E2DC;
+  --color-fd-primary: #F17829;
+  --color-fd-primary-foreground: #FFFFFF;
+  --color-fd-secondary: #FCFCFA;
+  --color-fd-secondary-foreground: #6B6560;
+  --color-fd-accent: #F5EDE4;
+  --color-fd-accent-foreground: #1A1714;
+  --color-fd-ring: #F17829;
+  --color-fd-overlay: hsla(20, 10%, 10%, 0.2);
+}
+
+/* Neutralize sidebar dark overrides from neutral.css */
+.dark #nd-sidebar {
+  --color-fd-muted: #F0EDE8;
+  --color-fd-secondary: #FCFCFA;
+  --color-fd-muted-foreground: #6B6560;
+}
+
+/* ═══════════════════════════════════════════════════
+   Base Styles
+   ═══════════════════════════════════════════════════ */
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-dm-sans), 'DM Sans', -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(241, 120, 41, 0.15);
+}
+
+/* ═══════════════════════════════════════════════════
+   Grain Overlay
+   Subtler than landing page (0.02 vs 0.025) for readability
+   ═══════════════════════════════════════════════════ */
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+}
+
+/* ═══════════════════════════════════════════════════
+   Typography
+   ═══════════════════════════════════════════════════ */
+
+code, kbd, pre, .font-mono {
+  font-family: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+}
+
+/* ═══════════════════════════════════════════════════
+   Code Blocks
+   Scope dark-friendly tokens onto the figure so the
+   copy button, tab triggers, and title bar all inherit
+   light text colors on the dark background.
+   ═══════════════════════════════════════════════════ */
+
+figure:has(pre) {
+  --color-fd-card: #1A1714;
+  --color-fd-secondary: #252220;
+  --color-fd-muted-foreground: #9E9790;
+  --color-fd-accent-foreground: #E8E4DE;
+  --color-fd-border: #3A3530;
+  --color-fd-ring: #F17829;
+  border-color: #3A3530 !important;
+  background: #1A1714 !important;
+}
+
+/* Override Shiki inline background to match warm dark */
+figure:has(pre) pre {
+  background: transparent !important;
+}
+
+/* Inline code: warm accent-light background */
+:not(pre) > code {
+  background: #F5EDE4;
+  color: #1A1714;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.85em;
+  border: 1px solid #F0EDE8;
+}
+
+/* ═══════════════════════════════════════════════════
+   Logo Ring Animation
+   ═══════════════════════════════════════════════════ */
+
+@keyframes ring-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.logo-ring {
+  transform-origin: 85px 85px;
+  animation: ring-spin 12s linear infinite;
+}
+
+.nav-title:hover .logo-ring {
+  animation-duration: 3s;
+}
+
+/* ═══════════════════════════════════════════════════
+   Nav Glass Enhancement
+   FumaDocs mobile header already has backdrop-blur-sm;
+   strengthen it to match landing page feel
+   ═══════════════════════════════════════════════════ */
+
+#nd-subnav {
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+}

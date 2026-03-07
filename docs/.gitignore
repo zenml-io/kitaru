@@ -15,7 +15,10 @@
 content/docs/cli/
 content/docs/cli.mdx
 content/docs/changelog.mdx
-content/docs/reference/python/
+content/docs/reference/
+
+# intermediate build artifacts from SDK doc generation
+.generated/
 
 # misc
 .DS_Store

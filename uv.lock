@@ -215,6 +215,39 @@ wheels = [
 ]
 
 [[package]]
+name = "griffe"
+version = "1.15.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/0c/3a471b6e31951dce2360477420d0a8d1e00dea6cf33b70f3e8c3ab6e28e1/griffe-1.15.0.tar.gz", hash = "sha256:7726e3afd6f298fbc3696e67958803e7ac843c1cfe59734b6251a40cdbfb5eea", size = 424112, upload-time = "2025-11-10T15:03:15.52Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/83/3b1d03d36f224edded98e9affd0467630fc09d766c0e56fb1498cbb04a9b/griffe-1.15.0-py3-none-any.whl", hash = "sha256:6f6762661949411031f5fcda9593f586e6ce8340f0ba88921a0f2ef7a81eb9a3", size = 150705, upload-time = "2025-11-10T15:03:13.549Z" },
+]
+
+[[package]]
+name = "griffe-typingdoc"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "griffelib" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/26/28182e0c8055842bf3da774dee1d5b789c0f236c078dcbdca1937b5214dc/griffe_typingdoc-0.3.1.tar.gz", hash = "sha256:2ff4703115cb7f8a65b9fdcdd1f3c3a15f813b6554621b52eaad094c4782ce96", size = 31218, upload-time = "2026-02-21T09:38:54.409Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/c4/cf543fbde49e1ae44830ef0840a4d6ee9f4e4f338138a7766d4e37cf6440/griffe_typingdoc-0.3.1-py3-none-any.whl", hash = "sha256:ecbd457ef6883126b8b6023abf12e08c58e1c152238a2f0e2afdd67a64b07021", size = 10092, upload-time = "2026-02-20T14:53:47.84Z" },
+]
+
+[[package]]
+name = "griffelib"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/51/c936033e16d12b627ea334aaaaf42229c37620d0f15593456ab69ab48161/griffelib-2.0.0-py3-none-any.whl", hash = "sha256:01284878c966508b6d6f1dbff9b6fa607bc062d8261c5c7253cb285b06422a7f", size = 142004, upload-time = "2026-02-09T19:09:40.561Z" },
+]
+
+[[package]]
 name = "idna"
 version = "3.11"
 source = { registry = "https://pypi.org/simple" }
@@ -265,6 +298,8 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "griffe" },
+    { name = "griffe-typingdoc" },
     { name = "pytest" },
     { name = "pytest-clarity" },
     { name = "pytest-randomly" },
@@ -282,6 +317,8 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
+    { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-clarity" },
     { name = "pytest-randomly" },
