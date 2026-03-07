@@ -45,13 +45,6 @@
           <li>
             <span class="check-icon">&#10003;</span>
             <div>
-              <strong>Every artifact and config versioned</strong>
-              <span>Browse outputs, trace lineage, compare runs.</span>
-            </div>
-          </li>
-          <li>
-            <span class="check-icon">&#10003;</span>
-            <div>
               <strong>Cost tracking per execution and LLM call</strong>
               <span>Know exactly what each agent run costs, by model.</span>
             </div>
@@ -59,8 +52,8 @@
           <li>
             <span class="check-icon">&#10003;</span>
             <div>
-              <strong>Named environments (dev / staging / prod)</strong>
-              <span>Switch models, stores, and settings with one flag.</span>
+              <strong>Divergence detection on replay</strong>
+              <span>Code changed the call sequence? Clear error, not silent corruption.</span>
             </div>
           </li>
           <li>
@@ -68,13 +61,6 @@
             <div>
               <strong>Cross-execution artifacts with save() and load()</strong>
               <span>Persist named outputs. Load them in future runs.</span>
-            </div>
-          </li>
-          <li>
-            <span class="check-icon">&#10003;</span>
-            <div>
-              <strong>Divergence detection on replay</strong>
-              <span>Code changed the call sequence? Clear error, not silent corruption.</span>
             </div>
           </li>
           <li>
@@ -95,7 +81,7 @@
     display: grid;
     grid-template-columns: 1.2fr 1fr;
     gap: 48px;
-    align-items: start;
+    align-items: center;
   }
 
   /* Terminal (dark) */
