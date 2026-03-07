@@ -6,7 +6,7 @@ Kitaru makes agent workflows **persistent, replayable, and observable** using a 
 
 ## What works today
 
-Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional. Several additional primitives (`wait`, `log`, `save`, `load`, `llm`) are scaffolded but not yet implemented.
+Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, and the Phase 5 first working workflow milestone is complete. Several additional primitives (`wait`, `log`, `save`, `load`, `llm`) are scaffolded but not yet implemented.
 
 ### SDK primitives
 
@@ -60,6 +60,12 @@ Expected output:
 
 ```text
 SOME DATA
+```
+
+You can also run the integration test for this example:
+
+```bash
+uv run pytest tests/test_phase5_example.py
 ```
 
 ### CLI

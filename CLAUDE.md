@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Kitaru?
 
-Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`workflow`, `checkpoint`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
+Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
-**ZenML mapping:** `@kitaru.workflow` → `@pipeline(dynamic=True)`, `@kitaru.checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
+**ZenML mapping:** `@kitaru.flow` → `@pipeline(dynamic=True)`, `@kitaru.checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
 
 ## Project layout
 
@@ -17,6 +17,7 @@ src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapter stubs (not yet implemented)
 tests/                # pytest tests
+examples/             # Runnable SDK examples (Phase 5 first working flow)
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -66,6 +67,7 @@ This project uses [just](https://github.com/casey/just) as a command runner. Run
 ```bash
 # Setup
 uv sync                              # Install dependencies
+uv sync --extra local                # Include local ZenML runtime components
 
 # Common Python workflows
 just check                            # Run all checks (format, lint, typecheck, typos, yaml, links)
@@ -111,25 +113,25 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK primitives below are **specified but not yet implemented**. The detailed design lives in `spec/` (temporary files, deleted once implemented). The current codebase has the CLI and package scaffolding; the runtime primitives are being built.
+> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, and core connection/login CLI paths are functional. Other primitives are scaffolded and still in progress.
 
-### Planned MVP primitives
+### Current MVP primitives
 
-| Primitive | Purpose |
+| Primitive | Status |
 |---|---|
-| `@kitaru.workflow` | Outer boundary — marks a durable execution |
-| `@kitaru.checkpoint` | Checkpointed unit of work, with optional `type=` for dashboard visualization |
-| `kitaru.wait()` | Suspend until a webhook event arrives (MVP: webhook only) |
-| `kitaru.log()` | Attach typed metadata to current checkpoint |
-| `kitaru.save()` | Explicit named artifact (inside checkpoint only) |
-| `kitaru.load()` | Cross-execution artifact loading (requires exec_id) |
+| `@kitaru.flow` | Implemented |
+| `@kitaru.checkpoint` | Implemented |
+| `kitaru.wait()` | Scaffolded (not yet implemented) |
+| `kitaru.log()` | Scaffolded (not yet implemented) |
+| `kitaru.save()` | Scaffolded (not yet implemented) |
+| `kitaru.load()` | Scaffolded (not yet implemented) |
 
 ### Key design patterns
 
-- **Workflows cannot nest** — no `@kitaru.workflow` inside another workflow
-- **Checkpoints can nest** — each independently persisted
+- **Flows cannot nest** — no `@kitaru.flow` inside another flow
+- **Nested checkpoint calls are blocked in the current MVP implementation**
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive
-- **Replay** works by re-running the workflow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
+- **Replay** works by re-running the flow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
 - **Artifact overrides** let you swap a checkpoint's cached output during replay
 
 ### Framework adapters (planned)

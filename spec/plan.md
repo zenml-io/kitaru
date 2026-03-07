@@ -123,9 +123,11 @@ with Kitaru semantics.
 
 ---
 
-## Phase 5: First working example
+## Phase 5: First working example ✅ DONE
 
 **Goal:** A simple end-to-end example that actually runs. This is your first real milestone.
+
+**Status:** Completed.
 
 **What to do:**
 - Create a minimal example (e.g., in `examples/` or as a test):
@@ -612,7 +614,7 @@ Phase 1  -- Naming + skeleton ---------------------------------------- DONE
 Phase 2  -- Login/logout/status CLI ----------------------------------- DONE
 Phase 3  -- @kitaru.flow (incl .deploy()) ----------------------------- DONE
 Phase 4  -- @kitaru.checkpoint ---------------------------------------- DONE
-Phase 5  -- First working example ------------------------------------- Milestone!
+Phase 5  -- First working example ------------------------------------- DONE (Milestone)
 Phase 6  -- Runtime context ------------------------------------------- Plumbing
 Phase 7  -- kitaru.log() ---------------------------------------------- Core
 Phase 7b -- Global log store ------------------------------------------ Core
