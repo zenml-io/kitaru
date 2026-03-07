@@ -41,6 +41,7 @@ Use `uv` for Python dependency management and `just` as the command runner.
 
 - `uv sync`: install and sync dependencies
 - `just check`: run all checks (format, lint, typecheck, typos, yaml, links)
+- **Always run `just check` after finishing any chunk of implementation work, and fix every reported issue before pausing or handing work off.**
 - `just test`: run full test suite
 - `just test tests/test_file.py::test_name`: run one test
 - `just fix`: auto-fix formatting, lint issues, and yaml

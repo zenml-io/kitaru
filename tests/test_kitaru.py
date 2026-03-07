@@ -157,7 +157,7 @@ class TestImplementedConnectionPrimitive:
 
 
 class TestPlaceholderBehavior:
-    """Verify scaffolded primitives still raise NotImplementedError."""
+    """Verify implemented/scaffolded primitive behavior in the current phase."""
 
     def test_flow_returns_callable_with_start_and_deploy(self) -> None:
         wrapped = kitaru.flow(lambda: None)
@@ -165,9 +165,14 @@ class TestPlaceholderBehavior:
         assert hasattr(wrapped, "start")
         assert hasattr(wrapped, "deploy")
 
-    def test_checkpoint_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="checkpoint"):
-            kitaru.checkpoint(lambda: None)
+    def test_checkpoint_returns_callable_with_submit(self) -> None:
+        with patch("kitaru.checkpoint.step") as step_factory:
+            zenml_step = object()
+            step_factory.return_value = lambda func: zenml_step
+            wrapped = kitaru.checkpoint(lambda: None)
+
+        assert callable(wrapped)
+        assert hasattr(wrapped, "submit")
 
     def test_wait_raises(self) -> None:
         with pytest.raises(NotImplementedError, match="wait"):
