@@ -65,7 +65,10 @@
     <span class="kw">return</span> draft
 
 <span class="cmt"># Replay with new inputs — completed steps are cached.</span>
-content_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>)</code></pre>
+content_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>)
+
+<span class="cmt"># Deploy on any stack — same code, zero changes.</span>
+content_agent.<span class="fn">start</span>(<span class="str">"AGI"</span>, stack<span class="op">=</span><span class="str">"prod"</span>)</code></pre>
           </div>
           <!-- Framework tab -->
           <div class="code-tab-content" id="tab-framework">
@@ -87,6 +90,10 @@ agent <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span clas
     <span class="kw">return</span> result.output
 
 <span class="cmt"># Replay with new inputs — completed steps are cached.</span>
+review_pr.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>)
+
+<span class="cmt"># Deploy on any stack — same code, zero changes.</span>
+review_pr.<span class="fn">start</span>(<span class="num">42</span>, stack<span class="op">=</span><span class="str">"prod"</span>)
 review_pr.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>)</code></pre>
           </div>
         </div>
