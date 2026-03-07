@@ -14,6 +14,8 @@ Phase 11 introduces the first real `KitaruClient` surface for execution manageme
 
 Phase 11.5 adds a Kitaru secrets CLI surface: `kitaru secrets set/show/list/delete`. Secrets are private by default, `set` behaves as create-or-update, and key names should use env-var style identifiers such as `OPENAI_API_KEY`.
 
+Phase 12 adds `kitaru.llm()` with LiteLLM as the backend engine, automatic prompt/response artifact capture, usage/cost/latency metadata logging, and local model alias registration (`kitaru model register/list`) with optional secret-backed credential lookup.
+
 ### SDK primitives
 
 ```python
@@ -122,6 +124,24 @@ You can also run the integration test for this example:
 uv run pytest tests/test_phase11_client_example.py
 ```
 
+### Run the LLM workflow
+
+The repository includes a runnable Phase 12 example at
+`examples/flow_with_llm.py`.
+
+```bash
+uv sync --extra local
+kitaru model register fast --model openai/gpt-4o-mini
+export OPENAI_API_KEY=sk-...
+uv run python -m examples.flow_with_llm
+```
+
+You can also run the integration test for this example:
+
+```bash
+uv run pytest tests/test_phase12_llm_example.py
+```
+
 ### CLI
 
 ```
@@ -146,6 +166,9 @@ kitaru secrets set <name> --KEY=value [--KEY=value ...]
 kitaru secrets show <name-or-id> [--show-values]
 kitaru secrets list
 kitaru secrets delete <name-or-id>
+
+kitaru model register <alias> --model <provider/model> [--secret <name-or-id>]
+kitaru model list
 ```
 
 ### Primitives still in progress
@@ -153,7 +176,6 @@ kitaru secrets delete <name-or-id>
 | Primitive | Purpose |
 |---|---|
 | `kitaru.wait()` | Suspend a flow until external input arrives (requires ZenML server support) |
-| `kitaru.llm()` | Tracked LLM calls with automatic artifact and metadata capture |
 
 ## Development
 

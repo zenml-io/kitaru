@@ -42,6 +42,7 @@ _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
     "kitaru_current_checkpoint_scope",
     default=None,
 )
+_LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", default=0)
 
 
 _PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
@@ -113,13 +114,15 @@ def _flow_scope(
     resolved_execution_id = (
         execution_id if execution_id is not None else _get_zenml_execution_id()
     )
-    token = _CURRENT_FLOW_SCOPE.set(
+    flow_token = _CURRENT_FLOW_SCOPE.set(
         _FlowScope(name=name, execution_id=resolved_execution_id)
     )
+    llm_counter_token = _LLM_CALL_COUNTER.set(0)
     try:
         yield
     finally:
-        _CURRENT_FLOW_SCOPE.reset(token)
+        _LLM_CALL_COUNTER.reset(llm_counter_token)
+        _CURRENT_FLOW_SCOPE.reset(flow_token)
 
 
 @contextmanager
@@ -137,7 +140,7 @@ def _checkpoint_scope(
     resolved_checkpoint_id = (
         checkpoint_id if checkpoint_id is not None else _get_zenml_checkpoint_id()
     )
-    token = _CURRENT_CHECKPOINT_SCOPE.set(
+    checkpoint_token = _CURRENT_CHECKPOINT_SCOPE.set(
         _CheckpointScope(
             name=name,
             type=checkpoint_type,
@@ -145,10 +148,12 @@ def _checkpoint_scope(
             checkpoint_id=resolved_checkpoint_id,
         )
     )
+    llm_counter_token = _LLM_CALL_COUNTER.set(0)
     try:
         yield
     finally:
-        _CURRENT_CHECKPOINT_SCOPE.reset(token)
+        _LLM_CALL_COUNTER.reset(llm_counter_token)
+        _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
 
 
 def _get_current_flow() -> _FlowScope | None:
@@ -192,6 +197,14 @@ def _get_current_checkpoint_id() -> str | None:
         return checkpoint_scope.checkpoint_id
 
     return None
+
+
+def _next_llm_call_name(prefix: str = "llm") -> str:
+    """Return the next runtime-local sequential LLM call name."""
+    normalized_prefix = prefix.strip() or "llm"
+    next_index = _LLM_CALL_COUNTER.get() + 1
+    _LLM_CALL_COUNTER.set(next_index)
+    return f"{normalized_prefix}_{next_index}"
 
 
 def _not_implemented(name: str) -> NoReturn:

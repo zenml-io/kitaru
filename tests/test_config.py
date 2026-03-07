@@ -31,12 +31,15 @@ from kitaru.config import (
     configure,
     current_stack,
     image_settings_to_docker_settings,
+    list_model_aliases,
     list_stacks,
     persist_frozen_execution_spec,
+    register_model_alias,
     reset_global_log_store,
     resolve_connection_config,
     resolve_execution_config,
     resolve_log_store,
+    resolve_model_selection,
     set_global_log_store,
     use_stack,
 )
@@ -91,6 +94,39 @@ def test_set_log_store_persists_global_override() -> None:
     persisted = yaml_utils.read_yaml(str(_kitaru_config_path()))
     assert persisted["log_store"]["backend"] == "datadog"
     assert persisted["log_store"]["endpoint"] == "https://logs.datadoghq.com"
+
+
+def test_set_log_store_preserves_model_registry() -> None:
+    """Log-store updates should not clobber persisted model aliases."""
+    register_model_alias("fast", model="openai/gpt-4o-mini", secret="openai-creds")
+
+    set_global_log_store(
+        "datadog",
+        endpoint="https://logs.datadoghq.com",
+    )
+
+    aliases = list_model_aliases()
+    assert len(aliases) == 1
+    assert aliases[0].alias == "fast"
+    assert aliases[0].model == "openai/gpt-4o-mini"
+    assert aliases[0].secret == "openai-creds"
+
+
+def test_register_model_alias_preserves_log_store_settings() -> None:
+    """Model alias writes should preserve existing log-store overrides."""
+    set_global_log_store(
+        "datadog",
+        endpoint="https://logs.datadoghq.com",
+    )
+
+    alias = register_model_alias("fast", model="openai/gpt-4o-mini")
+
+    assert alias.alias == "fast"
+    assert alias.is_default is True
+
+    snapshot = resolve_log_store()
+    assert snapshot.backend == "datadog"
+    assert snapshot.endpoint == "https://logs.datadoghq.com"
 
 
 def test_environment_override_takes_precedence(
@@ -155,6 +191,21 @@ def test_reset_clears_persisted_log_store_override() -> None:
     assert snapshot.source == "default"
 
 
+def test_reset_log_store_preserves_model_registry() -> None:
+    """Resetting log-store config should keep model aliases intact."""
+    register_model_alias("fast", model="openai/gpt-4o-mini")
+    set_global_log_store(
+        "datadog",
+        endpoint="https://logs.datadoghq.com",
+    )
+
+    reset_global_log_store()
+
+    aliases = list_model_aliases()
+    assert len(aliases) == 1
+    assert aliases[0].alias == "fast"
+
+
 def test_partial_env_override_raises_helpful_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -203,6 +254,61 @@ def test_set_overwrites_invalid_persisted_config() -> None:
 
     assert snapshot.backend == "datadog"
     assert snapshot.source == "global user config"
+
+
+def test_register_model_alias_sets_first_alias_as_default() -> None:
+    """The first registered alias should become the default model alias."""
+    fast = register_model_alias("FAST", model="openai/gpt-4o-mini")
+    smart = register_model_alias("smart", model="anthropic/claude-sonnet-4-20250514")
+
+    aliases = list_model_aliases()
+
+    assert fast.alias == "fast"
+    assert fast.is_default is True
+    assert smart.is_default is False
+    assert [entry.alias for entry in aliases] == ["fast", "smart"]
+
+
+def test_register_model_alias_updates_existing_alias() -> None:
+    """Re-registering an alias should update model/secret values."""
+    register_model_alias("fast", model="openai/gpt-4o-mini", secret="openai-creds")
+
+    updated = register_model_alias(
+        "fast",
+        model="openai/gpt-4.1-mini",
+        secret="openai-prod",
+    )
+
+    assert updated.alias == "fast"
+    assert updated.model == "openai/gpt-4.1-mini"
+    assert updated.secret == "openai-prod"
+    assert updated.is_default is True
+
+
+def test_resolve_model_selection_prefers_aliases_and_defaults() -> None:
+    """Model resolution should honor aliases and default fallback behavior."""
+    register_model_alias("fast", model="openai/gpt-4o-mini", secret="openai-creds")
+
+    alias_selection = resolve_model_selection("fast")
+    concrete_selection = resolve_model_selection("openai/gpt-4.1-mini")
+    default_selection = resolve_model_selection(None)
+
+    assert alias_selection.alias == "fast"
+    assert alias_selection.resolved_model == "openai/gpt-4o-mini"
+    assert alias_selection.secret == "openai-creds"
+
+    assert concrete_selection.alias is None
+    assert concrete_selection.resolved_model == "openai/gpt-4.1-mini"
+    assert concrete_selection.secret is None
+
+    assert default_selection.alias == "fast"
+    assert default_selection.resolved_model == "openai/gpt-4o-mini"
+
+
+def test_resolve_model_selection_requires_default_or_explicit_model() -> None:
+    """`kitaru.llm(model=None)` should fail without a configured default alias."""
+    with pytest.raises(ValueError, match="No model alias is configured"):
+        resolve_model_selection(None)
 
 
 def test_current_stack_returns_active_stack_info() -> None:

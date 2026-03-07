@@ -21,11 +21,13 @@ Example::
 Current status:
 
 - Implemented: ``@kitaru.flow``, ``@kitaru.checkpoint``, ``kitaru.log()``,
-  ``save()``, ``load()``, ``connect()``, ``configure()``, stack selection helpers
-  (``list_stacks()``, ``current_stack()``, ``use_stack()``), and ``KitaruClient``
-  execution/artifact browsing APIs (`get/list/latest/cancel/retry` + artifacts)
-- In progress: ``wait()`` and ``llm()``. ``KitaruClient`` `input()` and
-  `replay()` are intentionally stubbed pending wait/replay backend support.
+  ``save()``, ``load()``, ``llm()``, ``connect()``, ``configure()``, stack
+  selection helpers (``list_stacks()``, ``current_stack()``, ``use_stack()``),
+  model alias helpers via CLI (``kitaru model register/list``), and
+  ``KitaruClient`` execution/artifact browsing APIs
+  (`get/list/latest/cancel/retry` + artifacts)
+- In progress: ``wait()``. ``KitaruClient`` `input()` and `replay()` are
+  intentionally stubbed pending wait/replay backend support.
 
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset`` and stack selection via

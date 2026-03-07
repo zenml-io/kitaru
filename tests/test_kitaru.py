@@ -204,8 +204,8 @@ class TestPlaceholderBehavior:
         with pytest.raises(NotImplementedError, match="wait"):
             kitaru.wait()
 
-    def test_llm_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="llm"):
+    def test_llm_requires_flow_context(self) -> None:
+        with pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"):
             kitaru.llm("hello")
 
     def test_save_requires_checkpoint_context(self) -> None:

@@ -9,6 +9,7 @@
     "artifacts",
     "stack-selection",
     "log-store",
-    "secrets"
+    "secrets",
+    "llm-calls"
   ]
 }
