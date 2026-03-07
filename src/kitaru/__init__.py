@@ -21,10 +21,9 @@ Example::
 Current status:
 
 - Implemented: ``@kitaru.flow``, ``@kitaru.checkpoint``, ``kitaru.log()``,
-  ``save()``, ``load()``, ``connect()``, and stack selection helpers
+  ``save()``, ``load()``, ``connect()``, ``configure()``, and stack selection helpers
   (``list_stacks()``, ``current_stack()``, ``use_stack()``)
-- Scaffolded (not yet implemented): ``wait()``, ``llm()``, ``configure()``,
-  and ``KitaruClient``
+- Scaffolded (not yet implemented): ``wait()``, ``llm()``, and ``KitaruClient``
 
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset`` and stack selection via
@@ -35,6 +34,8 @@ from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
 from kitaru.client import KitaruClient
 from kitaru.config import (
+    ImageSettings,
+    KitaruConfig,
     StackInfo,
     configure,
     connect,
@@ -49,7 +50,9 @@ from kitaru.wait import wait
 
 __all__ = [
     "FlowHandle",
+    "ImageSettings",
     "KitaruClient",
+    "KitaruConfig",
     "StackInfo",
     "checkpoint",
     "configure",

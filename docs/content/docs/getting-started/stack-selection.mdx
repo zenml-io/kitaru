@@ -49,14 +49,16 @@ Each stack entry is returned as `StackInfo(id, name, is_active)`.
 
 ## Precedence with flow-level stack overrides
 
-The active stack is a default. Per-flow overrides still win:
+The active stack is only one layer in the Phase 10 precedence chain. Higher
+layers can override it:
 
-```python
-handle = my_flow.start(..., stack="gpu-cluster")
-```
-
-In this case, `gpu-cluster` is used for that run even if your active stack is
-something else.
+1. `my_flow.start(..., stack="gpu-cluster")`
+2. `@kitaru.flow(stack="gpu-cluster")`
+3. `kitaru.configure(stack="gpu-cluster")`
+4. `KITARU_STACK`
+5. `pyproject.toml` (`[tool.kitaru].stack`)
+6. active global user stack
+7. implicit `local`
 
 ## Related pages
 

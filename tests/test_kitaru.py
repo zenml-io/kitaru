@@ -58,7 +58,9 @@ class TestPublicExports:
     def test_all_exports_match(self) -> None:
         expected = {
             "FlowHandle",
+            "ImageSettings",
             "KitaruClient",
+            "KitaruConfig",
             "StackInfo",
             "checkpoint",
             "configure",
@@ -218,9 +220,10 @@ class TestPlaceholderBehavior:
         with pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"):
             kitaru.log(cost=0.01)
 
-    def test_configure_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="configure"):
-            kitaru.configure(cache=False)
+    def test_configure_sets_runtime_defaults(self) -> None:
+        snapshot = kitaru.configure(cache=False, retries=2)
+        assert snapshot.cache is False
+        assert snapshot.retries == 2
 
     def test_client_raises(self) -> None:
         with pytest.raises(NotImplementedError, match="KitaruClient"):

@@ -4,6 +4,7 @@
   "pages": [
     "installation",
     "quickstart",
+    "configuration",
     "artifacts",
     "stack-selection",
     "log-store"

@@ -6,7 +6,9 @@ Kitaru makes agent workflows **persistent, replayable, and observable** using a 
 
 ## What works today
 
-Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, the Phase 5 first working workflow milestone is complete, `kitaru.log()` attaches structured metadata to executions/checkpoints, and `kitaru.save()` / `kitaru.load()` now support explicit artifact persistence and cross-execution reuse inside checkpoints. Runtime log storage also has a global default/override model via `kitaru log-store ...`, and you can now inspect/switch your active stack with `kitaru stack ...` (or `kitaru.list_stacks()`, `kitaru.current_stack()`, `kitaru.use_stack()`).
+Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, the Phase 5 first working workflow milestone is complete, `kitaru.log()` attaches structured metadata to executions/checkpoints, and `kitaru.save()` / `kitaru.load()` support explicit artifact persistence and cross-execution reuse inside checkpoints. Runtime log storage also has a global default/override model via `kitaru log-store ...`, and you can inspect/switch your active stack with `kitaru stack ...` (or `kitaru.list_stacks()`, `kitaru.current_stack()`, `kitaru.use_stack()`).
+
+Phase 10 configuration is now implemented via `kitaru.configure(...)`, environment variables, and project-level `[tool.kitaru]` settings in `pyproject.toml`, with precedence resolved at flow start time and persisted as a frozen execution spec on each run.
 
 ### SDK primitives
 
@@ -66,6 +68,22 @@ You can also run the integration test for this example:
 
 ```bash
 uv run pytest tests/test_phase5_example.py
+```
+
+### Run the configuration workflow
+
+The repository includes a runnable Phase 10 example at
+`examples/flow_with_configuration.py`.
+
+```bash
+uv sync --extra local
+uv run python -m examples.flow_with_configuration
+```
+
+You can also run the integration test for this example:
+
+```bash
+uv run pytest tests/test_phase10_configuration_example.py
 ```
 
 ### Run the artifact save/load workflow
