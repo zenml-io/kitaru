@@ -4,6 +4,8 @@ This is the most important section in the SDK.
 
 Everything else in Kitaru depends on this model.
 
+**Key principle:** The heavy lifting for retry, resume, replay, divergence detection, and snapshots is implemented in the ZenML backend. Kitaru defines the user-visible contract and provides a simpler developer-facing model on top. This chapter describes **what the user observes**, not what mechanism Kitaru itself must independently invent.
+
 ## Durable execution by rerun, not frame restore
 
 Kitaru does **not** snapshot and restore Python stack frames in the MVP, and that is not the product direction.
@@ -116,11 +118,11 @@ Every durable call in an execution has:
 
 Names are for dashboards and developer ergonomics. IDs and sequence position are what make replay reliable, especially in loops and branches.
 
-## Divergence detection [TBD]
+## Divergence detection
 
-On replay, Kitaru should verify that the durable call sequence still matches the original execution up to the replay point.
+Divergence detection is part of the ZenML-backed replay machinery. Kitaru exposes the user-visible contract and failure mode; the detection logic itself is resolved in the ZenML backend.
 
-If code changes insert, remove, or reorder durable calls before the replay point, replay should fail with a clear divergence error rather than silently returning the wrong historical values.
+On replay, the system verifies that the durable call sequence still matches the original execution up to the replay point. If code changes insert, remove, or reorder durable calls before the replay point, replay fails with a clear divergence error rather than silently returning the wrong historical values.
 
 This matters especially for:
 
@@ -129,11 +131,13 @@ This matters especially for:
 - changed helper structure
 - reordered checkpoints or waits
 
+Kitaru documents and surfaces the divergence error to the user, but does not independently implement divergence detection — that behavior comes from ZenML.
+
 ## Snapshots
 
-Snapshots are **backend machinery** used to implement pause, resume, and retry.
+Snapshots are **ZenML backend machinery** used to implement pause, resume, and retry. They are not a Kitaru feature area — Kitaru neither owns nor exposes snapshot internals.
 
-They are not a primary user-facing MVP feature. Users should not need to manually trigger or manage snapshots.
+Users should not need to manually trigger or manage snapshots.
 
 The snapshot mechanism enables:
 
@@ -141,7 +145,7 @@ The snapshot mechanism enables:
 - restoring execution context when retry or resume triggers a rerun
 - preserving the frozen execution spec across process boundaries
 
-For the MVP, snapshots are an implementation detail. Dashboard-triggered snapshot management may come later.
+For the MVP, snapshots are a ZenML implementation detail. Dashboard-triggered snapshot management may come later as a Pro feature.
 
 ## Side effects and idempotency
 

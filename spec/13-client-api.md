@@ -14,16 +14,16 @@ The client API is not where durable orchestration happens. It is where **executi
 
 ## What it does
 
-The client should provide access to:
+The client should provide access to the following, listed in **priority order** (most-needed functions first):
 
-- execution listing and lookup
-- status inspection
-- pending wait inspection
-- input / resume for waiting executions
-- retry for failed executions
-- replay creation
-- artifact browsing
-- latest-execution lookup
+1. **input / resume for waiting executions** — provide input to a paused flow
+2. **replay from a durable call** — replay a step or checkpoint with optional overrides
+3. **retry for failed executions** — same-execution recovery
+4. **execution listing and lookup** — find and inspect executions
+5. **status inspection** — current execution state
+6. **pending wait inspection** — what the execution is waiting for
+7. **latest-execution lookup** — find the most recent execution of a flow
+8. **artifact browsing** — inspect artifacts (lower priority for MVP)
 
 ## Basic usage
 
@@ -94,14 +94,14 @@ If an execution is waiting, the client should expose the pending wait informatio
 ```python
 ex = client.executions.get("kr-a8f3c2")
 print(ex.status)         # "waiting"
-print(ex.pending_wait)   # schema/prompt/metadata for the active wait
+print(ex.pending_wait)   # schema/question/metadata for the active wait
 ```
 
 Useful fields include:
 
 - wait display name
 - wait call ID
-- prompt
+- question
 - schema
 - metadata
 - active timeout status if set
@@ -323,15 +323,23 @@ That means public APIs can be name-friendly, but the implementation must still b
 
 ## MVP notes
 
-For March, the most important client surface is:
+For the MVP, the client surface should be prioritized as follows:
 
-- `executions.list(...)`
-- `executions.get(exec_id)`
-- `executions.input(...)` — resume a waiting execution
+### Tier 1 — core operations (build first)
+
+- `executions.input(...)` — provide input to a waiting execution (resume)
 - `executions.retry(...)` — retry a failed execution (same execution)
 - `executions.replay(...)` — create a new execution from a previous one
-- `executions.latest(...)`
-- `artifacts.list(exec_id)`
-- `artifacts.get(artifact_id)`
+- `executions.get(exec_id)` — inspect an execution
 
-That is enough to support local tooling, dashboards, and basic automation.
+### Tier 2 — browsing and lookup
+
+- `executions.list(...)` — list and filter executions
+- `executions.latest(...)` — find the most recent execution of a flow
+
+### Tier 3 — artifacts (later)
+
+- `artifacts.list(exec_id)` — list artifacts for an execution
+- `artifacts.get(artifact_id)` — get a specific artifact
+
+The SDK should be built before the CLI (except `kitaru login`). The client API is the foundation that the CLI wraps.

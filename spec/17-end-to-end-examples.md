@@ -92,7 +92,7 @@ def content_pipeline(topic: str) -> str:
     review = kitaru.wait(
         schema=ReviewDecision,
         name="review_draft",
-        prompt=f"Review draft for '{topic}'",
+        question=f"Review draft for '{topic}'",
         metadata={"draft": draft},
     )
 
@@ -245,7 +245,7 @@ def coding_agent(issue_text: str) -> str:
     approved = kitaru.wait(
         schema=bool,
         name="approve_pr",
-        prompt="Create the PR?",
+        question="Create the PR?",
         metadata={"proposal": plan["proposal"]},
     )
     if not approved:
@@ -305,7 +305,7 @@ def approval_flow() -> str:
     approved = kitaru.wait(
         schema=bool,
         name="approve_release",
-        prompt="Approve this release?",
+        question="Approve this release?",
     )
     return "approved" if approved else "rejected"
 ```
@@ -452,7 +452,7 @@ def coding_agent(issue_text: str, repo_summary: str) -> str:
     plan_approved = kitaru.wait(
         schema=bool,
         name="approve_plan",
-        prompt="Approve implementation plan?",
+        question="Approve implementation plan?",
         metadata={
             "analysis": analysis,
             "context_preview": context[:1000],
@@ -475,7 +475,7 @@ def coding_agent(issue_text: str, repo_summary: str) -> str:
         review = kitaru.wait(
             schema=CodeReview,
             name="code_review",
-            prompt=f"Review code changes (round {round_idx + 1}/{MAX_REVIEW_ROUNDS})",
+            question=f"Review code changes (round {round_idx + 1}/{MAX_REVIEW_ROUNDS})",
             metadata={
                 "patch_files": list(patch.keys()),
                 "test_output": test_result.output,

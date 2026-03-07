@@ -149,8 +149,8 @@ Examples:
 
 ### LLM model precedence
 
-1. `kitaru.llm(..., model="fast")`
-2. configured `default_model`
+1. `kitaru.llm(..., model="fast")` — call-time override (alias or concrete model)
+2. stack-defined default model alias (from the `llm_model` stack component)
 
 ### Retry precedence
 
@@ -208,3 +208,5 @@ For March, the most useful override surface is:
 - `kitaru.llm()`: `model`, plus normal per-call LLM parameters
 
 These are all part of the [unified config object](04-connection-stacks-and-configuration.md) — overrides are just the runtime layer that sits on top of pre-execution defaults.
+
+Note: secrets in environment or config should use the ZenML `{{ SECRET_NAME }}` syntax. See chapter 4 for details.

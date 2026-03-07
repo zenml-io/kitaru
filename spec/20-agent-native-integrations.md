@@ -19,7 +19,7 @@ Example interaction:
 
 > **User:** "What Kitaru executions are waiting for input?"
 >
-> **Assistant:** *(calls `kitaru_executions_list` with `status="waiting"`)* "There's one: `kr-a8f3c2` (content_pipeline) is waiting at `approve_draft`. The prompt says 'Publish this draft about AI safety?'"
+> **Assistant:** *(calls `kitaru_executions_list` with `status="waiting"`)* "There's one: `kr-a8f3c2` (content_pipeline) is waiting at `approve_draft`. The question says 'Publish this draft about AI safety?'"
 >
 > **User:** "Approve it."
 >
@@ -130,7 +130,7 @@ The MCP server should expose tools that mirror the `KitaruClient` API (section 1
 
 - **Structured input and output.** Tools accept typed parameters and return structured JSON, not CLI text. This is the whole point of MCP over shell commands.
 - **Mirror the client API.** Tool names and parameters should map obviously to `KitaruClient` methods. Do not invent a parallel vocabulary.
-- **Return actionable context.** When listing executions, include enough detail (status, flow name, pending wait info) that the assistant can act without a follow-up `get` call. When a wait is pending, include the prompt and schema so the assistant can ask the user for input.
+- **Return actionable context.** When listing executions, include enough detail (status, flow name, pending wait info) that the assistant can act without a follow-up `get` call. When a wait is pending, include the question and schema so the assistant can ask the user for input.
 - **Validate before acting.** Resume input should be validated against the wait schema before being sent. Return clear validation errors.
 - **No destructive defaults.** Tools that modify state (input, retry, replay, cancel) should require explicit parameters — no "cancel the most recent execution" shortcuts.
 
@@ -494,6 +494,6 @@ For the March launch:
 
 - **Section 13 (Client API)** defines the `KitaruClient` interface that the MCP server wraps
 - **Section 14 (CLI Reference)** defines the CLI commands that the MCP tools parallel
-- **Section 15 (Observability)** — the MCP server should emit OTel spans for tool calls if tracing is configured
+- **Section 15 (Observability)** — OTel-native tracing is not MVP; for now the MCP server relies on the global log store and `kitaru.log()` metadata
 - **Section 16 (Framework Adapters)** — the skill teaches correct adapter usage patterns
 - **Section 19 (Implementation Guide)** — the MCP server and skill are additional deliverables to add to the deliverables table

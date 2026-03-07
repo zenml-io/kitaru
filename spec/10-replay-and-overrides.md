@@ -212,7 +212,7 @@ For clarity, the runtime should treat overrides primarily as **durable call outc
 
 Replay should only reuse historical outcomes when the durable call sequence still matches.
 
-If code changes before the replay point alter the sequence of checkpoints or waits, Kitaru should raise a divergence error.
+If code changes before the replay point alter the sequence of checkpoints or waits, the system raises a divergence error.
 
 This prevents silent corruption such as:
 
@@ -220,7 +220,7 @@ This prevents silent corruption such as:
 - applying an old human input to a different wait
 - skipping a newly inserted checkpoint unintentionally
 
-Divergence detection should be treated as a hard rule, not an optional idea.
+Divergence detection is implemented in the ZenML backend — Kitaru exposes the user-visible error and documents the contract. It should be treated as a hard rule, not an optional idea.
 
 ## Replay and code version
 
@@ -268,6 +268,10 @@ So replay should be used carefully with side-effecting checkpoints, and those ch
 - replay must validate durable call sequence compatibility before reusing history
 - retry is not a replay subtype — they are fundamentally different operations
 
+## OSS vs Pro considerations
+
+Local replay with overrides is a core MVP feature available in both OSS and Pro paths. However, richer replay ergonomics (dashboard-triggered replay, released-compute replay workflows) may depend on connected/Pro-backed deployment.
+
 ## MVP notes
 
 For MVP, replay should stay focused on:
@@ -278,3 +282,5 @@ For MVP, replay should stay focused on:
 - deterministic reuse of prior outcomes
 
 The core goal is not a giant replay surface. It is a reliable, inspectable rerun mechanism that developers can actually trust.
+
+Replay implementation wraps ZenML backend behavior — see the `feature/pause-pipeline-runs` branch for related functionality.
