@@ -36,7 +36,7 @@ single Cloudflare Worker.
   features. Every page must describe something a user can actually use today.
 - **ZenML invisibility:** Users should never need to know Kitaru is built on
   ZenML underneath. Never say "orchestrator", "artifact store", or "pipeline"
-  in user-facing docs — use Kitaru terminology (saga, checkpoint, storage).
+  in user-facing docs — use Kitaru terminology (workflow, checkpoint, storage).
 - **Frontmatter required:** Every `.mdx` page needs `title` and `description`.
 
 ## Content Structure

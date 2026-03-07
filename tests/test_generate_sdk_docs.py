@@ -36,7 +36,7 @@ class TestPrivateDetection:
         assert _is_private("__init__") is True
 
     def test_public_name(self) -> None:
-        assert _is_private("saga") is False
+        assert _is_private("workflow") is False
 
 
 class TestFilterModule:
@@ -107,7 +107,7 @@ class TestFilterModule:
             "classes": {},
             "functions": {},
             "attributes": [
-                {"name": "__all__", "value": "['saga']"},
+                {"name": "__all__", "value": "['workflow']"},
                 {"name": "VERSION", "value": "'1.0'"},
             ],
         }

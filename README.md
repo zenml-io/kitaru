@@ -17,7 +17,7 @@ def research(topic: str) -> str:
 def write_draft(notes: str) -> str:
     ...
 
-@kitaru.saga
+@kitaru.workflow
 def content_pipeline(topic: str) -> str:
     notes = research(topic)
     draft = write_draft(notes)

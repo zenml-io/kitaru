@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Kitaru?
 
-Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`saga`, `checkpoint`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
+Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`workflow`, `checkpoint`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
-**ZenML mapping:** `@kitaru.saga` → `@pipeline(dynamic=True)`, `@kitaru.checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
+**ZenML mapping:** `@kitaru.workflow` → `@pipeline(dynamic=True)`, `@kitaru.checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
 
 ## Project layout
 
@@ -117,7 +117,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 | Primitive | Purpose |
 |---|---|
-| `@kitaru.saga` | Outer boundary — marks a durable execution |
+| `@kitaru.workflow` | Outer boundary — marks a durable execution |
 | `@kitaru.checkpoint` | Checkpointed unit of work, with optional `type=` for dashboard visualization |
 | `kitaru.wait()` | Suspend until a webhook event arrives (MVP: webhook only) |
 | `kitaru.log()` | Attach typed metadata to current checkpoint |
@@ -126,10 +126,10 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ### Key design patterns
 
-- **Sagas cannot nest** — no `@kitaru.saga` inside another saga
+- **Workflows cannot nest** — no `@kitaru.workflow` inside another workflow
 - **Checkpoints can nest** — each independently persisted
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive
-- **Replay** works by re-running the saga from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
+- **Replay** works by re-running the workflow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
 - **Artifact overrides** let you swap a checkpoint's cached output during replay
 
 ### Framework adapters (planned)

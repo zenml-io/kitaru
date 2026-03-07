@@ -127,7 +127,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 ## Docs Content Rules
 
 - **Only document shipped features.** No "Coming Soon" sections.
-- **ZenML invisibility:** users should never need to know Kitaru is built on ZenML. Use Kitaru terminology (saga, checkpoint, storage), not ZenML terms (orchestrator, artifact store, pipeline).
+- **ZenML invisibility:** users should never need to know Kitaru is built on ZenML. Use Kitaru terminology (workflow, checkpoint, storage), not ZenML terms (orchestrator, artifact store, pipeline).
 - **Generated content is gitignored:** CLI docs (`cli.mdx` or `cli/`), `changelog.mdx`, and `reference/` are created by generation scripts and must not be hand-edited or committed. SDK reference uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
 - **Frontmatter required:** every `.mdx` page needs `title` and `description`.
 
