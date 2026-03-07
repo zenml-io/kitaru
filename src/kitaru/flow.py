@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from functools import update_wrapper
+from functools import update_wrapper, wraps
 from typing import Any, overload
 
 from zenml.client import Client
@@ -20,6 +20,8 @@ from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
+
+from kitaru.runtime import _flow_scope
 
 ImageSetting = str | DockerSettings | Mapping[str, Any]
 
@@ -42,6 +44,19 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
         yield
     finally:
         client.activate_stack(old_stack_id)
+
+
+def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a flow entrypoint with Kitaru flow runtime scope."""
+
+    flow_name = getattr(func, "__name__", func.__class__.__name__)
+
+    @wraps(func)
+    def _wrapped(*args: Any, **kwargs: Any) -> Any:
+        with _flow_scope(name=flow_name):
+            return func(*args, **kwargs)
+
+    return _wrapped
 
 
 def _normalize_retries(retries: int) -> int:
@@ -163,7 +178,9 @@ def _raise_for_unsuccessful_run(run: PipelineRunResponse) -> None:
         RuntimeError: Always.
     """
     details = [f"Execution {run.id} finished with status '{run.status.value}'."]
-    status_reason = run.get_body().status_reason
+
+    run_body = run.get_body() if hasattr(run, "get_body") else run
+    status_reason = getattr(run_body, "status_reason", None)
     if status_reason:
         details.append(status_reason)
     if run.exception_info and run.exception_info.traceback:
@@ -263,7 +280,8 @@ class _FlowDefinition:
         self._default_image = image
         self._default_cache = cache
         self._default_retries = _normalize_retries(retries)
-        self._pipeline: Pipeline = pipeline(dynamic=True)(func)
+        wrapped_entrypoint = _wrap_flow_entrypoint(func)
+        self._pipeline: Pipeline = pipeline(dynamic=True)(wrapped_entrypoint)
         update_wrapper(self, func)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
