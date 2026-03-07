@@ -64,8 +64,8 @@
         draft <span class="op">=</span> <span class="fn">revise</span>(draft, feedback.notes)
     <span class="kw">return</span> draft
 
-<span class="cmt"># Crash? Pick up where you left off.</span>
-content_agent.<span class="fn">retry</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>)</code></pre>
+<span class="cmt"># Replay with new inputs — completed steps are cached.</span>
+content_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>)</code></pre>
           </div>
           <!-- Framework tab -->
           <div class="code-tab-content" id="tab-framework">
@@ -86,8 +86,8 @@ agent <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span clas
         <span class="fn">merge_pr</span>(pr_id)
     <span class="kw">return</span> result.output
 
-<span class="cmt"># Crash? Pick up where you left off.</span>
-review_pr.<span class="fn">retry</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>)</code></pre>
+<span class="cmt"># Replay with new inputs — completed steps are cached.</span>
+review_pr.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>)</code></pre>
           </div>
         </div>
       </div>
