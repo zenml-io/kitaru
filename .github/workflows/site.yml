@@ -56,7 +56,6 @@ jobs:
       - run: uv run python scripts/generate_sdk_docs.py
       - run: node scripts/convert-sdk-docs.mjs
         working-directory: docs
-
       - run: pnpm run build
         working-directory: docs
 
@@ -71,7 +70,8 @@ jobs:
 
       # --- Deploy unified Worker (production) ---
       - name: Deploy production
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
+          == 'workflow_dispatch'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
