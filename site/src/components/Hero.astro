@@ -43,45 +43,57 @@
             <span class="code-dot"></span>
             <span class="code-dot"></span>
             <div class="code-tabs">
-              <button class="code-tab active" data-tab="plain">Plain Python</button>
-              <button class="code-tab" data-tab="framework">With a framework</button>
+              <button class="code-tab active" data-tab="hitl">Human-in-the-loop</button>
+              <button class="code-tab" data-tab="replay">Replay</button>
             </div>
           </div>
-          <!-- Plain Python tab -->
-          <div class="code-tab-content active" id="tab-plain">
-            <pre class="code-pre"><code><span class="cmt"># No framework needed — just primitives</span>
-<span class="kw">import</span> kitaru
+          <!-- Human-in-the-loop tab -->
+          <div class="code-tab-content active" id="tab-hitl">
+            <pre class="code-pre"><code><span class="kw">import</span> kitaru
 
 <span class="dec">@kitaru.checkpoint</span>
-<span class="kw">def</span> <span class="fn">analyze</span>(code: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
-    client <span class="op">=</span> openai.OpenAI()
-    <span class="kw">return</span> client.chat.completions.<span class="fn">create</span>(
-        model<span class="op">=</span><span class="str">'gpt-4o'</span>,
-        messages<span class="op">=</span>[{'{'}<span class="str">'role'</span>: <span class="str">'user'</span>, <span class="str">'content'</span>: code{'}'}],
-    ).choices[<span class="num">0</span>].message.content
+<span class="kw">def</span> <span class="fn">research</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>: ...
+
+<span class="dec">@kitaru.checkpoint</span>
+<span class="kw">def</span> <span class="fn">write_draft</span>(notes: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>: ...
 
 <span class="dec">@kitaru.flow</span>
-<span class="kw">def</span> <span class="fn">review</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
-    diff <span class="op">=</span> <span class="fn">fetch_pr</span>(pr_id)
-    result <span class="op">=</span> <span class="fn">analyze</span>(diff)
-    kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Approve?'</span>)
-    <span class="kw">return</span> result</code></pre>
+<span class="kw">def</span> <span class="fn">content_agent</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    notes <span class="op">=</span> <span class="fn">research</span>(topic)
+    draft <span class="op">=</span> <span class="fn">write_draft</span>(notes)
+
+    <span class="cmt"># Pauses here. Resumes when a human responds.</span>
+    feedback <span class="op">=</span> kitaru.<span class="fn">wait</span>(
+        schema<span class="op">=</span><span class="var">EditFeedback</span>,
+        prompt<span class="op">=</span><span class="str">"Review this draft"</span>,
+    )
+
+    <span class="kw">if not</span> feedback.approved:
+        draft <span class="op">=</span> <span class="fn">revise</span>(draft, feedback.notes)
+
+    <span class="kw">return</span> draft</code></pre>
           </div>
-          <!-- Framework tab -->
-          <div class="code-tab-content" id="tab-framework">
-            <pre class="code-pre"><code><span class="cmt"># Wrap any agent framework</span>
-<span class="kw">import</span> kitaru
-<span class="kw">from</span> kitaru.adapters <span class="kw">import</span> pydantic_ai <span class="kw">as</span> kp
-<span class="kw">from</span> pydantic_ai <span class="kw">import</span> Agent
+          <!-- Replay tab -->
+          <div class="code-tab-content" id="tab-replay">
+            <pre class="code-pre"><code><span class="cmt"># Replay a past run — cached steps aren't re-executed</span>
+content_agent.<span class="fn">replay</span>(
+    exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>,
+    from_<span class="op">=</span><span class="str">"write_draft"</span>,  <span class="cmt"># re-run from here</span>
+)
 
-<span class="var">agent</span> <span class="op">=</span> Agent(<span class="str">'openai:gpt-4o'</span>, tools<span class="op">=</span>[search, read])
-<span class="var">durable</span> <span class="op">=</span> kp.<span class="fn">wrap</span>(agent)
+<span class="cmt"># Or override specific values</span>
+content_agent.<span class="fn">replay</span>(
+    exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>,
+    from_<span class="op">=</span><span class="str">"write_draft"</span>,
+    overrides<span class="op">=</span>{
+        <span class="str">"checkpoint.research"</span>: <span class="str">"Updated notes..."</span>,
+        <span class="str">"wait.review_draft"</span>: EditFeedback(approved<span class="op">=</span><span class="var">True</span>),
+    },
+)
 
-<span class="dec">@kitaru.flow</span>
-<span class="kw">def</span> <span class="fn">review_pr</span>(pr_id: <span class="var">int</span>) <span class="op">-></span> <span class="var">str</span>:
-    result <span class="op">=</span> durable.<span class="fn">run_sync</span>(<span class="str">f"Review PR #{'{'}pr_id{'}'}"</span>)
-    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, prompt<span class="op">=</span><span class="str">'Ship it?'</span>)
-    <span class="kw">return</span> result.output</code></pre>
+<span class="cmt"># Crash? Process killed? Just retry.</span>
+<span class="cmt"># Completed checkpoints replay from cache.</span>
+content_agent.<span class="fn">retry</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>)</code></pre>
           </div>
         </div>
       </div>
@@ -299,11 +311,12 @@
 </style>
 
 <script>
-  // Tab switching
-  document.querySelectorAll('.code-tab').forEach(tab => {
+  // Tab switching — scoped to hero code window
+  const heroWindow = document.querySelector('.hero-code-window');
+  heroWindow?.querySelectorAll('.code-tab').forEach(tab => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
+      heroWindow.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+      heroWindow.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
       tab.classList.add('active');
       const target = tab.getAttribute('data-tab');
       document.getElementById(`tab-${target}`)?.classList.add('active');
