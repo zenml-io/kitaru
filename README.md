@@ -32,7 +32,7 @@ def my_agent(url: str) -> str:
 # Run synchronously — blocks until complete, returns the result
 result = my_agent("https://example.com")
 
-# Or start asynchronously and get a handle
+# Or start without blocking and get a handle
 handle = my_agent.start("https://example.com")
 print(handle.exec_id)       # execution identifier
 print(handle.status)         # current status
