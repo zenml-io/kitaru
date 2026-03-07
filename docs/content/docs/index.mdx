@@ -18,8 +18,8 @@ instead of starting over.
 <Callout type="info">
   Kitaru is in early development. Core SDK primitives are now available
   (`@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`,
-  `kitaru.load()`), plus stack selection helpers (`list_stacks`,
-  `current_stack`, `use_stack`).
+  `kitaru.load()`, `kitaru.configure()`), plus stack selection helpers
+  (`list_stacks`, `current_stack`, `use_stack`).
 </Callout>
 
 ## Current Status
@@ -30,6 +30,7 @@ Kitaru **0.1.0** includes:
 - Structured metadata logging with `kitaru.log()`
 - Artifact persistence + cross-execution reads with `kitaru.save()` / `kitaru.load()`
 - CLI connection commands (`login`, `logout`, `status`, `info`)
+- Runtime configuration defaults via `kitaru.configure(...)`
 - Stack selection commands (`stack list/current/use`)
 - Global runtime log-store commands (`log-store set/show/reset`)
 - Project infrastructure (CI, testing, linting, type checking)
@@ -53,6 +54,11 @@ Additional SDK primitives and framework adapters are under active development.
     title="CLI Reference"
     description="Available commands and options"
     href="/cli"
+  />
+  <Card
+    title="Configuration"
+    description="Set runtime defaults and understand override precedence"
+    href="/getting-started/configuration"
   />
   <Card
     title="Artifacts"

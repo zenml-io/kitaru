@@ -20,6 +20,20 @@ from zenml.constants import (
     ENV_ZENML_STORE_PREFIX,
 )
 
+from kitaru.config import (
+    KITARU_AUTH_TOKEN_ENV,
+    KITARU_CACHE_ENV,
+    KITARU_IMAGE_ENV,
+    KITARU_LOG_STORE_API_KEY_ENV,
+    KITARU_LOG_STORE_BACKEND_ENV,
+    KITARU_LOG_STORE_ENDPOINT_ENV,
+    KITARU_PROJECT_ENV,
+    KITARU_RETRIES_ENV,
+    KITARU_SERVER_URL_ENV,
+    KITARU_STACK_ENV,
+    _reset_runtime_configuration,
+)
+
 
 @pytest.fixture(autouse=True)
 def isolated_zenml_global_config(
@@ -44,6 +58,22 @@ def isolated_zenml_global_config(
         if env_name.startswith(ENV_ZENML_STORE_PREFIX):
             monkeypatch.delenv(env_name, raising=False)
 
+    for env_name in (
+        KITARU_LOG_STORE_BACKEND_ENV,
+        KITARU_LOG_STORE_ENDPOINT_ENV,
+        KITARU_LOG_STORE_API_KEY_ENV,
+        KITARU_STACK_ENV,
+        KITARU_CACHE_ENV,
+        KITARU_RETRIES_ENV,
+        KITARU_IMAGE_ENV,
+        KITARU_SERVER_URL_ENV,
+        KITARU_AUTH_TOKEN_ENV,
+        KITARU_PROJECT_ENV,
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    _reset_runtime_configuration()
+
     # xdist workers lack __main__.__file__, which ZenML needs for source root
     main = sys.modules.get("__main__")
     if main is not None and not getattr(main, "__file__", None):
@@ -58,3 +88,4 @@ def isolated_zenml_global_config(
 
     Client._reset_instance()
     GlobalConfiguration._reset_instance()
+    _reset_runtime_configuration()

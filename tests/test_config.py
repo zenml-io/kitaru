@@ -8,15 +8,34 @@ from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 import pytest
+from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
 from zenml.utils import yaml_utils
 
 from kitaru.config import (
+    FROZEN_EXECUTION_SPEC_METADATA_KEY,
+    KITARU_CACHE_ENV,
+    KITARU_IMAGE_ENV,
     KITARU_LOG_STORE_BACKEND_ENV,
     KITARU_LOG_STORE_ENDPOINT_ENV,
+    KITARU_PROJECT_ENV,
+    KITARU_RETRIES_ENV,
+    KITARU_SERVER_URL_ENV,
+    KITARU_STACK_ENV,
+    FrozenExecutionSpec,
+    ImageSettings,
+    KitaruConfig,
+    ResolvedConnectionConfig,
+    ResolvedExecutionConfig,
+    build_frozen_execution_spec,
+    configure,
     current_stack,
+    image_settings_to_docker_settings,
     list_stacks,
+    persist_frozen_execution_spec,
     reset_global_log_store,
+    resolve_connection_config,
+    resolve_execution_config,
     resolve_log_store,
     set_global_log_store,
     use_stack,
@@ -262,3 +281,225 @@ def test_use_stack_rejects_empty_selector() -> None:
     """use_stack should fail fast on empty stack names/IDs."""
     with pytest.raises(ValueError, match="cannot be empty"):
         use_stack("   ")
+
+
+def test_configure_sets_runtime_execution_defaults() -> None:
+    """configure should update process-local execution defaults."""
+    snapshot = configure(
+        stack="gpu-prod",
+        cache=False,
+        retries=2,
+        image={
+            "base_image": "python:3.12-slim",
+            "environment": {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
+        },
+    )
+
+    assert snapshot.stack == "gpu-prod"
+    assert snapshot.cache is False
+    assert snapshot.retries == 2
+    assert snapshot.image is not None
+    assert snapshot.image.base_image == "python:3.12-slim"
+    assert snapshot.image.environment == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
+
+
+def test_configure_can_clear_runtime_override_fields() -> None:
+    """configure should allow clearing previously set runtime overrides."""
+    configure(stack="gpu-prod", cache=False, retries=2)
+
+    snapshot = configure(stack=None, cache=None, retries=None, image=None)
+
+    assert snapshot.stack is None
+    assert snapshot.cache is None
+    assert snapshot.retries is None
+    assert snapshot.image is None
+
+
+def test_resolve_execution_config_applies_phase10_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execution config resolution should follow the Phase 10 precedence chain."""
+    pyproject_path = tmp_path / "pyproject.toml"
+    pyproject_path.write_text(
+        """
+[tool.kitaru]
+stack = "project-stack"
+cache = false
+retries = 1
+
+[tool.kitaru.image]
+base_image = "python:3.12"
+
+[tool.kitaru.image.environment]
+FROM_PROJECT = "1"
+SHARED = "project"
+""".strip()
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(KITARU_STACK_ENV, "env-stack")
+    monkeypatch.setenv(KITARU_CACHE_ENV, "true")
+    monkeypatch.setenv(KITARU_RETRIES_ENV, "3")
+    monkeypatch.setenv(
+        KITARU_IMAGE_ENV,
+        (
+            '{"base_image": "python:3.13", '
+            '"environment": {"FROM_ENV": "1", "SHARED": "env"}}'
+        ),
+    )
+    configure(
+        stack="runtime-stack",
+        cache=False,
+        retries=4,
+        image={"environment": {"FROM_RUNTIME": "1", "SHARED": "runtime"}},
+    )
+
+    with patch(
+        "kitaru.config.current_stack",
+        return_value=SimpleNamespace(name="global-stack"),
+    ):
+        resolved = resolve_execution_config(
+            decorator_overrides=KitaruConfig(
+                cache=True,
+                retries=5,
+                image=ImageSettings(
+                    environment={"FROM_DECORATOR": "1", "SHARED": "decorator"}
+                ),
+            ),
+            invocation_overrides=KitaruConfig(
+                stack="invocation-stack",
+                retries=6,
+                image=ImageSettings(
+                    environment={"FROM_INVOCATION": "1", "SHARED": "invocation"}
+                ),
+            ),
+            start_dir=tmp_path,
+        )
+
+    assert resolved.stack == "invocation-stack"
+    assert resolved.cache is True
+    assert resolved.retries == 6
+    assert resolved.image is not None
+    assert resolved.image.base_image == "python:3.13"
+    assert resolved.image.environment == {
+        "FROM_PROJECT": "1",
+        "SHARED": "invocation",
+        "FROM_ENV": "1",
+        "FROM_RUNTIME": "1",
+        "FROM_DECORATOR": "1",
+        "FROM_INVOCATION": "1",
+    }
+
+
+def test_resolve_execution_config_rejects_invalid_cache_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid cache env values should raise clear parse errors."""
+    monkeypatch.setenv(KITARU_CACHE_ENV, "not-a-bool")
+
+    with pytest.raises(ValueError, match=KITARU_CACHE_ENV):
+        resolve_execution_config()
+
+
+def test_resolve_execution_config_supports_string_image_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KITARU_IMAGE should accept plain image strings for compatibility."""
+    monkeypatch.setenv(KITARU_IMAGE_ENV, "python:3.12-slim")
+
+    with patch(
+        "kitaru.config.current_stack",
+        return_value=SimpleNamespace(name="global-stack"),
+    ):
+        resolved = resolve_execution_config()
+
+    assert resolved.image is not None
+    assert resolved.image.base_image == "python:3.12-slim"
+
+
+def test_image_settings_can_be_converted_to_docker_settings() -> None:
+    """Resolved image settings should map cleanly to ZenML Docker settings."""
+    image_settings = ImageSettings(
+        base_image="python:3.12",
+        requirements=["httpx"],
+        dockerfile="Dockerfile",
+        environment={"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
+    )
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert isinstance(docker_settings, DockerSettings)
+    assert docker_settings is not None
+    assert docker_settings.parent_image == "python:3.12"
+    assert docker_settings.requirements == ["httpx"]
+    assert docker_settings.dockerfile == "Dockerfile"
+    assert docker_settings.environment == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
+
+
+def test_connection_resolution_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Connection config should resolve as explicit > env > global."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://env.example.com")
+    monkeypatch.setenv(KITARU_PROJECT_ENV, "env-project")
+
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(
+            server_url="https://global.example.com",
+            auth_token="global-token",
+            project="global-project",
+        ),
+    ):
+        resolved = resolve_connection_config(
+            explicit=KitaruConfig(project="explicit-project"),
+        )
+
+    assert isinstance(resolved, ResolvedConnectionConfig)
+    assert resolved.server_url == "https://env.example.com"
+    assert resolved.project == "explicit-project"
+    assert resolved.auth_token == "global-token"
+
+
+def test_build_and_persist_frozen_execution_spec() -> None:
+    """Frozen execution specs should be serializable and persisted as metadata."""
+    frozen_execution_spec = build_frozen_execution_spec(
+        resolved_execution=ResolvedExecutionConfig(
+            stack="prod",
+            cache=False,
+            retries=2,
+            image=ImageSettings(
+                base_image="python:3.12",
+                environment={"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
+            ),
+        ),
+        flow_defaults=KitaruConfig(cache=False),
+        connection=ResolvedConnectionConfig(
+            server_url="https://server.example.com",
+            project="demo",
+        ),
+    )
+
+    assert isinstance(frozen_execution_spec, FrozenExecutionSpec)
+    assert (
+        frozen_execution_spec.resolved_execution.image is not None
+        and frozen_execution_spec.resolved_execution.image.environment
+        == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
+    )
+
+    with patch("kitaru.config.Client") as client_cls:
+        persist_frozen_execution_spec(
+            run_id="00000000-0000-0000-0000-000000000123",
+            frozen_execution_spec=frozen_execution_spec,
+        )
+
+    create_metadata = client_cls.return_value.create_run_metadata
+    create_metadata.assert_called_once()
+    metadata_payload = create_metadata.call_args.kwargs["metadata"]
+    assert FROZEN_EXECUTION_SPEC_METADATA_KEY in metadata_payload
+    assert (
+        metadata_payload[FROZEN_EXECUTION_SPEC_METADATA_KEY]["resolved_execution"][
+            "stack"
+        ]
+        == "prod"
+    )

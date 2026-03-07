@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import sys
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
@@ -23,9 +23,19 @@ from zenml.models import PipelineRunResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
+from kitaru.config import (
+    ImageInput,
+    ImageSettings,
+    KitaruConfig,
+    build_frozen_execution_spec,
+    image_settings_to_docker_settings,
+    persist_frozen_execution_spec,
+    resolve_connection_config,
+    resolve_execution_config,
+)
 from kitaru.runtime import _flow_scope
 
-ImageSetting = str | DockerSettings | Mapping[str, Any]
+ImageSetting = ImageInput
 
 
 @contextmanager
@@ -35,7 +45,9 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
     Args:
         stack_name_or_id: Optional stack name or ID.
     """
-    if not stack_name_or_id:
+    if not stack_name_or_id or stack_name_or_id == "local":
+        # "local" is Kitaru's implicit built-in default mode.
+        # We don't force-activate a named stack for it.
         yield
         return
 
@@ -133,25 +145,9 @@ def _to_retry_config(retries: int) -> StepRetryConfig | None:
     return StepRetryConfig(max_retries=retries)
 
 
-def _normalize_image(image: ImageSetting | None) -> DockerSettings | None:
-    """Normalize image input into ZenML Docker settings.
-
-    Args:
-        image: Optional image configuration.
-
-    Returns:
-        Docker settings for ZenML, or `None`.
-    """
-    if image is None:
-        return None
-    if isinstance(image, DockerSettings):
-        return image
-    if isinstance(image, str):
-        return DockerSettings(parent_image=image)
-    return DockerSettings.model_validate(image)
-
-
-def _build_settings(image: ImageSetting | None) -> dict[str, DockerSettings] | None:
+def _build_settings(
+    image: ImageSettings | None,
+) -> dict[str, DockerSettings] | None:
     """Build ZenML settings payload for flow execution.
 
     Args:
@@ -160,10 +156,30 @@ def _build_settings(image: ImageSetting | None) -> dict[str, DockerSettings] | N
     Returns:
         Pipeline settings dictionary or `None`.
     """
-    docker_settings = _normalize_image(image)
+    docker_settings = image_settings_to_docker_settings(image)
     if docker_settings is None:
         return None
     return {DOCKER_SETTINGS_KEY: docker_settings}
+
+
+def _build_execution_overrides(
+    *,
+    stack: str | None = None,
+    image: ImageSetting | None = None,
+    cache: bool | None = None,
+    retries: int | None = None,
+) -> KitaruConfig:
+    """Build a partial execution config from flow/deploy/start overrides."""
+    values: dict[str, Any] = {}
+    if stack is not None:
+        values["stack"] = stack
+    if image is not None:
+        values["image"] = image
+    if cache is not None:
+        values["cache"] = cache
+    if retries is not None:
+        values["retries"] = retries
+    return KitaruConfig.model_validate(values)
 
 
 def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
@@ -363,8 +379,8 @@ class _FlowDefinition:
         *,
         stack: str | None,
         image: ImageSetting | None,
-        cache: bool,
-        retries: int,
+        cache: bool | None,
+        retries: int | None,
     ) -> None:
         """Initialize a Kitaru flow wrapper.
 
@@ -376,10 +392,12 @@ class _FlowDefinition:
             retries: Default retry count.
         """
         self._func = func
-        self._default_stack = stack
-        self._default_image = image
-        self._default_cache = cache
-        self._default_retries = _normalize_retries(retries)
+        self._decorator_config = _build_execution_overrides(
+            stack=stack,
+            image=image,
+            cache=cache,
+            retries=retries,
+        )
 
         wrapped_entrypoint = _wrap_flow_entrypoint(func)
         source_alias = _pipeline_source_alias_name(func)
@@ -400,10 +418,7 @@ class _FlowDefinition:
         handle = self._submit(
             args=args,
             kwargs=kwargs,
-            stack=self._default_stack,
-            image=self._default_image,
-            cache=self._default_cache,
-            retries=self._default_retries,
+            invocation_overrides=KitaruConfig(),
         )
         return handle.wait()
 
@@ -429,18 +444,15 @@ class _FlowDefinition:
         Returns:
             A handle for the started execution.
         """
-        resolved_stack = stack if stack is not None else self._default_stack
-        resolved_image = image if image is not None else self._default_image
-        resolved_cache = cache if cache is not None else self._default_cache
-        resolved_retries = retries if retries is not None else self._default_retries
-
         return self._submit(
             args=args,
             kwargs=kwargs,
-            stack=resolved_stack,
-            image=resolved_image,
-            cache=resolved_cache,
-            retries=resolved_retries,
+            invocation_overrides=_build_execution_overrides(
+                stack=stack,
+                image=image,
+                cache=cache,
+                retries=retries,
+            ),
         )
 
     def _submit(
@@ -448,37 +460,43 @@ class _FlowDefinition:
         *,
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
-        stack: str | None,
-        image: ImageSetting | None,
-        cache: bool,
-        retries: int,
+        invocation_overrides: KitaruConfig,
     ) -> FlowHandle:
         """Submit an execution using resolved runtime settings.
 
         Args:
             args: Flow input args.
             kwargs: Flow input kwargs.
-            stack: Resolved stack.
-            image: Resolved image settings.
-            cache: Resolved cache behavior.
-            retries: Resolved retry count.
+            invocation_overrides: Invocation-time execution overrides.
 
         Returns:
             A handle for the started execution.
         """
-        resolved_retries = _normalize_retries(retries)
+        resolved_execution = resolve_execution_config(
+            decorator_overrides=self._decorator_config,
+            invocation_overrides=invocation_overrides,
+        )
+        frozen_execution_spec = build_frozen_execution_spec(
+            resolved_execution=resolved_execution,
+            flow_defaults=self._decorator_config,
+            connection=resolve_connection_config(),
+        )
         configured_pipeline = self._pipeline.with_options(
-            enable_cache=cache,
-            retry=_to_retry_config(resolved_retries),
-            settings=_build_settings(image),
+            enable_cache=resolved_execution.cache,
+            retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
+            settings=_build_settings(resolved_execution.image),
         )
 
-        with _temporary_active_stack(stack):
+        with _temporary_active_stack(resolved_execution.stack):
             run = configured_pipeline(*args, **kwargs)
 
         if run is None:
             raise RuntimeError("Flow execution did not produce a pipeline run.")
 
+        persist_frozen_execution_spec(
+            run_id=run.id,
+            frozen_execution_spec=frozen_execution_spec,
+        )
         return FlowHandle(run)
 
     def deploy(
@@ -524,8 +542,8 @@ def flow(
     *,
     stack: str | None = None,
     image: ImageSetting | None = None,
-    cache: bool = True,
-    retries: int = 0,
+    cache: bool | None = None,
+    retries: int | None = None,
 ) -> Callable[[Callable[..., Any]], _FlowDefinition]: ...
 
 
@@ -534,8 +552,8 @@ def flow(
     *,
     stack: str | None = None,
     image: ImageSetting | None = None,
-    cache: bool = True,
-    retries: int = 0,
+    cache: bool | None = None,
+    retries: int | None = None,
 ) -> _FlowDefinition | Callable[[Callable[..., Any]], _FlowDefinition]:
     """Mark a function as a durable flow.
 
@@ -553,8 +571,10 @@ def flow(
         func: Optional function for bare decorator use.
         stack: Default execution stack.
         image: Default image settings.
-        cache: Whether checkpoint caching is enabled.
-        retries: Number of automatic retries for flow steps.
+        cache: Optional cache override (when omitted, lower-precedence config
+            sources apply and eventually default to ``True``).
+        retries: Optional retry override (when omitted, lower-precedence config
+            sources apply and eventually default to ``0``).
 
     Returns:
         The wrapped flow object or a decorator that returns it.

@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Global log-store configuration with `kitaru log-store set/show/reset`
 - Active stack selection in SDK via `kitaru.list_stacks()`, `kitaru.current_stack()`, and `kitaru.use_stack()`
 - Active stack CLI commands: `kitaru stack list/current/use`
+- Runtime configuration API: `kitaru.configure(...)`
+- Unified config models: `kitaru.KitaruConfig` and `kitaru.ImageSettings`
+- Execution config precedence resolution across invocation/decorator/runtime/env/project/global/default layers
+- Frozen execution spec persistence on each flow run (`kitaru_execution_spec` metadata)
+- Phase 10 example workflow: `examples/flow_with_configuration.py`
+- Getting Started configuration docs page (`/getting-started/configuration`)
 - Persisted Kitaru user config (`kitaru.yaml`) for log-store override state
 - Environment override support for runtime log-store resolution
 
