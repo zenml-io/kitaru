@@ -353,12 +353,19 @@ When these arrive, the syntax might expand with a `source=` or `event=` paramete
 
 Wait, pause, resume, and replay are all implemented by wrapping ZenML SDK and backend behavior. The implementation should look at the ZenML SDK and defer to / wrap its logic rather than reimplementing these capabilities from scratch. See the ZenML branch `feature/pause-pipeline-runs` for the existing wait/resume implementation.
 
+**Branch status (March 2026):** `zenml.wait(...)` works and pauses in-progress runs. Resume works but differs by deployment:
+- On Pro servers with snapshot execution, the run **auto-resumes** when input is provided
+- On non-Pro servers or local orchestrators, the user must **manually resume** via a ZenML CLI command that already exists on the branch
+- Wait resolution is currently **human input only**
+
 ## OSS vs Pro considerations
 
 The full connected wait/resume experience — dashboard-triggered resume after compute is released — depends on Pro-backed server capabilities.
 
-- **OSS:** Local/manual resume via CLI or Python client. Less polished, but functional.
-- **Pro:** Dashboard-triggered resume, released-compute workflows, snapshot execution for seamless continuation.
+- **OSS / non-Pro / local orchestrator:** Resume is **manual**. After wait input is provided, the user must explicitly trigger a resume (e.g. via `kitaru executions resume` or the underlying ZenML CLI command). The run does not auto-continue.
+- **Pro (remote orchestrator on snapshot-capable servers):** Resume is **automatic**. Once the wait condition is resolved (input provided), the run automatically resumes without user intervention.
+
+As of March 2026, wait condition resolution is **human input only** — there are no webhook or automated triggers yet. Both resume paths (auto and manual) work on the `feature/pause-pipeline-runs` branch.
 
 ## Notes for MVP
 

@@ -199,3 +199,5 @@ For March, the essential error-handling contract is:
 - make replay preserve control-flow-relevant failures
 - keep wait validation explicit
 - keep wait timeout as resource retention only
+
+**Retry status (March 2026):** A ZenML CLI command to retry failed runs exists on the `feature/pause-pipeline-runs` branch, but **does not work yet**. Kitaru should stub `client.executions.retry(...)` until the upstream fix lands. Do not attempt to reimplement retry independently.
