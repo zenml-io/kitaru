@@ -196,8 +196,8 @@ prev = client.executions.latest(flow="content_pipeline", status="completed")
 replayed = client.executions.replay(
     prev.exec_id,
     from_="write_draft",
+    topic="AI observability",
     overrides={
-        "flow.input.topic": "AI observability",
         "checkpoint.research": "Edited research notes from local debugging",
     },
 )

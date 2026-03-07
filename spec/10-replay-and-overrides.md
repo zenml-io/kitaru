@@ -185,11 +185,12 @@ Conceptually, a replay creates a new execution with:
 Example conceptually:
 
 ```python
+# Flow inputs are passed directly as keyword arguments
 my_flow.replay(
     exec_id="kr-a8f3c2",
+    topic="New topic",
     from_="write_draft",
     overrides={
-        "flow.input.topic": "New topic",
         "checkpoint.research": "Edited research notes",
         "wait.approve": False,
     },
