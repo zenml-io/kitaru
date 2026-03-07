@@ -29,3 +29,9 @@ handle = my_agent.start("Build a CLI tool") -> this is subsumed by execute? or r
 
 - Make the step names look a bit nicer or have some sort of metadata in the step metadata which we can extract and use on the kitaru UI?
 - Swallow or have our own terminal logging for when we run a flow?
+
+## Projects must go?
+
+- to be discussed, but we'll need to think through projects for the `kitaru login` command. Basically it seems that we shouldn't be exposing the project concept to the user directly and we should just pick whatever project is the default project.
+- note that for testing internally (esp for MVP stage) we might want to have some kind of ENV var that allows us to set the project somehow since we might need that functionality...
+- (but for the kitaru UI (which is being built by a separate team), I think we won't expose the project concept to the user directly either)
