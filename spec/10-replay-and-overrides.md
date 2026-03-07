@@ -126,6 +126,20 @@ Semantically:
 - execute `write_draft` live
 - execute everything after it live unless otherwise specified
 
+### Replay with new flow inputs
+
+Flow inputs can be passed directly as keyword arguments. This is the most common replay pattern — re-run with different inputs while reusing cached checkpoint outcomes.
+
+```python
+# Replay the same execution with a different topic
+content_pipeline.replay(exec_id="kr-a8f3c2", topic="New topic")
+
+# Replay a coding agent with a different issue
+coding_agent.replay(exec_id="kr-b7e4d1", issue="Fix login bug")
+```
+
+When flow inputs are provided, they replace the original execution's inputs. Checkpoints before the replay point still return cached outcomes (unless explicitly overridden).
+
 ### Replay from a wait with new input
 
 ```python
