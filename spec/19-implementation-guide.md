@@ -78,10 +78,11 @@ The recommended build order reflects two key principles:
 
 ### Phase 2: Core primitives (no ZenML branch dependency)
 
-5. **`kitaru.llm()`** — thin convenience wrapper for LLM calls with tracking. Uses LiteLLM as the backend engine with a local model registry for aliases and credentials (no ZenML stack component dependency).
-6. **`kitaru.log()`** — structured metadata attachment.
-7. **`kitaru.save()` / `kitaru.load()`** — explicit named artifacts.
-8. **`kitaru.configure()`** — project-level runtime defaults (narrow scope).
+5. **Secrets surface** — `kitaru secrets set/show/list/delete` wrapping ZenML's centralized secret store. Private by default. This unblocks remote credential resolution for `kitaru.llm()`.
+6. **`kitaru.llm()`** — thin convenience wrapper for LLM calls with tracking. Uses LiteLLM as the backend engine with a local model registry for aliases. Credentials resolve from env vars or ZenML secrets referenced by aliases.
+7. **`kitaru.log()`** — structured metadata attachment.
+8. **`kitaru.save()` / `kitaru.load()`** — explicit named artifacts.
+9. **`kitaru.configure()`** — project-level runtime defaults (narrow scope).
 
 ### Phase 3: Wait/resume/replay (requires ZenML branch)
 

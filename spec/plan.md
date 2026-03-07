@@ -215,7 +215,7 @@ with Kitaru semantics.
 - Users can optionally switch the log backend to an OTel-compatible provider
   via `kitaru log-store set`
 - CLI commands:
-  - `kitaru log-store set <backend> --endpoint <url> --api-key {{ SECRET }}`
+  - `kitaru log-store set <backend> --endpoint <url> --api-key {{secret_name.api_key}}`
   - `kitaru log-store show`
   - `kitaru log-store reset`
 - This is a global setting — it switches the default log backend for all flows
@@ -303,7 +303,7 @@ selection, stack selection precedence), [14-cli-reference.md] (stack CLI tier)
   4. None (local-only mode)
 - Frozen execution spec: snapshot resolved config at flow start time and persist
   with the execution (so config can't drift while an execution is waiting)
-- Secrets: reference using ZenML syntax `{{ SECRET_NAME }}` — resolution handled by ZenML
+- Secrets: reference using ZenML syntax `{{secret_name.secret_key}}` — resolution handled by ZenML
 - **Note:** Rich project-level config and `kitaru config show` are Tier 3 / later.
   The MVP config surface is global user config + decorator/invocation overrides.
 
@@ -352,9 +352,32 @@ matters — build the most-needed operations first, not the easiest.
 
 ---
 
+## Phase 11.5: Secrets surface
+
+**Goal:** Wrap ZenML's centralized secret store with a Kitaru-shaped CLI surface. This unblocks remote credential resolution for `kitaru.llm()`.
+
+**What to do:**
+- Implement `kitaru secrets set <name> --KEY=value ...` — creates or updates a ZenML secret
+- Implement `kitaru secrets show <name>` — display secret metadata (and optionally values)
+- Implement `kitaru secrets list` — list all accessible secrets
+- Implement `kitaru secrets delete <name>` — delete a secret
+- Secrets are **private by default** (only the creating user can access)
+- Under the hood, wrap ZenML's `Client().create_secret()` / `get_secret()` /
+  `update_secret()` / `list_secrets()` / `delete_secret()`
+- Secret keys should use actual env var names (e.g. `OPENAI_API_KEY`) so that
+  ZenML's env injection and LiteLLM's env var reading work seamlessly
+- No new server functionality needed — the Kitaru server is the ZenML server
+
+**Spec references:** [04-connection-stacks-and-configuration.md] (secrets model),
+[14-cli-reference.md] (secrets CLI)
+
+**Estimated size:** Small-medium. Thin wrapper over existing ZenML secret CRUD.
+
+---
+
 ## Phase 12: `kitaru.llm()`
 
-**Goal:** Tracked LLM calls using LiteLLM as the backend engine, with a local model registry for aliases and credentials.
+**Goal:** Tracked LLM calls using LiteLLM as the backend engine, with a local model registry for aliases and ZenML secrets for remote credentials.
 
 **What to do:**
 - Implement `kitaru.llm(prompt, model=None, system=None, temperature=None, max_tokens=None, name=None)`
@@ -367,10 +390,14 @@ matters — build the most-needed operations first, not the easiest.
 - Model resolution: alias handling (`fast`, `smart`) via local model registry, or
   concrete LiteLLM identifiers (`openai/gpt-4o`, `anthropic/claude-sonnet-4-20250514`)
 - Implement local model registry:
-  - CLI: `kitaru model register <alias> --model <litellm_model_id>`
+  - CLI: `kitaru model register <alias> --model <litellm_model_id> [--secret <secret_name>]`
   - CLI: `kitaru model list`
   - Storage: local user config (e.g. `~/.config/kitaru/models.json`)
-  - Aliases and optional credential config, independent of stacks
+  - Aliases with optional ZenML secret references, independent of stacks
+- Credential resolution order:
+  1. Process env vars already set → use them (LiteLLM reads natively)
+  2. Alias has a `secret` field → fetch ZenML secret, inject as env vars, call LiteLLM
+  3. No credentials found → fail with clear error
 - Zero-config path: provider env vars (`OPENAI_API_KEY`, etc.) work without
   registration because LiteLLM reads them natively
 - Always record the resolved concrete model as metadata for provenance
@@ -378,12 +405,11 @@ matters — build the most-needed operations first, not the easiest.
 **Spec references:** [08-kitaru-llm.md] (full contract),
 [14-cli-reference.md] (model registration CLI)
 
-**Note:** This phase has no upstream ZenML dependency. LiteLLM + local registry
-is the MVP implementation. A future ZenML `llm_model` stack component may later
-become an additional credential-resolution backend, but it is not needed for this phase.
+**Note:** This phase depends on Phase 11.5 (secrets surface) for the remote
+credential path. LiteLLM + local registry + ZenML secrets is the full implementation.
 
 **Estimated size:** Medium. The LiteLLM wrapping is straightforward; the local
-registry and alias resolution are the main work.
+registry, alias resolution, and credential fetching are the main work.
 
 ---
 
@@ -629,8 +655,9 @@ Phase 7b -- Global log store ------------------------------------------ DONE
 Phase 8  -- kitaru.save() / kitaru.load() ----------------------------- DONE
 Phase 9  -- Stack selection ------------------------------------------- DONE
 Phase 10 -- Configuration --------------------------------------------- DONE
-Phase 11 -- KitaruClient (execution mgmt first) ---------------------- Medium
-Phase 12 -- kitaru.llm() (LiteLLM + local registry) ------------------- Medium
+Phase 11  -- KitaruClient (execution mgmt first) ---------------------- Medium
+Phase 11.5-- Secrets surface (wraps ZenML secrets) -------------------- Small-Medium
+Phase 12 -- kitaru.llm() (LiteLLM + registry + secrets) --------------- Medium
 Phase 13 -- Error handling --------------------------------------------- Medium
 Phase 14 -- CLI commands (tiered) ------------------------------------- Medium
 Phase 15 -- kitaru.wait() + resume ------------------------------------ BLOCKED (ZenML branch)
@@ -648,7 +675,7 @@ Phase 20 -- Examples, docs, polish ------------------------------------ Final
 | "It runs" | 5 | A flow with checkpoints executes and returns a result |
 | "It's useful" | 8 | Metadata, artifacts, log store, and structured logging work |
 | "It's connected" | 11 | Client can manage and inspect executions programmatically |
-| "It's smart" | 12 | LLM calls are tracked with cost/token metadata |
+| "It's smart" | 12 | Secrets + LLM calls are tracked with cost/token metadata |
 | "It's durable" | 16 | Wait, resume, replay with direct kwargs, and retry all work |
 | "It's complete" | 20 | Full SDK with adapters, CLI, MCP, examples, and docs |
 
@@ -661,8 +688,9 @@ If that branch isn't accessible yet:
 2. Stub `wait()` with a clear `NotImplementedError("Requires ZenML wait/resume support")`
 3. Stub `client.executions.input(...)`, `.replay(...)` similarly
 4. When the branch becomes available, come back and implement Phases 15-16
-5. Phase 12 (`kitaru.llm()`) uses LiteLLM + a local model registry and has no
-   upstream ZenML dependency
+5. Phase 11.5 (secrets) wraps ZenML's existing secret store — no upstream dependency
+6. Phase 12 (`kitaru.llm()`) uses LiteLLM + a local model registry + ZenML secrets
+   for remote credentials — depends on Phase 11.5 but has no upstream ZenML branch dependency
 
 ## How to use this plan
 

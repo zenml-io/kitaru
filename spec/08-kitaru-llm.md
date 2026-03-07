@@ -108,23 +108,25 @@ LiteLLM is the sole backend engine. There is no separate in-house provider abstr
 
 ## Local model registry
 
-Model aliases and optional credential configuration live in **local user config**, independent of stacks. This is managed via the `kitaru model register` CLI command.
+Model aliases live in **local user config**, independent of stacks. This is managed via the `kitaru model register` CLI command.
 
 The registry conceptually stores:
 
 ```json
 {
   "aliases": {
-    "fast": { "model": "openai/gpt-4o-mini" },
-    "smart": { "model": "anthropic/claude-sonnet-4-20250514" }
+    "fast": { "model": "openai/gpt-4o-mini", "secret": "openai-creds" },
+    "smart": { "model": "anthropic/claude-sonnet-4-20250514", "secret": "anthropic-creds" }
   },
   "default": "fast"
 }
 ```
 
+The `secret` field is optional — it references a ZenML secret by name that holds provider credentials. When present, `kitaru.llm()` fetches the secret at runtime to obtain API keys and other credentials.
+
 The exact on-disk schema and storage path (e.g. `~/.config/kitaru/models.json`) are not frozen yet.
 
-**Zero-config path:** Users who already have provider environment variables set (e.g. `OPENAI_API_KEY`) can use `kitaru.llm()` without registering anything — LiteLLM reads those env vars natively. The registry adds convenience (aliases, defaults) but is not required.
+**Zero-config path:** Users who already have provider environment variables set (e.g. `OPENAI_API_KEY`) can use `kitaru.llm()` without registering anything — LiteLLM reads those env vars natively. The registry adds convenience (aliases, defaults, remote credential references) but is not required.
 
 **Stacks do not own model configuration.** Model aliases and credentials are user-local config, not part of a stack's component list. This keeps stacks focused on execution infrastructure (runner, artifact store, container registry).
 
@@ -144,19 +146,25 @@ Resolution logic:
    - Use the locally configured default alias/model if one exists
    - Otherwise fail with a clear configuration error
 
-Credential resolution is separate:
+## Credential resolution
 
-- Provider env vars in the execution environment (read natively by LiteLLM)
-- Optional local credential/config entries from the model registry
-- Future: a ZenML-backed credential source behind the same resolver
+Credential resolution is separate from model resolution and follows this order:
+
+1. **Process env vars** — if the required provider env vars (e.g. `OPENAI_API_KEY`) already exist in the execution environment, use them. This works locally (user has env vars set) and remotely (env vars injected by ZenML or container config).
+2. **ZenML secret** — if the resolved alias has a `secret` field, fetch the referenced ZenML secret via `Client().get_secret(...)` and temporarily inject its key-value pairs as environment variables for the LiteLLM call. This is the primary path for remote execution.
+3. **No credentials found** — fail with a clear error explaining which provider credentials are needed and how to configure them.
+
+**Secret key naming convention:** ZenML secrets used for LLM credentials should store keys using the actual environment variable names LiteLLM expects (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). This ensures seamless compatibility — `kitaru.llm()` fetches the secret and sets env vars that LiteLLM reads natively.
+
+**How remote execution works:** Remote step containers receive a ZenML workload API token. This token authenticates requests to the ZenML server. When `kitaru.llm()` needs credentials, it uses this token to fetch the referenced secret from the server — the actual API keys never need to be in the container spec or pod environment.
 
 **Provenance:** The **resolved concrete model** used for each call must always be recorded as metadata (alongside the alias, if one was used). This ensures replay provenance is clear and dashboards remain auditable, even as aliases change over time.
 
-**Remote execution note:** Model aliases and credentials are user-local. When executing on a remote stack, the remote environment needs the relevant provider credentials (typically via environment variables in the execution environment). The local registry does not automatically propagate secrets to remote runners.
+## Future work
 
-## Future migration path
-
-A future ZenML-backed `llm_model` stack component may later become an additional credential-resolution backend. This would change where credentials are resolved from, but would not change the `kitaru.llm()` API. The migration is an implementation swap behind the same interface.
+- A future ZenML-backed `llm_model` stack component may later become an additional credential-resolution backend. This would not change the `kitaru.llm()` API.
+- Richer model registry UX: `kitaru model show`, `kitaru model remove`, `kitaru model test`
+- Import/export or team-sharing of alias configurations
 
 ## Examples
 
@@ -263,5 +271,6 @@ In practice:
 - do not overload `kitaru.llm()` with tool loops or conversation state
 - nested-boundary semantics should stay simple: standalone in flow, child event in checkpoint
 - LiteLLM is the sole backend engine — no in-house provider abstraction
-- model aliases and credentials are user-local config, not stack-owned
+- model aliases are user-local config, not stack-owned
+- credentials for remote execution use ZenML secrets referenced from aliases
 - usage/cost metadata is recorded when available from LiteLLM/provider responses

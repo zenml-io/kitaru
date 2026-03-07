@@ -269,7 +269,7 @@ When running remotely, Kitaru needs to know what Docker image to use and what en
         base_image="python:3.12-slim",
         requirements=["pydantic", "httpx"],
         dockerfile="Dockerfile.agent",
-        environment={"API_KEY": "{{ API_KEY_SECRET }}"},
+        environment={"API_KEY": "{{api_secret.api_key}}"},
     ),
 )
 def my_agent(prompt: str) -> str:
@@ -288,14 +288,47 @@ These are part of the unified config object and can be set at the project level,
 
 ## Secrets
 
-Secrets are referenced using the ZenML secret syntax: `{{ SECRET_NAME }}`. They are not resolved directly in app config.
+Kitaru uses ZenML's **centralized secret store** for managing sensitive credentials. The Kitaru server is the ZenML server, so the secret store infrastructure is already available — no additional server setup is needed.
+
+### Secret store architecture
+
+ZenML splits secrets into two layers:
+
+- **Secret metadata** (name, owner, visibility) lives in the server database
+- **Secret values** live in a configurable backend (SQL, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, HashiCorp Vault, or custom)
+
+Clients always access secrets through the server API. Remote step containers authenticate using a workload API token and can fetch secrets at runtime.
+
+### Two secret mechanisms
+
+ZenML provides two distinct ways to use secrets:
+
+1. **Secret references** — for config/settings values, using the syntax `{{secret_name.secret_key}}` (no spaces, dot-separated). These resolve lazily through ZenML's `SecretReferenceMixin`.
+
+2. **Runtime env injection** — pipelines, steps, stacks, and components can declare `secrets=["my_secret"]`, and ZenML injects all key-value pairs from that secret into the runtime process environment.
+
+### Kitaru secrets surface
+
+Kitaru wraps ZenML's secret store with a simpler, more opinionated interface:
+
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+kitaru secrets show openai-creds
+kitaru secrets list
+kitaru secrets delete openai-creds
+```
+
+Secrets created through Kitaru are **private by default** (only the creating user can access them). Secret keys should use the actual environment variable names that downstream tools expect (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) — this ensures compatibility with both ZenML's env injection and LiteLLM's native env var reading.
+
+### Secrets in image environment
+
+Secret references can be used in image environment settings:
 
 ```python
 @kitaru.flow(
     image=ImageSettings(
         environment={
-            "OPENAI_API_KEY": "{{ OPENAI_KEY }}",
-            "DATABASE_URL": "{{ DB_CONNECTION_STRING }}",
+            "DATABASE_URL": "{{db_secret.connection_string}}",
         },
     ),
 )
@@ -303,13 +336,9 @@ def my_agent(prompt: str) -> str:
     ...
 ```
 
-Secrets can be referenced in:
+### LLM credentials in remote runs
 
-- image environment variables
-- stack/component configuration
-- runtime overrides
-
-The secret store and resolution mechanism are handled by ZenML.
+Model aliases remain separate from stacks, but aliases may reference ZenML secrets for remote execution. When `kitaru.llm()` runs remotely, it fetches the referenced secret via the ZenML client (authenticated by the workload API token) and makes the credentials available to LiteLLM. See [Chapter 8](08-kitaru-llm.md) for the full credential resolution model.
 
 ## Execution behavior settings
 
