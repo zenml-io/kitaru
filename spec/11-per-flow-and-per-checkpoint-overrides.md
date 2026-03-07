@@ -214,4 +214,4 @@ For March, the most useful override surface is:
 
 These are all part of the [unified config object](04-connection-stacks-and-configuration.md) — overrides are just the runtime layer that sits on top of pre-execution defaults.
 
-Note: secrets in environment or config should use the ZenML `{{ SECRET_NAME }}` syntax. See chapter 4 for details.
+Note: secrets in environment or config should use the ZenML `{{secret_name.secret_key}}` syntax (no spaces, dot-separated). See chapter 4 for details.

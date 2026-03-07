@@ -233,13 +233,26 @@ Stacks include components for runner, artifact store, and container registry. A 
 
 ## Model registry
 
-The **model registry** is user-local configuration that stores LLM model aliases and optional provider credentials. It is managed via `kitaru model register` and is independent of stack selection.
+The **model registry** is user-local configuration that stores LLM model aliases and optional references to ZenML secrets for provider credentials. It is managed via `kitaru model register` and is independent of stack selection.
 
-The registry allows `kitaru.llm()` to resolve aliases like `fast` or `smart` to concrete LiteLLM model identifiers. It is stored on the user's machine, not in a stack or on the server.
+The registry allows `kitaru.llm()` to resolve aliases like `fast` or `smart` to concrete LiteLLM model identifiers. Alias definitions are stored on the user's machine, not in a stack or on the server. Credentials for remote execution are stored in ZenML secrets and referenced by name from the alias.
 
 ## Model alias
 
 A **model alias** is a short name (e.g. `fast`, `smart`) that maps to a concrete LiteLLM model identifier (e.g. `openai/gpt-4o-mini`). Aliases are defined in the local model registry and let user code reference models by role rather than specific provider/model name.
+
+## Secret
+
+A **secret** is a named bag of key-value pairs stored in ZenML's centralized secret store. Secrets are managed via `kitaru secrets set/show/list/delete`.
+
+Kitaru uses secrets primarily for:
+
+- LLM provider credentials (referenced from model aliases via `--secret`)
+- Infrastructure credentials in image environment settings
+
+Secrets are private by default (only the creating user can access them). Secret keys should use actual environment variable names (e.g. `OPENAI_API_KEY`) for compatibility with LiteLLM and ZenML's runtime env injection.
+
+Under the hood, secret metadata lives in the ZenML server database, and secret values live in the configured secrets-store backend.
 
 ## App config
 

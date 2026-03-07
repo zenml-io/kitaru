@@ -145,19 +145,37 @@ kitaru executions cancel kr-a8f3c2
 kitaru executions logs kr-a8f3c2 --follow
 ```
 
-## Tier 3: model registration, stack authoring, artifacts, and config (later)
+## Tier 3: secrets, model registration, stack authoring, artifacts, and config (later)
+
+### Secrets
+
+Secrets wrap ZenML's centralized secret store with a simpler interface. Secrets are **private by default**.
+
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+kitaru secrets set anthropic-creds --ANTHROPIC_API_KEY=sk-ant-...
+kitaru secrets show openai-creds
+kitaru secrets list
+kitaru secrets delete openai-creds
+```
+
+`set` creates a new secret or updates an existing one. Secret keys should use the actual environment variable names that downstream tools expect (e.g. `OPENAI_API_KEY`), so that ZenML's env injection and LiteLLM's native env var reading work seamlessly.
+
+Under the hood, `kitaru secrets` wraps ZenML's `Client().create_secret()` / `get_secret()` / `update_secret()` / `delete_secret()`. No new server functionality is needed.
 
 ### Model registration
 
-Model aliases and optional credentials are managed locally, independent of stacks:
+Model aliases are managed locally, independent of stacks. Aliases can optionally reference a ZenML secret for remote credential resolution:
 
 ```bash
-kitaru model register fast --model openai/gpt-4o-mini
-kitaru model register smart --model anthropic/claude-sonnet-4-20250514
+kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+kitaru model register smart --model anthropic/claude-sonnet-4-20250514 --secret anthropic-creds
 kitaru model list
 ```
 
-This is **local user config** — it is not synced to a server or tied to a stack. Provider credentials can also come from standard environment variables (e.g. `OPENAI_API_KEY`) which LiteLLM reads natively. The exact flags for provider-specific credential registration are not frozen yet.
+The `--secret` flag ties an alias to a ZenML secret that holds provider credentials. When `kitaru.llm()` uses this alias during remote execution, it fetches the secret to obtain API keys.
+
+Provider credentials can also come from standard environment variables (e.g. `OPENAI_API_KEY`) which LiteLLM reads natively — the `--secret` flag is only needed for remote execution where env vars may not be pre-set.
 
 ### Stack creation
 
@@ -177,7 +195,7 @@ The exact flags are not frozen — the principle is that the CLI must surface en
 ### Log store configuration
 
 ```bash
-kitaru log-store set datadog --endpoint https://logs.datadoghq.com --api-key {{ DATADOG_KEY }}
+kitaru log-store set datadog --endpoint https://logs.datadoghq.com --api-key {{datadog_secret.api_key}}
 kitaru log-store show
 kitaru log-store reset
 ```

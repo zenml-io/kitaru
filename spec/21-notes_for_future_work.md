@@ -67,11 +67,16 @@ Hamza proposed setting up a **default artifact store at Kitaru deploy time** so 
 
 This is mentioned in chapters 4/19 and the plan, but the specific mechanism (artifact store provisioned at deploy time) and the goal (zero-stack-setup experience) are worth tracking as a concrete UX requirement.
 
-### Secrets and infra UX for new users
+### Secrets and infra UX for new users — PARTIALLY RESOLVED
+
+**Decision:** Kitaru wraps ZenML's centralized secret store with `kitaru secrets set/show/list/delete`. Secrets are private by default and use env-var-shaped keys for LiteLLM compatibility. Model aliases can reference ZenML secrets via `--secret` for remote credential resolution. See updated spec chapters 4, 8, and 14.
 
 Alex raised: "We'll need to think about secrets somehow as well. Stacks + the whole infra stuff (from service connectors to spinning up a stack etc) is sort of the big question mark still for how we can make this work well." He noted: "obv I can make it all work assuming I have a nice zenml stack setup already, but for users who don't have a zenml stack already etc... idk how this is going to work well for a cloud stack."
 
-Future work: design the end-to-end cloud stack setup experience for users who have never touched ZenML. This includes credential handling, service connector creation, and making the whole thing feel native to Kitaru rather than requiring ZenML knowledge.
+**Remaining future work:**
+- End-to-end cloud stack setup experience for users who have never touched ZenML
+- Service connector creation integrated into stack creation UX
+- Making the whole infra setup feel native to Kitaru rather than requiring ZenML knowledge
 
 ### Revisit whether "stack" is the right user-facing term
 
@@ -90,9 +95,9 @@ The MVP uses `kitaru model register` to store aliases and optional credentials l
 **Remaining future work for the model registry:**
 - Richer registry UX (`kitaru model show`, `kitaru model remove`, `kitaru model test`)
 - Import/export or team-sharing of alias configurations
-- Migration or optional fallback to ZenML-backed credential resolution
-- Secret storage hardening (non-plaintext approaches)
-- How remote/connected environments consume locally defined model settings
+- Optional fallback to a future ZenML `llm_model` stack component for credential resolution
+
+**Note:** Remote credential resolution is now addressed — model aliases reference ZenML secrets via `--secret`, and `kitaru.llm()` fetches them at runtime. See updated spec chapter 8.
 
 ### Decide whether sandbox providers should be registered separately
 

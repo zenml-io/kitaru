@@ -263,7 +263,7 @@ When Kitaru is deployed remotely (via Helm), a remote bucket is part of the depl
 Users can optionally switch the global log backend to an external provider (e.g. Datadog, or any OTel-compatible provider) using a global command:
 
 ```bash
-kitaru log-store set datadog --endpoint https://logs.datadoghq.com --api-key {{ DATADOG_KEY }}
+kitaru log-store set datadog --endpoint https://logs.datadoghq.com --api-key {{datadog_secret.api_key}}
 ```
 
 This is a **global setting** that applies to all flows and executions — not a per-checkpoint or per-flow logger component. There is no explicit local logger stack component in Kitaru.
