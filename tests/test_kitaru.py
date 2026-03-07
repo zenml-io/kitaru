@@ -57,10 +57,22 @@ class TestPublicExports:
 
     def test_all_exports_match(self) -> None:
         expected = {
+            "FailureOrigin",
             "FlowHandle",
             "ImageSettings",
+            "KitaruBackendError",
             "KitaruClient",
             "KitaruConfig",
+            "KitaruContextError",
+            "KitaruDivergenceError",
+            "KitaruError",
+            "KitaruExecutionError",
+            "KitaruFeatureNotAvailableError",
+            "KitaruRuntimeError",
+            "KitaruStateError",
+            "KitaruUsageError",
+            "KitaruUserCodeError",
+            "KitaruWaitValidationError",
             "StackInfo",
             "checkpoint",
             "configure",
@@ -201,7 +213,7 @@ class TestPlaceholderBehavior:
         assert hasattr(wrapped, "submit")
 
     def test_wait_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="wait"):
+        with pytest.raises(kitaru.KitaruFeatureNotAvailableError, match="wait"):
             kitaru.wait()
 
     def test_llm_requires_flow_context(self) -> None:

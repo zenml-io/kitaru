@@ -15,6 +15,8 @@ from typing import Any, NoReturn
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.steps.step_context import StepContext
 
+from kitaru.errors import KitaruFeatureNotAvailableError
+
 
 @dataclass(frozen=True)
 class _FlowScope:
@@ -208,8 +210,8 @@ def _next_llm_call_name(prefix: str = "llm") -> str:
 
 
 def _not_implemented(name: str) -> NoReturn:
-    """Raise NotImplementedError with a consistent message."""
-    raise NotImplementedError(
+    """Raise a consistent feature-availability error for stubbed APIs."""
+    raise KitaruFeatureNotAvailableError(
         f"kitaru.{name}() is not yet implemented. "
-        f"The Kitaru SDK is under active development."
+        "The Kitaru SDK is under active development."
     )

@@ -23,9 +23,11 @@ Current status:
 - Implemented: ``@kitaru.flow``, ``@kitaru.checkpoint``, ``kitaru.log()``,
   ``save()``, ``load()``, ``llm()``, ``connect()``, ``configure()``, stack
   selection helpers (``list_stacks()``, ``current_stack()``, ``use_stack()``),
-  model alias helpers via CLI (``kitaru model register/list``), and
+  model alias helpers via CLI (``kitaru model register/list``),
   ``KitaruClient`` execution/artifact browsing APIs
-  (`get/list/latest/cancel/retry` + artifacts)
+  (`get/list/latest/cancel/retry` + artifacts), and a typed Kitaru exception
+  hierarchy with failure journaling (`Execution.failure`,
+  `CheckpointCall.attempts`).
 - In progress: ``wait()``. ``KitaruClient`` `input()` and `replay()` are
   intentionally stubbed pending wait/replay backend support.
 
@@ -47,16 +49,42 @@ from kitaru.config import (
     list_stacks,
     use_stack,
 )
+from kitaru.errors import (
+    FailureOrigin,
+    KitaruBackendError,
+    KitaruContextError,
+    KitaruDivergenceError,
+    KitaruError,
+    KitaruExecutionError,
+    KitaruFeatureNotAvailableError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+    KitaruUserCodeError,
+    KitaruWaitValidationError,
+)
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
 from kitaru.wait import wait
 
 __all__ = [
+    "FailureOrigin",
     "FlowHandle",
     "ImageSettings",
+    "KitaruBackendError",
     "KitaruClient",
     "KitaruConfig",
+    "KitaruContextError",
+    "KitaruDivergenceError",
+    "KitaruError",
+    "KitaruExecutionError",
+    "KitaruFeatureNotAvailableError",
+    "KitaruRuntimeError",
+    "KitaruStateError",
+    "KitaruUsageError",
+    "KitaruUserCodeError",
+    "KitaruWaitValidationError",
     "StackInfo",
     "checkpoint",
     "configure",

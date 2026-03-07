@@ -1,0 +1,53 @@
+---
+title: Error Handling
+description: Understand Kitaru exception types and failure journaling
+---
+
+Kitaru now exposes a typed exception hierarchy so you can distinguish usage,
+context, state, runtime, backend, and execution failures.
+
+## Core exception types
+
+```python
+import kitaru
+
+try:
+    result = my_flow.start(...).get()
+except kitaru.KitaruUserCodeError as exc:
+    # user checkpoint/flow code raised
+    print(exc.exec_id, exc.status, exc.failure_origin)
+except kitaru.KitaruDivergenceError:
+    # replay divergence surfaced from backend contract
+    ...
+except kitaru.KitaruExecutionError:
+    # other execution-level failure
+    ...
+```
+
+## Failure journaling in the client
+
+`KitaruClient` surfaces structured failure details:
+
+- `execution.failure`: failure summary for failed executions
+- `checkpoint.failure`: final checkpoint failure (if terminal attempt failed)
+- `checkpoint.attempts`: full retry attempt history, including failed attempts
+
+```python
+client = kitaru.KitaruClient()
+execution = client.executions.get(exec_id)
+
+if execution.failure:
+    print(execution.failure.origin, execution.failure.message)
+
+for checkpoint in execution.checkpoints:
+    for attempt in checkpoint.attempts:
+        print(attempt.attempt_id, attempt.status)
+        if attempt.failure:
+            print("  ", attempt.failure.exception_type, attempt.failure.message)
+```
+
+## Stubbed APIs
+
+Features that are intentionally not shipped yet raise
+`kitaru.KitaruFeatureNotAvailableError` (for example `kitaru.wait()`,
+`client.executions.input(...)`, and `client.executions.replay(...)`).

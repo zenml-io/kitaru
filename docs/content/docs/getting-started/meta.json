@@ -6,6 +6,7 @@
     "quickstart",
     "configuration",
     "execution-management",
+    "error-handling",
     "artifacts",
     "stack-selection",
     "log-store",

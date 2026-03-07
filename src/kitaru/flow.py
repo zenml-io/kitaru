@@ -33,6 +33,16 @@ from kitaru.config import (
     resolve_connection_config,
     resolve_execution_config,
 )
+from kitaru.errors import (
+    FailureOrigin,
+    KitaruBackendError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+    classify_failure_origin,
+    execution_error_from_failure,
+    traceback_last_line,
+)
 from kitaru.runtime import _flow_scope
 
 ImageSetting = ImageInput
@@ -127,7 +137,7 @@ def _normalize_retries(retries: int) -> int:
         The normalized retry count.
     """
     if retries < 0:
-        raise ValueError("Flow retries must be >= 0.")
+        raise KitaruUsageError("Flow retries must be >= 0.")
     return retries
 
 
@@ -197,14 +207,14 @@ def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
     for output_spec in output_specs:
         step_run = step_runs.get(output_spec.step_name)
         if step_run is None:
-            raise RuntimeError(
+            raise KitaruRuntimeError(
                 f"Execution {hydrated_run.id} is missing step output metadata "
                 f"for '{output_spec.step_name}'."
             )
 
         artifact = step_run.regular_outputs.get(output_spec.output_name)
         if artifact is None:
-            raise RuntimeError(
+            raise KitaruRuntimeError(
                 f"Execution {hydrated_run.id} is missing output "
                 f"'{output_spec.output_name}' on step '{output_spec.step_name}'."
             )
@@ -238,7 +248,7 @@ def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
     if not terminal_step_names:
         return []
     if len(terminal_step_names) > 1:
-        raise RuntimeError(
+        raise KitaruRuntimeError(
             "Execution output metadata is missing and fallback extraction is "
             "ambiguous because multiple terminal steps were found."
         )
@@ -246,12 +256,12 @@ def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
     terminal_step_name = terminal_step_names[0]
     terminal_step = step_runs[terminal_step_name]
     if not terminal_step.regular_outputs:
-        raise RuntimeError(
+        raise KitaruRuntimeError(
             f"Execution {hydrated_run.id} has no regular outputs on terminal "
             f"step '{terminal_step_name}'."
         )
     if len(terminal_step.regular_outputs) > 1:
-        raise RuntimeError(
+        raise KitaruRuntimeError(
             "Execution output metadata is missing and fallback extraction is "
             "ambiguous because the terminal step has multiple outputs."
         )
@@ -285,23 +295,36 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
 
 
 def _raise_for_unsuccessful_run(run: PipelineRunResponse) -> None:
-    """Raise a runtime error with helpful run failure context.
-
-    Args:
-        run: A finished but unsuccessful run.
-
-    Raises:
-        RuntimeError: Always.
-    """
+    """Raise a typed Kitaru execution error with run failure context."""
     details = [f"Execution {run.id} finished with status '{run.status.value}'."]
 
     run_body = run.get_body() if hasattr(run, "get_body") else run
     status_reason = getattr(run_body, "status_reason", None)
     if status_reason:
         details.append(status_reason)
-    if run.exception_info and run.exception_info.traceback:
-        details.append(run.exception_info.traceback.splitlines()[-1])
-    raise RuntimeError(" ".join(details))
+
+    traceback_text: str | None = None
+    if run.exception_info is not None:
+        traceback_text = run.exception_info.traceback
+
+    traceback_tail = traceback_last_line(traceback_text)
+    if traceback_tail:
+        details.append(traceback_tail)
+
+    default_origin = (
+        FailureOrigin.USER_CODE if traceback_text is not None else FailureOrigin.UNKNOWN
+    )
+    failure_origin = classify_failure_origin(
+        status_reason=status_reason,
+        traceback=traceback_text,
+        default=default_origin,
+    )
+    raise execution_error_from_failure(
+        " ".join(details),
+        exec_id=str(run.id),
+        status=run.status.value,
+        origin=failure_origin,
+    )
 
 
 class FlowHandle:
@@ -354,7 +377,7 @@ class FlowHandle:
         """
         run = self._refresh()
         if not run.status.is_finished:
-            raise RuntimeError(
+            raise KitaruStateError(
                 f"Execution {run.id} is still running (status: {run.status.value})."
             )
         if not run.status.is_successful:
@@ -363,10 +386,15 @@ class FlowHandle:
 
     def _refresh(self) -> PipelineRunResponse:
         """Refresh the cached run model from the server."""
-        self._run = Client().get_pipeline_run(
-            self._run_id,
-            allow_name_prefix_match=False,
-        )
+        try:
+            self._run = Client().get_pipeline_run(
+                self._run_id,
+                allow_name_prefix_match=False,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to refresh execution {self._run_id}: {exc}"
+            ) from exc
         return self._run
 
 
@@ -491,7 +519,7 @@ class _FlowDefinition:
             run = configured_pipeline(*args, **kwargs)
 
         if run is None:
-            raise RuntimeError("Flow execution did not produce a pipeline run.")
+            raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
         persist_frozen_execution_spec(
             run_id=run.id,

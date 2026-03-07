@@ -19,6 +19,7 @@ from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
 from zenml.steps.step_decorator import step
 
+from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.runtime import (
     _checkpoint_scope,
     _flow_scope,
@@ -67,7 +68,7 @@ def _register_checkpoint_source_alias(
 def _normalize_retries(retries: int) -> int:
     """Validate and normalize checkpoint retries."""
     if retries < 0:
-        raise ValueError("Checkpoint retries must be >= 0.")
+        raise KitaruUsageError("Checkpoint retries must be >= 0.")
     return retries
 
 
@@ -165,20 +166,20 @@ class _CheckpointDefinition:
             return
 
         if StepContext.is_active():
-            raise RuntimeError(_CHECKPOINT_NESTED_ERROR)
+            raise KitaruContextError(_CHECKPOINT_NESTED_ERROR)
 
         if DynamicPipelineRunContext.is_active() and _is_inside_flow():
             return
 
-        raise RuntimeError(_CHECKPOINT_OUTSIDE_FLOW_ERROR)
+        raise KitaruContextError(_CHECKPOINT_OUTSIDE_FLOW_ERROR)
 
     def _assert_submit_allowed(self) -> None:
         """Validate that checkpoint submission is legal in the current context."""
         if StepContext.is_active():
-            raise RuntimeError(_CHECKPOINT_NESTED_ERROR)
+            raise KitaruContextError(_CHECKPOINT_NESTED_ERROR)
 
         if not DynamicPipelineRunContext.is_active() or not _is_inside_flow():
-            raise RuntimeError(_CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR)
+            raise KitaruContextError(_CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR)
 
     def __call__(
         self,
