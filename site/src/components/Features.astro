@@ -81,36 +81,40 @@
         </div>
       </div>
 
-      <!-- Card 4: Parallel Branches -->
+      <!-- Card 4: Deploy Without Breaking -->
       <div class="feature-card">
         <div class="card-glow"></div>
         <div class="feature-visual">
-          <div class="anim-parallel" id="animParallel">
-            <div class="par-source"></div>
-            <div class="par-branch" data-idx="0">
-              <div class="par-line"></div>
-              <div class="par-dot" data-dot="0"></div>
-              <div class="par-dot" data-dot="1"></div>
-              <div class="par-dot" data-dot="2"></div>
-            </div>
-            <div class="par-branch" data-idx="1">
-              <div class="par-line"></div>
-              <div class="par-dot" data-dot="0"></div>
-              <div class="par-dot" data-dot="1"></div>
-              <div class="par-dot" data-dot="2"></div>
-            </div>
-            <div class="par-branch" data-idx="2">
-              <div class="par-line"></div>
-              <div class="par-dot" data-dot="0"></div>
-              <div class="par-dot" data-dot="1"></div>
-              <div class="par-dot" data-dot="2"></div>
+          <div class="anim-deploy" id="animDeploy">
+            <div class="deploy-lanes">
+              <div class="deploy-lane" data-lane="old">
+                <span class="lane-label">v1 — running</span>
+                <div class="lane-steps">
+                  <div class="dstep" data-idx="0">1</div>
+                  <div class="dstep" data-idx="1">2</div>
+                  <div class="dstep" data-idx="2">3</div>
+                  <div class="dstep" data-idx="3">4</div>
+                </div>
+              </div>
+              <div class="deploy-divider">
+                <span class="deploy-tag">git push</span>
+              </div>
+              <div class="deploy-lane" data-lane="new">
+                <span class="lane-label">v2 — deployed</span>
+                <div class="lane-steps">
+                  <div class="dstep" data-idx="0">1</div>
+                  <div class="dstep" data-idx="1">2</div>
+                  <div class="dstep" data-idx="2">3</div>
+                  <div class="dstep" data-idx="3">4</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
         <div class="feature-text">
-          <div class="feature-number">04 — Parallel Branches</div>
-          <h3>Fan out. Each branch checkpoints independently.</h3>
-          <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each has its own checkpoint history. Replay just the failed branch.</p>
+          <div class="feature-number">04 — Deploy Without Breaking</div>
+          <h3>Ship new code. Running agents finish safely.</h3>
+          <p>Old executions complete with cached checkpoints. New executions run your updated code. No non-determinism errors. No versioning headaches.</p>
         </div>
       </div>
 
@@ -466,76 +470,114 @@
     background: rgba(241,120,41,0.06);
   }
 
-  /* ═══ ANIMATION: Parallel Branches ═══ */
-  .anim-parallel {
+  /* ═══ ANIMATION: Deploy Without Breaking ═══ */
+  .anim-deploy {
     width: 100%;
     height: 100%;
     position: relative;
-  }
-
-  .par-source {
-    position: absolute;
-    left: 12%;
-    top: 50%;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--color-accent);
-    transform: translateY(-50%);
-    z-index: 2;
-  }
-
-  .par-branch {
-    position: absolute;
-    left: 18%;
-    right: 12%;
-    height: 2px;
     display: flex;
     align-items: center;
+    justify-content: center;
   }
 
-  .par-branch[data-idx="0"] { top: 28%; }
-  .par-branch[data-idx="1"] { top: 50%; }
-  .par-branch[data-idx="2"] { top: 72%; }
+  .deploy-lanes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 80%;
+  }
 
-  .par-line {
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 2px;
+  .deploy-lane {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .lane-label {
+    font-family: var(--font-mono);
+    font-size: 0.5rem;
+    color: rgba(255,255,255,0.3);
+    white-space: nowrap;
+    width: 80px;
+    text-align: right;
+  }
+
+  .lane-steps {
+    display: flex;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .dstep {
+    flex: 1;
+    height: 28px;
+    border-radius: 4px;
+    background: #1A1714;
+    border: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.5rem;
+    color: rgba(255,255,255,0.2);
+    transition: all 0.3s ease;
+  }
+
+  .dstep.cached {
+    border-color: rgba(61,140,92,0.4);
+    background: rgba(61,140,92,0.08);
+    color: var(--color-success);
+  }
+
+  .dstep.running {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: #1A1714;
+    box-shadow: 0 0 12px rgba(241,120,41,0.3);
+  }
+
+  .dstep.done {
+    border-color: rgba(61,140,92,0.4);
+    background: rgba(61,140,92,0.08);
+    color: var(--color-success);
+  }
+
+  .dstep.new-code {
+    border-color: rgba(130,170,255,0.4);
+    background: rgba(130,170,255,0.08);
+    color: rgba(130,170,255,0.9);
+  }
+
+  .deploy-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .deploy-divider::before,
+  .deploy-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
     background: rgba(255,255,255,0.08);
   }
 
-  .par-dot {
-    position: absolute;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #1A1714;
-    border: 1.5px solid rgba(255,255,255,0.15);
-    transition: all 0.4s ease;
-    z-index: 2;
+  .deploy-tag {
+    font-family: var(--font-mono);
+    font-size: 0.48rem;
+    color: rgba(130,170,255,0.7);
+    background: rgba(130,170,255,0.08);
+    border: 1px solid rgba(130,170,255,0.2);
+    border-radius: 3px;
+    padding: 1px 8px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.4s;
   }
 
-  .par-dot[data-dot="0"] { left: 20%; }
-  .par-dot[data-dot="1"] { left: 50%; }
-  .par-dot[data-dot="2"] { left: 80%; }
-
-  .par-dot.ok {
-    border-color: rgba(61,140,92,0.6);
-    background: rgba(61,140,92,0.15);
-  }
-
-  .par-dot.fail {
-    border-color: var(--color-cost-up);
-    background: rgba(220,74,61,0.15);
-    animation: failShake 0.4s ease;
-  }
-
-  .par-dot.replay {
-    border-color: var(--color-accent);
-    background: rgba(241,120,41,0.15);
-    box-shadow: 0 0 8px rgba(241,120,41,0.25);
+  .deploy-tag.visible {
+    opacity: 1;
   }
 
   @media (max-width: 768px) {
@@ -590,7 +632,7 @@
     runPauseResumeAnim();
     runReplayAnim();
     runFrameworkAnim();
-    runParallelAnim();
+    runDeployAnim();
   }
 
   // --- Pause & Resume ---
@@ -714,57 +756,73 @@
     featureTimers.push(t);
   }
 
-  // --- Parallel Branches ---
-  function runParallelAnim() {
-    const container = document.getElementById('animParallel');
+  // --- Deploy Without Breaking ---
+  function runDeployAnim() {
+    const container = document.getElementById('animDeploy');
     if (!container) return;
-    const branches = container.querySelectorAll('.par-branch');
-    const allDots = container.querySelectorAll('.par-dot');
+    const oldLane = container.querySelector('[data-lane="old"]');
+    const newLane = container.querySelector('[data-lane="new"]');
+    const tag = container.querySelector('.deploy-tag');
+    if (!oldLane || !newLane) return;
 
-    allDots.forEach(d => { d.className = 'par-dot'; });
+    const oldSteps = oldLane.querySelectorAll('.dstep');
+    const newSteps = newLane.querySelectorAll('.dstep');
 
-    let step = 0;
-    const failBranch = 2; // third branch fails
-    const failDot = 1;    // at second dot
+    // Reset
+    oldSteps.forEach(s => { s.className = 'dstep'; });
+    newSteps.forEach(s => { s.className = 'dstep'; });
+    tag?.classList.remove('visible');
 
-    function nextStep() {
-      if (step < 3) {
-        branches.forEach((branch, bIdx) => {
-          const dot = branch.querySelector(`.par-dot[data-dot="${step}"]`);
-          if (!dot) return;
-          if (bIdx === failBranch && step === failDot) {
-            const t1 = setTimeout(() => {
-              dot.classList.add('fail');
-              // After failure, replay
-              const t2 = setTimeout(() => {
-                dot.classList.remove('fail');
-                dot.classList.add('replay');
-                const t3 = setTimeout(() => {
-                  dot.classList.remove('replay');
-                  dot.classList.add('ok');
-                  step++;
-                  nextStep();
-                }, 600);
-                featureTimers.push(t3);
-              }, 800);
-              featureTimers.push(t2);
-            }, 200);
-            featureTimers.push(t1);
-          } else {
-            dot.classList.add('ok');
-          }
-        });
-        if (!(failBranch >= 0 && step === failDot)) {
-          step++;
-          const t = setTimeout(nextStep, 500);
-          featureTimers.push(t);
-        }
+    let i = 0;
+
+    // Phase 1: v1 runs steps, gets to step 3
+    function runOldSteps() {
+      if (i < 3) {
+        oldSteps[i].classList.add('running');
+        const t = setTimeout(() => {
+          oldSteps[i].classList.remove('running');
+          oldSteps[i].classList.add('cached');
+          i++;
+          runOldSteps();
+        }, 500);
+        featureTimers.push(t);
       } else {
-        const t = setTimeout(() => runParallelAnim(), 2500);
+        // Phase 2: deploy happens
+        tag?.classList.add('visible');
+        const t = setTimeout(() => {
+          // Phase 3: v1 finishes with cached outputs, v2 starts fresh
+          oldSteps[3].classList.add('running');
+          newSteps.forEach(s => s.classList.add('new-code'));
+          const t2 = setTimeout(() => {
+            oldSteps[3].classList.remove('running');
+            oldSteps[3].classList.add('done');
+            // Phase 4: v2 runs
+            let j = 0;
+            function runNewSteps() {
+              if (j < newSteps.length) {
+                newSteps[j].classList.remove('new-code');
+                newSteps[j].classList.add('running');
+                const t3 = setTimeout(() => {
+                  newSteps[j].classList.remove('running');
+                  newSteps[j].classList.add('done');
+                  j++;
+                  runNewSteps();
+                }, 400);
+                featureTimers.push(t3);
+              } else {
+                const t3 = setTimeout(() => runDeployAnim(), 2500);
+                featureTimers.push(t3);
+              }
+            }
+            runNewSteps();
+          }, 800);
+          featureTimers.push(t2);
+        }, 1000);
         featureTimers.push(t);
       }
     }
-    const t = setTimeout(nextStep, 500);
+
+    const t = setTimeout(runOldSteps, 500);
     featureTimers.push(t);
   }
 </script>

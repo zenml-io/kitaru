@@ -1,0 +1,195 @@
+---
+// Dashboard.astro — Dashboard preview section with real screenshots
+---
+
+<section class="dashboard-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>Built-in dashboard</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">See every execution. Debug any failure.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2">Cost tracking, trace visualization, human approval queues — out of the box. No Grafana setup. No custom dashboards.</p>
+
+    <div class="dashboard-showcase" data-reveal data-reveal-delay="3">
+      <div class="dashboard-tabs">
+        <button class="dash-tab active" data-dash-tab="traces">Execution Traces</button>
+        <button class="dash-tab" data-dash-tab="cost">Cost Breakdown</button>
+        <button class="dash-tab" data-dash-tab="diff">Execution Diff</button>
+        <button class="dash-tab" data-dash-tab="executions">Execution List</button>
+        <button class="dash-tab" data-dash-tab="workflows">Workflows</button>
+      </div>
+
+      <div class="dashboard-frame">
+        <div class="frame-header">
+          <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+          <span class="frame-url">kitaru.mycompany.com/dashboard</span>
+        </div>
+        <div class="frame-body">
+          <img src="/images/dashboard-traces.png" alt="Kitaru execution trace view showing LLM calls, tool calls, wait points, and cost breakdown" class="dash-screenshot active" id="dash-img-traces" loading="lazy" />
+          <img src="/images/dashboard-cost.png" alt="Kitaru cost breakdown showing per-model cost and token efficiency" class="dash-screenshot" id="dash-img-cost" loading="lazy" />
+          <img src="/images/dashboard-diff.png" alt="Kitaru execution diff comparing cost, duration, and tokens between runs" class="dash-screenshot" id="dash-img-diff" loading="lazy" />
+          <img src="/images/dashboard-executions.png" alt="Kitaru execution list showing status, duration, cost, and trigger information" class="dash-screenshot" id="dash-img-executions" loading="lazy" />
+          <img src="/images/dashboard-workflows.png" alt="Kitaru workflows overview showing active workflows with execution counts" class="dash-screenshot" id="dash-img-workflows" loading="lazy" />
+        </div>
+      </div>
+
+      <div class="dashboard-highlights">
+        <div class="dash-highlight">
+          <span class="check-icon">&#10003;</span>
+          <span>Cost per execution and per LLM call</span>
+        </div>
+        <div class="dash-highlight">
+          <span class="check-icon">&#10003;</span>
+          <span>Trace timeline with span-level detail</span>
+        </div>
+        <div class="dash-highlight">
+          <span class="check-icon">&#10003;</span>
+          <span>One-click replay from any checkpoint</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .dashboard-showcase {
+    margin-top: 48px;
+  }
+
+  .dashboard-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 0;
+  }
+
+  .dash-tab {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-bottom: none;
+    padding: 10px 20px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--color-secondary);
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    transition: all 0.2s;
+    margin-right: -1px;
+  }
+
+  .dash-tab:hover {
+    color: var(--color-primary);
+  }
+
+  .dash-tab.active {
+    background: #1A1714;
+    color: var(--color-accent);
+    border-color: var(--color-border);
+  }
+
+  .dashboard-frame {
+    border: 1px solid var(--color-border);
+    border-radius: 0 12px 12px 12px;
+    overflow: hidden;
+    box-shadow: 0 12px 60px rgba(26,23,20,0.15);
+  }
+
+  .frame-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    gap: 8px;
+    background: rgba(26,23,20,0.95);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .code-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .code-dot:nth-child(1) { background: #E85540; }
+  .code-dot:nth-child(2) { background: #E8A840; }
+  .code-dot:nth-child(3) { background: #40C840; }
+
+  .frame-url {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.3);
+    margin-left: 12px;
+    background: rgba(255,255,255,0.05);
+    padding: 3px 12px;
+    border-radius: 4px;
+  }
+
+  .frame-body {
+    position: relative;
+    background: #F5F0EB;
+    line-height: 0;
+  }
+
+  .dash-screenshot {
+    width: 100%;
+    height: auto;
+    display: none;
+  }
+
+  .dash-screenshot.active {
+    display: block;
+  }
+
+  .dashboard-highlights {
+    display: flex;
+    gap: 32px;
+    margin-top: 24px;
+    justify-content: center;
+  }
+
+  .dash-highlight {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .check-icon {
+    color: var(--color-success, #3D8C5C);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .dash-highlight span:last-child {
+    font-size: 0.82rem;
+    color: var(--color-secondary);
+  }
+
+  @media (max-width: 768px) {
+    .dashboard-highlights {
+      flex-direction: column;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .dash-tab {
+      font-size: 0.62rem;
+      padding: 8px 12px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .dash-tab {
+      font-size: 0.58rem;
+      padding: 6px 10px;
+    }
+  }
+</style>
+
+<script>
+  const dashTabs = document.querySelectorAll('.dash-tab');
+  dashTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      dashTabs.forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.dash-screenshot').forEach(img => img.classList.remove('active'));
+      tab.classList.add('active');
+      const target = tab.getAttribute('data-dash-tab');
+      document.getElementById(`dash-img-${target}`)?.classList.add('active');
+    });
+  });
+</script>
