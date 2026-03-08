@@ -186,3 +186,7 @@ Remaining work: fix the sidebar nesting issue in the FumaDocs theme/config.
 - improve the design
 - fix the opengraph image(s) for the blog main site + individual posts
 - add cover images?
+
+## Docs
+
+Fix the double dropdown headings
