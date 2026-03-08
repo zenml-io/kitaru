@@ -536,7 +536,8 @@ def test_image_settings_can_be_converted_to_docker_settings() -> None:
 
     assert isinstance(docker_settings, DockerSettings)
     assert docker_settings.parent_image == "python:3.12"
-    assert docker_settings.requirements == ["httpx", "kitaru"]
+    # kitaru is NOT auto-injected because base_image/dockerfile are set
+    assert docker_settings.requirements == ["httpx"]
     assert docker_settings.dockerfile == "Dockerfile"
     assert docker_settings.environment == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
 
@@ -555,6 +556,39 @@ def test_kitaru_auto_injected_when_image_settings_empty() -> None:
 
     assert isinstance(docker_settings, DockerSettings)
     assert docker_settings.requirements == ["kitaru"]
+
+
+def test_kitaru_not_injected_when_custom_base_image() -> None:
+    """Kitaru should not be auto-injected when a custom base_image is set."""
+    image_settings = ImageSettings(
+        base_image="my-registry/my-image:latest",
+        requirements=["httpx"],
+    )
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == ["httpx"]
+
+
+def test_kitaru_not_injected_when_custom_dockerfile() -> None:
+    """Kitaru should not be auto-injected when a custom dockerfile is set."""
+    image_settings = ImageSettings(
+        dockerfile="Dockerfile.custom",
+        requirements=["httpx"],
+    )
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == ["httpx"]
+
+
+def test_kitaru_auto_injected_with_only_requirements() -> None:
+    """Kitaru should be auto-injected when only requirements are set."""
+    image_settings = ImageSettings(requirements=["httpx"])
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == ["httpx", "kitaru"]
 
 
 def test_kitaru_not_duplicated_when_already_in_requirements() -> None:
