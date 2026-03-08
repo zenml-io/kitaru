@@ -1,0 +1,75 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+import BlogCard from '../../components/blog/BlogCard.astro';
+
+const posts = (await getCollection('blog', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+---
+
+<Base title="Blog — Kitaru" description="Thoughts on durable execution, agent infrastructure, and building reliable AI systems.">
+  <Fragment slot="head">
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={new URL('/blog', Astro.site).href} />
+  </Fragment>
+  <Nav />
+  <main class="blog-index">
+    <div class="section-inner">
+      <h1 class="blog-index-title" data-reveal>Blog</h1>
+      <p class="blog-index-desc" data-reveal data-reveal-delay="1">Thoughts on durable execution, agent infrastructure, and building reliable AI systems.</p>
+      <div class="blog-grid" data-reveal data-reveal-delay="2">
+        {posts.map((post) => (
+          <BlogCard
+            href={`/blog/${post.id}`}
+            title={post.data.title}
+            description={post.data.description}
+            date={post.data.date}
+            author={post.data.author}
+          />
+        ))}
+      </div>
+    </div>
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .blog-index {
+    padding: 40px clamp(16px, 5vw, 80px) 100px;
+  }
+
+  .blog-index-title {
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--color-primary);
+    margin-bottom: 12px;
+  }
+
+  .blog-index-desc {
+    font-size: clamp(0.95rem, 2.5vw, 1.05rem);
+    color: var(--color-secondary);
+    margin-bottom: 48px;
+    max-width: 520px;
+    line-height: 1.6;
+  }
+
+  .blog-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+
+  @media (max-width: 700px) {
+    .blog-grid {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .blog-index {
+      padding-bottom: 60px;
+    }
+  }
+</style>
