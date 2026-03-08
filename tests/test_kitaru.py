@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -212,9 +212,52 @@ class TestPlaceholderBehavior:
         assert callable(wrapped)
         assert hasattr(wrapped, "submit")
 
-    def test_wait_raises(self) -> None:
-        with pytest.raises(kitaru.KitaruFeatureNotAvailableError, match="wait"):
+    def test_wait_requires_flow_context(self) -> None:
+        with pytest.raises(kitaru.KitaruContextError, match=r"@kitaru\.flow"):
             kitaru.wait()
+
+    def test_wait_rejects_checkpoint_context(self) -> None:
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        with (
+            _flow_scope(name="flow_a"),
+            _checkpoint_scope(
+                name="checkpoint_a",
+                checkpoint_type=None,
+            ),
+            pytest.raises(
+                kitaru.KitaruContextError,
+                match=r"@kitaru\.checkpoint",
+            ),
+        ):
+            kitaru.wait()
+
+    def test_wait_delegates_to_zenml_wait(self) -> None:
+        from kitaru.runtime import _flow_scope
+
+        mock_zenml_wait = Mock(return_value=(True, object()))
+
+        with (
+            _flow_scope(name="flow_a"),
+            patch(
+                "kitaru.wait._resolve_zenml_wait",
+                return_value=mock_zenml_wait,
+            ),
+        ):
+            resolved = kitaru.wait(
+                name="approve_deploy",
+                question="Approve deploy?",
+                metadata={"service": "api"},
+            )
+
+        assert resolved is True
+        mock_zenml_wait.assert_called_once_with(
+            schema=bool,
+            question="Approve deploy?",
+            timeout=600,
+            metadata={"service": "api"},
+            key_prefix="approve_deploy",
+        )
 
     def test_llm_requires_flow_context(self) -> None:
         with pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"):

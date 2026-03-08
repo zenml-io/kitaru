@@ -1257,6 +1257,44 @@ def list____(
 
 
 @executions_app.command
+def input_(
+    exec_id: Annotated[
+        str,
+        Parameter(help="Execution ID."),
+    ],
+    *,
+    wait: Annotated[
+        str,
+        Parameter(help="Pending wait name or wait-condition ID."),
+    ],
+    value: Annotated[
+        str,
+        Parameter(
+            help=(
+                "Resolved wait input as JSON "
+                '(for example `true` or `{"approved": false}`).'
+            )
+        ),
+    ],
+) -> None:
+    """Resolve pending wait input for an execution."""
+    try:
+        parsed_value = _parse_json_value(value, option_name="--value")
+        execution = KitaruClient().executions.input(
+            exec_id,
+            wait=wait,
+            value=parsed_value,
+        )
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _print_success(
+        f"Resolved wait input for execution: {execution.exec_id}",
+        detail=f"Status: {execution.status.value}",
+    )
+
+
+@executions_app.command
 def retry_(
     exec_id: Annotated[
         str,
@@ -1271,6 +1309,25 @@ def retry_(
 
     _print_success(
         f"Retried execution: {execution.exec_id}",
+        detail=f"Status: {execution.status.value}",
+    )
+
+
+@executions_app.command
+def resume_(
+    exec_id: Annotated[
+        str,
+        Parameter(help="Execution ID."),
+    ],
+) -> None:
+    """Resume a paused execution after wait input is resolved."""
+    try:
+        execution = KitaruClient().executions.resume(exec_id)
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _print_success(
+        f"Resumed execution: {execution.exec_id}",
         detail=f"Status: {execution.status.value}",
     )
 

@@ -6,6 +6,7 @@
     "quickstart",
     "configuration",
     "execution-management",
+    "wait-and-resume",
     "error-handling",
     "artifacts",
     "stack-selection",

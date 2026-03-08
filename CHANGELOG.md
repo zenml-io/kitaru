@@ -24,9 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `KitaruClient` execution management API with Kitaru domain models (`Execution`, `ExecutionStatus`, `CheckpointCall`, `ArtifactRef`)
 - Execution management operations: `client.executions.get/list/latest/cancel/retry`
 - Artifact browsing operations: `client.artifacts.list/get` and `artifact.load()`
-- Explicit `NotImplementedError` stubs for branch-dependent `client.executions.input(...)` and replay APIs
+- Explicit `NotImplementedError` stub for branch-dependent replay APIs
 - Phase 11 example workflow: `examples/client_execution_management.py`
 - Getting Started execution management docs page (`/getting-started/execution-management`)
+- `kitaru.wait(...)` implementation with flow-only guardrails and checkpoint-context blocking
+- Wait-input lifecycle APIs: `client.executions.input(...)` and `client.executions.resume(...)`
+- Execution CLI wait/resume commands: `kitaru executions input` and `kitaru executions resume`
+- Phase 15 wait/resume example workflow: `examples/wait_and_resume.py`
+- Getting Started wait/resume docs page (`/getting-started/wait-and-resume`)
 - `kitaru.save()` for explicit named artifact persistence inside checkpoints
 - `kitaru.load()` for cross-execution artifact loading inside checkpoints
 - Artifact taxonomy validation for explicit `kitaru.save(..., type=...)` values (`prompt`, `response`, `context`, `input`, `output`, `blob`)
@@ -46,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Kitaru global config persistence now uses field-preserving updates, so log-store and model-registry settings no longer clobber each other
 - Updated README, CLAUDE guide, AGENTS guide, and docs pages to reflect shipped LLM/model-registry functionality and current implemented primitive status
-- Updated execution-management docs to cover shipped execution CLI commands and clearly defer `executions input/replay/logs`
+- Updated execution-management docs to cover shipped wait/input/resume commands and clearly defer replay/log streaming
 
 ## [0.1.0] - 2026-03-06
 

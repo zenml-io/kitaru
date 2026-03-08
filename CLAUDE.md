@@ -17,7 +17,7 @@ src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapter stubs (not yet implemented)
 tests/                # pytest tests
-examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12 milestones)
+examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15 milestones)
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -113,7 +113,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`, `kitaru.configure()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), local model alias CLI (`kitaru model register/list`), the first `KitaruClient` execution/artifact browsing surface, typed Kitaru exceptions + failure journaling (`execution.failure`, checkpoint attempt history), core connection/login CLI paths, `kitaru stack list/current/use`, `kitaru log-store set/show/reset`, `kitaru secrets set/show/list/delete`, and execution lifecycle CLI commands (`kitaru run`, `kitaru executions get/list/retry/cancel`) are functional. Other primitives remain in progress.
+> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.wait()`, `kitaru.llm()`, `kitaru.configure()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), local model alias CLI (`kitaru model register/list`), `KitaruClient` execution/artifact browsing + wait-input lifecycle surface, typed Kitaru exceptions + failure journaling (`execution.failure`, checkpoint attempt history), core connection/login CLI paths, `kitaru stack list/current/use`, `kitaru log-store set/show/reset`, `kitaru secrets set/show/list/delete`, and execution lifecycle CLI commands (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`) are functional. Replay and some CLI extensions remain in progress.
 
 ### Current MVP primitives
 
@@ -121,17 +121,17 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 |---|---|
 | `@kitaru.flow` | Implemented |
 | `@kitaru.checkpoint` | Implemented |
-| `kitaru.wait()` | Scaffolded (not yet implemented) |
+| `kitaru.wait()` | Implemented |
 | `kitaru.llm()` | Implemented |
 | `kitaru.log()` | Implemented |
 | `kitaru.save()` | Implemented |
 | `kitaru.load()` | Implemented |
 | Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
 | `kitaru.configure()` + Phase 10 config precedence | Implemented |
-| `KitaruClient` (`get/list/latest/cancel/retry` + artifact browsing) | Implemented |
-| Execution CLI (`kitaru run`, `kitaru executions get/list/retry/cancel`) | Implemented |
+| `KitaruClient` (`get/list/latest/input/resume/cancel/retry` + artifact browsing) | Implemented |
+| Execution CLI (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
-| `KitaruClient.input()` / replay | Stubbed (branch-dependent) |
+| `KitaruClient.executions.replay()` | Stubbed (branch-dependent) |
 
 ### Key design patterns
 

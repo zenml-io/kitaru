@@ -10,10 +10,10 @@ Start at Phase 1 and work forward. Don't skip ahead.
 2. **SDK before CLI** (except login). The CLI wraps the SDK, so build the SDK first.
 
 **External blocker (updated March 2026):** The ZenML `feature/pause-pipeline-runs`
-branch now has working `wait()` and resume support, so Phase 15 is **unblocked**.
-Phase 16 remains **partially blocked** because replay/resume wiring is not yet
-wrapped end-to-end in Kitaru. See the "What to do when you're blocked" section at
-the bottom for current status.
+branch now has working wait/resume support and Kitaru has wrapped Phase 15.
+Phase 16 remains **partially blocked** because replay wrappers are not yet
+implemented end-to-end in Kitaru. See the "What to do when you're blocked"
+section at the bottom for current status.
 
 **Ownership boundary:** ZenML owns the hard durability machinery (retry, resume,
 replay, snapshots, divergence detection). Kitaru defines the user-visible contract
@@ -455,8 +455,6 @@ registry, alias resolution, and credential fetching are the main work.
 
 **Deferred to later phases:**
 
-- `kitaru executions input <exec_id> --wait <name> --value <json>`
-  - depends on `kitaru.wait()` + resume wiring (Phase 15)
 - `kitaru executions replay <exec_id> --from <call_name> [--input key=val] [--override ...]`
   - depends on replay machinery (Phase 16)
 - `kitaru executions logs <exec_id> [--follow]`
@@ -519,7 +517,7 @@ don't reimplement.
 **Branch status (March 2026):**
 - **Replay:** Kitaru replay API/CLI wrappers remain stubbed and need implementation
 - **Retry:** implemented in Kitaru (`client.executions.retry(...)`, `kitaru executions retry`)
-- **Resume/input:** still blocked in Kitaru until Phase 15 (`kitaru.wait()` + resume wiring)
+- **Resume/input:** implemented in Kitaru via `kitaru.wait()`, `client.executions.input(...)`, and `client.executions.resume(...)`
 
 **What to do:**
 - Client methods:
@@ -679,9 +677,9 @@ Phase 11  -- KitaruClient (execution mgmt first) ---------------------- DONE
 Phase 11.5-- Secrets surface (wraps ZenML secrets) -------------------- DONE
 Phase 12 -- kitaru.llm() (LiteLLM + registry + secrets) --------------- DONE
 Phase 13 -- Error handling --------------------------------------------- DONE
-Phase 14 -- CLI commands (tiered) ------------------------------------- PARTIALLY DONE
-Phase 15 -- kitaru.wait() + resume ------------------------------------ UNBLOCKED (wait+resume work on branch)
-Phase 16 -- Replay + overrides (direct kwargs) ------------------------ PARTIALLY BLOCKED (replay/input wrappers pending)
+Phase 14 -- CLI commands (tiered) ------------------------------------- DONE
+Phase 15 -- kitaru.wait() + resume ------------------------------------ DONE
+Phase 16 -- Replay + overrides (direct kwargs) ------------------------ PARTIALLY BLOCKED (replay wrappers pending)
 Phase 17 -- PydanticAI adapter (incl HITL tools) ---------------------- Medium
 Phase 18 -- Stack creation + sandbox ---------------------------------- Large
 Phase 19 -- Agent-native integrations (MCP + skill) ------------------- Medium
@@ -702,27 +700,25 @@ Phase 20 -- Examples, docs, polish ------------------------------------ Final
 ## What to do when you're blocked
 
 **Updated March 2026:** The ZenML `feature/pause-pipeline-runs` branch now has
-working `wait()` and resume. Phase 15 is **unblocked**. Phase 16 is **partially
-blocked** in Kitaru because replay/input wrappers are not implemented yet.
+working wait/resume support and Kitaru Phase 15 is complete. Phase 16 is
+**partially blocked** in Kitaru because replay wrappers are not implemented yet.
 
 ### Current blocker status
 
 | Phase | Status | What's blocked |
 |---|---|---|
-| Phase 15 (`kitaru.wait()`) | **Unblocked** | `zenml.wait(...)` works; resume works (auto on Pro, manual elsewhere) |
+| Phase 15 (`kitaru.wait()`) | **Done** | `kitaru.wait(...)`, `client.executions.input(...)`, and manual `executions resume` wrappers are implemented |
 | Phase 16 (replay) | **Partially blocked** | Replay API/CLI wrappers are still stubbed in Kitaru |
 | Phase 16 (retry) | **Unblocked in Kitaru** | `client.executions.retry(...)` and CLI retry are implemented |
-| Phase 16 (resume/input) | **Blocked in Kitaru** | `client.executions.input(...)` remains stubbed pending Phase 15 wait integration |
 
 ### What to do now
 
-1. **Phase 15 can be built now.** Wrap `zenml.wait(...)` and handle the two resume
-   paths (auto on Pro, manual elsewhere)
-2. **Keep `client.executions.retry(...)` as-is** and validate against live backends as wait/replay work lands
-3. **Replay** should be implemented once the replay machinery can be wrapped safely in Kitaru
-4. Phase 11.5 (secrets) wraps ZenML's existing secret store — no upstream dependency
+1. **Phase 15 is complete.** `kitaru.wait(...)`, wait input, and manual resume wrappers are now in Kitaru.
+2. **Keep `client.executions.retry(...)` as-is** and validate against live backends as replay work lands.
+3. **Replay** should be implemented once the replay machinery can be wrapped safely in Kitaru.
+4. Phase 11.5 (secrets) wraps ZenML's existing secret store — no upstream dependency.
 5. Phase 12 (`kitaru.llm()`) uses LiteLLM + a local model registry + ZenML secrets
-   for remote credentials — depends on Phase 11.5 but has no upstream ZenML branch dependency
+   for remote credentials — depends on Phase 11.5 but has no upstream ZenML branch dependency.
 
 ## How to use this plan
 
