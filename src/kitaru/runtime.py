@@ -158,6 +158,21 @@ def _checkpoint_scope(
         _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
 
 
+@contextmanager
+def _suspend_checkpoint_scope() -> Iterator[None]:
+    """Temporarily clear checkpoint scope while keeping flow scope active.
+
+    This internal helper is used by framework adapters that need to trigger
+    flow-level operations (for example `kitaru.wait()`) during framework-internal
+    execution that otherwise runs inside a checkpoint.
+    """
+    checkpoint_token = _CURRENT_CHECKPOINT_SCOPE.set(None)
+    try:
+        yield
+    finally:
+        _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
+
+
 def _get_current_flow() -> _FlowScope | None:
     """Get the currently active flow scope, if any."""
     return _CURRENT_FLOW_SCOPE.get()

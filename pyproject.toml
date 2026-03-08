@@ -29,6 +29,9 @@ dependencies = [
 local = [
     "zenml[local]>=0.94.0",
 ]
+pydantic-ai = [
+    "pydantic-ai-slim>=0.2.0",
+]
 
 [project.scripts]
 kitaru = "kitaru.cli:cli"
@@ -60,6 +63,7 @@ dev = [
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
+    "pydantic-ai-slim>=0.2.0",
 ]
 
 [tool.ruff]

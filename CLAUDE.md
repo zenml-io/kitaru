@@ -15,9 +15,9 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 ```
 src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
-  adapters/           # Framework adapter stubs (not yet implemented)
+  adapters/           # Framework adapters (includes PydanticAI)
 tests/                # pytest tests
-examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15 milestones)
+examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15/17 milestones)
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -141,9 +141,11 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 - **Replay** works by re-running the flow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
 - **Artifact overrides** let you swap a checkpoint's cached output during replay
 
-### Framework adapters (planned)
+### Framework adapters
 
-The `adapters/` directory is scaffolded but empty. The planned PydanticAI adapter will wrap agents so each model request → `checkpoint(type='llm_call')` and each tool call → `checkpoint(type='tool_call')` automatically.
+The first framework adapter is implemented: `kitaru.adapters.pydantic_ai.wrap(agent)`.
+
+It keeps the enclosing checkpoint as the replay boundary, while tracking PydanticAI model requests and tool calls as child events/metadata under that checkpoint. The adapter also supports HITL marker tools via `kitaru.adapters.pydantic_ai.hitl_tool(...)`.
 
 ### Observability (current MVP + planned)
 

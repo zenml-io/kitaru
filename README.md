@@ -22,6 +22,8 @@ Phase 14 adds the first execution lifecycle CLI layer on top of `KitaruClient`: 
 
 Phase 15 adds durable wait/resume support: `kitaru.wait(...)`, `client.executions.input(...)`, `client.executions.resume(...)`, plus CLI commands `kitaru executions input` and `kitaru executions resume`.
 
+Phase 17 adds the first framework adapter: `kitaru.adapters.pydantic_ai.wrap(agent)`. Wrapped PydanticAI model requests and tool calls are tracked as child events under the enclosing checkpoint, and `@kitaru.adapters.pydantic_ai.hitl_tool(...)` can translate agent-level HITL requests into flow-level waits.
+
 ### SDK primitives
 
 ```python
@@ -144,6 +146,22 @@ You can also run the integration test for this example:
 
 ```bash
 uv run pytest tests/test_phase15_wait_example.py
+```
+
+### Run the PydanticAI adapter workflow
+
+The repository includes a runnable Phase 17 example at
+`examples/pydantic_ai_adapter.py`.
+
+```bash
+uv sync --extra local --extra pydantic-ai
+uv run python -m examples.pydantic_ai_adapter
+```
+
+You can also run the integration test for this example:
+
+```bash
+uv run pytest tests/test_phase17_pydantic_ai_example.py
 ```
 
 ### Run the LLM workflow

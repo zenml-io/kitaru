@@ -7,6 +7,7 @@
     "configuration",
     "execution-management",
     "wait-and-resume",
+    "pydantic-ai-adapter",
     "error-handling",
     "artifacts",
     "stack-selection",

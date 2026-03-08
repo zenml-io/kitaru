@@ -1,0 +1,71 @@
+---
+title: PydanticAI Adapter
+description: Wrap existing PydanticAI agents so model/tool activity is tracked inside Kitaru checkpoints
+---
+
+Kitaru's PydanticAI adapter lets you reuse an existing PydanticAI agent with Kitaru durability.
+
+Use it when you want:
+
+- an explicit outer `@kitaru.checkpoint` replay boundary
+- child-event visibility for agent model calls and tool calls
+- optional human input from adapter tools via flow-level `kitaru.wait(...)`
+
+## 1) Install optional adapter dependency
+
+```bash
+uv sync --extra local --extra pydantic-ai
+```
+
+## 2) Wrap an agent
+
+```python
+import kitaru
+from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
+from kitaru.adapters import pydantic_ai as kp
+
+researcher = kp.wrap(
+    Agent(TestModel(), name="researcher"),
+)
+
+@kitaru.checkpoint(type="llm_call")
+def run_research(topic: str) -> str:
+    return researcher.run_sync(f"Research {topic}").output
+
+@kitaru.flow
+def research_flow(topic: str) -> str:
+    return run_research(topic)
+```
+
+The outer checkpoint remains the replay boundary. Adapter-internal model/tool calls are tracked as child events under that checkpoint.
+
+## 3) Add adapter-level HITL tools (optional)
+
+```python
+@kp.hitl_tool(question="Approve publish?", schema=bool)
+def approve_publish(summary: str) -> bool:
+    # Body is skipped in HITL mode.
+    return False
+```
+
+When the agent invokes this tool, the adapter translates it to a flow-level `kitaru.wait(...)` under the hood.
+
+## Runtime behavior and guardrails
+
+- No nested checkpoint replay boundaries are introduced by the adapter.
+- Adapter child events stay child events; they do not become standalone durable calls.
+- Adapter HITL tools suspend at flow level and resume with recorded wait input.
+
+## Example in this repository
+
+```bash
+uv sync --extra local --extra pydantic-ai
+uv run python -m examples.pydantic_ai_adapter
+```
+
+The example prints:
+
+- execution ID
+- final result
+- child-event count captured under the checkpoint metadata
