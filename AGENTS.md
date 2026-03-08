@@ -9,7 +9,6 @@ src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapters (includes PydanticAI)
   mcp/                # MCP server tools (optional `kitaru[mcp]` extra)
-  skills/             # Packaged Claude Code skill markdown
 tests/                # pytest tests
 tests/mcp/            # MCP-specific tests (runs in `[mcp]` CI path)
 examples/             # Runnable SDK examples

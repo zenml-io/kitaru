@@ -17,7 +17,6 @@ src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapters (includes PydanticAI)
   mcp/                # MCP server tools (optional `kitaru[mcp]` extra)
-  skills/             # Packaged Claude Code skill markdown
 tests/                # pytest tests
 tests/mcp/            # MCP-specific unit tests (runs in `[mcp]` CI path)
 examples/             # Runnable SDK examples
@@ -32,6 +31,8 @@ scripts/              # Doc generation + site merge scripts
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
+.claude-plugin/       # Claude Code plugin marketplace + skill distribution
+  skills/kitaru-authoring/  # Kitaru authoring skill (SKILL.md)
 spec/                 # SDK design specifications (reference material)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)

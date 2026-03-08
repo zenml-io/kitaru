@@ -1,3 +1,13 @@
+---
+name: kitaru-authoring
+description: >
+  Guide for writing Kitaru durable agent workflows. Use when creating or
+  refactoring Kitaru flows, checkpoints, waits, logging, artifacts, LLM calls,
+  or PydanticAI adapter usage. Triggers on mentions of kitaru, @kitaru.flow,
+  @kitaru.checkpoint, kitaru.wait, kitaru.log, kitaru.save, kitaru.load,
+  kitaru.llm, or durable execution patterns.
+---
+
 # Kitaru Authoring Skill
 
 Use this guide when writing or refactoring Kitaru workflows.

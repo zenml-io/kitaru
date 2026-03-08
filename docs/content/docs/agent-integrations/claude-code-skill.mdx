@@ -1,14 +1,10 @@
 ---
 title: Claude Code Skill
-description: Install and use the packaged Kitaru authoring skill
+description: Install the Kitaru authoring skill for Claude Code
 ---
 
-Kitaru ships a Claude Code skill file at:
-
-- `kitaru/skills/kitaru-authoring.md` (inside the installed package)
-
-The skill teaches Claude how to write valid Kitaru flows, checkpoints, waits,
-and adapter usage patterns.
+Kitaru provides a Claude Code skill that teaches Claude how to write valid
+Kitaru flows, checkpoints, waits, and adapter usage patterns.
 
 ## What the skill covers
 
@@ -19,17 +15,29 @@ and adapter usage patterns.
 - PydanticAI adapter guidance (`kitaru.adapters.pydantic_ai.wrap(...)`)
 - Common mistakes (nested flows, non-serializable checkpoint outputs, etc.)
 
-## Install in your project
+## Install from the marketplace
+
+The Kitaru skill is published as a Claude Code plugin. Add the marketplace and
+install with two commands:
 
 ```bash
-mkdir -p .claude/skills
-cp "$(uv run python -c 'import kitaru.skills; print(kitaru.skills.__path__[0])')/kitaru-authoring.md" .claude/skills/
+/plugin marketplace add zenml-io/kitaru
+/plugin install kitaru@kitaru
 ```
 
-## Optional global installation
+Once installed, Claude Code will automatically use the skill when you ask it to
+write or refactor Kitaru workflows. You can also invoke it explicitly with
+`/kitaru-authoring`.
 
-If you keep shared Claude tooling in a global skills directory, copy the same
-file there instead.
+## Manual installation
+
+If you prefer to copy the skill file directly:
+
+```bash
+mkdir -p .claude/skills/kitaru-authoring
+curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru/develop/.claude-plugin/skills/kitaru-authoring/SKILL.md \
+  -o .claude/skills/kitaru-authoring/SKILL.md
+```
 
 ## Good prompts to pair with the skill
 
