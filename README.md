@@ -24,6 +24,8 @@ Phase 15 adds durable wait/resume support: `kitaru.wait(...)`, `client.execution
 
 Phase 17 adds the first framework adapter: `kitaru.adapters.pydantic_ai.wrap(agent)`. Wrapped PydanticAI model requests and tool calls are tracked as child events under the enclosing checkpoint, and `@kitaru.adapters.pydantic_ai.hitl_tool(...)` can translate agent-level HITL requests into flow-level waits.
 
+Phase 19 adds agent-native integrations: an optional MCP server (`kitaru-mcp`) with structured execution/artifact/status query tools, plus a packaged Claude Code skill (`kitaru.skills/kitaru-authoring.md`) for reliable Kitaru authoring patterns.
+
 ### SDK primitives
 
 ```python
@@ -148,6 +150,22 @@ You can also run the integration test for this example:
 uv run pytest tests/test_phase15_wait_example.py
 ```
 
+### Run the MCP query example
+
+The repository includes a runnable Phase 19 example at
+`examples/mcp_query_tools.py`.
+
+```bash
+uv sync --extra local --extra mcp
+uv run python -m examples.mcp_query_tools
+```
+
+You can also run the unit test for this example and MCP tool wrappers:
+
+```bash
+uv run pytest tests/mcp/test_phase19_mcp_example.py tests/mcp/test_server.py
+```
+
 ### Run the PydanticAI adapter workflow
 
 The repository includes a runnable Phase 17 example at
@@ -187,6 +205,7 @@ uv run pytest tests/test_phase12_llm_example.py
 ```
 kitaru --version              Show the SDK version
 kitaru --help                 Show available commands
+kitaru-mcp                    Run the MCP server (requires kitaru[mcp])
 
 kitaru login <server>         Connect to a Kitaru server
 kitaru login <server> --api-key <key>
@@ -232,9 +251,11 @@ kitaru model list
 Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and [just](https://github.com/casey/just).
 
 ```bash
-uv sync                # Install dependencies
-uv sync --extra local  # Include local ZenML runtime components
-just --list            # Show all available recipes
+uv sync                            # Install dependencies
+uv sync --extra local              # Include local ZenML runtime components
+uv sync --extra mcp                # Include MCP server dependencies
+uv sync --extra local --extra mcp  # Local runtime + MCP tools
+just --list                        # Show all available recipes
 just check             # Run all checks (format, lint, typecheck, typos, yaml)
 just test              # Run tests
 just fix               # Auto-fix formatting, lint, and yaml

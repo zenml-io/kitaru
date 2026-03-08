@@ -1,0 +1,1 @@
+"""MCP-specific test suite."""

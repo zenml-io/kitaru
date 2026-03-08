@@ -544,7 +544,7 @@ don't reimplement.
 
 ---
 
-## Phase 17: PydanticAI adapter
+## Phase 17: PydanticAI adapter --- DONE
 
 **Goal:** Wrap PydanticAI agents so model/tool calls become tracked child events,
 with optional HITL via adapter tools.
@@ -689,9 +689,9 @@ Phase 13 -- Error handling --------------------------------------------- DONE
 Phase 14 -- CLI commands (tiered) ------------------------------------- DONE
 Phase 15 -- kitaru.wait() + resume ------------------------------------ DONE
 Phase 16 -- Replay + overrides (direct kwargs) ------------------------ PARTIALLY BLOCKED (replay wrappers pending)
-Phase 17 -- PydanticAI adapter (incl HITL tools) ---------------------- Medium
+Phase 17 -- PydanticAI adapter (incl HITL tools) ---------------------- DONE
 Phase 18 -- Stack creation + sandbox ---------------------------------- Large
-Phase 19 -- Agent-native integrations (MCP + skill) ------------------- Medium
+Phase 19 -- Agent-native integrations (MCP + skill) ------------------- DONE
 Phase 20 -- Examples, docs, polish ------------------------------------ Final
 ```
 

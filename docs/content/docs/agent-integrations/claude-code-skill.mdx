@@ -1,0 +1,43 @@
+---
+title: Claude Code Skill
+description: Install and use the packaged Kitaru authoring skill
+---
+
+Kitaru ships a Claude Code skill file at:
+
+- `kitaru/skills/kitaru-authoring.md` (inside the installed package)
+
+The skill teaches Claude how to write valid Kitaru flows, checkpoints, waits,
+and adapter usage patterns.
+
+## What the skill covers
+
+- `@kitaru.flow` and `@kitaru.checkpoint` roles
+- `kitaru.wait()` flow-level guardrails
+- `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`
+- `.submit()` / `.result()` checkpoint concurrency
+- PydanticAI adapter guidance (`kitaru.adapters.pydantic_ai.wrap(...)`)
+- Common mistakes (nested flows, non-serializable checkpoint outputs, etc.)
+
+## Install in your project
+
+```bash
+mkdir -p .claude/skills
+cp "$(uv run python -c 'import kitaru.skills; print(kitaru.skills.__path__[0])')/kitaru-authoring.md" .claude/skills/
+```
+
+## Optional global installation
+
+If you keep shared Claude tooling in a global skills directory, copy the same
+file there instead.
+
+## Good prompts to pair with the skill
+
+- "Refactor this script into one `@kitaru.flow` with explicit checkpoints."
+- "Add a flow-level `kitaru.wait()` approval gate before publish."
+- "Wrap this PydanticAI call in a Kitaru checkpoint and preserve replay safety."
+
+## Related pages
+
+- [MCP Server](/agent-integrations/mcp-server)
+- [Execution management](/getting-started/execution-management)

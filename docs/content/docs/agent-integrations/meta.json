@@ -1,0 +1,8 @@
+{
+  "title": "Agent Integrations",
+  "defaultOpen": true,
+  "pages": [
+    "mcp-server",
+    "claude-code-skill"
+  ]
+}
