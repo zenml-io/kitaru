@@ -16,6 +16,22 @@ description: Install Kitaru with uv or pip
   </Tab>
 </Tabs>
 
+## Optional extras
+
+Install MCP server support:
+
+```bash
+uv add kitaru --extra mcp
+# or: pip install "kitaru[mcp]"
+```
+
+Install PydanticAI adapter support:
+
+```bash
+uv add kitaru --extra pydantic-ai
+# or: pip install "kitaru[pydantic-ai]"
+```
+
 ## Verify Installation
 
 ```bash
@@ -33,4 +49,6 @@ kitaru --help
 ## Next Steps
 
 Head to the [Quickstart](/getting-started/quickstart) to explore what's
-available, or see the [CLI Reference](/cli) for command details.
+available, see [Execution management](/getting-started/execution-management)
+for lifecycle operations, or open [MCP Server](/agent-integrations/mcp-server)
+for assistant-native querying.

@@ -16,8 +16,11 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapters (includes PydanticAI)
+  mcp/                # MCP server tools (optional `kitaru[mcp]` extra)
+  skills/             # Packaged Claude Code skill markdown
 tests/                # pytest tests
-examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15/17 milestones)
+tests/mcp/            # MCP-specific unit tests (runs in `[mcp]` CI path)
+examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15/17/19 milestones)
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -103,7 +106,7 @@ just site-build && npx wrangler deploy   # Build + deploy
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, links, typecheck, tests (3.12 + 3.13) |
+| `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, links, typecheck, and tests across base installs (3.12 + 3.13) plus an additional `kitaru[mcp]` test lane |
 | `site.yml` | Push to `main`; PRs touching docs/site/scripts | Build + deploy unified site; PR preview Workers |
 | `release.yml` | Workflow dispatch or `v*` tag | Version bump, PyPI publish, GitHub Release |
 | `spellcheck.yml` | Push/PR to `develop` | Separate typo/spell checking |
@@ -113,7 +116,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.wait()`, `kitaru.llm()`, `kitaru.configure()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), local model alias CLI (`kitaru model register/list`), `KitaruClient` execution/artifact browsing + wait-input lifecycle surface, typed Kitaru exceptions + failure journaling (`execution.failure`, checkpoint attempt history), core connection/login CLI paths, `kitaru stack list/current/use`, `kitaru log-store set/show/reset`, `kitaru secrets set/show/list/delete`, and execution lifecycle CLI commands (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`) are functional. Replay and some CLI extensions remain in progress.
+> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.wait()`, `kitaru.llm()`, `kitaru.configure()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), local model alias CLI (`kitaru model register/list`), `KitaruClient` execution/artifact browsing + wait-input lifecycle surface, typed Kitaru exceptions + failure journaling (`execution.failure`, checkpoint attempt history), core connection/login CLI paths, `kitaru stack list/current/use`, `kitaru log-store set/show/reset`, `kitaru secrets set/show/list/delete`, execution lifecycle CLI commands (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`), and the optional MCP server (`kitaru-mcp`) are functional. Replay and some CLI extensions remain in progress.
 
 ### Current MVP primitives
 

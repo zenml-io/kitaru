@@ -19,7 +19,8 @@ instead of starting over.
   Kitaru is in early development. Core SDK primitives are now available
   (`@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`,
   `kitaru.load()`, `kitaru.configure()`), plus stack selection helpers
-  (`list_stacks`, `current_stack`, `use_stack`).
+  (`list_stacks`, `current_stack`, `use_stack`), an MCP server (`kitaru-mcp`),
+  and a packaged Claude Code authoring skill.
 </Callout>
 
 ## Current Status
@@ -33,6 +34,7 @@ Kitaru **0.1.0** includes:
 - Runtime configuration defaults via `kitaru.configure(...)`
 - Stack selection commands (`stack list/current/use`)
 - Global runtime log-store commands (`log-store set/show/reset`)
+- Agent-native integrations: MCP server + Claude Code skill
 - Project infrastructure (CI, testing, linting, type checking)
 
 Additional SDK primitives and framework adapters are under active development.
@@ -54,6 +56,16 @@ Additional SDK primitives and framework adapters are under active development.
     title="CLI Reference"
     description="Available commands and options"
     href="/cli"
+  />
+  <Card
+    title="MCP Server"
+    description="Query and manage executions via MCP tools"
+    href="/agent-integrations/mcp-server"
+  />
+  <Card
+    title="Claude Code Skill"
+    description="Install the packaged Kitaru authoring skill"
+    href="/agent-integrations/claude-code-skill"
   />
   <Card
     title="Configuration"

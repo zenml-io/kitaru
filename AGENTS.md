@@ -8,8 +8,11 @@ Kitaru is a **mixed Python + web repo** that produces three things: a Python SDK
 src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapters (includes PydanticAI)
+  mcp/                # MCP server tools (optional `kitaru[mcp]` extra)
+  skills/             # Packaged Claude Code skill markdown
 tests/                # pytest tests
-examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15/17 milestones)
+tests/mcp/            # MCP-specific tests (runs in `[mcp]` CI path)
+examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15/17/19 milestones)
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -103,7 +106,7 @@ Link related issues (for example `Fixes #123`) when applicable.
 
 ### Python CI (`ci.yml`)
 
-Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, link check, and tests (Python 3.12 + 3.13).
+Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, link check, base tests (Python 3.12 + 3.13), and an extra test lane with `kitaru[mcp]` installed.
 
 ### Site CI (`site.yml`)
 

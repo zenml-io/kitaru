@@ -32,9 +32,13 @@ local = [
 pydantic-ai = [
     "pydantic-ai-slim>=0.2.0",
 ]
+mcp = [
+    "mcp>=1.26.0",
+]
 
 [project.scripts]
 kitaru = "kitaru.cli:cli"
+kitaru-mcp = "kitaru.mcp:main"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
@@ -50,6 +54,9 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kitaru"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/kitaru/skills" = "kitaru/skills"
 
 [dependency-groups]
 dev = [
