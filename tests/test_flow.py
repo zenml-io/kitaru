@@ -108,10 +108,11 @@ def test_flow_decorator_creates_callable_with_start_and_deploy() -> None:
     assert hasattr(wrapped, "start")
     assert hasattr(wrapped, "deploy")
     assert isinstance(handle, FlowHandle)
-    base_pipeline.with_options.assert_called_once_with(
+    call_kwargs = base_pipeline.with_options.call_args
+    assert call_kwargs == call(
         enable_cache=True,
         retry=None,
-        settings=None,
+        settings={"docker": DockerSettings(requirements=["kitaru"])},
     )
 
 
@@ -177,7 +178,7 @@ def test_deploy_is_start_sugar_with_stack_override() -> None:
         )
 
     settings = base_pipeline.with_options.call_args.kwargs["settings"]
-    assert settings is None
+    assert settings == {"docker": DockerSettings(requirements=["kitaru"])}
     assert base_pipeline.with_options.call_args.kwargs["enable_cache"] is True
     assert base_pipeline.with_options.call_args.kwargs["retry"] is None
     assert client_mock.activate_stack.call_args_list == [

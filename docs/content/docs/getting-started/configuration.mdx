@@ -81,6 +81,36 @@ base_image = "python:3.12-slim"
 OPENAI_API_KEY = "{{ OPENAI_KEY }}"
 ```
 
+## Automatic package injection
+
+Kitaru automatically adds itself to the container image requirements for remote
+execution. You never need to add `kitaru` to your `requirements` list manually —
+it is injected at build time so that remote containers always have the SDK
+available.
+
+If you specify your own requirements, Kitaru appends itself without duplicating:
+
+```python
+kitaru.configure(
+    image=kitaru.ImageSettings(
+        requirements=["httpx", "pydantic"],
+    ),
+)
+# Remote container installs: httpx, pydantic, kitaru
+```
+
+If you already include `kitaru` (with or without a version pin), it is not added
+again:
+
+```python
+kitaru.configure(
+    image=kitaru.ImageSettings(
+        requirements=["kitaru>=0.2.0", "httpx"],
+    ),
+)
+# Remote container installs: kitaru>=0.2.0, httpx (no duplicate)
+```
+
 ## Frozen execution spec
 
 At flow start, Kitaru computes a fully resolved execution config and persists it
