@@ -257,6 +257,8 @@ class ImageSettings(BaseModel):
     requirements: list[str] | None = None
     dockerfile: str | None = None
     environment: dict[str, str] | None = None
+    apt_packages: list[str] | None = None
+    replicate_local_python_environment: bool | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -306,6 +308,8 @@ class ImageSettings(BaseModel):
             and self.requirements is None
             and self.dockerfile is None
             and self.environment is None
+            and self.apt_packages is None
+            and self.replicate_local_python_environment is None
         )
 
 
@@ -420,11 +424,16 @@ def _coerce_image_input(value: Any) -> ImageSettings | None:
     if isinstance(value, ImageSettings):
         return value
     if isinstance(value, DockerSettings):
+        replicate = value.replicate_local_python_environment
         return ImageSettings(
             base_image=value.parent_image,
             requirements=value.requirements,
             dockerfile=value.dockerfile,
             environment=value.environment,
+            apt_packages=value.apt_packages or None,
+            replicate_local_python_environment=(
+                replicate if isinstance(replicate, bool) else None
+            ),
         )
     if isinstance(value, str):
         normalized_image = value.strip()
@@ -477,6 +486,16 @@ def _merge_image_settings(
             override.dockerfile if override.dockerfile is not None else base.dockerfile
         ),
         environment=merged_environment,
+        apt_packages=(
+            override.apt_packages
+            if override.apt_packages is not None
+            else base.apt_packages
+        ),
+        replicate_local_python_environment=(
+            override.replicate_local_python_environment
+            if override.replicate_local_python_environment is not None
+            else base.replicate_local_python_environment
+        ),
     )
 
 
@@ -723,7 +742,7 @@ def resolve_connection_config(
     return resolved
 
 
-_KITARU_PKG_SPECIFIER_RE = re.compile(r"[\[><=!~;\s]")
+_KITARU_PKG_SPECIFIER_RE = re.compile(r"[\[><=!~;@\s]")
 
 
 def _requirements_include_kitaru(requirements: list[str]) -> bool:
@@ -758,6 +777,12 @@ def image_settings_to_docker_settings(
         docker_settings_kwargs["dockerfile"] = image_settings.dockerfile
     if image_settings.environment is not None:
         docker_settings_kwargs["environment"] = image_settings.environment
+    if image_settings.apt_packages is not None:
+        docker_settings_kwargs["apt_packages"] = image_settings.apt_packages
+    if image_settings.replicate_local_python_environment is not None:
+        docker_settings_kwargs["replicate_local_python_environment"] = (
+            image_settings.replicate_local_python_environment
+        )
 
     return DockerSettings(**docker_settings_kwargs)
 

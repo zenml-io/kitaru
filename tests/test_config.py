@@ -575,6 +575,36 @@ def test_kitaru_not_duplicated_when_pinned_version_in_requirements() -> None:
     assert docker_settings.requirements == ["kitaru>=0.2.0", "httpx"]
 
 
+def test_kitaru_not_duplicated_when_git_url_in_requirements() -> None:
+    """Kitaru should not be added if a git direct reference is already present."""
+    git_ref = "kitaru @ git+https://github.com/zenml-io/kitaru.git@develop"
+    image_settings = ImageSettings(requirements=[git_ref, "httpx"])
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == [git_ref, "httpx"]
+
+
+def test_replicate_local_python_environment_passes_through() -> None:
+    """replicate_local_python_environment should flow through to DockerSettings."""
+    image_settings = ImageSettings(replicate_local_python_environment=True)
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.replicate_local_python_environment is True
+    assert docker_settings.requirements == ["kitaru"]
+
+
+def test_apt_packages_passes_through() -> None:
+    """apt_packages should flow through to DockerSettings."""
+    image_settings = ImageSettings(apt_packages=["git", "curl"])
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.apt_packages == ["git", "curl"]
+    assert docker_settings.requirements == ["kitaru"]
+
+
 def test_connection_resolution_precedence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

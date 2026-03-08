@@ -61,6 +61,15 @@ test *ARGS:
 build:
     uv build
 
+# Build and push dev base image for remote stack testing (K8s, etc.)
+# The image bakes in kitaru + its zenml git dependency from local source.
+# Pass REPO to override the target registry/image.
+dev-image REPO="strickvl/kitaru-dev":
+    docker build -f docker/Dockerfile.dev -t kitaru-dev .
+    docker tag kitaru-dev {{ REPO }}:latest
+    docker push {{ REPO }}:latest
+    @printf 'Dev image pushed to {{ REPO }}:latest\n'
+
 # Generate all docs content from Python source (CLI reference + changelog + SDK reference)
 generate-docs:
     uv run python scripts/generate_cli_docs.py
