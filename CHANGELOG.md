@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- PydanticAI framework adapter: `kitaru.adapters.pydantic_ai.wrap(agent)` for checkpoint-scoped child-event tracking of model/tool activity
+- Adapter HITL tool decorator: `kitaru.adapters.pydantic_ai.hitl_tool(...)` with flow-level wait translation
+- Optional dependency extra: `pydantic-ai` (`pydantic-ai-slim`)
+- Phase 17 runnable example: `examples/pydantic_ai_adapter.py`
+- Phase 17 integration/unit tests for adapter tracking, runtime scope suspension, and HITL behavior
+- Getting Started docs page for the PydanticAI adapter (`/getting-started/pydantic-ai-adapter`)
 - Typed Kitaru exception hierarchy (`KitaruError`, `KitaruContextError`, `KitaruStateError`, `KitaruExecutionError`, `KitaruUserCodeError`, `KitaruDivergenceError`, `KitaruFeatureNotAvailableError`, and related types)
 - Failure journaling in `KitaruClient`: structured execution-level failure details (`execution.failure`) and per-checkpoint retry attempt history (`checkpoint.attempts`)
 - Phase 14 execution CLI commands: `kitaru run`, `kitaru executions get/list/retry/cancel`
@@ -49,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Environment override support for runtime log-store resolution
 
 ### Changed
+- Runtime internals now include `_suspend_checkpoint_scope()` to support adapter-managed flow-level waits during checkpoint-local agent execution
 - Kitaru global config persistence now uses field-preserving updates, so log-store and model-registry settings no longer clobber each other
 - Updated README, CLAUDE guide, AGENTS guide, and docs pages to reflect shipped LLM/model-registry functionality and current implemented primitive status
 - Updated execution-management docs to cover shipped wait/input/resume commands and clearly defer replay/log streaming
