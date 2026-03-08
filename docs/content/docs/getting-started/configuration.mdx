@@ -111,6 +111,34 @@ kitaru.configure(
 # Remote container installs: kitaru>=0.2.0, httpx (no duplicate)
 ```
 
+### Replicating your local environment
+
+During development, you can replicate your entire local Python environment into
+the remote container. This installs all locally installed packages (via
+`pip freeze`) so the remote container matches your dev setup exactly:
+
+```python
+@kitaru.flow(image={"replicate_local_python_environment": True})
+def my_flow(topic: str) -> str:
+    ...
+```
+
+### System packages
+
+If your flow needs system-level dependencies (e.g., `git`, `ffmpeg`), use
+`apt_packages`:
+
+```python
+@kitaru.flow(
+    image=kitaru.ImageSettings(
+        apt_packages=["git", "ffmpeg"],
+        requirements=["httpx"],
+    ),
+)
+def my_flow(topic: str) -> str:
+    ...
+```
+
 ## Frozen execution spec
 
 At flow start, Kitaru computes a fully resolved execution config and persists it

@@ -101,7 +101,7 @@ handle = my_agent.start("https://example.com", retries=3, cache=True)
 | `retries` | `0` | Number of automatic retries on failure |
 | `cache` | `True` | Whether checkpoint results can be reused from previous runs |
 | `stack` | `None` | Target execution environment for this run (overrides the active stack default) |
-| `image` | `None` | Container image for remote execution (string, mapping, or settings object) |
+| `image` | `None` | Container image for remote execution (string, mapping, or settings object). Supports `base_image`, `requirements`, `environment`, `apt_packages`, `replicate_local_python_environment`, and `dockerfile`. |
 
 Per-run values override decorator defaults. If you don't pass an override, the
 decorator default applies.
