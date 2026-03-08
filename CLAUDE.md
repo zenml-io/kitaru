@@ -20,7 +20,7 @@ src/kitaru/           # Python SDK package (src layout)
   skills/             # Packaged Claude Code skill markdown
 tests/                # pytest tests
 tests/mcp/            # MCP-specific unit tests (runs in `[mcp]` CI path)
-examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15/17/19 milestones)
+examples/             # Runnable SDK examples
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -32,7 +32,7 @@ scripts/              # Doc generation + site merge scripts
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
-spec/                 # SDK design specifications (temporary, deleted once implemented)
+spec/                 # SDK design specifications (reference material)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
@@ -116,7 +116,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.wait()`, `kitaru.llm()`, `kitaru.configure()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), local model alias CLI (`kitaru model register/list`), `KitaruClient` execution/artifact browsing + wait-input lifecycle surface, typed Kitaru exceptions + failure journaling (`execution.failure`, checkpoint attempt history), core connection/login CLI paths, `kitaru stack list/current/use`, `kitaru log-store set/show/reset`, `kitaru secrets set/show/list/delete`, execution lifecycle CLI commands (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`), and the optional MCP server (`kitaru-mcp`) are functional. Replay and some CLI extensions remain in progress.
+> **Note:** Most SDK primitives and CLI commands are implemented (see table below). Replay (`client.executions.replay()`) and a few CLI extensions remain in progress.
 
 ### Current MVP primitives
 
@@ -130,7 +130,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.save()` | Implemented |
 | `kitaru.load()` | Implemented |
 | Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
-| `kitaru.configure()` + Phase 10 config precedence | Implemented |
+| `kitaru.configure()` + config precedence | Implemented |
 | `KitaruClient` (`get/list/latest/input/resume/cancel/retry` + artifact browsing) | Implemented |
 | Execution CLI (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |

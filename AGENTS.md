@@ -12,7 +12,7 @@ src/kitaru/           # Python SDK package (src layout)
   skills/             # Packaged Claude Code skill markdown
 tests/                # pytest tests
 tests/mcp/            # MCP-specific tests (runs in `[mcp]` CI path)
-examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15/17/19 milestones)
+examples/             # Runnable SDK examples
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
