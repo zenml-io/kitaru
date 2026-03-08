@@ -42,10 +42,13 @@ class TestBuildCommandTree:
 
         tree = build_command_tree(app)
         assert [sub.name for sub in tree.subcommands] == [
+            "executions",
             "info",
             "log-store",
             "login",
             "logout",
+            "model",
+            "run",
             "secrets",
             "stack",
             "status",
@@ -206,10 +209,13 @@ class TestWriteDocsTree:
         assert meta["title"] == "CLI Reference"
         assert meta["pages"] == [
             "index",
+            "executions",
             "info",
             "log-store",
             "login",
             "logout",
+            "model",
+            "run",
             "secrets",
             "stack",
             "status",
@@ -232,21 +238,29 @@ class TestWriteDocsTree:
         tree = build_command_tree(app)
         files = write_docs_tree(tree, output_dir)
 
-        for command in ("info", "login", "logout", "status"):
+        for command in ("info", "login", "logout", "run", "status"):
             assert (output_dir / f"{command}.mdx").exists()
             assert f"{command}.mdx" in files
             # No directory or meta.json for leaf commands
             assert not (output_dir / command / "index.mdx").exists()
             assert not (output_dir / command / "meta.json").exists()
 
-        # log-store, secrets, and stack have nested subcommands.
-        for command in ("log-store", "secrets", "stack"):
+        # executions, log-store, model, secrets, and stack have nested subcommands.
+        for command in ("executions", "log-store", "model", "secrets", "stack"):
             assert (output_dir / command / "index.mdx").exists()
             assert (output_dir / command / "meta.json").exists()
+
+        for command in ("cancel", "get", "list", "retry"):
+            assert (output_dir / "executions" / f"{command}.mdx").exists()
+            assert f"executions/{command}.mdx" in files
 
         for command in ("set", "show", "reset"):
             assert (output_dir / "log-store" / f"{command}.mdx").exists()
             assert f"log-store/{command}.mdx" in files
+
+        for command in ("list", "register"):
+            assert (output_dir / "model" / f"{command}.mdx").exists()
+            assert f"model/{command}.mdx" in files
 
         for command in ("delete", "list", "set", "show"):
             assert (output_dir / "secrets" / f"{command}.mdx").exists()

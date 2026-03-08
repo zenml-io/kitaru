@@ -32,8 +32,9 @@ Current status:
   intentionally stubbed pending wait/replay backend support.
 
 The CLI also supports global runtime log-store configuration via
-``kitaru log-store set/show/reset`` and stack selection via
-``kitaru stack list/current/use``.
+``kitaru log-store set/show/reset``, stack selection via
+``kitaru stack list/current/use``, and execution lifecycle commands via
+``kitaru run`` plus ``kitaru executions get/list/retry/cancel``.
 """
 
 from kitaru.artifacts import load, save

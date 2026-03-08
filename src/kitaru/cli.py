@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
+import json
 import os
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from importlib.metadata import version as get_version
-from typing import Annotated
+from pathlib import Path
+from types import ModuleType
+from typing import Annotated, Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 import cyclopts
@@ -23,6 +29,7 @@ from zenml.models import SecretResponse
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
+from kitaru.client import Execution, ExecutionStatus, KitaruClient
 from kitaru.config import (
     ModelAliasEntry,
     ResolvedLogStore,
@@ -76,10 +83,15 @@ model_app = cyclopts.App(
     name="model",
     help="Manage local model aliases for kitaru.llm().",
 )
+executions_app = cyclopts.App(
+    name="executions",
+    help="Inspect and manage flow executions.",
+)
 app.command(log_store_app)
 app.command(stack_app)
 app.command(secrets_app)
 app.command(model_app)
+app.command(executions_app)
 
 
 @dataclass
@@ -101,6 +113,199 @@ class RuntimeSnapshot:
     server_deployment_type: str | None = None
     local_server_status: str | None = None
     warning: str | None = None
+
+
+@runtime_checkable
+class _FlowHandleLike(Protocol):
+    """Protocol for flow handles returned by `.start()` / `.deploy()`."""
+
+    @property
+    def exec_id(self) -> str: ...
+
+
+@runtime_checkable
+class _FlowTarget(Protocol):
+    """Protocol for CLI-runnable flow objects."""
+
+    def start(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
+
+    def deploy(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
+
+
+def _load_module_from_python_path(module_path: str) -> ModuleType:
+    """Load a Python module from a filesystem path."""
+    path = Path(module_path).expanduser().resolve()
+    if not path.exists():
+        raise ValueError(f"Flow module path does not exist: {module_path}")
+    if path.suffix != ".py":
+        raise ValueError(
+            "Flow target file must be a Python file ending in `.py` "
+            f"(received: {module_path})."
+        )
+
+    module_name = f"_kitaru_cli_run_target_{abs(hash(path))}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Unable to load Python module from path: {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_flow_target(target: str) -> _FlowTarget:
+    """Load `<module_or_file>:<flow_name>` into a runnable flow object."""
+    module_ref, separator, attr_name = target.partition(":")
+    if separator != ":" or not module_ref or not attr_name:
+        raise ValueError(
+            "Flow target must use `<module_or_file>:<flow_name>` format "
+            f"(received: {target!r})."
+        )
+
+    try:
+        if module_ref.endswith(".py"):
+            module = _load_module_from_python_path(module_ref)
+        else:
+            module = importlib.import_module(module_ref)
+    except Exception as exc:
+        raise ValueError(f"Unable to import flow module `{module_ref}`: {exc}") from exc
+
+    try:
+        flow_obj = getattr(module, attr_name)
+    except AttributeError as exc:
+        raise ValueError(
+            f"Flow target `{target}` was not found: module `{module_ref}` "
+            f"has no attribute `{attr_name}`."
+        ) from exc
+
+    if not isinstance(flow_obj, _FlowTarget):
+        raise ValueError(
+            f"Target `{target}` is not a Kitaru flow object. "
+            "Expected an object created by `@kitaru.flow` with `.start()` support."
+        )
+
+    return flow_obj
+
+
+def _parse_json_value(raw_value: str, *, option_name: str) -> Any:
+    """Parse a CLI JSON option value and surface user-friendly errors."""
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid JSON for `{option_name}`: {exc.msg} "
+            f"(line {exc.lineno}, column {exc.colno})."
+        ) from exc
+
+
+def _parse_json_object(
+    raw_value: str | None,
+    *,
+    option_name: str,
+) -> dict[str, Any]:
+    """Parse a CLI JSON option that must decode to an object."""
+    if raw_value is None:
+        return {}
+    parsed = _parse_json_value(raw_value, option_name=option_name)
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"`{option_name}` must be a JSON object "
+            '(for example: \'{"topic": "AI"}\').'
+        )
+    return parsed
+
+
+def _format_timestamp(value: datetime | None) -> str:
+    """Format optional timestamps for CLI output."""
+    if value is None:
+        return "not available"
+    return value.isoformat(timespec="seconds")
+
+
+def _status_label(status: ExecutionStatus | str) -> str:
+    """Return a string label for execution/checkpoint statuses."""
+    if isinstance(status, ExecutionStatus):
+        return status.value
+    return str(status)
+
+
+def _checkpoint_summary(checkpoints: list[Any], *, max_items: int = 4) -> str:
+    """Render a compact checkpoint status summary string."""
+    if not checkpoints:
+        return "none"
+
+    entries: list[str] = []
+    for checkpoint in checkpoints[:max_items]:
+        name = str(getattr(checkpoint, "name", "unknown"))
+        raw_status = getattr(checkpoint, "status", "unknown")
+        status = _status_label(raw_status)
+        entries.append(f"{name} ({status})")
+
+    remaining = len(checkpoints) - len(entries)
+    if remaining > 0:
+        entries.append(f"... (+{remaining} more)")
+
+    return ", ".join(entries)
+
+
+def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
+    """Build label/value rows for execution details output."""
+    pending_wait_name = "none"
+    pending_wait_question = "none"
+    if execution.pending_wait is not None:
+        pending_wait_name = execution.pending_wait.name
+        pending_wait_question = execution.pending_wait.question or "not set"
+
+    failure_summary = "none"
+    if execution.failure is not None:
+        failure_summary = execution.failure.message
+
+    rows: list[tuple[str, str]] = [
+        ("Execution ID", execution.exec_id),
+        ("Flow", execution.flow_name or "not available"),
+        ("Status", execution.status.value),
+        ("Started", _format_timestamp(execution.started_at)),
+        ("Ended", _format_timestamp(execution.ended_at)),
+        ("Stack", execution.stack_name or "not available"),
+        ("Pending wait", pending_wait_name),
+        ("Wait question", pending_wait_question),
+        ("Failure", failure_summary),
+        ("Checkpoints", _checkpoint_summary(execution.checkpoints)),
+    ]
+
+    return rows
+
+
+def _execution_list_rows(executions: list[Execution]) -> list[tuple[str, str]]:
+    """Build label/value rows for execution list output."""
+    if not executions:
+        return [("Executions", "none found")]
+
+    rows: list[tuple[str, str]] = []
+    for execution in executions:
+        detail = (
+            f"{execution.flow_name or 'unknown flow'} | "
+            f"{execution.status.value} | "
+            f"stack={execution.stack_name or 'not set'}"
+        )
+        rows.append((execution.exec_id, detail))
+    return rows
+
+
+def _run_rows(
+    *,
+    target: str,
+    stack: str | None,
+    execution: Execution,
+) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru run` output."""
+    invocation = "deploy" if stack else "start"
+    return [
+        ("Target", target),
+        ("Invocation", invocation),
+        *_execution_rows(execution),
+    ]
 
 
 def _is_interactive(*, stderr: bool = False) -> bool:
@@ -933,6 +1138,159 @@ def delete_(
     _print_success(
         f"Deleted secret: {secret.name}",
         detail=f"Secret ID: {secret.id}",
+    )
+
+
+@app.command
+def run(
+    target: Annotated[
+        str,
+        Parameter(
+            help=(
+                "Flow target in `<module_or_file>:<flow_name>` format "
+                "(for example `agent.py:content_pipeline`)."
+            )
+        ),
+    ],
+    *,
+    args: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Flow input arguments as a JSON object "
+                '(for example \'{"topic": "AI safety"}\').'
+            )
+        ),
+    ] = None,
+    stack: Annotated[
+        str | None,
+        Parameter(help="Optional stack name/ID for deploy-style execution."),
+    ] = None,
+) -> None:
+    """Start a flow execution from a module/file target."""
+    try:
+        flow_target = _load_flow_target(target)
+        flow_inputs = _parse_json_object(args, option_name="--args")
+
+        if stack:
+            handle = flow_target.deploy(stack=stack, **flow_inputs)
+        else:
+            handle = flow_target.start(**flow_inputs)
+
+        if not isinstance(handle, _FlowHandleLike):
+            raise ValueError(
+                "Flow execution did not return a valid handle with an `exec_id`."
+            )
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _print_success(f"Started flow execution: {handle.exec_id}")
+
+    try:
+        execution = KitaruClient().executions.get(handle.exec_id)
+    except Exception as exc:
+        _emit_snapshot(
+            "Kitaru run",
+            [
+                ("Target", target),
+                ("Invocation", "deploy" if stack else "start"),
+                ("Execution ID", handle.exec_id),
+            ],
+            warning=(
+                "Execution started successfully, but details are not available yet: "
+                f"{exc}"
+            ),
+        )
+        return
+
+    _emit_snapshot(
+        "Kitaru run",
+        _run_rows(target=target, stack=stack, execution=execution),
+    )
+
+
+@executions_app.command
+def get_(
+    exec_id: Annotated[
+        str,
+        Parameter(help="Execution ID."),
+    ],
+) -> None:
+    """Show detailed information for one execution."""
+    try:
+        execution = KitaruClient().executions.get(exec_id)
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _emit_snapshot("Kitaru execution", _execution_rows(execution))
+
+
+@executions_app.command
+def list____(
+    *,
+    status: Annotated[
+        str | None,
+        Parameter(
+            help="Optional status filter (running/waiting/completed/failed/cancelled)."
+        ),
+    ] = None,
+    flow: Annotated[
+        str | None,
+        Parameter(help="Optional flow-name filter."),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        Parameter(help="Maximum number of executions to return."),
+    ] = None,
+) -> None:
+    """List executions with optional filters."""
+    try:
+        executions = KitaruClient().executions.list(
+            status=status,
+            flow=flow,
+            limit=limit,
+        )
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _emit_snapshot("Kitaru executions", _execution_list_rows(executions))
+
+
+@executions_app.command
+def retry_(
+    exec_id: Annotated[
+        str,
+        Parameter(help="Execution ID."),
+    ],
+) -> None:
+    """Retry a failed execution as same-execution recovery."""
+    try:
+        execution = KitaruClient().executions.retry(exec_id)
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _print_success(
+        f"Retried execution: {execution.exec_id}",
+        detail=f"Status: {execution.status.value}",
+    )
+
+
+@executions_app.command
+def cancel_(
+    exec_id: Annotated[
+        str,
+        Parameter(help="Execution ID."),
+    ],
+) -> None:
+    """Cancel a running execution."""
+    try:
+        execution = KitaruClient().executions.cancel(exec_id)
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _print_success(
+        f"Cancelled execution: {execution.exec_id}",
+        detail=f"Status: {execution.status.value}",
     )
 
 
