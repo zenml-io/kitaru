@@ -52,15 +52,15 @@ jobs:
           - name: py312-base
             python-version: '3.12'
             sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/mcp --ignore=tests/test_skill_files.py
+            pytest-command: uv run pytest --ignore=tests/mcp
           - name: py313-base
             python-version: '3.13'
             sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/mcp --ignore=tests/test_skill_files.py
+            pytest-command: uv run pytest --ignore=tests/mcp
           - name: py312-mcp
             python-version: '3.12'
             sync-command: uv sync --frozen --extra mcp
-            pytest-command: uv run pytest tests/mcp tests/test_skill_files.py
+            pytest-command: uv run pytest tests/mcp
     name: test (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v4
