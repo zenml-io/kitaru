@@ -1,0 +1,156 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+import BlogCard from '../../components/blog/BlogCard.astro';
+
+const posts = (await getCollection('blog', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+
+const [featured, ...rest] = posts;
+
+const featuredDate = new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric',
+}).format(featured.data.date);
+---
+
+<Base title="Blog — Kitaru" description="Thoughts on durable execution, agent infrastructure, and building reliable AI systems.">
+  <Fragment slot="head">
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={new URL('/blog', Astro.site).href} />
+  </Fragment>
+  <Nav />
+  <main class="blog-index">
+    <div class="section-inner">
+      <span class="section-eyebrow" data-reveal>Blog</span>
+
+      <!-- Featured post -->
+      <a href={`/blog/${featured.id}`} class="blog-featured" data-reveal data-reveal-delay="1">
+        <div class="blog-featured-accent"></div>
+        <div class="blog-featured-content">
+          <span class="blog-featured-meta">{featured.data.author} &middot; {featuredDate}</span>
+          <h1 class="blog-featured-title">{featured.data.title}</h1>
+          <p class="blog-featured-desc">{featured.data.description}</p>
+          <span class="blog-featured-read">Read post &rarr;</span>
+        </div>
+      </a>
+
+      <!-- Remaining posts -->
+      {rest.length > 0 && (
+        <div class="blog-grid" data-reveal data-reveal-delay="2">
+          {rest.map((post) => (
+            <BlogCard
+              href={`/blog/${post.id}`}
+              title={post.data.title}
+              description={post.data.description}
+              date={post.data.date}
+              author={post.data.author}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .blog-index {
+    padding: 40px clamp(16px, 5vw, 80px) 100px;
+  }
+
+  /* Featured post */
+  .blog-featured {
+    display: flex;
+    text-decoration: none;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-warm);
+    overflow: hidden;
+    margin: 32px 0 48px;
+    transition: border-color 0.2s, transform 0.15s;
+  }
+
+  .blog-featured:hover {
+    border-color: rgba(241, 120, 41, 0.4);
+    transform: translateY(-2px);
+  }
+
+  .blog-featured-accent {
+    width: 6px;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, var(--color-accent) 0%, var(--color-accent-deep, #c45a1a) 100%);
+  }
+
+  .blog-featured-content {
+    padding: clamp(24px, 5vw, 48px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .blog-featured-meta {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .blog-featured-title {
+    font-size: clamp(1.5rem, 3.5vw, 2.2rem);
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--color-primary);
+    margin: 0;
+  }
+
+  .blog-featured-desc {
+    font-size: clamp(0.92rem, 2vw, 1.05rem);
+    line-height: 1.65;
+    color: var(--color-secondary);
+    margin: 0;
+    max-width: 640px;
+  }
+
+  .blog-featured-read {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    margin-top: 4px;
+  }
+
+  /* Grid */
+  .blog-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+
+  @media (max-width: 900px) {
+    .blog-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 600px) {
+    .blog-grid {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .blog-index {
+      padding-bottom: 60px;
+    }
+
+    .blog-featured {
+      margin: 24px 0 36px;
+    }
+  }
+</style>
