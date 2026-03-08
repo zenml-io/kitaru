@@ -6,25 +6,25 @@
   <div class="how-inner">
     <div class="how-header" data-reveal>
       <span class="section-eyebrow">How it works</span>
-      <h2 class="section-title">Three steps to observability</h2>
-      <p class="section-desc">Integrate in minutes. No agent framework lock-in. Works with LangChain, CrewAI, AutoGen, or your own stack.</p>
+      <h2 class="section-title">Three steps to durable agents</h2>
+      <p class="section-desc">Not just observability — control. Cancel, resume, replay, and feed input to running agents. Pure Python, no infra to deploy.</p>
     </div>
 
     <div class="how-steps">
       <div class="how-step" data-reveal data-reveal-delay="1">
         <div class="how-step-number">01</div>
-        <h3>Install the SDK</h3>
-        <p>Add the Kitaru SDK to your project. A single <code>pip install kitaru</code> and two lines of config.</p>
+        <h3>Decorate your functions</h3>
+        <p><code>@kitaru.flow</code> and <code>@kitaru.checkpoint</code>. Your Python stays Python — no DAGs, no YAML, no separate runtime.</p>
       </div>
       <div class="how-step" data-reveal data-reveal-delay="2">
         <div class="how-step-number">02</div>
         <h3>Run your agents</h3>
-        <p>Kitaru instruments LLM calls, tool invocations, and gate checks automatically — zero code changes to your agent logic.</p>
+        <p>Every checkpoint is persisted. If it crashes at step 47, replay picks up from 46. Add <code>wait()</code> to pause for human input, tool results, or other agents.</p>
       </div>
       <div class="how-step" data-reveal data-reveal-delay="3">
         <div class="how-step-number">03</div>
-        <h3>Observe and optimize</h3>
-        <p>Open the dashboard to trace runs, compare versions, find prompt regressions, and cut costs — all in real time.</p>
+        <h3>Control in production</h3>
+        <p>Cancel stuck runs, resume waiting agents, replay from any checkpoint, browse artifacts — from the CLI, the API, or your AI assistant via MCP.</p>
       </div>
     </div>
   </div>
