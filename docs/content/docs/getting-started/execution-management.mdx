@@ -1,6 +1,6 @@
 ---
-title: Manage Executions with KitaruClient
-description: Inspect execution status, browse artifacts, and manage retries/cancellation
+title: Manage Executions with KitaruClient and CLI
+description: Inspect execution status, run flows, and manage retries/cancellation
 ---
 
 `KitaruClient` is the programmatic API for managing and inspecting executions
@@ -83,16 +83,38 @@ context_artifact = client.artifacts.get(artifact_id)
 value = context_artifact.load()
 ```
 
+## Manage executions from the CLI
+
+Phase 14 adds an execution-management CLI surface on top of `KitaruClient`.
+
+```bash
+# Start a flow from a module/file target
+kitaru run agent.py:content_pipeline --args '{"topic":"AI safety"}'
+kitaru run agent.py:content_pipeline --stack prod --args '{"topic":"AI safety"}'
+
+# Inspect and filter executions
+kitaru executions get kr-a8f3c2
+kitaru executions list
+kitaru executions list --status waiting --flow content_pipeline --limit 20
+
+# Same-execution lifecycle actions
+kitaru executions retry kr-a8f3c2
+kitaru executions cancel kr-a8f3c2
+```
+
 ## Current limitations
 
-`KitaruClient` intentionally stubs these APIs for now:
+The following execution APIs/commands are intentionally deferred for now:
 
 - `client.executions.input(...)`
 - `client.executions.replay(...)`
+- `kitaru executions input ...`
+- `kitaru executions replay ...`
+- `kitaru executions logs ...`
 
-These require wait/replay backend support that is still being integrated.
+These require additional wait/replay/log-retrieval integration work.
 
-## Try the Phase 11 example
+## Try the execution management example
 
 ```bash
 uv sync --extra local

@@ -161,8 +161,11 @@ The `feature/pause-pipeline-runs` branch has the following status:
 
 Kitaru implications:
 - `kitaru.wait()` is unblocked and can wrap the ZenML primitive now
-- Kitaru needs to handle the two resume paths (auto vs manual) and expose a user-friendly `kitaru executions resume` command for the manual path
-- `client.executions.retry(...)` should remain stubbed until upstream retry is fixed
+- Resume should use the canonical `input` vocabulary (`client.executions.input(...)`, `kitaru executions input ...`), even if we later add a `resume` alias
+- Kitaru still needs to handle the two resume paths (auto vs manual) and expose a user-friendly CLI path for the manual path
+- `client.executions.retry(...)` and `kitaru executions retry` are now implemented in Kitaru; continue validating behavior against live backends as wait/replay integration lands
+- `client.executions.replay(...)` and `kitaru executions replay` remain deferred
+- `kitaru executions logs` remains deferred until Kitaru has a backend-agnostic log retrieval API
 - Future work: automated wait resolution via webhooks/events (currently human-only)
 
 ### Docs: code snippet contrast and sidebar nesting

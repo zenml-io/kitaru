@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Typed Kitaru exception hierarchy (`KitaruError`, `KitaruContextError`, `KitaruStateError`, `KitaruExecutionError`, `KitaruUserCodeError`, `KitaruDivergenceError`, `KitaruFeatureNotAvailableError`, and related types)
 - Failure journaling in `KitaruClient`: structured execution-level failure details (`execution.failure`) and per-checkpoint retry attempt history (`checkpoint.attempts`)
+- Phase 14 execution CLI commands: `kitaru run`, `kitaru executions get/list/retry/cancel`
+- `kitaru run` JSON argument parsing for flow input kwargs and optional `--stack` deploy mode
 - Getting Started error-handling docs page (`/getting-started/error-handling`)
 - `kitaru.llm()` implementation with LiteLLM backend, context-aware flow/checkpoint behavior, prompt/response artifact capture, and automatic usage/cost/latency metadata logging
 - Local model alias registry persisted in `kitaru.yaml`, including default alias behavior and model-resolution helpers for `kitaru.llm()`
@@ -44,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Kitaru global config persistence now uses field-preserving updates, so log-store and model-registry settings no longer clobber each other
 - Updated README, CLAUDE guide, AGENTS guide, and docs pages to reflect shipped LLM/model-registry functionality and current implemented primitive status
+- Updated execution-management docs to cover shipped execution CLI commands and clearly defer `executions input/replay/logs`
 
 ## [0.1.0] - 2026-03-06
 

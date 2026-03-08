@@ -18,6 +18,8 @@ Phase 12 adds `kitaru.llm()` with LiteLLM as the backend engine, automatic promp
 
 Phase 13 adds a typed Kitaru error hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.), clearer runtime-vs-user-code failure surfacing, and failure journaling in `KitaruClient` via `execution.failure` plus per-checkpoint attempt history in `checkpoint.attempts`.
 
+Phase 14 adds the first execution lifecycle CLI layer on top of `KitaruClient`: `kitaru run`, `kitaru executions get`, `kitaru executions list`, `kitaru executions retry`, and `kitaru executions cancel`. `executions input`, `executions replay`, and `executions logs` are still deferred.
+
 ### SDK primitives
 
 ```python
@@ -155,6 +157,12 @@ kitaru login <server> --api-key <key>
 kitaru logout                 Log out and clear stored auth state
 kitaru status                 Show connection state and active stack
 kitaru info                   Show detailed environment information
+
+kitaru run <target> --args <json> [--stack <name>]
+kitaru executions get <exec_id>
+kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
+kitaru executions retry <exec_id>
+kitaru executions cancel <exec_id>
 
 kitaru stack list             List visible stacks
 kitaru stack current          Show the active stack
