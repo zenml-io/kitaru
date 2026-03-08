@@ -1,0 +1,111 @@
+---
+// NotJust.astro — Lightweight differentiator
+---
+
+<section class="notjust-section" style="padding: 80px clamp(24px, 5vw, 80px) 60px;">
+  <div class="section-inner">
+    <h2 class="section-title" data-reveal>See what happened.<br><em class="notjust-italic">Then do something about it.</em></h2>
+    <div class="notjust-row" data-reveal data-reveal-delay="1">
+      <div class="notjust-card">
+        <span class="notjust-label">Tracing tools</span>
+        <span class="notjust-headline">Show you what happened.</span>
+        <span class="notjust-detail">Which tools were called, how long it took, where it failed. But you can only watch.</span>
+      </div>
+      <div class="notjust-card">
+        <span class="notjust-label">Durable execution engines</span>
+        <span class="notjust-headline">Let you control it.</span>
+        <span class="notjust-detail">Cancel, pause, resume, replay. But you need a separate runtime and a new SDK to get there.</span>
+      </div>
+      <div class="notjust-card notjust-kitaru">
+        <span class="notjust-label">Kitaru</span>
+        <span class="notjust-headline">Both. Just Python.</span>
+        <span class="notjust-detail">Full control over running agents. Works with your existing tracing. <code>pip install kitaru</code> and two decorators.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .notjust-italic {
+    font-style: italic;
+    font-weight: 300;
+    color: var(--color-secondary);
+  }
+
+  .notjust-headline {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--color-primary);
+    line-height: 1.4;
+  }
+
+  .notjust-detail {
+    font-size: 0.85rem;
+    color: var(--color-secondary);
+    line-height: 1.6;
+  }
+
+  .notjust-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    max-width: 820px;
+    margin: 0 auto;
+  }
+
+  .notjust-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: center;
+    padding: 28px 20px;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-warm);
+  }
+
+  .notjust-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .notjust-line {
+    font-size: 1rem;
+    color: var(--color-secondary);
+    line-height: 1.5;
+  }
+
+  .notjust-kitaru {
+    border-color: rgba(241, 120, 41, 0.35);
+    background: rgba(241, 120, 41, 0.06);
+  }
+
+  .notjust-kitaru .notjust-label {
+    color: var(--color-accent);
+  }
+
+  .notjust-kitaru .notjust-line {
+    color: var(--color-primary);
+    font-weight: 500;
+  }
+
+  .notjust-line code {
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    color: var(--color-accent);
+    background: rgba(241, 120, 41, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  @media (max-width: 600px) {
+    .notjust-row {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+  }
+</style>

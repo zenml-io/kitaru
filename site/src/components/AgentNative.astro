@@ -5,8 +5,8 @@
 <section class="agent-native-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
   <div class="section-inner">
     <span class="section-eyebrow" data-reveal>Agent-native</span>
-    <h2 class="section-title" data-reveal data-reveal-delay="1">Your AI assistant manages your agents.</h2>
-    <p class="section-desc" data-reveal data-reveal-delay="2">Kitaru ships an MCP server. Claude Code, Cursor, or any MCP-compatible assistant can list executions, approve waits, trigger replays, and browse artifacts — conversationally.</p>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Built to be AI-native.</h2>
+    <p class="section-desc" data-reveal data-reveal-delay="2">Kitaru ships an MCP server. Claude Code, Cursor, or any AI assistant can start flows, browse artifacts, and resume waiting agents — as naturally as running a shell command. Your tools already speak Kitaru.</p>
 
     <div class="an-grid" data-reveal data-reveal-delay="3">
       <!-- Left: conversation mockup -->
@@ -18,27 +18,27 @@
         <div class="conv-body">
           <div class="conv-msg conv-user">
             <span class="conv-role">You</span>
-            <span class="conv-text">What Kitaru executions are waiting?</span>
+            <span class="conv-text">Kick off 3 research agents on these topics: LLM routing, agent memory, tool selection</span>
           </div>
           <div class="conv-msg conv-assistant">
             <span class="conv-role">Assistant</span>
-            <span class="conv-text">One execution waiting: <code>kr-a8f3c2</code> (coding_agent) at <code>plan_approval</code>. Question: "Merge this PR?"</span>
+            <span class="conv-text">Started 3 flows: <code>kr-d41f</code> <code>kr-b82a</code> <code>kr-9c3e</code>. All running. <code>kr-d41f</code> is waiting — it found conflicting sources and needs guidance.</span>
           </div>
           <div class="conv-msg conv-user">
             <span class="conv-role">You</span>
-            <span class="conv-text">Approve it with notes "LGTM, ship it"</span>
+            <span class="conv-text">Tell it to prioritize the 2024 benchmarks. What have the other two found so far?</span>
           </div>
           <div class="conv-msg conv-assistant">
             <span class="conv-role">Assistant</span>
-            <span class="conv-text">Done. Execution <code>kr-a8f3c2</code> has resumed.</span>
-            <span class="conv-tool">kitaru_executions_input(exec_id="kr-a8f3c2", wait="plan_approval", value={'{'}"approved": true, "notes": "LGTM, ship it"{'}'})</span>
+            <span class="conv-text">Resumed <code>kr-d41f</code>. The other two have saved 12 artifacts — <code>kr-b82a</code> found 4 papers on retrieval-augmented memory, <code>kr-9c3e</code> is comparing 3 tool-selection frameworks.</span>
+            <span class="conv-tool">kitaru_executions_input(exec_id="kr-d41f", wait="source_conflict", value="prioritize 2024 benchmarks")</span>
           </div>
         </div>
       </div>
 
       <!-- Right: what MCP gives you -->
       <div class="mcp-features">
-        <h3>MCP tools, not shell scripts</h3>
+        <h3>One CLI for the whole swarm</h3>
         <ul>
           <li>
             <code>kitaru_executions_list</code>
