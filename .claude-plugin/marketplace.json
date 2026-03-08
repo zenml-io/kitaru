@@ -1,0 +1,13 @@
+{
+  "name": "kitaru",
+  "owner": {
+    "name": "ZenML"
+  },
+  "plugins": [
+    {
+      "name": "kitaru",
+      "source": ".",
+      "description": "Kitaru durable execution authoring skill for Claude Code"
+    }
+  ]
+}

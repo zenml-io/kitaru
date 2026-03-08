@@ -55,9 +55,6 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["src/kitaru"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/kitaru/skills" = "kitaru/skills"
-
 [dependency-groups]
 dev = [
     "ruff>=0.11",
