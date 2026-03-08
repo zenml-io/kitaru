@@ -149,7 +149,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 The first framework adapter is implemented: `kitaru.adapters.pydantic_ai.wrap(agent)`.
 
-It keeps the enclosing checkpoint as the replay boundary, while tracking PydanticAI model requests and tool calls as child events/metadata under that checkpoint. The adapter also supports HITL marker tools via `kitaru.adapters.pydantic_ai.hitl_tool(...)`.
+It keeps the enclosing checkpoint as the replay boundary, while tracking PydanticAI model requests and tool calls as child events/metadata under that checkpoint. At flow scope, `run()` / `run_sync()` automatically use a synthetic `llm_call` checkpoint so tracking still works without an explicit outer checkpoint. The adapter also supports per-tool capture modes (`full`, `metadata_only`, `off`) and HITL marker tools via `kitaru.adapters.pydantic_ai.hitl_tool(...)`.
 
 ### Observability (current MVP + planned)
 
