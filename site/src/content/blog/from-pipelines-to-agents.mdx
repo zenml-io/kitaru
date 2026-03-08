@@ -1,0 +1,134 @@
+---
+title: "From pipelines to agents: how orchestration is being rewritten"
+description: "ML pipelines were DAGs. Agents are loops. The orchestration layer that worked for training jobs doesn't work for autonomous systems — and the industry is scrambling to catch up."
+date: 2026-03-12
+author: "Hamza Tahir"
+---
+
+For the last five years, "orchestration" in ML meant one thing: DAGs. You defined your steps, drew the arrows, and a scheduler ran them in order. Airflow. Kubeflow. Prefect. ZenML. Argo. Dagster. The details varied but the model was the same — a directed acyclic graph of tasks.
+
+That model worked brilliantly for ML pipelines. Training jobs are predictable. You know the steps upfront: ingest, preprocess, train, evaluate, deploy. The data flows one way. If step 3 fails, you re-run step 3.
+
+Then agents showed up and broke everything.
+
+## What DAGs got right
+
+Before we bury DAGs, let's acknowledge what they solved. ML in 2019 was chaos. Data scientists wrote scripts. Nobody could reproduce a training run. Artifacts disappeared between laptops. "It works on my machine" was the state of the art.
+
+DAG-based orchestrators fixed this by imposing structure:
+
+- **Explicit dependencies.** Step B runs after step A. No ambiguity.
+- **Artifact tracking.** Every step's output is versioned and stored.
+- **Reproducibility.** Same DAG + same data = same result.
+- **Infrastructure abstraction.** Define the graph, the orchestrator handles Kubernetes, spot instances, GPUs.
+
+This was transformative. Teams went from "I can't reproduce last month's model" to "I can re-run any pipeline from any point in its history." A whole category of MLOps tooling grew up around this model.
+
+## Where DAGs break down
+
+An agent loop looks like this:
+
+```python
+while not done:
+    observation = llm(context)
+    if observation.needs_tool:
+        result = call_tool(observation.tool, observation.args)
+        context.append(result)
+    elif observation.needs_human:
+        answer = wait_for_human(observation.question)
+        context.append(answer)
+    else:
+        done = True
+```
+
+Try drawing that as a DAG. You can't. The number of iterations is unknown. The tools called at each step depend on the LLM's response. There might be zero human interactions or five. The execution path is determined entirely at runtime.
+
+DAG orchestrators handle this poorly because their core abstraction — define the graph upfront, then execute it — assumes you know the shape of execution before it starts.
+
+Some orchestrators added escape hatches. Dynamic DAGs. Conditional branching. Parameterized subgraphs. But these are patches on a model that fundamentally assumes static structure.
+
+## The three eras of orchestration
+
+Looking back, orchestration has gone through three distinct phases, each driven by a different workload:
+
+### Era 1: Batch scheduling (2010s)
+
+**Workload:** ETL jobs, data pipelines, cron-driven tasks.
+
+**Model:** DAGs with scheduled triggers. Airflow was the canonical tool. You defined tasks and dependencies in Python, and the scheduler ran them on a cadence. If a task failed, you retried it or the whole DAG. State was minimal — maybe a database row saying "task X succeeded at time T."
+
+**What it got right:** Made batch data processing reliable and repeatable.
+
+**What it didn't need:** Long-running state, human interaction, cost tracking, real-time control.
+
+### Era 2: ML pipelines (2020-2024)
+
+**Workload:** Training pipelines, feature engineering, model deployment.
+
+**Model:** Still DAGs, but with richer primitives. Artifact versioning. Experiment tracking. GPU scheduling. Caching — if step 2's inputs haven't changed, skip it. Kubeflow, ZenML, Metaflow, and Vertex Pipelines defined this era.
+
+**What it got right:** Made ML reproducible and deployable. Teams could trace any model in production back to the exact data, code, and hyperparameters that produced it.
+
+**What it didn't need:** Dynamic control flow. Human-in-the-loop. Pause and resume. The graph was still known at compile time.
+
+### Era 3: Agent orchestration (2025+)
+
+**Workload:** Autonomous agents doing open-ended tasks — research, coding, analysis, customer support.
+
+**Model:** This is being figured out right now. But it's clearly not DAGs. The requirements are different:
+
+- **Dynamic execution paths.** You don't know the shape upfront.
+- **Long-running state.** An agent might run for hours, pause for human input, and resume the next day.
+- **Crash recovery without re-execution.** Restarting a 2-hour agent from scratch because step 47 failed is unacceptable.
+- **Cost awareness.** Each LLM call has a dollar cost. You need to track, budget, and optimize it.
+- **Human oversight.** Agents make mistakes. You need approval gates, intervention points, and the ability to steer mid-execution.
+- **Control at runtime.** Cancel stuck agents. Resume paused ones. Replay from a checkpoint. Feed input. Not after the fact — while it's running.
+
+No existing orchestration model fully handles this. The DAG model is too rigid. The durable execution model (Temporal, Restate) handles the control part but imposes determinism constraints that fight the inherently non-deterministic nature of LLM-based systems.
+
+## What agent orchestration actually looks like
+
+We think the right model borrows from both worlds:
+
+**From ML pipelines:** artifact versioning, checkpoint caching, reproducibility, infrastructure abstraction. The idea that every meaningful intermediate result should be persisted, versioned, and comparable.
+
+**From durable execution:** crash recovery, pause/resume, replay, runtime control. The idea that an execution is a persistent, addressable thing you can interact with.
+
+**From neither:** no DAGs, no determinism constraints, no journal replay, no separate runtime. Just Python with decorators.
+
+```python
+import kitaru
+
+@kitaru.checkpoint
+def research(topic: str) -> str:
+    return deep_research_with_llm(topic)
+
+@kitaru.checkpoint
+def write_report(research: str, style: str) -> str:
+    return generate_report(research, style)
+
+@kitaru.flow
+def analyst_agent(topic: str) -> str:
+    findings = research(topic)
+
+    style = kitaru.wait(
+        schema=str,
+        question="Research complete. What style for the report?",
+    )
+
+    return write_report(findings, style)
+```
+
+This is normal Python. The `while` loop, `if/else`, `try/except` — they all work. The `@checkpoint` decorator caches outputs for crash recovery and replay. The `wait()` call suspends the execution until a human responds. No graph definition. No special control flow rules.
+
+## The convergence
+
+Here's what's interesting: the ML pipeline world and the durable execution world are converging on the same problem from opposite directions.
+
+ML pipeline tools are adding dynamic execution, human-in-the-loop, and runtime control — features that durable execution engines have had for years.
+
+Durable execution engines are adding cost tracking, artifact management, and LLM-specific primitives — features that ML pipeline tools have had for years.
+
+Agents are the workload that forces this convergence. They need the artifact discipline of ML pipelines and the runtime control of durable execution, without the rigidity of either.
+
+The teams that figure out this middle ground first — infrastructure that gives you control without imposing constraints — will define the next era of orchestration. That's what we're building with Kitaru.
