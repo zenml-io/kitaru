@@ -575,6 +575,15 @@ contract, and HITL via adapter tools),
 **Estimated size:** Medium. Child event capture is straightforward if core
 primitives work. The HITL tool-to-wait translation adds complexity.
 
+**⚠ Before starting this phase:**
+1. **Clone Hamza's branch** with existing PydanticAI + ZenML durable execution
+   code: https://github.com/htahir1/pydantic-ai/tree/feat/zenml-durable-execution-v2
+   — this has reusable adapter code that should serve as the starting point.
+   Make the cloned repo available in RepoPrompt as a workspace so the full
+   context is accessible during implementation.
+2. **HITL ergonomics are not covered** in Hamza's branch — that work still needs
+   to be designed and built from scratch as part of this phase.
+
 ---
 
 ## Phase 18: Stack creation and sandbox
