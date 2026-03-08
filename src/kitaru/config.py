@@ -758,20 +758,29 @@ def image_settings_to_docker_settings(
 ) -> DockerSettings:
     """Convert resolved image settings into ZenML Docker settings.
 
-    Kitaru is always injected into the requirements list so that remote
-    containers have the SDK available at runtime.
+    Kitaru is auto-injected into the requirements list so that remote
+    containers have the SDK available at runtime — unless a custom
+    ``base_image`` or ``dockerfile`` is set, in which case the user
+    controls the image content.
     """
     if image_settings is None or image_settings.is_empty():
         return DockerSettings(requirements=["kitaru"])
+
+    # When the user provides a custom base image or Dockerfile, they own
+    # the image content — don't inject kitaru automatically.
+    user_controls_image = (
+        image_settings.base_image is not None or image_settings.dockerfile is not None
+    )
 
     docker_settings_kwargs: dict[str, Any] = {}
     if image_settings.base_image is not None:
         docker_settings_kwargs["parent_image"] = image_settings.base_image
 
     requirements = list(image_settings.requirements or [])
-    if not _requirements_include_kitaru(requirements):
+    if not user_controls_image and not _requirements_include_kitaru(requirements):
         requirements.append("kitaru")
-    docker_settings_kwargs["requirements"] = requirements
+    if requirements:
+        docker_settings_kwargs["requirements"] = requirements
 
     if image_settings.dockerfile is not None:
         docker_settings_kwargs["dockerfile"] = image_settings.dockerfile

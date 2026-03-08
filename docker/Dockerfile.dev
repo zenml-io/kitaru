@@ -18,4 +18,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 RUN pip install uv
 
 COPY . /tmp/kitaru
-RUN cd /tmp/kitaru && uv pip install --system . && rm -rf /tmp/kitaru
+RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
