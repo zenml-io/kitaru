@@ -175,3 +175,8 @@ Two docs issues flagged:
 - The left sidebar has a **double nesting** issue: "Core Concepts > Core Concepts" looks weird
 
 Remaining work: fix the sidebar nesting issue in the FumaDocs theme/config.
+
+## Skill stuff
+
+- Move the skill(s) out to their own zenml-io/kitaru-skills repository (it's only here for now while we iterate)
+- add a scoping skill to be called by the pipeline authoring skill
