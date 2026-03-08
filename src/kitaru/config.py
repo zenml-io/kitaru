@@ -723,20 +723,37 @@ def resolve_connection_config(
     return resolved
 
 
+_KITARU_PKG_SPECIFIER_RE = re.compile(r"[\[><=!~;\s]")
+
+
+def _requirements_include_kitaru(requirements: list[str]) -> bool:
+    """Check whether a requirements list already contains the kitaru package."""
+    return any(
+        _KITARU_PKG_SPECIFIER_RE.split(req, maxsplit=1)[0].lower() == "kitaru"
+        for req in requirements
+    )
+
+
 def image_settings_to_docker_settings(
     image_settings: ImageSettings | None,
-) -> DockerSettings | None:
-    """Convert resolved image settings into ZenML Docker settings."""
-    if image_settings is None:
-        return None
-    if image_settings.is_empty():
-        return None
+) -> DockerSettings:
+    """Convert resolved image settings into ZenML Docker settings.
+
+    Kitaru is always injected into the requirements list so that remote
+    containers have the SDK available at runtime.
+    """
+    if image_settings is None or image_settings.is_empty():
+        return DockerSettings(requirements=["kitaru"])
 
     docker_settings_kwargs: dict[str, Any] = {}
     if image_settings.base_image is not None:
         docker_settings_kwargs["parent_image"] = image_settings.base_image
-    if image_settings.requirements is not None:
-        docker_settings_kwargs["requirements"] = image_settings.requirements
+
+    requirements = list(image_settings.requirements or [])
+    if not _requirements_include_kitaru(requirements):
+        requirements.append("kitaru")
+    docker_settings_kwargs["requirements"] = requirements
+
     if image_settings.dockerfile is not None:
         docker_settings_kwargs["dockerfile"] = image_settings.dockerfile
     if image_settings.environment is not None:

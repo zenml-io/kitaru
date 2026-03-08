@@ -535,11 +535,44 @@ def test_image_settings_can_be_converted_to_docker_settings() -> None:
     docker_settings = image_settings_to_docker_settings(image_settings)
 
     assert isinstance(docker_settings, DockerSettings)
-    assert docker_settings is not None
     assert docker_settings.parent_image == "python:3.12"
-    assert docker_settings.requirements == ["httpx"]
+    assert docker_settings.requirements == ["httpx", "kitaru"]
     assert docker_settings.dockerfile == "Dockerfile"
     assert docker_settings.environment == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
+
+
+def test_kitaru_auto_injected_when_no_image_settings() -> None:
+    """Kitaru should be auto-injected even when no image settings are given."""
+    docker_settings = image_settings_to_docker_settings(None)
+
+    assert isinstance(docker_settings, DockerSettings)
+    assert docker_settings.requirements == ["kitaru"]
+
+
+def test_kitaru_auto_injected_when_image_settings_empty() -> None:
+    """Kitaru should be auto-injected when image settings are empty."""
+    docker_settings = image_settings_to_docker_settings(ImageSettings())
+
+    assert isinstance(docker_settings, DockerSettings)
+    assert docker_settings.requirements == ["kitaru"]
+
+
+def test_kitaru_not_duplicated_when_already_in_requirements() -> None:
+    """Kitaru should not be added again if already present in requirements."""
+    image_settings = ImageSettings(requirements=["kitaru", "httpx"])
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == ["kitaru", "httpx"]
+
+
+def test_kitaru_not_duplicated_when_pinned_version_in_requirements() -> None:
+    """Kitaru should not be added if a pinned version is already present."""
+    image_settings = ImageSettings(requirements=["kitaru>=0.2.0", "httpx"])
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.requirements == ["kitaru>=0.2.0", "httpx"]
 
 
 def test_connection_resolution_precedence(

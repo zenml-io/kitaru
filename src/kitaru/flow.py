@@ -157,19 +157,19 @@ def _to_retry_config(retries: int) -> StepRetryConfig | None:
 
 def _build_settings(
     image: ImageSettings | None,
-) -> dict[str, DockerSettings] | None:
+) -> dict[str, DockerSettings]:
     """Build ZenML settings payload for flow execution.
+
+    Kitaru is always included in the Docker requirements so that remote
+    containers have the SDK available at runtime.
 
     Args:
         image: Optional image configuration.
 
     Returns:
-        Pipeline settings dictionary or `None`.
+        Pipeline settings dictionary.
     """
-    docker_settings = image_settings_to_docker_settings(image)
-    if docker_settings is None:
-        return None
-    return {DOCKER_SETTINGS_KEY: docker_settings}
+    return {DOCKER_SETTINGS_KEY: image_settings_to_docker_settings(image)}
 
 
 def _build_execution_overrides(
