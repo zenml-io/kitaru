@@ -33,12 +33,14 @@ const isoDate = date.toISOString();
     padding: clamp(20px, 4vw, 28px);
     border-radius: 10px;
     border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-border);
     background: var(--color-surface-warm);
-    transition: border-color 0.2s, transform 0.15s;
+    transition: border-color 0.2s, border-left-color 0.2s, transform 0.15s;
   }
 
   .blog-card:hover {
     border-color: rgba(241, 120, 41, 0.35);
+    border-left-color: var(--color-accent);
     transform: translateY(-2px);
   }
 
