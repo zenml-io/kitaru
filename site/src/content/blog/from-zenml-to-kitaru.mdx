@@ -1,0 +1,89 @@
+---
+title: "From ZenML to Kitaru: why we built a new product"
+description: "We spent four years building ML pipeline infrastructure. Then agents showed up and we realized the next problem needed a new tool — not an extension of the old one."
+date: 2026-03-10
+author: "Hamza Tahir"
+---
+
+ZenML started in 2020. The problem was clear: ML teams couldn't reproduce their training pipelines, couldn't track their artifacts, and couldn't deploy models without a heroic manual effort. We built an open-source MLOps framework to fix that.
+
+Four years, thousands of users, and a lot of hard lessons later, we had something that worked. Teams used ZenML to build reproducible ML pipelines that ran on any cloud. The artifact store tracked every intermediate output. The pipeline DAG made dependencies explicit. It was infrastructure that took ML from "works on my laptop" to "works in production."
+
+Then the world changed.
+
+## The agent moment
+
+In 2024, we started seeing teams use ZenML in ways we didn't design for. They were building agents — autonomous systems that made decisions at runtime, called tools, and ran for hours instead of minutes.
+
+They were hacking ZenML's pipeline model to fit a workload it wasn't built for. Dynamic DAGs. Conditional steps. State passed through artifact store workarounds. It worked, technically. But it was ugly, and the abstractions fought them at every turn.
+
+The core issue: ZenML's mental model was "define a graph, then execute it." Agents don't have a graph. They have a loop with branching decisions that depend on LLM responses nobody can predict.
+
+We could have bolted agent support onto ZenML. Added a "dynamic mode." Extended the step abstraction. Made the DAG optional. Some of our team argued for exactly that.
+
+We chose to build something new instead. Here's why.
+
+## What ZenML got right (that we kept)
+
+Not everything about ZenML was wrong for agents. Some things were exactly right:
+
+**Artifact versioning.** Every intermediate result stored, versioned, and comparable. This is just as valuable for agent checkpoints as it is for training pipeline outputs. We kept this.
+
+**Infrastructure abstraction.** "This code runs on my laptop and on Kubernetes with zero changes." Same principle in Kitaru — `pip install kitaru` locally, `kitaru stack use prod` for your cloud.
+
+**Reproducibility.** The ability to go back to any previous run and understand exactly what happened. For ML, this meant tracing a model to its training data. For agents, it means replaying an execution from any checkpoint.
+
+**The stack concept.** ZenML's idea that infrastructure is a composable stack (orchestrator + artifact store + ...) rather than a monolith. Kitaru inherits this directly.
+
+## What we had to rethink
+
+**DAGs → normal Python.** The biggest change. ZenML pipelines were directed acyclic graphs — you defined steps and wired them together. Kitaru flows are just functions. `if/else`, `while`, `try/except` — they all work. The framework doesn't need to know the execution shape upfront.
+
+**Steps → checkpoints.** A ZenML step was a unit of work in a graph. A Kitaru checkpoint is a function whose output you want to cache for crash recovery and replay. Subtle difference, but it changes how you think about decomposition. You don't checkpoint because it's a "step in the pipeline." You checkpoint because re-running that function would cost $2 in tokens.
+
+**No first-class human interaction → `wait()`.** ZenML pipelines ran start to finish. There was no concept of pausing mid-execution for human input. For agents, this is essential. We built `wait()` as a core primitive, not an afterthought.
+
+**Batch scheduling → on-demand execution.** ZenML pipelines typically ran on a schedule or trigger. Agent flows run when you need them — kick one off, let it work, interact with it when it needs you.
+
+**Pipeline comparison → execution replay.** In ZenML, you compared pipeline runs to find regressions. In Kitaru, you replay a specific execution from a specific checkpoint with different inputs. Same underlying capability (versioned artifacts), different user-facing primitive.
+
+## Why not just extend ZenML?
+
+We considered it seriously. The argument for extending ZenML:
+
+- Existing user base. Thousands of teams already using it.
+- Shared infrastructure. Artifact store, metadata store, stack abstraction — all reusable.
+- Less work. Extending is cheaper than building new.
+
+The argument against:
+
+- **Mental model mismatch.** "Define a DAG, then execute it" is so deeply embedded in ZenML's API that making it optional would confuse existing users and create a split-brain product.
+- **Different audience.** ZenML users are ML engineers building training pipelines. Kitaru users are agent engineers building autonomous systems. Different people, different problems, different language.
+- **Naming and identity.** Calling it "ZenML Dynamic Mode" would signal "it's the same product with a flag." We wanted to signal "this is purpose-built for your workload."
+- **Speed of iteration.** A new product can make opinionated decisions without worrying about backward compatibility with existing users.
+
+The deciding factor: when we talked to agent teams, they didn't describe their problem in pipeline terms. They said "my agent crashes and I lose everything." They said "I need humans to approve things mid-run." They said "I'm burning $50 a day in wasted LLM calls because I can't resume from where it failed."
+
+Those are real problems, but they're not ZenML-shaped problems. They needed a ZenML-powered solution with a completely different interface.
+
+## What we learned from four years of ZenML
+
+The biggest lesson: **developer experience is the product.** Not the feature set. Not the architecture diagram. The experience of going from `pip install` to working code.
+
+ZenML's early versions were powerful but required understanding pipelines, steps, materializers, artifact stores, orchestrators, and stacks before you could do anything useful. We spent years simplifying that onboarding.
+
+With Kitaru, we started from the other end. Two decorators: `@flow` and `@checkpoint`. That's the whole API surface for getting started. Everything else — artifact stores, cloud deployment, cost tracking — layers on top. But the first five minutes are two decorators and `python my_agent.py`.
+
+The second lesson: **build for the workflow people already have.** ZenML succeeded when we stopped trying to change how ML engineers wrote code and started wrapping the code they already wrote. Kitaru applies the same principle — you don't rewrite your agent. You add `@checkpoint` to the functions that matter.
+
+## What's next
+
+Kitaru is built on ZenML's engine. The artifact store, the metadata store, the orchestration layer — that's four years of battle-tested infrastructure. But the interface is completely new, designed for a different problem and a different user.
+
+We're still early. The SDK is functional but not complete. The adapter ecosystem is growing. The dashboard is being built.
+
+What we're confident about: agents need infrastructure that understands their specific needs — crash recovery without re-burning tokens, human oversight as a primitive, replay from any point, cost visibility per step. That's what we're building.
+
+What we're still figuring out: the right primitives for multi-agent coordination, the performance characteristics at scale, the best way to handle the inevitable evolution from "background agents" to "real-time agents."
+
+Four years of ZenML taught us that the best infrastructure is invisible until you need it. Kitaru is our attempt to make agent infrastructure that same kind of invisible — two decorators when things work, full control when they don't.
