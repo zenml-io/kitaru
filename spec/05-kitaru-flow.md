@@ -6,7 +6,7 @@ Marks a function as a **durable execution** — the top-level unit Kitaru manage
 
 A flow is the boundary around a long-running piece of Python logic that may span multiple checkpointed steps, survive process restarts, suspend for input, and later resume or replay.
 
-Under the hood, a Kitaru flow maps to a **dynamic ZenML pipeline**, but the user-facing model is simpler: a flow is just normal Python with durable boundaries inside it.
+Under the hood, a Kitaru flow maps to a **dynamic ZenML pipeline**, but the user-facing model is simpler: a flow is just normal Python with durable boundaries inside it. The heavy lifting for durability, retry, and resume is implemented in the ZenML backend — Kitaru provides the simpler developer-facing model.
 
 A flow is where Kitaru creates and owns the **execution record**: status, inputs, checkpoints, waits, artifacts, and replay history all live under that execution.
 
@@ -42,7 +42,7 @@ Instead, **retry**, **resume**, and **replay** all work by rerunning the flow fu
 
 ## Invocation
 
-There are two invocation patterns:
+There are three invocation patterns:
 
 ```python
 # Synchronous — blocks until complete
@@ -57,13 +57,28 @@ handle = my_agent.start("Build a CLI tool")
 print(handle.exec_id)
 print(handle.status)
 result = handle.wait()
+
+# Deploy — starts an execution on a named stack
+# Semantically identical to .start() with stack=, but communicates
+# intent more clearly when targeting remote infrastructure.
+handle = my_agent.deploy("Build a CLI tool", stack="aws-sandbox")
 ```
 
 ### Implementation note
 
-The `my_flow.start()` pattern works because the `@kitaru.flow` decorator returns a callable object that also exposes `.start()`. This is a small extension of the ZenML pattern (where you just call the function directly).
+The `my_flow.start()` and `my_flow.deploy()` patterns work because the `@kitaru.flow` decorator returns a callable object that also exposes `.start()` and `.deploy()`. This is a small extension of the ZenML pattern (where you just call the function directly).
 
 The alternative pattern `kitaru.start_flow(my_flow)` would require reworking how flows are resolved and imported across environments, so it should be avoided. Invocation should always go through the decorated function object itself.
+
+### `.deploy()` vs `.start()` with `stack=`
+
+`.deploy(...)` is sugar for `.start(..., stack=...)`. Both produce the same execution. `.deploy()` exists because it communicates intent more clearly in user-facing contexts — "deploy this agent on production infrastructure" reads better than "start with stack equals."
+
+```python
+# These are equivalent:
+handle = my_agent.start("Build a CLI tool", stack="gcp-production")
+handle = my_agent.deploy("Build a CLI tool", stack="gcp-production")
+```
 
 ### Start with runtime overrides
 
@@ -91,7 +106,7 @@ Kitaru does not impose a graph DSL. The flow body is plain Python. Durability co
 def content_pipeline(topic: str) -> str:
     research = research_step(topic)
     draft = write_step(research)
-    review = kitaru.wait(schema=ReviewDecision, prompt="Review?")
+    review = kitaru.wait(schema=ReviewDecision, question="Review?")
 
     if not review.approved:
         draft = revise_step(draft, review.notes)
@@ -201,5 +216,6 @@ Kitaru sets two underlying ZenML defaults that should always be active:
 ## Notes for MVP
 
 - direct composition via `other_flow.start()` is cleaner than pretending nested flows are a single execution
-- background durability after process exit depends on connected or server-backed mode, not local inline execution alone
+- background durability after process exit depends on connected or server-backed mode (Pro), not local inline execution alone
 - automatic scheduler-driven retries (e.g. a background process that retries failed flows) are desirable but may be scoped as future work beyond manual retry for the MVP
+- flow retry behavior is backed by ZenML step/pipeline retry machinery

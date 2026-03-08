@@ -1,0 +1,64 @@
+---
+title: Core Concepts
+description: The mental model behind Kitaru's durable execution primitives
+---
+
+Kitaru gives you durable execution for AI agent workflows using a small set of
+Python primitives. You write normal Python — Kitaru handles persistence,
+observability, and recovery underneath.
+
+This section explains the ideas you need to understand before using Kitaru
+effectively.
+
+## Core ideas
+
+| Concept | What it is |
+|---|---|
+| **Flow** | The outer durable boundary around your workflow |
+| **Checkpoint** | A unit of work inside a flow whose output is persisted |
+| **Execution** | A single run of a flow, identified by a unique ID |
+| **Structured metadata** | Key-value data you attach to executions and checkpoints with `kitaru.log()` |
+| **Runtime log storage** | Where runtime logs are sent (configured separately from structured metadata) |
+| **Active stack** | The default execution target used when no per-run `stack=...` override is passed |
+
+## What you can use today
+
+Kitaru's current release includes:
+
+- `@kitaru.flow` — mark a function as a durable workflow
+- `@kitaru.checkpoint` — mark a function as a persisted work unit
+- `kitaru.log()` — attach structured metadata to the current scope
+- `kitaru.connect()` — connect to a Kitaru server
+- `kitaru.save()` / `kitaru.load()` — persist and load named artifacts in checkpoints
+- `kitaru.list_stacks()` / `kitaru.current_stack()` / `kitaru.use_stack()` — manage the default stack
+- `FlowHandle` — interact with a running or finished execution
+
+<Callout type="warn">
+  Some symbols are still scaffolded: `wait`, `llm`, `configure`, and
+  `KitaruClient`. Calling these currently raises `NotImplementedError`.
+</Callout>
+
+## Explore the concepts
+
+<Cards>
+  <Card
+    title="Flows"
+    description="Define durable execution boundaries and control how workflows run"
+    href="/concepts/flows"
+  />
+  <Card
+    title="Checkpoints"
+    description="Break work into persisted units with concurrency support"
+    href="/concepts/checkpoints"
+  />
+  <Card
+    title="Logging and Metadata"
+    description="Attach structured data to executions and checkpoints"
+    href="/concepts/logging"
+  />
+  <Card
+    title="Execution Model"
+    description="Understand how flows run, return results, and surface errors"
+    href="/concepts/execution-model"
+  />
+</Cards>

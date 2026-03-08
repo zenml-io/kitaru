@@ -207,7 +207,7 @@ Overrides act like synthetic replayed outcomes in the new execution and do not m
 
 ## Divergence
 
-**Divergence** happens when the durable call sequence in replay no longer matches the historical execution before the replay point.
+**Divergence** happens when the durable call sequence in replay no longer matches the historical execution before the replay point. Divergence detection is implemented in the ZenML backend — Kitaru exposes the user-visible error.
 
 Examples:
 
@@ -227,26 +227,51 @@ A stack determines things like:
 - where artifacts and execution journal data live
 - what runtime capabilities are available
 
-A stack is not the same thing as app config.
+Stacks include components for runner, artifact store, and container registry. A stack is not the same thing as app config.
+
+**Note:** LLM model configuration (aliases, credentials) is managed through the local model registry, not through stacks. See **Model registry** and **Model alias** below.
+
+## Model registry
+
+The **model registry** is user-local configuration that stores LLM model aliases and optional references to ZenML secrets for provider credentials. It is managed via `kitaru model register` and is independent of stack selection.
+
+The registry allows `kitaru.llm()` to resolve aliases like `fast` or `smart` to concrete LiteLLM model identifiers. Alias definitions are stored on the user's machine, not in a stack or on the server. Credentials for remote execution are stored in ZenML secrets and referenced by name from the alias.
+
+## Model alias
+
+A **model alias** is a short name (e.g. `fast`, `smart`) that maps to a concrete LiteLLM model identifier (e.g. `openai/gpt-4o-mini`). Aliases are defined in the local model registry and let user code reference models by role rather than specific provider/model name.
+
+## Secret
+
+A **secret** is a named bag of key-value pairs stored in ZenML's centralized secret store. Secrets are managed via `kitaru secrets set/show/list/delete`.
+
+Kitaru uses secrets primarily for:
+
+- LLM provider credentials (referenced from model aliases via `--secret`)
+- Infrastructure credentials in image environment settings
+
+Secrets are private by default (only the creating user can access them). Secret keys should use actual environment variable names (e.g. `OPENAI_API_KEY`) for compatibility with LiteLLM and ZenML's runtime env injection.
+
+Under the hood, secret metadata lives in the ZenML server database, and secret values live in the configured secrets-store backend.
 
 ## App config
 
-**App config** is project-level runtime configuration set through `kitaru.configure()` or project config files.
+**App config** is project-level runtime configuration set through `kitaru.configure()` or `pyproject.toml` under `[tool.kitaru]`. There is no separate `kitaru.toml` file.
 
 Typical app config includes:
 
 - local runtime directory
 - project-level defaults
 
-It should not be confused with connection state or stack selection.
+It should not be confused with connection state or stack selection. Rich project-level configuration is likely not in the MVP scope.
 
 ## Connection
 
-**Connection** is how the SDK talks to a Kitaru server.
+**Connection** is how the SDK talks to a server.
 
-It includes things like:
+Under the hood, the Kitaru server **is** the ZenML server. All server URLs are ZenML server URLs. Connection includes:
 
-- server URL
+- server URL (ZenML server)
 - auth token or API key
 
 It is separate from both stack selection and app config.
@@ -269,15 +294,17 @@ Resume and retry use the original frozen spec. Replay creates a new spec.
 
 ## Snapshot
 
-A **snapshot** is backend/internal machinery used to implement pause, resume, and retry.
+A **snapshot** is ZenML backend machinery used to implement pause, resume, and retry. Kitaru neither owns nor exposes snapshot internals.
 
-Snapshots are **not** a primary user-facing MVP feature. Users do not manually trigger or manage snapshots.
+Snapshots are **not** a user-facing MVP feature. Users do not manually trigger or manage snapshots.
 
 Snapshots enable:
 
 - suspending execution state when compute is released
 - restoring execution context for retry or resume
 - preserving the frozen execution spec across process boundaries
+
+Dashboard-triggered snapshot management may come later as a Pro feature.
 
 ## Wait timeout
 
@@ -342,6 +369,10 @@ The sandbox is an MVP deliverable. Its exact shape is still being defined.
 - multiple `.submit()` calls run concurrently
 
 On replay, concurrently submitted checkpoints replay their recorded outcomes just like sequential ones.
+
+## Log Store
+
+The **log store** is the global backend where runtime logs (stdout/stderr, structured events) are stored. By default, logs go to the artifact store. Users can optionally switch the global log backend to an OTel-compatible provider (e.g. Datadog) via `kitaru log-store set`. There is no explicit local logger stack component — this is a global configuration. See chapter 9.
 
 ## Idempotency
 

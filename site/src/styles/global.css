@@ -118,6 +118,7 @@ body::before {
 .section-inner {
   max-width: 1200px;
   margin: 0 auto;
+  overflow: hidden;
 }
 
 .section-eyebrow {
@@ -180,4 +181,19 @@ body::before {
    ═══════════════════════════════════════════════════ */
 @media (max-width: 768px) {
   .cta-input-row { flex-direction: column; }
+}
+
+@media (max-width: 600px) {
+  /* Tighten section padding on phones — inline styles use 80px/100px */
+  section {
+    padding-top: 48px !important;
+    padding-bottom: 48px !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .section-title { font-size: clamp(24px, 6vw, 32px); }
+  .section-desc { font-size: 15px; }
 }

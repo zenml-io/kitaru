@@ -1,0 +1,131 @@
+---
+title: Manage Executions with KitaruClient and CLI
+description: Inspect execution status, resolve waits, and manage lifecycle actions
+---
+
+`KitaruClient` is the programmatic API for managing and inspecting executions
+outside your flow functions.
+
+## Create a client
+
+```python
+import kitaru
+
+client = kitaru.KitaruClient()
+```
+
+The client uses your current Kitaru connection/project context.
+
+## Inspect a single execution
+
+```python
+execution = client.executions.get(exec_id)
+print(execution.exec_id)
+print(execution.flow_name)
+print(execution.status)  # running/waiting/completed/failed/cancelled
+
+if execution.pending_wait:
+    print(execution.pending_wait.name, execution.pending_wait.question)
+
+if execution.failure:
+    print(execution.failure.origin, execution.failure.message)
+```
+
+Execution details include:
+
+- start/end timestamps
+- stack name
+- summary metadata
+- checkpoint calls
+- pending wait details (`execution.pending_wait`)
+- execution failure details (`execution.failure`) when status is `failed`
+- checkpoint retry/failure attempt history (`checkpoint.attempts`)
+- artifacts
+- frozen execution spec (when available)
+
+## List and query executions
+
+```python
+recent = client.executions.list(limit=20)
+completed_for_flow = client.executions.list(
+    flow="content_pipeline",
+    status="completed",
+    limit=10,
+)
+latest = client.executions.latest(flow="content_pipeline")
+```
+
+## Resolve wait input (resume path)
+
+```python
+execution = client.executions.input(
+    exec_id,
+    wait="approve_deploy",
+    value=True,
+)
+```
+
+For manual-resume backends, call `resume(...)` after wait input is resolved:
+
+```python
+execution = client.executions.resume(exec_id)
+```
+
+## Retry and cancel
+
+```python
+# Same-execution retry (failed executions only)
+retried = client.executions.retry(exec_id)
+
+# Cancel a running execution
+cancelled = client.executions.cancel(exec_id)
+```
+
+## Browse and load artifacts
+
+```python
+artifacts = client.artifacts.list(exec_id)
+for artifact in artifacts:
+    print(artifact.name, artifact.kind, artifact.save_type)
+
+context_artifact = client.artifacts.get(artifact_id)
+value = context_artifact.load()
+```
+
+## Manage executions from the CLI
+
+```bash
+# Start a flow from a module/file target
+kitaru run agent.py:content_pipeline --args '{"topic":"AI safety"}'
+kitaru run agent.py:content_pipeline --stack prod --args '{"topic":"AI safety"}'
+
+# Inspect and filter executions
+kitaru executions get kr-a8f3c2
+kitaru executions list
+kitaru executions list --status waiting --flow content_pipeline --limit 20
+
+# Wait-input and lifecycle actions
+kitaru executions input kr-a8f3c2 --wait approve_deploy --value true
+kitaru executions resume kr-a8f3c2
+kitaru executions retry kr-a8f3c2
+kitaru executions cancel kr-a8f3c2
+```
+
+## Current limitations
+
+The following execution APIs/commands are intentionally deferred for now:
+
+- `client.executions.replay(...)`
+- `kitaru executions replay ...`
+- `kitaru executions logs ...`
+
+## Try the examples
+
+```bash
+uv sync --extra local
+uv run python -m examples.client_execution_management
+uv run pytest tests/test_phase11_client_example.py
+
+uv run python -m examples.wait_and_resume
+uv run pytest tests/test_phase15_wait_example.py
+```

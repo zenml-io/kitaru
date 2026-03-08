@@ -1,0 +1,166 @@
+---
+title: Execution Model
+description: How flows run, return results, and surface errors
+---
+
+This page explains how Kitaru executes your workflows and what to expect when
+things succeed or fail.
+
+## The mental model
+
+Kitaru tracks your workflow at **flow and checkpoint boundaries**. Think of it
+like this:
+
+1. A [flow](/concepts/flows) defines the outer durable boundary
+2. [Checkpoints](/concepts/checkpoints) inside the flow are the persisted work
+   units
+3. Kitaru records the outcome of each checkpoint as it runs
+4. On re-execution, completed checkpoints can return cached results instead of
+   running again
+
+Your Python code between checkpoints runs normally — Kitaru does not intercept
+every line. The durability guarantees apply at the checkpoint boundaries.
+
+## What happens when you call a flow
+
+### Direct call
+
+```python
+result = my_agent("https://example.com")
+```
+
+Behind the scenes:
+
+<Steps>
+  <Step>
+    Kitaru submits a new execution
+  </Step>
+  <Step>
+    A `FlowHandle` is created internally
+  </Step>
+  <Step>
+    The call blocks (via `handle.wait()`) until the execution finishes
+  </Step>
+  <Step>
+    On success, the flow's return value is extracted and returned
+  </Step>
+  <Step>
+    On failure, a `RuntimeError` is raised
+  </Step>
+</Steps>
+
+### Handle-based execution
+
+```python
+handle = my_agent.start("https://example.com")
+# execution runs in the background
+result = handle.wait()
+```
+
+The same execution lifecycle happens, but you control when to block. This is
+useful when you want to start multiple flows or do other work while waiting.
+
+## How results surface
+
+When an execution completes successfully, Kitaru extracts the flow function's
+return value:
+
+- **Single return value** → returned directly
+- **Multiple return values** → returned as a tuple
+- **No return value** → returns `None`
+
+```python
+@kitaru.flow
+def single_result() -> str:
+    return process()
+# result = single_result()  → "processed data"
+
+@kitaru.flow
+def no_result() -> None:
+    process()
+# result = no_result()  → None
+```
+
+## How errors surface
+
+### Failed executions
+
+If a flow execution fails, Kitaru raises a `RuntimeError` with context about
+what went wrong:
+
+```python
+try:
+    result = my_agent("bad-input")
+except RuntimeError as e:
+    print(e)  # includes execution ID and status
+```
+
+This happens whether you use a direct call or `handle.wait()`.
+
+### `handle.get()` on an unfinished execution
+
+`handle.get()` is a **non-blocking** check. If the execution is still running,
+it raises immediately:
+
+```python
+handle = my_agent.start("https://example.com")
+try:
+    result = handle.get()  # raises if not yet finished
+except RuntimeError:
+    result = handle.wait()  # block until done instead
+```
+
+### Misuse errors
+
+Kitaru raises errors immediately when SDK rules are violated:
+
+| Situation | Error |
+|---|---|
+| Calling a checkpoint outside a flow | `RuntimeError` |
+| Nesting one checkpoint inside another | `RuntimeError` |
+| Using `.submit()` outside a running flow | `RuntimeError` |
+| Calling `kitaru.log()` outside a flow | `RuntimeError` |
+| Passing negative `retries` | `ValueError` |
+
+These are not runtime failures — they are guardrails that catch mistakes at the
+point where they happen.
+
+## Caching behavior
+
+By default, checkpoint caching is **enabled** (`cache=True` on `@kitaru.flow`).
+This means:
+
+- Checkpoints that already succeeded in a previous execution can return their
+  cached result without re-running
+- This is especially useful during development when you want to iterate on later
+  checkpoints without repeating expensive earlier work
+
+You can disable caching at the flow level or per-run:
+
+```python
+# Disable caching by default
+@kitaru.flow(cache=False)
+def always_fresh(url: str) -> str:
+    ...
+
+# Or override per-run
+handle = my_agent.start("https://example.com", cache=False)
+```
+
+## Current limitations
+
+Kitaru is under active development. The following are not yet available as
+user-facing APIs:
+
+- **Replay** — `client.executions.replay(...)` and `kitaru executions replay`
+- **Execution log streaming** — `kitaru executions logs ...`
+
+Everything else in this page (`flow`, `checkpoint`, `wait`, `llm`,
+`configure`, and execution browsing/input/retry/cancel APIs) is available.
+
+## Next steps
+
+- Start building with [Flows](/concepts/flows) and
+  [Checkpoints](/concepts/checkpoints)
+- Add observability with [Logging and Metadata](/concepts/logging)
+- See the full API in the [Python Reference](/reference/python)

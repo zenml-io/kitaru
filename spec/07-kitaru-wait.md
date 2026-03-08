@@ -23,16 +23,16 @@ From the user's perspective, `wait()` looks like a normal blocking Python call t
 
 ```python
 # Human approval (yes/no)
-approved = kitaru.wait(schema=bool, prompt="Deploy to production?")
+approved = kitaru.wait(schema=bool, question="Deploy to production?")
 
 # Structured input (Pydantic model)
-decision = kitaru.wait(schema=ReviewDecision, prompt="Review this draft")
+decision = kitaru.wait(schema=ReviewDecision, question="Review this draft")
 
 # External system payload
 payload = kitaru.wait(schema=dict, name="etl_completed")
 
 # Simple gate (defaults to bool)
-kitaru.wait(prompt="Ready to proceed?")
+kitaru.wait(question="Ready to proceed?")
 ```
 
 All parameters should use keyword arguments for clarity. `schema=` is the primary signature form.
@@ -41,17 +41,17 @@ All parameters should use keyword arguments for clarity. `schema=` is the primar
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `schema` | `type` | `bool` | Expected input type. Can be `bool`, `str`, `dict`, a Pydantic model, or an `Enum` for multiple-choice UI generation |
+| `schema` | `type` | `bool` | Expected input type. Can be any JSON-serializable shape — `bool`, `str`, `dict`, a Pydantic model, an `Enum` for multiple-choice UI generation, or other JSON-serializable types |
 | `name` | `str` | `None` | Human-friendly label for the wait (the "name" of this wait point) |
-| `prompt` | `str` | `None` | Human-readable question or instruction shown in dashboard, API, or CLI |
+| `question` | `str` | `None` | Human-readable question or instruction shown in dashboard, API, or CLI |
 | `timeout` | `int` | `None` | **Active wait timeout only** — seconds to keep compute/resources alive before releasing them. See timeout semantics below |
 | `metadata` | `dict` | `None` | Extra context visible in dashboard or API |
 
 ### Parameter naming rationale
 
 - `schema` — clear intent, avoids Python keyword conflicts (not `type`, not `from`)
-- `name` — the label, not the prompt
-- `prompt` — the human-readable question/instruction
+- `name` — the label, not the question
+- `question` — the human-readable question/instruction
 
 ## What `wait()` means semantically
 
@@ -62,7 +62,7 @@ It is a **durable call boundary** that records:
 - that the execution is waiting
 - where the wait occurred in execution history
 - what schema the input must satisfy
-- what prompt and metadata were attached
+- what question and metadata were attached
 - what input was eventually provided
 
 Like checkpoints, waits participate in the execution journal and replay model.
@@ -113,7 +113,7 @@ When a flow hits `kitaru.wait(...)` for the first time:
 - stores:
     - wait name and sequence position
     - schema
-    - prompt
+    - question
     - metadata
 - marks the execution as `waiting`
 - optionally keeps resources alive for the active timeout duration
@@ -173,7 +173,7 @@ def deploy_agent(service: str, version: str) -> str:
     approved = kitaru.wait(
         schema=bool,
         name="approve_deploy",
-        prompt=f"Approve deployment of {service} v{version}?",
+        question=f"Approve deployment of {service} v{version}?",
         metadata={"plan": plan, "service": service},
     )
 
@@ -200,7 +200,7 @@ def writing_agent(topic: str) -> str:
     feedback = kitaru.wait(
         schema=EditFeedback,
         name="review_draft",
-        prompt=f"Review this draft about '{topic}'",
+        question=f"Review this draft about '{topic}'",
         metadata={"draft": draft},
     )
 
@@ -228,7 +228,7 @@ def triage_agent(issue: str) -> str:
     priority = kitaru.wait(
         schema=Priority,
         name="set_priority",
-        prompt=f"Set priority for: {issue}",
+        question=f"Set priority for: {issue}",
         metadata={"analysis": analysis},
     )
 
@@ -262,10 +262,11 @@ kitaru executions input kr-a8f3c2 \
   --value true
 ```
 
-**Via API:**
+**Via API (ZenML server endpoint):**
 
 ```bash
-curl -X POST https://kitaru.mycompany.com/api/executions/kr-a8f3c2/input \
+# All server URLs are ZenML server URLs — there is no separate Kitaru API
+curl -X POST https://my-zenml-server.mycompany.com/api/v1/executions/kr-a8f3c2/input \
   -d '{"wait":"approve_deploy","value":true}'
 ```
 
@@ -302,7 +303,7 @@ A waiting execution should expose:
 
 - current status: `waiting`
 - the pending wait call
-- prompt
+- question
 - schema or expected input shape
 - metadata context
 - whether an active timeout exists and its remaining duration
@@ -322,7 +323,7 @@ This is the core audit trail for human-in-the-loop and externally resumed workfl
 - returns a normal Python value when resumed
 - participates in replay just like checkpoints do
 - input should be validated before resume completes
-- waits inside loops or branches are distinct durable calls, not just prompt strings
+- waits inside loops or branches are distinct durable calls, not just question strings
 
 ## MVP scope for `wait()`
 
@@ -347,6 +348,24 @@ In the future, `wait()` may support richer event sources:
 - **third-party integrations** — e.g., waiting for a Slack reaction, a GitHub PR merge, or an external system callback
 
 When these arrive, the syntax might expand with a `source=` or `event=` parameter. But for the MVP, all waits resolve through the same external-input API path.
+
+## ZenML backend
+
+Wait, pause, resume, and replay are all implemented by wrapping ZenML SDK and backend behavior. The implementation should look at the ZenML SDK and defer to / wrap its logic rather than reimplementing these capabilities from scratch. See the ZenML branch `feature/pause-pipeline-runs` for the existing wait/resume implementation.
+
+**Branch status (March 2026):** `zenml.wait(...)` works and pauses in-progress runs. Resume works but differs by deployment:
+- On Pro servers with snapshot execution, the run **auto-resumes** when input is provided
+- On non-Pro servers or local orchestrators, the user must **manually resume** via a ZenML CLI command that already exists on the branch
+- Wait resolution is currently **human input only**
+
+## OSS vs Pro considerations
+
+The full connected wait/resume experience — dashboard-triggered resume after compute is released — depends on Pro-backed server capabilities.
+
+- **OSS / non-Pro / local orchestrator:** Resume is **manual**. After wait input is provided, the user must explicitly trigger a resume (e.g. via `kitaru executions resume` or the underlying ZenML CLI command). The run does not auto-continue.
+- **Pro (remote orchestrator on snapshot-capable servers):** Resume is **automatic**. Once the wait condition is resolved (input provided), the run automatically resumes without user intervention.
+
+As of March 2026, wait condition resolution is **human input only** — there are no webhook or automated triggers yet. Both resume paths (auto and manual) work on the `feature/pause-pipeline-runs` branch.
 
 ## Notes for MVP
 

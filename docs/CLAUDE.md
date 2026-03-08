@@ -25,17 +25,18 @@ single Cloudflare Worker.
 
 - **Never add Node.js tooling to the repo root.** No root `package.json`,
   no root `node_modules`, no workspace config.
-- **Never hand-edit generated files:** `content/docs/cli.mdx` (or `cli/`)
-  and `content/docs/changelog.mdx` are created by Python scripts and gitignored.
-  `content/docs/reference/python/` is reserved for future SDK reference generation
-  (also gitignored) but no generator exists yet.
+- **Never hand-edit generated files:** `content/docs/cli.mdx` (or `cli/`),
+  `content/docs/changelog.mdx`, and `content/docs/reference/` are created by
+  generation scripts and gitignored. SDK reference uses a two-step pipeline:
+  `scripts/generate_sdk_docs.py` (Python extraction) + `docs/scripts/convert-sdk-docs.mjs`
+  (Node MDX conversion via fumadocs-python).
 - **Respect static export constraints:** No server-side features (middleware,
   rewrites, cookies, ISR). All content must be buildable at build time.
 - **Only document shipped features.** No "Coming Soon" sections for unimplemented
   features. Every page must describe something a user can actually use today.
 - **ZenML invisibility:** Users should never need to know Kitaru is built on
   ZenML underneath. Never say "orchestrator", "artifact store", or "pipeline"
-  in user-facing docs — use Kitaru terminology (saga, checkpoint, storage).
+  in user-facing docs — use Kitaru terminology (workflow, checkpoint, storage).
 - **Frontmatter required:** Every `.mdx` page needs `title` and `description`.
 
 ## Content Structure
@@ -48,7 +49,7 @@ content/docs/
   cli.mdx                # AUTO-GENERATED (flat; becomes cli/ when subcommands exist)
   contributing.mdx       # Links to repo CONTRIBUTING.md
   changelog.mdx          # AUTO-GENERATED from CHANGELOG.md
-  reference/python/      # AUTO-GENERATED (gitignored, deferred)
+  reference/             # AUTO-GENERATED (gitignored, SDK reference via fumadocs-python)
 ```
 
 ## Available MDX Components
@@ -60,12 +61,14 @@ These are registered globally in `mdx-components.tsx`:
 - `<Steps>` / `<Step>` — numbered procedure walkthroughs
 - `<Cards>` / `<Card>` — linking to related pages
 - `<Accordions>` / `<Accordion>` — collapsible FAQ items
+- `<PyFunction>`, `<PyAttribute>`, `<PySourceCode>`, `<PyFunctionReturn>` — Python SDK
+  reference components (from `fumadocs-python/components`, used in generated pages only)
 
 ## Development
 
 ```bash
 # From repo root:
-just generate-docs  # Generate CLI + changelog docs from Python source (run first on fresh clone)
+just generate-docs  # Generate CLI + changelog + SDK reference docs (run first on fresh clone)
 just docs           # Start dev server at localhost:3000
 just docs-build     # Full static build
 just site-build     # Full unified build (generate + docs + site + merge)
@@ -78,9 +81,11 @@ pnpm run lint       # Biome lint
 pnpm run format     # Biome format
 ```
 
-**Important:** Generated content (CLI reference, changelog) is gitignored. On a fresh
-clone, run `just generate-docs` before `just docs` or `just docs-build`, otherwise
-those pages will be missing from the sidebar.
+**Important:** Generated content (CLI reference, changelog, SDK reference) is gitignored.
+On a fresh clone, run `just generate-docs` before `just docs` or `just docs-build`,
+otherwise those pages will be missing from the sidebar. SDK reference generation
+requires `fumapy` — `just generate-docs` auto-installs it from
+`docs/node_modules/fumadocs-python` (requires `pnpm install` in `docs/` first).
 
 ## File Responsibilities
 

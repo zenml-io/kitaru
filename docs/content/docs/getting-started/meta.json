@@ -1,5 +1,17 @@
 {
   "title": "Getting Started",
   "defaultOpen": true,
-  "pages": ["installation", "quickstart"]
+  "pages": [
+    "installation",
+    "quickstart",
+    "configuration",
+    "execution-management",
+    "wait-and-resume",
+    "error-handling",
+    "artifacts",
+    "stack-selection",
+    "log-store",
+    "secrets",
+    "llm-calls"
+  ]
 }

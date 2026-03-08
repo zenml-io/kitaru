@@ -9,26 +9,33 @@ or change your Python control flow.
 
 ## Vision
 
-Kitaru will provide a small set of primitives — sagas, checkpoints, wait
+Kitaru will provide a small set of primitives — workflows, checkpoints, wait
 points, and structured logging — that let you write normal Python code while
 getting durable execution guarantees underneath. When something fails halfway
 through a multi-step agent workflow, Kitaru replays from the last checkpoint
 instead of starting over.
 
 <Callout type="info">
-  Kitaru is in early development. The package is installable and provides a CLI,
-  but the SDK primitives are not yet available. This documentation covers what
-  you can use today.
+  Kitaru is in early development. Core SDK primitives are now available
+  (`@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`,
+  `kitaru.load()`, `kitaru.configure()`), plus stack selection helpers
+  (`list_stacks`, `current_stack`, `use_stack`).
 </Callout>
 
 ## Current Status
 
 Kitaru **0.1.0** includes:
 
-- The `kitaru` CLI with `--help` and `--version`
+- Core SDK execution primitives: `@kitaru.flow` and `@kitaru.checkpoint`
+- Structured metadata logging with `kitaru.log()`
+- Artifact persistence + cross-execution reads with `kitaru.save()` / `kitaru.load()`
+- CLI connection commands (`login`, `logout`, `status`, `info`)
+- Runtime configuration defaults via `kitaru.configure(...)`
+- Stack selection commands (`stack list/current/use`)
+- Global runtime log-store commands (`log-store set/show/reset`)
 - Project infrastructure (CI, testing, linting, type checking)
 
-The SDK primitives and framework adapters are under active development.
+Additional SDK primitives and framework adapters are under active development.
 
 ## Next Steps
 
@@ -39,8 +46,33 @@ The SDK primitives and framework adapters are under active development.
     href="/getting-started/installation"
   />
   <Card
+    title="Core Concepts"
+    description="Understand flows, checkpoints, and the execution model"
+    href="/concepts"
+  />
+  <Card
     title="CLI Reference"
     description="Available commands and options"
     href="/cli"
+  />
+  <Card
+    title="Configuration"
+    description="Set runtime defaults and understand override precedence"
+    href="/getting-started/configuration"
+  />
+  <Card
+    title="Artifacts"
+    description="Save and load named artifacts across executions"
+    href="/getting-started/artifacts"
+  />
+  <Card
+    title="Stack Selection"
+    description="Choose and inspect the default execution stack"
+    href="/getting-started/stack-selection"
+  />
+  <Card
+    title="Runtime Log Store"
+    description="Configure global runtime log backend behavior"
+    href="/getting-started/log-store"
   />
 </Cards>

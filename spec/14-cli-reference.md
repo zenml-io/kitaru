@@ -1,34 +1,30 @@
 # 14. CLI Reference
 
-The CLI is the command-line entry point for:
+The CLI is the command-line entry point for interacting with Kitaru. It should mirror the SDK and core runtime model rather than invent a separate one.
 
-- connecting to a server
-- selecting stacks
-- inspecting executions
-- providing input to waits (resume)
-- retrying failed executions
-- triggering replay
-- browsing artifacts
+**Implementation order:** The SDK is built first — the CLI wraps the SDK. The exception is `kitaru login`, which is needed early to unblock everything else.
 
-The CLI should mirror the core runtime model rather than invent a separate one.
+## Output styling
 
-## Auth and connection
+CLI output uses Rich for styled terminal rendering (panels, colored labels, underlined URLs) when the output stream is an interactive terminal. Non-TTY output (pipes, redirects, CI) falls back to plain text to remain machine-friendly and test-stable. New commands should use the shared output helpers (`_emit_snapshot`, `_print_success`, `_exit_with_error`) rather than bare `print()`.
+
+## Tier 1: basics (build first)
+
+### Auth and connection
 
 ```bash
-kitaru login https://kitaru.mycompany.com
+kitaru login https://my-zenml-server.mycompany.com
 kitaru status
 kitaru info
 kitaru logout
 ```
 
-### What these do
-
-- `login` stores connection/auth state for the current user
+- `login` stores connection/auth state for the current user (connects to a ZenML server)
 - `status` shows the current connection and active stack context
 - `info` shows detailed environment information: connection, active stack, project config, SDK version, and server version
 - `logout` clears stored auth state
 
-## Stack selection
+### Stack selection
 
 ```bash
 kitaru stack list
@@ -39,62 +35,7 @@ kitaru stack current
 
 For MVP, stack UX should focus on **selecting** from available stacks, not assembling infra components by hand.
 
-## Running a flow
-
-For local or ad hoc execution, the CLI should allow invoking a flow by module path.
-
-```bash
-kitaru run agent.py:content_pipeline --args '{"topic":"AI safety"}'
-```
-
-### With an explicit stack
-
-```bash
-kitaru run agent.py:content_pipeline --stack prod --args '{"topic":"AI safety"}'
-```
-
-This should resolve a new execution using the same execution model as the Python SDK.
-
-## Listing executions
-
-```bash
-kitaru executions list
-kitaru executions list --status waiting
-kitaru executions list --flow content_pipeline
-```
-
-Useful filters include:
-
-- `--status`
-- `--flow`
-- `--stack`
-- possibly time range later
-
-## Getting execution details
-
-```bash
-kitaru executions get kr-a8f3c2
-```
-
-This should show useful summary information such as:
-
-- execution ID
-- flow name
-- status
-- start/end times
-- stack
-- current wait if any
-- recent checkpoints / durable calls
-
-## Streaming logs
-
-```bash
-kitaru executions logs kr-a8f3c2 --follow
-```
-
-This is useful for live inspection, especially in connected mode.
-
-## Providing input to a wait (resume)
+### Providing input to a wait (resume)
 
 This is a **resume** operation — it continues the same execution.
 
@@ -114,7 +55,7 @@ User-facing CLI should accept a wait name for convenience, but the runtime shoul
 
 Invalid input should fail validation and leave the execution in `waiting`.
 
-## Retry
+### Retry
 
 This is a **same-execution** operation — it does not create a new execution.
 
@@ -122,14 +63,47 @@ This is a **same-execution** operation — it does not create a new execution.
 kitaru executions retry kr-a8f3c2
 ```
 
-Retry semantics:
+### Getting execution details
 
-- same logical execution
-- fixed code, fixed config, no user overrides
-- reruns from the top, replaying prior durable outcomes
-- re-executes from the failure point forward
+```bash
+kitaru executions get kr-a8f3c2
+```
 
-## Replay
+This should show useful summary information such as:
+
+- execution ID
+- flow name
+- status
+- start/end times
+- stack
+- current wait if any
+- recent checkpoints / durable calls
+
+## Tier 2: broader execution management
+
+### Running a flow
+
+For local or ad hoc execution, the CLI should allow invoking a flow by module path.
+
+```bash
+kitaru run agent.py:content_pipeline --args '{"topic":"AI safety"}'
+```
+
+With an explicit stack:
+
+```bash
+kitaru run agent.py:content_pipeline --stack prod --args '{"topic":"AI safety"}'
+```
+
+### Listing executions
+
+```bash
+kitaru executions list
+kitaru executions list --status waiting
+kitaru executions list --flow content_pipeline
+```
+
+### Replay
 
 Replay creates a **new execution**.
 
@@ -137,7 +111,7 @@ Replay creates a **new execution**.
 kitaru executions replay kr-a8f3c2 --from write_draft
 ```
 
-Replay with an override should also be possible:
+Replay with an override:
 
 ```bash
 kitaru executions replay kr-a8f3c2 \
@@ -145,12 +119,12 @@ kitaru executions replay kr-a8f3c2 \
   --override wait.approve=false
 ```
 
-Or conceptually:
+Flow inputs can be passed directly:
 
 ```bash
 kitaru executions replay kr-a8f3c2 \
   --from write_draft \
-  --override flow.input.topic='"New topic"'
+  --input topic='"New topic"'
 ```
 
 The exact CLI shape can be refined, but the semantics should remain:
@@ -159,39 +133,86 @@ The exact CLI shape can be refined, but the semantics should remain:
 - the old execution is unchanged
 - overrides replace selected reused outcomes
 
-## Cancel
+### Cancel
 
 ```bash
 kitaru executions cancel kr-a8f3c2
 ```
 
-Cancellation behavior should be explicit in implementation, especially for:
+### Streaming logs
 
-- running executions
-- waiting executions
-- already terminal executions
+```bash
+kitaru executions logs kr-a8f3c2 --follow
+```
 
-## Artifact browsing
+## Tier 3: secrets, model registration, stack authoring, artifacts, and config (later)
+
+### Secrets
+
+Secrets wrap ZenML's centralized secret store with a simpler interface. Secrets are **private by default**.
+
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+kitaru secrets set anthropic-creds --ANTHROPIC_API_KEY=sk-ant-...
+kitaru secrets show openai-creds
+kitaru secrets list
+kitaru secrets delete openai-creds
+```
+
+`set` creates a new secret or updates an existing one. Secret keys should use the actual environment variable names that downstream tools expect (e.g. `OPENAI_API_KEY`), so that ZenML's env injection and LiteLLM's native env var reading work seamlessly.
+
+Under the hood, `kitaru secrets` wraps ZenML's `Client().create_secret()` / `get_secret()` / `update_secret()` / `delete_secret()`. No new server functionality is needed.
+
+### Model registration
+
+Model aliases are managed locally, independent of stacks. Aliases can optionally reference a ZenML secret for remote credential resolution:
+
+```bash
+kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+kitaru model register smart --model anthropic/claude-sonnet-4-20250514 --secret anthropic-creds
+kitaru model list
+```
+
+The `--secret` flag ties an alias to a ZenML secret that holds provider credentials. When `kitaru.llm()` uses this alias during remote execution, it fetches the secret to obtain API keys.
+
+Provider credentials can also come from standard environment variables (e.g. `OPENAI_API_KEY`) which LiteLLM reads natively — the `--secret` flag is only needed for remote execution where env vars may not be pre-set.
+
+### Stack creation
+
+Stack creation must expose infrastructure details and credentials that map to ZenML service connectors and components underneath:
+
+```bash
+kitaru stack create prod \
+    --runner kubernetes \
+    --runner-namespace ml-agents \
+    --artifact-store s3://my-bucket \
+    --artifact-store-role arn:aws:iam::123:role/kitaru \
+    --container-registry ghcr.io/myorg
+```
+
+The exact flags are not frozen — the principle is that the CLI must surface enough detail to configure real infrastructure, not just accept a runner name.
+
+### Log store configuration
+
+```bash
+kitaru log-store set datadog --endpoint https://logs.datadoghq.com --api-key {{datadog_secret.api_key}}
+kitaru log-store show
+kitaru log-store reset
+```
+
+This is a **global setting** — it switches the default log backend for all flows. See chapter 9 for the log store model.
+
+### Artifact browsing
 
 ```bash
 kitaru artifacts list kr-a8f3c2
 kitaru artifacts list kr-a8f3c2 --name raw_notes
 kitaru artifacts list kr-a8f3c2 --type context
-```
-
-Get one artifact:
-
-```bash
 kitaru artifacts get art_abc123
-```
-
-Download a blob artifact:
-
-```bash
 kitaru artifacts get art_abc123 --download report.pdf
 ```
 
-## Config inspection
+### Config inspection
 
 ```bash
 kitaru config show
@@ -201,20 +222,17 @@ This should show the resolved view of:
 
 - connection context
 - active stack
-- project app config
-- maybe selected defaults relevant to execution
-
-It should avoid pretending that all config belongs to one flat hierarchy.
+- project config (from `pyproject.toml` `[tool.kitaru]`)
+- relevant defaults for execution
 
 ## MVP notes
 
-For March, the CLI should stay focused on the core lifecycle:
+For the MVP, the CLI should stay focused on the core lifecycle. Tier 1 commands are the priority:
 
 - login / status / info / logout
 - stack list / use / current
-- run
-- executions list / get / logs / input / retry / replay / cancel
-- artifacts list / get / download
-- config show
+- executions input / retry / get
 
-Anything beyond that should be clearly marked as later or admin-only rather than mixed into the main SDK story.
+Tier 2 extends to broader execution management. Tier 3 (stack authoring, artifacts, config) can come later.
+
+Anything beyond the core lifecycle should be clearly marked as later or admin-only rather than mixed into the main SDK story.

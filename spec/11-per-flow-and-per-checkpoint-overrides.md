@@ -122,6 +122,9 @@ For example:
 
 ```python
 handle = my_flow.start(task="demo", stack="local")
+
+# Or equivalently, using .deploy() when targeting remote infra:
+handle = my_flow.deploy(task="demo", stack="aws-sandbox")
 ```
 
 This lets the caller choose execution-time behavior without editing the decorator.
@@ -142,15 +145,17 @@ Examples:
 
 ### Flow stack precedence
 
-1. `my_flow.start(..., stack="prod")` — invocation-time override
+1. `my_flow.deploy(..., stack="prod")` or `my_flow.start(..., stack="prod")` — invocation-time override
 2. `@kitaru.flow(stack="prod")` — decorator default
 3. selected active stack
 4. implicit `local`
 
 ### LLM model precedence
 
-1. `kitaru.llm(..., model="fast")`
-2. configured `default_model`
+1. `kitaru.llm(..., model="fast")` — call-time override (alias or concrete LiteLLM identifier)
+2. locally configured default alias/model (from the local model registry)
+
+Credential resolution is separate from model selection: provider env vars in the execution environment and/or local model registry entries.
 
 ### Retry precedence
 
@@ -208,3 +213,5 @@ For March, the most useful override surface is:
 - `kitaru.llm()`: `model`, plus normal per-call LLM parameters
 
 These are all part of the [unified config object](04-connection-stacks-and-configuration.md) — overrides are just the runtime layer that sits on top of pre-execution defaults.
+
+Note: secrets in environment or config should use the ZenML `{{secret_name.secret_key}}` syntax (no spaces, dot-separated). See chapter 4 for details.

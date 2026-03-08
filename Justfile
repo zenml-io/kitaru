@@ -41,11 +41,11 @@ yaml-check:
 
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
-    lychee --offline --root-dir . --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
+    lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
 
 # Check links including external URLs (slow, used in CI)
 links-external:
-    lychee --root-dir . --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
+    lychee --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
 
 # Auto-fix formatting, lint issues, and YAML
 fix:
@@ -61,10 +61,24 @@ test *ARGS:
 build:
     uv build
 
-# Generate all docs content from Python source (CLI reference + changelog)
+# Build and push dev base image for remote stack testing (K8s, etc.)
+# The image bakes in kitaru + its zenml git dependency from local source.
+# Pass REPO to override the target registry/image.
+dev-image REPO="strickvl/kitaru-dev":
+    docker build -f docker/Dockerfile.dev -t kitaru-dev .
+    docker tag kitaru-dev {{ REPO }}:latest
+    docker push {{ REPO }}:latest
+    @printf 'Dev image pushed to {{ REPO }}:latest\n'
+
+# Generate all docs content from Python source (CLI reference + changelog + SDK reference)
 generate-docs:
     uv run python scripts/generate_cli_docs.py
     uv run python scripts/generate_changelog_docs.py
+    @# fumapy is bundled in the fumadocs-python npm package, not on PyPI.
+    @# Auto-install it if docs/node_modules exists (requires prior pnpm install in docs/).
+    @test -d docs/node_modules/fumadocs-python && uv pip install -q docs/node_modules/fumadocs-python || true
+    uv run python scripts/generate_sdk_docs.py
+    cd docs && node scripts/convert-sdk-docs.mjs
 
 # Preview docs locally (run generate-docs first if CLI pages needed)
 docs:

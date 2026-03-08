@@ -1,0 +1,75 @@
+---
+title: Configure Runtime Log Storage
+description: Set, inspect, and reset Kitaru's global runtime log-store backend
+---
+
+This guide shows how to configure where Kitaru runtime logs go.
+
+## What this controls
+
+Kitaru has two separate observability channels:
+
+- `kitaru.log(...)` writes **structured metadata** to executions/checkpoints.
+- `kitaru log-store ...` configures the backend for **runtime logs**.
+
+By default, runtime logs use `artifact-store`.
+
+## Show current log-store backend
+
+```bash
+kitaru log-store show
+```
+
+This command shows the effective backend and where it came from (`default`,
+`global user config`, or `environment`).
+
+## Set a global backend override
+
+```bash
+kitaru log-store set datadog \
+  --endpoint https://logs.datadoghq.com \
+  --api-key "{{ DATADOG_KEY }}"
+```
+
+This stores a global user-level override and applies to all flows on that
+machine.
+
+## Reset to default behavior
+
+```bash
+kitaru log-store reset
+```
+
+Reset removes the persisted global override and returns to default
+`artifact-store` behavior.
+
+## Environment overrides
+
+Environment variables take precedence over the persisted global setting:
+
+- `KITARU_LOG_STORE_BACKEND`
+- `KITARU_LOG_STORE_ENDPOINT`
+- `KITARU_LOG_STORE_API_KEY`
+
+Example:
+
+```bash
+export KITARU_LOG_STORE_BACKEND=datadog
+export KITARU_LOG_STORE_ENDPOINT=https://logs.datadoghq.com
+export KITARU_LOG_STORE_API_KEY="${DATADOG_API_KEY}"
+kitaru log-store show
+```
+
+To force default behavior via environment, set:
+
+```bash
+export KITARU_LOG_STORE_BACKEND=artifact-store
+unset KITARU_LOG_STORE_ENDPOINT
+unset KITARU_LOG_STORE_API_KEY
+kitaru log-store show
+```
+
+## Related reference pages
+
+- [CLI log-store commands](/cli/log-store)
+- [Python logging reference](/reference/python/logging)

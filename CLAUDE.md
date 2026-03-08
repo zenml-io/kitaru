@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Kitaru?
 
-Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`saga`, `checkpoint`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
+Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `save`, `load`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
-**ZenML mapping:** `@kitaru.saga` → `@pipeline(dynamic=True)`, `@kitaru.checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
+**ZenML mapping:** `@kitaru.flow` → `@pipeline(dynamic=True)`, `@kitaru.checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
 
 ## Project layout
 
@@ -17,14 +17,17 @@ src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI entry point (cyclopts)
   adapters/           # Framework adapter stubs (not yet implemented)
 tests/                # pytest tests
+examples/             # Runnable SDK examples (Phase 5/7/8/10/11/12/15 milestones)
 docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   content/docs/       # Documentation content (MDX files)
+  scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
   app/                # Next.js app routes, layout, metadata, search, sitemap
 site/                 # Astro landing page + Cloudflare runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (/api/waitlist with KV)
 scripts/              # Doc generation + site merge scripts
   generate_cli_docs.py       # Generates CLI reference MDX from cyclopts introspection
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
+  generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
 spec/                 # SDK design specifications (temporary, deleted once implemented)
 wrangler.toml         # Unified Cloudflare Worker deployment config
@@ -35,7 +38,7 @@ design/               # Design docs, meeting notes (gitignored, never commit)
 
 The docs and landing page deploy as **one Cloudflare Worker** from `site/dist/`:
 
-1. Python scripts generate docs content (CLI reference + changelog)
+1. Python scripts generate docs content (CLI reference, changelog, SDK reference JSON)
 2. `docs/` builds a static export into `docs/out/` (Next.js with `basePath: '/docs'`)
 3. `site/` builds the Astro app into `site/dist/` (owns runtime `/api/waitlist` + KV)
 4. `scripts/merge_site.sh` copies `docs/out/*` into `site/dist/docs/`
@@ -64,6 +67,7 @@ This project uses [just](https://github.com/casey/just) as a command runner. Run
 ```bash
 # Setup
 uv sync                              # Install dependencies
+uv sync --extra local                # Include local ZenML runtime components
 
 # Common Python workflows
 just check                            # Run all checks (format, lint, typecheck, typos, yaml, links)
@@ -83,7 +87,7 @@ just links                            # Check markdown links offline (requires l
 just build                            # Build wheel + sdist locally
 
 # Docs/site workflows (require Node 22+ and pnpm)
-just generate-docs                    # Generate CLI reference + changelog from Python source
+just generate-docs                    # Generate CLI reference + changelog + SDK reference docs
 just docs                             # Preview docs dev server (localhost:3000)
 just docs-build                       # Build docs static export
 just site                             # Preview landing page dev server (localhost:4321)
@@ -109,34 +113,47 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** The SDK primitives below are **specified but not yet implemented**. The detailed design lives in `spec/` (temporary files, deleted once implemented). The current codebase has the CLI and package scaffolding; the runtime primitives are being built.
+> **Note:** The SDK is partially implemented. `@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.wait()`, `kitaru.llm()`, `kitaru.configure()`, stack selection helpers (`list_stacks`, `current_stack`, `use_stack`), local model alias CLI (`kitaru model register/list`), `KitaruClient` execution/artifact browsing + wait-input lifecycle surface, typed Kitaru exceptions + failure journaling (`execution.failure`, checkpoint attempt history), core connection/login CLI paths, `kitaru stack list/current/use`, `kitaru log-store set/show/reset`, `kitaru secrets set/show/list/delete`, and execution lifecycle CLI commands (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`) are functional. Replay and some CLI extensions remain in progress.
 
-### Planned MVP primitives
+### Current MVP primitives
 
-| Primitive | Purpose |
+| Primitive | Status |
 |---|---|
-| `@kitaru.saga` | Outer boundary — marks a durable execution |
-| `@kitaru.checkpoint` | Checkpointed unit of work, with optional `type=` for dashboard visualization |
-| `kitaru.wait()` | Suspend until a webhook event arrives (MVP: webhook only) |
-| `kitaru.log()` | Attach typed metadata to current checkpoint |
-| `kitaru.save()` | Explicit named artifact (inside checkpoint only) |
-| `kitaru.load()` | Cross-execution artifact loading (requires exec_id) |
+| `@kitaru.flow` | Implemented |
+| `@kitaru.checkpoint` | Implemented |
+| `kitaru.wait()` | Implemented |
+| `kitaru.llm()` | Implemented |
+| `kitaru.log()` | Implemented |
+| `kitaru.save()` | Implemented |
+| `kitaru.load()` | Implemented |
+| Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
+| `kitaru.configure()` + Phase 10 config precedence | Implemented |
+| `KitaruClient` (`get/list/latest/input/resume/cancel/retry` + artifact browsing) | Implemented |
+| Execution CLI (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`) | Implemented |
+| Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
+| `KitaruClient.executions.replay()` | Stubbed (branch-dependent) |
 
 ### Key design patterns
 
-- **Sagas cannot nest** — no `@kitaru.saga` inside another saga
-- **Checkpoints can nest** — each independently persisted
+- **Flows cannot nest** — no `@kitaru.flow` inside another flow
+- **Nested checkpoint calls are blocked in the current MVP implementation**
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive
-- **Replay** works by re-running the saga from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
+- **Replay** works by re-running the flow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
 - **Artifact overrides** let you swap a checkpoint's cached output during replay
 
 ### Framework adapters (planned)
 
 The `adapters/` directory is scaffolded but empty. The planned PydanticAI adapter will wrap agents so each model request → `checkpoint(type='llm_call')` and each tool call → `checkpoint(type='tool_call')` automatically.
 
-### Observability (planned)
+### Observability (current MVP + planned)
 
-Kitaru will emit OpenTelemetry spans. It will **not** own the tracing backend — users configure their own OTel exporter (Logfire, Datadog, etc.).
+Current MVP observability includes:
+
+- `kitaru.log()` for structured metadata on executions/checkpoints
+- Global runtime log-store configuration via `kitaru log-store set/show/reset`
+  (defaults to `artifact-store`, supports global external backend override)
+
+Future work will add richer OpenTelemetry-native tracing and exporter integration.
 
 ## Code style
 
@@ -154,6 +171,7 @@ Kitaru will emit OpenTelemetry spans. It will **not** own the tracing backend �
 
 ## Commits and PRs
 
+- **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, links, and tests.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
 - **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
@@ -166,6 +184,15 @@ The CLI uses [cyclopts](https://cyclopts.readthedocs.io/) (`src/kitaru/cli.py`).
 - Version is read automatically from package metadata via `importlib.metadata.version()`
 - When testing CLI commands, always pass an explicit arg list: `app(["--help"])`, never bare `app()` (which reads `sys.argv`)
 - CLI commands raise `SystemExit(0)` on success — wrap in `pytest.raises(SystemExit)` in tests
+
+### CLI output styling
+
+CLI output uses [Rich](https://rich.readthedocs.io/) for styled terminal output with a **dual-mode pattern**: Rich panels/colors for interactive terminals, plain text for non-TTY output (pipes, CI, tests). The `_is_interactive()` helper controls mode selection.
+
+- Use `_emit_snapshot()` for key/value views (status, info), `_print_success()` for success messages, `_exit_with_error()` for errors
+- Use `rich.text.Text` objects for user-supplied values — never interpolate them into Rich markup strings (avoids `[`/`]` misinterpretation)
+- Create `Console()` lazily inside helpers, not at module level (pytest replaces streams after import)
+- Tests use `capsys` and assert on plain-text substrings — the non-TTY path keeps this stable
 
 ## Conventions
 

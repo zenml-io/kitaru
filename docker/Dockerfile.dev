@@ -1,0 +1,21 @@
+# Dev base image for testing kitaru flows on remote stacks (K8s, etc.).
+#
+# Builds from the ZenML base image and installs kitaru (+ its zenml git
+# dependency) from the local source tree.  The zenml-io/zenml repo is
+# public, so git can clone it without credentials.
+#
+# Rebuild whenever kitaru or zenml dependencies change:
+#   just dev-image
+#
+# Then reference the image in your flow:
+#   @kitaru.flow(image={"base_image": "<ecr-url>:kitaru-dev"})
+
+FROM zenmldocker/zenml:0.94.0-py3.13
+
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install uv
+
+COPY . /tmp/kitaru
+RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru

@@ -1,0 +1,152 @@
+---
+title: Configure Flow Execution Defaults
+description: Use kitaru.configure(), environment variables, and flow overrides with clear precedence
+---
+
+This guide shows how to configure Kitaru flow execution defaults and how
+precedence is resolved.
+
+## Configure runtime defaults in Python
+
+Use `kitaru.configure(...)` to set process-local defaults:
+
+```python
+import kitaru
+
+kitaru.configure(
+    stack="local",
+    cache=False,
+    retries=1,
+    image=kitaru.ImageSettings(
+        base_image="python:3.12-slim",
+        environment={"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
+    ),
+)
+```
+
+These defaults apply to flows started in the current Python process.
+
+## Flow-level and invocation-level overrides
+
+Flow defaults can override configured runtime defaults, and invocation-time
+arguments can override both.
+
+```python
+@kitaru.flow(cache=True, retries=2)
+def my_flow(topic: str) -> str:
+    ...
+
+handle = my_flow.start("kitaru", retries=3)
+```
+
+In this example, resolved retries are `3`.
+
+## Precedence (highest to lowest)
+
+1. Invocation-time overrides (`my_flow.start(..., stack="prod")`)
+2. Flow decorator defaults (`@kitaru.flow(stack="prod")`)
+3. `kitaru.configure(...)`
+4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
+5. Project config (`pyproject.toml` under `[tool.kitaru]`)
+6. Global user config (active stack and connection defaults)
+7. Built-in defaults (`local` stack, `cache=True`, `retries=0`)
+
+## Environment variables
+
+Execution settings:
+
+- `KITARU_STACK`
+- `KITARU_CACHE`
+- `KITARU_RETRIES`
+- `KITARU_IMAGE` (JSON object or plain image string)
+
+Connection settings:
+
+- `KITARU_SERVER_URL`
+- `KITARU_AUTH_TOKEN`
+- `KITARU_PROJECT`
+
+## Project config in pyproject.toml
+
+```toml
+[tool.kitaru]
+stack = "prod"
+cache = false
+retries = 2
+
+[tool.kitaru.image]
+base_image = "python:3.12-slim"
+
+[tool.kitaru.image.environment]
+OPENAI_API_KEY = "{{ OPENAI_KEY }}"
+```
+
+## Automatic package injection
+
+Kitaru automatically adds itself to the container image requirements for remote
+execution. You never need to add `kitaru` to your `requirements` list manually —
+it is injected at build time so that remote containers always have the SDK
+available.
+
+If you specify your own requirements, Kitaru appends itself without duplicating:
+
+```python
+kitaru.configure(
+    image=kitaru.ImageSettings(
+        requirements=["httpx", "pydantic"],
+    ),
+)
+# Remote container installs: httpx, pydantic, kitaru
+```
+
+If you already include `kitaru` (with or without a version pin), it is not added
+again:
+
+```python
+kitaru.configure(
+    image=kitaru.ImageSettings(
+        requirements=["kitaru>=0.2.0", "httpx"],
+    ),
+)
+# Remote container installs: kitaru>=0.2.0, httpx (no duplicate)
+```
+
+### Replicating your local environment
+
+During development, you can replicate your entire local Python environment into
+the remote container. This installs all locally installed packages (via
+`pip freeze`) so the remote container matches your dev setup exactly:
+
+```python
+@kitaru.flow(image={"replicate_local_python_environment": True})
+def my_flow(topic: str) -> str:
+    ...
+```
+
+### System packages
+
+If your flow needs system-level dependencies (e.g., `git`, `ffmpeg`), use
+`apt_packages`:
+
+```python
+@kitaru.flow(
+    image=kitaru.ImageSettings(
+        apt_packages=["git", "ffmpeg"],
+        requirements=["httpx"],
+    ),
+)
+def my_flow(topic: str) -> str:
+    ...
+```
+
+## Frozen execution spec
+
+At flow start, Kitaru computes a fully resolved execution config and persists it
+with the execution metadata (`kitaru_execution_spec`). This keeps execution
+behavior stable even if config changes later.
+
+## Related pages
+
+- [Stack Selection](/getting-started/stack-selection)
+- [Execution Model](/concepts/execution-model)
+- [Python configuration reference](/reference/python/config)
