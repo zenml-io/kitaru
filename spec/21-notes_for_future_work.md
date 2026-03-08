@@ -180,3 +180,9 @@ Remaining work: fix the sidebar nesting issue in the FumaDocs theme/config.
 
 - Move the skill(s) out to their own zenml-io/kitaru-skills repository (it's only here for now while we iterate)
 - add a scoping skill to be called by the pipeline authoring skill
+
+## Blog
+
+- improve the design
+- fix the opengraph image(s) for the blog main site + individual posts
+- add cover images?
