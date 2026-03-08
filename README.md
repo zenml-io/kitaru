@@ -4,27 +4,22 @@ Durable execution for AI agents, built on [ZenML](https://zenml.io).
 
 Kitaru makes agent workflows **persistent, replayable, and observable** using a small set of Python primitives. No graph DSL, no framework lock-in — just decorators on your existing code.
 
-## What works today
+## Features
 
-Kitaru is under active development. The core flow and checkpoint decorators are implemented and functional, the Phase 5 first working workflow milestone is complete, `kitaru.log()` attaches structured metadata to executions/checkpoints, and `kitaru.save()` / `kitaru.load()` support explicit artifact persistence and cross-execution reuse inside checkpoints. Runtime log storage also has a global default/override model via `kitaru log-store ...`, and you can inspect/switch your active stack with `kitaru stack ...` (or `kitaru.list_stacks()`, `kitaru.current_stack()`, `kitaru.use_stack()`).
+Kitaru is under active development. The core SDK primitives are implemented and functional:
 
-Phase 10 configuration is now implemented via `kitaru.configure(...)`, environment variables, and project-level `[tool.kitaru]` settings in `pyproject.toml`, with precedence resolved at flow start time and persisted as a frozen execution spec on each run.
-
-Phase 11 introduces the first real `KitaruClient` surface for execution management. You can now inspect executions (`get`, `list`, `latest`), perform same-execution recovery (`retry`), cancel running executions (`cancel`), and browse/load artifacts (`client.artifacts.list/get`, `artifact.load()`).
-
-Phase 11.5 adds a Kitaru secrets CLI surface: `kitaru secrets set/show/list/delete`. Secrets are private by default, `set` behaves as create-or-update, and key names should use env-var style identifiers such as `OPENAI_API_KEY`.
-
-Phase 12 adds `kitaru.llm()` with LiteLLM as the backend engine, automatic prompt/response artifact capture, usage/cost/latency metadata logging, and local model alias registration (`kitaru model register/list`) with optional secret-backed credential lookup.
-
-Phase 13 adds a typed Kitaru error hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.), clearer runtime-vs-user-code failure surfacing, and failure journaling in `KitaruClient` via `execution.failure` plus per-checkpoint attempt history in `checkpoint.attempts`.
-
-Phase 14 adds the first execution lifecycle CLI layer on top of `KitaruClient`: `kitaru run`, `kitaru executions get`, `kitaru executions list`, `kitaru executions retry`, and `kitaru executions cancel`.
-
-Phase 15 adds durable wait/resume support: `kitaru.wait(...)`, `client.executions.input(...)`, `client.executions.resume(...)`, plus CLI commands `kitaru executions input` and `kitaru executions resume`.
-
-Phase 17 adds the first framework adapter: `kitaru.adapters.pydantic_ai.wrap(agent)`. Wrapped PydanticAI model requests and tool calls are tracked as child events under the enclosing checkpoint, and `@kitaru.adapters.pydantic_ai.hitl_tool(...)` can translate agent-level HITL requests into flow-level waits.
-
-Phase 19 adds agent-native integrations: an optional MCP server (`kitaru-mcp`) with structured execution/artifact/status query tools, plus a packaged Claude Code skill (`kitaru.skills/kitaru-authoring.md`) for reliable Kitaru authoring patterns.
+- **Flows and checkpoints** — `@kitaru.flow` and `@kitaru.checkpoint` decorators for durable, replayable workflows with concurrent execution via `.submit()` / `.result()`
+- **Artifact persistence** — `kitaru.save()` / `kitaru.load()` for explicit artifact storage and cross-execution reuse inside checkpoints
+- **Structured logging** — `kitaru.log()` attaches metadata to executions and checkpoints, with configurable runtime log backends (`kitaru log-store ...`)
+- **Configuration** — `kitaru.configure(...)`, environment variables, and `[tool.kitaru]` in `pyproject.toml`, with precedence resolved at flow start and persisted per execution
+- **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
+- **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
+- **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, and local model aliases (`kitaru model register/list`)
+- **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
+- **Execution CLI** — `kitaru run`, `kitaru executions get/list/retry/cancel/input/resume` for full lifecycle management from the terminal
+- **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
+- **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint, with HITL support via `hitl_tool(...)`
+- **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus a packaged Claude Code skill for authoring patterns
 
 ### SDK primitives
 
@@ -64,140 +59,38 @@ def parallel_agent(urls: list[str]) -> list[str]:
     return [f.result() for f in futures]
 ```
 
-### Run the first working workflow
+### Examples
 
-The repository includes a runnable Phase 5 example at
-`examples/first_working_flow.py`.
-
-```bash
-uv sync --extra local
-uv run python -m examples.first_working_flow
-```
-
-Expected output:
-
-```text
-SOME DATA
-```
-
-You can also run the integration test for this example:
+The `examples/` directory contains runnable workflows showcasing each feature. Install dependencies first:
 
 ```bash
-uv run pytest tests/test_phase5_example.py
+uv sync --extra local              # Core examples
+uv sync --extra local --extra mcp  # MCP server example
 ```
 
-### Run the configuration workflow
+| Example | File | What it demonstrates |
+|---|---|---|
+| Basic flow | `examples/first_working_flow.py` | `@flow` / `@checkpoint` decorators, sync execution |
+| Artifact save/load | `examples/flow_with_artifacts.py` | `kitaru.save()` / `kitaru.load()` inside checkpoints |
+| Structured logging | `examples/flow_with_logging.py` | `kitaru.log()` metadata on executions and checkpoints |
+| Configuration | `examples/flow_with_configuration.py` | `kitaru.configure()` with precedence resolution |
+| Execution management | `examples/client_execution_management.py` | `KitaruClient` for inspecting and managing executions |
+| LLM calls | `examples/flow_with_llm.py` | `kitaru.llm()` with model aliases and metadata capture |
+| Wait/resume | `examples/wait_and_resume.py` | `kitaru.wait()` and external input via client |
+| PydanticAI adapter | `examples/pydantic_ai_adapter.py` | `wrap(agent)` for framework-level observability |
+| MCP query tools | `examples/mcp_query_tools.py` | MCP server execution/artifact query tools |
 
-The repository includes a runnable Phase 10 example at
-`examples/flow_with_configuration.py`.
+Run any example with:
 
 ```bash
-uv sync --extra local
-uv run python -m examples.flow_with_configuration
+uv run python -m examples.<module_name>
 ```
 
-You can also run the integration test for this example:
+For the LLM example, register a model alias and set your API key first:
 
 ```bash
-uv run pytest tests/test_phase10_configuration_example.py
-```
-
-### Run the artifact save/load workflow
-
-The repository includes a runnable Phase 8 example at
-`examples/flow_with_artifacts.py`.
-
-```bash
-uv sync --extra local
-uv run python -m examples.flow_with_artifacts
-```
-
-You can also run the integration test for this example:
-
-```bash
-uv run pytest tests/test_phase8_artifacts_example.py
-```
-
-### Run the execution management workflow
-
-The repository includes a runnable Phase 11 example at
-`examples/client_execution_management.py`.
-
-```bash
-uv sync --extra local
-uv run python -m examples.client_execution_management
-```
-
-You can also run the integration test for this example:
-
-```bash
-uv run pytest tests/test_phase11_client_example.py
-```
-
-### Run the wait/resume workflow
-
-The repository includes a runnable Phase 15 example at
-`examples/wait_and_resume.py`.
-
-```bash
-uv sync --extra local
-uv run python -m examples.wait_and_resume
-```
-
-You can also run the integration test for this example:
-
-```bash
-uv run pytest tests/test_phase15_wait_example.py
-```
-
-### Run the MCP query example
-
-The repository includes a runnable Phase 19 example at
-`examples/mcp_query_tools.py`.
-
-```bash
-uv sync --extra local --extra mcp
-uv run python -m examples.mcp_query_tools
-```
-
-You can also run the unit test for this example and MCP tool wrappers:
-
-```bash
-uv run pytest tests/mcp/test_phase19_mcp_example.py tests/mcp/test_server.py
-```
-
-### Run the PydanticAI adapter workflow
-
-The repository includes a runnable Phase 17 example at
-`examples/pydantic_ai_adapter.py`.
-
-```bash
-uv sync --extra local --extra pydantic-ai
-uv run python -m examples.pydantic_ai_adapter
-```
-
-You can also run the integration test for this example:
-
-```bash
-uv run pytest tests/test_phase17_pydantic_ai_example.py
-```
-
-### Run the LLM workflow
-
-The repository includes a runnable Phase 12 example at
-`examples/flow_with_llm.py`.
-
-```bash
-uv sync --extra local
 kitaru model register fast --model openai/gpt-4o-mini
 export OPENAI_API_KEY=sk-...
-uv run python -m examples.flow_with_llm
-```
-
-You can also run the integration test for this example:
-
-```bash
-uv run pytest tests/test_phase12_llm_example.py
 ```
 
 ### CLI
