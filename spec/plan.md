@@ -475,7 +475,7 @@ many commands to wire up.
 
 ---
 
-## Phase 15: `kitaru.wait()` + resume
+## Phase 15: `kitaru.wait()` + resume --- DONE
 
 **Goal:** Durable suspension and resume. **Wraps ZenML `feature/pause-pipeline-runs` branch.**
 
