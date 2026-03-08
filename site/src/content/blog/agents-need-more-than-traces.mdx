@@ -1,0 +1,80 @@
+---
+title: "Your agents need more than traces"
+description: "Tracing shows you what went wrong. But what if you could go back, fix the input, and resume from where it failed — without re-running everything?"
+date: 2026-03-08
+author: "Hamza Tahir"
+---
+
+You're building an agent that does deep research. It runs for an hour, makes 40 tool calls, burns $25 in tokens. At step 38, it hits a rate limit and crashes.
+
+You open your tracing dashboard. You can see exactly what happened — every LLM call, every tool invocation, the exact error. Beautiful.
+
+Now what?
+
+You start the agent again from scratch. Another hour. Another $25.
+
+## The gap between seeing and doing
+
+Tracing is essential. You need to know what your agent did, how long it took, where it failed. But knowing is only half the problem. The other half is *acting on it*.
+
+What you actually want:
+
+- **Resume from step 38.** The first 37 steps already succeeded. Their outputs are sitting right there. Why re-compute them?
+- **Swap the failing input.** Maybe the rate limit was on one specific API. You want to retry step 38 with a different provider, keeping everything else.
+- **Pause the next run at step 20.** You know the agent makes a questionable decision there. You want to review it before letting it continue.
+
+These aren't observability problems. They're control problems.
+
+## What control looks like in practice
+
+Here's a Kitaru flow with checkpoints:
+
+```python
+import kitaru
+
+@kitaru.checkpoint
+def gather_sources(topic: str) -> list[str]:
+    return search_academic_papers(topic)
+
+@kitaru.checkpoint
+def analyze(sources: list[str]) -> str:
+    return call_llm(f"Analyze these sources: {sources}")
+
+@kitaru.flow
+def research_agent(topic: str) -> str:
+    sources = gather_sources(topic)
+
+    # Agent pauses here until a human approves
+    approved = kitaru.wait(
+        schema=bool,
+        question=f"Found {len(sources)} sources. Continue?",
+    )
+    if not approved:
+        return "Stopped by reviewer."
+
+    return analyze(sources)
+```
+
+Each `@checkpoint` persists its return value. If `analyze` fails, you don't re-run `gather_sources` — its output is cached. You fix the issue and replay from the failure point.
+
+The `wait()` call is a real suspension. The process stops. No polling loop. No compute burning. When the human approves — from the CLI, the API, or an AI assistant via MCP — the flow resumes from exactly where it paused.
+
+## Not another runtime
+
+There are durable execution engines that solve this. They're powerful. They're also heavy — a separate runtime to deploy, a new SDK to learn, infrastructure to manage.
+
+Kitaru takes a different approach: two decorators and `pip install`. Your code stays Python. Your control flow stays yours — if/else, loops, try/except, all work naturally. The durability is invisible until you need it.
+
+## What this means for agent builders
+
+When every step is checkpointed, new patterns emerge:
+
+**Cost control.** You stop re-burning tokens on steps that already worked. A 40-step agent that fails at step 38 costs you 2 steps to retry, not 40.
+
+**Human oversight.** You can insert approval gates anywhere in your flow. The agent pauses, the human reviews, the agent continues. No architectural changes — just add `wait()`.
+
+**Debugging by replay.** Something went wrong at step 15? Replay from step 14 with different inputs. Compare both runs. Iterate until it works.
+
+**Multi-agent coordination.** One agent can read another agent's artifacts. A master agent can monitor, resume, and feed input to a fleet of sub-agents — all through the same API.
+
+Your agents are getting more complex. Your infrastructure should make that manageable, not painful.

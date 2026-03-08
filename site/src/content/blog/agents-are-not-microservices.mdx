@@ -1,0 +1,96 @@
+---
+title: "Your agents are not microservices"
+description: "Durable execution engines were built for payment flows and order processing. AI agents need something different. Here's why."
+date: 2026-02-25
+author: "Hamza Tahir"
+---
+
+Temporal was born at Uber. It was designed for ride matching, payment processing, and order fulfillment — millions of short-lived, predictable workflows per second, each needing sub-100ms latency.
+
+That's not what your AI agent does.
+
+Your agent spends 45 seconds on a single LLM call. It makes decisions at runtime that change the entire execution path. It costs $2 per run in API tokens. It might need a human to approve something and wait for hours.
+
+These are fundamentally different workloads. They need different infrastructure.
+
+## The microservice assumptions
+
+Durable execution engines were designed around a set of assumptions that made perfect sense for their original workloads:
+
+**High concurrency, low compute per task.** A payment flow does a database write, calls a payment API, sends a notification. Each step takes milliseconds. You run 100,000 of these concurrently, so you need workers that can multiplex thousands of workflows in a single process.
+
+**Predictable execution paths.** A payment either succeeds, fails, or needs retry. You know the shape upfront. Deterministic replay works because the logic is deterministic.
+
+**Sub-second resume.** When a payment callback arrives, you need to resume the workflow immediately. Customers are waiting. Spinning up a new process would be too slow.
+
+**Long-running workers.** Workers poll for tasks and stay alive indefinitely. This amortizes startup cost across thousands of workflow executions.
+
+Every design decision in Temporal, Restate, and similar systems flows from these assumptions. They're good assumptions — for microservices.
+
+## The agent reality
+
+AI agents violate every one of these assumptions:
+
+**Low concurrency, high compute per task.** A research agent makes 40 LLM calls at $0.05-$5 each. Each call takes 5-30 seconds. You're running 10 of these, not 100,000. The bottleneck is LLM API cost, not workflow throughput.
+
+**Unpredictable execution paths.** The agent decides at runtime which tools to call, how many times to iterate, and when to ask a human. You can't predict the sequence of operations upfront. Forcing this into a deterministic model means fighting the framework.
+
+**Resume latency doesn't matter.** When a human approves a PR review at 3 PM after the agent submitted it at 11 AM, nobody cares if resume takes 2 seconds instead of 17 milliseconds.
+
+**Short-lived processes.** An agent runs for 10 minutes, hits a `wait()`, and the process should die. When the human responds hours later, a new process starts. There's no reason to keep a worker alive.
+
+## What agents actually need
+
+Strip away the microservice assumptions and ask: what does an AI agent workload actually require?
+
+**Crash recovery without re-burning tokens.** If the agent crashes at step 38, resume from step 38. Don't re-run the $25 worth of LLM calls that already succeeded.
+
+**Human-in-the-loop as a first-class primitive.** Not signals. Not callbacks. A real `wait()` that suspends the execution, releases compute, and resumes when input arrives — minutes, hours, or days later.
+
+**No determinism constraints.** Agents call `datetime.now()`, use `random()`, make HTTP requests in their main logic. A framework that bans these from workflow code is a non-starter.
+
+**Cost visibility.** How much did this execution cost? Which LLM call was the most expensive? How does run #47 compare to run #46? This is table stakes for agent operations.
+
+**Artifact tracking.** Every intermediate result should be inspectable, comparable across runs, and queryable. Not just a trace — actual versioned outputs.
+
+## The right tool for the job
+
+This isn't about which platform is "better." It's about fit:
+
+| Workload | What it needs | Best fit |
+|---|---|---|
+| Payment processing | Sub-ms resume, 100k concurrent, deterministic | Temporal |
+| Serverless RPC handlers | Push-based, short-lived, stateless | Restate, Inngest |
+| AI agents | Crash recovery, human-in-the-loop, cost tracking, no determinism | Kitaru |
+
+Temporal is excellent at what it does. So is Restate. But using them for AI agents means accepting constraints that were designed for a different problem — and working around them at every turn.
+
+## Start from the workload, not the architecture
+
+Kitaru's execution model is simple: each checkpoint caches its output. On resume, cached outputs are returned instantly. Failed or new checkpoints execute live. No journal. No replay. No worker fleet.
+
+This is "too simple" for payment processing — you'd need sub-millisecond resume and hundred-thousand concurrent workflows. But for 10 agents doing expensive LLM work with humans in the loop, simplicity is the feature.
+
+```python
+import kitaru
+
+@kitaru.checkpoint
+def deep_research(topic: str) -> str:
+    # 30 seconds, $2 in tokens
+    return call_llm(f"Research {topic} thoroughly")
+
+@kitaru.flow
+def research_agent(topic: str) -> str:
+    research = deep_research(topic)
+
+    kitaru.wait(
+        schema=bool,
+        question="Research complete. Proceed to analysis?",
+    )
+
+    return analyze(research)  # research is cached, not re-computed
+```
+
+Two decorators. `pip install kitaru`. Your Python stays Python.
+
+The agent landscape is evolving fast. Maybe someday agents will need microservice-scale throughput. But today, the agents hitting production — coding agents, research agents, content workflows — are long-running, expensive, and human-supervised. That's the workload Kitaru is built for.

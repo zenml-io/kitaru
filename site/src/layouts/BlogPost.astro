@@ -1,0 +1,242 @@
+---
+import Base from './Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  date: Date;
+  author: string;
+}
+
+const { title, description, date, author } = Astro.props;
+
+const formatted = new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric',
+}).format(date);
+
+const isoDate = date.toISOString();
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site).href;
+---
+
+<Base title={`${title} — Kitaru Blog`} description={description}>
+  <Fragment slot="head">
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="article:published_time" content={isoDate} />
+    <meta property="article:author" content={author} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+  </Fragment>
+  <Nav />
+  <main class="blog-post-main">
+    <article class="blog-post" itemscope itemtype="https://schema.org/BlogPosting">
+      <meta itemprop="datePublished" content={isoDate} />
+      <meta itemprop="author" content={author} />
+      <header class="blog-post-header">
+        <a href="/blog" class="blog-back">&larr; Blog</a>
+        <h1 class="blog-post-title" itemprop="headline">{title}</h1>
+        <div class="blog-post-meta">
+          <span>{author}</span>
+          <span class="blog-post-sep">&middot;</span>
+          <time datetime={isoDate}>{formatted}</time>
+        </div>
+      </header>
+      <div class="blog-post-body" itemprop="articleBody">
+        <slot />
+      </div>
+    </article>
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .blog-post-main {
+    padding: 40px clamp(16px, 5vw, 80px) 100px;
+  }
+
+  .blog-post {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  .blog-back {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+
+  .blog-back:hover {
+    color: var(--color-accent);
+  }
+
+  .blog-post-header {
+    margin-bottom: 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .blog-post-title {
+    font-size: clamp(1.6rem, 4vw, 2.6rem);
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--color-primary);
+    margin: 0;
+  }
+
+  .blog-post-meta {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .blog-post-sep {
+    color: var(--color-border);
+  }
+
+  .blog-post-body {
+    font-size: clamp(0.95rem, 2.5vw, 1.05rem);
+    line-height: 1.75;
+    color: var(--color-secondary);
+  }
+
+  .blog-post-body :global(h2) {
+    font-size: clamp(1.2rem, 3vw, 1.4rem);
+    font-weight: 600;
+    color: var(--color-primary);
+    margin: 48px 0 16px;
+    letter-spacing: -0.01em;
+  }
+
+  .blog-post-body :global(h3) {
+    font-size: clamp(1.05rem, 2.5vw, 1.15rem);
+    font-weight: 600;
+    color: var(--color-primary);
+    margin: 36px 0 12px;
+  }
+
+  .blog-post-body :global(p) {
+    margin: 0 0 20px;
+  }
+
+  .blog-post-body :global(a) {
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .blog-post-body :global(strong) {
+    font-weight: 600;
+    color: var(--color-primary);
+  }
+
+  .blog-post-body :global(em) {
+    font-style: italic;
+  }
+
+  .blog-post-body :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    color: var(--color-accent);
+    background: rgba(241, 120, 41, 0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
+    word-break: break-word;
+  }
+
+  .blog-post-body :global(pre) {
+    background: #1A1714;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    margin: 24px -16px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .blog-post-body :global(pre code) {
+    background: none;
+    padding: 0;
+    font-size: 0.82rem;
+    color: #E8E4DE;
+    line-height: 1.7;
+    word-break: normal;
+  }
+
+  .blog-post-body :global(ul),
+  .blog-post-body :global(ol) {
+    margin: 0 0 20px;
+    padding-left: 24px;
+  }
+
+  .blog-post-body :global(li) {
+    margin-bottom: 8px;
+  }
+
+  .blog-post-body :global(blockquote) {
+    border-left: 3px solid var(--color-accent);
+    padding-left: 20px;
+    margin: 24px 0;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+
+  .blog-post-body :global(hr) {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: 40px 0;
+  }
+
+  .blog-post-body :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0;
+    font-size: 0.88rem;
+    overflow-x: auto;
+    display: block;
+  }
+
+  .blog-post-body :global(th),
+  .blog-post-body :global(td) {
+    padding: 10px 14px;
+    border: 1px solid var(--color-border);
+    text-align: left;
+  }
+
+  .blog-post-body :global(th) {
+    font-weight: 600;
+    color: var(--color-primary);
+    background: var(--color-surface-warm);
+  }
+
+  @media (max-width: 480px) {
+    .blog-post-main {
+      padding-top: 24px;
+      padding-bottom: 60px;
+    }
+
+    .blog-post-header {
+      margin-bottom: 32px;
+      gap: 12px;
+    }
+
+    .blog-post-body :global(pre) {
+      margin-left: -16px;
+      margin-right: -16px;
+      border-radius: 0;
+    }
+  }
+</style>

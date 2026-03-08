@@ -1,0 +1,77 @@
+---
+interface Props {
+  href: string;
+  title: string;
+  description: string;
+  date: Date;
+  author: string;
+}
+
+const { href, title, description, date, author } = Astro.props;
+
+const formatted = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+}).format(date);
+
+const isoDate = date.toISOString();
+---
+
+<article class="blog-card" itemscope itemtype="https://schema.org/BlogPosting">
+  <a href={href}>
+    <span class="blog-card-meta">
+      <span itemprop="author">{author}</span> &middot; <time datetime={isoDate} itemprop="datePublished">{formatted}</time>
+    </span>
+    <h3 class="blog-card-title" itemprop="headline">{title}</h3>
+    <p class="blog-card-desc" itemprop="description">{description}</p>
+  </a>
+</article>
+
+<style>
+  .blog-card {
+    padding: clamp(20px, 4vw, 28px);
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-border);
+    background: var(--color-surface-warm);
+    transition: border-color 0.2s, border-left-color 0.2s, transform 0.15s;
+  }
+
+  .blog-card:hover {
+    border-color: rgba(241, 120, 41, 0.35);
+    border-left-color: var(--color-accent);
+    transform: translateY(-2px);
+  }
+
+  .blog-card a {
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .blog-card-meta {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .blog-card-title {
+    font-size: clamp(1.05rem, 2.5vw, 1.2rem);
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--color-primary);
+    margin: 0;
+  }
+
+  .blog-card-desc {
+    font-size: clamp(0.82rem, 2vw, 0.88rem);
+    line-height: 1.6;
+    color: var(--color-secondary);
+    margin: 0;
+  }
+</style>
