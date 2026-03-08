@@ -199,6 +199,89 @@ def test_executions_list_applies_filters(
     assert "kr-200: content_pipeline | waiting | stack=prod" in output
 
 
+def test_executions_input_parses_json_and_reports_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions input` should parse JSON and call client input."""
+    fake_client = Mock()
+    fake_client.executions.input.return_value = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.WAITING,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "input",
+                "kr-123",
+                "--wait",
+                "approve_deploy",
+                "--value",
+                "true",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.input.assert_called_once_with(
+        "kr-123",
+        wait="approve_deploy",
+        value=True,
+    )
+    output = capsys.readouterr().out
+    assert "Resolved wait input for execution: kr-123" in output
+    assert "Status: waiting" in output
+
+
+def test_executions_input_rejects_invalid_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions input` should fail when `--value` is invalid JSON."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "input",
+                "kr-123",
+                "--wait",
+                "approve_deploy",
+                "--value",
+                "{invalid",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "Invalid JSON for `--value`" in capsys.readouterr().err
+
+
+def test_executions_resume_reports_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions resume` should resume and print status details."""
+    fake_client = Mock()
+    fake_client.executions.resume.return_value = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "resume", "kr-123"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.resume.assert_called_once_with("kr-123")
+    output = capsys.readouterr().out
+    assert "Resumed execution: kr-123" in output
+    assert "Status: running" in output
+
+
 def test_executions_retry_reports_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

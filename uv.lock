@@ -840,7 +840,7 @@ dependencies = [
     { name = "litellm" },
     { name = "pydantic" },
     { name = "rich" },
-    { name = "zenml" },
+    { name = "zenml", extra = ["local"] },
 ]
 
 [package.optional-dependencies]
@@ -868,7 +868,7 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.75.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "rich", specifier = ">=12.0.0" },
-    { name = "zenml", specifier = ">=0.94.0" },
+    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=feature%2Fpause-pipeline-runs" },
     { name = "zenml", extras = ["local"], marker = "extra == 'local'", specifier = ">=0.94.0" },
 ]
 provides-extras = ["local"]
@@ -2232,7 +2232,7 @@ wheels = [
 [[package]]
 name = "zenml"
 version = "0.94.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/zenml-io/zenml.git?rev=feature%2Fpause-pipeline-runs#a01e8f84251d500619f876d41aaa8ed17f1f378b" }
 dependencies = [
     { name = "asgiref" },
     { name = "click" },
@@ -2249,10 +2249,6 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
     { name = "setuptools" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/1b/e396568588bcac590526e4ef583190774c54b02c4136d21a0dd5a846fb69/zenml-0.94.0.tar.gz", hash = "sha256:7f67de0ac59d0742aefd60fd8735cf85ec793682e54904eb405895e34eafad08", size = 7048629, upload-time = "2026-03-04T19:11:20.419Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/bd/4074f39f5058c64d496c0a12bc7a14bebd3cfbab6f9f178453d8827b41d8/zenml-0.94.0-py3-none-any.whl", hash = "sha256:d98657113e9e64eded3392523206130ab3b9137b64e26839afe808b3bbef667f", size = 8159223, upload-time = "2026-03-04T19:11:18.247Z" },
 ]
 
 [package.optional-dependencies]

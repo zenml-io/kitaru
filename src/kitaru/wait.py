@@ -5,24 +5,53 @@ The execution remains in ``waiting`` status and can be resumed later
 via the client API or CLI.
 
 Wait is valid only directly inside a flow, not inside a checkpoint.
-
-Example::
-
-    approval = kitaru.wait(
-        schema=bool,
-        name="human_approval",
-        question="Approve this draft?",
-    )
-
-Note: This is scaffolding. The wait primitive is not yet implemented.
-It also requires ZenML server-side support (feature/pause-pipeline-runs).
 """
 
 from __future__ import annotations
 
-from typing import Any
+import importlib
+from collections.abc import Callable
+from typing import Any, cast
 
-from kitaru.runtime import _not_implemented
+from kitaru.errors import (
+    KitaruContextError,
+    KitaruFeatureNotAvailableError,
+)
+from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow
+
+_WAIT_OUTSIDE_FLOW_ERROR = "wait() can only run inside a @kitaru.flow."
+_WAIT_INSIDE_CHECKPOINT_ERROR = (
+    "wait() cannot be called inside a @kitaru.checkpoint. "
+    "Call wait() in the flow body instead."
+)
+_DEFAULT_WAIT_TIMEOUT_SECONDS = 600
+
+
+def _resolve_zenml_wait() -> Callable[..., tuple[Any, Any]]:
+    """Load the upstream wait primitive from the installed ZenML build."""
+    try:
+        from zenml import wait as zenml_wait
+
+        return cast(Callable[..., tuple[Any, Any]], zenml_wait)
+    except ImportError:
+        pass
+
+    try:
+        dynamic_utils = importlib.import_module(
+            "zenml.execution.pipeline.dynamic.utils"
+        )
+    except ImportError as exc:
+        raise KitaruFeatureNotAvailableError(
+            "kitaru.wait() requires a ZenML build that includes wait support."
+        ) from exc
+
+    dynamic_wait = getattr(dynamic_utils, "wait", None)
+    if callable(dynamic_wait):
+        return cast(Callable[..., tuple[Any, Any]], dynamic_wait)
+
+    raise KitaruFeatureNotAvailableError(
+        "kitaru.wait() requires a ZenML build that includes wait support."
+    )
 
 
 def wait(
@@ -45,4 +74,19 @@ def wait(
     Returns:
         The validated input value once the execution is resumed.
     """
-    _not_implemented("wait")
+    if not _is_inside_flow():
+        raise KitaruContextError(_WAIT_OUTSIDE_FLOW_ERROR)
+
+    if _is_inside_checkpoint():
+        raise KitaruContextError(_WAIT_INSIDE_CHECKPOINT_ERROR)
+
+    resolved_timeout = _DEFAULT_WAIT_TIMEOUT_SECONDS if timeout is None else timeout
+    zenml_wait = _resolve_zenml_wait()
+    resolved_value, _ = zenml_wait(
+        schema=schema,
+        question=question,
+        timeout=resolved_timeout,
+        metadata=metadata,
+        key_prefix=name,
+    )
+    return resolved_value

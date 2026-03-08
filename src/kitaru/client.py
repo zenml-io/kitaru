@@ -42,6 +42,7 @@ from kitaru.errors import (
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
+    KitaruWaitValidationError,
     classify_failure_origin,
     traceback_exception_type,
     traceback_last_line,
@@ -49,6 +50,9 @@ from kitaru.errors import (
 
 _CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
 _PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
+_WAIT_CONDITION_STATUS_PENDING = "pending"
+_WAIT_CONDITION_STATUS_RESOLVED = "resolved"
+_WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 
 
 class ExecutionStatus(StrEnum):
@@ -161,6 +165,10 @@ class Execution:
         """Retry this failed execution as a same-execution recovery."""
         return self._client.executions.retry(self.exec_id)
 
+    def resume(self) -> Execution:
+        """Resume this paused execution after wait input is resolved."""
+        return self._client.executions.resume(self.exec_id)
+
     def cancel(self) -> Execution:
         """Cancel this execution."""
         return self._client.executions.cancel(self.exec_id)
@@ -226,9 +234,9 @@ def _to_plain_dict(values: Mapping[str, Any]) -> dict[str, Any]:
     return {str(key): value for key, value in values.items()}
 
 
-def _to_public_status(status: ZenMLExecutionStatus) -> ExecutionStatus:
+def _to_public_status(status: Any) -> ExecutionStatus:
     """Map ZenML execution states to Kitaru public states."""
-    status_value = status.value
+    status_value = str(getattr(status, "value", status))
 
     if status_value in {
         "initializing",
@@ -486,16 +494,23 @@ def _map_pending_wait(wait_condition: Any) -> PendingWait:
     )
 
 
-def _first_pending_wait(
+def _get_active_wait_condition(run: PipelineRunResponse) -> Any | None:
+    """Return the active wait condition attached to run resources, if any."""
+    resources = cast(Any, run.get_resources())
+    return getattr(resources, "active_wait_condition", None)
+
+
+def _list_pending_wait_conditions(
     *,
     run: PipelineRunResponse,
     client: KitaruClient,
-) -> PendingWait | None:
-    """Resolve the active pending wait condition for a run."""
-    resources = cast(Any, run.get_resources())
-    active_wait = resources.active_wait_condition
+) -> list[Any]:
+    """Return pending wait-condition models for an execution."""
+    pending_conditions: list[Any] = []
+
+    active_wait = _get_active_wait_condition(run)
     if active_wait is not None:
-        return _map_pending_wait(active_wait)
+        pending_conditions.append(active_wait)
 
     try:
         wait_conditions_page = cast(
@@ -504,16 +519,120 @@ def _first_pending_wait(
         ).list_run_wait_conditions(
             run_name_or_id=run.id,
             project=client._project,
-            status="pending",
+            status=_WAIT_CONDITION_STATUS_PENDING,
             hydrate=True,
-            size=1,
+            size=200,
         )
     except AttributeError:
-        return None
-    if not wait_conditions_page.items:
+        return pending_conditions
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to list pending waits for execution {run.id}: {exc}"
+        ) from exc
+
+    existing_ids = {str(condition.id) for condition in pending_conditions}
+    for condition in wait_conditions_page.items:
+        condition_id = str(condition.id)
+        if condition_id in existing_ids:
+            continue
+        pending_conditions.append(condition)
+        existing_ids.add(condition_id)
+
+    return pending_conditions
+
+
+def _first_pending_wait(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+) -> PendingWait | None:
+    """Resolve the first pending wait condition for a run."""
+    active_wait = _get_active_wait_condition(run)
+    if active_wait is not None:
+        return _map_pending_wait(active_wait)
+
+    try:
+        pending_conditions = _list_pending_wait_conditions(run=run, client=client)
+    except KitaruBackendError:
         return None
 
-    return _map_pending_wait(wait_conditions_page.items[0])
+    if not pending_conditions:
+        return None
+    return _map_pending_wait(pending_conditions[0])
+
+
+def _select_pending_wait_condition(
+    *,
+    run: PipelineRunResponse,
+    wait: str,
+    pending_conditions: list[Any],
+) -> Any:
+    """Resolve a wait selector to exactly one pending wait condition."""
+    wait_selector = wait.strip()
+    if not wait_selector:
+        raise KitaruUsageError("`wait` must be a non-empty string.")
+
+    key_matches = [
+        condition
+        for condition in pending_conditions
+        if condition.wait_condition_key == wait_selector
+    ]
+    if len(key_matches) == 1:
+        return key_matches[0]
+    if len(key_matches) > 1:
+        raise KitaruStateError(
+            f"Multiple pending waits match '{wait_selector}' for execution '{run.id}'."
+        )
+
+    id_matches = [
+        condition
+        for condition in pending_conditions
+        if str(condition.id) == wait_selector
+    ]
+    if len(id_matches) == 1:
+        return id_matches[0]
+
+    available_waits = ", ".join(
+        sorted({condition.wait_condition_key for condition in pending_conditions})
+    )
+    raise KitaruStateError(
+        f"Execution '{run.id}' has no pending wait '{wait_selector}'. "
+        f"Available waits: {available_waits}."
+    )
+
+
+def _restart_run_from_snapshot(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+    operation_name: str,
+) -> None:
+    """Restart an execution from its stored snapshot metadata."""
+    snapshot = run.snapshot
+    if snapshot is None:
+        raise KitaruRuntimeError(
+            f"Unable to {operation_name} execution because snapshot metadata "
+            "is missing."
+        )
+    if snapshot.stack is None:
+        raise KitaruRuntimeError(
+            f"Unable to {operation_name} execution because snapshot stack "
+            "metadata is missing."
+        )
+
+    try:
+        with _temporary_active_stack(str(snapshot.stack.id)):
+            active_stack = client._client().active_stack
+            orchestrator = cast(Any, active_stack.orchestrator)
+            orchestrator.restart(
+                snapshot=snapshot,
+                run=run,
+                stack=active_stack,
+            )
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to {operation_name} execution '{run.id}': {exc}"
+        ) from exc
 
 
 def _map_execution(
@@ -524,6 +643,19 @@ def _map_execution(
 ) -> Execution:
     """Map a ZenML pipeline run into a Kitaru execution model."""
     status = _to_public_status(run.status)
+
+    pending_wait: PendingWait | None = None
+    if status == ExecutionStatus.WAITING:
+        pending_wait = _first_pending_wait(run=run, client=client)
+    elif status == ExecutionStatus.RUNNING:
+        active_wait = _get_active_wait_condition(run)
+        if active_wait is not None:
+            pending_wait = _map_pending_wait(active_wait)
+        elif include_details:
+            pending_wait = _first_pending_wait(run=run, client=client)
+
+    if pending_wait is not None:
+        status = ExecutionStatus.WAITING
 
     status_reason = getattr(run, "status_reason", None)
     run_exception_info = getattr(run, "exception_info", None)
@@ -584,10 +716,6 @@ def _map_execution(
 
     metadata = _to_plain_dict(run.run_metadata)
 
-    pending_wait: PendingWait | None = None
-    if status == ExecutionStatus.WAITING:
-        pending_wait = _first_pending_wait(run=run, client=client)
-
     flow_name: str | None = None
     if run.pipeline is not None:
         flow_name = _normalize_flow_name(run.pipeline.name)
@@ -628,51 +756,84 @@ class _ExecutionsAPI:
         self._client_ref = client
 
     def input(self, exec_id: str, *, wait: str, value: Any) -> Execution:
-        """Provide input to a waiting execution.
-
-        This API is intentionally deferred until wait/resume branch support is
-        available for Kitaru's full resume semantics.
-        """
-        _ = (exec_id, wait, value)
-        raise KitaruFeatureNotAvailableError(
-            "client.executions.input() is not implemented yet. "
-            "Waiting input/resume depends on pending ZenML wait/resume branch "
-            "integration for Kitaru."
+        """Provide input to a waiting execution."""
+        run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        pending_conditions = _list_pending_wait_conditions(
+            run=run,
+            client=self._client_ref,
         )
+        if not pending_conditions:
+            raise KitaruStateError(
+                f"Execution '{exec_id}' has no pending waits to resolve."
+            )
+
+        condition = _select_pending_wait_condition(
+            run=run,
+            wait=wait,
+            pending_conditions=pending_conditions,
+        )
+
+        try:
+            cast(Any, self._client_ref._client()).resolve_run_wait_condition(
+                run_wait_condition_id=condition.id,
+                status=cast(Any, _WAIT_CONDITION_STATUS_RESOLVED),
+                resolution=cast(Any, _WAIT_CONDITION_RESOLUTION_CONTINUE),
+                result=value,
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise KitaruWaitValidationError(
+                "Wait input failed validation for "
+                f"'{condition.wait_condition_key}' on execution '{exec_id}': {exc}"
+            ) from exc
+        except Exception as exc:
+            raise KitaruBackendError(
+                "Failed to resolve wait condition "
+                f"'{condition.wait_condition_key}' for execution '{exec_id}': {exc}"
+            ) from exc
+
+        return self.get(exec_id)
 
     def retry(self, exec_id: str) -> Execution:
         """Retry a failed execution as same-execution recovery."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
-        if run.status != ZenMLExecutionStatus.FAILED:
+        run_status_value = str(getattr(run.status, "value", run.status))
+        if run_status_value != ZenMLExecutionStatus.FAILED.value:
             raise KitaruStateError(
                 "Only failed executions can be retried. "
-                f"Execution '{exec_id}' is currently '{run.status.value}'."
+                f"Execution '{exec_id}' is currently '{run_status_value}'."
             )
 
-        snapshot = run.snapshot
-        if snapshot is None:
-            raise KitaruRuntimeError(
-                "Unable to retry execution because snapshot metadata is missing."
-            )
-        if snapshot.stack is None:
-            raise KitaruRuntimeError(
-                "Unable to retry execution because snapshot stack metadata is missing."
+        _restart_run_from_snapshot(
+            run=run,
+            client=self._client_ref,
+            operation_name="retry",
+        )
+        return self.get(exec_id)
+
+    def resume(self, exec_id: str) -> Execution:
+        """Resume a paused execution after all waits are resolved."""
+        run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        pending_conditions = _list_pending_wait_conditions(
+            run=run,
+            client=self._client_ref,
+        )
+        if pending_conditions:
+            raise KitaruStateError(
+                f"Resolve pending wait input before resuming execution '{exec_id}'."
             )
 
-        try:
-            with _temporary_active_stack(str(snapshot.stack.id)):
-                active_stack = self._client_ref._client().active_stack
-                orchestrator = cast(Any, active_stack.orchestrator)
-                orchestrator.restart(
-                    snapshot=snapshot,
-                    run=run,
-                    stack=active_stack,
-                )
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to retry execution '{exec_id}': {exc}"
-            ) from exc
+        run_status_value = str(getattr(run.status, "value", run.status))
+        if run_status_value != "paused":
+            raise KitaruStateError(
+                "Only paused executions can be resumed. "
+                f"Execution '{exec_id}' is currently '{run_status_value}'."
+            )
 
+        _restart_run_from_snapshot(
+            run=run,
+            client=self._client_ref,
+            operation_name="resume",
+        )
         return self.get(exec_id)
 
     def replay(

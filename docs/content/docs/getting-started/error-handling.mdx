@@ -3,7 +3,7 @@ title: Error Handling
 description: Understand Kitaru exception types and failure journaling
 ---
 
-Kitaru now exposes a typed exception hierarchy so you can distinguish usage,
+Kitaru exposes a typed exception hierarchy so you can distinguish usage,
 context, state, runtime, backend, and execution failures.
 
 ## Core exception types
@@ -23,6 +23,20 @@ except kitaru.KitaruExecutionError:
     # other execution-level failure
     ...
 ```
+
+## Wait-input validation failures
+
+`client.executions.input(...)` raises `kitaru.KitaruWaitValidationError`
+when supplied input does not satisfy the wait schema.
+
+```python
+try:
+    client.executions.input(exec_id, wait="approve_deploy", value="yes")
+except kitaru.KitaruWaitValidationError as exc:
+    print(exc)
+```
+
+When validation fails, the execution remains in `waiting`.
 
 ## Failure journaling in the client
 
@@ -46,8 +60,10 @@ for checkpoint in execution.checkpoints:
             print("  ", attempt.failure.exception_type, attempt.failure.message)
 ```
 
-## Stubbed APIs
+## APIs still in progress
 
-Features that are intentionally not shipped yet raise
-`kitaru.KitaruFeatureNotAvailableError` (for example `kitaru.wait()`,
-`client.executions.input(...)`, and `client.executions.replay(...)`).
+Replay is intentionally not shipped yet and raises
+`kitaru.KitaruFeatureNotAvailableError`:
+
+- `client.executions.replay(...)`
+

@@ -1,0 +1,81 @@
+---
+title: Wait and Resume Flows
+description: Suspend a flow for external input and continue the same execution
+---
+
+`kitaru.wait(...)` is the durable suspension primitive for human-in-the-loop
+and external-input workflows.
+
+When your flow reaches `wait(...)`, execution moves to `waiting` and resumes the
+same execution after input is provided.
+
+## Basic pattern
+
+```python
+import kitaru
+
+@kitaru.flow
+def publish_flow(topic: str) -> str:
+    approved = kitaru.wait(
+        schema=bool,
+        name="approve_publish",
+        question=f"Approve publishing {topic}?",
+        metadata={"topic": topic},
+    )
+    if not approved:
+        return f"REJECTED: {topic}"
+    return f"PUBLISHED: {topic}"
+```
+
+## Provide input from Python
+
+```python
+client = kitaru.KitaruClient()
+execution = client.executions.input(
+    exec_id,
+    wait="approve_publish",
+    value=True,
+)
+```
+
+If your backend requires an explicit resume step after input resolution:
+
+```python
+execution = client.executions.resume(exec_id)
+```
+
+## Provide input from CLI
+
+```bash
+kitaru executions input <exec_id> --wait approve_publish --value true
+```
+
+Optional explicit resume step:
+
+```bash
+kitaru executions resume <exec_id>
+```
+
+## Validation behavior
+
+Input is validated against the wait schema:
+
+- invalid input raises `kitaru.KitaruWaitValidationError`
+- execution stays in `waiting` until valid input is supplied
+
+## Example in this repository
+
+Interactive mode (default): the script prints exact CLI commands to run from a
+second terminal once the wait condition is reached.
+
+```bash
+uv sync --extra local
+uv run python -m examples.wait_and_resume --mode interactive
+```
+
+Auto mode (useful for CI-style checks):
+
+```bash
+uv run python -m examples.wait_and_resume --mode auto
+uv run pytest tests/test_phase15_wait_example.py
+```

@@ -20,7 +20,12 @@ from kitaru.config import (
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
 )
-from kitaru.errors import FailureOrigin, KitaruFeatureNotAvailableError
+from kitaru.errors import (
+    FailureOrigin,
+    KitaruFeatureNotAvailableError,
+    KitaruStateError,
+    KitaruWaitValidationError,
+)
 
 
 def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
@@ -62,7 +67,7 @@ class _DummyStep:
         self,
         *,
         name: str,
-        status: ZenMLExecutionStatus,
+        status: Any,
         outputs: dict[str, list[_DummyArtifact]],
         step_id: UUID | None = None,
         original_step_run_id: UUID | None = None,
@@ -89,7 +94,7 @@ class _DummyRun:
     def __init__(
         self,
         *,
-        status: ZenMLExecutionStatus,
+        status: Any,
         flow_name: str,
         run_metadata: dict[str, Any] | None = None,
         steps: dict[str, _DummyStep] | None = None,
@@ -98,6 +103,7 @@ class _DummyRun:
         run_id: UUID | None = None,
         status_reason: str | None = None,
         exception_traceback: str | None = None,
+        active_wait_condition: Any = None,
     ) -> None:
         self.id = run_id or uuid4()
         self.status = status
@@ -115,13 +121,14 @@ class _DummyRun:
             if exception_traceback is not None
             else None
         )
+        self._active_wait_condition = active_wait_condition
 
     @property
     def steps(self) -> dict[str, _DummyStep]:
         return self._steps
 
     def get_resources(self) -> Any:
-        return SimpleNamespace(active_wait_condition=None)
+        return SimpleNamespace(active_wait_condition=self._active_wait_condition)
 
 
 def _resolved_connection(project: str | None = None) -> ResolvedConnectionConfig:
@@ -130,6 +137,28 @@ def _resolved_connection(project: str | None = None) -> ResolvedConnectionConfig
         auth_token=None,
         project=project,
     )
+
+
+def _dummy_wait_condition(
+    *,
+    key: str,
+    wait_id: UUID | None = None,
+    question: str | None = None,
+    data_schema: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Any:
+    return SimpleNamespace(
+        id=wait_id or uuid4(),
+        wait_condition_key=key,
+        question=question,
+        data_schema=data_schema,
+        wait_metadata=metadata or {},
+        created=None,
+    )
+
+
+def _paused_status() -> Any:
+    return SimpleNamespace(value="paused")
 
 
 def test_client_initializes_namespaces() -> None:
@@ -503,14 +532,313 @@ def test_retry_rejects_non_failed_execution() -> None:
             client.executions.retry(str(run.id))
 
 
-def test_input_and_replay_raise_not_implemented() -> None:
+def test_input_resolves_pending_wait_condition() -> None:
+    run_id = uuid4()
+    wait_condition = _dummy_wait_condition(
+        key="approve_deploy",
+        question="Deploy to prod?",
+        data_schema={"type": "boolean"},
+    )
+    waiting_run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        active_wait_condition=wait_condition,
+    )
+    resumed_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(waiting_run),
+            _as_pipeline_run(resumed_run),
+        ]
+        client_mock.list_run_wait_conditions.side_effect = [
+            SimpleNamespace(items=[wait_condition]),
+            SimpleNamespace(items=[]),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.input(
+            str(run_id),
+            wait="approve_deploy",
+            value=True,
+        )
+
+    client_mock.resolve_run_wait_condition.assert_called_once_with(
+        run_wait_condition_id=wait_condition.id,
+        status="resolved",
+        resolution="continue",
+        result=True,
+    )
+    assert execution.status == ExecutionStatus.RUNNING
+
+
+def test_get_surfaces_waiting_status_for_running_wait_condition() -> None:
+    wait_condition = _dummy_wait_condition(
+        key="review_draft",
+        question="Approve this draft?",
+        data_schema={"type": "boolean"},
+        metadata={"section": "intro"},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        active_wait_condition=wait_condition,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    assert execution.status == ExecutionStatus.WAITING
+    assert execution.pending_wait is not None
+    assert execution.pending_wait.name == "review_draft"
+    assert execution.pending_wait.question == "Approve this draft?"
+    assert execution.pending_wait.schema == {"type": "boolean"}
+    assert execution.pending_wait.metadata == {"section": "intro"}
+
+
+def test_get_surfaces_waiting_status_for_running_execution_with_listed_wait() -> None:
+    wait_condition = _dummy_wait_condition(
+        key="approve_release:0",
+        question="Approve release?",
+        data_schema={"type": "boolean"},
+        metadata={"topic": "kitaru-1"},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        active_wait_condition=None,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(
+            items=[wait_condition]
+        )
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    assert execution.status == ExecutionStatus.WAITING
+    assert execution.pending_wait is not None
+    assert execution.pending_wait.wait_id == str(wait_condition.id)
+    assert execution.pending_wait.name == "approve_release:0"
+    assert execution.pending_wait.metadata == {"topic": "kitaru-1"}
+
+
+def test_input_rejects_missing_pending_wait() -> None:
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="no pending waits"):
+            client.executions.input(str(run.id), wait="approve", value=True)
+
+
+def test_input_rejects_unknown_wait_name() -> None:
+    wait_condition = _dummy_wait_condition(key="approve")
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        active_wait_condition=wait_condition,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(
+            items=[wait_condition]
+        )
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="no pending wait 'review'"):
+            client.executions.input(str(run.id), wait="review", value=True)
+
+
+def test_input_maps_validation_error() -> None:
+    wait_condition = _dummy_wait_condition(key="approve")
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        active_wait_condition=wait_condition,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(
+            items=[wait_condition]
+        )
+        client_mock.resolve_run_wait_condition.side_effect = ValueError(
+            "result does not match schema"
+        )
+
+        client = KitaruClient()
+        with pytest.raises(KitaruWaitValidationError, match="failed validation"):
+            client.executions.input(str(run.id), wait="approve", value="yes")
+
+
+def test_resume_restarts_paused_execution() -> None:
+    run_id = uuid4()
+    snapshot_stack_id = uuid4()
+    paused = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    resumed = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+
+    old_stack_id = uuid4()
+    active_stack = SimpleNamespace(orchestrator=SimpleNamespace(restart=MagicMock()))
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+        client_mock.active_stack = active_stack
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(paused),
+            _as_pipeline_run(resumed),
+        ]
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.resume(str(run_id))
+
+    active_stack.orchestrator.restart.assert_called_once_with(
+        snapshot=paused.snapshot,
+        run=_as_pipeline_run(paused),
+        stack=active_stack,
+    )
+    assert client_mock.activate_stack.call_args_list == [
+        call(str(snapshot_stack_id)),
+        call(old_stack_id),
+    ]
+    assert execution.status == ExecutionStatus.RUNNING
+
+
+def test_resume_rejects_when_pending_waits_exist() -> None:
+    wait_condition = _dummy_wait_condition(key="approve")
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        active_wait_condition=wait_condition,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(
+            items=[wait_condition]
+        )
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="Resolve pending wait input"):
+            client.executions.resume(str(run.id))
+
+
+def test_resume_rejects_non_paused_execution() -> None:
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="Only paused executions"):
+            client.executions.resume(str(run.id))
+
+
+def test_replay_still_raises_not_implemented() -> None:
     with patch(
         "kitaru.client.resolve_connection_config", return_value=_resolved_connection()
     ):
         client = KitaruClient()
-
-    with pytest.raises(KitaruFeatureNotAvailableError, match="input"):
-        client.executions.input("exec-1", wait="approval", value=True)
 
     with pytest.raises(KitaruFeatureNotAvailableError, match="replay"):
         client.executions.replay("exec-1", from_="checkpoint")

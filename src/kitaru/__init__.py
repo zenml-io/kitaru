@@ -21,20 +21,19 @@ Example::
 Current status:
 
 - Implemented: ``@kitaru.flow``, ``@kitaru.checkpoint``, ``kitaru.log()``,
-  ``save()``, ``load()``, ``llm()``, ``connect()``, ``configure()``, stack
-  selection helpers (``list_stacks()``, ``current_stack()``, ``use_stack()``),
-  model alias helpers via CLI (``kitaru model register/list``),
-  ``KitaruClient`` execution/artifact browsing APIs
-  (`get/list/latest/cancel/retry` + artifacts), and a typed Kitaru exception
-  hierarchy with failure journaling (`Execution.failure`,
+  ``save()``, ``load()``, ``wait()``, ``llm()``, ``connect()``,
+  ``configure()``, stack selection helpers (``list_stacks()``,
+  ``current_stack()``, ``use_stack()``), model alias helpers via CLI
+  (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
+  (`get/list/latest/input/retry/resume/cancel` + artifacts), and a typed
+  Kitaru exception hierarchy with failure journaling (`Execution.failure`,
   `CheckpointCall.attempts`).
-- In progress: ``wait()``. ``KitaruClient`` `input()` and `replay()` are
-  intentionally stubbed pending wait/replay backend support.
+- In progress: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset``, stack selection via
 ``kitaru stack list/current/use``, and execution lifecycle commands via
-``kitaru run`` plus ``kitaru executions get/list/retry/cancel``.
+``kitaru run`` plus ``kitaru executions get/list/input/retry/resume/cancel``.
 """
 
 from kitaru.artifacts import load, save

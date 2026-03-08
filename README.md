@@ -10,7 +10,7 @@ Kitaru is under active development. The core flow and checkpoint decorators are 
 
 Phase 10 configuration is now implemented via `kitaru.configure(...)`, environment variables, and project-level `[tool.kitaru]` settings in `pyproject.toml`, with precedence resolved at flow start time and persisted as a frozen execution spec on each run.
 
-Phase 11 introduces the first real `KitaruClient` surface for execution management. You can now inspect executions (`get`, `list`, `latest`), perform same-execution recovery (`retry`), cancel running executions (`cancel`), and browse/load artifacts (`client.artifacts.list/get`, `artifact.load()`). `client.executions.input(...)` and replay are still intentionally deferred.
+Phase 11 introduces the first real `KitaruClient` surface for execution management. You can now inspect executions (`get`, `list`, `latest`), perform same-execution recovery (`retry`), cancel running executions (`cancel`), and browse/load artifacts (`client.artifacts.list/get`, `artifact.load()`).
 
 Phase 11.5 adds a Kitaru secrets CLI surface: `kitaru secrets set/show/list/delete`. Secrets are private by default, `set` behaves as create-or-update, and key names should use env-var style identifiers such as `OPENAI_API_KEY`.
 
@@ -18,7 +18,9 @@ Phase 12 adds `kitaru.llm()` with LiteLLM as the backend engine, automatic promp
 
 Phase 13 adds a typed Kitaru error hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.), clearer runtime-vs-user-code failure surfacing, and failure journaling in `KitaruClient` via `execution.failure` plus per-checkpoint attempt history in `checkpoint.attempts`.
 
-Phase 14 adds the first execution lifecycle CLI layer on top of `KitaruClient`: `kitaru run`, `kitaru executions get`, `kitaru executions list`, `kitaru executions retry`, and `kitaru executions cancel`. `executions input`, `executions replay`, and `executions logs` are still deferred.
+Phase 14 adds the first execution lifecycle CLI layer on top of `KitaruClient`: `kitaru run`, `kitaru executions get`, `kitaru executions list`, `kitaru executions retry`, and `kitaru executions cancel`.
+
+Phase 15 adds durable wait/resume support: `kitaru.wait(...)`, `client.executions.input(...)`, `client.executions.resume(...)`, plus CLI commands `kitaru executions input` and `kitaru executions resume`.
 
 ### SDK primitives
 
@@ -128,6 +130,22 @@ You can also run the integration test for this example:
 uv run pytest tests/test_phase11_client_example.py
 ```
 
+### Run the wait/resume workflow
+
+The repository includes a runnable Phase 15 example at
+`examples/wait_and_resume.py`.
+
+```bash
+uv sync --extra local
+uv run python -m examples.wait_and_resume
+```
+
+You can also run the integration test for this example:
+
+```bash
+uv run pytest tests/test_phase15_wait_example.py
+```
+
 ### Run the LLM workflow
 
 The repository includes a runnable Phase 12 example at
@@ -161,6 +179,8 @@ kitaru info                   Show detailed environment information
 kitaru run <target> --args <json> [--stack <name>]
 kitaru executions get <exec_id>
 kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
+kitaru executions input <exec_id> --wait <wait_name_or_id> --value <json>
+kitaru executions resume <exec_id>
 kitaru executions retry <exec_id>
 kitaru executions cancel <exec_id>
 
@@ -185,7 +205,9 @@ kitaru model list
 
 | Primitive | Purpose |
 |---|---|
-| `kitaru.wait()` | Suspend a flow until external input arrives (requires ZenML server support) |
+| `client.executions.replay(...)` | Replay from a checkpoint boundary into a new execution |
+| `kitaru executions replay ...` | CLI replay wrapper |
+| `kitaru executions logs ...` | Backend-agnostic execution log streaming |
 
 ## Development
 
