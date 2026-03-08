@@ -14,10 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - MCP-focused tests: import guard coverage (`tests/test_mcp_import_guard.py`) and tool wrapper tests (`tests/mcp/test_server.py`)
 - Agent integrations docs pages: `/agent-integrations/mcp-server` and `/agent-integrations/claude-code-skill`
 - PydanticAI framework adapter: `kitaru.adapters.pydantic_ai.wrap(agent)` for checkpoint-scoped child-event tracking of model/tool activity
+- Adapter capture policy controls: `tool_capture_config` + `tool_capture_config_by_name` with `full`, `metadata_only`, and `off` modes
+- Adapter run-summary metadata (`pydantic_ai_run_summaries`) and event-stream-handler metadata (`pydantic_ai_event_stream_handlers`)
+- Adapter stream transcript artifacts (`*_stream_transcript`) for streaming replay inspection
 - Adapter HITL tool decorator: `kitaru.adapters.pydantic_ai.hitl_tool(...)` with flow-level wait translation
 - Optional dependency extra: `pydantic-ai` (`pydantic-ai-slim`)
 - Phase 17 runnable example: `examples/pydantic_ai_adapter.py`
-- Phase 17 integration/unit tests for adapter tracking, runtime scope suspension, and HITL behavior
+- Phase 17 integration/unit tests for adapter tracking, runtime scope suspension, HITL behavior, capture config, stream transcripts, and synthetic flow-scope run semantics
 - Getting Started docs page for the PydanticAI adapter (`/getting-started/pydantic-ai-adapter`)
 - Typed Kitaru exception hierarchy (`KitaruError`, `KitaruContextError`, `KitaruStateError`, `KitaruExecutionError`, `KitaruUserCodeError`, `KitaruDivergenceError`, `KitaruFeatureNotAvailableError`, and related types)
 - Failure journaling in `KitaruClient`: structured execution-level failure details (`execution.failure`) and per-checkpoint retry attempt history (`checkpoint.attempts`)
@@ -61,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Runtime internals now include `_suspend_checkpoint_scope()` to support adapter-managed flow-level waits during checkpoint-local agent execution
+- PydanticAI adapter event metadata now includes timing (`duration_ms`), explicit ordering/lineage fields (`sequence_index`, `turn_index`, `fan_out_from`, `fan_in_from`), and immutable wrapper dispatch semantics across function/MCP/generic toolsets
+- Wrapped PydanticAI `run()` / `run_sync()` calls at flow scope now use a synthetic `llm_call` checkpoint boundary so adapter tracking remains available outside explicit checkpoints
 - Kitaru global config persistence now uses field-preserving updates, so log-store and model-registry settings no longer clobber each other
 - Updated README, CLAUDE guide, AGENTS guide, and docs pages to reflect shipped LLM/model-registry functionality and current implemented primitive status
 - Updated execution-management docs to cover shipped wait/input/resume commands and clearly defer replay/log streaming

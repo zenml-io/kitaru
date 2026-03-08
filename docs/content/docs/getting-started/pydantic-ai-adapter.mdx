@@ -10,6 +10,7 @@ Use it when you want:
 - an explicit outer `@kitaru.checkpoint` replay boundary
 - child-event visibility for agent model calls and tool calls
 - optional human input from adapter tools via flow-level `kitaru.wait(...)`
+- run-level summary metadata (`pydantic_ai_run_summaries`)
 
 ## 1) Install optional adapter dependency
 
@@ -27,6 +28,11 @@ from kitaru.adapters import pydantic_ai as kp
 
 researcher = kp.wrap(
     Agent(TestModel(), name="researcher"),
+    tool_capture_config={"mode": "full"},
+    tool_capture_config_by_name={
+        "quick_check": {"mode": "metadata_only"},
+        "noop": {"mode": "off"},
+    },
 )
 
 @kitaru.checkpoint(type="llm_call")
@@ -40,7 +46,17 @@ def research_flow(topic: str) -> str:
 
 The outer checkpoint remains the replay boundary. Adapter-internal model/tool calls are tracked as child events under that checkpoint.
 
-## 3) Add adapter-level HITL tools (optional)
+## 3) Tool capture modes
+
+Capture policy is observability-only (it does not change tool execution):
+
+- `full` (default): metadata + args/result artifacts + timings
+- `metadata_only`: metadata + timings, no args/result artifacts
+- `off`: no adapter child event or artifacts for that tool
+
+You can set a global default with `tool_capture_config` and override individual tools with `tool_capture_config_by_name`.
+
+## 4) Add adapter-level HITL tools (optional)
 
 ```python
 @kp.hitl_tool(question="Approve publish?", schema=bool)
@@ -53,9 +69,11 @@ When the agent invokes this tool, the adapter translates it to a flow-level `kit
 
 ## Runtime behavior and guardrails
 
-- No nested checkpoint replay boundaries are introduced by the adapter.
+- No nested checkpoint replay boundaries are introduced by adapter internals.
 - Adapter child events stay child events; they do not become standalone durable calls.
-- Adapter HITL tools suspend at flow level and resume with recorded wait input.
+- `run()` / `run_sync()` at flow scope (outside checkpoints) use one synthetic checkpoint so tracking still works.
+- Outside a flow, wrapped agents run as plain PydanticAI calls (no Kitaru tracking).
+- Streamed model requests record a transcript artifact (`*_stream_transcript`) for replay/inspection.
 
 ## Example in this repository
 
@@ -68,4 +86,5 @@ The example prints:
 
 - execution ID
 - final result
-- child-event count captured under the checkpoint metadata
+- child-event count captured under checkpoint metadata
+- run summary count for wrapped agent runs

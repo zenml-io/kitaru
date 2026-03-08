@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from kitaru.errors import KitaruFeatureNotAvailableError
+
+CaptureMode = Literal["full", "metadata_only", "off"]
+
+
+class CaptureConfig(TypedDict, total=False):
+    """Capture policy for adapter-managed tool call observability."""
+
+    mode: CaptureMode
+    enabled: bool
+    save_args: bool
+    save_result: bool
+    include_timings: bool
 
 
 def _require_pydantic_ai() -> None:
@@ -18,12 +30,23 @@ def _require_pydantic_ai() -> None:
         ) from exc
 
 
-def wrap(agent: Any, *, name: str | None = None) -> Any:
+def wrap(
+    agent: Any,
+    *,
+    name: str | None = None,
+    tool_capture_config: CaptureConfig | None = None,
+    tool_capture_config_by_name: dict[str, CaptureConfig | None] | None = None,
+) -> Any:
     """Wrap a PydanticAI agent for checkpoint child-event tracking."""
     _require_pydantic_ai()
     from ._agent import KitaruAgent
 
-    return KitaruAgent(agent, name=name)
+    return KitaruAgent(
+        agent,
+        name=name,
+        tool_capture_config=tool_capture_config,
+        tool_capture_config_by_name=tool_capture_config_by_name,
+    )
 
 
 def hitl_tool(
@@ -39,4 +62,4 @@ def hitl_tool(
     return _hitl_tool(question=question, name=name, schema=schema)
 
 
-__all__ = ["hitl_tool", "wrap"]
+__all__ = ["CaptureConfig", "CaptureMode", "hitl_tool", "wrap"]

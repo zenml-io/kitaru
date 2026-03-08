@@ -28,7 +28,8 @@ research_agent = kp.wrap(
         TestModel(),
         name="researcher",
         tools=[gather_context],
-    )
+    ),
+    tool_capture_config={"mode": "full"},
 )
 
 
@@ -45,8 +46,10 @@ def research_flow(topic: str) -> str:
     return run_research(topic)
 
 
-def run_workflow(topic: str = "kitaru") -> tuple[str, str, dict[str, Any]]:
-    """Run the workflow and return execution plus child-event diagnostics."""
+def run_workflow(
+    topic: str = "kitaru",
+) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+    """Run the workflow and return execution plus adapter diagnostics."""
     handle = research_flow.start(topic)
     raw_result = handle.wait()
     if not isinstance(raw_result, str):
@@ -56,20 +59,27 @@ def run_workflow(topic: str = "kitaru") -> tuple[str, str, dict[str, Any]]:
     hydrated_run = run.get_hydrated_version()
 
     child_events: dict[str, Any] = {}
-    for step in hydrated_run.steps.values():
-        metadata = step.run_metadata.get("pydantic_ai_events")
-        if isinstance(metadata, dict):
-            child_events.update(cast(dict[str, Any], metadata))
+    run_summaries: dict[str, Any] = {}
 
-    return handle.exec_id, raw_result, child_events
+    for step in hydrated_run.steps.values():
+        events_metadata = step.run_metadata.get("pydantic_ai_events")
+        if isinstance(events_metadata, dict):
+            child_events.update(cast(dict[str, Any], events_metadata))
+
+        summaries_metadata = step.run_metadata.get("pydantic_ai_run_summaries")
+        if isinstance(summaries_metadata, dict):
+            run_summaries.update(cast(dict[str, Any], summaries_metadata))
+
+    return handle.exec_id, raw_result, child_events, run_summaries
 
 
 def main() -> None:
     """Run the example as a script."""
-    execution_id, result, child_events = run_workflow()
+    execution_id, result, child_events, run_summaries = run_workflow()
     print(f"Execution ID: {execution_id}")
     print(f"Result: {result}")
     print(f"Tracked child events: {len(child_events)}")
+    print(f"Tracked run summaries: {len(run_summaries)}")
 
 
 if __name__ == "__main__":
