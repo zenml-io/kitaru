@@ -141,7 +141,7 @@ kitaru model list
 
 ## Development
 
-Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and [just](https://github.com/casey/just).
+Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and [just](https://github.com/casey/just).
 
 ```bash
 uv sync                            # Install dependencies

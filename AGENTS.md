@@ -105,7 +105,7 @@ Link related issues (for example `Fixes #123`) when applicable.
 
 ### Python CI (`ci.yml`)
 
-Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, link check, base tests (Python 3.12 + 3.13), and an extra test lane with `kitaru[mcp]` installed.
+Runs on push/PR to `develop`. Jobs: lint + format check + yaml check, typos, type check, link check, base tests (Python 3.11 + 3.12 + 3.13), and additional test lanes with `kitaru[mcp]` installed (3.11 + 3.12).
 
 ### Site CI (`site.yml`)
 

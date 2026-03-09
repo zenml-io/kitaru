@@ -31,11 +31,9 @@ Canonical style: `from kitaru import flow, checkpoint` for decorators. `import k
 
 **Terminology alignment — DONE.** All error messages, docstrings, test assertions, skill files, docs pages, and spec chapters (02–20) updated to use canonical `@flow` / `@checkpoint` style. Runtime helpers remain namespaced (`kitaru.log()`, `kitaru.wait()`, etc.).
 
-### Python version support: eventually target 3.11+
+### Python version support — RESOLVED
 
-Current: Python 3.12+ only. Hamza wanted 3.10+ (matching ZenML). Alex's rationale for 3.12: it's the typing dividing line (modern `type` statement, PEP 695 generics).
-
-**Consensus:** Ship with 3.12+ for MVP, plan to add 3.11 support later. This requires auditing type annotations and any 3.12-specific syntax (mainly `type` statement and some PEP 695 features).
+Original floor was 3.12+ for MVP. Audit completed: no PEP 695 `type` statements or other 3.12-only syntax found in Kitaru source. The natural floor is 3.11 (due to `tomllib` and `enum.StrEnum`, both 3.11+). Modern type annotations (`list[str]`, `X | None`) are 3.9+/3.10+ respectively, so no issue. Minimum lowered to 3.11, CI matrix updated to include 3.11 test lanes.
 
 ---
 
