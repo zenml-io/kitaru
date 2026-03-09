@@ -9,11 +9,13 @@ between them avoids confusion:
 | Channel | What it does | How you use it |
 |---|---|---|
 | **Structured metadata** | Key-value data attached to a specific execution or checkpoint | `kitaru.log(key=value)` in Python |
-| **Runtime log storage** | Backend configuration for where runtime logs are sent | `kitaru log-store ...` in the CLI |
+| **Runtime logs** | Execution/checkpoint stdout/stderr retrieval + backend destination configuration | `kitaru executions logs ...`, `KitaruClient.executions.logs(...)`, and `kitaru log-store ...` |
 
 This page focuses on structured metadata via `kitaru.log()`. For runtime log
-storage configuration, see
-[Configure Runtime Log Storage](/getting-started/log-store).
+retrieval and storage backend configuration, see:
+
+- [View Execution Runtime Logs](/getting-started/execution-logs)
+- [Configure Runtime Log Storage](/getting-started/log-store)
 
 ## Attaching metadata with `kitaru.log()`
 
@@ -111,11 +113,18 @@ Metadata values should be **JSON-serializable**:
 Standard keys like `cost`, `tokens`, `latency`, and `model` are common
 conventions, but you can use any key name that makes sense for your workflow.
 
-## Runtime log storage (separate system)
+## Runtime logs (separate system)
 
-Runtime log storage is a different system from structured metadata. It controls
-where runtime logs are sent and is configured via the CLI, not via
-`kitaru.log()`.
+Runtime logs are a different system from structured metadata. They cover
+captured execution/checkpoint log lines and where those lines are stored.
+
+Retrieve logs with:
+
+- `kitaru executions logs <exec_id>`
+- `KitaruClient().executions.logs(exec_id, ...)`
+- MCP `get_execution_logs`
+
+Configure the preferred backend destination with `kitaru log-store ...`.
 
 The precedence for runtime log storage is:
 
@@ -123,7 +132,8 @@ The precedence for runtime log storage is:
 2. **Global user config** (set via `kitaru log-store set`)
 3. **Built-in default** (the `artifact-store` backend)
 
-For full details, see [Configure Runtime Log Storage](/getting-started/log-store).
+For full details, see [View Execution Runtime Logs](/getting-started/execution-logs)
+and [Configure Runtime Log Storage](/getting-started/log-store).
 
 ## Next steps
 
@@ -131,5 +141,7 @@ For full details, see [Configure Runtime Log Storage](/getting-started/log-store
   [Execution Model](/concepts/execution-model)
 - See the full API in the
   [Logging Reference](/reference/python/logging)
+- Retrieve execution runtime logs with
+  [Execution Logs](/getting-started/execution-logs)
 - Configure runtime log backends with
   [Log Store Setup](/getting-started/log-store)

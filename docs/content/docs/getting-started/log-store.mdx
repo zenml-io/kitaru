@@ -3,7 +3,7 @@ title: Configure Runtime Log Storage
 description: Set, inspect, and reset Kitaru's global runtime log-store backend
 ---
 
-This guide shows how to configure where Kitaru runtime logs go.
+This guide shows how to configure Kitaru's preferred runtime log backend.
 
 ## What this controls
 
@@ -14,14 +14,26 @@ Kitaru has two separate observability channels:
 
 By default, runtime logs use `artifact-store`.
 
+## Important: preference vs active stack
+
+`kitaru log-store set` stores a Kitaru-side preference. ZenML runtime log
+capture still follows the active stack log-store component. If they differ,
+Kitaru now shows a warning in:
+
+- `kitaru log-store show`
+- `kitaru status`
+
+Use those warnings as a signal that your saved preference and active runtime
+destination are different.
+
 ## Show current log-store backend
 
 ```bash
 kitaru log-store show
 ```
 
-This command shows the effective backend and where it came from (`default`,
-`global user config`, or `environment`).
+This command shows the effective preferred backend and where it came from
+(`default`, `global user config`, or `environment`).
 
 ## Set a global backend override
 
@@ -71,5 +83,6 @@ kitaru log-store show
 
 ## Related reference pages
 
+- [View execution runtime logs](/getting-started/execution-logs)
 - [CLI log-store commands](/cli/log-store)
 - [Python logging reference](/reference/python/logging)

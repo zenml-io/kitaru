@@ -1,0 +1,91 @@
+---
+title: View Execution Runtime Logs
+description: Retrieve execution and checkpoint runtime logs from the SDK, CLI, and MCP
+---
+
+Kitaru now ships a runtime-log retrieval lane that is separate from
+`kitaru.log(...)` metadata.
+
+You can fetch runtime logs through:
+
+- Python SDK: `KitaruClient().executions.logs(...)`
+- CLI: `kitaru executions logs ...`
+- MCP: `get_execution_logs`
+
+## CLI quick start
+
+```bash
+kitaru executions logs <exec_id>
+```
+
+By default, this prints merged log lines across checkpoints in chronological
+order.
+
+## Common options
+
+```bash
+# Include timestamp + level
+kitaru executions logs <exec_id> -v
+
+# Include timestamp + level + module/checkpoint context
+kitaru executions logs <exec_id> -vv
+
+# Group output by checkpoint
+kitaru executions logs <exec_id> --grouped
+
+# JSONL output (one JSON object per line)
+kitaru executions logs <exec_id> --output json
+
+# Follow until terminal state
+kitaru executions logs <exec_id> --follow
+
+# Runner/orchestrator logs
+kitaru executions logs <exec_id> --source runner
+```
+
+## Checkpoint filtering
+
+Use `--checkpoint <name>` to filter to one checkpoint function name (across all
+its invocations):
+
+```bash
+kitaru executions logs <exec_id> --checkpoint research
+```
+
+`--checkpoint` cannot be combined with `--source runner` because runner logs are
+execution-level, not checkpoint-level.
+
+## Follow mode behavior
+
+`--follow` polls on an interval (default `3.0s`) and exits when execution
+reaches a terminal state:
+
+- `[Execution completed successfully]` (exit code `0`)
+- `[Execution failed: ...]` (exit code `1`)
+- `[Execution cancelled]` (exit code `1`)
+
+When execution is waiting for input, follow mode prints a waiting banner and
+continues polling.
+
+## Python SDK example
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+entries = client.executions.logs("kr-a8f3c2", checkpoint="research", limit=100)
+for entry in entries:
+    print(entry.timestamp, entry.level, entry.checkpoint_name, entry.message)
+```
+
+## OTEL and other retrieval limits
+
+If the active backend is OTEL export-only, Kitaru will return a clear retrieval
+error instead of pretending logs are available in-process. In that case, view
+logs in your OTEL backend directly.
+
+## Related pages
+
+- [Logging and Metadata](/concepts/logging)
+- [Configure Runtime Log Storage](/getting-started/log-store)
+- [CLI executions commands](/cli/executions)

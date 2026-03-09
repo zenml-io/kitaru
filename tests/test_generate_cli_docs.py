@@ -254,6 +254,7 @@ class TestWriteDocsTree:
             "get",
             "input",
             "list",
+            "logs",
             "replay",
             "resume",
             "retry",

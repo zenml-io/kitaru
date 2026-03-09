@@ -174,8 +174,8 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.load()` | Implemented |
 | Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
-| `KitaruClient` (`get/list/latest/input/resume/cancel/retry` + artifact browsing) | Implemented |
-| Execution CLI (`kitaru run`, `kitaru executions get/list/input/replay/retry/resume/cancel`) | Implemented |
+| `KitaruClient` (`get/list/latest/logs/input/resume/cancel/replay` + artifact browsing) | Implemented |
+| Execution CLI (`kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
 | `KitaruClient.executions.replay()` | Implemented |
 
@@ -198,8 +198,9 @@ It keeps the enclosing checkpoint as the replay boundary, while tracking Pydanti
 Current MVP observability includes:
 
 - `kitaru.log()` for structured metadata on executions/checkpoints
+- Runtime log retrieval via `KitaruClient.executions.logs(...)`, `kitaru executions logs`, and MCP `get_execution_logs`
 - Global runtime log-store configuration via `kitaru log-store set/show/reset`
-  (defaults to `artifact-store`, supports global external backend override)
+  (defaults to `artifact-store`, supports global external backend override, and now warns when preference differs from the active stack log store)
 
 Future work will add richer OpenTelemetry-native tracing and exporter integration.
 

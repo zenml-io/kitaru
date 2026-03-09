@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- `kitaru status` and `kitaru log-store show` now surface a mismatch warning when the Kitaru log-store preference differs from the active ZenML stack log store
 - Kitaru's global config file now lives at `~/.config/kitaru/config.yaml` instead of inside ZenML's config directory; existing config is auto-migrated on first read
 - CLI output (`kitaru status`, `kitaru info`) no longer exposes ZenML config paths or local stores path
 - Project is no longer inferred from ZenML's active project; `ResolvedConnectionConfig.project` only reflects explicit overrides via `KITARU_PROJECT` env var or `kitaru.configure(project=...)`
@@ -16,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru.configure()` now accepts a `project` parameter for internal/testing use
 
 ### Added
+- Runtime log retrieval lane: `KitaruClient.executions.logs(...)`, `kitaru executions logs` (with `--follow`, `--grouped`, `-v`/`-vv`, and JSONL output), and MCP `get_execution_logs`
+- Runtime log retrieval docs updates across logging/log-store guides plus a new getting-started page for execution logs
 - Production Docker image (`docker/Dockerfile`): multi-stage server image based on ZenML server architecture with all cloud plugins, published as `zenmldocker/kitaru` during releases
 - Docker image build and push integrated into the release workflow (`release.yml`)
 - `.dockerignore` to keep Docker build context clean

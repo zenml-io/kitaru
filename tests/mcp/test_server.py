@@ -12,6 +12,7 @@ from kitaru.client import ExecutionStatus
 from kitaru.config import StackInfo
 from kitaru.mcp.server import (
     RuntimeSnapshot,
+    get_execution_logs,
     kitaru_artifacts_get,
     kitaru_artifacts_list,
     kitaru_executions_cancel,
@@ -95,6 +96,54 @@ def test_executions_latest_with_stack_filter(
 
     assert payload["exec_id"] == sample_execution.exec_id
     mock_kitaru_client.executions.latest.assert_not_called()
+
+
+def test_get_execution_logs_calls_client_with_agent_default_limit(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """The log tool should call `client.executions.logs` with default limit=200."""
+    mock_kitaru_client.executions.logs.return_value = [
+        SimpleNamespace(
+            message="Starting research",
+            level="INFO",
+            timestamp="2026-03-09T10:01:12+00:00",
+            checkpoint_name="research",
+        )
+    ]
+
+    with patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client):
+        payload = get_execution_logs("kr-a8f3c2")
+
+    mock_kitaru_client.executions.logs.assert_called_once_with(
+        "kr-a8f3c2",
+        checkpoint=None,
+        source="step",
+        limit=200,
+    )
+    assert "Starting research" in payload
+
+
+def test_get_execution_logs_passes_explicit_filters(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """The log tool should forward explicit source/checkpoint/limit arguments."""
+    mock_kitaru_client.executions.logs.return_value = []
+
+    with patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client):
+        payload = get_execution_logs(
+            "kr-a8f3c2",
+            checkpoint="research",
+            source="runner",
+            limit=50,
+        )
+
+    mock_kitaru_client.executions.logs.assert_called_once_with(
+        "kr-a8f3c2",
+        checkpoint="research",
+        source="runner",
+        limit=50,
+    )
+    assert payload == "No log entries found."
 
 
 def test_executions_run_fetches_execution(
@@ -275,6 +324,11 @@ def test_status_and_stack_tools_return_structured_payloads() -> None:
         server_deployment_type="kubernetes",
         local_server_status="not started",
         warning=None,
+        log_store_status="datadog (preferred) ⚠ stack uses artifact-store",
+        log_store_warning=(
+            "Active ZenML stack uses: artifact-store\n"
+            "The Kitaru log-store preference is not wired into stack selection yet."
+        ),
     )
 
     stacks = [
@@ -290,4 +344,8 @@ def test_status_and_stack_tools_return_structured_payloads() -> None:
         stack_payload = kitaru_stacks_list()
 
     assert status_payload["active_stack"] == "prod"
+    assert (
+        status_payload["log_store_status"]
+        == "datadog (preferred) ⚠ stack uses artifact-store"
+    )
     assert [stack["name"] for stack in stack_payload] == ["prod", "dev"]

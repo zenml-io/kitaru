@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib
 import importlib.util
 import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from importlib.metadata import version as get_version
@@ -29,7 +31,7 @@ from zenml.models import SecretResponse
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
-from kitaru.client import Execution, ExecutionStatus, KitaruClient
+from kitaru.client import Execution, ExecutionStatus, KitaruClient, LogEntry
 from kitaru.config import (
     KITARU_PROJECT_ENV,
     ModelAliasEntry,
@@ -37,6 +39,7 @@ from kitaru.config import (
     StackInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
+    active_stack_log_store,
     list_model_aliases,
     login_to_server,
     register_model_alias,
@@ -115,6 +118,8 @@ class RuntimeSnapshot:
     server_deployment_type: str | None = None
     local_server_status: str | None = None
     warning: str | None = None
+    log_store_status: str | None = None
+    log_store_warning: str | None = None
 
 
 @runtime_checkable
@@ -520,6 +525,20 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         snapshot.warning = f"Unable to query the configured store: {exc}"
 
+    try:
+        preferred_log_store = resolve_log_store()
+    except ValueError as exc:
+        snapshot.log_store_warning = (
+            f"Unable to resolve Kitaru log-store preference: {exc}"
+        )
+        return snapshot
+
+    log_store_status, log_store_warning = _log_store_mismatch_details(
+        preferred_log_store
+    )
+    snapshot.log_store_status = log_store_status
+    snapshot.log_store_warning = log_store_warning
+
     return snapshot
 
 
@@ -554,6 +573,8 @@ def _status_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
     )
     if snapshot.local_server_status:
         rows.append(("Local server", snapshot.local_server_status))
+    if snapshot.log_store_status:
+        rows.append(("Log store", snapshot.log_store_status))
     return rows
 
 
@@ -594,6 +615,44 @@ def _log_store_detail(snapshot: ResolvedLogStore) -> str:
         return f"Effective backend: {snapshot.backend}"
 
     return f"Effective backend: {snapshot.backend} (from {snapshot.source} settings)"
+
+
+def _log_store_mismatch_details(
+    preferred: ResolvedLogStore,
+) -> tuple[str | None, str | None]:
+    """Return status-row + warning text when preferred and active backends differ."""
+    if preferred.source == "default":
+        return None, None
+
+    active_store = active_stack_log_store()
+    if active_store is None:
+        return None, None
+
+    if active_store.backend == preferred.backend:
+        return None, None
+
+    status_row = f"{preferred.backend} (preferred) ⚠ stack uses {active_store.backend}"
+
+    active_label = active_store.backend
+    if active_store.stack_name:
+        active_label = f"{active_store.backend} (stack: {active_store.stack_name})"
+
+    warning = "\n".join(
+        [
+            f"Active ZenML stack uses: {active_label}",
+            "The Kitaru log-store preference is not wired into stack selection yet.",
+            "Actual runtime logs go to the stack's log store, not this preference.",
+        ]
+    )
+    return status_row, warning
+
+
+def _combine_warnings(*warnings: str | None) -> str | None:
+    """Combine non-empty warning messages into one multiline block."""
+    rendered = [warning for warning in warnings if warning]
+    if not rendered:
+        return None
+    return "\n".join(rendered)
 
 
 def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
@@ -786,11 +845,209 @@ def _emit_snapshot(
     rows: list[tuple[str, str]],
     warning: str | None = None,
 ) -> None:
-    """Emit a snapshot view, choosing Rich or plain text based on the terminal."""
+    """Render key/value snapshots in rich or plain-text mode."""
     if _is_interactive():
         _render_rich_snapshot(title, rows, warning)
     else:
         print(_render_plain_snapshot(title, rows, warning))
+
+
+def _normalize_log_output(output: str) -> str:
+    """Normalize and validate the `executions logs` output format."""
+    normalized = output.strip().lower()
+    if normalized not in {"text", "json"}:
+        raise ValueError("`--output` must be either `text` or `json`.")
+    return normalized
+
+
+def _format_log_timestamp(value: str | None) -> str:
+    """Render an optional ISO timestamp in a compact CLI-friendly shape."""
+    if value is None:
+        return "-"
+
+    raw_value = value.strip()
+    if not raw_value:
+        return "-"
+
+    normalized = raw_value
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return raw_value
+
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_log_entry(entry: LogEntry, *, verbosity: int) -> str:
+    """Format one log entry for CLI text output."""
+    if verbosity <= 0:
+        return entry.message
+
+    timestamp = _format_log_timestamp(entry.timestamp)
+    level = (entry.level or "INFO").upper()
+    if verbosity == 1:
+        return f"{timestamp} {level:<5} {entry.message}"
+
+    module = entry.module or entry.checkpoint_name or "unknown"
+    return f"{timestamp} {level:<5} [{module}] {entry.message}"
+
+
+def _serialize_log_entry(entry: LogEntry) -> dict[str, Any]:
+    """Serialize one log entry for JSONL output."""
+    payload: dict[str, Any] = {"message": entry.message}
+    for key, value in (
+        ("level", entry.level),
+        ("timestamp", entry.timestamp),
+        ("source", entry.source),
+        ("checkpoint_name", entry.checkpoint_name),
+        ("module", entry.module),
+        ("filename", entry.filename),
+        ("lineno", entry.lineno),
+    ):
+        if value is not None:
+            payload[key] = value
+
+    return payload
+
+
+def _emit_control_message(message: str, *, output: str) -> None:
+    """Emit non-log control/status text for text or JSONL output modes."""
+    if output == "json":
+        print(message, file=sys.stderr)
+    else:
+        print(message)
+
+
+def _emit_log_entries(
+    entries: list[LogEntry],
+    *,
+    output: str,
+    grouped: bool,
+    verbosity: int,
+) -> None:
+    """Emit log entries in text or JSONL format."""
+    if output == "json":
+        for entry in entries:
+            print(json.dumps(_serialize_log_entry(entry)))
+        return
+
+    if not grouped:
+        for entry in entries:
+            print(_format_log_entry(entry, verbosity=verbosity))
+        return
+
+    grouped_entries: dict[str, list[LogEntry]] = {}
+    for entry in entries:
+        checkpoint_name = entry.checkpoint_name or "unknown"
+        grouped_entries.setdefault(checkpoint_name, []).append(entry)
+
+    for idx, (checkpoint_name, checkpoint_entries) in enumerate(
+        grouped_entries.items()
+    ):
+        if idx > 0:
+            print("")
+        print(f"── checkpoint: {checkpoint_name} " + "─" * 30)
+        for entry in checkpoint_entries:
+            print(_format_log_entry(entry, verbosity=verbosity))
+
+
+def _emit_empty_logs_message(exec_id: str, *, output: str) -> None:
+    """Emit a friendly empty-state message when no runtime logs were found."""
+    _emit_control_message(
+        f"No log entries found for execution {exec_id}.",
+        output=output,
+    )
+    _emit_control_message(
+        "The execution may still be starting, or step logging may be disabled.",
+        output=output,
+    )
+
+
+def _log_entry_dedup_key(entry: LogEntry) -> tuple[Any, ...]:
+    """Build a stable key for follow-mode log deduplication."""
+    return (
+        entry.timestamp,
+        entry.level,
+        entry.checkpoint_name,
+        entry.module,
+        entry.filename,
+        entry.lineno,
+        entry.message,
+    )
+
+
+def _follow_execution_logs(
+    *,
+    client: KitaruClient,
+    exec_id: str,
+    checkpoint: str | None,
+    source: str,
+    limit: int | None,
+    output: str,
+    grouped: bool,
+    verbosity: int,
+    interval: float,
+) -> int:
+    """Poll execution logs until terminal status and stream only new entries."""
+    seen_entries: builtins.set[tuple[Any, ...]] = builtins.set()
+    last_wait_name: str | None = None
+
+    while True:
+        entries = client.executions.logs(
+            exec_id,
+            checkpoint=checkpoint,
+            source=source,
+            limit=limit,
+        )
+
+        new_entries: list[LogEntry] = []
+        for entry in entries:
+            key = _log_entry_dedup_key(entry)
+            if key in seen_entries:
+                continue
+            seen_entries.add(key)
+            new_entries.append(entry)
+
+        if new_entries:
+            _emit_log_entries(
+                new_entries,
+                output=output,
+                grouped=grouped,
+                verbosity=verbosity,
+            )
+
+        execution = client.executions.get(exec_id)
+        if execution.status == ExecutionStatus.COMPLETED:
+            _emit_control_message("[Execution completed successfully]", output=output)
+            return 0
+        if execution.status == ExecutionStatus.FAILED:
+            failure_reason = execution.status_reason or "execution failed"
+            if execution.failure is not None:
+                failure_reason = execution.failure.message
+            _emit_control_message(
+                f"[Execution failed: {failure_reason}]",
+                output=output,
+            )
+            return 1
+        if execution.status == ExecutionStatus.CANCELLED:
+            _emit_control_message("[Execution cancelled]", output=output)
+            return 1
+
+        if execution.status == ExecutionStatus.WAITING:
+            wait_name = "unknown"
+            if execution.pending_wait is not None:
+                wait_name = execution.pending_wait.name
+            if wait_name != last_wait_name:
+                _emit_control_message(
+                    f"[Execution is waiting for input on: {wait_name}]",
+                    output=output,
+                )
+                last_wait_name = wait_name
+
+        time.sleep(interval)
 
 
 def _logout_current_connection() -> str:
@@ -937,7 +1194,8 @@ def show() -> None:
     except ValueError as exc:
         _exit_with_error(str(exc))
 
-    _emit_snapshot("Kitaru log store", _log_store_rows(snapshot))
+    _, mismatch_warning = _log_store_mismatch_details(snapshot)
+    _emit_snapshot("Kitaru log store", _log_store_rows(snapshot), mismatch_warning)
 
 
 @log_store_app.command
@@ -1257,6 +1515,116 @@ def list____(
 
 
 @executions_app.command
+def logs_(
+    exec_id: Annotated[
+        str,
+        Parameter(help="Execution ID."),
+    ],
+    *,
+    checkpoint: Annotated[
+        str | None,
+        Parameter(help="Optional checkpoint function name to filter by."),
+    ] = None,
+    source: Annotated[
+        str,
+        Parameter(
+            help='Log source (default: "step"; use "runner" for run-level logs).'
+        ),
+    ] = "step",
+    limit: Annotated[
+        int | None,
+        Parameter(help="Maximum total log entries to return."),
+    ] = None,
+    follow: Annotated[
+        bool,
+        Parameter(
+            help="Stream new log entries until execution reaches a terminal state."
+        ),
+    ] = False,
+    interval: Annotated[
+        float,
+        Parameter(help="Polling interval in seconds for `--follow`."),
+    ] = 3.0,
+    grouped: Annotated[
+        bool,
+        Parameter(help="Group output by checkpoint with section headers."),
+    ] = False,
+    output: Annotated[
+        str,
+        Parameter(help='Output format: "text" (default) or "json" (JSONL).'),
+    ] = "text",
+    verbosity: Annotated[
+        int,
+        Parameter(
+            alias=["-v"],
+            count=True,
+            help="Increase verbosity (`-v` for level+timestamp, `-vv` for module).",
+        ),
+    ] = 0,
+) -> None:
+    """Fetch runtime log entries for an execution."""
+    try:
+        output_format = _normalize_log_output(output)
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+
+    if grouped and output_format == "json":
+        _exit_with_error("`--grouped` cannot be combined with `--output json`.")
+
+    if checkpoint and source.strip().lower() == "runner":
+        _exit_with_error("`--checkpoint` cannot be combined with `--source runner`.")
+
+    if interval <= 0:
+        _exit_with_error("`--interval` must be > 0.")
+
+    verbosity = min(verbosity, 2)
+
+    client = KitaruClient()
+
+    if follow:
+        try:
+            exit_code = _follow_execution_logs(
+                client=client,
+                exec_id=exec_id,
+                checkpoint=checkpoint,
+                source=source,
+                limit=limit,
+                output=output_format,
+                grouped=grouped,
+                verbosity=verbosity,
+                interval=interval,
+            )
+        except KeyboardInterrupt:
+            _emit_control_message("[Log follow interrupted]", output=output_format)
+            raise SystemExit(1) from None
+        except Exception as exc:
+            _exit_with_error(str(exc))
+
+        raise SystemExit(exit_code)
+
+    try:
+        entries = client.executions.logs(
+            exec_id,
+            checkpoint=checkpoint,
+            source=source,
+            limit=limit,
+        )
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    if not entries:
+        _emit_empty_logs_message(exec_id, output=output_format)
+        return
+
+    _emit_log_entries(
+        entries,
+        output=output_format,
+        grouped=grouped,
+        verbosity=verbosity,
+    )
+
+
+@executions_app.command
 def input_(
     exec_id: Annotated[
         str,
@@ -1406,14 +1774,22 @@ def cancel_(
 def status() -> None:
     """Show the current connection state and active stack context."""
     snapshot = _build_runtime_snapshot()
-    _emit_snapshot("Kitaru status", _status_rows(snapshot), snapshot.warning)
+    _emit_snapshot(
+        "Kitaru status",
+        _status_rows(snapshot),
+        _combine_warnings(snapshot.warning, snapshot.log_store_warning),
+    )
 
 
 @app.command
 def info() -> None:
     """Show detailed environment information for the current setup."""
     snapshot = _build_runtime_snapshot()
-    _emit_snapshot("Kitaru info", _info_rows(snapshot), snapshot.warning)
+    _emit_snapshot(
+        "Kitaru info",
+        _info_rows(snapshot),
+        _combine_warnings(snapshot.warning, snapshot.log_store_warning),
+    )
 
 
 @app.default

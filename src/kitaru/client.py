@@ -20,7 +20,7 @@ from collections import defaultdict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -30,16 +30,20 @@ from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.models import PipelineRunResponse, StepRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.utils.run_utils import stop_run
+from zenml.zen_stores.rest_zen_store import RestZenStore
 
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
     FrozenExecutionSpec,
+    active_stack_log_store,
     resolve_connection_config,
+    resolve_log_store,
 )
 from kitaru.errors import (
     FailureOrigin,
     KitaruBackendError,
     KitaruFeatureNotAvailableError,
+    KitaruLogRetrievalError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -102,6 +106,20 @@ class FailureInfo:
     exception_type: str | None
     traceback: str | None
     origin: FailureOrigin
+
+
+@dataclass(frozen=True)
+class LogEntry:
+    """One runtime log entry retrieved for an execution."""
+
+    message: str
+    level: str | None = None
+    timestamp: str | None = None
+    source: str | None = None
+    checkpoint_name: str | None = None
+    module: str | None = None
+    filename: str | None = None
+    lineno: int | None = None
 
 
 @dataclass(frozen=True)
@@ -303,6 +321,155 @@ def _coerce_status_filter(
         raise KitaruUsageError(
             f"Unsupported status filter {status!r}. Expected one of: {expected}."
         ) from exc
+
+
+def _normalize_log_source(source: str) -> str:
+    """Normalize a runtime log source selector."""
+    normalized = source.strip().lower()
+    if not normalized:
+        raise KitaruUsageError("`source` must be a non-empty string.")
+    return normalized
+
+
+def _parse_log_timestamp(value: str | None) -> datetime | None:
+    """Parse an optional log timestamp for sorting."""
+    if value is None:
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _log_sort_key(entry: LogEntry, fallback_index: int) -> tuple[int, float, int]:
+    """Build a stable sort key for runtime log entries."""
+    parsed_timestamp = _parse_log_timestamp(entry.timestamp)
+    if parsed_timestamp is None:
+        return (1, float("inf"), fallback_index)
+    return (0, parsed_timestamp.timestamp(), fallback_index)
+
+
+def _sort_log_entries(entries: list[LogEntry]) -> list[LogEntry]:
+    """Sort runtime log entries chronologically with stable fallback order."""
+    indexed = list(enumerate(entries))
+    indexed.sort(key=lambda item: _log_sort_key(item[1], item[0]))
+    return [entry for _, entry in indexed]
+
+
+def _step_log_fetch_order_key(step: StepRunResponse) -> tuple[float, str, str]:
+    """Order step runs deterministically for sequential log retrieval."""
+    start_time = step.start_time
+    if start_time is None:
+        start_key = float("inf")
+    else:
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=UTC)
+        start_key = start_time.timestamp()
+
+    return (start_key, _normalize_checkpoint_name(step.name), str(step.id))
+
+
+def _coerce_log_level(value: Any) -> str | None:
+    """Coerce a log level value from API payloads to a string."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    if isinstance(value, Mapping):
+        nested = value.get("value")
+        if isinstance(nested, str):
+            normalized_nested = nested.strip()
+            return normalized_nested or None
+    return str(value)
+
+
+def _coerce_log_text(value: Any) -> str | None:
+    """Coerce optional log text fields to stripped strings."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return str(value)
+
+
+def _coerce_log_lineno(value: Any) -> int | None:
+    """Coerce an optional log line number value."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return None
+
+
+def _map_runtime_log_entry(
+    raw_entry: Mapping[str, Any],
+    *,
+    source: str,
+    checkpoint_name: str | None,
+) -> LogEntry:
+    """Map one raw REST log payload entry into a public `LogEntry`."""
+    message_value = raw_entry.get("message")
+    if isinstance(message_value, str):
+        message = message_value
+    elif message_value is None:
+        message = ""
+    else:
+        message = str(message_value)
+
+    timestamp_value = raw_entry.get("timestamp")
+    timestamp: str | None
+    if isinstance(timestamp_value, datetime):
+        timestamp = timestamp_value.isoformat()
+    elif isinstance(timestamp_value, str):
+        stripped_timestamp = timestamp_value.strip()
+        timestamp = stripped_timestamp or None
+    else:
+        timestamp = None
+
+    return LogEntry(
+        message=message,
+        level=_coerce_log_level(raw_entry.get("level")),
+        timestamp=timestamp,
+        source=source,
+        checkpoint_name=checkpoint_name,
+        module=_coerce_log_text(raw_entry.get("module")),
+        filename=_coerce_log_text(raw_entry.get("filename")),
+        lineno=_coerce_log_lineno(raw_entry.get("lineno")),
+    )
+
+
+def _is_empty_log_result_error(message: str) -> bool:
+    """Return whether an error message indicates an empty log collection."""
+    lowered = message.lower()
+    return "no logs found" in lowered
+
+
+def _is_otel_log_retrieval_error(message: str) -> bool:
+    """Return whether an error message points to OTEL export-only retrieval."""
+    lowered = message.lower()
+    if "notimplementederror" in lowered:
+        return True
+    return "otel" in lowered and "not implemented" in lowered
 
 
 def _parse_frozen_execution_spec(raw_value: Any) -> FrozenExecutionSpec | None:
@@ -887,6 +1054,155 @@ class _ExecutionsAPI:
     def __init__(self, client: KitaruClient) -> None:
         self._client_ref = client
 
+    def _rest_store(self) -> RestZenStore:
+        """Return a REST-backed zen store required for runtime log retrieval."""
+        zen_store = self._client_ref._client().zen_store
+        if isinstance(zen_store, RestZenStore):
+            return zen_store
+
+        raise KitaruLogRetrievalError(
+            "Runtime log retrieval requires a server-backed connection. "
+            "Local database mode does not expose execution log endpoints."
+        )
+
+    def _resolve_log_endpoint_hint(self) -> str | None:
+        """Resolve a best-effort endpoint hint for log-retrieval errors."""
+        active_log_store = active_stack_log_store()
+        if active_log_store is not None and active_log_store.endpoint:
+            return active_log_store.endpoint
+
+        try:
+            preferred_log_store = resolve_log_store()
+        except ValueError:
+            return None
+
+        return preferred_log_store.endpoint
+
+    def _fetch_log_payload(
+        self,
+        *,
+        path: str,
+        source: str,
+    ) -> builtins.list[Mapping[str, Any]]:
+        """Call a log endpoint and normalize the response payload shape."""
+        store = self._rest_store()
+
+        try:
+            payload = store.get(path, params={"source": source})
+        except Exception as exc:
+            error_message = str(exc)
+            if _is_empty_log_result_error(error_message):
+                return []
+
+            if _is_otel_log_retrieval_error(error_message):
+                endpoint_hint = self._resolve_log_endpoint_hint()
+                message = (
+                    "Logs for this execution are stored in an OTEL backend and "
+                    "cannot be fetched via the Kitaru log retrieval API."
+                )
+                if endpoint_hint:
+                    message += f" View them in your OTEL backend at: {endpoint_hint}."
+                raise KitaruLogRetrievalError(message) from exc
+
+            raise KitaruLogRetrievalError(
+                f"Failed to retrieve runtime logs for source '{source}': {exc}"
+            ) from exc
+
+        if not isinstance(payload, list):
+            raise KitaruLogRetrievalError(
+                "Unexpected response while retrieving runtime logs: "
+                "expected a list payload."
+            )
+
+        normalized_payload: builtins.list[Mapping[str, Any]] = []
+        for entry in payload:
+            if not isinstance(entry, Mapping):
+                raise KitaruLogRetrievalError(
+                    "Unexpected log entry payload type returned by the server."
+                )
+            normalized_payload.append(entry)
+
+        return normalized_payload
+
+    def logs(
+        self,
+        exec_id: str,
+        *,
+        checkpoint: str | None = None,
+        source: str = "step",
+        limit: int | None = None,
+    ) -> builtins.list[LogEntry]:
+        """Fetch runtime log entries for an execution."""
+        normalized_source = _normalize_log_source(source)
+        if limit is not None and limit < 1:
+            raise KitaruUsageError("`limit` must be >= 1 when provided.")
+
+        normalized_checkpoint: str | None = None
+        if checkpoint is not None:
+            normalized_checkpoint = checkpoint.strip()
+            if not normalized_checkpoint:
+                raise KitaruUsageError("`checkpoint` must be non-empty when provided.")
+
+        if normalized_source == "runner" and normalized_checkpoint is not None:
+            raise KitaruUsageError(
+                "`checkpoint` cannot be combined with `source='runner'`."
+            )
+
+        run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+
+        if normalized_source == "runner":
+            run_payload = self._fetch_log_payload(
+                path=f"/runs/{run.id}/logs",
+                source=normalized_source,
+            )
+            run_entries = [
+                _map_runtime_log_entry(
+                    raw_entry,
+                    source=normalized_source,
+                    checkpoint_name=None,
+                )
+                for raw_entry in run_payload
+            ]
+            sorted_run_entries = _sort_log_entries(run_entries)
+            if limit is not None:
+                return sorted_run_entries[:limit]
+            return sorted_run_entries
+
+        step_runs = sorted(run.steps.values(), key=_step_log_fetch_order_key)
+        if normalized_checkpoint is not None:
+            step_runs = [
+                step
+                for step in step_runs
+                if _normalize_checkpoint_name(step.name) == normalized_checkpoint
+            ]
+
+        if not step_runs:
+            return []
+
+        entries: list[LogEntry] = []
+        for step in step_runs:
+            checkpoint_name = _normalize_checkpoint_name(step.name)
+            step_payload = self._fetch_log_payload(
+                path=f"/steps/{step.id}/logs",
+                source=normalized_source,
+            )
+            entries.extend(
+                _map_runtime_log_entry(
+                    raw_entry,
+                    source=normalized_source,
+                    checkpoint_name=checkpoint_name,
+                )
+                for raw_entry in step_payload
+            )
+
+            if limit is not None and len(entries) >= limit:
+                break
+
+        sorted_entries = _sort_log_entries(entries)
+        if limit is not None:
+            return sorted_entries[:limit]
+        return sorted_entries
+
     def input(self, exec_id: str, *, wait: str, value: Any) -> Execution:
         """Provide input to a waiting execution."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
@@ -1290,5 +1606,6 @@ __all__ = [
     "ExecutionStatus",
     "FailureInfo",
     "KitaruClient",
+    "LogEntry",
     "PendingWait",
 ]
