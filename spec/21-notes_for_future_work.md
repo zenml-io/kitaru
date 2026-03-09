@@ -196,9 +196,9 @@ Basic log-store configuration (`kitaru log-store set/show/reset`) is implemented
 
 ## Docs
 
-### Fix sidebar double nesting
+### ~~Fix sidebar double nesting~~ — FIXED
 
-The left sidebar has a "Core Concepts > Core Concepts" double nesting issue in the FumaDocs theme/config.
+Removed duplicate separator labels from the root `meta.json` and stopped listing `index` as an explicit child page in folder `meta.json` files (both manual and in generation scripts). Each section now appears once in the sidebar.
 
 ### ~~Code snippet contrast~~ — FIXED
 
