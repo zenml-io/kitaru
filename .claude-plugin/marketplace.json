@@ -7,7 +7,7 @@
     {
       "name": "kitaru",
       "source": ".",
-      "description": "Kitaru durable execution authoring skill for Claude Code"
+      "description": "Kitaru skills for Claude Code: scoping (flow architecture design) and authoring (writing durable agent workflows)"
     }
   ]
 }
