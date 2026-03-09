@@ -50,6 +50,42 @@ The docs and landing page deploy as **one Cloudflare Worker** from `site/dist/`:
 
 The site workflow (`.github/workflows/site.yml`) runs this pipeline on `main` pushes (production) and creates preview Workers for PRs.
 
+## Images & Assets
+
+### Two-tier system
+
+| Tier | Location | Use for | How to reference |
+|------|----------|---------|------------------|
+| **A: Static** | `site/public/` | SVG logos, icons, favicons | Root-relative: `"/favicon.svg"` |
+| **B: R2** | `kitaru-assets` bucket | Blog heroes, OG images, screenshots, article imagery | Absolute URL: `"https://assets.kitaru.ai/..."` |
+
+**Decision rule:** If a raster image appears in blog frontmatter (`image`, `ogImage`), upload to R2 and use the absolute URL. Content schemas enforce `z.string().url()`. SVGs and favicons stay in `site/public/`.
+
+### Adding content images
+
+Always **convert to AVIF first**, then upload:
+
+```bash
+# Upload with blog prefix
+uv run scripts/r2-upload.py output.avif --prefix content/blog
+
+# Print paste-ready YAML snippet
+uv run scripts/r2-upload.py output.avif --frontmatter
+```
+
+**Never add raster blog images to `site/public/`** — they belong in R2.
+
+### R2 upload credentials
+
+Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NOT require these — only the upload script needs them.
+
+**Team members:** R2 credentials (Account ID, Access Key, Secret Key) are stored in [1Password](https://start.1password.com/open/i?a=WIYWG2XIHNDZRN7LKKYT32PPY4&v=xi7637kspgwy67twg4xuukczy4&i=bzl6znbucjgrj2ozmk2pyclsze&h=zenml.1password.com) (ZenML team access required).
+
+### Gotchas
+
+- **Verify uploads work:** After uploading, `curl -sI <url>` should return HTTP 200. The boto3 API can succeed but the public domain may not be configured yet.
+- **`site/public/` assets must exist:** Astro doesn't error on missing `public/` files — it silently 404s at runtime. After adding references, verify the files exist.
+
 ## Branching strategy
 
 - **`develop`** is the default branch and the target for all PRs.
@@ -117,7 +153,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** Most SDK primitives and CLI commands are implemented (see table below). Replay (`client.executions.replay()`) and a few CLI extensions remain in progress.
+> **Note:** Most SDK primitives and CLI commands are implemented (see table below). Replay is now implemented across SDK, flow objects, CLI, and MCP surfaces.
 
 ### Current MVP primitives
 
@@ -133,9 +169,9 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
 | `KitaruClient` (`get/list/latest/input/resume/cancel/retry` + artifact browsing) | Implemented |
-| Execution CLI (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`) | Implemented |
+| Execution CLI (`kitaru run`, `kitaru executions get/list/input/replay/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
-| `KitaruClient.executions.replay()` | Stubbed (branch-dependent) |
+| `KitaruClient.executions.replay()` | Implemented |
 
 ### Key design patterns
 
