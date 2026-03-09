@@ -181,6 +181,7 @@ Future work will add richer OpenTelemetry-native tracing and exporter integratio
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
 - **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
+- **Before opening a PR or making a large commit**, always run `/simplify` to review changed code for reuse opportunities, quality issues, and efficiency improvements. Fix any issues it finds before committing.
 
 ## CLI
 
