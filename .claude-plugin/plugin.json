@@ -1,5 +1,5 @@
 {
   "name": "kitaru",
-  "description": "Kitaru durable execution authoring skill for Claude Code",
-  "version": "0.1.0"
+  "description": "Kitaru skills for Claude Code: scoping (flow architecture design) and authoring (writing durable agent workflows)",
+  "version": "0.2.0"
 }

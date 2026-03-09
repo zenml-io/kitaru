@@ -12,6 +12,11 @@ description: >
 
 Use this guide when writing or refactoring Kitaru workflows.
 
+> **Before building**: If the user hasn't validated their workflow design yet, suggest
+> using the `kitaru-scoping` skill first to assess fit and define checkpoint/wait
+> boundaries. Scoping produces a `flow_architecture.md` that feeds directly into
+> authoring.
+
 ## Mental model
 
 - `@kitaru.flow` is the **durable outer boundary**.

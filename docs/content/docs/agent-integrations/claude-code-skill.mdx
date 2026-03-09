@@ -1,13 +1,33 @@
 ---
-title: Claude Code Skill
-description: Install the Kitaru authoring skill for Claude Code
+title: Claude Code Skills
+description: Install Kitaru's Claude Code skills for scoping and authoring durable agent workflows
 ---
 
-Kitaru provides a Claude Code skill that teaches Claude how to write valid
-Kitaru flows, checkpoints, waits, and adapter usage patterns.
+Kitaru provides two Claude Code skills that teach Claude how to design and build
+durable agent workflows.
 
-## What the skill covers
+## Available skills
 
+### Scoping skill
+
+The **kitaru-scoping** skill helps you decide whether your agent workflow
+benefits from durable execution, then designs the flow architecture —
+checkpoint boundaries, wait points, artifact strategy, and MVP scope.
+
+It runs a structured interview and produces a `flow_architecture.md`
+specification that feeds directly into the authoring skill.
+
+**Use it when:**
+- You're starting a new agent project and aren't sure where durability adds value
+- You have a complex workflow and need help identifying checkpoint/wait boundaries
+- You want to validate that Kitaru is the right tool before writing code
+
+### Authoring skill
+
+The **kitaru-authoring** skill teaches Claude how to write valid Kitaru flows,
+checkpoints, waits, and adapter usage patterns.
+
+**What it covers:**
 - `@kitaru.flow` and `@kitaru.checkpoint` roles
 - `kitaru.wait()` flow-level guardrails
 - `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`
@@ -15,32 +35,48 @@ Kitaru flows, checkpoints, waits, and adapter usage patterns.
 - PydanticAI adapter guidance (`kitaru.adapters.pydantic_ai.wrap(...)`)
 - Common mistakes (nested flows, non-serializable checkpoint outputs, etc.)
 
+## Recommended workflow
+
+1. **Scope first** — use `/kitaru-scoping` (or let Claude trigger it automatically)
+   to validate fit and define your flow architecture
+2. **Author second** — use `/kitaru-authoring` to build the flows defined in
+   your `flow_architecture.md`
+
 ## Install from the marketplace
 
-The Kitaru skill is published as a Claude Code plugin. Add the marketplace and
-install with two commands:
+The Kitaru skills are published as a Claude Code plugin. Add the marketplace
+and install with two commands:
 
 ```bash
 /plugin marketplace add zenml-io/kitaru
 /plugin install kitaru@kitaru
 ```
 
-Once installed, Claude Code will automatically use the skill when you ask it to
-write or refactor Kitaru workflows. You can also invoke it explicitly with
-`/kitaru-authoring`.
+Once installed, Claude Code will automatically use the skills based on context.
+You can also invoke them explicitly with `/kitaru-scoping` or `/kitaru-authoring`.
 
 ## Manual installation
 
-If you prefer to copy the skill file directly:
+If you prefer to copy the skill files directly:
 
 ```bash
-mkdir -p .claude/skills/kitaru-authoring
+mkdir -p .claude/skills/kitaru-scoping .claude/skills/kitaru-authoring
+
+curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru/develop/.claude-plugin/skills/kitaru-scoping/SKILL.md \
+  -o .claude/skills/kitaru-scoping/SKILL.md
+
 curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru/develop/.claude-plugin/skills/kitaru-authoring/SKILL.md \
   -o .claude/skills/kitaru-authoring/SKILL.md
 ```
 
-## Good prompts to pair with the skill
+## Good prompts to pair with the skills
 
+**Scoping:**
+- "I want to build a research agent — is Kitaru right for this?"
+- "Help me figure out where to put checkpoints in my coding agent workflow."
+- "I have a complex agent with 10 steps — help me scope it down."
+
+**Authoring:**
 - "Refactor this script into one `@kitaru.flow` with explicit checkpoints."
 - "Add a flow-level `kitaru.wait()` approval gate before publish."
 - "Wrap this PydanticAI call in a Kitaru checkpoint and preserve replay safety."
