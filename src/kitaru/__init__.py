@@ -28,12 +28,12 @@ Current status:
   (`get/list/latest/input/retry/resume/cancel` + artifacts), and a typed
   Kitaru exception hierarchy with failure journaling (`Execution.failure`,
   `CheckpointCall.attempts`).
-- In progress: replay support (`KitaruClient.executions.replay(...)`).
+- Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset``, stack selection via
 ``kitaru stack list/current/use``, and execution lifecycle commands via
-``kitaru run`` plus ``kitaru executions get/list/input/retry/resume/cancel``.
+``kitaru run`` plus ``kitaru executions get/list/input/replay/retry/resume/cancel``.
 """
 
 from kitaru.artifacts import load, save

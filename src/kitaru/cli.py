@@ -1295,6 +1295,57 @@ def input_(
 
 
 @executions_app.command
+def replay_(
+    exec_id: Annotated[
+        str,
+        Parameter(help="Execution ID."),
+    ],
+    *,
+    from_: Annotated[
+        str,
+        Parameter(
+            help="Replay selector (checkpoint name/id/call-id or wait selector).",
+            alias=["--from"],
+        ),
+    ],
+    args: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Flow input overrides as a JSON object "
+                '(for example \'{"topic": "New topic"}\').'
+            )
+        ),
+    ] = None,
+    overrides: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Replay overrides as a JSON object with `checkpoint.*` / `wait.*` keys."
+            )
+        ),
+    ] = None,
+) -> None:
+    """Replay an execution from a checkpoint/wait boundary."""
+    try:
+        flow_inputs = _parse_json_object(args, option_name="--args")
+        parsed_overrides = _parse_json_object(overrides, option_name="--overrides")
+        execution = KitaruClient().executions.replay(
+            exec_id,
+            from_=from_,
+            overrides=parsed_overrides or None,
+            **flow_inputs,
+        )
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _print_success(
+        f"Replayed execution: {execution.exec_id}",
+        detail=f"Status: {execution.status.value}",
+    )
+
+
+@executions_app.command
 def retry_(
     exec_id: Annotated[
         str,

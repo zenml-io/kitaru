@@ -1,0 +1,89 @@
+---
+title: Replay and Overrides
+description: Replay executions from checkpoints or waits with flow/checkpoint/wait overrides
+---
+
+Replay creates a **new execution** from a previous one.
+
+Use replay when you want to keep earlier durable work and rerun only a suffix of
+your workflow.
+
+## SDK replay
+
+```python
+import kitaru
+
+client = kitaru.KitaruClient()
+
+replayed = client.executions.replay(
+    "kr-a8f3c2",
+    from_="write_draft",
+    topic="New topic",
+    overrides={
+        "checkpoint.research": "Edited notes",
+        "wait.approve": False,
+    },
+)
+
+print(replayed.exec_id)
+print(replayed.original_exec_id)  # points to source execution
+```
+
+## Flow-object replay
+
+```python
+handle = content_pipeline.replay(
+    exec_id="kr-a8f3c2",
+    from_="write_draft",
+    topic="New topic",
+    overrides={"checkpoint.research": "Edited notes"},
+)
+
+result = handle.wait()
+```
+
+## CLI replay
+
+```bash
+kitaru executions replay kr-a8f3c2 \
+  --from write_draft \
+  --args '{"topic":"New topic"}' \
+  --overrides '{"checkpoint.research":"Edited notes","wait.approve":false}'
+```
+
+## Selector rules
+
+`from_` can target:
+
+- checkpoint name (for example `write_draft`)
+- checkpoint invocation/call ID
+- wait key (for example `approve:0`) or unique wait prefix (`approve`)
+
+If a selector is ambiguous, replay raises `KitaruStateError`.
+
+## Override keys
+
+Replay override keys must start with:
+
+- `checkpoint.`
+- `wait.`
+
+Examples:
+
+- `checkpoint.research`
+- `wait.approve`
+
+Any other prefix raises `KitaruUsageError`.
+
+## Divergence
+
+Replay can raise `KitaruDivergenceError` when the backend detects that durable
+call sequence compatibility is broken.
+
+Also check replayed execution failure metadata:
+
+```python
+latest = client.executions.get(replayed.exec_id)
+if latest.failure:
+    print(latest.failure.origin, latest.failure.message)
+```

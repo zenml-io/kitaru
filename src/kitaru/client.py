@@ -15,13 +15,14 @@ Example::
 from __future__ import annotations
 
 import builtins
+import importlib
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, cast
+from typing import Any, Protocol, cast, runtime_checkable
 
 from pydantic import ValidationError
 from zenml.client import Client
@@ -44,9 +45,11 @@ from kitaru.errors import (
     KitaruUsageError,
     KitaruWaitValidationError,
     classify_failure_origin,
+    execution_error_from_failure,
     traceback_exception_type,
     traceback_last_line,
 )
+from kitaru.replay import build_replay_plan
 
 _CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
 _PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
@@ -63,6 +66,20 @@ class ExecutionStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+@runtime_checkable
+class _ReplayFlowLike(Protocol):
+    """Flow wrapper protocol used by client-side replay resolution."""
+
+    def replay(
+        self,
+        exec_id: str,
+        *,
+        from_: str,
+        overrides: dict[str, Any] | None = None,
+        **flow_inputs: Any,
+    ) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -500,6 +517,35 @@ def _get_active_wait_condition(run: PipelineRunResponse) -> Any | None:
     return getattr(resources, "active_wait_condition", None)
 
 
+def _list_run_wait_conditions(
+    *,
+    run: PipelineRunResponse,
+    client: KitaruClient,
+    status: str | None = None,
+) -> list[Any]:
+    """Return wait-condition models for an execution."""
+    try:
+        wait_conditions_page = cast(Any, client._client()).list_run_wait_conditions(
+            run_name_or_id=run.id,
+            project=client._project,
+            status=status,
+            hydrate=True,
+            sort_by="asc:created",
+            size=200,
+        )
+    except AttributeError:
+        return []
+    except Exception as exc:
+        operation = (
+            "pending waits" if status == _WAIT_CONDITION_STATUS_PENDING else "waits"
+        )
+        raise KitaruBackendError(
+            f"Failed to list {operation} for execution {run.id}: {exc}"
+        ) from exc
+
+    return list(wait_conditions_page.items)
+
+
 def _list_pending_wait_conditions(
     *,
     run: PipelineRunResponse,
@@ -512,26 +558,14 @@ def _list_pending_wait_conditions(
     if active_wait is not None:
         pending_conditions.append(active_wait)
 
-    try:
-        wait_conditions_page = cast(
-            Any,
-            client._client(),
-        ).list_run_wait_conditions(
-            run_name_or_id=run.id,
-            project=client._project,
-            status=_WAIT_CONDITION_STATUS_PENDING,
-            hydrate=True,
-            size=200,
-        )
-    except AttributeError:
-        return pending_conditions
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to list pending waits for execution {run.id}: {exc}"
-        ) from exc
+    listed_pending = _list_run_wait_conditions(
+        run=run,
+        client=client,
+        status=_WAIT_CONDITION_STATUS_PENDING,
+    )
 
     existing_ids = {str(condition.id) for condition in pending_conditions}
-    for condition in wait_conditions_page.items:
+    for condition in listed_pending:
         condition_id = str(condition.id)
         if condition_id in existing_ids:
             continue
@@ -599,6 +633,104 @@ def _select_pending_wait_condition(
         f"Execution '{run.id}' has no pending wait '{wait_selector}'. "
         f"Available waits: {available_waits}."
     )
+
+
+def _snapshot_source_parts(run: PipelineRunResponse) -> tuple[str, str | None]:
+    """Return `(module, attribute)` from a run snapshot source."""
+    snapshot = run.snapshot
+    pipeline_spec = getattr(snapshot, "pipeline_spec", None)
+    source = getattr(pipeline_spec, "source", None)
+    if source is None:
+        raise KitaruRuntimeError(
+            "Replay requires pipeline source metadata on the source execution."
+        )
+
+    module = getattr(source, "module", None)
+    attribute = getattr(source, "attribute", None)
+
+    import_path = getattr(source, "import_path", None)
+    if isinstance(import_path, str) and import_path:
+        import_module, _, import_attribute = import_path.rpartition(".")
+        if not module and import_module:
+            module = import_module
+        if attribute is None and import_attribute:
+            attribute = import_attribute
+
+    if not isinstance(module, str) or not module:
+        raise KitaruRuntimeError(
+            "Replay source metadata is missing a module import path."
+        )
+
+    if attribute is not None and not isinstance(attribute, str):
+        attribute = None
+
+    return module, attribute
+
+
+def _resolve_flow_for_replay(run: PipelineRunResponse) -> _ReplayFlowLike:
+    """Resolve the original flow wrapper object for a replay source run."""
+    module_name, source_attribute = _snapshot_source_parts(run)
+
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as exc:
+        raise KitaruRuntimeError(
+            "Failed to import replay source module "
+            f"'{module_name}' for execution '{run.id}': {exc}"
+        ) from exc
+
+    selectors: list[str] = []
+    if run.pipeline is not None:
+        flow_name = _normalize_flow_name(run.pipeline.name)
+        if flow_name:
+            selectors.append(flow_name)
+
+    if source_attribute and source_attribute.startswith(_PIPELINE_SOURCE_ALIAS_PREFIX):
+        selectors.append(source_attribute.removeprefix(_PIPELINE_SOURCE_ALIAS_PREFIX))
+
+    if source_attribute:
+        selectors.append(source_attribute)
+
+    deduped_selectors = list(
+        dict.fromkeys(selector for selector in selectors if selector)
+    )
+    for selector in deduped_selectors:
+        candidate = getattr(module, selector, None)
+        if isinstance(candidate, _ReplayFlowLike):
+            return candidate
+
+    tried_selectors = ", ".join(deduped_selectors) or "none"
+    raise KitaruRuntimeError(
+        "Unable to resolve a replay-capable flow object from source module "
+        f"'{module_name}' for execution '{run.id}'. "
+        f"Tried: {tried_selectors}."
+    )
+
+
+def _resolve_pipeline_for_replay(run: PipelineRunResponse) -> Any:
+    """Resolve the underlying pipeline object for replay fallback."""
+    module_name, source_attribute = _snapshot_source_parts(run)
+    if not source_attribute:
+        raise KitaruRuntimeError(
+            "Replay fallback could not determine pipeline source attribute for "
+            f"execution '{run.id}'."
+        )
+
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as exc:
+        raise KitaruRuntimeError(
+            "Failed to import replay source module "
+            f"'{module_name}' for execution '{run.id}': {exc}"
+        ) from exc
+
+    pipeline_obj = getattr(module, source_attribute, None)
+    if pipeline_obj is None or not hasattr(pipeline_obj, "replay"):
+        raise KitaruRuntimeError(
+            "Replay fallback expected a pipeline object with `.replay(...)` at "
+            f"'{module_name}.{source_attribute}'."
+        )
+    return pipeline_obj
 
 
 def _restart_run_from_snapshot(
@@ -844,13 +976,85 @@ class _ExecutionsAPI:
         overrides: dict[str, Any] | None = None,
         **flow_inputs: Any,
     ) -> Execution:
-        """Replay an execution from a prior checkpoint boundary."""
-        _ = (exec_id, from_, overrides, flow_inputs)
-        raise KitaruFeatureNotAvailableError(
-            "client.executions.replay() is not implemented yet. "
-            "Replay support remains branch-dependent and will be added once "
-            "Kitaru can safely wrap the upstream replay APIs."
+        """Replay an execution from a checkpoint or wait boundary."""
+        source_run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+
+        run_status_value = str(getattr(source_run.status, "value", source_run.status))
+        if run_status_value in {
+            "initializing",
+            "provisioning",
+            "running",
+            "retrying",
+            "stopping",
+        }:
+            raise KitaruStateError(
+                "Replay requires a non-running source execution. "
+                f"Execution '{exec_id}' is currently '{run_status_value}'."
+            )
+
+        replay_flow: _ReplayFlowLike | None = None
+        try:
+            replay_flow = _resolve_flow_for_replay(source_run)
+        except KitaruRuntimeError:
+            replay_flow = None
+
+        if replay_flow is not None:
+            handle = replay_flow.replay(
+                exec_id,
+                from_=from_,
+                overrides=overrides,
+                **flow_inputs,
+            )
+            replay_exec_id = getattr(handle, "exec_id", None)
+            if not replay_exec_id:
+                raise KitaruRuntimeError(
+                    "Resolved flow replay call did not return a valid execution handle."
+                )
+            return self.get(str(replay_exec_id))
+
+        replay_pipeline = _resolve_pipeline_for_replay(source_run)
+        replay_plan = build_replay_plan(
+            run=source_run,
+            from_=from_,
+            overrides=overrides,
+            flow_inputs=flow_inputs,
+            wait_conditions=_list_run_wait_conditions(
+                run=source_run,
+                client=self._client_ref,
+                status=None,
+            ),
         )
+
+        try:
+            replayed_run = replay_pipeline.replay(
+                pipeline_run=source_run.id,
+                skip=replay_plan.steps_to_skip,
+                skip_successful_steps=False,
+                input_overrides=replay_plan.input_overrides or None,
+                step_input_overrides=replay_plan.step_input_overrides or None,
+            )
+        except Exception as exc:
+            failure_origin = classify_failure_origin(
+                status_reason=str(exc),
+                traceback=None,
+                default=FailureOrigin.BACKEND,
+            )
+            if failure_origin == FailureOrigin.DIVERGENCE:
+                raise execution_error_from_failure(
+                    f"Replay divergence detected for execution '{exec_id}': {exc}",
+                    exec_id=str(source_run.id),
+                    status="failed",
+                    origin=failure_origin,
+                ) from exc
+            raise KitaruBackendError(
+                f"Failed to replay execution '{exec_id}': {exc}"
+            ) from exc
+
+        replayed_exec_id = str(getattr(replayed_run, "id", ""))
+        if not replayed_exec_id:
+            raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
+
+        return self.get(replayed_exec_id)
 
     def get(self, exec_id: str) -> Execution:
         """Get and map one execution by ID."""

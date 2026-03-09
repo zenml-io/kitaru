@@ -10,7 +10,6 @@ import pytest
 
 from kitaru.client import ExecutionStatus
 from kitaru.config import StackInfo
-from kitaru.errors import KitaruFeatureNotAvailableError
 from kitaru.mcp.server import (
     RuntimeSnapshot,
     kitaru_artifacts_get,
@@ -193,19 +192,29 @@ def test_executions_input_resolves_wait_and_returns_execution(
     assert payload["status"] == "running"
 
 
-def test_executions_replay_returns_structured_not_available(
+def test_executions_replay_returns_structured_execution(
     mock_kitaru_client: MagicMock,
+    sample_execution,
 ) -> None:
-    """Replay tool should return a stable response when replay is not yet shipped."""
-    mock_kitaru_client.executions.replay.side_effect = KitaruFeatureNotAvailableError(
-        "Replay not available yet"
-    )
+    """Replay tool should return replay operation metadata and execution payload."""
+    mock_kitaru_client.executions.replay.return_value = sample_execution
 
     with patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client):
-        payload = kitaru_executions_replay("kr-a8f3c2", from_="write_summary")
+        payload = kitaru_executions_replay(
+            "kr-a8f3c2",
+            from_="write_summary",
+            flow_inputs={"topic": "new topic"},
+        )
 
-    assert payload["available"] is False
-    assert "Replay not available" in payload["message"]
+    mock_kitaru_client.executions.replay.assert_called_once_with(
+        "kr-a8f3c2",
+        from_="write_summary",
+        overrides=None,
+        topic="new topic",
+    )
+    assert payload["available"] is True
+    assert payload["operation"] == "replay"
+    assert payload["execution"]["exec_id"] == sample_execution.exec_id
 
 
 def test_execution_mutation_tools_return_serialized_execution(

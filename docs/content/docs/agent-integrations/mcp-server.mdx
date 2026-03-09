@@ -79,8 +79,14 @@ Connection tools:
 The MCP server reuses the same config/auth context as `kitaru` CLI and SDK.
 If you can run `kitaru status`, MCP tools use that same connection.
 
-## Current replay status
+## Replay behavior
 
-`kitaru_executions_replay` is exposed, but replay support is still deferred in
-`KitaruClient`. The tool returns a structured `available: false` response until
-replay wrappers are implemented.
+`kitaru_executions_replay` starts a new execution and returns:
+
+- `available: true`
+- `operation: "replay"`
+- the serialized replayed execution payload
+
+Use `from_` for checkpoint/wait selection, optional `flow_inputs` for flow
+parameter overrides, and optional `overrides` for `checkpoint.*` / `wait.*`
+overrides.

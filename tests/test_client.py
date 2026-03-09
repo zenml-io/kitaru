@@ -23,6 +23,7 @@ from kitaru.config import (
 from kitaru.errors import (
     FailureOrigin,
     KitaruFeatureNotAvailableError,
+    KitaruRuntimeError,
     KitaruStateError,
     KitaruWaitValidationError,
 )
@@ -73,6 +74,7 @@ class _DummyStep:
         original_step_run_id: UUID | None = None,
         run_metadata: dict[str, Any] | None = None,
         exception_traceback: str | None = None,
+        spec: Any | None = None,
     ) -> None:
         self.id = step_id or uuid4()
         self.name = name
@@ -83,6 +85,7 @@ class _DummyStep:
         self.original_step_run_id = original_step_run_id
         self.parent_step_ids: list[UUID] = []
         self.outputs = outputs
+        self.spec = spec
         self.exception_info = (
             SimpleNamespace(traceback=exception_traceback)
             if exception_traceback is not None
@@ -159,6 +162,14 @@ def _dummy_wait_condition(
 
 def _paused_status() -> Any:
     return SimpleNamespace(value="paused")
+
+
+def _snapshot_source(module: str, attribute: str) -> Any:
+    return SimpleNamespace(
+        module=module,
+        attribute=attribute,
+        import_path=f"{module}.{attribute}",
+    )
 
 
 def test_client_initializes_namespaces() -> None:
@@ -834,14 +845,139 @@ def test_resume_rejects_non_paused_execution() -> None:
             client.executions.resume(str(run.id))
 
 
-def test_replay_still_raises_not_implemented() -> None:
-    with patch(
-        "kitaru.client.resolve_connection_config", return_value=_resolved_connection()
-    ):
-        client = KitaruClient()
+def test_replay_delegates_to_flow_wrapper_when_available() -> None:
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="__kitaru_pipeline_source_sample_flow",
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    replayed_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="sample_flow",
+    )
 
-    with pytest.raises(KitaruFeatureNotAvailableError, match="replay"):
-        client.executions.replay("exec-1", from_="checkpoint")
+    replay_handle = SimpleNamespace(exec_id=str(replayed_run.id))
+    replay_flow = SimpleNamespace(replay=MagicMock(return_value=replay_handle))
+    replay_module = SimpleNamespace(
+        sample_flow=replay_flow,
+        __kitaru_pipeline_source_sample_flow=object(),
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(source_run),
+            _as_pipeline_run(replayed_run),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.replay(
+            str(source_run.id),
+            from_="write_summary",
+            topic="new topic",
+        )
+
+    replay_flow.replay.assert_called_once_with(
+        str(source_run.id),
+        from_="write_summary",
+        overrides=None,
+        topic="new topic",
+    )
+    assert execution.exec_id == str(replayed_run.id)
+
+
+def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
+    fetch_step = _DummyStep(
+        name="__kitaru_checkpoint_source_fetch",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    fetch_step.spec = SimpleNamespace(
+        invocation_id="fetch",
+        inputs_v2={},
+    )
+
+    write_step = _DummyStep(
+        name="__kitaru_checkpoint_source_write",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    write_step.spec = SimpleNamespace(
+        invocation_id="write",
+        inputs_v2={},
+    )
+
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="__kitaru_pipeline_source_sample_flow",
+        steps={fetch_step.name: fetch_step, write_step.name: write_step},
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    replayed_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="sample_flow",
+    )
+
+    replay_pipeline = SimpleNamespace(
+        replay=MagicMock(return_value=_as_pipeline_run(replayed_run))
+    )
+    replay_module = SimpleNamespace(
+        __kitaru_pipeline_source_sample_flow=replay_pipeline,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no replay flow"),
+        ),
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(source_run),
+            _as_pipeline_run(replayed_run),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.replay(
+            str(source_run.id),
+            from_="write",
+        )
+
+    replay_pipeline.replay.assert_called_once()
+    replay_kwargs = replay_pipeline.replay.call_args.kwargs
+    assert replay_kwargs["pipeline_run"] == source_run.id
+    assert replay_kwargs["skip"] == {"fetch"}
+    assert execution.exec_id == str(replayed_run.id)
 
 
 def test_artifact_get_maps_producing_call_and_loads_value() -> None:

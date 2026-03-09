@@ -258,6 +258,68 @@ def test_executions_input_rejects_invalid_json(
     assert "Invalid JSON for `--value`" in capsys.readouterr().err
 
 
+def test_executions_replay_parses_json_and_reports_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions replay` should parse JSON and call replay API."""
+    fake_client = Mock()
+    fake_client.executions.replay.return_value = _execution_stub(
+        exec_id="kr-222",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "replay",
+                "kr-111",
+                "--from",
+                "write_summary",
+                "--args",
+                '{"topic":"new topic"}',
+                "--overrides",
+                '{"checkpoint.research":"edited"}',
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.replay.assert_called_once_with(
+        "kr-111",
+        from_="write_summary",
+        overrides={"checkpoint.research": "edited"},
+        topic="new topic",
+    )
+    output = capsys.readouterr().out
+    assert "Replayed execution: kr-222" in output
+    assert "Status: running" in output
+
+
+def test_executions_replay_rejects_invalid_overrides_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions replay` should fail when `--overrides` is invalid JSON."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "replay",
+                "kr-111",
+                "--from",
+                "write_summary",
+                "--overrides",
+                "{invalid",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "Invalid JSON for `--overrides`" in capsys.readouterr().err
+
+
 def test_executions_resume_reports_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
