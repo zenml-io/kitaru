@@ -1,10 +1,18 @@
-# Things that need to be done once the rest is complete
+# Future work
 
-## About how to run / start a workflow
+This document tracks open work items, grouped by domain. Items marked **RESOLVED** are kept for decision context but have no remaining action. Items marked **PARTIALLY RESOLVED** have some work done but still have outstanding tasks.
 
-The spec has 3 patterns defined currently:
+---
 
-```
+## Product: API and developer experience
+
+How users write Kitaru code — import style, invocation patterns, language support.
+
+### Flow invocation API
+
+The spec defines 3 patterns for starting a flow:
+
+```python
 # 1. Synchronous — blocks until complete
 result = my_agent("Build a CLI tool")
 
@@ -15,178 +23,198 @@ handle = my_agent.start("Build a CLI tool")
 handle = my_agent.deploy("Build a CLI tool", stack="aws-sandbox")
 ```
 
-Hamza said the following:
+Hamza's feedback:
+- Drop `my_agent("Build a CLI tool")` (direct call syntax)
+- `.start()` is subsumed by `.run()` — `run` is the common verb (LangGraph uses it); `start` and `execute` are less standard
 
-result = my_agent("Build a CLI tool") -> lets get rid of this one
-handle = my_agent.start("Build a CLI tool") -> this is subsumed by execute? or run. i think run is the common one that langgraph uses .. start and execute are probably not as common
+**Action:** Settle on `.run()` as the canonical verb and update the spec + examples.
 
-## Config directory when logging in
+### Import style: `@flow` / `@checkpoint` vs `@kitaru.flow` / `@kitaru.checkpoint`
 
-- btw i can see that in phase 2 you have named the config directory still zenml, and we can see the active project which isnt a concept we've exposed in kitaru. 
-- default project should be used and the config path either hidden or the name kitaru used
+Hamza's preference: `from kitaru import flow, checkpoint` then use `@flow` and `@checkpoint` directly, rather than `@kitaru.flow` / `@kitaru.checkpoint`.
 
-## Nice to haves
+This is cosmetic but affects every code example in the spec and docs. Both styles can coexist (the module-level `kitaru.flow` is just an attribute), but the spec and docs should be consistent about which style is recommended.
 
-- Make the step names look a bit nicer or have some sort of metadata in the step metadata which we can extract and use on the kitaru UI?
-- Swallow or have our own terminal logging for when we run a flow?
+**Action:** Decide on canonical import style and update all examples accordingly.
 
-## Projects must go?
+### Python version support: eventually target 3.11+
 
-- to be discussed, but we'll need to think through projects for the `kitaru login` command. Basically it seems that we shouldn't be exposing the project concept to the user directly and we should just pick whatever project is the default project.
-- note that for testing internally (esp for MVP stage) we might want to have some kind of ENV var that allows us to set the project somehow since we might need that functionality...
-- (but for the kitaru UI (which is being built by a separate team), I think we won't expose the project concept to the user directly either)
+Current: Python 3.12+ only. Hamza wanted 3.10+ (matching ZenML). Alex's rationale for 3.12: it's the typing dividing line (modern `type` statement, PEP 695 generics).
 
-## Open architecture questions (from Hamza's & Alex's feedback, March 2026)
+**Consensus:** Ship with 3.12+ for MVP, plan to add 3.11 support later. This requires auditing type annotations and any 3.12-specific syntax (mainly `type` statement and some PEP 695 features).
 
-### Resolve project handling across the spec
+---
 
-The "Projects must go?" section above captures the intent to hide projects from users. However, the spec is still **internally inconsistent**: chapters 4, 14, and 19 still reference project config in `pyproject.toml`, project context in `kitaru info`, and project-level config as part of the config model.
+## Product: configuration and setup
 
-Hamza's rationale for hiding projects: "because of the UI burden" and "in OSS zenml we also don't have it." The Kitaru UI team also won't expose the project concept directly.
+How users connect to Kitaru, register infrastructure, and manage credentials.
 
-Future work: decide whether `project` remains a fully internal/defaulted concept, and if so, clean up chapters 4/14/19 and the CLI vocabulary accordingly. Note that for internal testing (especially MVP stage) we may still need an env var escape hatch to set the project.
+### Config directory naming
+
+The config directory is still named `zenml` in some places, and `active project` is shown but isn't a concept exposed in Kitaru.
+
+**Action:** Use `kitaru` as the config path name. Either hide the config path or rename it. Default project should be used silently.
+
+### Projects: hide from users
+
+Projects should not be exposed to users directly. Kitaru should just use the default project.
+
+- Hamza's rationale: "because of the UI burden" and "in OSS zenml we also don't have it"
+- The Kitaru UI team also won't expose the project concept
+- For internal testing (especially MVP stage), keep an env var escape hatch to override the project
+- **Spec inconsistency:** chapters 4, 14, and 19 still reference project config in `pyproject.toml`, project context in `kitaru info`, and project-level config as part of the config model
+
+**Action:** Decide whether `project` remains fully internal/defaulted. If so, clean up chapters 4/14/19 and CLI vocabulary.
 
 ### Stack registration recipe UX
 
-Hamza's vision for stack creation: expose stacks as first-class citizens, but hide stack components and service connectors from users. Users pick from pre-built stack recipes (AWS, GCP, Cloudflare, Modal) and register with a single command:
+Hamza's vision: expose stacks as first-class citizens, hide stack components and service connectors. Users pick from pre-built recipes (AWS, GCP, Cloudflare, Modal) and register with a single command:
 
 ```
 kitaru stack register --type aws --aws-profile .. --aws-secret-key .. --artifact-store s3:// --container-registry something.ecr.aws
 ```
 
-Key constraints from Hamza:
-- **No reusing of components** — each stack registration creates its own fresh set
-- Service connectors are set up behind the scenes, never exposed to the user
-- Eventually users should be able to do this via Terraform too
+Key constraints:
+- **No reusing of components** — each registration creates a fresh set
+- Service connectors are set up behind the scenes, never exposed to users
+- Eventually support this via Terraform too
 
-This is partially reflected in chapters 4/14/19 and plan phase 18, but the specific recipe syntax, the "no component reuse" constraint, and the Terraform aspiration are not captured elsewhere.
+Partially reflected in chapters 4/14/19 and plan phase 18, but the recipe syntax, "no component reuse" constraint, and Terraform aspiration aren't captured elsewhere.
+
+### Revisit whether "stack" is the right user-facing term
+
+Hamza's explicit scope: "a stack in kitaru simply defines the orchestrator, artifact store, and container URI (optionally). I would not include any other concept in it."
+
+If model registration and sandbox registration become separate concepts, the current "stack" abstraction may be too broad. Hamza suggested renaming to **"runtime"**.
+
+**Action:** Once model and sandbox registration decisions are made, revisit whether "stack" should be narrowed/renamed to "runtime".
 
 ### Deploy-time default stack with artifact store
 
-Hamza proposed setting up a **default artifact store at Kitaru deploy time** so that the experience is seamless from the beginning — users wouldn't need to register even a single stack to get started. Logs and artifacts would go to this deploy-time default store automatically.
+Hamza proposed setting up a **default artifact store at deploy time** so users don't need to register a single stack to get started. Logs and artifacts would go to this default store automatically.
 
-This is mentioned in chapters 4/19 and the plan, but the specific mechanism (artifact store provisioned at deploy time) and the goal (zero-stack-setup experience) are worth tracking as a concrete UX requirement.
+Mentioned in chapters 4/19 and the plan, but the specific mechanism (artifact store provisioned at deploy time) and the goal (zero-stack-setup experience) are worth tracking as a concrete UX requirement.
 
 ### Secrets and infra UX for new users — PARTIALLY RESOLVED
 
 **Decision:** Kitaru wraps ZenML's centralized secret store with `kitaru secrets set/show/list/delete`. Secrets are private by default and use env-var-shaped keys for LiteLLM compatibility. Model aliases can reference ZenML secrets via `--secret` for remote credential resolution. See updated spec chapters 4, 8, and 14.
 
-Alex raised: "We'll need to think about secrets somehow as well. Stacks + the whole infra stuff (from service connectors to spinning up a stack etc) is sort of the big question mark still for how we can make this work well." He noted: "obv I can make it all work assuming I have a nice zenml stack setup already, but for users who don't have a zenml stack already etc... idk how this is going to work well for a cloud stack."
-
-**Remaining future work:**
+**Remaining work:**
 - End-to-end cloud stack setup experience for users who have never touched ZenML
 - Service connector creation integrated into stack creation UX
 - Making the whole infra setup feel native to Kitaru rather than requiring ZenML knowledge
 
-### Revisit whether "stack" is the right user-facing term
+---
 
-Hamza's explicit stack scope definition: "For me a stack in kitaru simply defines the orchestrator, artifact store, and container URI (optionally). I would not include any other concept in it."
+## Product: core primitives and data model
 
-If model registration and sandbox registration become separate concepts (see below), then the current "stack" abstraction may be too broad. Hamza suggested renaming to **"runtime"** since it's focused on these execution primitives only.
+Runtime behavior, artifacts, models, sandboxes, and upstream ZenML dependencies.
 
-Future work: once model and sandbox registration decisions are made, revisit whether "stack" should be narrowed/renamed to "runtime" to avoid overloading the concept. The naming decision depends on how many things end up living inside vs outside the stack.
+### Artifacts are fundamentally different from ZenML artifacts
 
-### Model registry — RESOLVED
+Hamza: "The notion of artifacts in kitaru needs to be meaningfully different from artifacts in zenml. In zenml artifacts usually are pandas dataframes, models etc, in kitaru they will be dicts/json/pydantic objects."
 
-**Decision:** Models use a **local model registry** with LiteLLM as the backend engine. Model config is **not** stack-owned. See updated spec chapter 8.
+Because Kitaru artifacts are structured data (JSON/dicts/Pydantic models) rather than opaque blobs, the dashboard can:
+- Show artifact contents inline by default
+- Diff artifacts between executions or replay runs
+- Enable structured search/filtering over artifact values
+- Render artifacts without custom materializers
 
-The MVP uses `kitaru model register` to store aliases and optional credentials locally. Provider env vars (`OPENAI_API_KEY`, etc.) also work as a zero-config path since LiteLLM reads them natively. A future ZenML `llm_model` stack component may later become an additional credential-resolution backend, but it is not part of the MVP.
+**Action:** Make this distinction explicit in the artifact system design, dashboard rendering spec, and materializer strategy. Default serialization should optimize for JSON-friendly types.
 
-**Remaining future work for the model registry:**
+### Model registry — RESOLVED (with remaining extensions)
+
+**Decision:** Models use a **local model registry** with LiteLLM as the backend. Model config is **not** stack-owned. See updated spec chapter 8. Remote credential resolution is addressed via `--secret` on model aliases.
+
+**Remaining extensions:**
 - Richer registry UX (`kitaru model show`, `kitaru model remove`, `kitaru model test`)
 - Import/export or team-sharing of alias configurations
 - Optional fallback to a future ZenML `llm_model` stack component for credential resolution
 
-**Note:** Remote credential resolution is now addressed — model aliases reference ZenML secrets via `--secret`, and `kitaru.llm()` fetches them at runtime. See updated spec chapter 8.
+### Sandbox providers: register separately?
 
-### Decide whether sandbox providers should be registered separately
-
-The current spec leans toward sandbox as part of the stack/runner concept. Hamza suggested that sandbox providers **should NOT be part of the stack/runtime** ("I think it should be part of the stack / runner concept described above (too inflexible). Probably a new thing to register"):
+Current spec leans toward sandbox as part of the stack/runner concept. Hamza suggested sandboxes **should NOT** be part of the stack/runtime (too inflexible), and instead be a separate registered concept:
 
 ```
 kitaru sandbox-provider register --type daytona ...
 ```
 
-Hamza acknowledged this is not fully thought through: "I have not thought through how this would interface with e.g. the pydantic ai integration or even simple flow/checkpoint syntax. something to think through."
+Hamza acknowledged this isn't fully thought through — particularly how sandboxes interface with framework adapters (PydanticAI) and the flow/checkpoint execution model.
 
-Future work: decide whether sandbox is a stack component, a standalone registered concept, or something else. This also needs to consider how sandboxes interface with framework adapters (e.g. PydanticAI) and the flow/checkpoint execution model.
-
-### Log store: OTEL integration and implementation challenges
-
-Hamza on log storage: "by default it goes where the runner stores its artifacts and they can configure maybe an entrypoint for OTEL... this is gonna be tricky to implement outside of a stack."
-
-The basic log-store configuration (`kitaru log-store set/show/reset`) is implemented, but the OTEL entrypoint configuration and making this work well outside of a stack context remain open challenges.
-
-### Log formatting: Kitaru-branded terminal output
-
-Hamza wants Kitaru's terminal output to have its own distinct look and feel, different from ZenML: "I'd also like logs of kitaru to have a certain theme and feel different from zenml. By logs I mean what gets printed out when you run a flow... 'steps' should not be shown... I imagine a really sexy and more modern checkpoint by checkpoint interface."
-
-The existing "Nice to haves" section above mentions this briefly, but Hamza's vision is more specific: a modern, checkpoint-by-checkpoint progress display that completely hides the ZenML step abstraction underneath.
-
-### Import style: `@flow` / `@checkpoint` instead of `@kitaru.flow` / `@kitaru.checkpoint`
-
-Hamza's preference: `from kitaru import flow, checkpoint` then use `@flow` and `@checkpoint` directly, rather than the current `@kitaru.flow` / `@kitaru.checkpoint` style. This is a cosmetic API decision but affects every code example in the spec and docs.
-
-Future work: decide on the canonical import style and update all examples accordingly. Both styles can coexist (the module-level `kitaru.flow` is just an attribute), but the spec and docs should be consistent about which style is recommended.
-
-### Artifacts in Kitaru are fundamentally different from ZenML artifacts
-
-Hamza: "The notion of artifacts in kitaru needs to be meaningfully different from artifacts in zenml. In zenml artifacts usually are pandas dataframes, models etc, in kitaru they will be dicts/json/pydantic objects. That means we can easily show them by default in the dashboard and diff them and do all sorts of things with them that we couldn't do in a general way in zenml."
-
-This is an important product distinction. Because Kitaru artifacts are structured data (JSON/dicts/Pydantic models) rather than opaque blobs (DataFrames, ML models), the dashboard can:
-- Show artifact contents inline by default
-- Diff artifacts between executions or replay runs
-- Enable structured search/filtering over artifact values
-- Render artifacts without needing custom materializers
-
-Future work: make this distinction explicit in the artifact system design, dashboard rendering spec, and materializer strategy. The default serialization path should optimize for JSON-friendly types rather than the general-purpose materializer zoo that ZenML needs.
-
-### Python version support: eventually target 3.11+
-
-Current spec targets Python 3.12+ only. Hamza pushed back: "I would like same Python support as zenml (which I believe is >=3.10). A lot of users don't have 3.12." He noted LangGraph requires 3.10+, Temporal supports 3.8+.
-
-Alex's rationale for 3.12: it's the typing dividing line (modern `type` statement, cleaner generics syntax). Hamza accepted 3.12 for now but would have preferred 3.11.
-
-**Consensus:** Ship with 3.12+ for MVP, but plan to add 3.11 support eventually. This will require auditing type annotations and any 3.12-specific syntax. The main cost is typing ergonomics (e.g. `type` statement, some PEP 695 features).
+**Action:** Decide whether sandbox is a stack component, a standalone registered concept, or something else.
 
 ### ZenML branch capability status (March 2026)
 
-The `feature/pause-pipeline-runs` branch has the following status:
+The `feature/pause-pipeline-runs` branch status:
 
-- **`zenml.wait(...)`** — works, pauses in-progress runs
-- **Resume (Pro/snapshot servers)** — automatic resume when wait condition is resolved
-- **Resume (non-Pro/local)** — manual resume required via ZenML CLI command (exists on branch)
-- **Wait resolution** — human input only (no webhook/automated triggers yet)
-- **Retry failed runs** — ZenML CLI command exists but **does not work yet**
+| Capability | Status |
+|---|---|
+| `zenml.wait(...)` | Works, pauses in-progress runs |
+| Resume (Pro/snapshot servers) | Auto-resume when wait condition resolved |
+| Resume (non-Pro/local) | Manual resume via ZenML CLI (exists on branch) |
+| Wait resolution | Human input only (no webhook/automated triggers) |
+| Retry failed runs | CLI command exists but **does not work yet** |
 
 Kitaru implications:
-- `kitaru.wait()` is unblocked and can wrap the ZenML primitive now
-- Resume should use the canonical `input` vocabulary (`client.executions.input(...)`, `kitaru executions input ...`), even if we later add a `resume` alias
-- Kitaru still needs to handle the two resume paths (auto vs manual) and expose a user-friendly CLI path for the manual path
-- `client.executions.retry(...)` and `kitaru executions retry` are now implemented in Kitaru; continue validating behavior against live backends as wait/replay integration lands
+- `kitaru.wait()` is unblocked and can wrap the ZenML primitive
+- Resume uses canonical `input` vocabulary (`client.executions.input(...)`, `kitaru executions input ...`)
+- Kitaru still needs to handle both resume paths (auto vs manual) and expose a user-friendly CLI for the manual path
+- `client.executions.retry(...)` and `kitaru executions retry` are implemented; continue validating against live backends
 - `client.executions.replay(...)` and `kitaru executions replay` remain deferred
 - `kitaru executions logs` remains deferred until Kitaru has a backend-agnostic log retrieval API
-- Future work: automated wait resolution via webhooks/events (currently human-only)
+- Future: automated wait resolution via webhooks/events (currently human-only)
 
-### Docs: code snippet contrast and sidebar nesting
+---
 
-Two docs issues flagged:
-- ~~Code snippets are hard to read in **light mode** — contrast/colors need adjustment~~ **FIXED**: Switched Shiki themes to `github-light` + `github-dark` and forced code blocks to use the dark variant via `var(--shiki-dark)`, giving high-contrast dark code blocks on the light site.
-- The left sidebar has a **double nesting** issue: "Core Concepts > Core Concepts" looks weird
+## Product: observability and terminal UX
 
-Remaining work: fix the sidebar nesting issue in the FumaDocs theme/config.
+What users see when running flows — log output, tracing, and dashboard rendering.
 
-## Skill stuff
+### Kitaru-branded terminal output
 
-- Move the skill(s) out to their own zenml-io/kitaru-skills repository (it's only here for now while we iterate)
-- add a scoping skill to be called by the pipeline authoring skill
+Hamza wants Kitaru's terminal output to have its own distinct look and feel: "I imagine a really sexy and more modern checkpoint by checkpoint interface." Key requirements:
+- Hide the ZenML step abstraction completely
+- Show progress checkpoint-by-checkpoint
+- Different visual theme from ZenML
 
-## Blog
+**Action:** Design and implement a checkpoint-oriented progress display with Rich.
 
-- improve the design
-- fix the opengraph image(s) for the blog main site + individual posts
-- add cover images?
+### OTEL integration for log store
+
+Hamza on log storage: "by default it goes where the runner stores its artifacts and they can configure maybe an entrypoint for OTEL... this is gonna be tricky to implement outside of a stack."
+
+Basic log-store configuration (`kitaru log-store set/show/reset`) is implemented. Remaining:
+- OTEL entrypoint configuration
+- Making log export work well outside of a stack context
+
+### Nice to haves
+
+- Make step names look nicer or add metadata in step metadata extractable by the Kitaru UI
+- Swallow or customize terminal logging when running a flow
+
+---
 
 ## Docs
 
-Fix the double dropdown headings
+### Fix sidebar double nesting
+
+The left sidebar has a "Core Concepts > Core Concepts" double nesting issue in the FumaDocs theme/config.
+
+### ~~Code snippet contrast~~ — FIXED
+
+Switched Shiki themes to `github-light` + `github-dark` and forced code blocks to use the dark variant via `var(--shiki-dark)`.
+
+---
+
+## Blog
+
+- Improve the overall design
+- Fix OpenGraph image(s) for the blog index page and individual posts
+- Add cover images to posts
+
+---
+
+## Skills (Claude Code)
+
+- Move the skill(s) out to their own `zenml-io/kitaru-skills` repository (only here while iterating)
+- Add a scoping skill to be called by the pipeline authoring skill
