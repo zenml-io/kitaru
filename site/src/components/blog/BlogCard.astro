@@ -56,13 +56,13 @@ const readTime = readingTime(body);
   .blog-card {
     border-radius: 10px;
     border: 1px solid var(--color-border);
-    background: var(--color-surface-warm);
+    background: var(--color-surface);
     overflow: hidden;
     transition: border-color 0.2s, transform 0.15s;
   }
 
   .blog-card:not(:has(.blog-card-image)) {
-    padding: clamp(22px, 4vw, 28px);
+    padding: clamp(24px, 4vw, 32px);
     border-top: 3px solid var(--color-border);
     transition: border-color 0.2s, border-top-color 0.2s, transform 0.15s;
   }
@@ -80,11 +80,11 @@ const readTime = readingTime(body);
   }
 
   .blog-card:has(.blog-card-image) .blog-card-top {
-    padding-top: clamp(16px, 3vw, 20px);
+    padding-top: clamp(18px, 3vw, 24px);
   }
 
   .blog-card:has(.blog-card-image) .blog-card-desc {
-    padding-bottom: clamp(18px, 3vw, 24px);
+    padding-bottom: clamp(22px, 3vw, 28px);
   }
 
   .blog-card-image {
@@ -100,7 +100,8 @@ const readTime = readingTime(body);
     display: block;
   }
 
-  .blog-card:hover {
+  .blog-card:hover,
+  .blog-card:focus-within {
     border-color: rgba(241, 120, 41, 0.3);
     transform: translateY(-2px);
   }
@@ -109,7 +110,7 @@ const readTime = readingTime(body);
     text-decoration: none;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 14px;
   }
 
   .blog-card-top {
@@ -121,11 +122,11 @@ const readTime = readingTime(body);
   .cat-pill {
     display: inline-block;
     font-family: var(--font-mono);
-    font-size: 0.62rem;
+    font-size: 0.68rem;
     font-weight: 500;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    padding: 3px 8px;
+    padding: 3px 9px;
     border-radius: 4px;
     line-height: 1;
   }
@@ -153,7 +154,7 @@ const readTime = readingTime(body);
     align-items: center;
     justify-content: center;
     font-family: var(--font-mono);
-    font-size: 0.52rem;
+    font-size: 0.58rem;
     font-weight: 600;
     color: #fff;
     flex-shrink: 0;
@@ -178,7 +179,7 @@ const readTime = readingTime(body);
   }
 
   .blog-card-desc {
-    font-size: clamp(0.8rem, 2vw, 0.86rem);
+    font-size: clamp(0.84rem, 2vw, 0.9rem);
     line-height: 1.6;
     color: var(--color-secondary);
     margin: 0;

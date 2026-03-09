@@ -29,13 +29,13 @@ const featuredReadTime = readingTime(featured.body ?? '');
     <meta property="og:url" content={new URL('/blog', Astro.site).href} />
   </Fragment>
   <Nav />
-  <main class="blog-index">
+  <main class="blog-index" id="main-content">
     <div class="section-inner">
       <span class="section-eyebrow" data-reveal>Blog</span>
       <p class="blog-subtitle" data-reveal data-reveal-delay="1">Thoughts on durable execution, agent infrastructure, and building reliable AI systems.</p>
 
       <!-- Featured post -->
-      <a href={`/blog/${featured.id}`} class="blog-featured" data-reveal data-reveal-delay="2">
+      <article class="blog-featured" data-reveal data-reveal-delay="2" itemscope itemtype="https://schema.org/BlogPosting">
         <div class="blog-featured-content">
           <div class="blog-featured-top">
             <span class="cat-pill" style={`background:${featuredCatStyle.bg};color:${featuredCatStyle.color};`}>{featuredCategory}</span>
@@ -49,9 +49,9 @@ const featuredReadTime = readingTime(featured.body ?? '');
             )}
             <span class="blog-meta-text">{featured.data.author} &middot; {featuredDate}</span>
           </div>
-          <h1 class="blog-featured-title">{featured.data.title}</h1>
-          <p class="blog-featured-desc">{featured.data.description}</p>
-          <span class="blog-featured-read">Read post &rarr;</span>
+          <h1 class="blog-featured-title" itemprop="headline">{featured.data.title}</h1>
+          <p class="blog-featured-desc" itemprop="description">{featured.data.description}</p>
+          <a href={`/blog/${featured.id}`} class="blog-featured-read">Read post &rarr;</a>
         </div>
         <div class="blog-featured-image" aria-hidden="true">
           {featured.data.image ? (
@@ -60,7 +60,7 @@ const featuredReadTime = readingTime(featured.body ?? '');
             <div class="blog-featured-image-inner"></div>
           )}
         </div>
-      </a>
+      </article>
 
       <!-- Remaining posts -->
       {rest.length > 0 && (
@@ -87,6 +87,8 @@ const featuredReadTime = readingTime(featured.body ?? '');
 <style>
   .blog-index {
     padding: 40px clamp(16px, 5vw, 80px) 100px;
+    max-width: 1280px;
+    margin: 0 auto;
   }
 
   .blog-subtitle {
@@ -99,18 +101,19 @@ const featuredReadTime = readingTime(featured.body ?? '');
 
   /* ── Featured post ── */
   .blog-featured {
+    position: relative;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    text-decoration: none;
     border-radius: 14px;
     border: 1px solid var(--color-border);
-    background: linear-gradient(135deg, rgba(241, 120, 41, 0.06) 0%, rgba(160, 120, 72, 0.05) 100%);
+    background: var(--color-surface);
     overflow: hidden;
     margin-bottom: 48px;
     transition: border-color 0.2s, transform 0.15s;
   }
 
-  .blog-featured:hover {
+  .blog-featured:hover,
+  .blog-featured:has(:focus-visible) {
     border-color: rgba(241, 120, 41, 0.35);
     transform: translateY(-2px);
   }
@@ -157,22 +160,39 @@ const featuredReadTime = readingTime(featured.body ?? '');
     font-size: 0.76rem;
     font-weight: 500;
     color: var(--color-accent);
+    text-decoration: none;
     margin-top: 4px;
   }
 
+  .blog-featured-read::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  .blog-featured-read:focus-visible {
+    outline: none;
+  }
+
   .blog-featured-image {
-    aspect-ratio: 16 / 9;
     position: relative;
     overflow: hidden;
+    min-height: 100%;
   }
 
   .blog-featured-image-inner {
     position: absolute;
     inset: 0;
-    background: linear-gradient(135deg, rgba(241, 120, 41, 0.1) 0%, rgba(160, 120, 72, 0.12) 60%, rgba(26, 23, 20, 0.04) 100%);
+    background:
+      radial-gradient(circle at 30% 40%, rgba(241, 120, 41, 0.14) 0%, transparent 60%),
+      radial-gradient(circle at 80% 70%, rgba(160, 120, 72, 0.12) 0%, transparent 50%),
+      radial-gradient(circle at 60% 20%, rgba(196, 149, 106, 0.08) 0%, transparent 40%),
+      linear-gradient(135deg, rgba(250, 250, 248, 0.5) 0%, rgba(245, 237, 228, 0.3) 100%);
   }
 
   .blog-featured-img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -183,11 +203,11 @@ const featuredReadTime = readingTime(featured.body ?? '');
   .cat-pill {
     display: inline-block;
     font-family: var(--font-mono);
-    font-size: 0.62rem;
+    font-size: 0.68rem;
     font-weight: 500;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    padding: 3px 8px;
+    padding: 3px 9px;
     border-radius: 4px;
     line-height: 1;
   }
@@ -209,7 +229,7 @@ const featuredReadTime = readingTime(featured.body ?? '');
     align-items: center;
     justify-content: center;
     font-family: var(--font-mono);
-    font-size: 0.58rem;
+    font-size: 0.62rem;
     font-weight: 600;
     color: #fff;
     flex-shrink: 0;
