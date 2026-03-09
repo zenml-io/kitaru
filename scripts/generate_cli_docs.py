@@ -281,9 +281,7 @@ def render_meta(
     title: str, children: list[CommandDoc], *, default_open: bool = False
 ) -> dict[str, Any]:
     """Build a meta.json dict for a directory."""
-    pages: list[str] = ["index"]
-    for child in children:
-        pages.append(child.slug)
+    pages: list[str] = [child.slug for child in children]
     meta: dict[str, Any] = {"title": title}
     if default_open:
         meta["defaultOpen"] = True
@@ -313,7 +311,7 @@ def write_docs_tree(root: CommandDoc, output_dir: Path) -> list[str]:
             created.append(str(page_path.relative_to(output_dir)))
 
             title = "CLI Reference" if is_root else cmd.invocation
-            meta = render_meta(title, cmd.subcommands, default_open=is_root)
+            meta = render_meta(title, cmd.subcommands)
             meta_path = dir_path / "meta.json"
             meta_path.write_text(json.dumps(meta, indent=2) + "\n")
             created.append(str(meta_path.relative_to(output_dir)))
