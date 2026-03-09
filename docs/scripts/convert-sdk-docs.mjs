@@ -175,10 +175,7 @@ async function generateMetaFiles(files, outDir) {
 
     const dirName = dirPath.split("/").pop();
     const pages = Array.from(children).sort();
-    const hasIndex = pages.includes("index");
-    const ordered = hasIndex
-      ? ["index", ...pages.filter((p) => p !== "index")]
-      : pages;
+    const ordered = pages.filter((p) => p !== "index");
 
     const meta = { title: dirName, pages: ordered };
     const metaPath = resolve(outDir, dirPath, "meta.json");
@@ -189,15 +186,12 @@ async function generateMetaFiles(files, outDir) {
   // Write top-level python/ meta.json
   const topChildren = dirs.get(".") || new Set();
   const topPages = Array.from(topChildren).sort();
-  const hasIndex = topPages.includes("index");
-  const ordered = hasIndex
-    ? ["index", ...topPages.filter((p) => p !== "index")]
-    : topPages;
+  const ordered = topPages.filter((p) => p !== "index");
 
   await writeFile(
     resolve(outDir, "meta.json"),
     JSON.stringify(
-      { title: "Python SDK", defaultOpen: true, pages: ordered },
+      { title: "Python SDK", defaultOpen: false, pages: ordered },
       null,
       2,
     ) + "\n",
