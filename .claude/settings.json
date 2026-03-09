@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(uv run scripts/r2-upload.py*)"
+    ]
+  },
   "extraKnownMarketplaces": {
     "astral-sh": {
       "source": {
