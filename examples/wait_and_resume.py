@@ -21,6 +21,20 @@ from kitaru.client import KitaruClient
 _WAIT_DISCOVERY_TIMEOUT_SECONDS = 900.0
 
 
+def _prime_zenml_runtime() -> None:
+    """Force ZenML's lazy store initialization on the current thread.
+
+    ZenML's ``GlobalConfiguration().zen_store`` is lazy and not thread-safe.
+    When two threads first access it concurrently they race on SQLite table
+    creation (``CREATE TABLE … already exists``) or alembic stamping.  Calling
+    this once on the main thread before spawning worker threads eliminates the
+    race entirely.
+    """
+    from zenml.client import Client
+
+    _ = Client().zen_store
+
+
 class _StartState(TypedDict):
     """Shared state between the starter thread and the main thread."""
 
@@ -152,6 +166,7 @@ def run_workflow(
     """Run the wait example and resolve its pending input via the client API."""
     resolved_topic = topic or f"kitaru-{int(time.time())}"
     client = KitaruClient()
+    _prime_zenml_runtime()
 
     starter_thread, start_state = _start_flow_in_background(resolved_topic)
     exec_id, wait_id = _wait_for_pending_wait(
@@ -196,6 +211,7 @@ def run_workflow_interactive(topic: str | None = None) -> str:
     """Run workflow in main thread and print manual unblock commands."""
     resolved_topic = topic or f"kitaru-{int(time.time())}"
     client = KitaruClient()
+    _prime_zenml_runtime()
     stop_event = threading.Event()
 
     watcher = threading.Thread(
