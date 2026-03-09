@@ -208,7 +208,6 @@ class TestWriteDocsTree:
         meta = json.loads((output_dir / "meta.json").read_text())
         assert meta["title"] == "CLI Reference"
         assert meta["pages"] == [
-            "index",
             "executions",
             "info",
             "log-store",
@@ -298,9 +297,9 @@ class TestWriteDocsTree:
 class TestRenderMeta:
     """Tests for meta.json rendering."""
 
-    def test_includes_index_first(self) -> None:
+    def test_empty_children_produces_empty_pages(self) -> None:
         meta = render_meta("CLI Reference", [])
-        assert meta["pages"][0] == "index"
+        assert meta["pages"] == []
 
     def test_includes_child_slugs(self) -> None:
         children = [
@@ -320,4 +319,4 @@ class TestRenderMeta:
             ),
         ]
         meta = render_meta("CLI Reference", children)
-        assert meta["pages"] == ["index", "serve", "agent"]
+        assert meta["pages"] == ["serve", "agent"]
