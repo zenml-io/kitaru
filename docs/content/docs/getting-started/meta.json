@@ -6,6 +6,7 @@
     "quickstart",
     "configuration",
     "execution-management",
+    "replay-and-overrides",
     "wait-and-resume",
     "pydantic-ai-adapter",
     "error-handling",

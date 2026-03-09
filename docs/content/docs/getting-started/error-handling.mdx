@@ -60,10 +60,20 @@ for checkpoint in execution.checkpoints:
             print("  ", attempt.failure.exception_type, attempt.failure.message)
 ```
 
-## APIs still in progress
+## Replay divergence behavior
 
-Replay is intentionally not shipped yet and raises
-`kitaru.KitaruFeatureNotAvailableError`:
+`client.executions.replay(...)` may fail immediately with
+`kitaru.KitaruDivergenceError` when the backend detects an incompatible durable
+call sequence.
 
-- `client.executions.replay(...)`
+Even when replay submission succeeds, divergence can still surface later on the
+replayed execution as normal execution failure metadata:
+
+```python
+replayed = client.executions.replay(exec_id, from_="write_draft")
+latest = replayed.refresh()
+
+if latest.failure and latest.failure.origin == kitaru.FailureOrigin.DIVERGENCE:
+    print("Replay divergence:", latest.failure.message)
+```
 

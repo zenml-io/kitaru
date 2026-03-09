@@ -249,7 +249,15 @@ class TestWriteDocsTree:
             assert (output_dir / command / "index.mdx").exists()
             assert (output_dir / command / "meta.json").exists()
 
-        for command in ("cancel", "get", "list", "retry"):
+        for command in (
+            "cancel",
+            "get",
+            "input",
+            "list",
+            "replay",
+            "resume",
+            "retry",
+        ):
             assert (output_dir / "executions" / f"{command}.mdx").exists()
             assert f"executions/{command}.mdx" in files
 

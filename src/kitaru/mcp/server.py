@@ -41,7 +41,6 @@ from kitaru.config import (
     _read_runtime_connection_config,
 )
 from kitaru.config import list_stacks as get_available_stacks
-from kitaru.errors import KitaruFeatureNotAvailableError
 
 SDK_VERSION = get_version("kitaru")
 _MCP_INSTALL_ERROR = (
@@ -687,24 +686,17 @@ def kitaru_executions_replay(
     overrides: dict[str, Any] | None = None,
     flow_inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Replay an execution or return structured not-available details."""
+    """Replay an execution and return structured replay details."""
     if flow_inputs is not None and not isinstance(flow_inputs, dict):
         raise ValueError("`flow_inputs` must be an object when provided.")
 
     replay_inputs = flow_inputs or {}
-    try:
-        execution = KitaruClient().executions.replay(
-            exec_id,
-            from_=from_,
-            overrides=overrides,
-            **replay_inputs,
-        )
-    except KitaruFeatureNotAvailableError as exc:
-        return {
-            "available": False,
-            "operation": "replay",
-            "message": str(exc),
-        }
+    execution = KitaruClient().executions.replay(
+        exec_id,
+        from_=from_,
+        overrides=overrides,
+        **replay_inputs,
+    )
 
     return {
         "available": True,

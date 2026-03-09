@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru.configure()` now accepts a `project` parameter for internal/testing use
 
 ### Added
+- Phase 16 replay support: replay planning (`src/kitaru/replay.py`), `KitaruClient.executions.replay(...)`, flow-object replay (`my_flow.replay(...)`), `kitaru executions replay`, and fully-enabled MCP replay tool responses
+- Replay docs and examples: `/getting-started/replay-and-overrides`, updated execution/error/MCP docs, and `examples/replay_with_overrides.py`
 - Agent-native MCP server surface: optional `kitaru[mcp]` extra, `kitaru-mcp` console entry point, and Phase 19 MCP tools for execution/artifact/status/stack queries
 - Claude Code authoring skill: `.claude-plugin/skills/kitaru-authoring/SKILL.md` (installable via plugin marketplace)
 - Phase 19 example workflow: `examples/mcp_query_tools.py`
@@ -46,7 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `KitaruClient` execution management API with Kitaru domain models (`Execution`, `ExecutionStatus`, `CheckpointCall`, `ArtifactRef`)
 - Execution management operations: `client.executions.get/list/latest/cancel/retry`
 - Artifact browsing operations: `client.artifacts.list/get` and `artifact.load()`
-- Explicit `NotImplementedError` stub for branch-dependent replay APIs
 - Phase 11 example workflow: `examples/client_execution_management.py`
 - Getting Started execution management docs page (`/getting-started/execution-management`)
 - `kitaru.wait(...)` implementation with flow-only guardrails and checkpoint-context blocking
@@ -76,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Wrapped PydanticAI `run()` / `run_sync()` calls at flow scope now use a synthetic `llm_call` checkpoint boundary so adapter tracking remains available outside explicit checkpoints
 - Kitaru global config persistence now uses field-preserving updates, so log-store and model-registry settings no longer clobber each other
 - Updated README, CLAUDE guide, AGENTS guide, and docs pages to reflect shipped LLM/model-registry functionality and current implemented primitive status
-- Updated execution-management docs to cover shipped wait/input/resume commands and clearly defer replay/log streaming
+- Updated execution-management docs to cover shipped replay/wait/input/resume commands and to defer only execution log streaming
 
 ## [0.1.0] - 2026-03-06
 

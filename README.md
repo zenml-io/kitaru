@@ -12,11 +12,11 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Artifact persistence** — `kitaru.save()` / `kitaru.load()` for explicit artifact storage and cross-execution reuse inside checkpoints
 - **Structured logging** — `kitaru.log()` attaches metadata to executions and checkpoints, with configurable runtime log backends (`kitaru log-store ...`)
 - **Configuration** — `kitaru.configure(...)`, environment variables, and `[tool.kitaru]` in `pyproject.toml`, with precedence resolved at flow start and persisted per execution
-- **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
+- **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`), replaying from checkpoints/waits (`replay`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
 - **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, and local model aliases (`kitaru model register/list`)
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
-- **Execution CLI** — `kitaru run`, `kitaru executions get/list/retry/cancel/input/resume` for full lifecycle management from the terminal
+- **Execution CLI** — `kitaru run`, `kitaru executions get/list/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
 - **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus a Claude Code authoring skill available via the plugin marketplace
@@ -77,6 +77,7 @@ uv sync --extra local --extra mcp  # MCP server example
 | Execution management | `examples/client_execution_management.py` | `KitaruClient` for inspecting and managing executions |
 | LLM calls | `examples/flow_with_llm.py` | `kitaru.llm()` with model aliases and metadata capture |
 | Wait/resume | `examples/wait_and_resume.py` | `kitaru.wait()` and external input via client |
+| Replay/overrides | `examples/replay_with_overrides.py` | replay from checkpoint boundaries with `checkpoint.*` overrides |
 | PydanticAI adapter | `examples/pydantic_ai_adapter.py` | `wrap(agent)` with child-event lineage, run summaries, and capture policy |
 | MCP query tools | `examples/mcp_query_tools.py` | MCP server execution/artifact query tools |
 
@@ -110,6 +111,7 @@ kitaru run <target> --args <json> [--stack <name>]
 kitaru executions get <exec_id>
 kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
 kitaru executions input <exec_id> --wait <wait_name_or_id> --value <json>
+kitaru executions replay <exec_id> --from <selector> [--args <json>] [--overrides <json>]
 kitaru executions resume <exec_id>
 kitaru executions retry <exec_id>
 kitaru executions cancel <exec_id>
@@ -135,8 +137,6 @@ kitaru model list
 
 | Primitive | Purpose |
 |---|---|
-| `client.executions.replay(...)` | Replay from a checkpoint boundary into a new execution |
-| `kitaru executions replay ...` | CLI replay wrapper |
 | `kitaru executions logs ...` | Backend-agnostic execution log streaming |
 
 ## Development
