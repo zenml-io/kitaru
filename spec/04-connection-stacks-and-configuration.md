@@ -13,7 +13,7 @@ This mirrors what ZenML calls "configuration and settings": a base layer of stat
 
 ### The `@flow` decorator as the main config surface
 
-The `@kitaru.flow` decorator is the primary place where configuration flows into an execution. It accepts:
+The `@flow` decorator is the primary place where configuration flows into an execution. It accepts:
 
 - stack selection
 - image / Docker settings
@@ -60,7 +60,7 @@ Configuration can come from multiple sources. More specific sources override les
 ### Sources (most specific wins)
 
 1. **Invocation-time overrides** — `my_flow.deploy(..., stack="prod")` or `my_flow.start(..., stack="prod")`
-2. **Decorator defaults** — `@kitaru.flow(stack="prod")`
+2. **Decorator defaults** — `@flow(stack="prod")`
 3. **`kitaru.configure()` calls** — explicit runtime configuration
 4. **Environment variables** — `KITARU_STACK`, `KITARU_SERVER_URL`, etc.
 5. **Project config** — `pyproject.toml` under `[tool.kitaru]` (checked into the repo)
@@ -199,7 +199,9 @@ Kitaru always has an implicit built-in `local` stack.
 This gives the zero-config local development story:
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def my_flow(...):
     ...
 ```
@@ -254,7 +256,7 @@ More advanced stack authoring can remain a platform or admin concern.
 ### Stack selection precedence
 
 1. `my_flow.deploy(..., stack="prod")` or `my_flow.start(..., stack="prod")` — invocation-time override
-2. `@kitaru.flow(stack="prod")` — decorator default
+2. `@flow(stack="prod")` — decorator default
 3. environment variable override
 4. active user-selected stack (from global config)
 5. implicit `local`
@@ -264,7 +266,9 @@ More advanced stack authoring can remain a platform or admin concern.
 When running remotely, Kitaru needs to know what Docker image to use and what environment to set up. This is configured through **image** settings (called "Docker settings" in ZenML).
 
 ```python
-@kitaru.flow(
+from kitaru import flow
+
+@flow(
     image=ImageSettings(
         base_image="python:3.12-slim",
         requirements=["pydantic", "httpx"],
@@ -325,7 +329,9 @@ Secrets created through Kitaru are **private by default** (only the creating use
 Secret references can be used in image environment settings:
 
 ```python
-@kitaru.flow(
+from kitaru import flow
+
+@flow(
     image=ImageSettings(
         environment={
             "DATABASE_URL": "{{db_secret.connection_string}}",

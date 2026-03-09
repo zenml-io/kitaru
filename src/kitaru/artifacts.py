@@ -7,14 +7,16 @@ Both are valid only inside a checkpoint.
 
 Example::
 
-    @kitaru.checkpoint
+    from kitaru import checkpoint
+
+    @checkpoint
     def research(topic: str) -> str:
         context = gather_sources(topic)
         kitaru.save("sources", context, type="context")
         return summarize(context)
 
     # In a later execution:
-    @kitaru.checkpoint
+    @checkpoint
     def refine(exec_id: str) -> str:
         old_sources = kitaru.load(exec_id, "sources")
         return improve(old_sources)
@@ -101,21 +103,19 @@ def _require_checkpoint_scope(api_name: str) -> tuple[UUID, UUID]:
     """
     if not _is_inside_checkpoint():
         raise KitaruContextError(
-            f"kitaru.{api_name}() can only be called inside a @kitaru.checkpoint."
+            f"kitaru.{api_name}() can only be called inside a @checkpoint."
         )
 
     execution_id = _get_current_execution_id()
     if execution_id is None:
         raise KitaruStateError(
-            f"kitaru.{api_name}() requires an active execution ID inside "
-            "@kitaru.checkpoint."
+            f"kitaru.{api_name}() requires an active execution ID inside @checkpoint."
         )
 
     checkpoint_id = _get_current_checkpoint_id()
     if checkpoint_id is None:
         raise KitaruStateError(
-            f"kitaru.{api_name}() requires an active checkpoint ID inside "
-            "@kitaru.checkpoint."
+            f"kitaru.{api_name}() requires an active checkpoint ID inside @checkpoint."
         )
 
     return (

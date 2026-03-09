@@ -166,7 +166,9 @@ This enables richer human-in-the-loop interactions without custom dashboard code
 **Human approval gate:**
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def deploy_agent(service: str, version: str) -> str:
     plan = plan_deployment(service, version)
 
@@ -188,12 +190,14 @@ def deploy_agent(service: str, version: str) -> str:
 ```python
 from pydantic import BaseModel
 
+from kitaru import flow
+
 class EditFeedback(BaseModel):
     approved: bool
     notes: str = ""
     sections_to_revise: list[str] = []
 
-@kitaru.flow
+@flow
 def writing_agent(topic: str) -> str:
     draft = write_draft(topic)
 
@@ -215,13 +219,15 @@ def writing_agent(topic: str) -> str:
 ```python
 from enum import Enum
 
+from kitaru import flow
+
 class Priority(Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
-@kitaru.flow
+@flow
 def triage_agent(issue: str) -> str:
     analysis = analyze_issue(issue)
 
@@ -238,7 +244,9 @@ def triage_agent(issue: str) -> str:
 **External callback payload:**
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def data_analysis_agent(query: str) -> str:
     job_id = trigger_etl(query)
 
@@ -318,7 +326,7 @@ This is the core audit trail for human-in-the-loop and externally resumed workfl
 
 ## Rules
 
-- must be called inside a `@kitaru.flow`, **not** inside a checkpoint
+- must be called inside a `@flow`, **not** inside a checkpoint
 - suspends the current execution instead of blocking an in-memory process forever
 - returns a normal Python value when resumed
 - participates in replay just like checkpoints do

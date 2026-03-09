@@ -42,10 +42,11 @@ When OTel support is added, Kitaru should emit spans and structured metadata aro
 # Logfire
 import logfire
 import kitaru
+from kitaru import flow
 
 logfire.configure()
 
-@kitaru.flow
+@flow
 def my_agent(prompt: str) -> str:
     return kitaru.llm(prompt, model="fast")
 ```
@@ -56,8 +57,9 @@ from opentelemetry.sdk.trace.export import ConsoleSpanExporter
 # ... standard OTel setup ...
 
 import kitaru
+from kitaru import flow
 
-@kitaru.flow
+@flow
 def my_agent(prompt: str) -> str:
     return kitaru.llm(prompt, model="fast")
 ```

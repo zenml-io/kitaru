@@ -21,7 +21,7 @@ def _get_logged_resource(client_mock: MagicMock) -> RunMetadataResource:
 
 
 def test_log_raises_outside_flow() -> None:
-    with pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"):
+    with pytest.raises(RuntimeError, match=r"inside a @flow"):
         log(cost=0.01)
 
 

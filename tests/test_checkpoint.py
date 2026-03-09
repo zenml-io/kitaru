@@ -1,4 +1,4 @@
-"""Tests for the `@kitaru.checkpoint` implementation."""
+"""Tests for the `@checkpoint` implementation."""
 
 from __future__ import annotations
 
@@ -167,7 +167,7 @@ def test_checkpoint_rejects_call_outside_flow_context() -> None:
             step_active=False,
             dynamic_run_active=False,
         ),
-        pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"),
+        pytest.raises(RuntimeError, match=r"inside a @flow"),
     ):
         wrapped()
 
@@ -179,7 +179,7 @@ def test_checkpoint_rejects_call_in_non_kitaru_compilation_context() -> None:
 
     with (
         _zenml_contexts(compilation_active=True, flow_active=False),
-        pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"),
+        pytest.raises(RuntimeError, match=r"inside a @flow"),
     ):
         wrapped(41)
 
@@ -189,7 +189,7 @@ def test_checkpoint_rejects_call_in_non_kitaru_dynamic_context() -> None:
 
     with (
         _zenml_contexts(dynamic_run_active=True, flow_active=False),
-        pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"),
+        pytest.raises(RuntimeError, match=r"inside a @flow"),
     ):
         wrapped(41)
 

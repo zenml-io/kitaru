@@ -171,7 +171,9 @@ Credential resolution is separate from model resolution and follows this order:
 **Simple call inside a flow:**
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def my_agent(topic: str) -> str:
     outline = kitaru.llm(f"Create an outline for: {topic}", model="fast")
     draft = kitaru.llm(f"Write an article from this outline:\n{outline}", model="smart")
@@ -181,7 +183,9 @@ def my_agent(topic: str) -> str:
 **Call inside a checkpoint:**
 
 ```python
-@kitaru.checkpoint(type="llm_call")
+from kitaru import checkpoint
+
+@checkpoint(type="llm_call")
 def summarize(text: str) -> str:
     return kitaru.llm(
         f"Summarize this in 3 bullet points:\n\n{text}",
@@ -235,7 +239,7 @@ That means if the enclosing checkpoint is replayed from history, the inner `llm(
 
 If the enclosing checkpoint is re-executed live, the inner `llm()` call happens live again and emits fresh child artifacts and metadata.
 
-## When to use `kitaru.llm()` vs `@kitaru.checkpoint`
+## When to use `kitaru.llm()` vs `@checkpoint`
 
 Use `kitaru.llm()` when you want:
 
@@ -243,7 +247,7 @@ Use `kitaru.llm()` when you want:
 - automatic tracking
 - minimal ceremony
 
-Use `@kitaru.checkpoint` when you want:
+Use `@checkpoint` when you want:
 
 - a true replay boundary
 - tool use
@@ -254,7 +258,7 @@ Use `@kitaru.checkpoint` when you want:
 In practice:
 
 - `kitaru.llm()` is good for small one-shot calls
-- `@kitaru.checkpoint` is the right durable unit for larger work
+- `@checkpoint` is the right durable unit for larger work
 
 ## Rules
 

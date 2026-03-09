@@ -90,8 +90,8 @@ The recommended build order reflects two key principles:
 
 1. **Login / logout / status** — CLI auth against ZenML server. This unblocks everything else.
 2. **`kitaru info`** — show current connection, stack, and project context.
-3. **`@kitaru.flow`** — the outermost durable execution boundary. Maps to `@pipeline`.
-4. **`@kitaru.checkpoint`** — the replayable work boundary. Maps to `@step`.
+3. **`@flow`** — the outermost durable execution boundary. Maps to `@pipeline`.
+4. **`@checkpoint`** — the replayable work boundary. Maps to `@step`.
 
 ### Phase 2: Core primitives (no ZenML branch dependency)
 

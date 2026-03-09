@@ -33,7 +33,7 @@ Your value is in asking the right questions, applying knowledge of Kitaru's exec
 
 ## What Kitaru is
 
-Kitaru is ZenML's **durable execution layer for Python agent workflows**. It provides primitives (`@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.wait()`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`) that make agent workflows persistent, replayable, and observable — without requiring a graph DSL or changing Python control flow.
+Kitaru is ZenML's **durable execution layer for Python agent workflows**. It provides primitives (`@flow`, `@checkpoint`, `kitaru.wait()`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`) that make agent workflows persistent, replayable, and observable — without requiring a graph DSL or changing Python control flow.
 
 **Execution model**: Durable rerun-from-top. When a flow resumes or replays, it reruns from the beginning. Checkpoints before the replay/resume point return cached outputs. Checkpoints at or after that point re-execute.
 
@@ -166,7 +166,7 @@ Any checkpoint that touches external systems (creates PRs, sends emails, updates
 Show the user a sketch of the flow structure:
 
 > "Here's how I'd structure this:
-> - `@kitaru.flow`: [name] — [what it orchestrates]
+> - `@flow`: [name] — [what it orchestrates]
 >   - `@checkpoint`: [name] — [what it does, what it returns]
 >   - `@checkpoint`: [name] — [what it does, what it returns]
 >   - `wait()`: [name] — [what decision/input is needed]
@@ -191,7 +191,7 @@ Review the proposed architecture for common mistakes.
 These will cause runtime errors — catch them before they get to code:
 
 - **Wait inside a checkpoint** — `kitaru.wait()` is flow-level only. Move it out of the checkpoint.
-- **Nested flows** — `@kitaru.flow` cannot be called inside another flow. Flatten to one flow boundary.
+- **Nested flows** — `@flow` cannot be called inside another flow. Flatten to one flow boundary.
 - **Non-serializable checkpoint returns** — Checkpoint return values must be JSON-compatible or Pydantic models. No raw objects, file handles, database connections, or framework-specific types.
 - **Nested checkpoints** — A checkpoint cannot call another checkpoint in the current MVP.
 

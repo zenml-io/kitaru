@@ -18,8 +18,8 @@ The spec should describe semantic contracts clearly, and note deployment-path de
 
 The March MVP is centered on the durable execution core:
 
-- `@kitaru.flow`
-- `@kitaru.checkpoint`
+- `@flow`
+- `@checkpoint`
 - local replay with overrides
 - `kitaru.wait()` with a connected resume path
 - manual and client-driven retry for failed executions

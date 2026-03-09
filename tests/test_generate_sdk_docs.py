@@ -188,11 +188,6 @@ class TestExtractApi:
         # Stack helpers live in kitaru.config (a public submodule), so they
         # appear under the config module rather than being promoted to root.
         config_funcs = set(
-            filtered.get("modules", {})
-            .get("config", {})
-            .get("functions", {})
-            .keys()
+            filtered.get("modules", {}).get("config", {}).get("functions", {}).keys()
         )
-        assert {"list_stacks", "current_stack", "use_stack"}.issubset(
-            config_funcs
-        )
+        assert {"list_stacks", "current_stack", "use_stack"}.issubset(config_funcs)

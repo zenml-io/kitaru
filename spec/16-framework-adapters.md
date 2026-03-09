@@ -4,8 +4,8 @@ Kitaru is designed around **primitives first, frameworks second**.
 
 That means you should always be able to use Kitaru directly with:
 
-- `@kitaru.flow`
-- `@kitaru.checkpoint`
+- `@flow`
+- `@checkpoint`
 - `kitaru.wait()`
 - `kitaru.llm()`
 
@@ -44,7 +44,7 @@ Adapters must respect the MVP durable-boundary restrictions:
 - **No nested checkpoint-within-checkpoint semantics** introduced by adapters
 - **No `wait()` inside checkpoints** via adapter magic
 - **Child events stay child events** — adapter-internal model and tool calls do not become independent replay boundaries
-- `@kitaru.checkpoint` remains the real replay boundary; adapter activity is child-level visibility
+- `@checkpoint` remains the real replay boundary; adapter activity is child-level visibility
 
 This is a hard rule, not a suggestion. Adapters that bypass these restrictions would create ambiguous nested durable semantics.
 
@@ -70,6 +70,7 @@ researcher = kp.wrap(
 ### Example
 
 ```python
+from kitaru import flow
 from pydantic_ai import Agent
 from kitaru.adapters import pydantic_ai as kp
 
@@ -80,7 +81,7 @@ researcher = kp.wrap(
     )
 )
 
-@kitaru.flow
+@flow
 def research(topic: str) -> str:
     result = researcher.run_sync(f"Research {topic}")
     return result.output
@@ -115,7 +116,7 @@ Kitaru should distinguish between:
 
 For the MVP, the cleanest rule is:
 
-- the enclosing `@kitaru.checkpoint` remains the real replay boundary
+- the enclosing `@checkpoint` remains the real replay boundary
 - framework-internal model calls and tool calls show up as child events, artifacts, and metadata under that checkpoint
 
 This keeps the runtime coherent.
@@ -126,24 +127,25 @@ Without that distinction, adapters risk creating ambiguous nested checkpoint sem
 
 The clearest pattern is:
 
-- use `@kitaru.flow` for orchestration
-- use `@kitaru.checkpoint` around meaningful framework-driven units of work
+- use `@flow` for orchestration
+- use `@checkpoint` around meaningful framework-driven units of work
 - let the adapter emit child artifacts, child events, and metadata inside that checkpoint
 
 Example:
 
 ```python
+from kitaru import flow, checkpoint
 from pydantic_ai import Agent
 from kitaru.adapters import pydantic_ai as kp
 
 research_agent = kp.wrap(Agent("openai:gpt-4o", name="researcher"))
 
-@kitaru.checkpoint(type="llm_call")
+@checkpoint(type="llm_call")
 def run_research(topic: str) -> str:
     result = research_agent.run_sync(f"Research {topic} thoroughly")
     return result.output
 
-@kitaru.flow
+@flow
 def content_pipeline(topic: str) -> str:
     notes = run_research(topic)
     return notes
@@ -190,6 +192,7 @@ This means human-in-the-loop can happen *inside* the agent's reasoning loop with
 ### Example: approval tool
 
 ```python
+from kitaru import flow
 from pydantic_ai import Agent
 from kitaru.adapters import pydantic_ai as kp
 
@@ -197,7 +200,7 @@ coder = kp.wrap(
     Agent("claude-sonnet-4-6", tools=[edit, test, approve]),
 )
 
-@kitaru.flow
+@flow
 def coding_agent(issue: str) -> str:
     # The agent may call the `approve` tool during its loop.
     # When it does, the flow suspends and resumes on human input.
@@ -233,7 +236,7 @@ But for the MVP, the focus should stay narrow.
 ## Rules
 
 - adapters are convenience layers, not the primary runtime abstraction
-- `@kitaru.flow` and `@kitaru.checkpoint` remain the core durable boundaries
+- `@flow` and `@checkpoint` remain the core durable boundaries
 - adapter-internal events should not muddy replay semantics
 - adapters must not bypass MVP boundary restrictions (no nested checkpoints, no wait inside checkpoints)
 - the MVP should favor explicit outer checkpoints around framework work

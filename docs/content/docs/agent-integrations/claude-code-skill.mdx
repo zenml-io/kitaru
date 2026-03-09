@@ -28,7 +28,7 @@ The **kitaru-authoring** skill teaches Claude how to write valid Kitaru flows,
 checkpoints, waits, and adapter usage patterns.
 
 **What it covers:**
-- `@kitaru.flow` and `@kitaru.checkpoint` roles
+- `@flow` and `@checkpoint` roles
 - `kitaru.wait()` flow-level guardrails
 - `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`
 - `.submit()` / `.result()` checkpoint concurrency
@@ -77,9 +77,9 @@ curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru/develop/.claude-plu
 - "I have a complex agent with 10 steps — help me scope it down."
 
 **Authoring:**
-- "Refactor this script into one `@kitaru.flow` with explicit checkpoints."
+- "Refactor this script into one `@flow` with explicit checkpoints."
 - "Add a flow-level `kitaru.wait()` approval gate before publish."
-- "Wrap this PydanticAI call in a Kitaru checkpoint and preserve replay safety."
+- "Wrap this PydanticAI call in a `@checkpoint` and preserve replay safety."
 
 ## Related pages
 

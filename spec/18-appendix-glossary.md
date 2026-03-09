@@ -4,7 +4,7 @@ This glossary defines the core terms used throughout the Kitaru SDK reference.
 
 ## Execution
 
-An **execution** is a single run of a `@kitaru.flow`.
+An **execution** is a single run of a `@flow`.
 
 It is the top-level durable object Kitaru tracks and owns.
 
@@ -28,7 +28,7 @@ Examples of execution statuses include:
 
 ## Flow
 
-A **flow** is the outer orchestration function decorated with `@kitaru.flow`.
+A **flow** is the outer orchestration function decorated with `@flow`.
 
 It defines the boundary of a durable execution.
 
@@ -40,7 +40,7 @@ A flow:
 
 ## Checkpoint
 
-A **checkpoint** is a durable work boundary inside a flow, created with `@kitaru.checkpoint`.
+A **checkpoint** is a durable work boundary inside a flow, created with `@checkpoint`.
 
 A checkpoint:
 
@@ -331,7 +331,7 @@ Lineage is useful for replay inspection, auditing, and debugging.
 
 ## Synthetic checkpoint
 
-A **synthetic checkpoint** is a lightweight durable call boundary created by the runtime for convenience rather than by an explicit `@kitaru.checkpoint` decorator.
+A **synthetic checkpoint** is a lightweight durable call boundary created by the runtime for convenience rather than by an explicit `@checkpoint` decorator.
 
 In the MVP, a standalone `kitaru.llm()` call in a flow may behave this way.
 

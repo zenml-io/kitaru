@@ -7,7 +7,9 @@ it attaches to the execution.
 
 Example::
 
-    @kitaru.checkpoint
+    from kitaru import checkpoint
+
+    @checkpoint
     def call_model(prompt: str) -> str:
         response = model.generate(prompt)
         kitaru.log(
@@ -35,12 +37,12 @@ from kitaru.runtime import (
     _is_inside_flow,
 )
 
-_LOG_OUTSIDE_FLOW_ERROR = "kitaru.log() can only be called inside a @kitaru.flow."
+_LOG_OUTSIDE_FLOW_ERROR = "kitaru.log() can only be called inside a @flow."
 _LOG_MISSING_EXECUTION_ID_ERROR = (
-    "kitaru.log() requires an active execution ID inside @kitaru.flow."
+    "kitaru.log() requires an active execution ID inside @flow."
 )
 _LOG_MISSING_CHECKPOINT_ID_ERROR = (
-    "kitaru.log() requires an active checkpoint ID inside @kitaru.checkpoint."
+    "kitaru.log() requires an active checkpoint ID inside @checkpoint."
 )
 
 

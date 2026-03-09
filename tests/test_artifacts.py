@@ -47,7 +47,7 @@ def _scope_ids() -> tuple[str, str]:
 
 
 def test_save_raises_outside_checkpoint() -> None:
-    with pytest.raises(RuntimeError, match=r"inside a @kitaru\.checkpoint"):
+    with pytest.raises(RuntimeError, match=r"inside a @checkpoint"):
         save("artifact", 123)
 
 
@@ -153,7 +153,7 @@ def test_save_delegates_to_zenml_manual_artifact_publisher() -> None:
 
 
 def test_load_raises_outside_checkpoint() -> None:
-    with pytest.raises(RuntimeError, match=r"inside a @kitaru\.checkpoint"):
+    with pytest.raises(RuntimeError, match=r"inside a @checkpoint"):
         load(str(uuid4()), "research")
 
 
