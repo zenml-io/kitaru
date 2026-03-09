@@ -1,17 +1,34 @@
 ---
 import { getCollection, render } from 'astro:content';
 import BlogPost from '../../layouts/BlogPost.astro';
+import { readingTime } from '../../lib/blog';
 
 export async function getStaticPaths() {
-  const posts = await getCollection('blog', ({ data }) => !data.draft);
-  return posts.map((post) => ({
-    params: { slug: post.id },
-    props: { post },
-  }));
+  const allPosts = await getCollection('blog', ({ data }) => !data.draft);
+  const sorted = allPosts.sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+
+  return sorted.map((post, idx) => {
+    // Pick up to 2 related posts (next chronologically, wrapping around)
+    const related = sorted
+      .filter((p) => p.id !== post.id)
+      .slice(0, 2)
+      .map((p) => ({
+        href: `/blog/${p.id}`,
+        title: p.data.title,
+        author: p.data.author,
+        readTime: readingTime(p.body ?? ''),
+      }));
+
+    return {
+      params: { slug: post.id },
+      props: { post, related },
+    };
+  });
 }
 
-const { post } = Astro.props;
+const { post, related } = Astro.props;
 const { Content } = await render(post);
+const readTime = readingTime(post.body ?? '');
 ---
 
 <BlogPost
@@ -19,6 +36,10 @@ const { Content } = await render(post);
   description={post.data.description}
   date={post.data.date}
   author={post.data.author}
+  category={post.data.category}
+  ogImage={post.data.ogImage}
+  readTime={readTime}
+  relatedPosts={related}
 >
   <Content />
 </BlogPost>

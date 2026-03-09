@@ -9,6 +9,10 @@ const blog = defineCollection({
     date: z.coerce.date(),
     author: z.string(),
     draft: z.boolean().default(false),
+    category: z
+      .enum(['Agents', 'Infrastructure', 'Design', 'Philosophy'])
+      .default('Agents'),
+    ogImage: z.string().optional(),
   }),
 });
 

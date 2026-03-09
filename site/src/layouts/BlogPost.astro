@@ -2,15 +2,29 @@
 import Base from './Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import { AUTHORS, CATEGORY_STYLES } from '../lib/blog';
 
 interface Props {
   title: string;
   description: string;
   date: Date;
   author: string;
+  category?: string;
+  ogImage?: string;
+  readTime: string;
+  relatedPosts?: { href: string; title: string; author: string; readTime: string }[];
 }
 
-const { title, description, date, author } = Astro.props;
+const {
+  title,
+  description,
+  date,
+  author,
+  category = 'Agents',
+  ogImage,
+  readTime,
+  relatedPosts = [],
+} = Astro.props;
 
 const formatted = new Intl.DateTimeFormat('en-US', {
   month: 'long',
@@ -20,6 +34,11 @@ const formatted = new Intl.DateTimeFormat('en-US', {
 
 const isoDate = date.toISOString();
 const canonicalUrl = new URL(Astro.url.pathname, Astro.site).href;
+const authorData = AUTHORS[author] ?? { initials: '??', color: '#9E9790' };
+const catStyle = CATEGORY_STYLES[category] ?? CATEGORY_STYLES.Agents;
+const ogImageUrl = ogImage
+  ? new URL(ogImage, Astro.site).href
+  : 'https://kitaru.ai/og-image.png';
 ---
 
 <Base title={`${title} — Kitaru Blog`} description={description}>
@@ -28,60 +47,121 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).href;
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta property="article:published_time" content={isoDate} />
     <meta property="article:author" content={author} />
+    <meta property="article:tag" content={category} />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageUrl} />
   </Fragment>
   <Nav />
-  <main class="blog-post-main">
+  <main>
     <article class="blog-post" itemscope itemtype="https://schema.org/BlogPosting">
       <meta itemprop="datePublished" content={isoDate} />
       <meta itemprop="author" content={author} />
-      <header class="blog-post-header">
-        <a href="/blog" class="blog-back">&larr; Blog</a>
-        <h1 class="blog-post-title" itemprop="headline">{title}</h1>
-        <div class="blog-post-meta">
-          <span>{author}</span>
-          <span class="blog-post-sep">&middot;</span>
-          <time datetime={isoDate}>{formatted}</time>
+
+      <!-- Hero header -->
+      <header class="blog-post-hero">
+        <div class="blog-post-hero-inner">
+          <a href="/blog" class="blog-back">&larr; Blog</a>
+          <div class="blog-post-top">
+            <span class="cat-pill" style={`background:${catStyle.bg};color:${catStyle.color};`}>{category}</span>
+            <span class="blog-post-read-time">{readTime}</span>
+          </div>
+          <h1 class="blog-post-title" itemprop="headline">{title}</h1>
+          <div class="blog-post-author">
+            <span class="avatar" style={`background:${authorData.color};`}>{authorData.initials}</span>
+            <div class="blog-post-author-info">
+              <span class="blog-post-author-name">{author}</span>
+              <time datetime={isoDate} class="blog-post-author-date">{formatted}</time>
+            </div>
+          </div>
         </div>
       </header>
-      <div class="blog-post-body" itemprop="articleBody">
-        <slot />
+
+      <!-- Body -->
+      <div class="blog-post-body-wrap">
+        <div class="blog-post-body" itemprop="articleBody">
+          <slot />
+        </div>
       </div>
     </article>
+
+    <!-- Related posts -->
+    {relatedPosts.length > 0 && (
+      <section class="blog-related">
+        <h4 class="blog-related-heading">Continue reading</h4>
+        <div class="blog-related-grid">
+          {relatedPosts.map((rp) => (
+            <a class="blog-related-card" href={rp.href}>
+              <h5>{rp.title}</h5>
+              <span>{rp.author} &middot; {rp.readTime}</span>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
   </main>
   <Footer />
 </Base>
 
 <style>
-  .blog-post-main {
-    padding: 40px clamp(16px, 5vw, 80px) 100px;
+  /* ── Hero header ── */
+  .blog-post-hero {
+    background: linear-gradient(180deg, rgba(241, 120, 41, 0.055) 0%, rgba(250, 250, 248, 1) 100%);
+    padding: 56px clamp(16px, 5vw, 80px) 40px;
+    border-bottom: 1px solid var(--color-border-light);
   }
 
-  .blog-post {
-    max-width: 720px;
+  .blog-post-hero-inner {
+    max-width: 800px;
     margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
   .blog-back {
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     color: var(--color-muted);
     text-decoration: none;
     transition: color 0.2s;
+    margin-bottom: 4px;
   }
 
   .blog-back:hover {
     color: var(--color-accent);
   }
 
-  .blog-post-header {
-    margin-bottom: 48px;
+  .blog-post-top {
     display: flex;
-    flex-direction: column;
-    gap: 16px;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .cat-pill {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    line-height: 1;
+  }
+
+  .blog-post-read-time {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted);
   }
 
   .blog-post-title {
@@ -93,18 +173,50 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).href;
     margin: 0;
   }
 
-  .blog-post-meta {
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    color: var(--color-muted);
+  .blog-post-author {
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
   }
 
-  .blog-post-sep {
-    color: var(--color-border);
+  .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .blog-post-author-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .blog-post-author-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-primary);
+  }
+
+  .blog-post-author-date {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--color-muted);
+  }
+
+  /* ── Body ── */
+  .blog-post-body-wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 48px clamp(16px, 5vw, 80px) 60px;
   }
 
   .blog-post-body {
@@ -222,15 +334,74 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).href;
     background: var(--color-surface-warm);
   }
 
+  /* ── Related posts ── */
+  .blog-related {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 clamp(16px, 5vw, 80px) 80px;
+    border-top: 1px solid var(--color-border-light);
+    padding-top: 40px;
+  }
+
+  .blog-related-heading {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 20px;
+  }
+
+  .blog-related-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .blog-related-card {
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-warm);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.2s;
+  }
+
+  .blog-related-card:hover {
+    border-color: rgba(241, 120, 41, 0.3);
+  }
+
+  .blog-related-card h5 {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    margin-bottom: 6px;
+    line-height: 1.3;
+  }
+
+  .blog-related-card span {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--color-muted);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .blog-related-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   @media (max-width: 480px) {
-    .blog-post-main {
-      padding-top: 24px;
-      padding-bottom: 60px;
+    .blog-post-hero {
+      padding-top: 32px;
+      padding-bottom: 28px;
     }
 
-    .blog-post-header {
-      margin-bottom: 32px;
-      gap: 12px;
+    .blog-post-body-wrap {
+      padding-top: 32px;
+      padding-bottom: 40px;
     }
 
     .blog-post-body :global(pre) {
