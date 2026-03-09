@@ -1,10 +1,26 @@
 ---
-title: Configure Flow Execution Defaults
-description: Use kitaru.configure(), environment variables, and flow overrides with clear precedence
+title: Configuration
+description: Kitaru config directory, execution defaults, environment variables, and precedence
 ---
 
-This guide shows how to configure Kitaru flow execution defaults and how
-precedence is resolved.
+This guide covers Kitaru's configuration system: where settings live on disk,
+how to set execution defaults, and how precedence is resolved.
+
+## Config directory
+
+Kitaru stores its user-facing configuration at:
+
+```
+~/.config/kitaru/
+  config.yaml    # Log-store, model aliases, and other Kitaru settings
+```
+
+This is the only config directory that appears in CLI output and error
+messages. Kitaru also maintains internal state in a separate location, but
+you never need to interact with it directly.
+
+You can see the active config directory by running `kitaru status` or
+`kitaru info`.
 
 ## Configure runtime defaults in Python
 
@@ -145,6 +161,21 @@ import kitaru
 def my_flow(topic: str) -> str:
     ...
 ```
+
+## Project override (internal/testing)
+
+Kitaru uses a flat namespace — it silently works with the default project
+configured on the server. You never need to think about projects in normal
+usage.
+
+For development and testing, you can override the project using:
+
+- **Environment variable:** `KITARU_PROJECT=my-project`
+- **SDK call:** `kitaru.configure(project="my-project")`
+
+When an explicit project override is set, it appears in `kitaru info` output
+as "Project override". It does not appear in `kitaru status` (which stays
+compact and user-focused).
 
 ## Frozen execution spec
 

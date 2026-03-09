@@ -47,7 +47,8 @@ from zenml.utils import io_utils, yaml_utils
 zenml_cli_utils = importlib.import_module("zenml.cli.utils")
 
 _DEFAULT_LOG_STORE_BACKEND = "artifact-store"
-_KITARU_GLOBAL_CONFIG_FILENAME = "kitaru.yaml"
+_KITARU_GLOBAL_CONFIG_FILENAME = "config.yaml"
+_KITARU_LEGACY_CONFIG_FILENAME = "kitaru.yaml"
 _LOG_STORE_SOURCE_DEFAULT = "default"
 _LOG_STORE_SOURCE_ENVIRONMENT = "environment"
 _LOG_STORE_SOURCE_GLOBAL_USER_CONFIG = "global user config"
@@ -403,6 +404,7 @@ class FrozenExecutionSpec(BaseModel):
 
 
 _RUNTIME_EXECUTION_OVERRIDES: dict[str, Any] = {}
+_RUNTIME_CONNECTION_OVERRIDES: dict[str, Any] = {}
 
 
 def _coerce_image_input(value: Any) -> ImageSettings | None:
@@ -632,10 +634,14 @@ def _extract_store_token(store: Any) -> str | None:
 
 
 def _read_global_connection_config() -> KitaruConfig:
-    """Read connection defaults from global user config/runtime state."""
+    """Read connection defaults from global user config/runtime state.
+
+    Only reads ``server_url`` and ``auth_token`` from ZenML's persisted
+    store configuration. Project is intentionally omitted here — it is
+    only populated by explicit overrides (env var or runtime configure).
+    """
     server_url: str | None = None
     auth_token: str | None = None
-    project: str | None = None
 
     global_config = GlobalConfiguration()
     store = global_config.store
@@ -647,22 +653,20 @@ def _read_global_connection_config() -> KitaruConfig:
                 server_url = _normalize_server_url(stripped_store_url)
         auth_token = _extract_store_token(store)
 
-    try:
-        active_project = Client().active_project
-        project = str(active_project.name).strip() if active_project else None
-    except Exception:
-        project = None
-
     return KitaruConfig(
         server_url=server_url,
         auth_token=auth_token,
-        project=project,
     )
 
 
 def _read_runtime_execution_config() -> KitaruConfig:
     """Read in-memory execution overrides set by ``kitaru.configure()``."""
     return KitaruConfig.model_validate(dict(_RUNTIME_EXECUTION_OVERRIDES))
+
+
+def _read_runtime_connection_config() -> KitaruConfig:
+    """Read in-memory connection overrides set by ``kitaru.configure()``."""
+    return KitaruConfig.model_validate(dict(_RUNTIME_CONNECTION_OVERRIDES))
 
 
 def _merge_execution_layer(
@@ -730,11 +734,19 @@ def resolve_connection_config(
     *,
     explicit: KitaruConfig | None = None,
 ) -> ResolvedConnectionConfig:
-    """Resolve connection configuration with connection-specific precedence."""
+    """Resolve connection configuration with connection-specific precedence.
+
+    Precedence (lowest to highest):
+    1. Global ZenML-backed defaults (server_url, auth_token only)
+    2. Environment variable overrides (KITARU_SERVER_URL, etc.)
+    3. Runtime overrides from ``kitaru.configure(project=...)``
+    4. Explicit argument passed by the caller
+    """
     resolved = ResolvedConnectionConfig()
     for layer in (
         _read_global_connection_config(),
         _read_connection_env_config(),
+        _read_runtime_connection_config(),
         explicit or KitaruConfig(),
     ):
         resolved = _merge_connection_layer(resolved, layer)
@@ -852,6 +864,7 @@ def _reset_runtime_configuration() -> None:
     This helper is intended for tests.
     """
     _RUNTIME_EXECUTION_OVERRIDES.clear()
+    _RUNTIME_CONNECTION_OVERRIDES.clear()
 
 
 def _normalize_server_url(server_url: str) -> str:
@@ -944,28 +957,29 @@ def _suppress_zenml_cli_messages() -> Iterator[None]:
         logging.disable(previous_disable_level)
 
 
+def _kitaru_config_dir() -> Path:
+    """Return the Kitaru-owned global config directory (``~/.config/kitaru/``)."""
+    return Path.home() / ".config" / "kitaru"
+
+
 def _kitaru_global_config_path() -> Path:
     """Return the path to Kitaru's global config file."""
-    config_directory = Path(GlobalConfiguration().config_directory)
-    return config_directory / _KITARU_GLOBAL_CONFIG_FILENAME
+    return _kitaru_config_dir() / _KITARU_GLOBAL_CONFIG_FILENAME
 
 
-def _read_kitaru_global_config() -> _KitaruGlobalConfig:
-    """Read Kitaru global config from disk.
+def _legacy_kitaru_global_config_path() -> Path:
+    """Return the legacy path inside ZenML's config directory."""
+    return Path(GlobalConfiguration().config_directory) / _KITARU_LEGACY_CONFIG_FILENAME
 
-    Returns:
-        Parsed Kitaru global config.
 
-    Raises:
-        ValueError: If the config file exists but is malformed.
-    """
-    config_path = _kitaru_global_config_path()
+def _parse_kitaru_config_file(config_path: Path) -> _KitaruGlobalConfig | None:
+    """Parse a Kitaru global config file, returning ``None`` if absent."""
     if not config_path.exists():
-        return _KitaruGlobalConfig()
+        return None
 
     config_values = yaml_utils.read_yaml(str(config_path))
     if config_values is None:
-        return _KitaruGlobalConfig()
+        return None
 
     if not isinstance(config_values, dict):
         raise ValueError(
@@ -980,6 +994,35 @@ def _read_kitaru_global_config() -> _KitaruGlobalConfig:
             "The Kitaru global config file is invalid. Fix or delete "
             f"{config_path} and try again."
         ) from exc
+
+
+def _read_kitaru_global_config() -> _KitaruGlobalConfig:
+    """Read Kitaru global config from disk with legacy migration.
+
+    Precedence:
+    1. New path (``~/.config/kitaru/config.yaml``) — used if it exists.
+    2. Legacy path (``<zenml-config-dir>/kitaru.yaml``) — read and
+       automatically migrated to the new location.
+    3. Empty defaults if neither file exists.
+
+    Returns:
+        Parsed Kitaru global config.
+
+    Raises:
+        ValueError: If the config file exists but is malformed.
+    """
+    new_path = _kitaru_global_config_path()
+    parsed = _parse_kitaru_config_file(new_path)
+    if parsed is not None:
+        return parsed
+
+    legacy_path = _legacy_kitaru_global_config_path()
+    parsed = _parse_kitaru_config_file(legacy_path)
+    if parsed is not None:
+        _write_kitaru_global_config(parsed)
+        return parsed
+
+    return _KitaruGlobalConfig()
 
 
 def _write_kitaru_global_config(config: _KitaruGlobalConfig) -> None:
@@ -1488,54 +1531,71 @@ def configure(
     image: ImageInput | None | object = _UNSET,
     cache: bool | None | object = _UNSET,
     retries: int | None | object = _UNSET,
+    project: str | None | object = _UNSET,
 ) -> KitaruConfig:
-    """Set process-local runtime execution defaults.
+    """Set process-local runtime defaults.
 
-    This updates the ``kitaru.configure()`` layer in the execution precedence
-    chain. It does not persist values to disk and does not affect connection
-    state.
+    Execution-level fields (``stack``, ``image``, ``cache``, ``retries``)
+    update the execution precedence chain.  The ``project`` field updates
+    the connection precedence chain and is intended as an internal /
+    testing escape hatch — it is not a normal user-facing setting.
 
     Args:
         stack: Default stack name/ID override.
         image: Default image settings override.
         cache: Default cache behavior override.
         retries: Default retry-count override.
+        project: Project override (internal/testing). Set to ``None``
+            to clear.
 
     Returns:
         The current runtime override layer after applying updates.
     """
-    candidate_overrides = dict(_RUNTIME_EXECUTION_OVERRIDES)
+    candidate_execution = dict(_RUNTIME_EXECUTION_OVERRIDES)
 
     if stack is not _UNSET:
         if stack is None:
-            candidate_overrides.pop("stack", None)
+            candidate_execution.pop("stack", None)
         else:
-            candidate_overrides["stack"] = stack
+            candidate_execution["stack"] = stack
 
     if image is not _UNSET:
         if image is None:
-            candidate_overrides.pop("image", None)
+            candidate_execution.pop("image", None)
         else:
-            candidate_overrides["image"] = _coerce_image_input(image)
+            candidate_execution["image"] = _coerce_image_input(image)
 
     if cache is not _UNSET:
         if cache is None:
-            candidate_overrides.pop("cache", None)
+            candidate_execution.pop("cache", None)
         else:
-            candidate_overrides["cache"] = cache
+            candidate_execution["cache"] = cache
 
     if retries is not _UNSET:
         if retries is None:
-            candidate_overrides.pop("retries", None)
+            candidate_execution.pop("retries", None)
         else:
-            candidate_overrides["retries"] = retries
+            candidate_execution["retries"] = retries
 
-    validated_overrides = KitaruConfig.model_validate(candidate_overrides)
+    validated_execution = KitaruConfig.model_validate(candidate_execution)
     _RUNTIME_EXECUTION_OVERRIDES.clear()
     _RUNTIME_EXECUTION_OVERRIDES.update(
-        validated_overrides.model_dump(mode="python", exclude_none=True)
+        validated_execution.model_dump(mode="python", exclude_none=True)
     )
-    return validated_overrides
+
+    if project is not _UNSET:
+        candidate_connection = dict(_RUNTIME_CONNECTION_OVERRIDES)
+        if project is None:
+            candidate_connection.pop("project", None)
+        else:
+            candidate_connection["project"] = project
+        validated_connection = KitaruConfig.model_validate(candidate_connection)
+        _RUNTIME_CONNECTION_OVERRIDES.clear()
+        _RUNTIME_CONNECTION_OVERRIDES.update(
+            validated_connection.model_dump(mode="python", exclude_none=True)
+        )
+
+    return validated_execution
 
 
 def connect(
