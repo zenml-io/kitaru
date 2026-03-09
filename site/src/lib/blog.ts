@@ -2,6 +2,9 @@
  * Blog utilities — reading time, author data, category styling.
  */
 
+/** Canonical base URL for R2-hosted content assets. */
+export const ASSET_BASE_URL = "https://assets.kitaru.ai";
+
 /** Compute reading time from raw text (250 wpm average). */
 export function readingTime(text: string): string {
   const words = text.trim().split(/\s+/).length;
