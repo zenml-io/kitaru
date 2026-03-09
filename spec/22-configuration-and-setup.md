@@ -6,7 +6,7 @@ How users connect to Kitaru, register infrastructure, and manage credentials. Th
 
 ---
 
-## Config directory — DECIDED
+## Config directory — COMPLETED
 
 **Decision:** Separate directories. Kitaru's own config lives at `~/.config/kitaru/`. ZenML's config stays at its default location (`~/.config/zenml/`) but is never referenced in user-facing output, docs, or CLI messages.
 
@@ -28,7 +28,7 @@ How users connect to Kitaru, register infrastructure, and manage credentials. Th
 
 ---
 
-## Projects — DECIDED
+## Projects — COMPLETED
 
 **Decision:** Projects are a flat namespace. Kitaru silently uses whatever project is set as the default on the server. Users never see or interact with the project concept directly. The UI also just uses the default project.
 
@@ -43,7 +43,7 @@ How users connect to Kitaru, register infrastructure, and manage credentials. Th
 
 ---
 
-## Stack naming — DECIDED
+## Stack naming — COMPLETED
 
 **Decision:** Keep "stack" as the user-facing term. Despite Hamza's suggestion of "runtime", "stack" is established in the MLOps/IaC world and avoids clashing with Python/Docker's use of "runtime". The narrowed scope (orchestrator + artifact store + container registry) is fine — users don't need a different word just because the scope is smaller than ZenML's stacks.
 

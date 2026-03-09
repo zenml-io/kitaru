@@ -290,6 +290,13 @@ class TestPlaceholderBehavior:
         assert snapshot.cache is False
         assert snapshot.retries == 2
 
+    def test_configure_accepts_project_override(self) -> None:
+        kitaru.configure(project="staging-project")
+        from kitaru.config import resolve_connection_config
+
+        resolved = resolve_connection_config()
+        assert resolved.project == "staging-project"
+
     def test_client_exposes_namespaces(self) -> None:
         client = kitaru.KitaruClient()
         assert hasattr(client, "executions")

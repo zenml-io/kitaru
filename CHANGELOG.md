@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Kitaru's global config file now lives at `~/.config/kitaru/config.yaml` instead of inside ZenML's config directory; existing config is auto-migrated on first read
+- CLI output (`kitaru status`, `kitaru info`) no longer exposes ZenML config paths or local stores path
+- Project is no longer inferred from ZenML's active project; `ResolvedConnectionConfig.project` only reflects explicit overrides via `KITARU_PROJECT` env var or `kitaru.configure(project=...)`
+- `kitaru info` shows "Project override" row only when an explicit override is set (instead of always showing "Active project")
+- `kitaru login` no longer prints "Active project" in its success output
+- `kitaru.configure()` now accepts a `project` parameter for internal/testing use
+
 ### Added
 - Agent-native MCP server surface: optional `kitaru[mcp]` extra, `kitaru-mcp` console entry point, and Phase 19 MCP tools for execution/artifact/status/stack queries
 - Claude Code authoring skill: `.claude-plugin/skills/kitaru-authoring/SKILL.md` (installable via plugin marketplace)

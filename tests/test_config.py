@@ -9,8 +9,7 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 from zenml.config.docker_settings import DockerSettings
-from zenml.config.global_config import GlobalConfiguration
-from zenml.utils import yaml_utils
+from zenml.utils import io_utils, yaml_utils
 
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
@@ -65,7 +64,7 @@ class _FakeStackPage:
 
 def _kitaru_config_path() -> Path:
     """Return the path used for persisted Kitaru global config in tests."""
-    return Path(GlobalConfiguration().config_directory) / "kitaru.yaml"
+    return Path.home() / ".config" / "kitaru" / "config.yaml"
 
 
 def test_log_store_defaults_to_artifact_store() -> None:
@@ -419,6 +418,75 @@ def test_configure_can_clear_runtime_override_fields() -> None:
     assert snapshot.cache is None
     assert snapshot.retries is None
     assert snapshot.image is None
+
+
+def test_configure_sets_runtime_project_override() -> None:
+    """configure(project=...) should set an override in the connection layer."""
+    configure(project="staging-project")
+
+    resolved = resolve_connection_config()
+    assert resolved.project == "staging-project"
+
+
+def test_configure_clears_runtime_project_override() -> None:
+    """configure(project=None) should clear a previously set project override."""
+    configure(project="staging-project")
+    configure(project=None)
+
+    resolved = resolve_connection_config()
+    assert resolved.project is None
+
+
+def test_configure_project_independent_of_execution() -> None:
+    """Project and execution overrides should not interfere with each other."""
+    configure(stack="gpu-prod", cache=False, project="staging-project")
+
+    exec_resolved = resolve_execution_config()
+    conn_resolved = resolve_connection_config()
+
+    assert exec_resolved.stack == "gpu-prod"
+    assert exec_resolved.cache is False
+    assert conn_resolved.project == "staging-project"
+
+
+def test_global_connection_config_does_not_infer_project() -> None:
+    """Global connection config should not include inferred project."""
+    from kitaru.config import _read_global_connection_config
+
+    config = _read_global_connection_config()
+    assert config.project is None
+
+
+def test_kitaru_config_path_uses_kitaru_dir() -> None:
+    """Kitaru's config file should live under ~/.config/kitaru/."""
+    path = _kitaru_config_path()
+    assert path.parent.name == "kitaru"
+    assert path.parent.parent.name == ".config"
+    assert path.name == "config.yaml"
+
+
+def test_legacy_config_migration(tmp_path: Path) -> None:
+    """Config from the legacy ZenML-based path should be auto-migrated."""
+    from kitaru.config import _legacy_kitaru_global_config_path
+
+    legacy_path = _legacy_kitaru_global_config_path()
+    io_utils.create_dir_recursive_if_not_exists(str(legacy_path.parent))
+    yaml_utils.write_yaml(
+        str(legacy_path),
+        {
+            "version": 1,
+            "log_store": {
+                "backend": "datadog",
+                "endpoint": "https://logs.datadoghq.com",
+            },
+        },
+    )
+
+    snapshot = resolve_log_store()
+    assert snapshot.backend == "datadog"
+
+    new_path = _kitaru_config_path()
+    assert new_path.exists()
 
 
 def test_resolve_execution_config_applies_phase10_precedence(

@@ -39,9 +39,14 @@ from kitaru.config import (
 def isolated_zenml_global_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[Path]:
-    """Isolate ZenML's global config so tests never touch real user state."""
+    """Isolate ZenML and Kitaru config so tests never touch real user state."""
     config_dir = tmp_path / ".zenml"
     config_dir.mkdir()
+
+    # Redirect Kitaru's own config home (~/.config/kitaru/) into tmp_path
+    kitaru_home = tmp_path / ".config" / "kitaru"
+    kitaru_home.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
     monkeypatch.setenv(ENV_ZENML_CONFIG_PATH, str(config_dir))
 
