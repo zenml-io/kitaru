@@ -511,7 +511,7 @@ def test_login_delegates_to_connect(
 
     output = capsys.readouterr().out
     assert "Connected to Kitaru server: https://example.com" in output
-    assert "Active project: demo-project" in output
+    assert "Active project" not in output
 
 
 def test_login_surfaces_validation_errors(
@@ -1354,10 +1354,8 @@ def test_status_renders_compact_snapshot(
         connection_target="https://example.com",
         server_url="https://example.com",
         active_user="alice",
-        active_project="demo",
         active_stack="prod",
-        config_directory="/tmp/.zenml",
-        local_stores_path="/tmp/.zenml/local_stores",
+        config_directory="/tmp/.config/kitaru",
         local_server_status="not started",
     )
 
@@ -1372,7 +1370,8 @@ def test_status_renders_compact_snapshot(
     assert "Kitaru status" in output
     assert "Connection: remote Kitaru server" in output
     assert "Active stack: prod" in output
-    assert "Local stores path: /tmp/.zenml/local_stores" in output
+    assert "Config directory: /tmp/.config/kitaru" in output
+    assert "Project override" not in output
 
 
 def test_info_renders_detailed_snapshot(
@@ -1385,14 +1384,12 @@ def test_info_renders_detailed_snapshot(
         connection_target="https://example.com",
         server_url="https://example.com",
         active_user="alice",
-        active_project="demo",
         active_stack="prod",
         repository_root="/work/repo",
         server_version="0.94.0",
         server_database="sqlite",
         server_deployment_type="oss",
-        config_directory="/tmp/.zenml",
-        local_stores_path="/tmp/.zenml/local_stores",
+        config_directory="/tmp/.config/kitaru",
         local_server_status="not started",
     )
 
@@ -1408,6 +1405,33 @@ def test_info_renders_detailed_snapshot(
     assert "Connection target: https://example.com" in output
     assert "Server version: 0.94.0" in output
     assert "Repository root: /work/repo" in output
+    assert "Project override" not in output
+
+
+def test_info_shows_project_override_when_set(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info` should show project override only when explicitly set."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.1.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        server_url="https://example.com",
+        active_user="alice",
+        active_stack="prod",
+        config_directory="/tmp/.config/kitaru",
+        project_override="staging-project",
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Project override: staging-project" in output
 
 
 def test_build_runtime_snapshot_handles_missing_local_store() -> None:
@@ -1433,8 +1457,7 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
     fake_gc = Mock()
     fake_gc.uses_local_store = False
     fake_gc.store_configuration = SimpleNamespace(url="http://127.0.0.1:8237")
-    fake_gc.config_directory = "/tmp/.zenml"
-    fake_gc.local_stores_path = "/tmp/.zenml/local_stores"
+    fake_gc.config_directory = "/tmp/.config/kitaru"
     fake_local_server = SimpleNamespace(
         config=SimpleNamespace(provider=SimpleNamespace(value="daemon")),
         status=SimpleNamespace(

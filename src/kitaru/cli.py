@@ -31,9 +31,12 @@ from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
 from kitaru.client import Execution, ExecutionStatus, KitaruClient
 from kitaru.config import (
+    KITARU_PROJECT_ENV,
     ModelAliasEntry,
     ResolvedLogStore,
     StackInfo,
+    _kitaru_config_dir,
+    _read_runtime_connection_config,
     list_model_aliases,
     login_to_server,
     register_model_alias,
@@ -102,10 +105,9 @@ class RuntimeSnapshot:
     connection: str
     connection_target: str
     config_directory: str
-    local_stores_path: str
     server_url: str | None = None
     active_user: str | None = None
-    active_project: str | None = None
+    project_override: str | None = None
     active_stack: str | None = None
     repository_root: str | None = None
     server_version: str | None = None
@@ -428,8 +430,7 @@ def _build_snapshot_without_local_store(
         sdk_version=SDK_VERSION,
         connection="local mode (unavailable)",
         connection_target="unavailable",
-        config_directory=str(gc.config_directory),
-        local_stores_path=str(gc.local_stores_path),
+        config_directory=str(_kitaru_config_dir()),
         local_server_status=_describe_local_server(),
         warning=(
             "Local Kitaru runtime support is unavailable in this environment. "
@@ -487,8 +488,7 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
         connection=connection,
         connection_target=store_cfg.url,
         server_url=server_url,
-        config_directory=str(gc.config_directory),
-        local_stores_path=str(gc.local_stores_path),
+        config_directory=str(_kitaru_config_dir()),
         local_server_status=_describe_local_server(),
     )
 
@@ -500,14 +500,18 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
         )
         return snapshot
 
+    # Detect explicit project override (env var or runtime configure())
+    project_env = os.environ.get(KITARU_PROJECT_ENV)
+    runtime_conn = _read_runtime_connection_config()
+    if project_env:
+        snapshot.project_override = project_env
+    elif runtime_conn.project:
+        snapshot.project_override = runtime_conn.project
+
     try:
         client = Client()
         store_info = client.zen_store.get_store_info()
         snapshot.active_user = client.active_user.name
-        try:
-            snapshot.active_project = client.active_project.name
-        except RuntimeError:
-            snapshot.active_project = None
         snapshot.active_stack = client.active_stack_model.name
         snapshot.repository_root = str(client.root) if client.root else None
         snapshot.server_version = str(store_info.version)
@@ -544,10 +548,8 @@ def _status_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
     rows.extend(
         [
             ("Active user", snapshot.active_user or "unavailable"),
-            ("Active project", snapshot.active_project or "not set"),
             ("Active stack", snapshot.active_stack or "unavailable"),
             ("Config directory", snapshot.config_directory),
-            ("Local stores path", snapshot.local_stores_path),
         ]
     )
     if snapshot.local_server_status:
@@ -557,7 +559,7 @@ def _status_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
 
 def _info_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
     """Build the label/value pairs for the detailed info view."""
-    return [
+    rows = [
         ("SDK version", snapshot.sdk_version),
         ("Connection", snapshot.connection),
         ("Connection target", snapshot.connection_target),
@@ -566,13 +568,14 @@ def _info_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
         ("Server database", snapshot.server_database or "unavailable"),
         ("Server deployment", snapshot.server_deployment_type or "unavailable"),
         ("Active user", snapshot.active_user or "unavailable"),
-        ("Active project", snapshot.active_project or "not set"),
         ("Active stack", snapshot.active_stack or "unavailable"),
         ("Repository root", snapshot.repository_root or "not set"),
         ("Config directory", snapshot.config_directory),
-        ("Local stores path", snapshot.local_stores_path),
         ("Local server", snapshot.local_server_status or "not started"),
     ]
+    if snapshot.project_override:
+        rows.append(("Project override", snapshot.project_override))
+    return rows
 
 
 def _log_store_rows(snapshot: ResolvedLogStore) -> list[tuple[str, str]]:
@@ -884,10 +887,7 @@ def login(
         _exit_with_error(str(exc))
 
     connected_server_url = _get_connected_server_url() or server.rstrip("/")
-    _print_success(
-        f"Connected to Kitaru server: {connected_server_url}",
-        detail=f"Active project: {project}" if project else None,
-    )
+    _print_success(f"Connected to Kitaru server: {connected_server_url}")
 
 
 @app.command
