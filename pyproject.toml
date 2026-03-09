@@ -109,6 +109,12 @@ include = ["scripts/generate_sdk_docs.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+[[tool.ty.overrides]]
+include = ["scripts/r2-upload.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-vv -n auto"
