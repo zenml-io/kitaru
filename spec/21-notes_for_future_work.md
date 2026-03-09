@@ -217,4 +217,4 @@ Switched Shiki themes to `github-light` + `github-dark` and forced code blocks t
 ## Skills (Claude Code)
 
 - Move the skill(s) out to their own `zenml-io/kitaru-skills` repository (only here while iterating)
-- Add a scoping skill to be called by the pipeline authoring skill
+- ~~Add a scoping skill to be called by the authoring skill~~ — DONE. `kitaru-scoping` runs a structured interview to assess fit, identify checkpoint/wait boundaries, and produce a `flow_architecture.md`. The authoring skill now references it as a recommended first step.
