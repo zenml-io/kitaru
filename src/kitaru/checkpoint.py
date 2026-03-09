@@ -32,12 +32,12 @@ from kitaru.runtime import (
     _is_inside_flow,
 )
 
-_CHECKPOINT_OUTSIDE_FLOW_ERROR = "Checkpoints can only run inside a @kitaru.flow."
+_CHECKPOINT_OUTSIDE_FLOW_ERROR = "Checkpoints can only run inside a @flow."
 _CHECKPOINT_NESTED_ERROR = (
     "Nested checkpoint calls are not supported in the Kitaru MVP."
 )
 _CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR = (
-    "Concurrent checkpoint execution is only available inside a running @kitaru.flow."
+    "Concurrent checkpoint execution is only available inside a running @flow."
 )
 
 
@@ -125,7 +125,7 @@ def _wrap_entrypoint(
 
 
 class _CheckpointDefinition:
-    """Callable wrapper returned by `@kitaru.checkpoint`."""
+    """Callable wrapper returned by `@checkpoint`."""
 
     def __init__(
         self,
@@ -246,10 +246,12 @@ def checkpoint(
 
     Can be used as a bare decorator or with arguments::
 
-        @kitaru.checkpoint
+        from kitaru import checkpoint
+
+        @checkpoint
         def my_step(): ...
 
-        @kitaru.checkpoint(retries=3, type="llm_call")
+        @checkpoint(retries=3, type="llm_call")
         def my_step(): ...
 
     Args:

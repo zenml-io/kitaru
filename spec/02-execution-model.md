@@ -89,8 +89,8 @@ This preserves normal Python control flow across replay, including:
 
 The core durable boundaries are:
 
-- `@kitaru.flow` — execution boundary
-- `@kitaru.checkpoint` — replayable work boundary
+- `@flow` — execution boundary
+- `@checkpoint` — replayable work boundary
 - `kitaru.wait()` — suspension boundary
 
 `kitaru.llm()` is a convenience wrapper whose behavior depends on where it is called:
@@ -188,7 +188,9 @@ should live inside a durable boundary such as a checkpoint.
 For example, this is risky:
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def bad():
     branch = random.choice(["a", "b"])
     return step(branch)
@@ -197,11 +199,13 @@ def bad():
 This is safer:
 
 ```python
-@kitaru.checkpoint
+from kitaru import flow, checkpoint
+
+@checkpoint
 def choose_branch() -> str:
     return random.choice(["a", "b"])
 
-@kitaru.flow
+@flow
 def good():
     branch = choose_branch()
     return step(branch)

@@ -37,7 +37,9 @@ Instead, replay means:
 Given an original execution:
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def content_pipeline(topic: str) -> str:
     notes = research(topic)
     draft = write_draft(notes)

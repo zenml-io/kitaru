@@ -26,7 +26,7 @@ from kitaru.errors import (
 from kitaru.logging import log
 from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_call_name
 
-_LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @kitaru.flow."
+_LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @flow."
 _MOCK_RESPONSE_ENV = "KITARU_LLM_MOCK_RESPONSE"
 _MODEL_PROVIDER_HINTS: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),

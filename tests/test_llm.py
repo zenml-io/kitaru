@@ -20,7 +20,7 @@ def _flow_checkpoint_scope() -> tuple[str, str]:
 
 def test_llm_raises_outside_flow() -> None:
     """`kitaru.llm()` should reject calls outside an active flow."""
-    with pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"):
+    with pytest.raises(RuntimeError, match=r"inside a @flow"):
         llm("hello")
 
 

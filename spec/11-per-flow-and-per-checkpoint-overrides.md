@@ -38,7 +38,9 @@ Typical examples:
 ### Example
 
 ```python
-@kitaru.flow(
+from kitaru import flow
+
+@flow(
     stack="prod",
     image=ImageSettings(
         base_image="python:3.12-slim",
@@ -78,7 +80,9 @@ Typical examples:
 ### Example
 
 ```python
-@kitaru.checkpoint(
+from kitaru import checkpoint
+
+@checkpoint(
     retries=3,
     type="tool_call",
 )
@@ -146,7 +150,7 @@ Examples:
 ### Flow stack precedence
 
 1. `my_flow.deploy(..., stack="prod")` or `my_flow.start(..., stack="prod")` — invocation-time override
-2. `@kitaru.flow(stack="prod")` — decorator default
+2. `@flow(stack="prod")` — decorator default
 3. selected active stack
 4. implicit `local`
 

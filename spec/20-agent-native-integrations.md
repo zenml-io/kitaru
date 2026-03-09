@@ -238,7 +238,7 @@ The skill file lives in the Kitaru repository and is published as part of the pa
 
 Without a skill, Claude Code would need to guess at Kitaru's API from docstrings and type hints alone. The skill provides:
 
-- correct decorator usage (`@kitaru.flow`, `@kitaru.checkpoint`)
+- correct decorator usage (`@flow`, `@checkpoint`)
 - the right patterns for replay, wait, and artifact overrides
 - awareness of MVP restrictions (no nested checkpoints, no wait inside checkpoints)
 - PydanticAI adapter usage
@@ -259,8 +259,8 @@ The skill should cover:
 
 #### Core patterns
 
-- `@kitaru.flow` as the outer durable boundary
-- `@kitaru.checkpoint` for replayable work units
+- `@flow` as the outer durable boundary
+- `@checkpoint` for replayable work units
 - `kitaru.wait()` for suspension (flow-level only, never inside a checkpoint)
 - `kitaru.log()` for metadata
 - `kitaru.save()` / `kitaru.load()` for explicit artifacts
@@ -269,7 +269,7 @@ The skill should cover:
 
 #### Rules the skill must enforce
 
-- flows cannot nest (no `@kitaru.flow` inside another flow)
+- flows cannot nest (no `@flow` inside another flow)
 - `wait()` is only valid directly inside a flow body, not inside a checkpoint
 - checkpoint return values must be serializable (Pydantic models or JSON-compatible types)
 - no nested checkpoint-within-checkpoint semantics
@@ -278,7 +278,7 @@ The skill should cover:
 #### PydanticAI adapter
 
 - `kp.wrap(agent)` pattern
-- placing wrapped agent calls inside an explicit `@kitaru.checkpoint`
+- placing wrapped agent calls inside an explicit `@checkpoint`
 - child events vs replay boundaries
 
 #### Configuration and connection
@@ -292,7 +292,7 @@ The skill should cover:
 - putting `wait()` inside a checkpoint (fails at runtime)
 - returning non-serializable values from checkpoints
 - nesting flows
-- forgetting to use `@kitaru.checkpoint` around meaningful work (losing replayability)
+- forgetting to use `@checkpoint` around meaningful work (losing replayability)
 
 ### How users install the skill
 
@@ -447,7 +447,7 @@ def test_executions_input_tool(mock_client):
 The skill file is markdown, not code, so traditional unit tests do not apply. However:
 
 - a test should verify the skill file exists at the expected path in the installed package
-- a test should verify the skill file contains key patterns (`@kitaru.flow`, `@kitaru.checkpoint`, `kitaru.wait()`) so it does not accidentally become stale
+- a test should verify the skill file contains key patterns (`@flow`, `@checkpoint`, `kitaru.wait()`) so it does not accidentally become stale
 
 ```python
 # tests/test_skill_files.py
@@ -465,7 +465,7 @@ def test_skill_file_exists():
 def test_skill_file_covers_core_primitives():
     skills_dir = Path(kitaru.skills.__path__[0])
     content = (skills_dir / "kitaru-authoring.md").read_text()
-    for pattern in ["@kitaru.flow", "@kitaru.checkpoint", "kitaru.wait()", "kitaru.log()"]:
+    for pattern in ["@flow", "@checkpoint", "kitaru.wait()", "kitaru.log()"]:
         assert pattern in content, f"Skill file missing coverage of {pattern}"
 ```
 

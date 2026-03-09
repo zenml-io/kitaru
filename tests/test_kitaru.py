@@ -223,7 +223,7 @@ class TestPlaceholderBehavior:
         assert hasattr(wrapped, "submit")
 
     def test_wait_requires_flow_context(self) -> None:
-        with pytest.raises(kitaru.KitaruContextError, match=r"@kitaru\.flow"):
+        with pytest.raises(kitaru.KitaruContextError, match=r"@flow"):
             kitaru.wait()
 
     def test_wait_rejects_checkpoint_context(self) -> None:
@@ -237,7 +237,7 @@ class TestPlaceholderBehavior:
             ),
             pytest.raises(
                 kitaru.KitaruContextError,
-                match=r"@kitaru\.checkpoint",
+                match=r"@checkpoint",
             ),
         ):
             kitaru.wait()
@@ -270,19 +270,19 @@ class TestPlaceholderBehavior:
         )
 
     def test_llm_requires_flow_context(self) -> None:
-        with pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"):
+        with pytest.raises(RuntimeError, match=r"inside a @flow"):
             kitaru.llm("hello")
 
     def test_save_requires_checkpoint_context(self) -> None:
-        with pytest.raises(RuntimeError, match=r"inside a @kitaru\.checkpoint"):
+        with pytest.raises(RuntimeError, match=r"inside a @checkpoint"):
             kitaru.save("name", "value")
 
     def test_load_requires_checkpoint_context(self) -> None:
-        with pytest.raises(RuntimeError, match=r"inside a @kitaru\.checkpoint"):
+        with pytest.raises(RuntimeError, match=r"inside a @checkpoint"):
             kitaru.load("exec-123", "name")
 
     def test_log_requires_flow_context(self) -> None:
-        with pytest.raises(RuntimeError, match=r"inside a @kitaru\.flow"):
+        with pytest.raises(RuntimeError, match=r"inside a @flow"):
             kitaru.log(cost=0.01)
 
     def test_configure_sets_runtime_defaults(self) -> None:

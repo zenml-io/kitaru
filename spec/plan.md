@@ -70,22 +70,22 @@ not "reimplement from scratch."
 
 ---
 
-## Phase 3: `@kitaru.flow` — the outer boundary --- DONE
+## Phase 3: `@flow` — the outer boundary --- DONE
 
 **Goal:** The flow decorator works and maps to a ZenML dynamic pipeline.
 
 **What to do:**
-- Implement `@kitaru.flow` in `src/kitaru/flow.py`
+- Implement `@flow` in `src/kitaru/flow.py`
 - Wrap `@pipeline(dynamic=True)` from ZenML
 - Support basic decorator parameters: `stack`, `image`, `cache`, `retries`
-- The `@kitaru.flow` decorator returns a callable object that exposes three
+- The `@flow` decorator returns a callable object that exposes three
   invocation patterns:
   - **Direct call:** `result = my_flow(...)` — blocks until complete, returns result
   - **Start:** `handle = my_flow.start(...)` — returns a `FlowHandle` for longer-running
     executions. `FlowHandle` exposes: `exec_id`, `status`, `wait()`, `get()`
   - **Deploy:** `handle = my_flow.deploy(..., stack="prod")` — sugar for
     `.start(..., stack=...)` that communicates remote-execution intent more clearly
-- Enforce: flows cannot nest as one execution (no `@kitaru.flow` inside another
+- Enforce: flows cannot nest as one execution (no `@flow` inside another
   flow's execution boundary). A flow *can* start another flow, but that creates
   a separate execution.
 - The flow is the **main config surface** — all execution-relevant settings
@@ -100,12 +100,12 @@ sync result extraction, FlowHandle, and `.deploy()` sugar need careful design.
 
 ---
 
-## Phase 4: `@kitaru.checkpoint` — the durable outcome boundary --- DONE
+## Phase 4: `@checkpoint` — the durable outcome boundary --- DONE
 
 **Goal:** Checkpoints work inside flows and persist durable outcomes (not just outputs).
 
 **What to do:**
-- Implement `@kitaru.checkpoint` in `src/kitaru/checkpoint.py`
+- Implement `@checkpoint` in `src/kitaru/checkpoint.py`
 - Wrap ZenML's `@step` decorator
 - Support decorator parameters: `retries`, `type` (for dashboard visualization)
 - Map `retries` to ZenML's `StepRetryConfig`
@@ -135,16 +135,17 @@ with Kitaru semantics.
 - Create a minimal example (e.g., in `examples/` or as a test):
   ```python
   import kitaru
+  from kitaru import flow, checkpoint
 
-  @kitaru.checkpoint
+  @checkpoint
   def fetch_data(url: str) -> str:
       return "some data"
 
-  @kitaru.checkpoint
+  @checkpoint
   def process(data: str) -> str:
       return data.upper()
 
-  @kitaru.flow
+  @flow
   def my_agent(url: str) -> str:
       data = fetch_data(url)
       return process(data)
@@ -268,7 +269,7 @@ loading needs care.
 - Keep this to selection only — stack creation comes later
 - Stack selection precedence:
   1. `my_flow.deploy(..., stack="prod")` or `my_flow.start(..., stack="prod")`
-  2. `@kitaru.flow(stack="prod")` — decorator default
+  2. `@flow(stack="prod")` — decorator default
   3. Environment variable override
   4. Active user-selected stack (from global config)
   5. Implicit `local`
@@ -292,7 +293,7 @@ selection, stack selection precedence), [14-cli-reference.md] (stack CLI tier)
   - Execution config: stack, image, cache, retries — resolved at flow start time
 - Implement the config precedence chain:
   1. Invocation-time overrides (`my_flow.deploy(..., stack="prod")` or `.start(...)`)
-  2. Decorator defaults (`@kitaru.flow(stack="prod")`)
+  2. Decorator defaults (`@flow(stack="prod")`)
   3. `kitaru.configure(...)` — explicit runtime configuration
   4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
   5. Project config — `pyproject.toml` under `[tool.kitaru]` (checked into the repo)
@@ -673,8 +674,8 @@ MVP tool set, packaging requirements)
 ```
 Phase 1  -- Naming + skeleton ---------------------------------------- DONE
 Phase 2  -- Login/logout/status CLI ----------------------------------- DONE
-Phase 3  -- @kitaru.flow (incl .deploy()) ----------------------------- DONE
-Phase 4  -- @kitaru.checkpoint ---------------------------------------- DONE
+Phase 3  -- @flow (incl .deploy()) ------------------------------------ DONE
+Phase 4  -- @checkpoint ----------------------------------------------- DONE
 Phase 5  -- First working example ------------------------------------- DONE (Milestone)
 Phase 6  -- Runtime context ------------------------------------------- DONE
 Phase 7  -- kitaru.log() ---------------------------------------------- DONE

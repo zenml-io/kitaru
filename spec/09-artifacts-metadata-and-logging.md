@@ -18,7 +18,7 @@ Artifacts are created implicitly by Kitaru in the normal case, and can also be c
 
 | Producer | Artifacts created |
 | --- | --- |
-| `@kitaru.checkpoint` return value | output artifact |
+| `@checkpoint` return value | output artifact |
 | `kitaru.llm()` | prompt artifact + response artifact |
 | `kitaru.wait()` | input artifact / recorded wait value |
 | `kitaru.save()` | explicit named artifact |
@@ -43,7 +43,9 @@ Every artifact gets a name.
 By default, checkpoint output artifacts are named after the producing function.
 
 ```python
-@kitaru.checkpoint
+from kitaru import checkpoint
+
+@checkpoint
 def research(topic: str) -> str:
     ...
 ```
@@ -53,7 +55,9 @@ A successful call produces an output artifact named `research`.
 Repeated calls may be auto-indexed for display:
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def multi_research(topics: list[str]) -> list[str]:
     results = []
     for topic in topics:
@@ -77,7 +81,7 @@ For MVP, the useful artifact types are:
 | `response` | `kitaru.llm()` output | model text response | markdown / text view |
 | `context` | explicit `kitaru.save(..., type="context")` | intermediate data | expandable JSON/text |
 | `input` | `kitaru.wait()` | provided input value | structured input view |
-| `output` | `@kitaru.checkpoint` return value | checkpoint output | type-aware text / JSON view |
+| `output` | `@checkpoint` return value | checkpoint output | type-aware text / JSON view |
 | `blob` | explicit `kitaru.save(..., type="blob")` | binary data | preview or download |
 
 ## `kitaru.save()` — explicit artifact creation
@@ -101,7 +105,9 @@ That keeps artifact production anchored to a durable work boundary.
 ### Example
 
 ```python
-@kitaru.checkpoint
+from kitaru import checkpoint
+
+@checkpoint
 def research(topic: str) -> str:
     raw = kitaru.llm(f"Deep research on {topic}", model="smart")
     kitaru.save("raw_notes", raw, type="context", tags=["debug"])
@@ -128,7 +134,9 @@ This keeps cross-execution reads visible as lineage edges in durable execution h
 ### Example
 
 ```python
-@kitaru.checkpoint
+from kitaru import checkpoint
+
+@checkpoint
 def build_on_previous(prev_exec_id: str) -> str:
     previous_research = kitaru.load(prev_exec_id, "research")
     return kitaru.llm(
@@ -209,7 +217,9 @@ This keeps the API simple while making examples like flow-level logging well-def
 **Logging inside a checkpoint:**
 
 ```python
-@kitaru.checkpoint
+from kitaru import checkpoint
+
+@checkpoint
 def generate_summary(text: str) -> str:
     summary = kitaru.llm(f"Summarize:\n{text}", model="fast")
     kitaru.log(quality_score=0.92, source_count=4)
@@ -219,7 +229,9 @@ def generate_summary(text: str) -> str:
 **Logging at flow level:**
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def my_agent(prompt: str) -> str:
     draft = write_draft(prompt)
     kitaru.log(topic=prompt, stage="draft_complete")

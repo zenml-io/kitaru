@@ -1,4 +1,4 @@
-# 5. `@kitaru.flow` — The Outer Boundary
+# 5. `@flow` — The Outer Boundary
 
 ## What it does
 
@@ -13,12 +13,14 @@ A flow is where Kitaru creates and owns the **execution record**: status, inputs
 ## Signature
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def my_agent(prompt: str) -> str:
     ...
 
 # Async may be supported, but sync is the primary path
-@kitaru.flow
+@flow
 async def my_async_agent(prompt: str) -> str:
     ...
 ```
@@ -66,7 +68,7 @@ handle = my_agent.deploy("Build a CLI tool", stack="aws-sandbox")
 
 ### Implementation note
 
-The `my_flow.start()` and `my_flow.deploy()` patterns work because the `@kitaru.flow` decorator returns a callable object that also exposes `.start()` and `.deploy()`. This is a small extension of the ZenML pattern (where you just call the function directly).
+The `my_flow.start()` and `my_flow.deploy()` patterns work because the `@flow` decorator returns a callable object that also exposes `.start()` and `.deploy()`. This is a small extension of the ZenML pattern (where you just call the function directly).
 
 The alternative pattern `kitaru.start_flow(my_flow)` would require reworking how flows are resolved and imported across environments, so it should be avoided. Invocation should always go through the decorated function object itself.
 
@@ -102,7 +104,9 @@ Anything that should execute as one durable unit:
 Kitaru does not impose a graph DSL. The flow body is plain Python. Durability comes from the boundaries inside it.
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def content_pipeline(topic: str) -> str:
     research = research_step(topic)
     draft = write_step(research)
@@ -116,7 +120,7 @@ def content_pipeline(topic: str) -> str:
 
 ## The flow as the main config surface
 
-The `@kitaru.flow` decorator is the primary place where configuration enters an execution. All execution-relevant settings — infrastructure, image, behavior — flow through it. Connection credentials (server URL, auth) are resolved separately before any flow runs; they do not belong in the decorator.
+The `@flow` decorator is the primary place where configuration enters an execution. All execution-relevant settings — infrastructure, image, behavior — flow through it. Connection credentials (server URL, auth) are resolved separately before any flow runs; they do not belong in the decorator.
 
 See [Chapter 4](04-connection-stacks-and-configuration.md) for the full unified configuration model.
 
@@ -158,15 +162,17 @@ Flow retries are **not** replay. They use fixed code, fixed config, and no user 
 Kitaru does not have a dedicated `parallel` primitive. Instead, concurrency uses the **`.submit()` + `.result()`** pattern (ZenML futures).
 
 ```python
-@kitaru.checkpoint
+from kitaru import flow, checkpoint
+
+@checkpoint
 def research(topic: str) -> str:
     ...
 
-@kitaru.checkpoint
+@checkpoint
 def gather_data(topic: str) -> dict:
     ...
 
-@kitaru.flow
+@flow
 def parallel_research(topic: str) -> str:
     # Submit both checkpoints — they run concurrently
     research_future = research.submit(topic)

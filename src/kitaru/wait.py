@@ -19,9 +19,9 @@ from kitaru.errors import (
 )
 from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow
 
-_WAIT_OUTSIDE_FLOW_ERROR = "wait() can only run inside a @kitaru.flow."
+_WAIT_OUTSIDE_FLOW_ERROR = "wait() can only run inside a @flow."
 _WAIT_INSIDE_CHECKPOINT_ERROR = (
-    "wait() cannot be called inside a @kitaru.checkpoint. "
+    "wait() cannot be called inside a @checkpoint. "
     "Call wait() in the flow body instead."
 )
 _DEFAULT_WAIT_TIMEOUT_SECONDS = 600

@@ -49,7 +49,7 @@ def _synthetic_agent_run_checkpoint(run_id: str) -> Any:
     if run_callable is None:
         raise KitaruUsageError(
             "Synthetic adapter checkpoint callback was not found. "
-            "Wrap the agent call in an explicit @kitaru.checkpoint when using "
+            "Wrap the agent call in an explicit @checkpoint when using "
             "distributed execution backends."
         )
 

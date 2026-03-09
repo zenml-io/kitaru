@@ -23,8 +23,8 @@ def test_plugin_skill_covers_core_primitives() -> None:
     content = skill_file.read_text(encoding="utf-8")
 
     for pattern in [
-        "@kitaru.flow",
-        "@kitaru.checkpoint",
+        "@flow",
+        "@checkpoint",
         "kitaru.wait()",
         "kitaru.log()",
     ]:

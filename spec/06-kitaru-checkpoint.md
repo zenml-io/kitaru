@@ -1,4 +1,4 @@
-# 6. `@kitaru.checkpoint` — Durable Unit of Work
+# 6. `@checkpoint` — Durable Unit of Work
 
 ## What it does
 
@@ -19,11 +19,13 @@ Each checkpoint invocation is recorded in execution history with its **outcome**
 ## Signature
 
 ```python
-@kitaru.checkpoint
+from kitaru import checkpoint
+
+@checkpoint
 def my_step(input: str) -> str:
     ...
 
-@kitaru.checkpoint(
+@checkpoint(
     retries=3,
     type="llm_call",
 )
@@ -53,11 +55,13 @@ This preserves normal Python behavior across replay.
 Example:
 
 ```python
-@kitaru.checkpoint
+from kitaru import flow, checkpoint
+
+@checkpoint
 def flaky() -> str:
     raise ValueError("bad input")
 
-@kitaru.flow
+@flow
 def my_flow() -> str:
     try:
         flaky()
@@ -104,7 +108,9 @@ Replay should match checkpoint calls by execution order and durable identity, no
 **Simple checkpoint:**
 
 ```python
-@kitaru.checkpoint
+from kitaru import checkpoint
+
+@checkpoint
 def summarize(text: str) -> str:
     client = openai.OpenAI()
     response = client.chat.completions.create(
@@ -117,7 +123,9 @@ def summarize(text: str) -> str:
 **Typed checkpoint (PydanticAI agent):**
 
 ```python
-@kitaru.checkpoint(type="llm_call")
+from kitaru import checkpoint
+
+@checkpoint(type="llm_call")
 def research(topic: str) -> str:
     agent = Agent("openai:gpt-4o", name="researcher", tools=[search_web])
     result = agent.run_sync(f"Research {topic} thoroughly")
@@ -127,7 +135,9 @@ def research(topic: str) -> str:
 **Checkpoint with retries:**
 
 ```python
-@kitaru.checkpoint(retries=3)
+from kitaru import checkpoint
+
+@checkpoint(retries=3)
 def generate_embeddings(texts: list[str]) -> list[list[float]]:
     model = SentenceTransformer("all-MiniLM-L6-v2")
     return model.encode(texts).tolist()
@@ -186,7 +196,7 @@ On replay, concurrently submitted checkpoints replay their recorded outcomes jus
 ## Rules
 
 - sync is the primary and recommended path for MVP
-- must be called inside a `@kitaru.flow`
+- must be called inside a `@flow`
 - should have a return type annotation
 - the return value becomes an artifact on success
 - exceptions are also recorded and replayed

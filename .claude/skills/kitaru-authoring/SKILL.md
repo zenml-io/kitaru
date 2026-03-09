@@ -3,8 +3,8 @@ name: kitaru-authoring
 description: >
   Guide for writing Kitaru durable agent workflows. Use when creating or
   refactoring Kitaru flows, checkpoints, waits, logging, artifacts, LLM calls,
-  or PydanticAI adapter usage. Triggers on mentions of kitaru, @kitaru.flow,
-  @kitaru.checkpoint, kitaru.wait, kitaru.log, kitaru.save, kitaru.load,
+  or PydanticAI adapter usage. Triggers on mentions of kitaru, @flow,
+  @checkpoint, kitaru.wait, kitaru.log, kitaru.save, kitaru.load,
   kitaru.llm, or durable execution patterns.
 ---
 
@@ -14,19 +14,20 @@ Use this guide when writing or refactoring Kitaru workflows.
 
 ## Mental model
 
-- `@kitaru.flow` is the **durable outer boundary**.
-- `@kitaru.checkpoint` is a **replayable work unit** inside the flow.
+- `@flow` is the **durable outer boundary**.
+- `@checkpoint` is a **replayable work unit** inside the flow.
 - `kitaru.wait()` pauses at the flow level and resumes with user/system input.
 
 ```python
+from kitaru import flow, checkpoint
 import kitaru
 
-@kitaru.checkpoint
+@checkpoint
 def draft(topic: str) -> str:
     kitaru.log(phase="draft")
     return f"Draft for {topic}"
 
-@kitaru.flow
+@flow
 def review_flow(topic: str) -> str:
     text = draft(topic)
     approved = kitaru.wait(name="approve_draft", question="Approve draft?", schema=bool)
@@ -37,7 +38,7 @@ def review_flow(topic: str) -> str:
 
 ## Rules to enforce
 
-1. Do not nest flows (`@kitaru.flow` inside another flow).
+1. Do not nest flows (`@flow` inside another flow).
 2. Do not call `kitaru.wait()` inside a checkpoint.
 3. Checkpoint return values must be serializable (JSON-friendly or Pydantic models).
 4. Wrap meaningful work in checkpoints so replay boundaries are explicit.
@@ -52,16 +53,16 @@ def review_flow(topic: str) -> str:
 ## PydanticAI adapter pattern
 
 ```python
-import kitaru
+from kitaru import checkpoint
 import kitaru.adapters.pydantic_ai as kp
 
-@kitaru.checkpoint
+@checkpoint
 def ask_agent(agent, prompt: str) -> str:
     wrapped = kp.wrap(agent)
     return wrapped.run_sync(prompt).output
 ```
 
-Use `@kitaru.adapters.pydantic_ai.hitl_tool(...)` when agent tools should trigger flow-level waits.
+Use `kitaru.adapters.pydantic_ai.hitl_tool(...)` when agent tools should trigger flow-level waits.
 
 ## Connection and runtime context
 

@@ -35,11 +35,13 @@ When a checkpoint raises an unhandled exception:
 ## Example: checkpoint failure handled in flow
 
 ```python
-@kitaru.checkpoint
+from kitaru import flow, checkpoint
+
+@checkpoint
 def risky_step(data: str) -> str:
     raise ValueError("bad input")
 
-@kitaru.flow
+@flow
 def my_agent(task: str) -> str:
     try:
         return risky_step(task)
@@ -54,7 +56,9 @@ This should behave normally on first run and on replay, because the failure outc
 Checkpoint retries are the narrowest retry scope. They are **same-execution, local** retries that use ZenML step retry behavior underneath.
 
 ```python
-@kitaru.checkpoint(retries=3)
+from kitaru import checkpoint
+
+@checkpoint(retries=3)
 def flaky_api_call(query: str) -> dict:
     return external_api.search(query)
 ```
@@ -82,7 +86,9 @@ Because flow retries rerun from the top, previously completed checkpoints are re
 ## Flow retries
 
 ```python
-@kitaru.flow(retries=2)
+from kitaru import flow
+
+@flow(retries=2)
 def my_flow(task: str) -> str:
     data = fetch_data(task)
     return process_data(data)
@@ -172,7 +178,9 @@ Because `kitaru.log()` is context-sensitive, it can be used both:
 Example:
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def resilient_agent(task: str) -> str:
     try:
         return primary_model(task)
