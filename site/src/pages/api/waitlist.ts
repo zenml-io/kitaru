@@ -1,3 +1,8 @@
+/**
+ * @deprecated The waitlist form has been replaced by inline Cal.com
+ * demo booking (see CalEmbed.astro + Cta.astro). This endpoint is
+ * kept for backward compatibility — no active UI calls it.
+ */
 import type { APIRoute } from 'astro';
 
 export const prerender = false;
