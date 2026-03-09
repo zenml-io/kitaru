@@ -1,0 +1,40 @@
+# Version control
+.git
+.github
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+.ruff_cache
+
+# Development / design (never ship)
+design/
+*.md
+!README.md
+!CHANGELOG.md
+
+# Node / docs / site (not needed in the server image)
+docs/
+site/
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.whl
+*.tar.gz
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*
+
+# Docker (avoid recursive copy)
+docker/Dockerfile
+docker/Dockerfile.dev
