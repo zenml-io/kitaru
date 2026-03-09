@@ -33,6 +33,7 @@ scripts/              # Doc generation + site merge scripts
   merge_site.sh              # Merges docs static export into Astro build output
 .claude-plugin/       # Claude Code plugin marketplace + skill distribution
   skills/kitaru-authoring/  # Kitaru authoring skill (SKILL.md)
+docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing runner)
 spec/                 # SDK design specifications (reference material)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
@@ -98,7 +99,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 1. Ensure `develop` has all changes for the release.
 2. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
 3. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-4. The workflow bumps version, runs CI, publishes to PyPI, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
+4. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
 
 ## Development commands
 
@@ -134,6 +135,11 @@ just site                             # Preview landing page dev server (localho
 just site-build-only                  # Build landing page only (no docs merge)
 just site-build                       # Full unified build (generate + build + merge)
 
+# Docker
+just server-image                    # Build production server image (zenmldocker/kitaru:latest)
+just server-image TAG=v0.2.0         # Build with specific tag
+just server-image-push               # Build + push to Docker Hub
+
 # Manual deploy to Cloudflare
 unset CF_API_TOKEN CLOUDFLARE_API_TOKEN  # Clear stale tokens (use wrangler login credentials)
 just site-build && npx wrangler deploy   # Build + deploy
@@ -145,7 +151,7 @@ just site-build && npx wrangler deploy   # Build + deploy
 |---|---|---|
 | `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, links, typecheck, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes |
 | `site.yml` | Push to `main`; PRs touching docs/site/scripts | Build + deploy unified site; PR preview Workers |
-| `release.yml` | Workflow dispatch or `v*` tag | Version bump, PyPI publish, GitHub Release |
+| `release.yml` | Workflow dispatch or `v*` tag | Version bump, PyPI publish, Docker image publish, GitHub Release |
 | `spellcheck.yml` | Push/PR to `develop` | Separate typo/spell checking |
 | `image-optimiser.yml` | PRs only | Image compression for docs assets |
 

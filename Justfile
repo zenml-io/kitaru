@@ -70,6 +70,18 @@ dev-image REPO="strickvl/kitaru-dev":
     docker push {{ REPO }}:latest
     @printf 'Dev image pushed to {{ REPO }}:latest\n'
 
+# Build production server image (ZenML server + cloud plugins + Kitaru).
+# Pass REPO to override the target registry/image.
+server-image REPO="zenmldocker/kitaru" TAG="latest":
+    docker build -f docker/Dockerfile --target server -t kitaru-server .
+    docker tag kitaru-server {{ REPO }}:{{ TAG }}
+    @printf 'Server image built: {{ REPO }}:{{ TAG }}\n'
+
+# Build and push production server image
+server-image-push REPO="zenmldocker/kitaru" TAG="latest": (server-image REPO TAG)
+    docker push {{ REPO }}:{{ TAG }}
+    @printf 'Server image pushed: {{ REPO }}:{{ TAG }}\n'
+
 # Generate all docs content from Python source (CLI reference + changelog + SDK reference)
 generate-docs:
     uv run python scripts/generate_cli_docs.py
