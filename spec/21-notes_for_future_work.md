@@ -39,62 +39,7 @@ Original floor was 3.12+ for MVP. Audit completed: no PEP 695 `type` statements 
 
 ## Product: configuration and setup
 
-How users connect to Kitaru, register infrastructure, and manage credentials.
-
-### Config directory naming
-
-The config directory is still named `zenml` in some places, and `active project` is shown but isn't a concept exposed in Kitaru.
-
-**Action:** Use `kitaru` as the config path name. Either hide the config path or rename it. Default project should be used silently.
-
-### Projects: hide from users
-
-Projects should not be exposed to users directly. Kitaru should just use the default project.
-
-- Hamza's rationale: "because of the UI burden" and "in OSS zenml we also don't have it"
-- The Kitaru UI team also won't expose the project concept
-- For internal testing (especially MVP stage), keep an env var escape hatch to override the project
-- **Spec inconsistency:** chapters 4, 14, and 19 still reference project config in `pyproject.toml`, project context in `kitaru info`, and project-level config as part of the config model
-
-**Action:** Decide whether `project` remains fully internal/defaulted. If so, clean up chapters 4/14/19 and CLI vocabulary.
-
-### Stack registration recipe UX
-
-Hamza's vision: expose stacks as first-class citizens, hide stack components and service connectors. Users pick from pre-built recipes (AWS, GCP, Cloudflare, Modal) and register with a single command:
-
-```
-kitaru stack register --type aws --aws-profile .. --aws-secret-key .. --artifact-store s3:// --container-registry something.ecr.aws
-```
-
-Key constraints:
-- **No reusing of components** — each registration creates a fresh set
-- Service connectors are set up behind the scenes, never exposed to users
-- Eventually support this via Terraform too
-
-Partially reflected in chapters 4/14/19 and plan phase 18, but the recipe syntax, "no component reuse" constraint, and Terraform aspiration aren't captured elsewhere.
-
-### Revisit whether "stack" is the right user-facing term
-
-Hamza's explicit scope: "a stack in kitaru simply defines the orchestrator, artifact store, and container URI (optionally). I would not include any other concept in it."
-
-If model registration and sandbox registration become separate concepts, the current "stack" abstraction may be too broad. Hamza suggested renaming to **"runtime"**.
-
-**Action:** Once model and sandbox registration decisions are made, revisit whether "stack" should be narrowed/renamed to "runtime".
-
-### Deploy-time default stack with artifact store
-
-Hamza proposed setting up a **default artifact store at deploy time** so users don't need to register a single stack to get started. Logs and artifacts would go to this default store automatically.
-
-Mentioned in chapters 4/19 and the plan, but the specific mechanism (artifact store provisioned at deploy time) and the goal (zero-stack-setup experience) are worth tracking as a concrete UX requirement.
-
-### Secrets and infra UX for new users — PARTIALLY RESOLVED
-
-**Decision:** Kitaru wraps ZenML's centralized secret store with `kitaru secrets set/show/list/delete`. Secrets are private by default and use env-var-shaped keys for LiteLLM compatibility. Model aliases can reference ZenML secrets via `--secret` for remote credential resolution. See updated spec chapters 4, 8, and 14.
-
-**Remaining work:**
-- End-to-end cloud stack setup experience for users who have never touched ZenML
-- Service connector creation integrated into stack creation UX
-- Making the whole infra setup feel native to Kitaru rather than requiring ZenML knowledge
+Moved to **[22-configuration-and-setup.md](22-configuration-and-setup.md)** — covers config directory naming, projects, stack registration recipes, "stack" vs "runtime" naming, deploy-time defaults, and secrets/infra UX.
 
 ---
 
