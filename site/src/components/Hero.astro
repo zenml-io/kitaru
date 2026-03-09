@@ -23,7 +23,7 @@
           style="font-size: clamp(1rem, 1.8vw, 1.15rem); max-width: 480px; line-height: 1.65; margin-bottom: 36px; font-weight: 300; color: var(--color-secondary);"
           data-reveal data-reveal-delay="2"
         >
-          Durable execution, <strong style="font-weight: 500; color: var(--color-primary);">human-in-the-loop</strong>, and crash recovery for Python agents.
+          Durable execution, <strong style="font-weight: 500; color: var(--color-primary);">input gates</strong>, and crash recovery for Python agents.
         </p>
 
         <div data-reveal data-reveal-delay="3">
@@ -56,7 +56,7 @@
     plan <span class="op">=</span> <span class="fn">analyze_issue</span>(issue)    <span class="cmt"># cached on replay</span>
     patch <span class="op">=</span> <span class="fn">write_code</span>(plan)      <span class="cmt"># cached on replay</span>
 
-    <span class="cmt"># Pauses. Resumes when a human responds.</span>
+    <span class="cmt"># Pauses. Resumes when input arrives.</span>
     approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, question<span class="op">=</span><span class="str">"Merge this PR?"</span>)
     <span class="kw">if</span> approved:
         <span class="fn">merge</span>(patch)
@@ -73,7 +73,7 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
 <span class="kw">from</span> kitaru.adapters <span class="kw">import</span> pydantic_ai <span class="kw">as</span> kp
 
 <span class="cmt"># Every LLM call + tool use is checkpointed.</span>
-<span class="cmt"># Human approval happens inside the agent loop.</span>
+<span class="cmt"># Approval happens inside the agent loop.</span>
 coder <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span class="str">"claude-sonnet-4-6"</span>, tools<span class="op">=</span>[edit, test, approve]))
 
 <span class="dec">@kitaru.flow</span>
