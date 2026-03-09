@@ -50,9 +50,10 @@ When an alias includes `--secret openai-creds`, `kitaru.llm()` fetches that secr
 ## 3) Call `kitaru.llm()` in a flow
 
 ```python
+from kitaru import flow
 import kitaru
 
-@kitaru.flow
+@flow
 def writer(topic: str) -> str:
     outline = kitaru.llm(
         f"Create a 3-bullet outline about {topic}.",

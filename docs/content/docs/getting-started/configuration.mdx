@@ -32,19 +32,21 @@ Flow defaults can override configured runtime defaults, and invocation-time
 arguments can override both.
 
 ```python
-@kitaru.flow(cache=True, retries=2)
+from kitaru import flow
+
+@flow(cache=True, retries=2)
 def my_flow(topic: str) -> str:
     ...
 
-handle = my_flow.start("kitaru", retries=3)
+handle = my_flow.run("kitaru", retries=3)
 ```
 
 In this example, resolved retries are `3`.
 
 ## Precedence (highest to lowest)
 
-1. Invocation-time overrides (`my_flow.start(..., stack="prod")`)
-2. Flow decorator defaults (`@kitaru.flow(stack="prod")`)
+1. Invocation-time overrides (`my_flow.run(..., stack="prod")`)
+2. Flow decorator defaults (`@flow(stack="prod")`)
 3. `kitaru.configure(...)`
 4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
@@ -118,7 +120,9 @@ the remote container. This installs all locally installed packages (via
 `pip freeze`) so the remote container matches your dev setup exactly:
 
 ```python
-@kitaru.flow(image={"replicate_local_python_environment": True})
+from kitaru import flow
+
+@flow(image={"replicate_local_python_environment": True})
 def my_flow(topic: str) -> str:
     ...
 ```
@@ -129,7 +133,10 @@ If your flow needs system-level dependencies (e.g., `git`, `ffmpeg`), use
 `apt_packages`:
 
 ```python
-@kitaru.flow(
+from kitaru import flow
+import kitaru
+
+@flow(
     image=kitaru.ImageSettings(
         apt_packages=["git", "ffmpeg"],
         requirements=["httpx"],

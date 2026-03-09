@@ -2,8 +2,8 @@
 
 This example demonstrates:
 - process-local defaults via ``kitaru.configure(...)``
-- flow-level defaults via ``@kitaru.flow(...)``
-- invocation-time overrides via ``.start(..., retries=...)``
+- flow-level defaults via ``@flow(...)``
+- invocation-time overrides via ``.run(..., retries=...)``
 - frozen execution spec persistence on the resulting run metadata
 """
 
@@ -12,9 +12,10 @@ from typing import Any, cast
 from zenml.client import Client
 
 import kitaru
+from kitaru import checkpoint, flow
 
 
-@kitaru.checkpoint
+@checkpoint
 def draft(topic: str) -> str:
     """Generate a simple draft output.
 
@@ -27,7 +28,7 @@ def draft(topic: str) -> str:
     return f"draft:{topic}".upper()
 
 
-@kitaru.flow(cache=True, retries=2)
+@flow(cache=True, retries=2)
 def configured_flow(topic: str) -> str:
     """Run a configured flow.
 
@@ -59,7 +60,7 @@ def run_workflow(topic: str = "kitaru") -> tuple[str, str, dict[str, Any]]:
         ),
     )
 
-    handle = configured_flow.start(topic, retries=3)
+    handle = configured_flow.run(topic, retries=3)
     result = handle.wait()
 
     run = Client().get_pipeline_run(

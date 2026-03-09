@@ -98,13 +98,13 @@ def test_executions_latest_with_stack_filter(
     mock_kitaru_client.executions.latest.assert_not_called()
 
 
-def test_executions_run_start_fetches_execution(
+def test_executions_run_fetches_execution(
     mock_kitaru_client: MagicMock,
     sample_execution,
 ) -> None:
-    """Run tool should start a flow and include execution details when available."""
+    """Run tool should run a flow and include execution details when available."""
     flow_target = MagicMock()
-    flow_target.start.return_value = SimpleNamespace(exec_id=sample_execution.exec_id)
+    flow_target.run.return_value = SimpleNamespace(exec_id=sample_execution.exec_id)
     mock_kitaru_client.executions.get.return_value = sample_execution
 
     with (
@@ -116,8 +116,8 @@ def test_executions_run_start_fetches_execution(
             args={"topic": "ai safety"},
         )
 
-    flow_target.start.assert_called_once_with(topic="ai safety")
-    assert payload["invocation"] == "start"
+    flow_target.run.assert_called_once_with(topic="ai safety")
+    assert payload["invocation"] == "run"
     assert payload["execution"]["exec_id"] == sample_execution.exec_id
 
 

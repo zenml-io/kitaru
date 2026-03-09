@@ -15,6 +15,7 @@ from contextlib import suppress
 from typing import Any, TypedDict
 
 import kitaru
+from kitaru import checkpoint, flow
 from kitaru.client import KitaruClient
 
 _WAIT_DISCOVERY_TIMEOUT_SECONDS = 900.0
@@ -27,13 +28,13 @@ class _StartState(TypedDict):
     error: Exception | None
 
 
-@kitaru.checkpoint
+@checkpoint
 def draft_release_note(topic: str) -> str:
     """Create a draft release note for the requested topic."""
     return f"Draft about {topic}."
 
 
-@kitaru.checkpoint
+@checkpoint
 def publish_release_note(draft: str) -> str:
     """Publish a previously approved draft release note."""
     return f"PUBLISHED: {draft}"
@@ -43,7 +44,7 @@ def publish_release_note(draft: str) -> str:
 # feature/pause-pipeline-runs are released to PyPI — the auto-injection
 # of kitaru into Docker requirements will handle this automatically.
 # Build the dev image with: just dev-image
-@kitaru.flow(image={"base_image": "strickvl/kitaru-dev:latest"})
+@flow(image={"base_image": "strickvl/kitaru-dev:latest"})
 def wait_for_approval_flow(topic: str) -> str:
     """Gate publication behind a durable human-approval wait."""
     draft = draft_release_note(topic)
@@ -99,12 +100,12 @@ def _watch_and_print_unblock_commands(
 
 
 def _start_flow_in_background(topic: str) -> tuple[threading.Thread, _StartState]:
-    """Start the flow in a background thread to avoid local start() blocking."""
+    """Start the flow in a background thread to avoid local run() blocking."""
     state: _StartState = {"handle": None, "error": None}
 
     def _runner() -> None:
         try:
-            state["handle"] = wait_for_approval_flow.start(topic, cache=False)
+            state["handle"] = wait_for_approval_flow.run(topic, cache=False)
         except Exception as exc:  # pragma: no cover - surfaced via state
             state["error"] = exc
 
@@ -126,7 +127,7 @@ def _wait_for_pending_wait(
         start_error = start_state["error"]
         if start_error is not None:
             raise RuntimeError(
-                "Flow start failed before reaching a wait condition."
+                "Flow run failed before reaching a wait condition."
             ) from start_error
 
         found = _find_pending_wait_for_topic(client=client, topic=topic)
@@ -175,14 +176,14 @@ def run_workflow(
     starter_thread.join(timeout=60.0)
     if starter_thread.is_alive():
         raise TimeoutError(
-            "Timed out waiting for the background flow start call to finish."
+            "Timed out waiting for the background flow run call to finish."
         )
     if start_state["error"] is not None:
         raise RuntimeError("Background flow start failed.") from start_state["error"]
 
     handle = start_state["handle"]
     if handle is None:
-        raise RuntimeError("Flow handle was not captured from background start.")
+        raise RuntimeError("Flow handle was not captured from background run.")
 
     result = handle.wait()
     if not isinstance(result, str):
@@ -213,7 +214,7 @@ def run_workflow_interactive(topic: str | None = None) -> str:
     print("Keep this terminal open; execute the printed commands in another terminal.")
 
     try:
-        result = wait_for_approval_flow(resolved_topic)
+        result = wait_for_approval_flow.run(resolved_topic).wait()
     finally:
         stop_event.set()
         watcher.join(timeout=2.0)

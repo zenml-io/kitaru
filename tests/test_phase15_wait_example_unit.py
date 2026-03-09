@@ -101,7 +101,7 @@ def test_run_workflow_times_out_if_starter_thread_never_finishes(monkeypatch) ->
     )
     monkeypatch.setattr(wait_and_resume, "KitaruClient", Mock(return_value=fake_client))
 
-    with pytest.raises(TimeoutError, match="background flow start"):
+    with pytest.raises(TimeoutError, match="background flow run"):
         wait_and_resume.run_workflow(topic="kitaru")
 
 
@@ -125,7 +125,7 @@ def test_watch_prints_manual_unblock_commands(monkeypatch, capsys) -> None:
 
 
 def test_run_workflow_interactive_uses_main_thread_flow_call(monkeypatch) -> None:
-    """Interactive mode should call flow directly and return its final result."""
+    """Interactive mode should call .run().wait() and return its final result."""
     fake_client = Mock()
     monkeypatch.setattr(wait_and_resume, "KitaruClient", Mock(return_value=fake_client))
     monkeypatch.setattr(
@@ -134,10 +134,13 @@ def test_run_workflow_interactive_uses_main_thread_flow_call(monkeypatch) -> Non
         lambda **_: None,
     )
 
-    fake_flow_call = Mock(return_value="done")
-    monkeypatch.setattr(wait_and_resume, "wait_for_approval_flow", fake_flow_call)
+    fake_handle = SimpleNamespace(wait=Mock(return_value="done"))
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=fake_handle)
+    monkeypatch.setattr(wait_and_resume, "wait_for_approval_flow", fake_flow)
 
     result = wait_and_resume.run_workflow_interactive(topic="kitaru")
 
-    fake_flow_call.assert_called_once_with("kitaru")
+    fake_flow.run.assert_called_once_with("kitaru")
+    fake_handle.wait.assert_called_once()
     assert result == "done"

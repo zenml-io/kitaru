@@ -6,9 +6,10 @@ This example shows both logging scopes:
 """
 
 import kitaru
+from kitaru import checkpoint, flow
 
 
-@kitaru.checkpoint
+@checkpoint
 def write_draft(topic: str) -> str:
     """Create a draft paragraph for a topic.
 
@@ -24,7 +25,7 @@ def write_draft(topic: str) -> str:
     return draft
 
 
-@kitaru.checkpoint
+@checkpoint
 def polish_draft(draft: str) -> str:
     """Polish the generated draft.
 
@@ -39,7 +40,7 @@ def polish_draft(draft: str) -> str:
     return refined
 
 
-@kitaru.flow
+@flow
 def writing_agent(topic: str) -> str:
     """Run the logging example workflow.
 
@@ -65,7 +66,7 @@ def run_workflow(topic: str = "kitaru") -> str:
     Returns:
         Workflow output.
     """
-    return writing_agent(topic)
+    return writing_agent.run(topic).wait()
 
 
 def main() -> None:

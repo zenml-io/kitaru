@@ -21,12 +21,12 @@ like this:
 Your Python code between checkpoints runs normally — Kitaru does not intercept
 every line. The durability guarantees apply at the checkpoint boundaries.
 
-## What happens when you call a flow
-
-### Direct call
+## What happens when you run a flow
 
 ```python
-result = my_agent("https://example.com")
+handle = my_agent.run("https://example.com")
+# execution runs in the background
+result = handle.wait()
 ```
 
 Behind the scenes:
@@ -36,10 +36,13 @@ Behind the scenes:
     Kitaru submits a new execution
   </Step>
   <Step>
-    A `FlowHandle` is created internally
+    `.run()` returns a `FlowHandle` immediately
   </Step>
   <Step>
-    The call blocks (via `handle.wait()`) until the execution finishes
+    The execution runs in the background
+  </Step>
+  <Step>
+    Calling `handle.wait()` blocks until the execution finishes
   </Step>
   <Step>
     On success, the flow's return value is extracted and returned
@@ -49,16 +52,11 @@ Behind the scenes:
   </Step>
 </Steps>
 
-### Handle-based execution
+For a synchronous one-liner, chain `.wait()`:
 
 ```python
-handle = my_agent.start("https://example.com")
-# execution runs in the background
-result = handle.wait()
+result = my_agent.run("https://example.com").wait()
 ```
-
-The same execution lifecycle happens, but you control when to block. This is
-useful when you want to start multiple flows or do other work while waiting.
 
 ## How results surface
 
@@ -70,15 +68,17 @@ return value:
 - **No return value** → returns `None`
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def single_result() -> str:
     return process()
-# result = single_result()  → "processed data"
+# result = single_result.run().wait()  → "processed data"
 
-@kitaru.flow
+@flow
 def no_result() -> None:
     process()
-# result = no_result()  → None
+# result = no_result.run().wait()  → None
 ```
 
 ## How errors surface
@@ -90,12 +90,10 @@ what went wrong:
 
 ```python
 try:
-    result = my_agent("bad-input")
+    result = my_agent.run("bad-input").wait()
 except RuntimeError as e:
     print(e)  # includes execution ID and status
 ```
-
-This happens whether you use a direct call or `handle.wait()`.
 
 ### `handle.get()` on an unfinished execution
 
@@ -103,7 +101,7 @@ This happens whether you use a direct call or `handle.wait()`.
 it raises immediately:
 
 ```python
-handle = my_agent.start("https://example.com")
+handle = my_agent.run("https://example.com")
 try:
     result = handle.get()  # raises if not yet finished
 except RuntimeError:
@@ -127,7 +125,7 @@ point where they happen.
 
 ## Caching behavior
 
-By default, checkpoint caching is **enabled** (`cache=True` on `@kitaru.flow`).
+By default, checkpoint caching is **enabled** (`cache=True` on `@flow`).
 This means:
 
 - Checkpoints that already succeeded in a previous execution can return their
@@ -138,13 +136,15 @@ This means:
 You can disable caching at the flow level or per-run:
 
 ```python
+from kitaru import flow
+
 # Disable caching by default
-@kitaru.flow(cache=False)
+@flow(cache=False)
 def always_fresh(url: str) -> str:
     ...
 
 # Or override per-run
-handle = my_agent.start("https://example.com", cache=False)
+handle = my_agent.run("https://example.com", cache=False)
 ```
 
 ## Current limitations

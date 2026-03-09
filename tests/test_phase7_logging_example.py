@@ -22,7 +22,7 @@ def _find_step_metadata(
 
 def test_phase7_logging_example_runs_end_to_end() -> None:
     """Verify the logging example executes and persists structured metadata."""
-    handle = writing_agent.start("kitaru")
+    handle = writing_agent.run("kitaru")
     result = handle.wait()
 
     assert result == "DRAFT ABOUT KITARU. [reviewed]"

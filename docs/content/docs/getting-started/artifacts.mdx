@@ -8,7 +8,7 @@ Use `kitaru.save()` and `kitaru.load()` when you want explicit artifact handling
 - `kitaru.save(name, value, ...)` stores a named value in the current checkpoint.
 - `kitaru.load(exec_id, name)` reads a named value from another execution.
 
-Both APIs are checkpoint-only. Calling them outside `@kitaru.checkpoint` raises an error.
+Both APIs are checkpoint-only. Calling them outside `@checkpoint` raises an error.
 
 ## Artifact types
 
@@ -24,15 +24,16 @@ Kitaru validates these artifact types:
 ## Example
 
 ```python
+from kitaru import checkpoint
 import kitaru
 
-@kitaru.checkpoint
+@checkpoint
 def research(topic: str) -> str:
     notes = f"Research notes about {topic}."
     kitaru.save("research_context", {"topic": topic, "notes": notes}, type="context")
     return notes
 
-@kitaru.checkpoint
+@checkpoint
 def follow_up(prev_exec_id: str) -> str:
     # Load checkpoint output by checkpoint name.
     previous_notes = kitaru.load(prev_exec_id, "research")

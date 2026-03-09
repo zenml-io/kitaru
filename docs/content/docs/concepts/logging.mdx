@@ -20,9 +20,10 @@ storage configuration, see
 Call `kitaru.log()` with keyword arguments to attach structured metadata:
 
 ```python
+from kitaru import checkpoint
 import kitaru
 
-@kitaru.checkpoint
+@checkpoint
 def call_model(prompt: str) -> str:
     response = model.generate(prompt)
     kitaru.log(
@@ -50,14 +51,17 @@ outside a flow       →  raises RuntimeError
 This means you can log at both levels in the same workflow:
 
 ```python
-@kitaru.checkpoint
+from kitaru import flow, checkpoint
+import kitaru
+
+@checkpoint
 def write_draft(topic: str) -> str:
     draft = f"Draft about {topic}."
     kitaru.log(draft_cost={"usd": 0.001})       # → checkpoint metadata
     kitaru.log(model="demo-model", latency_ms=120)  # → checkpoint metadata
     return draft
 
-@kitaru.flow
+@flow
 def writing_agent(topic: str) -> str:
     kitaru.log(topic=topic, stage="started")     # → execution metadata
     draft = write_draft(topic)
@@ -81,7 +85,10 @@ on the value type:
 For example:
 
 ```python
-@kitaru.checkpoint
+from kitaru import checkpoint
+import kitaru
+
+@checkpoint
 def tracked_step() -> str:
     kitaru.log(cost={"usd": 0.001})
     kitaru.log(cost={"tokens": 42})

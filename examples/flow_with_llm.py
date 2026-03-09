@@ -11,9 +11,10 @@ from typing import Any, cast
 from zenml.client import Client
 
 import kitaru
+from kitaru import checkpoint, flow
 
 
-@kitaru.checkpoint
+@checkpoint
 def write_draft(topic: str, outline: str) -> str:
     """Expand an outline into a short draft paragraph."""
     return kitaru.llm(
@@ -23,7 +24,7 @@ def write_draft(topic: str, outline: str) -> str:
     )
 
 
-@kitaru.flow
+@flow
 def llm_writer(topic: str) -> str:
     """Generate an outline and then a draft using tracked LLM calls."""
     outline = kitaru.llm(
@@ -36,7 +37,7 @@ def llm_writer(topic: str) -> str:
 
 def run_workflow(topic: str = "kitaru") -> tuple[str, str, list[dict[str, Any]]]:
     """Run the LLM workflow and return execution diagnostics."""
-    handle = llm_writer.start(topic)
+    handle = llm_writer.run(topic)
     raw_result = handle.wait()
     if not isinstance(raw_result, str):
         raise RuntimeError(

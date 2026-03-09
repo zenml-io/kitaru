@@ -52,8 +52,8 @@ Each stack entry is returned as `StackInfo(id, name, is_active)`.
 The active stack is only one layer in the Phase 10 precedence chain. Higher
 layers can override it:
 
-1. `my_flow.start(..., stack="gpu-cluster")`
-2. `@kitaru.flow(stack="gpu-cluster")`
+1. `my_flow.run(..., stack="gpu-cluster")`
+2. `@flow(stack="gpu-cluster")`
 3. `kitaru.configure(stack="gpu-cluster")`
 4. `KITARU_STACK`
 5. `pyproject.toml` (`[tool.kitaru].stack`)

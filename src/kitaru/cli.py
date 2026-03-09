@@ -117,7 +117,7 @@ class RuntimeSnapshot:
 
 @runtime_checkable
 class _FlowHandleLike(Protocol):
-    """Protocol for flow handles returned by `.start()` / `.deploy()`."""
+    """Protocol for flow handles returned by `.run()` / `.deploy()`."""
 
     @property
     def exec_id(self) -> str: ...
@@ -127,7 +127,7 @@ class _FlowHandleLike(Protocol):
 class _FlowTarget(Protocol):
     """Protocol for CLI-runnable flow objects."""
 
-    def start(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
+    def run(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
 
     def deploy(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
 
@@ -182,7 +182,7 @@ def _load_flow_target(target: str) -> _FlowTarget:
     if not isinstance(flow_obj, _FlowTarget):
         raise ValueError(
             f"Target `{target}` is not a Kitaru flow object. "
-            "Expected an object created by `@kitaru.flow` with `.start()` support."
+            "Expected an object created by `@flow` with `.run()` support."
         )
 
     return flow_obj
@@ -300,7 +300,7 @@ def _run_rows(
     execution: Execution,
 ) -> list[tuple[str, str]]:
     """Build label/value rows for `kitaru run` output."""
-    invocation = "deploy" if stack else "start"
+    invocation = "deploy" if stack else "run"
     return [
         ("Target", target),
         ("Invocation", invocation),
@@ -1175,7 +1175,7 @@ def run(
         if stack:
             handle = flow_target.deploy(stack=stack, **flow_inputs)
         else:
-            handle = flow_target.start(**flow_inputs)
+            handle = flow_target.run(**flow_inputs)
 
         if not isinstance(handle, _FlowHandleLike):
             raise ValueError(
@@ -1193,7 +1193,7 @@ def run(
             "Kitaru run",
             [
                 ("Target", target),
-                ("Invocation", "deploy" if stack else "start"),
+                ("Invocation", "deploy" if stack else "run"),
                 ("Execution ID", handle.exec_id),
             ],
             warning=(

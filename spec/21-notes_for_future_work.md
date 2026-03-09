@@ -8,34 +8,26 @@ This document tracks open work items, grouped by domain. Items marked **RESOLVED
 
 How users write Kitaru code — import style, invocation patterns, language support.
 
-### Flow invocation API
+### Flow invocation API — RESOLVED
 
-The spec defines 3 patterns for starting a flow:
+Direct call syntax (`my_agent("input")`) removed — `__call__` now raises a friendly `KitaruUsageError`. `.start()` removed entirely. `.run()` is the canonical verb. `.deploy()` remains as semantic sugar for `.run(..., stack=...)`.
+
+Two invocation patterns:
 
 ```python
-# 1. Synchronous — blocks until complete
-result = my_agent("Build a CLI tool")
+# Handle-based — returns a FlowHandle
+handle = my_agent.run("Build a CLI tool")
 
-# 2. Start — returns a handle for longer-running execution
-handle = my_agent.start("Build a CLI tool")
-
-# 3. Deploy — starts an execution on a named stack
+# Deploy — signals remote/deployment intent
 handle = my_agent.deploy("Build a CLI tool", stack="aws-sandbox")
+
+# Block until complete
+result = my_agent.run("Build a CLI tool").wait()
 ```
 
-Hamza's feedback:
-- Drop `my_agent("Build a CLI tool")` (direct call syntax)
-- `.start()` is subsumed by `.run()` — `run` is the common verb (LangGraph uses it); `start` and `execute` are less standard
+### Import style — RESOLVED
 
-**Action:** Settle on `.run()` as the canonical verb and update the spec + examples.
-
-### Import style: `@flow` / `@checkpoint` vs `@kitaru.flow` / `@kitaru.checkpoint`
-
-Hamza's preference: `from kitaru import flow, checkpoint` then use `@flow` and `@checkpoint` directly, rather than `@kitaru.flow` / `@kitaru.checkpoint`.
-
-This is cosmetic but affects every code example in the spec and docs. Both styles can coexist (the module-level `kitaru.flow` is just an attribute), but the spec and docs should be consistent about which style is recommended.
-
-**Action:** Decide on canonical import style and update all examples accordingly.
+Canonical style: `from kitaru import flow, checkpoint` for decorators. `import kitaru` for runtime helpers (`kitaru.log()`, `kitaru.wait()`, etc.). Both `@flow` and `@kitaru.flow` work mechanically, but docs/examples use the direct import form.
 
 ### Python version support: eventually target 3.11+
 
