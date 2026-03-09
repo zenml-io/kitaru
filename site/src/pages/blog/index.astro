@@ -4,6 +4,7 @@ import Base from '../../layouts/Base.astro';
 import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
 import BlogCard from '../../components/blog/BlogCard.astro';
+import { readingTime, AUTHORS, CATEGORY_STYLES } from '../../lib/blog';
 
 const posts = (await getCollection('blog', ({ data }) => !data.draft))
   .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
@@ -15,6 +16,11 @@ const featuredDate = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   year: 'numeric',
 }).format(featured.data.date);
+
+const featuredAuthor = AUTHORS[featured.data.author] ?? { initials: '??', color: '#9E9790' };
+const featuredCategory = featured.data.category ?? 'Agents';
+const featuredCatStyle = CATEGORY_STYLES[featuredCategory] ?? CATEGORY_STYLES.Agents;
+const featuredReadTime = readingTime(featured.body ?? '');
 ---
 
 <Base title="Blog — Kitaru" description="Thoughts on durable execution, agent infrastructure, and building reliable AI systems.">
@@ -26,21 +32,31 @@ const featuredDate = new Intl.DateTimeFormat('en-US', {
   <main class="blog-index">
     <div class="section-inner">
       <span class="section-eyebrow" data-reveal>Blog</span>
+      <p class="blog-subtitle" data-reveal data-reveal-delay="1">Thoughts on durable execution, agent infrastructure, and building reliable AI systems.</p>
 
       <!-- Featured post -->
-      <a href={`/blog/${featured.id}`} class="blog-featured" data-reveal data-reveal-delay="1">
-        <div class="blog-featured-accent"></div>
+      <a href={`/blog/${featured.id}`} class="blog-featured" data-reveal data-reveal-delay="2">
         <div class="blog-featured-content">
-          <span class="blog-featured-meta">{featured.data.author} &middot; {featuredDate}</span>
+          <div class="blog-featured-top">
+            <span class="cat-pill" style={`background:${featuredCatStyle.bg};color:${featuredCatStyle.color};`}>{featuredCategory}</span>
+            <span class="blog-meta-text">{featuredReadTime}</span>
+          </div>
+          <div class="blog-featured-author">
+            <span class="avatar" style={`background:${featuredAuthor.color};`}>{featuredAuthor.initials}</span>
+            <span class="blog-meta-text">{featured.data.author} &middot; {featuredDate}</span>
+          </div>
           <h1 class="blog-featured-title">{featured.data.title}</h1>
           <p class="blog-featured-desc">{featured.data.description}</p>
           <span class="blog-featured-read">Read post &rarr;</span>
+        </div>
+        <div class="blog-featured-image" aria-hidden="true">
+          <div class="blog-featured-image-inner"></div>
         </div>
       </a>
 
       <!-- Remaining posts -->
       {rest.length > 0 && (
-        <div class="blog-grid" data-reveal data-reveal-delay="2">
+        <div class="blog-grid" data-reveal data-reveal-delay="3">
           {rest.map((post) => (
             <BlogCard
               href={`/blog/${post.id}`}
@@ -48,6 +64,8 @@ const featuredDate = new Intl.DateTimeFormat('en-US', {
               description={post.data.description}
               date={post.data.date}
               author={post.data.author}
+              category={post.data.category}
+              body={post.body ?? ''}
             />
           ))}
         </div>
@@ -62,47 +80,53 @@ const featuredDate = new Intl.DateTimeFormat('en-US', {
     padding: 40px clamp(16px, 5vw, 80px) 100px;
   }
 
-  /* Featured post */
+  .blog-subtitle {
+    font-size: clamp(0.88rem, 2vw, 0.95rem);
+    color: var(--color-secondary);
+    line-height: 1.5;
+    max-width: 480px;
+    margin-bottom: 32px;
+  }
+
+  /* ── Featured post ── */
   .blog-featured {
     display: flex;
     text-decoration: none;
-    border-radius: 12px;
+    border-radius: 14px;
     border: 1px solid var(--color-border);
-    background: var(--color-surface-warm);
+    background: linear-gradient(135deg, rgba(241, 120, 41, 0.06) 0%, rgba(160, 120, 72, 0.05) 100%);
     overflow: hidden;
-    margin: 32px 0 48px;
+    margin-bottom: 48px;
     transition: border-color 0.2s, transform 0.15s;
   }
 
   .blog-featured:hover {
-    border-color: rgba(241, 120, 41, 0.4);
+    border-color: rgba(241, 120, 41, 0.35);
     transform: translateY(-2px);
   }
 
-  .blog-featured-accent {
-    width: 6px;
-    flex-shrink: 0;
-    background: linear-gradient(180deg, var(--color-accent) 0%, var(--color-accent-deep, #c45a1a) 100%);
-  }
-
   .blog-featured-content {
-    padding: clamp(24px, 5vw, 48px);
+    flex: 1;
+    padding: clamp(28px, 5vw, 44px);
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
 
-  .blog-featured-meta {
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    font-weight: 500;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-muted);
+  .blog-featured-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .blog-featured-author {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .blog-featured-title {
-    font-size: clamp(1.5rem, 3.5vw, 2.2rem);
+    font-size: clamp(1.5rem, 3.5vw, 2rem);
     font-weight: 700;
     line-height: 1.2;
     letter-spacing: -0.02em;
@@ -111,31 +135,80 @@ const featuredDate = new Intl.DateTimeFormat('en-US', {
   }
 
   .blog-featured-desc {
-    font-size: clamp(0.92rem, 2vw, 1.05rem);
-    line-height: 1.65;
+    font-size: clamp(0.9rem, 2vw, 1rem);
+    line-height: 1.6;
     color: var(--color-secondary);
     margin: 0;
-    max-width: 640px;
+    max-width: 560px;
   }
 
   .blog-featured-read {
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     font-weight: 500;
     color: var(--color-accent);
     margin-top: 4px;
   }
 
-  /* Grid */
+  .blog-featured-image {
+    width: 320px;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .blog-featured-image-inner {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(241, 120, 41, 0.1) 0%, rgba(160, 120, 72, 0.12) 60%, rgba(26, 23, 20, 0.04) 100%);
+  }
+
+  /* ── Shared meta styles ── */
+  .cat-pill {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    line-height: 1;
+  }
+
+  .blog-meta-text {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  /* ── Grid (2-column) ── */
   .blog-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 20px;
   }
 
   @media (max-width: 900px) {
-    .blog-grid {
-      grid-template-columns: repeat(2, 1fr);
+    .blog-featured-image {
+      display: none;
     }
   }
 
@@ -150,7 +223,7 @@ const featuredDate = new Intl.DateTimeFormat('en-US', {
     }
 
     .blog-featured {
-      margin: 24px 0 36px;
+      margin-bottom: 36px;
     }
   }
 </style>
