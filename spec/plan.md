@@ -656,7 +656,7 @@ MVP tool set, packaging requirements)
 - Update docs site with SDK reference
 - Final packaging review:
   - `kitaru` PyPI package
-  - `kitaru` Docker image (ZenML base + cloud plugins + bundled dashboard)
+  - `kitaru` Docker image (ZenML base + cloud plugins + bundled dashboard) — **DONE** (Dockerfile + release workflow; dashboard bundling pending `kitaru-ui`)
   - `kitaru-ui` bundled into both PyPI package and Docker image
   - MCP/skill docs
   - Sandbox component docs
