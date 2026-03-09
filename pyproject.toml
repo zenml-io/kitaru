@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 authors = [
     { name = "ZenML GmbH", email = "info@zenml.io" },
 ]
@@ -13,6 +13,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
@@ -71,7 +72,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 src = ["src", "scripts", "tests"]
 line-length = 88
 exclude= [
@@ -99,7 +100,7 @@ convention = "google"
 known-first-party = ["kitaru"]
 
 [tool.ty.environment]
-python-version = "3.12"
+python-version = "3.11"
 root = ["src", "scripts", "."]
 
 [[tool.ty.overrides]]

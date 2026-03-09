@@ -49,6 +49,10 @@ jobs:
     strategy:
       matrix:
         include:
+          - name: py311-base
+            python-version: '3.11'
+            sync-command: uv sync --frozen
+            pytest-command: uv run pytest --ignore=tests/mcp
           - name: py312-base
             python-version: '3.12'
             sync-command: uv sync --frozen
@@ -57,6 +61,10 @@ jobs:
             python-version: '3.13'
             sync-command: uv sync --frozen
             pytest-command: uv run pytest --ignore=tests/mcp
+          - name: py311-mcp
+            python-version: '3.11'
+            sync-command: uv sync --frozen --extra mcp
+            pytest-command: uv run pytest tests/mcp
           - name: py312-mcp
             python-version: '3.12'
             sync-command: uv sync --frozen --extra mcp

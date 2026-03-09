@@ -107,7 +107,7 @@ just site-build && npx wrangler deploy   # Build + deploy
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, links, typecheck, and tests across base installs (3.12 + 3.13) plus an additional `kitaru[mcp]` test lane |
+| `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, links, typecheck, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes |
 | `site.yml` | Push to `main`; PRs touching docs/site/scripts | Build + deploy unified site; PR preview Workers |
 | `release.yml` | Workflow dispatch or `v*` tag | Version bump, PyPI publish, GitHub Release |
 | `spellcheck.yml` | Push/PR to `develop` | Separate typo/spell checking |
@@ -204,7 +204,7 @@ CLI output uses [Rich](https://rich.readthedocs.io/) for styled terminal output 
 
 ## Conventions
 
-- Python 3.12+
+- Python 3.11+
 - Type hint all function parameters and return values
 - Use modern type annotations: `list[str]` not `List[str]`, `str | None` not `Optional[str]`, `dict[str, int]` not `Dict[str, int]` — no `from typing import` for these
 - src layout (`src/kitaru/`)
