@@ -185,7 +185,14 @@ class TestExtractApi:
         raw = extract_api("kitaru")
         filtered = _filter_module(raw, is_root=True)
 
-        exported_functions = set(filtered.get("functions", {}).keys())
+        # Stack helpers live in kitaru.config (a public submodule), so they
+        # appear under the config module rather than being promoted to root.
+        config_funcs = set(
+            filtered.get("modules", {})
+            .get("config", {})
+            .get("functions", {})
+            .keys()
+        )
         assert {"list_stacks", "current_stack", "use_stack"}.issubset(
-            exported_functions
+            config_funcs
         )
