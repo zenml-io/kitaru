@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, Mock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -23,8 +24,10 @@ from kitaru.config import (
 from kitaru.errors import (
     FailureOrigin,
     KitaruFeatureNotAvailableError,
+    KitaruLogRetrievalError,
     KitaruRuntimeError,
     KitaruStateError,
+    KitaruUsageError,
     KitaruWaitValidationError,
 )
 
@@ -1015,3 +1018,341 @@ def test_artifact_get_maps_producing_call_and_loads_value() -> None:
 
     assert value == {"ok": True}
     assert client_mock.get_artifact_version.call_count == 2
+
+
+def test_logs_merges_step_entries_in_timestamp_order() -> None:
+    step_research = _DummyStep(
+        name="__kitaru_checkpoint_source_research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    step_write = _DummyStep(
+        name="__kitaru_checkpoint_source_write",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    step_research.start_time = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    step_write.start_time = datetime(2026, 3, 9, 10, 5, tzinfo=UTC)
+
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={
+            step_write.name: step_write,
+            step_research.name: step_research,
+        },
+    )
+
+    fake_store = Mock()
+
+    def _get(path: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        assert params == {"source": "step"}
+        if path == f"/steps/{step_research.id}/logs":
+            return [
+                {
+                    "message": "research-start",
+                    "timestamp": "2026-03-09T10:00:01+00:00",
+                    "level": "INFO",
+                },
+                {
+                    "message": "research-end",
+                    "timestamp": "2026-03-09T10:00:03+00:00",
+                    "level": "INFO",
+                },
+            ]
+        if path == f"/steps/{step_write.id}/logs":
+            return [
+                {
+                    "message": "write-start",
+                    "timestamp": "2026-03-09T10:00:02+00:00",
+                    "level": "INFO",
+                }
+            ]
+        raise AssertionError(f"Unexpected path: {path}")
+
+    fake_store.get.side_effect = _get
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        entries = client.executions.logs(str(run.id))
+
+    assert [entry.message for entry in entries] == [
+        "research-start",
+        "write-start",
+        "research-end",
+    ]
+    assert [entry.checkpoint_name for entry in entries] == [
+        "research",
+        "write",
+        "research",
+    ]
+
+
+def test_logs_filters_by_checkpoint_name() -> None:
+    step_research = _DummyStep(
+        name="__kitaru_checkpoint_source_research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    step_write = _DummyStep(
+        name="__kitaru_checkpoint_source_write",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    step_research.start_time = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    step_write.start_time = datetime(2026, 3, 9, 10, 5, tzinfo=UTC)
+
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={step_research.name: step_research, step_write.name: step_write},
+    )
+
+    fake_store = Mock()
+    fake_store.get.return_value = [
+        {"message": "research-only", "timestamp": "2026-03-09T10:00:01+00:00"}
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        entries = client.executions.logs(str(run.id), checkpoint="research")
+
+    assert len(entries) == 1
+    assert entries[0].checkpoint_name == "research"
+    fake_store.get.assert_called_once_with(
+        f"/steps/{step_research.id}/logs", params={"source": "step"}
+    )
+
+
+def test_logs_runner_source_uses_run_endpoint() -> None:
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={},
+    )
+
+    fake_store = Mock()
+    fake_store.get.return_value = [
+        {"message": "runner-log", "timestamp": "2026-03-09T10:00:01+00:00"}
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        entries = client.executions.logs(str(run.id), source="runner")
+
+    assert len(entries) == 1
+    assert entries[0].source == "runner"
+    fake_store.get.assert_called_once_with(
+        f"/runs/{run.id}/logs", params={"source": "runner"}
+    )
+
+
+def test_logs_rejects_checkpoint_with_runner_source() -> None:
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={},
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        with pytest.raises(KitaruUsageError, match="checkpoint"):
+            client.executions.logs(
+                str(run.id),
+                checkpoint="research",
+                source="runner",
+            )
+
+
+def test_logs_early_stops_when_limit_is_reached() -> None:
+    first_step = _DummyStep(
+        name="__kitaru_checkpoint_source_first",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    second_step = _DummyStep(
+        name="__kitaru_checkpoint_source_second",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    first_step.start_time = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    second_step.start_time = datetime(2026, 3, 9, 10, 5, tzinfo=UTC)
+
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={first_step.name: first_step, second_step.name: second_step},
+    )
+
+    fake_store = Mock()
+
+    def _get(path: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        if path == f"/steps/{first_step.id}/logs":
+            return [
+                {"message": "first-1", "timestamp": "2026-03-09T10:00:01+00:00"},
+                {"message": "first-2", "timestamp": "2026-03-09T10:00:02+00:00"},
+            ]
+        if path == f"/steps/{second_step.id}/logs":
+            return [{"message": "second-1", "timestamp": "2026-03-09T10:00:03+00:00"}]
+        raise AssertionError(f"Unexpected path: {path}")
+
+    fake_store.get.side_effect = _get
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        entries = client.executions.logs(str(run.id), limit=2)
+
+    assert [entry.message for entry in entries] == ["first-1", "first-2"]
+    assert fake_store.get.call_count == 1
+
+
+def test_logs_require_server_backed_connection() -> None:
+    step = _DummyStep(
+        name="__kitaru_checkpoint_source_research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={step.name: step},
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.zen_store = object()
+
+        client = KitaruClient()
+        with pytest.raises(KitaruLogRetrievalError, match="server-backed"):
+            client.executions.logs(str(run.id))
+
+
+def test_logs_map_otel_retrieval_errors_to_kitaru_error() -> None:
+    step = _DummyStep(
+        name="__kitaru_checkpoint_source_research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={step.name: step},
+    )
+
+    fake_store = Mock()
+    fake_store.get.side_effect = RuntimeError(
+        "NotImplementedError: OTEL log store fetch is not implemented"
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
+        patch(
+            "kitaru.client.active_stack_log_store",
+            return_value=SimpleNamespace(
+                backend="otel",
+                endpoint="https://logs.example.com",
+                stack_name="prod",
+            ),
+        ),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        with pytest.raises(KitaruLogRetrievalError, match="OTEL backend"):
+            client.executions.logs(str(run.id))
+
+
+def test_logs_return_empty_list_when_backend_reports_no_entries() -> None:
+    step = _DummyStep(
+        name="__kitaru_checkpoint_source_research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={step.name: step},
+    )
+
+    fake_store = Mock()
+    fake_store.get.side_effect = RuntimeError(
+        f"No logs found for source 'step' in step {step.id}"
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        entries = client.executions.logs(str(run.id))
+
+    assert entries == []

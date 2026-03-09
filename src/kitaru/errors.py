@@ -66,6 +66,10 @@ class KitaruBackendError(KitaruRuntimeError):
     """Raised when Kitaru cannot communicate with the backend."""
 
 
+class KitaruLogRetrievalError(KitaruBackendError):
+    """Raised when runtime logs cannot be retrieved from the backend."""
+
+
 class KitaruDivergenceError(KitaruExecutionError):
     """Raised when replay divergence is detected by the backend."""
 
@@ -176,6 +180,7 @@ __all__ = [
     "KitaruError",
     "KitaruExecutionError",
     "KitaruFeatureNotAvailableError",
+    "KitaruLogRetrievalError",
     "KitaruRuntimeError",
     "KitaruStateError",
     "KitaruUsageError",
