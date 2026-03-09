@@ -29,6 +29,8 @@ result = my_agent.run("Build a CLI tool").wait()
 
 Canonical style: `from kitaru import flow, checkpoint` for decorators. `import kitaru` for runtime helpers (`kitaru.log()`, `kitaru.wait()`, etc.). Both `@flow` and `@kitaru.flow` work mechanically, but docs/examples use the direct import form.
 
+**Terminology alignment — DONE.** All error messages, docstrings, test assertions, skill files, docs pages, and spec chapters (02–20) updated to use canonical `@flow` / `@checkpoint` style. Runtime helpers remain namespaced (`kitaru.log()`, `kitaru.wait()`, etc.).
+
 ### Python version support: eventually target 3.11+
 
 Current: Python 3.12+ only. Hamza wanted 3.10+ (matching ZenML). Alex's rationale for 3.12: it's the typing dividing line (modern `type` statement, PEP 695 generics).
