@@ -1,11 +1,8 @@
 {
   "title": "Documentation",
   "pages": [
-    "---Getting Started---",
     "getting-started",
-    "---Core Concepts---",
     "concepts",
-    "---Agent Integrations---",
     "agent-integrations",
     "---Reference---",
     "cli",
