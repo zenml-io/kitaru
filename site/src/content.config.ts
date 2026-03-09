@@ -13,6 +13,7 @@ const blog = defineCollection({
       .enum(['Agents', 'Infrastructure', 'Design', 'Philosophy'])
       .default('Agents'),
     ogImage: z.string().optional(),
+    image: z.string().optional(),
   }),
 });
 
