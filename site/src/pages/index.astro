@@ -10,6 +10,7 @@ import Features from '../components/Features.astro';
 import AgentNative from '../components/AgentNative.astro';
 import Cta from '../components/Cta.astro';
 import Footer from '../components/Footer.astro';
+import { KITARU_DEMO_CAL } from '../lib/cal';
 ---
 
 <Base>
@@ -37,7 +38,7 @@ import Footer from '../components/Footer.astro';
     <AgentNative />
     <div class="gradient-divider"></div>
     <!-- 7. CTA -->
-    <Cta />
+    <Cta calConfig={KITARU_DEMO_CAL} />
   </main>
   <Footer />
 </Base>
