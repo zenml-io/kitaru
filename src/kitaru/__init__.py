@@ -2,25 +2,25 @@
 
 Kitaru provides primitives for making AI agent workflows persistent,
 replayable, and observable. Decorate your orchestration function with
-``@kitaru.flow`` and your work units with ``@kitaru.checkpoint`` to
-get automatic durability.
+``@flow`` and your work units with ``@checkpoint`` to get automatic
+durability.
 
 Example::
 
-    import kitaru
+    from kitaru import flow, checkpoint
 
-    @kitaru.checkpoint
+    @checkpoint
     def fetch_data(url: str) -> str:
         return requests.get(url).text
 
-    @kitaru.flow
+    @flow
     def my_agent(url: str) -> str:
         data = fetch_data(url)
         return data.upper()
 
 Current status:
 
-- Implemented: ``@kitaru.flow``, ``@kitaru.checkpoint``, ``kitaru.log()``,
+- Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``connect()``,
   ``configure()``, stack selection helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``), model alias helpers via CLI

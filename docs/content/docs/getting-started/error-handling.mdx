@@ -12,7 +12,7 @@ context, state, runtime, backend, and execution failures.
 import kitaru
 
 try:
-    result = my_flow.start(...).get()
+    result = my_flow.run(...).get()
 except kitaru.KitaruUserCodeError as exc:
     # user checkpoint/flow code raised
     print(exc.exec_id, exc.status, exc.failure_origin)

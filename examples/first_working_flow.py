@@ -1,13 +1,13 @@
 """Phase 5 first working Kitaru workflow example.
 
 This is the smallest end-to-end example that exercises the current MVP
-primitives: ``@kitaru.flow`` + ``@kitaru.checkpoint``.
+primitives: ``@flow`` + ``@checkpoint``.
 """
 
-import kitaru
+from kitaru import checkpoint, flow
 
 
-@kitaru.checkpoint
+@checkpoint
 def fetch_data(url: str) -> str:
     """Fetch source data.
 
@@ -21,7 +21,7 @@ def fetch_data(url: str) -> str:
     return "some data"
 
 
-@kitaru.checkpoint
+@checkpoint
 def process_data(data: str) -> str:
     """Transform source data.
 
@@ -34,7 +34,7 @@ def process_data(data: str) -> str:
     return data.upper()
 
 
-@kitaru.flow
+@flow
 def my_agent(url: str) -> str:
     """Run the example Kitaru workflow.
 
@@ -57,7 +57,7 @@ def run_workflow(url: str = "https://example.com") -> str:
     Returns:
         Workflow output.
     """
-    return my_agent(url)
+    return my_agent.run(url).wait()
 
 
 def main() -> None:

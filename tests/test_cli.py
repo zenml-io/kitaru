@@ -333,9 +333,9 @@ def test_executions_cancel_reports_success(
 def test_run_starts_flow_with_json_args(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru run` should load a flow and call `.start()` with JSON args."""
+    """`kitaru run` should load a flow and call `.run()` with JSON args."""
     fake_flow = SimpleNamespace(
-        start=Mock(return_value=SimpleNamespace(exec_id="kr-501")),
+        run=Mock(return_value=SimpleNamespace(exec_id="kr-501")),
         deploy=Mock(),
     )
     fake_client = Mock()
@@ -360,14 +360,14 @@ def test_run_starts_flow_with_json_args(
         )
 
     assert exc_info.value.code == 0
-    fake_flow.start.assert_called_once_with(topic="AI safety")
+    fake_flow.run.assert_called_once_with(topic="AI safety")
     fake_flow.deploy.assert_not_called()
     fake_client.executions.get.assert_called_once_with("kr-501")
     output = capsys.readouterr().out
     assert "Started flow execution: kr-501" in output
     assert "Kitaru run" in output
     assert "Target: agent.py:content_pipeline" in output
-    assert "Invocation: start" in output
+    assert "Invocation: run" in output
 
 
 def test_run_reports_exec_id_when_detail_lookup_fails(
@@ -375,7 +375,7 @@ def test_run_reports_exec_id_when_detail_lookup_fails(
 ) -> None:
     """`kitaru run` should still succeed if post-launch inspection fails."""
     fake_flow = SimpleNamespace(
-        start=Mock(return_value=SimpleNamespace(exec_id="kr-777")),
+        run=Mock(return_value=SimpleNamespace(exec_id="kr-777")),
         deploy=Mock(),
     )
     fake_client = Mock()
@@ -396,7 +396,7 @@ def test_run_reports_exec_id_when_detail_lookup_fails(
         )
 
     assert exc_info.value.code == 0
-    fake_flow.start.assert_called_once_with(topic="AI safety")
+    fake_flow.run.assert_called_once_with(topic="AI safety")
     fake_client.executions.get.assert_called_once_with("kr-777")
     output = capsys.readouterr().out
     assert "Started flow execution: kr-777" in output
@@ -409,7 +409,7 @@ def test_run_uses_deploy_when_stack_is_provided(
 ) -> None:
     """`kitaru run --stack` should call `.deploy(...)` on the flow."""
     fake_flow = SimpleNamespace(
-        start=Mock(),
+        run=Mock(),
         deploy=Mock(return_value=SimpleNamespace(exec_id="kr-601")),
     )
     fake_client = Mock()
@@ -437,7 +437,7 @@ def test_run_uses_deploy_when_stack_is_provided(
         )
 
     assert exc_info.value.code == 0
-    fake_flow.start.assert_not_called()
+    fake_flow.run.assert_not_called()
     fake_flow.deploy.assert_called_once_with(stack="prod", topic="AI safety")
     output = capsys.readouterr().out
     assert "Invocation: deploy" in output

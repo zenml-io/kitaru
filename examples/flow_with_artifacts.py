@@ -6,9 +6,10 @@ This example demonstrates:
 """
 
 import kitaru
+from kitaru import checkpoint, flow
 
 
-@kitaru.checkpoint
+@checkpoint
 def research(topic: str) -> str:
     """Generate notes and persist extra research context.
 
@@ -28,7 +29,7 @@ def research(topic: str) -> str:
     return notes
 
 
-@kitaru.flow
+@flow
 def first_pass(topic: str) -> str:
     """Run the first pass that produces reusable artifacts.
 
@@ -41,7 +42,7 @@ def first_pass(topic: str) -> str:
     return research(topic)
 
 
-@kitaru.checkpoint
+@checkpoint
 def follow_up_from_previous(prev_exec_id: str) -> str:
     """Build follow-up output by loading artifacts from a prior execution.
 
@@ -56,7 +57,7 @@ def follow_up_from_previous(prev_exec_id: str) -> str:
     return f"{previous_notes} [topic={saved_context['topic']}]"
 
 
-@kitaru.flow
+@flow
 def second_pass(prev_exec_id: str) -> str:
     """Run a second pass that reads artifacts from the first pass.
 
@@ -78,9 +79,9 @@ def run_workflow(topic: str = "kitaru") -> tuple[str, str, str]:
     Returns:
         Tuple of `(first_exec_id, first_result, second_result)`.
     """
-    first_handle = first_pass.start(topic)
+    first_handle = first_pass.run(topic)
     first_result = first_handle.wait()
-    second_result = second_pass(first_handle.exec_id)
+    second_result = second_pass.run(first_handle.exec_id).wait()
     return first_handle.exec_id, first_result, second_result
 
 

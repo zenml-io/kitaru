@@ -179,7 +179,7 @@ def _build_execution_overrides(
     cache: bool | None = None,
     retries: int | None = None,
 ) -> KitaruConfig:
-    """Build a partial execution config from flow/deploy/start overrides."""
+    """Build a partial execution config from flow/run/deploy overrides."""
     values: dict[str, Any] = {}
     if stack is not None:
         values["stack"] = stack
@@ -399,7 +399,7 @@ class FlowHandle:
 
 
 class _FlowDefinition:
-    """Callable wrapper returned by `@kitaru.flow`."""
+    """Flow wrapper returned by `@flow`."""
 
     def __init__(
         self,
@@ -442,15 +442,15 @@ class _FlowDefinition:
         update_wrapper(self, func)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        """Run flow synchronously and return the final result."""
-        handle = self._submit(
-            args=args,
-            kwargs=kwargs,
-            invocation_overrides=KitaruConfig(),
+        """Raise a friendly error — direct flow calls are not supported."""
+        raise KitaruUsageError(
+            "Direct flow calls are not supported. Use:\n"
+            "  handle = my_flow.run(...)        # returns FlowHandle\n"
+            "  result = my_flow.run(...).wait()  # blocks until complete\n"
+            "  handle = my_flow.deploy(...)      # remote execution"
         )
-        return handle.wait()
 
-    def start(
+    def run(
         self,
         *args: Any,
         stack: str | None = None,
@@ -459,7 +459,7 @@ class _FlowDefinition:
         retries: int | None = None,
         **kwargs: Any,
     ) -> FlowHandle:
-        """Start a flow execution and return a handle.
+        """Run a flow execution and return a handle.
 
         Args:
             *args: Flow input args.
@@ -536,9 +536,9 @@ class _FlowDefinition:
         retries: int | None = None,
         **kwargs: Any,
     ) -> FlowHandle:
-        """Start a flow execution, signaling remote/deployment intent.
+        """Run a flow execution, signaling remote/deployment intent.
 
-        This is semantic sugar for `.start(..., stack=...)`.
+        This is semantic sugar for `.run(..., stack=...)`.
 
         Args:
             *args: Flow input args.
@@ -551,7 +551,7 @@ class _FlowDefinition:
         Returns:
             A handle for the started execution.
         """
-        return self.start(
+        return self.run(
             *args,
             stack=stack,
             image=image,
@@ -587,11 +587,11 @@ def flow(
 
     Can be used as a bare decorator or with arguments::
 
-        @kitaru.flow
+        @flow
         def my_flow(...):
             ...
 
-        @kitaru.flow(stack="prod", retries=2)
+        @flow(stack="prod", retries=2)
         def my_other_flow(...):
             ...
 

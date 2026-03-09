@@ -14,7 +14,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from zenml.client import Client
 
-import kitaru
+from kitaru import checkpoint, flow
 from kitaru.adapters import pydantic_ai as kp
 
 
@@ -33,14 +33,14 @@ research_agent = kp.wrap(
 )
 
 
-@kitaru.checkpoint(type="llm_call")
+@checkpoint(type="llm_call")
 def run_research(topic: str) -> str:
     """Run one wrapped agent iteration inside an explicit checkpoint boundary."""
     result = research_agent.run_sync(f"Research {topic} and summarize findings.")
     return result.output
 
 
-@kitaru.flow
+@flow
 def research_flow(topic: str) -> str:
     """Run the wrapped agent inside a durable flow."""
     return run_research(topic)
@@ -50,7 +50,7 @@ def run_workflow(
     topic: str = "kitaru",
 ) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
     """Run the workflow and return execution plus adapter diagnostics."""
-    handle = research_flow.start(topic)
+    handle = research_flow.run(topic)
     raw_result = handle.wait()
     if not isinstance(raw_result, str):
         raise RuntimeError("Expected research_flow() to return a string result.")

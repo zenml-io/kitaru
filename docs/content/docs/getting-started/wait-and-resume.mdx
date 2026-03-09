@@ -12,9 +12,10 @@ same execution after input is provided.
 ## Basic pattern
 
 ```python
+from kitaru import flow
 import kitaru
 
-@kitaru.flow
+@flow
 def publish_flow(topic: str) -> str:
     approved = kitaru.wait(
         schema=bool,

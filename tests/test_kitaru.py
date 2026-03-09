@@ -90,6 +90,16 @@ class TestPublicExports:
         assert set(kitaru.__all__) == expected
 
 
+class TestDirectImportStyle:
+    """Verify canonical import style works correctly."""
+
+    def test_direct_decorator_imports(self) -> None:
+        from kitaru import checkpoint, flow
+
+        assert flow is kitaru.flow
+        assert checkpoint is kitaru.checkpoint
+
+
 class TestImplementedConnectionPrimitive:
     """Verify the early Phase 2 connection primitive works as intended."""
 
@@ -197,11 +207,11 @@ class TestImplementedConnectionPrimitive:
 class TestPlaceholderBehavior:
     """Verify implemented/scaffolded primitive behavior in the current phase."""
 
-    def test_flow_returns_callable_with_start_and_deploy(self) -> None:
+    def test_flow_returns_wrapper_with_run_and_deploy(self) -> None:
         wrapped = kitaru.flow(lambda: None)
-        assert callable(wrapped)
-        assert hasattr(wrapped, "start")
+        assert hasattr(wrapped, "run")
         assert hasattr(wrapped, "deploy")
+        assert not hasattr(wrapped, "start")
 
     def test_checkpoint_returns_callable_with_submit(self) -> None:
         with patch("kitaru.checkpoint.step") as step_factory:

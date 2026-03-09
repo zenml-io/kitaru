@@ -7,7 +7,7 @@ Kitaru's PydanticAI adapter lets you reuse an existing PydanticAI agent with Kit
 
 Use it when you want:
 
-- an explicit outer `@kitaru.checkpoint` replay boundary
+- an explicit outer `@checkpoint` replay boundary
 - child-event visibility for agent model calls and tool calls
 - optional human input from adapter tools via flow-level `kitaru.wait(...)`
 - run-level summary metadata (`pydantic_ai_run_summaries`)
@@ -21,7 +21,7 @@ uv sync --extra local --extra pydantic-ai
 ## 2) Wrap an agent
 
 ```python
-import kitaru
+from kitaru import flow, checkpoint
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from kitaru.adapters import pydantic_ai as kp
@@ -35,11 +35,11 @@ researcher = kp.wrap(
     },
 )
 
-@kitaru.checkpoint(type="llm_call")
+@checkpoint(type="llm_call")
 def run_research(topic: str) -> str:
     return researcher.run_sync(f"Research {topic}").output
 
-@kitaru.flow
+@flow
 def research_flow(topic: str) -> str:
     return run_research(topic)
 ```

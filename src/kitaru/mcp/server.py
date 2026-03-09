@@ -45,7 +45,7 @@ _MCP_INSTALL_ERROR = (
 
 @runtime_checkable
 class _FlowHandleLike(Protocol):
-    """Protocol for flow handles returned by `.start()` / `.deploy()`."""
+    """Protocol for flow handles returned by `.run()` / `.deploy()`."""
 
     @property
     def exec_id(self) -> str: ...
@@ -55,7 +55,7 @@ class _FlowHandleLike(Protocol):
 class _FlowTarget(Protocol):
     """Protocol for MCP-runnable flow objects."""
 
-    def start(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
+    def run(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
 
     def deploy(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
 
@@ -147,7 +147,7 @@ def _load_flow_target(target: str) -> _FlowTarget:
     if not isinstance(flow_obj, _FlowTarget):
         raise ValueError(
             f"Target `{target}` is not a Kitaru flow object. "
-            "Expected an object created by `@kitaru.flow` with `.start()` support."
+            "Expected an object created by `@flow` with `.run()` support."
         )
 
     return flow_obj
@@ -617,8 +617,8 @@ def kitaru_executions_run(
         handle = flow_target.deploy(stack=stack, **flow_inputs)
         invocation = "deploy"
     else:
-        handle = flow_target.start(**flow_inputs)
-        invocation = "start"
+        handle = flow_target.run(**flow_inputs)
+        invocation = "run"
 
     if not isinstance(handle, _FlowHandleLike):
         raise ValueError(

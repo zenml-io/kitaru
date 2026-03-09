@@ -8,7 +8,7 @@ Kitaru makes agent workflows **persistent, replayable, and observable** using a 
 
 Kitaru is under active development. The core SDK primitives are implemented and functional:
 
-- **Flows and checkpoints** — `@kitaru.flow` and `@kitaru.checkpoint` decorators for durable, replayable workflows with concurrent execution via `.submit()` / `.result()`
+- **Flows and checkpoints** — `@flow` and `@checkpoint` decorators for durable, replayable workflows with concurrent execution via `.submit()` / `.result()`
 - **Artifact persistence** — `kitaru.save()` / `kitaru.load()` for explicit artifact storage and cross-execution reuse inside checkpoints
 - **Structured logging** — `kitaru.log()` attaches metadata to executions and checkpoints, with configurable runtime log backends (`kitaru log-store ...`)
 - **Configuration** — `kitaru.configure(...)`, environment variables, and `[tool.kitaru]` in `pyproject.toml`, with precedence resolved at flow start and persisted per execution
@@ -24,27 +24,27 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 ### SDK primitives
 
 ```python
-import kitaru
+from kitaru import checkpoint, flow
 
-@kitaru.checkpoint
+@checkpoint
 def fetch_data(url: str) -> str:
     """A checkpoint is a unit of work whose outcome is persisted."""
     _ = url
     return "some data"
 
-@kitaru.checkpoint
+@checkpoint
 def process_data(data: str) -> str:
     """Checkpoints are composed inside a flow."""
     return data.upper()
 
-@kitaru.flow
+@flow
 def my_agent(url: str) -> str:
     """A flow is the outer durable execution boundary."""
     data = fetch_data(url)
     return process_data(data)
 
-# Run synchronously — blocks until complete, returns the result
-result = my_agent("https://example.com")
+# Run and wait for result
+result = my_agent.run("https://example.com").wait()
 print(result)  # SOME DATA
 ```
 
@@ -53,7 +53,7 @@ print(result)  # SOME DATA
 Checkpoints support `.submit()` for concurrent execution inside a flow:
 
 ```python
-@kitaru.flow
+@flow
 def parallel_agent(urls: list[str]) -> list[str]:
     futures = [fetch_data.submit(url) for url in urls]
     return [f.result() for f in futures]

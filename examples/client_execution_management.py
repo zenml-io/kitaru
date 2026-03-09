@@ -10,9 +10,10 @@ This example demonstrates:
 from typing import Any
 
 import kitaru
+from kitaru import checkpoint, flow
 
 
-@kitaru.checkpoint
+@checkpoint
 def write_summary(topic: str) -> str:
     """Produce a summary and persist related context.
 
@@ -31,7 +32,7 @@ def write_summary(topic: str) -> str:
     return summary
 
 
-@kitaru.flow
+@flow
 def summarize_topic(topic: str) -> str:
     """Run the summary flow.
 
@@ -55,7 +56,7 @@ def run_workflow(
     Returns:
         Tuple of `(execution_id, status, result, artifact_names, loaded_context)`.
     """
-    handle = summarize_topic.start(topic)
+    handle = summarize_topic.run(topic)
     result = handle.wait()
 
     client = kitaru.KitaruClient()

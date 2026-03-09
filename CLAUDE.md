@@ -8,7 +8,7 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
-**ZenML mapping:** `@kitaru.flow` → `@pipeline(dynamic=True)`, `@kitaru.checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
+**ZenML mapping:** `@flow` → `@pipeline(dynamic=True)`, `@checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
 
 ## Project layout
 
@@ -123,8 +123,8 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 | Primitive | Status |
 |---|---|
-| `@kitaru.flow` | Implemented |
-| `@kitaru.checkpoint` | Implemented |
+| `@flow` | Implemented |
+| `@checkpoint` | Implemented |
 | `kitaru.wait()` | Implemented |
 | `kitaru.llm()` | Implemented |
 | `kitaru.log()` | Implemented |
@@ -139,7 +139,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ### Key design patterns
 
-- **Flows cannot nest** — no `@kitaru.flow` inside another flow
+- **Flows cannot nest** — no `@flow` inside another flow
 - **Nested checkpoint calls are blocked in the current MVP implementation**
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive
 - **Replay** works by re-running the flow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute

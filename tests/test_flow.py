@@ -1,4 +1,4 @@
-"""Tests for the `@kitaru.flow` implementation."""
+"""Tests for the `@flow` implementation."""
 
 from __future__ import annotations
 
@@ -14,7 +14,12 @@ from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
 from kitaru.config import ResolvedExecutionConfig
-from kitaru.errors import FailureOrigin, KitaruStateError, KitaruUserCodeError
+from kitaru.errors import (
+    FailureOrigin,
+    KitaruStateError,
+    KitaruUsageError,
+    KitaruUserCodeError,
+)
 from kitaru.flow import FlowHandle, _wrap_flow_entrypoint, flow
 from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
@@ -83,7 +88,7 @@ class _DummyRun:
         return self
 
 
-def test_flow_decorator_creates_callable_with_start_and_deploy() -> None:
+def test_flow_decorator_creates_wrapper_with_run_and_deploy() -> None:
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
     base_pipeline = MagicMock()
@@ -101,12 +106,12 @@ def test_flow_decorator_creates_callable_with_start_and_deploy() -> None:
         patch("kitaru.flow.persist_frozen_execution_spec"),
     ):
         wrapped = flow(lambda x: x)
-        handle = wrapped.start(123)
+        handle = wrapped.run(123)
 
     pipeline_mock.assert_called_once_with(dynamic=True)
-    assert callable(wrapped)
-    assert hasattr(wrapped, "start")
+    assert hasattr(wrapped, "run")
     assert hasattr(wrapped, "deploy")
+    assert not hasattr(wrapped, "start")
     assert isinstance(handle, FlowHandle)
     call_kwargs = base_pipeline.with_options.call_args
     assert call_kwargs == call(
@@ -141,7 +146,7 @@ def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
         delattr(module, alias)
 
 
-def test_deploy_is_start_sugar_with_stack_override() -> None:
+def test_deploy_is_run_sugar_with_stack_override() -> None:
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
     base_pipeline = MagicMock()
@@ -187,38 +192,17 @@ def test_deploy_is_start_sugar_with_stack_override() -> None:
     ]
 
 
-def test_direct_call_forwards_user_kwargs_without_treating_them_as_overrides() -> None:
-    completed = _DummyRun(
-        status=ExecutionStatus.COMPLETED,
-        outputs=[("step", "output", "done")],
-    )
-    configured_pipeline = MagicMock(return_value=completed)
-    base_pipeline = MagicMock()
-    base_pipeline.with_options.return_value = configured_pipeline
-    zenml_decorator = MagicMock(return_value=base_pipeline)
+def test_direct_call_raises_usage_error() -> None:
+    zenml_decorator = MagicMock(return_value=MagicMock())
 
-    client_mock = MagicMock()
-    client_mock.get_pipeline_run.return_value = completed
+    with patch("kitaru.flow.pipeline", return_value=zenml_decorator):
+        wrapped = flow(lambda x: x)
 
-    with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
-        patch("kitaru.flow.Client", return_value=client_mock),
-        patch(
-            "kitaru.flow.resolve_execution_config",
-            return_value=_resolved_execution(),
-        ),
-        patch("kitaru.flow.resolve_connection_config", return_value=object()),
-        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
-    ):
-        wrapped = flow(lambda stack: stack)
-        result = wrapped(stack="input-value")
-
-    assert result == "done"
-    configured_pipeline.assert_called_once_with(stack="input-value")
+    with pytest.raises(KitaruUsageError, match="Direct flow calls are not supported"):
+        wrapped("input")
 
 
-def test_start_restores_previous_stack_if_submission_fails() -> None:
+def test_run_restores_previous_stack_if_submission_fails() -> None:
     configured_pipeline = MagicMock(side_effect=RuntimeError("submission failed"))
     base_pipeline = MagicMock()
     base_pipeline.with_options.return_value = configured_pipeline
@@ -241,7 +225,7 @@ def test_start_restores_previous_stack_if_submission_fails() -> None:
         pytest.raises(RuntimeError, match="submission failed"),
     ):
         wrapped = flow(lambda: None)
-        wrapped.start(stack="prod")
+        wrapped.run(stack="prod")
 
     assert client_mock.activate_stack.call_args_list == [
         call("prod"),
@@ -249,7 +233,7 @@ def test_start_restores_previous_stack_if_submission_fails() -> None:
     ]
 
 
-def test_start_allows_submission_when_other_compilation_context_is_active() -> None:
+def test_run_allows_submission_when_other_compilation_context_is_active() -> None:
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
     base_pipeline = MagicMock()
@@ -271,13 +255,13 @@ def test_start_allows_submission_when_other_compilation_context_is_active() -> N
         patch("kitaru.flow.persist_frozen_execution_spec"),
     ):
         wrapped = flow(lambda: None)
-        handle = wrapped.start()
+        handle = wrapped.run()
 
     assert isinstance(handle, FlowHandle)
 
 
-def test_start_resolves_config_and_persists_frozen_spec() -> None:
-    """start should resolve execution config and persist the frozen spec."""
+def test_run_resolves_config_and_persists_frozen_spec() -> None:
+    """run should resolve execution config and persist the frozen spec."""
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
     base_pipeline = MagicMock()
@@ -303,7 +287,7 @@ def test_start_resolves_config_and_persists_frozen_spec() -> None:
     ):
         client_cls.return_value.active_stack_model.id = "old-stack-id"
         wrapped = flow(stack="decorator-stack", cache=True, retries=2)(lambda x: x)
-        wrapped.start("payload", stack="invocation-stack", retries=3)
+        wrapped.run("payload", stack="invocation-stack", retries=3)
 
     resolve_execution_config_mock.assert_called_once()
     resolve_connection_mock.assert_called_once()

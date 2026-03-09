@@ -9,16 +9,16 @@ return their cached results instead of running again.
 
 ## Defining a checkpoint
 
-Decorate work functions with `@kitaru.checkpoint`:
+Decorate work functions with `@checkpoint`:
 
 ```python
-import kitaru
+from kitaru import checkpoint
 
-@kitaru.checkpoint
+@checkpoint
 def fetch_data(url: str) -> str:
     return requests.get(url).text
 
-@kitaru.checkpoint
+@checkpoint
 def process_data(data: str) -> str:
     return data.upper()
 ```
@@ -27,10 +27,12 @@ Checkpoints are reusable — define them once and call them from any flow.
 
 ## Composing checkpoints in a flow
 
-Call checkpoints from inside a `@kitaru.flow` to build your workflow:
+Call checkpoints from inside a `@flow` to build your workflow:
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def my_agent(url: str) -> str:
     data = fetch_data(url)
     result = process_data(data)
@@ -45,7 +47,9 @@ can be passed directly as input to the next — standard Python data flow.
 For independent work that can run in parallel, use `.submit()`:
 
 ```python
-@kitaru.flow
+from kitaru import flow
+
+@flow
 def parallel_agent(urls: list[str]) -> list[str]:
     futures = [fetch_data.submit(url) for url in urls]
     return [f.result() for f in futures]
@@ -78,7 +82,9 @@ These are convenience wrappers over concurrent submission. See the
 ## Decorator options
 
 ```python
-@kitaru.checkpoint(retries=3, type="llm_call")
+from kitaru import checkpoint
+
+@checkpoint(retries=3, type="llm_call")
 def call_model(prompt: str) -> str:
     ...
 ```
@@ -108,7 +114,7 @@ be reused in future executions. Prefer:
 Kitaru enforces several guardrails in the current release:
 
 - **Checkpoints only work inside a flow.** Calling a checkpoint outside a
-  `@kitaru.flow` raises `KitaruContextError`.
+  `@flow` raises `KitaruContextError`.
 - **No nested checkpoints.** Calling one checkpoint from inside another is not
   supported and raises `KitaruContextError`.
 - **`.submit()` requires a running flow.** Concurrent submission is only
@@ -117,11 +123,13 @@ Kitaru enforces several guardrails in the current release:
   require a running flow context.
 
 ```python
+from kitaru import checkpoint
+
 # This raises KitaruContextError — checkpoint called outside a flow
 fetch_data("https://example.com")
 
 # This also raises KitaruContextError — nested checkpoint
-@kitaru.checkpoint
+@checkpoint
 def outer():
     return inner()  # inner is also a checkpoint — not allowed
 ```
