@@ -38,8 +38,6 @@ const layout = config.layout ?? "month_view";
 <style>
   .cal-embed-wrapper {
     width: 100%;
-    max-width: 960px;
-    margin: 0 auto;
   }
 
   .cal-embed-target {
@@ -114,14 +112,14 @@ const layout = config.layout ?? "month_view";
       if (window.plausible) {
         window.plausible("Cal: Booking Confirmed", {
           props: {
-            date: (e && e.detail && e.detail.data && e.detail.data.date) || "",
-            duration: (e && e.detail && e.detail.data && e.detail.data.duration) || "",
+            date: e?.detail?.data?.date || "",
+            duration: e?.detail?.data?.duration || "",
           },
         });
       }
       if (window.analytics) {
         window.analytics.track("Demo Booked", {
-          date: (e && e.detail && e.detail.data && e.detail.data.date) || "",
+          date: e?.detail?.data?.date || "",
           source: "landing-page",
         });
       }
