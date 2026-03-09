@@ -11,6 +11,7 @@ interface Props {
   author: string;
   category?: string;
   ogImage?: string;
+  image?: string;
   readTime: string;
   relatedPosts?: { href: string; title: string; author: string; readTime: string }[];
 }
@@ -22,6 +23,7 @@ const {
   author,
   category = 'Agents',
   ogImage,
+  image,
   readTime,
   relatedPosts = [],
 } = Astro.props;
@@ -73,7 +75,11 @@ const ogImageUrl = ogImage
           </div>
           <h1 class="blog-post-title" itemprop="headline">{title}</h1>
           <div class="blog-post-author">
-            <span class="avatar" style={`background:${authorData.color};`}>{authorData.initials}</span>
+            {authorData.image ? (
+              <img class="avatar" src={authorData.image} alt={author} />
+            ) : (
+              <span class="avatar" style={`background:${authorData.color};`}>{authorData.initials}</span>
+            )}
             <div class="blog-post-author-info">
               <span class="blog-post-author-name">{author}</span>
               <time datetime={isoDate} class="blog-post-author-date">{formatted}</time>
@@ -81,6 +87,13 @@ const ogImageUrl = ogImage
           </div>
         </div>
       </header>
+
+      <!-- Hero image -->
+      {image && (
+        <div class="blog-post-image-wrap">
+          <img src={image} alt={title} class="blog-post-image" itemprop="image" />
+        </div>
+      )}
 
       <!-- Body -->
       <div class="blog-post-body-wrap">
@@ -192,6 +205,7 @@ const ogImageUrl = ogImage
     font-weight: 600;
     color: #fff;
     flex-shrink: 0;
+    object-fit: cover;
   }
 
   .blog-post-author-info {
@@ -210,6 +224,22 @@ const ogImageUrl = ogImage
     font-family: var(--font-mono);
     font-size: 0.7rem;
     color: var(--color-muted);
+  }
+
+  /* ── Hero image ── */
+  .blog-post-image-wrap {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 0 clamp(16px, 5vw, 80px);
+  }
+
+  .blog-post-image {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 10px;
+    display: block;
+    border: 1px solid var(--color-border);
   }
 
   /* ── Body ── */

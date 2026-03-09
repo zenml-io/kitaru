@@ -42,7 +42,11 @@ const featuredReadTime = readingTime(featured.body ?? '');
             <span class="blog-meta-text">{featuredReadTime}</span>
           </div>
           <div class="blog-featured-author">
-            <span class="avatar" style={`background:${featuredAuthor.color};`}>{featuredAuthor.initials}</span>
+            {featuredAuthor.image ? (
+              <img class="avatar" src={featuredAuthor.image} alt={featured.data.author} />
+            ) : (
+              <span class="avatar" style={`background:${featuredAuthor.color};`}>{featuredAuthor.initials}</span>
+            )}
             <span class="blog-meta-text">{featured.data.author} &middot; {featuredDate}</span>
           </div>
           <h1 class="blog-featured-title">{featured.data.title}</h1>
@@ -50,7 +54,11 @@ const featuredReadTime = readingTime(featured.body ?? '');
           <span class="blog-featured-read">Read post &rarr;</span>
         </div>
         <div class="blog-featured-image" aria-hidden="true">
-          <div class="blog-featured-image-inner"></div>
+          {featured.data.image ? (
+            <img src={featured.data.image} alt={featured.data.title} class="blog-featured-img" />
+          ) : (
+            <div class="blog-featured-image-inner"></div>
+          )}
         </div>
       </a>
 
@@ -66,6 +74,7 @@ const featuredReadTime = readingTime(featured.body ?? '');
               author={post.data.author}
               category={post.data.category}
               body={post.body ?? ''}
+              image={post.data.image}
             />
           ))}
         </div>
@@ -90,7 +99,8 @@ const featuredReadTime = readingTime(featured.body ?? '');
 
   /* ── Featured post ── */
   .blog-featured {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     text-decoration: none;
     border-radius: 14px;
     border: 1px solid var(--color-border);
@@ -106,10 +116,10 @@ const featuredReadTime = readingTime(featured.body ?? '');
   }
 
   .blog-featured-content {
-    flex: 1;
     padding: clamp(28px, 5vw, 44px);
     display: flex;
     flex-direction: column;
+    justify-content: center;
     gap: 12px;
   }
 
@@ -151,8 +161,7 @@ const featuredReadTime = readingTime(featured.body ?? '');
   }
 
   .blog-featured-image {
-    width: 320px;
-    flex-shrink: 0;
+    aspect-ratio: 16 / 9;
     position: relative;
     overflow: hidden;
   }
@@ -161,6 +170,13 @@ const featuredReadTime = readingTime(featured.body ?? '');
     position: absolute;
     inset: 0;
     background: linear-gradient(135deg, rgba(241, 120, 41, 0.1) 0%, rgba(160, 120, 72, 0.12) 60%, rgba(26, 23, 20, 0.04) 100%);
+  }
+
+  .blog-featured-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   /* ── Shared meta styles ── */
@@ -197,6 +213,7 @@ const featuredReadTime = readingTime(featured.body ?? '');
     font-weight: 600;
     color: #fff;
     flex-shrink: 0;
+    object-fit: cover;
   }
 
   /* ── Grid (2-column) ── */
@@ -207,8 +224,8 @@ const featuredReadTime = readingTime(featured.body ?? '');
   }
 
   @media (max-width: 900px) {
-    .blog-featured-image {
-      display: none;
+    .blog-featured {
+      grid-template-columns: 1fr;
     }
   }
 
