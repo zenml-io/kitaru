@@ -1,0 +1,185 @@
+{
+  "name": "kitaru-light",
+  "type": "light",
+  "colors": {
+    "editor.background": "#F0EBE3",
+    "editor.foreground": "#3D3530"
+  },
+  "tokenColors": [
+    {
+      "name": "Comments",
+      "scope": ["comment", "punctuation.definition.comment"],
+      "settings": {
+        "foreground": "#867D72",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "name": "Strings",
+      "scope": ["string", "string.quoted", "string.template"],
+      "settings": {
+        "foreground": "#277040"
+      }
+    },
+    {
+      "name": "String Escape",
+      "scope": ["constant.character.escape"],
+      "settings": {
+        "foreground": "#2D6E3E"
+      }
+    },
+    {
+      "name": "F-string expressions",
+      "scope": [
+        "meta.fstring",
+        "punctuation.definition.template-expression"
+      ],
+      "settings": {
+        "foreground": "#A35218"
+      }
+    },
+    {
+      "name": "Numbers",
+      "scope": ["constant.numeric"],
+      "settings": {
+        "foreground": "#A35218"
+      }
+    },
+    {
+      "name": "Built-in Constants (True, False, None)",
+      "scope": ["constant.language"],
+      "settings": {
+        "foreground": "#2D6E3E"
+      }
+    },
+    {
+      "name": "Keywords & Storage",
+      "scope": [
+        "keyword",
+        "storage.type",
+        "storage.modifier",
+        "keyword.control",
+        "keyword.operator.new"
+      ],
+      "settings": {
+        "foreground": "#7D5C30"
+      }
+    },
+    {
+      "name": "Functions & Methods",
+      "scope": [
+        "entity.name.function",
+        "meta.function-call",
+        "support.function"
+      ],
+      "settings": {
+        "foreground": "#A85218"
+      }
+    },
+    {
+      "name": "Classes & Types",
+      "scope": [
+        "entity.name.type",
+        "entity.name.class",
+        "support.type",
+        "support.class",
+        "entity.other.inherited-class"
+      ],
+      "settings": {
+        "foreground": "#7A5A28"
+      }
+    },
+    {
+      "name": "Decorators",
+      "scope": [
+        "meta.decorator",
+        "punctuation.definition.decorator",
+        "entity.name.function.decorator"
+      ],
+      "settings": {
+        "foreground": "#A85218",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "name": "Operators & Punctuation",
+      "scope": [
+        "keyword.operator",
+        "punctuation",
+        "punctuation.definition.parameters",
+        "punctuation.separator",
+        "punctuation.section"
+      ],
+      "settings": {
+        "foreground": "#746860"
+      }
+    },
+    {
+      "name": "Variables & Parameters",
+      "scope": [
+        "variable",
+        "variable.parameter",
+        "variable.other",
+        "meta.function.parameters"
+      ],
+      "settings": {
+        "foreground": "#3D3530"
+      }
+    },
+    {
+      "name": "Properties & Attributes",
+      "scope": [
+        "variable.other.property",
+        "variable.other.object.property",
+        "entity.other.attribute-name"
+      ],
+      "settings": {
+        "foreground": "#5C4E42"
+      }
+    },
+    {
+      "name": "Built-in & Self",
+      "scope": [
+        "variable.language",
+        "variable.language.self",
+        "variable.language.this"
+      ],
+      "settings": {
+        "foreground": "#2D6E3E",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "name": "Imports & Modules",
+      "scope": [
+        "keyword.control.import",
+        "keyword.control.from",
+        "keyword.other.import"
+      ],
+      "settings": {
+        "foreground": "#6E6050"
+      }
+    },
+    {
+      "name": "Module Names",
+      "scope": [
+        "entity.name.import",
+        "entity.name.module"
+      ],
+      "settings": {
+        "foreground": "#277040"
+      }
+    },
+    {
+      "name": "Type Annotations",
+      "scope": [
+        "meta.function.return-type",
+        "punctuation.definition.type",
+        "support.type.python"
+      ],
+      "settings": {
+        "foreground": "#277040"
+      }
+    }
+  ]
+}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, call, patch
 from uuid import UUID, uuid4
 
@@ -21,6 +21,7 @@ from kitaru.errors import (
     KitaruUserCodeError,
 )
 from kitaru.flow import FlowHandle, _wrap_flow_entrypoint, flow
+from kitaru.replay import ReplayPlan
 from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
 
@@ -307,6 +308,116 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
         frozen_execution_spec=frozen_spec,
     )
     configured_pipeline.assert_called_once_with("payload")
+
+
+def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip={"fetch"},
+        input_overrides={"topic": "new topic"},
+        step_input_overrides={"write": {"research": "edited"}},
+        wait_overrides={},
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+        patch("kitaru.flow._list_wait_conditions_for_run", return_value=[]),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.active_stack_model.id = "old-stack-id"
+        client_instance.get_pipeline_run.return_value = source_run
+
+        wrapped = flow(lambda topic: topic)
+        handle = wrapped.replay(
+            str(source_run.id),
+            from_="write",
+            topic="new topic",
+            overrides={"checkpoint.research": "edited"},
+        )
+
+    assert isinstance(handle, FlowHandle)
+    configured_pipeline.replay.assert_called_once_with(
+        pipeline_run=source_run.id,
+        skip={"fetch"},
+        skip_successful_steps=False,
+        input_overrides={"topic": "new topic"},
+        step_input_overrides={"write": {"research": "edited"}},
+    )
+    persist_mock.assert_called_once()
+    assert persist_mock.call_args.kwargs["run_id"] == replayed_run.id
+
+
+def test_replay_applies_wait_overrides_when_present() -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        wait_overrides={"approve:0": True},
+    )
+
+    pending_wait = SimpleNamespace(id="wait-id", wait_condition_key="approve:0")
+
+    def _list_waits(*, status: str | None = None, **_: Any) -> SimpleNamespace:
+        if status == "pending":
+            return SimpleNamespace(items=[pending_wait])
+        return SimpleNamespace(items=[])
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.active_stack_model.id = "old-stack-id"
+        client_instance.get_pipeline_run.return_value = source_run
+        client_instance.list_run_wait_conditions.side_effect = _list_waits
+
+        wrapped = flow(lambda: None)
+        wrapped.replay(str(source_run.id), from_="approve")
+
+    client_instance.resolve_run_wait_condition.assert_called_once_with(
+        run_wait_condition_id="wait-id",
+        status="resolved",
+        resolution="continue",
+        result=True,
+    )
 
 
 def test_flow_handle_wait_polls_until_complete() -> None:

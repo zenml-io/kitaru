@@ -145,14 +145,16 @@ The `kitaru` package is a standard Python package published to PyPI. It includes
 
 ### Docker image
 
-The Docker image is based on a ZenML image that includes:
+> **Status:** Implemented. See `docker/Dockerfile` and the Docker steps in `.github/workflows/release.yml`. Dashboard bundling is pending `kitaru-ui`.
 
-- a specific ZenML branch (`feature/pause-pipeline-runs`) with replay/snapshot support
-- ZenML cloud plugins (for Pro features like checkpoint visualization and snapshot execution)
+The Docker image is based on the ZenML server architecture and includes:
+
+- ZenML from `feature/kitaru` branch (TODO: switch to released PyPI once merged)
+- ZenML server + cloud plugin extras (same set as `zenmldocker/zenml-server`)
 - the Kitaru SDK
-- the bundled dashboard
+- the bundled dashboard (TODO: pending `kitaru-ui`)
 
-The Dockerfile and image build pipeline need to be set up by the infrastructure team, not the SDK developer.
+The production Dockerfile (`docker/Dockerfile`) is a multi-stage build published as `zenmldocker/kitaru` during releases. The release workflow builds and pushes the image alongside the PyPI package.
 
 ### Version management
 

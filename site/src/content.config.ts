@@ -12,7 +12,8 @@ const blog = defineCollection({
     category: z
       .enum(['Agents', 'Infrastructure', 'Design', 'Philosophy'])
       .default('Agents'),
-    ogImage: z.string().optional(),
+    ogImage: z.string().url().optional(),
+    image: z.string().url().optional(),
   }),
 });
 

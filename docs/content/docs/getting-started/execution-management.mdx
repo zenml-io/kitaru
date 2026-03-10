@@ -71,11 +71,19 @@ For manual-resume backends, call `resume(...)` after wait input is resolved:
 execution = client.executions.resume(exec_id)
 ```
 
-## Retry and cancel
+## Retry, replay, and cancel
 
 ```python
 # Same-execution retry (failed executions only)
 retried = client.executions.retry(exec_id)
+
+# Replay into a new execution from a checkpoint or wait boundary
+replayed = client.executions.replay(
+    exec_id,
+    from_="write_draft",
+    overrides={"checkpoint.research": "Edited notes", "wait.approve": False},
+    topic="New topic",
+)
 
 # Cancel a running execution
 cancelled = client.executions.cancel(exec_id)
@@ -107,6 +115,7 @@ kitaru executions list --status waiting --flow content_pipeline --limit 20
 # Wait-input and lifecycle actions
 kitaru executions input kr-a8f3c2 --wait approve_deploy --value true
 kitaru executions resume kr-a8f3c2
+kitaru executions replay kr-a8f3c2 --from write_draft --args '{"topic":"New topic"}' --overrides '{"checkpoint.research":"Edited notes"}'
 kitaru executions retry kr-a8f3c2
 kitaru executions cancel kr-a8f3c2
 ```
@@ -132,10 +141,8 @@ See the full setup guide at [MCP Server](/agent-integrations/mcp-server).
 
 ## Current limitations
 
-The following execution APIs/commands are intentionally deferred for now:
+The following execution surface is still deferred:
 
-- `client.executions.replay(...)`
-- `kitaru executions replay ...`
 - `kitaru executions logs ...`
 
 ## Try the examples
@@ -147,6 +154,9 @@ uv run pytest tests/test_phase11_client_example.py
 
 uv run python -m examples.wait_and_resume
 uv run pytest tests/test_phase15_wait_example.py
+
+uv run python -m examples.replay_with_overrides
+uv run pytest tests/test_phase16_replay_example.py
 
 uv sync --extra mcp
 uv run python -m examples.mcp_query_tools

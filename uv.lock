@@ -1113,7 +1113,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=0.2.0" },
     { name = "rich", specifier = ">=12.0.0" },
-    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=feature%2Fpause-pipeline-runs" },
+    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=feature%2Fkitaru" },
     { name = "zenml", extras = ["local"], marker = "extra == 'local'", specifier = ">=0.94.0" },
 ]
 provides-extras = ["local", "pydantic-ai", "mcp"]
@@ -2784,7 +2784,7 @@ wheels = [
 [[package]]
 name = "zenml"
 version = "0.94.0"
-source = { git = "https://github.com/zenml-io/zenml.git?rev=feature%2Fpause-pipeline-runs#a01e8f84251d500619f876d41aaa8ed17f1f378b" }
+source = { git = "https://github.com/zenml-io/zenml.git?rev=feature%2Fkitaru#cfbe91fd74368dfd1dd562458abc353b2cc305f7" }
 dependencies = [
     { name = "asgiref" },
     { name = "click" },

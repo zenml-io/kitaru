@@ -32,16 +32,19 @@ from kitaru.client import (
     Execution,
     FailureInfo,
     KitaruClient,
+    LogEntry,
     PendingWait,
 )
 from kitaru.config import (
     KITARU_PROJECT_ENV,
+    ResolvedLogStore,
     StackInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
+    active_stack_log_store,
+    resolve_log_store,
 )
 from kitaru.config import list_stacks as get_available_stacks
-from kitaru.errors import KitaruFeatureNotAvailableError
 
 SDK_VERSION = get_version("kitaru")
 _MCP_INSTALL_ERROR = (
@@ -84,6 +87,8 @@ class RuntimeSnapshot:
     server_deployment_type: str | None = None
     local_server_status: str | None = None
     warning: str | None = None
+    log_store_status: str | None = None
+    log_store_warning: str | None = None
 
 
 def _load_fastmcp_class() -> type[Any]:
@@ -351,6 +356,66 @@ def _serialize_runtime_snapshot(snapshot: RuntimeSnapshot) -> dict[str, Any]:
     return _to_jsonable(snapshot, fallback_repr=True)
 
 
+def _log_store_mismatch_details(
+    preferred: ResolvedLogStore,
+) -> tuple[str | None, str | None]:
+    """Return status-row + warning text when preferred and active backends differ."""
+    if preferred.source == "default":
+        return None, None
+
+    active_store = active_stack_log_store()
+    if active_store is None:
+        return None, None
+
+    if active_store.backend == preferred.backend:
+        return None, None
+
+    status_row = f"{preferred.backend} (preferred) ⚠ stack uses {active_store.backend}"
+
+    active_label = active_store.backend
+    if active_store.stack_name:
+        active_label = f"{active_store.backend} (stack: {active_store.stack_name})"
+
+    warning = "\n".join(
+        [
+            f"Active ZenML stack uses: {active_label}",
+            "The Kitaru log-store preference is not wired into stack selection yet.",
+            "Actual runtime logs go to the stack's log store, not this preference.",
+        ]
+    )
+    return status_row, warning
+
+
+def _combine_warnings(*warnings: str | None) -> str | None:
+    """Combine non-empty warning messages into one multiline block."""
+    rendered = [warning for warning in warnings if warning]
+    if not rendered:
+        return None
+    return "\n".join(rendered)
+
+
+def _format_log_entry(entry: LogEntry) -> str:
+    """Render a readable one-line text representation for MCP log output."""
+    parts: list[str] = []
+    if entry.timestamp:
+        parts.append(entry.timestamp)
+    if entry.level:
+        parts.append(str(entry.level).upper())
+    if entry.checkpoint_name:
+        parts.append(f"[{entry.checkpoint_name}]")
+
+    if parts:
+        return f"{' '.join(parts)} {entry.message}"
+    return entry.message
+
+
+def _format_execution_logs(entries: list[LogEntry]) -> str:
+    """Render execution logs as plain text for MCP agent readability."""
+    if not entries:
+        return "No log entries found."
+    return "\n".join(_format_log_entry(entry) for entry in entries)
+
+
 def _describe_local_server() -> str:
     """Summarize the state of the local Kitaru-compatible server, if any."""
     try:
@@ -469,6 +534,20 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
         snapshot.server_deployment_type = str(store_info.deployment_type)
     except Exception as exc:  # pragma: no cover - backend-dependent runtime path
         snapshot.warning = f"Unable to query the configured store: {exc}"
+
+    try:
+        preferred_log_store = resolve_log_store()
+    except ValueError as exc:
+        snapshot.log_store_warning = (
+            f"Unable to resolve Kitaru log-store preference: {exc}"
+        )
+        return snapshot
+
+    log_store_status, log_store_warning = _log_store_mismatch_details(
+        preferred_log_store
+    )
+    snapshot.log_store_status = log_store_status
+    snapshot.log_store_warning = log_store_warning
 
     return snapshot
 
@@ -608,6 +687,26 @@ def kitaru_executions_latest(
 
 
 @mcp.tool()
+def get_execution_logs(
+    exec_id: str,
+    checkpoint: str | None = None,
+    source: str = "step",
+    limit: int = 200,
+) -> str:
+    """Fetch runtime log entries for a Kitaru execution."""
+    if limit < 1:
+        raise ValueError("`limit` must be >= 1.")
+
+    entries = KitaruClient().executions.logs(
+        exec_id,
+        checkpoint=checkpoint,
+        source=source,
+        limit=limit,
+    )
+    return _format_execution_logs(entries)
+
+
+@mcp.tool()
 def kitaru_executions_run(
     target: str,
     args: dict[str, Any] | None = None,
@@ -687,24 +786,17 @@ def kitaru_executions_replay(
     overrides: dict[str, Any] | None = None,
     flow_inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Replay an execution or return structured not-available details."""
+    """Replay an execution and return structured replay details."""
     if flow_inputs is not None and not isinstance(flow_inputs, dict):
         raise ValueError("`flow_inputs` must be an object when provided.")
 
     replay_inputs = flow_inputs or {}
-    try:
-        execution = KitaruClient().executions.replay(
-            exec_id,
-            from_=from_,
-            overrides=overrides,
-            **replay_inputs,
-        )
-    except KitaruFeatureNotAvailableError as exc:
-        return {
-            "available": False,
-            "operation": "replay",
-            "message": str(exc),
-        }
+    execution = KitaruClient().executions.replay(
+        exec_id,
+        from_=from_,
+        overrides=overrides,
+        **replay_inputs,
+    )
 
     return {
         "available": True,

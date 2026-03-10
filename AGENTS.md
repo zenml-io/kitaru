@@ -19,6 +19,7 @@ docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
 site/                 # Astro landing page + runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (e.g. /api/waitlist with KV)
 scripts/              # Doc generation + site merge scripts (includes SDK reference extraction)
+docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing runner)
 spec/                 # SDK design specifications (planning material, not shipped code)
 design/               # Design docs, meeting notes (gitignored, never commit)
 wrangler.toml         # Unified Cloudflare Worker deployment config
@@ -115,7 +116,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 
 ### Other workflows
 
-- `release.yml`: release automation (version bump, PyPI publish, GitHub Release)
+- `release.yml`: release automation (version bump, PyPI publish, Docker image publish, GitHub Release)
 - `spellcheck.yml`: separate typo/spell checking on `develop` PRs/pushes
 - `image-optimiser.yml`: PR-only image compression for docs assets
 

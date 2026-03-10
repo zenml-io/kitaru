@@ -33,6 +33,7 @@ scripts/              # Doc generation + site merge scripts
   merge_site.sh              # Merges docs static export into Astro build output
 .claude-plugin/       # Claude Code plugin marketplace + skill distribution
   skills/kitaru-authoring/  # Kitaru authoring skill (SKILL.md)
+docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing runner)
 spec/                 # SDK design specifications (reference material)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
@@ -50,6 +51,42 @@ The docs and landing page deploy as **one Cloudflare Worker** from `site/dist/`:
 
 The site workflow (`.github/workflows/site.yml`) runs this pipeline on `main` pushes (production) and creates preview Workers for PRs.
 
+## Images & Assets
+
+### Two-tier system
+
+| Tier | Location | Use for | How to reference |
+|------|----------|---------|------------------|
+| **A: Static** | `site/public/` | SVG logos, icons, favicons | Root-relative: `"/favicon.svg"` |
+| **B: R2** | `kitaru-assets` bucket | Blog heroes, OG images, screenshots, article imagery | Absolute URL: `"https://assets.kitaru.ai/..."` |
+
+**Decision rule:** If a raster image appears in blog frontmatter (`image`, `ogImage`), upload to R2 and use the absolute URL. Content schemas enforce `z.string().url()`. SVGs and favicons stay in `site/public/`.
+
+### Adding content images
+
+Always **convert to AVIF first**, then upload:
+
+```bash
+# Upload with blog prefix
+uv run scripts/r2-upload.py output.avif --prefix content/blog
+
+# Print paste-ready YAML snippet
+uv run scripts/r2-upload.py output.avif --frontmatter
+```
+
+**Never add raster blog images to `site/public/`** — they belong in R2.
+
+### R2 upload credentials
+
+Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NOT require these — only the upload script needs them.
+
+**Team members:** R2 credentials (Account ID, Access Key, Secret Key) are stored in [1Password](https://start.1password.com/open/i?a=WIYWG2XIHNDZRN7LKKYT32PPY4&v=xi7637kspgwy67twg4xuukczy4&i=bzl6znbucjgrj2ozmk2pyclsze&h=zenml.1password.com) (ZenML team access required).
+
+### Gotchas
+
+- **Verify uploads work:** After uploading, `curl -sI <url>` should return HTTP 200. The boto3 API can succeed but the public domain may not be configured yet.
+- **`site/public/` assets must exist:** Astro doesn't error on missing `public/` files — it silently 404s at runtime. After adding references, verify the files exist.
+
 ## Branching strategy
 
 - **`develop`** is the default branch and the target for all PRs.
@@ -62,7 +99,7 @@ The site workflow (`.github/workflows/site.yml`) runs this pipeline on `main` pu
 1. Ensure `develop` has all changes for the release.
 2. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
 3. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-4. The workflow bumps version, runs CI, publishes to PyPI, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
+4. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
 
 ## Development commands
 
@@ -74,7 +111,7 @@ uv sync                              # Install dependencies
 uv sync --extra local                # Include local ZenML runtime components
 
 # Common Python workflows
-just check                            # Run all checks (format, lint, typecheck, typos, yaml, links)
+just check                            # Run all checks (format, lint, typecheck, typos, yaml, actions, links)
 just test                             # Run all tests
 just test tests/test_foo.py           # Run a single test file
 just test tests/test_foo.py::test_bar # Run a single test
@@ -87,6 +124,7 @@ just typecheck                        # Type check only
 just typos                            # Typo check only
 just format-check                     # Check formatting without modifying
 just yaml-check                       # Check YAML formatting
+just actions-lint                     # Lint GitHub Actions workflows (requires actionlint)
 just links                            # Check markdown links offline (requires lychee)
 just build                            # Build wheel + sdist locally
 
@@ -97,6 +135,11 @@ just docs-build                       # Build docs static export
 just site                             # Preview landing page dev server (localhost:4321)
 just site-build-only                  # Build landing page only (no docs merge)
 just site-build                       # Full unified build (generate + build + merge)
+
+# Docker
+just server-image                    # Build production server image (zenmldocker/kitaru:latest)
+just server-image TAG=v0.2.0         # Build with specific tag
+just server-image-push               # Build + push to Docker Hub
 
 # Manual deploy to Cloudflare
 unset CF_API_TOKEN CLOUDFLARE_API_TOKEN  # Clear stale tokens (use wrangler login credentials)
@@ -109,7 +152,7 @@ just site-build && npx wrangler deploy   # Build + deploy
 |---|---|---|
 | `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, links, typecheck, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes |
 | `site.yml` | Push to `main`; PRs touching docs/site/scripts | Build + deploy unified site; PR preview Workers |
-| `release.yml` | Workflow dispatch or `v*` tag | Version bump, PyPI publish, GitHub Release |
+| `release.yml` | Workflow dispatch or `v*` tag | Version bump, PyPI publish, Docker image publish, GitHub Release |
 | `spellcheck.yml` | Push/PR to `develop` | Separate typo/spell checking |
 | `image-optimiser.yml` | PRs only | Image compression for docs assets |
 
@@ -117,7 +160,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-> **Note:** Most SDK primitives and CLI commands are implemented (see table below). Replay (`client.executions.replay()`) and a few CLI extensions remain in progress.
+> **Note:** Most SDK primitives and CLI commands are implemented (see table below). Replay is now implemented across SDK, flow objects, CLI, and MCP surfaces.
 
 ### Current MVP primitives
 
@@ -132,10 +175,10 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.load()` | Implemented |
 | Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
-| `KitaruClient` (`get/list/latest/input/resume/cancel/retry` + artifact browsing) | Implemented |
-| Execution CLI (`kitaru run`, `kitaru executions get/list/input/retry/resume/cancel`) | Implemented |
+| `KitaruClient` (`get/list/latest/logs/input/resume/cancel/replay` + artifact browsing) | Implemented |
+| Execution CLI (`kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
-| `KitaruClient.executions.replay()` | Stubbed (branch-dependent) |
+| `KitaruClient.executions.replay()` | Implemented |
 
 ### Key design patterns
 
@@ -156,8 +199,9 @@ It keeps the enclosing checkpoint as the replay boundary, while tracking Pydanti
 Current MVP observability includes:
 
 - `kitaru.log()` for structured metadata on executions/checkpoints
+- Runtime log retrieval via `KitaruClient.executions.logs(...)`, `kitaru executions logs`, and MCP `get_execution_logs`
 - Global runtime log-store configuration via `kitaru log-store set/show/reset`
-  (defaults to `artifact-store`, supports global external backend override)
+  (defaults to `artifact-store`, supports global external backend override, and now warns when preference differs from the active stack log store)
 
 Future work will add richer OpenTelemetry-native tracing and exporter integration.
 
@@ -177,7 +221,7 @@ Future work will add richer OpenTelemetry-native tracing and exporter integratio
 
 ## Commits and PRs
 
-- **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, links, and tests.
+- **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, actions lint, links, and tests.
 - **Fix pre-existing failures too.** If `just check` or `just test` surfaces failures that predate your changes, fix them rather than ignoring them. Other people may be working in the same repo, so not every failure is yours — but don't default to "not my problem." Ask the user if unsure whether a failure should be addressed in this commit.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.

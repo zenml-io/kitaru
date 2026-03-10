@@ -7,7 +7,7 @@
 
 @theme {
   /* Backgrounds */
-  --color-bg: #FAFAF8;
+  --color-bg: #f8f6f3;
   --color-surface: #FFFFFF;
   --color-surface-warm: #FCFCFA;
 
@@ -64,6 +64,35 @@ body::before {
 
 ::selection {
   background: rgba(241,120,41,0.15);
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Skip-to-content link */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 16px;
+  z-index: 10000;
+  padding: 8px 16px;
+  background: var(--color-primary);
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 0 0 6px 6px;
+  text-decoration: none;
+  transition: top 0.2s;
+}
+.skip-link:focus {
+  top: 0;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -197,4 +226,31 @@ body::before {
 @media (max-width: 480px) {
   .section-title { font-size: clamp(24px, 6vw, 32px); }
   .section-desc { font-size: 15px; }
+}
+
+/* ═══════════════════════════════════════════════════
+   Reduced motion
+   ═══════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .blog-card,
+  .blog-featured,
+  .btn-primary,
+  .btn-secondary,
+  .blog-related-card {
+    transition: none;
+  }
+
+  .blog-card:hover,
+  .blog-featured:hover,
+  .btn-primary:hover {
+    transform: none;
+  }
 }

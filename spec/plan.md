@@ -511,7 +511,7 @@ don't reimplement.
 
 ---
 
-## Phase 16: Replay and overrides
+## Phase 16: Replay and overrides --- DONE
 
 **Goal:** Create new executions derived from previous ones. **Partially blocked by ZenML branch.**
 
@@ -656,7 +656,7 @@ MVP tool set, packaging requirements)
 - Update docs site with SDK reference
 - Final packaging review:
   - `kitaru` PyPI package
-  - `kitaru` Docker image (ZenML base + cloud plugins + bundled dashboard)
+  - `kitaru` Docker image (ZenML base + cloud plugins + bundled dashboard) — **DONE** (Dockerfile + release workflow; dashboard bundling pending `kitaru-ui`)
   - `kitaru-ui` bundled into both PyPI package and Docker image
   - MCP/skill docs
   - Sandbox component docs
@@ -689,7 +689,7 @@ Phase 12 -- kitaru.llm() (LiteLLM + registry + secrets) --------------- DONE
 Phase 13 -- Error handling --------------------------------------------- DONE
 Phase 14 -- CLI commands (tiered) ------------------------------------- DONE
 Phase 15 -- kitaru.wait() + resume ------------------------------------ DONE
-Phase 16 -- Replay + overrides (direct kwargs) ------------------------ PARTIALLY BLOCKED (replay wrappers pending)
+Phase 16 -- Replay + overrides (direct kwargs) ------------------------ DONE
 Phase 17 -- PydanticAI adapter (incl HITL tools) ---------------------- DONE
 Phase 18 -- Stack creation + sandbox ---------------------------------- Large
 Phase 19 -- Agent-native integrations (MCP + skill) ------------------- DONE

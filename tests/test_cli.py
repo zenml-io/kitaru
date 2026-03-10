@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from importlib.metadata import version as get_version
 from types import SimpleNamespace
@@ -18,7 +19,7 @@ from kitaru.cli import (
     _parse_secret_assignments,
     app,
 )
-from kitaru.client import ExecutionStatus
+from kitaru.client import ExecutionStatus, LogEntry
 
 
 class _BrokenGlobalConfig:
@@ -44,6 +45,7 @@ def _execution_stub(
     stack_name: str | None = "prod",
     pending_wait: SimpleNamespace | None = None,
     failure: SimpleNamespace | None = None,
+    status_reason: str | None = None,
     checkpoints: list[SimpleNamespace] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
@@ -56,6 +58,7 @@ def _execution_stub(
         stack_name=stack_name,
         pending_wait=pending_wait,
         failure=failure,
+        status_reason=status_reason,
         checkpoints=checkpoints or [],
     )
 
@@ -199,6 +202,289 @@ def test_executions_list_applies_filters(
     assert "kr-200: content_pipeline | waiting | stack=prod" in output
 
 
+def test_executions_logs_renders_default_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions logs` should print message-only lines by default."""
+    fake_client = Mock()
+    fake_client.executions.logs.return_value = [
+        LogEntry(
+            message="Starting research",
+            level="INFO",
+            timestamp="2026-03-09T10:01:12+00:00",
+            source="step",
+            checkpoint_name="research",
+        ),
+        LogEntry(
+            message="Writing draft",
+            level="INFO",
+            timestamp="2026-03-09T10:01:15+00:00",
+            source="step",
+            checkpoint_name="write",
+        ),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "logs", "kr-123"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.logs.assert_called_once_with(
+        "kr-123",
+        checkpoint=None,
+        source="step",
+        limit=None,
+    )
+    output = capsys.readouterr().out
+    assert "Starting research" in output
+    assert "Writing draft" in output
+    assert "INFO" not in output
+
+
+def test_executions_logs_supports_verbosity_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`-v` and `-vv` should progressively include more log context."""
+    entry = LogEntry(
+        message="LLM call completed",
+        level="INFO",
+        timestamp="2026-03-09T10:01:12+00:00",
+        source="step",
+        checkpoint_name="research",
+        module="research",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient") as client_cls,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        client_cls.return_value.executions.logs.return_value = [entry]
+        app(["executions", "logs", "kr-123", "-v"])
+
+    assert exc_info.value.code == 0
+    output_v = capsys.readouterr().out
+    assert "2026-03-09 10:01:12" in output_v
+    assert "INFO" in output_v
+    assert "[research]" not in output_v
+
+    with (
+        patch("kitaru.cli.KitaruClient") as client_cls,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        client_cls.return_value.executions.logs.return_value = [entry]
+        app(["executions", "logs", "kr-123", "-vv"])
+
+    assert exc_info.value.code == 0
+    output_vv = capsys.readouterr().out
+    assert "[research]" in output_vv
+
+
+def test_executions_logs_grouped_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--grouped` should add checkpoint section headers."""
+    fake_client = Mock()
+    fake_client.executions.logs.return_value = [
+        LogEntry(message="Start", checkpoint_name="research"),
+        LogEntry(message="Done", checkpoint_name="write"),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "logs", "kr-123", "--grouped"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "checkpoint: research" in output
+    assert "checkpoint: write" in output
+
+
+def test_executions_logs_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--output json` should emit JSONL entries."""
+    fake_client = Mock()
+    fake_client.executions.logs.return_value = [
+        LogEntry(
+            message="Starting research",
+            level="INFO",
+            timestamp="2026-03-09T10:01:12+00:00",
+            source="step",
+            checkpoint_name="research",
+        )
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "logs", "kr-123", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    stdout = capsys.readouterr().out.strip()
+    payload = json.loads(stdout)
+    assert payload["message"] == "Starting research"
+    assert payload["checkpoint_name"] == "research"
+
+
+def test_executions_logs_rejects_invalid_flag_combination(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Grouped text sections are incompatible with JSONL output."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "logs",
+                "kr-123",
+                "--grouped",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_executions_logs_rejects_checkpoint_with_runner_source(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Checkpoint filtering is invalid for runner-level logs."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "logs",
+                "kr-123",
+                "--source",
+                "runner",
+                "--checkpoint",
+                "research",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_executions_logs_empty_state(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An empty result should print a helpful explanatory hint."""
+    fake_client = Mock()
+    fake_client.executions.logs.return_value = []
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "logs", "kr-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "No log entries found for execution kr-123." in output
+
+
+def test_executions_logs_follow_until_completion(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--follow` should stream new logs and exit with code 0 on completion."""
+    running = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+    completed = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+    )
+
+    first_entry = LogEntry(
+        message="Starting research",
+        timestamp="2026-03-09T10:01:12+00:00",
+        level="INFO",
+        checkpoint_name="research",
+    )
+    second_entry = LogEntry(
+        message="Writing draft",
+        timestamp="2026-03-09T10:01:15+00:00",
+        level="INFO",
+        checkpoint_name="write",
+    )
+
+    fake_client = Mock()
+    fake_client.executions.logs.side_effect = [
+        [first_entry],
+        [first_entry, second_entry],
+    ]
+    fake_client.executions.get.side_effect = [running, completed]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru.cli.time.sleep"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "logs", "kr-123", "--follow", "--interval", "0.01"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Starting research" in output
+    assert "Writing draft" in output
+    assert "[Execution completed successfully]" in output
+
+
+def test_executions_logs_follow_failure_exits_non_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--follow` should exit with code 1 when execution fails."""
+    failed = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        failure=SimpleNamespace(message="Checkpoint failed"),
+    )
+
+    fake_client = Mock()
+    fake_client.executions.logs.return_value = []
+    fake_client.executions.get.return_value = failed
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru.cli.time.sleep"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "logs", "kr-123", "--follow", "--interval", "0.01"])
+
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().out
+    assert "[Execution failed: Checkpoint failed]" in output
+
+
+def test_executions_logs_surfaces_backend_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Backend retrieval errors should surface as CLI failures."""
+    fake_client = Mock()
+    fake_client.executions.logs.side_effect = RuntimeError(
+        "Logs for this execution are stored in an OTEL backend."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "logs", "kr-123"])
+
+    assert exc_info.value.code == 1
+    assert "OTEL backend" in capsys.readouterr().err
+
+
 def test_executions_input_parses_json_and_reports_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -256,6 +542,68 @@ def test_executions_input_rejects_invalid_json(
 
     assert exc_info.value.code == 1
     assert "Invalid JSON for `--value`" in capsys.readouterr().err
+
+
+def test_executions_replay_parses_json_and_reports_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions replay` should parse JSON and call replay API."""
+    fake_client = Mock()
+    fake_client.executions.replay.return_value = _execution_stub(
+        exec_id="kr-222",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "replay",
+                "kr-111",
+                "--from",
+                "write_summary",
+                "--args",
+                '{"topic":"new topic"}',
+                "--overrides",
+                '{"checkpoint.research":"edited"}',
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.replay.assert_called_once_with(
+        "kr-111",
+        from_="write_summary",
+        overrides={"checkpoint.research": "edited"},
+        topic="new topic",
+    )
+    output = capsys.readouterr().out
+    assert "Replayed execution: kr-222" in output
+    assert "Status: running" in output
+
+
+def test_executions_replay_rejects_invalid_overrides_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions replay` should fail when `--overrides` is invalid JSON."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "replay",
+                "kr-111",
+                "--from",
+                "write_summary",
+                "--overrides",
+                "{invalid",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "Invalid JSON for `--overrides`" in capsys.readouterr().err
 
 
 def test_executions_resume_reports_success(
@@ -738,6 +1086,34 @@ def test_log_store_show_renders_snapshot(
     assert "API key: configured" in output
     assert "top-secret" not in output
     assert "Source: environment" in output
+
+
+def test_log_store_show_warns_on_stack_mismatch(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru log-store show` should explain preference vs active-stack mismatch."""
+    with (
+        patch("kitaru.cli.resolve_log_store") as mock_resolve,
+        patch("kitaru.cli.active_stack_log_store") as mock_active,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_resolve.return_value = SimpleNamespace(
+            backend="datadog",
+            endpoint="https://logs.datadoghq.com",
+            api_key="top-secret",
+            source="global user config",
+        )
+        mock_active.return_value = SimpleNamespace(
+            backend="artifact-store",
+            endpoint=None,
+            stack_name="local",
+        )
+        app(["log-store", "show"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Active ZenML stack uses: artifact-store" in output
+    assert "not wired into stack selection yet" in output
 
 
 def test_log_store_set_reports_environment_override(
@@ -1372,6 +1748,38 @@ def test_status_renders_compact_snapshot(
     assert "Active stack: prod" in output
     assert "Config directory: /tmp/.config/kitaru" in output
     assert "Project override" not in output
+
+
+def test_status_renders_log_store_mismatch_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Status should include a compact log-store mismatch row + warning block."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.1.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        server_url="https://example.com",
+        active_user="alice",
+        active_stack="prod",
+        config_directory="/tmp/.config/kitaru",
+        local_server_status="not started",
+        log_store_status="datadog (preferred) ⚠ stack uses artifact-store",
+        log_store_warning=(
+            "Active ZenML stack uses: artifact-store\n"
+            "The Kitaru log-store preference is not wired into stack selection yet."
+        ),
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Log store: datadog (preferred) ⚠ stack uses artifact-store" in output
+    assert "Active ZenML stack uses: artifact-store" in output
 
 
 def test_info_renders_detailed_snapshot(

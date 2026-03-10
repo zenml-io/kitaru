@@ -22,8 +22,8 @@ dependencies = [
     "litellm>=1.75.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    # TODO: revert to "zenml>=0.94.0" once feature/pause-pipeline-runs is merged and released
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@feature/pause-pipeline-runs",
+    # TODO: revert to "zenml>=0.94.0" once feature/kitaru is merged and released
+    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@feature/kitaru",
 ]
 
 [project.optional-dependencies]
@@ -105,6 +105,12 @@ root = ["src", "scripts", "."]
 
 [[tool.ty.overrides]]
 include = ["scripts/generate_sdk_docs.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+include = ["scripts/r2-upload.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"

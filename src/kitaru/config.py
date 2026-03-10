@@ -152,6 +152,14 @@ class ResolvedLogStore(BaseModel):
     ]
 
 
+class ActiveStackLogStore(BaseModel):
+    """Active stack log-store backend resolved from the current ZenML stack."""
+
+    backend: str
+    endpoint: str | None = None
+    stack_name: str | None = None
+
+
 class ModelAliasConfig(BaseModel):
     """Local model alias settings used by `kitaru.llm()`."""
 
@@ -1160,6 +1168,64 @@ def resolve_log_store() -> ResolvedLogStore:
         endpoint=None,
         api_key=None,
         source=_LOG_STORE_SOURCE_DEFAULT,
+    )
+
+
+def _normalize_log_store_backend_name(raw_backend: str | None) -> str:
+    """Normalize backend identifiers for user-facing comparisons."""
+    if raw_backend is None:
+        return "unknown"
+
+    normalized = raw_backend.strip().lower().replace("_", "-")
+    if not normalized:
+        return "unknown"
+
+    if normalized in {"artifact", "artifact-store", "artifactstore"}:
+        return "artifact-store"
+    if normalized in {"datadog"}:
+        return "datadog"
+    if normalized in {"otel", "otlp", "open-telemetry", "open telemetry"}:
+        return "otel"
+    return normalized
+
+
+def _extract_log_store_endpoint(log_store: Any) -> str | None:
+    """Best-effort extraction of an endpoint from a log-store component."""
+    config = getattr(log_store, "config", None)
+    if config is None:
+        return None
+
+    endpoint = getattr(config, "endpoint", None)
+    if not isinstance(endpoint, str):
+        return None
+
+    normalized = endpoint.strip().rstrip("/")
+    if not normalized:
+        return None
+    return normalized
+
+
+def active_stack_log_store() -> ActiveStackLogStore | None:
+    """Return the runtime log-store backend from the active ZenML stack."""
+    try:
+        client = Client()
+        active_stack = client.active_stack
+        active_stack_model = client.active_stack_model
+        log_store = active_stack.log_store
+    except Exception:
+        return None
+
+    flavor = getattr(log_store, "flavor", None)
+    raw_backend = flavor if isinstance(flavor, str) else log_store.__class__.__name__
+
+    stack_name = getattr(active_stack_model, "name", None)
+    if not isinstance(stack_name, str):
+        stack_name = None
+
+    return ActiveStackLogStore(
+        backend=_normalize_log_store_backend_name(raw_backend),
+        endpoint=_extract_log_store_endpoint(log_store),
+        stack_name=stack_name,
     )
 
 

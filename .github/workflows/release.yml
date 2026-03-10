@@ -51,14 +51,14 @@ jobs:
       # --- Checkout ---
       - name: Checkout develop (dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: develop
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout tagged commit (tag push)
         if: github.event_name == 'push'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -99,7 +99,7 @@ jobs:
 
       # --- Run CI checks ---
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: '3.12'
       - name: Install dependencies
@@ -158,13 +158,49 @@ jobs:
             --title "v$VERSION" \
             --generate-notes
 
+      # --- Docker image ---
+      # TODO: Once the ZenML dependency switches from feature/kitaru to a
+      # released PyPI version, remove this TODO. Until then, the Docker image
+      # is built from an unreleased ZenML branch — verify the image works
+      # before cutting a release that publishes it.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to Docker Hub
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: server
+          push: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+          tags: |
+            zenmldocker/kitaru:${{ env.VERSION }}
+            zenmldocker/kitaru:latest
+          labels: |
+            org.opencontainers.image.title=kitaru
+            org.opencontainers.image.description=Durable execution for AI agents, built on ZenML
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/zenml-io/kitaru
+            org.opencontainers.image.licenses=Apache-2.0
+
       # --- Dry-run summary ---
       - name: Dry-run summary
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
         run: |-
-          echo "## Dry-run complete" >> "$GITHUB_STEP_SUMMARY"
-          echo "Version: $VERSION" >> "$GITHUB_STEP_SUMMARY"
-          echo "Build artifacts:" >> "$GITHUB_STEP_SUMMARY"
-          ls dist/ >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "No changes were pushed, published, or tagged." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Dry-run complete"
+            echo "Version: $VERSION"
+            echo ""
+            echo "### Python package"
+            ls dist/
+            echo ""
+            echo "### Docker image"
+            echo "Built (not pushed): zenmldocker/kitaru:$VERSION"
+            echo ""
+            echo "No changes were pushed, published, or tagged."
+          } >> "$GITHUB_STEP_SUMMARY"
