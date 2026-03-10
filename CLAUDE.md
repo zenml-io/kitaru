@@ -111,7 +111,7 @@ uv sync                              # Install dependencies
 uv sync --extra local                # Include local ZenML runtime components
 
 # Common Python workflows
-just check                            # Run all checks (format, lint, typecheck, typos, yaml, links)
+just check                            # Run all checks (format, lint, typecheck, typos, yaml, actions, links)
 just test                             # Run all tests
 just test tests/test_foo.py           # Run a single test file
 just test tests/test_foo.py::test_bar # Run a single test
@@ -124,6 +124,7 @@ just typecheck                        # Type check only
 just typos                            # Typo check only
 just format-check                     # Check formatting without modifying
 just yaml-check                       # Check YAML formatting
+just actions-lint                     # Lint GitHub Actions workflows (requires actionlint)
 just links                            # Check markdown links offline (requires lychee)
 just build                            # Build wheel + sdist locally
 
@@ -220,7 +221,7 @@ Future work will add richer OpenTelemetry-native tracing and exporter integratio
 
 ## Commits and PRs
 
-- **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, links, and tests.
+- **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, actions lint, links, and tests.
 - **Fix pre-existing failures too.** If `just check` or `just test` surfaces failures that predate your changes, fix them rather than ignoring them. Other people may be working in the same repo, so not every failure is yours — but don't default to "not my problem." Ask the user if unsure whether a failure should be addressed in this commit.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.

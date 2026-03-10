@@ -192,13 +192,15 @@ jobs:
       - name: Dry-run summary
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
         run: |-
-          echo "## Dry-run complete" >> "$GITHUB_STEP_SUMMARY"
-          echo "Version: $VERSION" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Python package" >> "$GITHUB_STEP_SUMMARY"
-          ls dist/ >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Docker image" >> "$GITHUB_STEP_SUMMARY"
-          echo "Built (not pushed): zenmldocker/kitaru:$VERSION" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "No changes were pushed, published, or tagged." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Dry-run complete"
+            echo "Version: $VERSION"
+            echo ""
+            echo "### Python package"
+            ls dist/
+            echo ""
+            echo "### Docker image"
+            echo "Built (not pushed): zenmldocker/kitaru:$VERSION"
+            echo ""
+            echo "No changes were pushed, published, or tagged."
+          } >> "$GITHUB_STEP_SUMMARY"
