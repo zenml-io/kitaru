@@ -5,7 +5,7 @@
 <section class="hero-section" style="padding: 120px clamp(24px, 5vw, 80px) 80px;">
   <div class="section-inner">
     <div class="hero-grid">
-      <!-- Left: copy + CTA -->
+      <!-- Left: copy + form -->
       <div class="hero-left">
         <div class="hero-badge" data-reveal>
           <span class="dot"></span>
@@ -27,7 +27,10 @@
         </p>
 
         <div data-reveal data-reveal-delay="3">
-          <a href="#schedule-demo" class="hero-cta-btn">Schedule a Demo</a>
+          <form class="hero-form" id="hero-waitlist-form">
+            <input type="email" placeholder="you@company.com" required>
+            <button type="submit">Get Early Access</button>
+          </form>
           <p style="font-size: 0.75rem; margin-top: 12px; color: var(--color-muted);">Open source. Free to start. No credit card required.</p>
         </div>
       </div>
@@ -130,9 +133,35 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     background-clip: text;
   }
 
-  .hero-cta-btn {
-    display: inline-block;
-    padding: 14px 32px;
+  .hero-form {
+    display: flex;
+    gap: 10px;
+    max-width: 420px;
+  }
+
+  .hero-form input {
+    flex: 1;
+    padding: 14px 18px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-primary);
+    font-family: var(--font-ui);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .hero-form input::placeholder {
+    color: var(--color-muted);
+  }
+
+  .hero-form input:focus {
+    border-color: var(--color-accent);
+  }
+
+  .hero-form button {
+    padding: 14px 24px;
     background: var(--color-primary);
     color: #fff;
     border: none;
@@ -143,10 +172,9 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     transition: all 0.25s;
     white-space: nowrap;
     font-family: var(--font-ui);
-    text-decoration: none;
   }
 
-  .hero-cta-btn:hover {
+  .hero-form button:hover {
     opacity: 0.85;
     transform: translateY(-1px);
   }
@@ -266,6 +294,10 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
       padding-bottom: 60px !important;
     }
 
+    .hero-form {
+      flex-direction: column;
+      max-width: 100%;
+    }
   }
 
   @media (max-width: 900px) {
@@ -308,4 +340,41 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     });
   });
 
+  // Waitlist form
+  const heroForm = document.getElementById('hero-waitlist-form') as HTMLFormElement;
+  heroForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = heroForm.querySelector('button')!;
+    const input = heroForm.querySelector('input')! as HTMLInputElement;
+    const email = input.value.trim();
+
+    btn.textContent = 'Submitting...';
+    btn.setAttribute('disabled', 'true');
+
+    try {
+      const res = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      if (res.ok) {
+        btn.textContent = "You're in \u2713";
+        btn.style.background = '#3D8C5C';
+        input.disabled = true;
+        window.analytics?.track('Waitlist Signup', {
+          email,
+          source: 'hero',
+          page: window.location.pathname,
+        });
+        window.analytics?.identify(email, { email });
+      } else {
+        btn.textContent = 'Try again';
+        btn.removeAttribute('disabled');
+      }
+    } catch (_err) {
+      btn.textContent = 'Try again';
+      btn.removeAttribute('disabled');
+    }
+  });
 </script>
