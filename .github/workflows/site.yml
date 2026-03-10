@@ -79,10 +79,11 @@ jobs:
           wranglerVersion: '4'
           command: deploy
 
-      # --- Deploy preview Worker (same-repo PRs only) ---
+      # --- Deploy preview Worker (same-repo PRs only; skip when secrets
+      #     are unavailable, e.g. Dependabot PRs) ---
       - name: Deploy preview
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
-          == github.repository
+          == github.repository && secrets.CLOUDFLARE_API_TOKEN != ''
         id: preview
         uses: cloudflare/wrangler-action@v3
         with:
