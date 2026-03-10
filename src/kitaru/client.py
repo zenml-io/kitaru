@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import builtins
 import importlib
+import sys
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -834,17 +835,49 @@ def _snapshot_source_parts(run: PipelineRunResponse) -> tuple[str, str | None]:
     return module, attribute
 
 
+def _import_module_for_replay(module_name: str, run_id: str | Any) -> Any:
+    """Import a module by name, falling back to ``sys.modules`` search.
+
+    ZenML records the pipeline source module relative to the archived source
+    root (e.g. ``replay_with_overrides``), but in the running process the
+    module may be loaded under a different path.  Three fallback strategies:
+
+    1. Direct ``importlib.import_module`` (exact match).
+    2. Search ``sys.modules`` for a suffix match (e.g. the module is loaded
+       as ``examples.replay_with_overrides``).
+    3. Return ``__main__`` — when invoked via ``python -m pkg.mod``, the
+       module is loaded as ``__main__`` and won't appear under its dotted
+       name in ``sys.modules``.
+    """
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError:
+        pass
+
+    # Search already-loaded modules for a suffix match.
+    suffix = f".{module_name}"
+    for loaded_name, loaded_module in sys.modules.items():
+        if (
+            loaded_name == module_name or loaded_name.endswith(suffix)
+        ) and loaded_module is not None:
+            return loaded_module
+
+    # When run via `python -m`, the module is __main__.
+    main_module = sys.modules.get("__main__")
+    if main_module is not None:
+        return main_module
+
+    raise KitaruRuntimeError(
+        f"Failed to import replay source module '{module_name}' for "
+        f"execution '{run_id}': no module named '{module_name}' and no "
+        "matching module found in sys.modules."
+    )
+
+
 def _resolve_flow_for_replay(run: PipelineRunResponse) -> _ReplayFlowLike:
     """Resolve the original flow wrapper object for a replay source run."""
     module_name, source_attribute = _snapshot_source_parts(run)
-
-    try:
-        module = importlib.import_module(module_name)
-    except Exception as exc:
-        raise KitaruRuntimeError(
-            "Failed to import replay source module "
-            f"'{module_name}' for execution '{run.id}': {exc}"
-        ) from exc
+    module = _import_module_for_replay(module_name, run.id)
 
     selectors: list[str] = []
     if run.pipeline is not None:
@@ -883,13 +916,7 @@ def _resolve_pipeline_for_replay(run: PipelineRunResponse) -> Any:
             f"execution '{run.id}'."
         )
 
-    try:
-        module = importlib.import_module(module_name)
-    except Exception as exc:
-        raise KitaruRuntimeError(
-            "Failed to import replay source module "
-            f"'{module_name}' for execution '{run.id}': {exc}"
-        ) from exc
+    module = _import_module_for_replay(module_name, run.id)
 
     pipeline_obj = getattr(module, source_attribute, None)
     if pipeline_obj is None or not hasattr(pipeline_obj, "replay"):
