@@ -1,5 +1,7 @@
 # Future work
 
+> **Note:** This document has been consolidated into [24-consolidated-roadmap.md](24-consolidated-roadmap.md) along with specs 22, 23, plan.md, and Discord thread notes. Refer to 24 for the current unified view. This file is kept for historical context.
+
 This document tracks open work items, grouped by domain. Items marked **RESOLVED** are kept for decision context but have no remaining action. Items marked **PARTIALLY RESOLVED** have some work done but still have outstanding tasks.
 
 ## Product: configuration and setup

@@ -1,5 +1,7 @@
 # 22. Configuration and setup
 
+> **Note:** This document has been consolidated into [24-consolidated-roadmap.md](24-consolidated-roadmap.md) along with specs 21, 23, plan.md, and Discord thread notes. Refer to 24 for the current unified view. This file is kept for historical context.
+
 How users connect to Kitaru, register infrastructure, and manage credentials. These items were extracted from `21-notes_for_future_work.md` because they're heavily interlinked and need dedicated planning.
 
 **Implementation priority:** Config directory + project cleanup first (quick wins that fix the foundation), then stack creation UX, then deploy-time defaults.
