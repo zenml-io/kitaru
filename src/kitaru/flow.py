@@ -54,11 +54,10 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
     """Temporarily activate a stack for one flow invocation.
 
     Args:
-        stack_name_or_id: Optional stack name or ID.
+        stack_name_or_id: Optional stack name or ID. When ``None``, the
+            currently active ZenML stack is used unchanged.
     """
-    if not stack_name_or_id or stack_name_or_id == "local":
-        # "local" is Kitaru's implicit built-in default mode.
-        # We don't force-activate a named stack for it.
+    if not stack_name_or_id:
         yield
         return
 

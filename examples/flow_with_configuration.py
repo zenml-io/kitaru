@@ -51,7 +51,6 @@ def run_workflow(topic: str = "kitaru") -> tuple[str, str, dict[str, Any]]:
         Tuple of ``(execution_id, result, frozen_execution_spec)``.
     """
     kitaru.configure(
-        stack="local",
         cache=False,
         retries=1,
         image=kitaru.ImageSettings(

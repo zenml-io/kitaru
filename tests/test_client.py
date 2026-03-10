@@ -912,6 +912,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     )
     fetch_step.spec = SimpleNamespace(
         invocation_id="fetch",
+        upstream_steps=[],
         inputs_v2={},
     )
 
@@ -922,6 +923,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     )
     write_step.spec = SimpleNamespace(
         invocation_id="write",
+        upstream_steps=["fetch"],
         inputs_v2={},
     )
 
@@ -981,6 +983,103 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     assert replay_kwargs["pipeline_run"] == source_run.id
     assert replay_kwargs["skip"] == {"fetch"}
     assert execution.exec_id == str(replayed_run.id)
+
+
+def test_replay_fallback_applies_wait_overrides() -> None:
+    """Fallback client replay path should apply wait overrides after replay."""
+    fetch_step = _DummyStep(
+        name="__kitaru_checkpoint_source_fetch",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    fetch_step.spec = SimpleNamespace(
+        invocation_id="fetch",
+        upstream_steps=[],
+        inputs_v2={},
+    )
+
+    write_step = _DummyStep(
+        name="__kitaru_checkpoint_source_write",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    write_step.spec = SimpleNamespace(
+        invocation_id="write",
+        upstream_steps=["fetch"],
+        inputs_v2={},
+    )
+
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="__kitaru_pipeline_source_sample_flow",
+        steps={fetch_step.name: fetch_step, write_step.name: write_step},
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    replayed_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="sample_flow",
+    )
+
+    replay_pipeline = SimpleNamespace(
+        replay=MagicMock(return_value=_as_pipeline_run(replayed_run))
+    )
+    replay_module = SimpleNamespace(
+        __kitaru_pipeline_source_sample_flow=replay_pipeline,
+    )
+
+    wait = SimpleNamespace(
+        id=uuid4(),
+        wait_condition_key="approve:0",
+        created=None,
+        upstream_step_names=["fetch"],
+        downstream_step_names=["write"],
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no replay flow"),
+        ),
+        patch("kitaru.client._apply_wait_overrides") as apply_waits_mock,
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(source_run),
+            _as_pipeline_run(replayed_run),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        # First call: source run wait conditions (for replay planning).
+        # Second call: replayed run wait conditions (for execution mapping).
+        client_mock.list_run_wait_conditions.side_effect = [
+            SimpleNamespace(items=[wait]),
+            SimpleNamespace(items=[]),
+        ]
+
+        client = KitaruClient()
+        client.executions.replay(
+            str(source_run.id),
+            from_="write",
+            overrides={"wait.approve": True},
+        )
+
+    apply_waits_mock.assert_called_once_with(
+        run_id=str(replayed_run.id),
+        wait_overrides={"approve:0": True},
+    )
 
 
 def test_artifact_get_maps_producing_call_and_loads_value() -> None:

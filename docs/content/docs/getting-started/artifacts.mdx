@@ -3,12 +3,23 @@ title: Save and Load Artifacts
 description: Persist named values in checkpoints and reuse them across executions
 ---
 
-Use `kitaru.save()` and `kitaru.load()` when you want explicit artifact handling.
+Kitaru offers two ways to work with artifacts, depending on where your code runs.
+
+## Inside checkpoints
+
+Use `kitaru.save()` and `kitaru.load()` for inline artifact handling:
 
 - `kitaru.save(name, value, ...)` stores a named value in the current checkpoint.
-- `kitaru.load(exec_id, name)` reads a named value from another execution.
+- `kitaru.load(exec_id, name)` reads a named value from another execution's checkpoint.
 
-Both APIs are checkpoint-only. Calling them outside `@checkpoint` raises an error.
+Both are checkpoint-only. Calling them outside `@checkpoint` raises an error.
+
+## Outside checkpoints
+
+Use the client APIs for browsing artifacts from completed executions:
+
+- `KitaruClient().executions.get(exec_id).artifacts` — browse all artifacts.
+- `KitaruClient().artifacts.get(artifact_id)` — load a specific artifact.
 
 ## Artifact types
 

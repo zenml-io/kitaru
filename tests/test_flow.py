@@ -31,7 +31,7 @@ def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
 
 def _resolved_execution(
     *,
-    stack: str = "local",
+    stack: str | None = None,
     cache: bool = True,
     retries: int = 0,
 ) -> ResolvedExecutionConfig:

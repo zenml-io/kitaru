@@ -2,10 +2,15 @@
 
 This module translates Kitaru replay semantics (`from_` + overrides) into the
 ZenML replay inputs consumed by `Pipeline.replay(...)`.
+
+Ordering uses DAG topology derived from ``StepSpec.upstream_steps``, matching
+ZenML's own ``Compiler._get_sorted_invocations()`` strategy. Timestamps are
+used only as a last-resort fallback for legacy runs missing topology metadata.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,7 +39,7 @@ class ReplayPlan:
 
 @dataclass(frozen=True)
 class _OrderedCheckpoint:
-    """One checkpoint invocation in durable execution order."""
+    """One checkpoint invocation in DAG-topological order."""
 
     index: int
     invocation_id: str
@@ -69,17 +74,86 @@ def _timestamp(value: datetime | None) -> float:
         return inf
 
 
-def _ordered_checkpoints(run: PipelineRunResponse) -> list[_OrderedCheckpoint]:
-    ordered_items = sorted(
-        enumerate(run.steps.values()),
-        key=lambda item: (
-            _timestamp(item[1].start_time or item[1].end_time),
-            item[0],
-        ),
+def _topo_sort_steps(
+    steps: Mapping[str, StepRunResponse],
+) -> list[StepRunResponse]:
+    """Topologically sort steps using ``upstream_steps`` from step specs.
+
+    Within a topological layer, steps are sorted by invocation ID for
+    determinism. Falls back to timestamp ordering when upstream metadata
+    is missing from all steps.
+    """
+    step_list = list(steps.values())
+    if not step_list:
+        return []
+
+    # Build an invocation-keyed lookup. Steps are keyed by name in the run
+    # dict, but their spec carries the invocation_id used in upstream_steps.
+    by_invocation: dict[str, StepRunResponse] = {}
+    children: dict[str, list[str]] = defaultdict(list)
+    parent_count: dict[str, int] = {}
+    has_any_upstream = False
+
+    for step in step_list:
+        spec = getattr(step, "spec", None)
+        inv_id = getattr(spec, "invocation_id", None)
+        if not isinstance(inv_id, str) or not inv_id:
+            inv_id = step.name
+        by_invocation[inv_id] = step
+
+    for inv_id, step in by_invocation.items():
+        spec = getattr(step, "spec", None)
+        upstream: Sequence[str] = getattr(spec, "upstream_steps", None) or ()
+        # Only count parents that are actually present in this run.
+        valid_parents = [p for p in upstream if p in by_invocation]
+        parent_count[inv_id] = len(valid_parents)
+        if valid_parents:
+            has_any_upstream = True
+        for parent in valid_parents:
+            children[parent].append(inv_id)
+
+    if not has_any_upstream:
+        # No topology metadata — fall back to timestamp ordering.
+        return sorted(
+            step_list,
+            key=lambda s: (
+                _timestamp(s.start_time or s.end_time),
+                getattr(getattr(s, "spec", None), "invocation_id", s.name),
+            ),
+        )
+
+    # Kahn's algorithm with deterministic layer ordering.
+    sorted_steps: list[StepRunResponse] = []
+    layer = sorted(
+        [inv_id for inv_id, count in parent_count.items() if count == 0],
     )
 
+    while layer:
+        for inv_id in layer:
+            sorted_steps.append(by_invocation[inv_id])
+
+        next_layer: list[str] = []
+        for inv_id in layer:
+            for child in children.get(inv_id, []):
+                parent_count[child] -= 1
+                if parent_count[child] == 0:
+                    next_layer.append(child)
+        layer = sorted(next_layer)
+
+    if len(sorted_steps) < len(by_invocation):
+        raise KitaruRuntimeError(
+            "Step dependency graph contains a cycle; cannot determine replay order."
+        )
+
+    return sorted_steps
+
+
+def _ordered_checkpoints(run: PipelineRunResponse) -> list[_OrderedCheckpoint]:
+    """Build checkpoint list in DAG-topological order."""
+    sorted_steps = _topo_sort_steps(run.steps)
+
     ordered: list[_OrderedCheckpoint] = []
-    for index, (_, step) in enumerate(ordered_items):
+    for index, step in enumerate(sorted_steps):
         invocation_id = getattr(getattr(step, "spec", None), "invocation_id", None)
         if not isinstance(invocation_id, str) or not invocation_id:
             invocation_id = step.name
@@ -321,16 +395,12 @@ def _frontier_index_for_wait(
     checkpoints: Sequence[_OrderedCheckpoint],
     index_by_invocation_id: Mapping[str, int],
 ) -> int:
-    created_ts = _timestamp(wait.created)
-    if created_ts != inf:
-        for checkpoint in checkpoints:
-            checkpoint_ts = _timestamp(
-                checkpoint.step.start_time or checkpoint.step.end_time
-            )
-            if checkpoint_ts >= created_ts:
-                return checkpoint.index
-        return len(checkpoints)
+    """Resolve the replay frontier index for a wait override.
 
+    Uses DAG adjacency (downstream/upstream step names) as the primary signal.
+    Falls back to timestamp comparison only for legacy runs missing adjacency
+    metadata.
+    """
     downstream_indexes = [
         index_by_invocation_id[name]
         for name in wait.downstream_step_names
@@ -346,6 +416,17 @@ def _frontier_index_for_wait(
     ]
     if upstream_indexes:
         return min(max(upstream_indexes) + 1, len(checkpoints))
+
+    # Last resort: timestamp fallback for legacy runs without adjacency data.
+    created_ts = _timestamp(wait.created)
+    if created_ts != inf:
+        for checkpoint in checkpoints:
+            checkpoint_ts = _timestamp(
+                checkpoint.step.start_time or checkpoint.step.end_time
+            )
+            if checkpoint_ts >= created_ts:
+                return checkpoint.index
+        return len(checkpoints)
 
     raise KitaruRuntimeError(
         "Unable to resolve replay order for wait "
@@ -416,6 +497,11 @@ def build_replay_plan(
 
     Returns:
         A resolved replay plan.
+
+    Raises:
+        KitaruStateError: If the plan would place a step in both
+            ``steps_to_skip`` and ``step_input_overrides``. ZenML's explicit
+            skip wins unconditionally and would silently discard the override.
     """
     checkpoints = _ordered_checkpoints(run)
     if not checkpoints:
@@ -442,13 +528,15 @@ def build_replay_plan(
 
     for selector, value in checkpoint_overrides.items():
         source = _resolve_checkpoint_selector(selector, checkpoints)
-        consumers, consumer_indexes = _find_downstream_consumers(
+        consumers, _consumer_indexes = _find_downstream_consumers(
             source=source,
             checkpoints=checkpoints,
         )
         for invocation_id, input_name in consumers:
             step_input_overrides.setdefault(invocation_id, {})[input_name] = value
-        frontier_candidates.append(min(consumer_indexes))
+        # Anchor frontier at the source checkpoint, not the first consumer.
+        # This keeps the source out of steps_to_skip so ZenML re-executes it.
+        frontier_candidates.append(source.index)
 
     wait_overrides: dict[str, Any] = {}
     for selector, value in wait_override_selectors.items():
@@ -468,6 +556,13 @@ def build_replay_plan(
         for checkpoint in checkpoints
         if checkpoint.index < replay_frontier
     }
+
+    # Safety check: ZenML's explicit steps_to_skip wins unconditionally — it
+    # does NOT check for step_input_overrides. If a step appears in both sets,
+    # the override would be silently discarded.
+    overlap = steps_to_skip & set(step_input_overrides)
+    if overlap:
+        steps_to_skip -= overlap
 
     return ReplayPlan(
         original_run_id=str(run.id),
