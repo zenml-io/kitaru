@@ -8,6 +8,9 @@ import kitaruLight from './src/styles/kitaru-light.json';
 export default defineConfig({
   site: 'https://kitaru.ai',
   trailingSlash: 'never',
+  redirects: {
+    '/banner': { status: 302, destination: '/' },
+  },
   integrations: [sitemap(), mdx()],
   markdown: {
     shikiConfig: {
