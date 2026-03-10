@@ -29,19 +29,19 @@ For these, starting over is not just annoying — it's wasteful. You're re-burni
 Durable execution means every meaningful step in your agent is checkpointed. If it crashes at step 15, you restart from step 15 — not step 1.
 
 ```python
-import kitaru
+from kitaru import checkpoint, flow
 
-@kitaru.checkpoint
+@checkpoint
 def step_one(input: str) -> str:
     # This result is persisted
     return expensive_api_call(input)
 
-@kitaru.checkpoint
+@checkpoint
 def step_two(data: str) -> str:
     # If this crashes, step_one's result is still cached
     return another_expensive_call(data)
 
-@kitaru.flow
+@flow
 def my_agent(input: str) -> str:
     a = step_one(input)
     b = step_two(a)

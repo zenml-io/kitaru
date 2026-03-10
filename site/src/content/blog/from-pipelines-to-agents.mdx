@@ -101,16 +101,17 @@ We think the right model borrows from both worlds:
 
 ```python
 import kitaru
+from kitaru import checkpoint, flow
 
-@kitaru.checkpoint
+@checkpoint
 def research(topic: str) -> str:
     return deep_research_with_llm(topic)
 
-@kitaru.checkpoint
+@checkpoint
 def write_report(research: str, style: str) -> str:
     return generate_report(research, style)
 
-@kitaru.flow
+@flow
 def analyst_agent(topic: str) -> str:
     findings = research(topic)
 

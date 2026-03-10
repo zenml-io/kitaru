@@ -15,7 +15,7 @@
         <div class="v-card-header">Artifacts</div>
         <div class="v-code-block">
           <pre class="v-pre"><code><span class="cmt"># Checkpoint outputs auto-persisted</span>
-<span class="dec">@kitaru.checkpoint</span>
+<span class="dec">@checkpoint</span>
 <span class="kw">def</span> <span class="fn">analyze</span>(code: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
     <span class="kw">return</span> call_llm(code)  <span class="cmt"># versioned</span>
 
@@ -40,7 +40,7 @@ kitaru.<span class="fn">configure</span>(
 )
 
 <span class="cmt"># Use by name</span>
-<span class="dec">@kitaru.flow</span>(config<span class="op">=</span><span class="str">'prod'</span>)
+<span class="dec">@flow</span>(config<span class="op">=</span><span class="str">'prod'</span>)
 <span class="kw">def</span> <span class="fn">my_agent</span>(): ...</code></pre>
         </div>
         <p class="v-desc">Named dev/staging/prod configs with automatic versioning. Model routing profiles included.</p>

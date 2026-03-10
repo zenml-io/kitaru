@@ -76,13 +76,14 @@ This is "too simple" for payment processing — you'd need sub-millisecond resum
 
 ```python
 import kitaru
+from kitaru import checkpoint, flow
 
-@kitaru.checkpoint
+@checkpoint
 def deep_research(topic: str) -> str:
     # 30 seconds, $2 in tokens
     return call_llm(f"Research {topic} thoroughly")
 
-@kitaru.flow
+@flow
 def research_agent(topic: str) -> str:
     research = deep_research(topic)
 
