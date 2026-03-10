@@ -6,7 +6,7 @@ It is not part of the public API surface.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -46,6 +46,10 @@ _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
 )
 _LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", default=0)
 
+_SUBMISSION_OBSERVER: ContextVar[Callable[[str], None] | None] = ContextVar(
+    "kitaru_submission_observer",
+    default=None,
+)
 
 _PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
 
@@ -230,3 +234,34 @@ def _not_implemented(name: str) -> NoReturn:
         f"kitaru.{name}() is not yet implemented. "
         "The Kitaru SDK is under active development."
     )
+
+
+@contextmanager
+def _submission_observer(callback: Callable[[str], None]) -> Iterator[None]:
+    """Install a submission observer for the current execution context.
+
+    The callback is invoked exactly once with the execution ID as soon as
+    the flow entrypoint detects an active ZenML run context.
+    """
+    token = _SUBMISSION_OBSERVER.set(callback)
+    try:
+        yield
+    finally:
+        _SUBMISSION_OBSERVER.reset(token)
+
+
+def _notify_submission_observer() -> None:
+    """Publish the current execution ID to the active observer, if any.
+
+    Called from the flow entrypoint wrapper once the ZenML run context
+    is available.  Safe to call when no observer is installed.
+    """
+    observer = _SUBMISSION_OBSERVER.get()
+    if observer is None:
+        return
+
+    exec_id = _get_zenml_execution_id()
+    if exec_id is not None:
+        observer(exec_id)
+        # Clear so it fires at most once per submission
+        _SUBMISSION_OBSERVER.set(None)
