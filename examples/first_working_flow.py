@@ -34,7 +34,11 @@ def process_data(data: str) -> str:
     return data.upper()
 
 
-@flow
+# TODO: remove explicit base_image once kitaru and ZenML
+# feature/kitaru are released to PyPI — the auto-injection
+# of kitaru into Docker requirements will handle this automatically.
+# Build the dev image with: just dev-image
+@flow(image={"base_image": "strickvl/kitaru-dev:latest"})
 def my_agent(url: str) -> str:
     """Run the example Kitaru workflow.
 
