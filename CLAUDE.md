@@ -51,6 +51,8 @@ The docs and landing page deploy as **one Cloudflare Worker** from `site/dist/`:
 
 The site workflow (`.github/workflows/site.yml`) runs this pipeline on `main` pushes (production) and creates preview Workers for PRs.
 
+**SSR vs static routing caveat:** The `wrangler.toml` sets `not_found_handling = "404-page"` in `[assets]`. This means Cloudflare's asset layer serves a 404 for any path without a matching static file *before* the Worker's SSR handler runs. SSR routes (`export const prerender = false`) may silently 404 in production even though they work locally. **Prefer Astro's built-in `redirects` config or static pages over SSR routes** for things like redirects. Only use SSR for routes that genuinely need runtime logic (e.g. `/api/waitlist` which uses KV bindings).
+
 ## Images & Assets
 
 ### Two-tier system
