@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru.configure()` now accepts a `project` parameter for internal/testing use
 
 ### Added
+- Kitaru-branded live terminal output: `kitaru run` now shows a Rich Live checkpoint-by-checkpoint progress display during interactive sessions, replacing ZenML's console output with Kitaru-themed visuals
 - Runtime log retrieval lane: `KitaruClient.executions.logs(...)`, `kitaru executions logs` (with `--follow`, `--grouped`, `-v`/`-vv`, and JSONL output), and MCP `get_execution_logs`
 - Runtime log retrieval docs updates across logging/log-store guides plus a new getting-started page for execution logs
 - Production Docker image (`docker/Dockerfile`): multi-stage server image based on ZenML server architecture with all cloud plugins, published as `zenmldocker/kitaru` during releases

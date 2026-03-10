@@ -56,6 +56,14 @@ from kitaru.config import (
 from kitaru.config import (
     use_stack as set_active_stack,
 )
+from kitaru.runtime import _submission_observer
+from kitaru.terminal import (
+    LiveExecutionRenderer,
+    _suppress_zenml_console,
+)
+from kitaru.terminal import (
+    is_interactive as is_terminal_interactive,
+)
 
 SDK_VERSION = get_version("kitaru")
 AUTH_ENV_VARS = (
@@ -852,6 +860,53 @@ def _emit_snapshot(
         print(_render_plain_snapshot(title, rows, warning))
 
 
+def _emit_run_snapshot(
+    *,
+    target: str,
+    stack: str | None,
+    exec_id: str,
+) -> None:
+    """Emit the post-run snapshot for non-interactive or deploy paths."""
+    try:
+        execution = KitaruClient().executions.get(exec_id)
+    except Exception as exc:
+        _emit_snapshot(
+            "Kitaru run",
+            [
+                ("Target", target),
+                ("Invocation", "deploy" if stack else "run"),
+                ("Execution ID", exec_id),
+            ],
+            warning=(
+                "Execution started successfully, but details are not available yet: "
+                f"{exc}"
+            ),
+        )
+        return
+
+    _emit_snapshot(
+        "Kitaru run",
+        _run_rows(target=target, stack=stack, execution=execution),
+    )
+
+
+def _run_with_live_display(
+    *,
+    flow_target: _FlowTarget,
+    target: str,
+    flow_inputs: dict[str, Any],
+) -> _FlowHandleLike:
+    """Execute a flow with the live terminal renderer active."""
+    renderer = LiveExecutionRenderer(target=target)
+    with (
+        renderer,
+        _suppress_zenml_console(),
+        _submission_observer(renderer.publish_exec_id),
+    ):
+        handle = flow_target.run(**flow_inputs)
+    return handle
+
+
 def _normalize_log_output(output: str) -> str:
     """Normalize and validate the `executions logs` output format."""
     normalized = output.strip().lower()
@@ -1426,11 +1481,19 @@ def run(
     ] = None,
 ) -> None:
     """Start a flow execution from a module/file target."""
+    use_live = is_terminal_interactive() and not stack
+
     try:
         flow_target = _load_flow_target(target)
         flow_inputs = _parse_json_object(args, option_name="--args")
 
-        if stack:
+        if use_live:
+            handle = _run_with_live_display(
+                flow_target=flow_target,
+                target=target,
+                flow_inputs=flow_inputs,
+            )
+        elif stack:
             handle = flow_target.deploy(stack=stack, **flow_inputs)
         else:
             handle = flow_target.run(**flow_inputs)
@@ -1442,29 +1505,9 @@ def run(
     except Exception as exc:
         _exit_with_error(str(exc))
 
-    _print_success(f"Started flow execution: {handle.exec_id}")
-
-    try:
-        execution = KitaruClient().executions.get(handle.exec_id)
-    except Exception as exc:
-        _emit_snapshot(
-            "Kitaru run",
-            [
-                ("Target", target),
-                ("Invocation", "deploy" if stack else "run"),
-                ("Execution ID", handle.exec_id),
-            ],
-            warning=(
-                "Execution started successfully, but details are not available yet: "
-                f"{exc}"
-            ),
-        )
-        return
-
-    _emit_snapshot(
-        "Kitaru run",
-        _run_rows(target=target, stack=stack, execution=execution),
-    )
+    if not use_live:
+        _print_success(f"Started flow execution: {handle.exec_id}")
+        _emit_run_snapshot(target=target, stack=stack, exec_id=handle.exec_id)
 
 
 @executions_app.command
