@@ -29,10 +29,10 @@ jobs:
     if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # --- Generate docs content (Python-only generators) ---
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --frozen
       - run: uv run python scripts/generate_cli_docs.py
       - run: uv run python scripts/generate_changelog_docs.py
@@ -41,7 +41,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: latest
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: docs/.node-version
           cache: pnpm
@@ -79,10 +79,11 @@ jobs:
           wranglerVersion: '4'
           command: deploy
 
-      # --- Deploy preview Worker (same-repo PRs only) ---
+      # --- Deploy preview Worker (same-repo PRs only; skip when secrets
+      #     are unavailable, e.g. Dependabot PRs) ---
       - name: Deploy preview
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
-          == github.repository
+          == github.repository && secrets.CLOUDFLARE_API_TOKEN != ''
         id: preview
         uses: cloudflare/wrangler-action@v3
         with:
