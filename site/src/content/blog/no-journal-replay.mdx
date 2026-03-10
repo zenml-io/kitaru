@@ -35,7 +35,7 @@ For an AI agent? It's a nightmare. Agents are inherently non-deterministic. They
 Kitaru checkpoints store **actual outputs** in an artifact store. Not journal entries. Not operation logs. The literal return value of each `@checkpoint` function, serialized and saved.
 
 ```python
-@kitaru.checkpoint
+@checkpoint
 def research(topic: str) -> str:
     # This can call datetime.now(), random(), whatever
     # The return value is what gets cached

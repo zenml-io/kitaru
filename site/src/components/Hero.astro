@@ -47,8 +47,9 @@
           <!-- Plain Python tab -->
           <div class="code-tab-content active" id="tab-plain">
             <pre class="code-pre"><code><span class="kw">import</span> kitaru
+<span class="kw">from</span> kitaru <span class="kw">import</span> flow
 
-<span class="dec">@kitaru.flow</span>
+<span class="dec">@flow</span>
 <span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
     plan <span class="op">=</span> <span class="fn">analyze_issue</span>(issue)    <span class="cmt"># cached on replay</span>
     patch <span class="op">=</span> <span class="fn">write_code</span>(plan)      <span class="cmt"># cached on replay</span>
@@ -66,14 +67,14 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
           </div>
           <!-- Framework tab -->
           <div class="code-tab-content" id="tab-framework">
-            <pre class="code-pre"><code><span class="kw">import</span> kitaru
+            <pre class="code-pre"><code><span class="kw">from</span> kitaru <span class="kw">import</span> flow
 <span class="kw">from</span> kitaru.adapters <span class="kw">import</span> pydantic_ai <span class="kw">as</span> kp
 
 <span class="cmt"># Every LLM call + tool use is checkpointed.</span>
 <span class="cmt"># Approval happens inside the agent loop.</span>
 coder <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span class="str">"claude-sonnet-4-6"</span>, tools<span class="op">=</span>[edit, test, approve]))
 
-<span class="dec">@kitaru.flow</span>
+<span class="dec">@flow</span>
 <span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
     <span class="kw">return</span> coder.<span class="fn">run_sync</span>(<span class="str">f"Fix: </span>{'{'}issue{'}'}<span class="str">"</span>).output
 

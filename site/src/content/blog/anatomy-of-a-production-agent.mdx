@@ -19,7 +19,7 @@ Here's the full pattern — the eight stages a coding agent goes through from is
 The agent reads the issue, understands the codebase context, and formulates a plan.
 
 ```python
-@kitaru.checkpoint
+@checkpoint
 def analyze_issue(issue: str, codebase_context: str) -> AnalysisPlan:
     return call_llm(
         f"Analyze this issue and create a plan:\n{issue}\n\nContext:\n{codebase_context}"
@@ -35,7 +35,7 @@ def analyze_issue(issue: str, codebase_context: str) -> AnalysisPlan:
 The agent navigates the repo — finding relevant files, understanding architecture, tracing dependencies.
 
 ```python
-@kitaru.checkpoint
+@checkpoint
 def explore_codebase(plan: AnalysisPlan) -> ExplorationResult:
     files = search_codebase(plan.relevant_patterns)
     dependencies = trace_imports(files)
@@ -51,7 +51,7 @@ def explore_codebase(plan: AnalysisPlan) -> ExplorationResult:
 The agent creates a concrete implementation plan — which files to change, in what order, with what approach.
 
 ```python
-@kitaru.checkpoint
+@checkpoint
 def create_plan(analysis: AnalysisPlan, exploration: ExplorationResult) -> ImplementationPlan:
     return call_llm(
         f"Create a detailed implementation plan:\n{analysis}\n\nCodebase:\n{exploration}"
@@ -83,7 +83,7 @@ if not approved:
 The agent writes code according to the approved plan.
 
 ```python
-@kitaru.checkpoint
+@checkpoint
 def write_code(plan: ImplementationPlan) -> CodeChanges:
     changes = []
     for file_change in plan.changes:
@@ -101,7 +101,7 @@ def write_code(plan: ImplementationPlan) -> CodeChanges:
 The agent runs the test suite and interprets the results.
 
 ```python
-@kitaru.checkpoint
+@checkpoint
 def run_tests(changes: CodeChanges) -> TestResult:
     applied = apply_changes(changes)
     result = run_test_suite(applied)
@@ -129,7 +129,7 @@ Each iteration through this loop is checkpointed. If the agent crashes on attemp
 The agent packages the changes, writes a description, and creates a pull request.
 
 ```python
-@kitaru.checkpoint
+@checkpoint
 def create_pr(changes: CodeChanges, plan: ImplementationPlan) -> str:
     description = call_llm(f"Write a PR description for:\n{plan.summary}")
     pr_url = create_pull_request(changes, description)
@@ -141,7 +141,7 @@ def create_pr(changes: CodeChanges, plan: ImplementationPlan) -> str:
 Putting it all together:
 
 ```python
-@kitaru.flow
+@flow
 def coding_agent(issue: str) -> str:
     context = load_codebase_context()
     analysis = analyze_issue(issue, context)

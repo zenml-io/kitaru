@@ -34,16 +34,17 @@ Here's a Kitaru flow with checkpoints:
 
 ```python
 import kitaru
+from kitaru import checkpoint, flow
 
-@kitaru.checkpoint
+@checkpoint
 def gather_sources(topic: str) -> list[str]:
     return search_academic_papers(topic)
 
-@kitaru.checkpoint
+@checkpoint
 def analyze(sources: list[str]) -> str:
     return call_llm(f"Analyze these sources: {sources}")
 
-@kitaru.flow
+@flow
 def research_agent(topic: str) -> str:
     sources = gather_sources(topic)
 
