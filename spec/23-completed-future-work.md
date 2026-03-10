@@ -1,4 +1,6 @@
-# Work Already completed from 21 and 22
+# Work already completed from 21 and 22
+
+> **Note:** This document has been consolidated into [24-consolidated-roadmap.md](24-consolidated-roadmap.md) along with specs 21, 22, plan.md, and Discord thread notes. Refer to 24 for the current unified view. This file is kept for historical context — completed items are omitted from 24.
 
 ## Product: API and developer experience
 
