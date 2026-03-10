@@ -28,6 +28,8 @@ jobs:
   build-deploy:
     if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
+    env:
+      HAS_CF_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -83,7 +85,7 @@ jobs:
       #     are unavailable, e.g. Dependabot PRs) ---
       - name: Deploy preview
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
-          == github.repository && secrets.CLOUDFLARE_API_TOKEN != ''
+          == github.repository && env.HAS_CF_SECRETS == 'true'
         id: preview
         uses: cloudflare/wrangler-action@v3
         with:
