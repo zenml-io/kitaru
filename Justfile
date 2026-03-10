@@ -2,7 +2,7 @@
 default:
     @just --list
 
-# Run all checks (format, lint, typecheck, typos, yaml, links)
+# Run all checks (format, lint, typecheck, typos, yaml, actions, links)
 check:
     @printf '─── Format Check ───────────────────────────────\n'
     @just format-check
@@ -14,6 +14,8 @@ check:
     @just typos
     @printf '\n─── YAML Check ─────────────────────────────────\n'
     @just yaml-check
+    @printf '\n─── Actions Lint ───────────────────────────────\n'
+    @just actions-lint
     @printf '\n─── Links ──────────────────────────────────────\n'
     @just links
     @printf '\n─────────────────────────────────────────────────\n'
@@ -38,6 +40,10 @@ typos:
 # Check YAML formatting
 yaml-check:
     uv run yamlfix --check .github/
+
+# Lint GitHub Actions workflows (requires actionlint: brew install actionlint)
+actions-lint:
+    actionlint
 
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
