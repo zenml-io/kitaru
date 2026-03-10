@@ -373,14 +373,16 @@ class KitaruConfig(BaseModel):
 class ResolvedExecutionConfig(BaseModel):
     """Fully resolved execution settings for a flow run."""
 
-    stack: str
+    stack: str | None = None
     image: ImageSettings | None = None
     cache: bool
     retries: int
 
     @field_validator("stack")
     @classmethod
-    def _validate_stack(cls, value: str) -> str:
+    def _validate_stack(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized_value = value.strip()
         if not normalized_value:
             raise ValueError("Stack cannot be empty.")
@@ -720,7 +722,7 @@ def resolve_execution_config(
 ) -> ResolvedExecutionConfig:
     """Resolve execution configuration according to Phase 10 precedence."""
     resolved = ResolvedExecutionConfig(
-        stack="local",
+        stack=None,
         image=None,
         cache=True,
         retries=0,
