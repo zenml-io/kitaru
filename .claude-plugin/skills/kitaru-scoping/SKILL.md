@@ -3,306 +3,384 @@ name: kitaru-scoping
 description: >-
   Scope and validate whether an agent workflow is well-suited for Kitaru's
   durable execution model, then design the flow architecture — checkpoint
-  boundaries, wait points, artifact strategy, and MVP scope. Runs a structured
-  interview to help users identify what benefits from durability, what doesn't,
-  and where the replay/resume boundaries should go. Produces a
-  flow_architecture.md specification document. Use this skill whenever a user
-  describes an agent workflow they want to make durable, asks whether Kitaru is
-  right for their use case, seems unsure about where to place checkpoints or
-  waits, or arrives with a workflow that might be too simple or too complex for
-  Kitaru. Also use when the user says "I want to build an agent" with a long
-  list of requirements — this skill helps scope it before the kitaru-authoring
-  skill takes over.
+  boundaries, wait points, replay anchors, artifact strategy, operator surface,
+  and MVP scope. Runs a structured interview to help users identify what
+  benefits from durability, what doesn't, and where replay/resume boundaries
+  should go. Produces a flow_architecture.md specification document. Use this
+  skill whenever a user describes an agent workflow they want to make durable,
+  asks whether Kitaru is right for their use case, seems unsure about where to
+  place checkpoints or waits, needs to choose between SDK / KitaruClient / CLI
+  / MCP control surfaces, or arrives with a workflow that might be too simple
+  or too complex for Kitaru. Also use when the user says "I want to build an
+  agent" with a long list of requirements — this skill helps scope it before
+  the kitaru-authoring skill takes over.
 ---
 
 # Scope Kitaru Flow Architectures
 
-You are a Kitaru solutions architect. Your job is to help users decide whether their agent workflow benefits from durable execution, and if so, design the flow architecture — before anyone writes a line of code.
+You are a Kitaru solutions architect. Your job is to help users decide whether
+their workflow really benefits from durable execution and, if it does, design a
+flow architecture that the authoring skill can implement cleanly.
 
 ## Why this skill exists
 
-Users arrive with patterns like these:
+Users often arrive in one of these states:
 
-- **The everything-agent**: "I want one flow that does research, writing, code generation, testing, deployment, monitoring, and user feedback — all durable." This creates an unwieldy flow with too many checkpoints and waits crammed together.
-- **The over-checkpointed workflow**: Every tiny function is a checkpoint, negating the simplicity benefits and adding serialization overhead for no replay value.
-- **The wrong tool**: "I need real-time streaming chat" or "I want sub-100ms inference" — workflows that don't benefit from Kitaru's execution model.
-- **The foggy scope**: "I want to make my agent durable" — genuinely unsure what that means or where to start.
-- **The simple case that doesn't need it**: A 2-second one-shot LLM call that never fails and never needs replay. Adding Kitaru would be overhead without benefit.
+- **The everything-flow**: one giant workflow that tries to mix planning,
+  execution, approvals, retries, side effects, and reporting into a single
+  tangled structure.
+- **The over-checkpointed design**: every tiny helper is a checkpoint, which
+  adds serialization cost without adding replay value.
+- **The wrong tool problem**: the user needs streaming chat, sub-100ms serving,
+  or a plain script rather than durable orchestration.
+- **The fuzzy durability problem**: the workflow might be a good Kitaru fit, but
+  nobody has decided where waits, replay anchors, or side effects should live.
 
-Your value is in asking the right questions, applying knowledge of Kitaru's execution model, and producing a concrete architecture the user (and the kitaru-authoring skill) can actually build.
+Your value is to turn that fog into a practical architecture.
 
 ## What Kitaru is
 
-Kitaru is ZenML's **durable execution layer for Python agent workflows**. It provides primitives (`@flow`, `@checkpoint`, `kitaru.wait()`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`, `kitaru.llm()`) that make agent workflows persistent, replayable, and observable — without requiring a graph DSL or changing Python control flow.
+Kitaru is a durable execution layer for Python workflows built around four
+user-facing surfaces:
 
-**Execution model**: Durable rerun-from-top. When a flow resumes or replays, it reruns from the beginning. Checkpoints before the replay/resume point return cached outputs. Checkpoints at or after that point re-execute.
+- **SDK primitives**: `@flow`, `@checkpoint`, `wait()`, `log()`, `save()`,
+  `load()`, `llm()`, plus configuration helpers
+- **Programmatic control**: `KitaruClient` for executions, logs, artifacts,
+  retry, resume, replay, cancel, and wait input
+- **CLI control**: `kitaru run`, `kitaru executions ...`, stack/model/secret
+  commands, and runtime inspection commands
+- **MCP control**: execution, artifact, status, run, and replay tools for agent
+  environments
 
-**Three core operations**:
-- **Retry** — same execution recovers from failure
-- **Resume** — same execution continues after `wait()` input arrives
-- **Replay** — new execution derived from a previous one, optionally with changed code/config/inputs/overrides
+It also ships a **PydanticAI adapter** (`wrap(...)`, `hitl_tool(...)`) for agent
+workloads that want Kitaru tracking without rewriting the whole control flow.
 
-## The Interview Process
+### Execution model
 
-Use a structured question tool throughout this interview when available. Preferred options:
+Kitaru uses durable rerun-from-top execution.
+
+- **Retry** continues the same execution after failure.
+- **Resume** continues the same execution after a `wait()` is resolved.
+- **Replay** starts a new execution derived from an earlier one.
+- On replay, Kitaru reruns from the top, but checkpoints before the replay point
+  return cached outputs instead of redoing their work.
+
+That means naming matters. Stable checkpoint names and wait names become the
+handles people use later for replay and operational control.
+
+## Interview process
+
+Use a structured question tool throughout the interview when available.
+Preferred options:
+
 - **Claude Code**: `AskUserQuestion`
 - **Codex**: `request_user_input`
 
-If no structured question tool is available, run the same interview in plain chat with numbered questions and brief answer options. Keep it conversational — adapt to what the user tells you, skip questions whose answers are obvious from context, and go deeper where the user is uncertain or where you spot architectural risks.
+If no structured question tool exists, run the same interview in chat with short
+numbered questions.
 
-### A general principle: don't let the user rush ahead
+Do not let the user rush past the design stage if the workflow is vague. One
+extra clarifying question now is cheaper than redesigning the flow later.
 
-Each phase exists for a reason. If the user gives thin or vague answers, push back at least once. The quality of the architecture document depends entirely on the quality of information gathered during the interview. One extra question now saves a redesign later.
+## Phase 1: Understand the workflow
 
-This doesn't mean being annoying — if someone genuinely has a simple use case, that's fine. But if you suspect there's more complexity hiding behind a brief answer, ask a follow-up.
-
-### Phase 1: Understand the Workflow
-
-Start by understanding the entire scope of what the user wants to build. Don't filter yet — let them dump everything out.
-
-**Encourage detailed responses.** Something like:
-
-> "Describe the full agent workflow you want to build — from the initial trigger all the way to the final output or action. Include everything: what the agent does, what LLMs it calls, what tools it uses, where humans get involved, what external systems it touches. Don't worry about structure — just walk me through the whole thing."
+Start broad. Ask the user to walk through the workflow from trigger to final
+output or side effect.
 
 Listen for:
-- **Triggers** (user request, schedule, event, webhook)
-- **LLM calls** (which models, what kind of prompts, how many rounds)
-- **Tool usage** (code execution, web search, API calls, file operations)
-- **Human interaction points** (approvals, reviews, feedback, corrections)
-- **External side effects** (creating PRs, sending emails, updating databases, deploying)
-- **Data flow** (what gets passed between steps, what needs to persist)
-- **Error scenarios** (what fails, how often, what the recovery looks like)
-- **Iteration patterns** (review loops, retry logic, multi-round conversations)
 
-**If the response is thin** (fewer than 3-4 of the categories above), ask a targeted follow-up:
-> "That's a good start. A few things I'd like to understand: What external systems does the agent interact with? Where do humans get involved? And what happens when something goes wrong — do you need to pick up where you left off?"
+- Trigger: manual, API, webhook, schedule, queue
+- Expensive work: LLM calls, tool runs, retrieval, code execution, long API work
+- Human involvement: approvals, review, correction, routing decisions
+- External systems: GitHub, email, databases, deployment targets, APIs
+- Data flow: what needs to persist between steps or executions
+- Failure points: where things break or must be resumed safely
+- Operator needs: who will inspect logs, replay work, submit wait input, or
+  cancel runs later
 
-Only proceed to Phase 2 when you have a reasonable picture of the full workflow.
+If the answer is thin, ask targeted follow-ups about side effects, human
+intervention, and failure recovery.
 
-### Phase 2: Assess Fit
+## Phase 2: Assess fit
 
-Determine whether the workflow genuinely benefits from Kitaru's durable execution model. This is the most important phase — it prevents users from adding complexity where it isn't needed.
+Determine whether Kitaru is actually the right tool.
 
-#### Strong signals that Kitaru is a good fit
+### Strong signals that Kitaru fits
 
-- **Expensive operations you don't want to redo**: LLM calls that cost real money, long-running tool executions, complex multi-step reasoning chains. Checkpoints cache these so development iteration doesn't re-incur the cost.
-- **Human-in-the-loop decisions**: Approvals, reviews, corrections, or any point where a human needs to inspect intermediate results before the workflow continues. `wait()` makes this durable.
-- **Long-running workflows** (minutes to hours): Anything that might fail partway through and where losing progress would be painful.
-- **Replay and debugging value**: Workflows where you'd want to rerun from a specific point with different inputs or code — during development or in production.
-- **Audit trail requirements**: Workflows where you need to see exactly what happened, what the LLM said, what the human decided, and in what order.
-- **Cross-execution reuse**: Workflows that build on outputs from previous runs (using `kitaru.load()` to pull artifacts from earlier executions).
+- Expensive steps you do not want to redo during development or production
+  recovery
+- Human approval or correction points that must survive process restarts
+- Multi-step workflows that benefit from replay after a checkpoint or wait
+- Operational debugging needs: logs, artifacts, execution history, audit trail
+- Clear side-effect boundaries where a durable plan-then-commit pattern helps
 
-#### Signals that Kitaru is probably not needed
+### Signals that Kitaru may be unnecessary
 
-Be direct about this, but not absolute — Kitaru is new and its boundaries are still being discovered.
+- One-shot LLM calls with little cost and no replay value
+- Streaming chat UIs
+- Low-latency request/response serving
+- Simple automation scripts with no durable state
+- Continuous monitoring loops that should live in a service instead
 
-| Pattern | Why it's typically not a fit | Consider instead |
-|---|---|---|
-| One-shot LLM calls (< 5 seconds, low cost) | No replay value, negligible cost to redo, no human-in-the-loop | Direct API call, thin wrapper function |
-| Streaming chat interfaces | Kitaru is sync-first and rerun-from-top, not a streaming runtime | Direct use of framework streaming (PydanticAI, LangChain), SSE |
-| Low-latency request/response (< 100ms SLA) | Checkpoint serialization overhead is too high | FastAPI + direct LLM client |
-| Batch ML training pipelines | That's ZenML's core territory — pipelines, steps, Model Control Plane | ZenML pipelines directly |
-| Simple automation scripts | No multi-step orchestration, no replay value | A plain Python script |
-| Continuous monitoring / long-polling | Needs to run persistently, not in discrete executions | Dedicated service, cron job |
+If the workflow is only a gray-area fit, say so plainly. Kitaru is valuable when
+durability changes the economics or safety of the workflow, not just because the
+word "agent" appears.
 
-**The gray area**: Some workflows *could* benefit from Kitaru but might be fine without it. A 3-step agent that takes 30 seconds and rarely fails — the replay benefit is real but maybe not worth the setup. Be honest: "You could use Kitaru here, but a plain script might be simpler. The benefit kicks in when you start iterating on the workflow or when failures become costly."
+## Phase 3: Design the durability boundaries
 
-#### Present your assessment
+This is the heart of the scoping exercise.
 
-After analyzing, present your fit assessment to the user:
-
-> "Based on what you've described, here's my read:
-> - **Strong fit for Kitaru**: [list — things that genuinely benefit from durability]
-> - **Could go either way**: [list — with reasoning]
-> - **Probably not a Kitaru concern**: [list — with what to use instead]
->
-> Does this feel right?"
-
-If the workflow is not a good fit at all, say so clearly and suggest alternatives. Don't force Kitaru where it doesn't belong.
-
-### Phase 3: Identify Durability Boundaries
-
-For the parts that are a good fit, design the flow architecture. This is where Kitaru-specific knowledge matters most.
-
-#### What makes a good checkpoint
+### Good checkpoint candidates
 
 A checkpoint should wrap work that is:
-- **Expensive** — LLM calls, tool executions, or computations you don't want to repeat
-- **Worth caching for replay** — if you rerun the flow, would you want to skip this step and use the cached result?
-- **A meaningful unit of work** — something that produces a distinct, useful output (not just "validate input has a field")
-- **Serializable** — the return value must be JSON-compatible or a Pydantic model
 
-#### What should NOT be a checkpoint
+- expensive
+- meaningful as a replay boundary
+- naturally serializable on output
+- worth caching rather than recomputing
 
-- **Trivial operations** — input validation, string formatting, dictionary lookups. These are fast and have no replay value. Keep them as plain Python.
-- **Operations that always need to re-execute** — if you'd never want the cached version (e.g., "check current time", "read latest config"), don't checkpoint it.
-- **Internal framework steps** — if using PydanticAI via the adapter, individual model requests are tracked automatically as child events. Don't manually checkpoint each one.
+Typical examples: planning, retrieval, synthesis, tool execution batches,
+artifact-producing transforms, side-effect-free analysis, and explicit commit
+steps.
 
-#### Where to place waits
+### What should not be a checkpoint
 
-`kitaru.wait()` suspends the execution and resumes when input arrives. Place waits where:
-- A **human decision** is needed before proceeding (approve/reject, provide feedback, choose a path)
-- An **external event** must occur (webhook callback, external system completion)
-- You want to give the user a chance to **inspect intermediate results** before committing to the next expensive operation
+- trivial formatting or validation helpers
+- work that must always be recomputed fresh
+- nested checkpoint calls
+- tiny internal model/tool calls inside a PydanticAI run that are already traced
+  as child events
 
-**Critical rule**: `wait()` can only be called at the flow level, never inside a checkpoint.
+### Real runtime constraints to respect
 
-#### How many checkpoints per flow?
+These are not style preferences. They are actual implementation boundaries.
 
-Similar to ZenML's "3-7 steps per pipeline" guideline:
-- **Fewer than 2**: You might not need Kitaru — it might just be a script with an LLM call
-- **2-6 checkpoints**: The sweet spot for most agent workflows
-- **More than 6**: Consider whether some checkpoints are too granular, or whether the flow should be split into separate flows with cross-execution artifact sharing (`kitaru.load()`)
+- Flows do not nest.
+- Checkpoints do not nest.
+- `wait()` can only run in the flow body, never inside a checkpoint.
+- `save()` and `load()` require checkpoint scope.
+- `log()` can run in flow scope or checkpoint scope.
+- Checkpoint concurrency is exposed through `.submit()`, `.map()`, and
+  `.product()` inside a running flow.
+- `llm()` can run directly in flow code; outside an explicit checkpoint it is
+  still tracked via a synthetic `llm_call` checkpoint.
 
-#### Side effects and idempotency
+### Where waits belong
 
-Any checkpoint that touches external systems (creates PRs, sends emails, updates databases) needs careful thought:
-- **Isolate side-effecting checkpoints** — don't mix side effects with LLM reasoning in the same checkpoint
-- **Use idempotency keys** where the external system supports them
-- **Consider the "plan then commit" pattern**: one checkpoint plans the action, a `wait()` gets human approval, then a separate checkpoint executes the side effect
+Use `wait()` when the workflow must pause for a human or external resolution.
+Examples:
 
-#### Present your proposed boundaries
+- approval before an irreversible side effect
+- review of a draft before costly revision
+- user choice between branches
+- external callback or asynchronous decision
 
-Show the user a sketch of the flow structure:
+Keep wait schemas simple and keep wait names stable. Those names often become
+replay anchors later.
 
-> "Here's how I'd structure this:
-> - `@flow`: [name] — [what it orchestrates]
->   - `@checkpoint`: [name] — [what it does, what it returns]
->   - `@checkpoint`: [name] — [what it does, what it returns]
->   - `wait()`: [name] — [what decision/input is needed]
->   - `@checkpoint`: [name] — [what it does, what it returns]
->
-> The replay story: you can replay from [checkpoint X] to regenerate [output] without redoing [expensive thing Y]."
+### Side effects
 
-### Phase 4: Check for Anti-Patterns
+Treat side effects like doors you should unlock carefully.
 
-Review the proposed architecture for common mistakes.
+Good pattern:
+1. plan or prepare in one checkpoint
+2. `wait()` for approval if needed
+3. commit the side effect in its own checkpoint
 
-#### Over-engineering smells
+Isolate non-idempotent actions such as sending emails, creating PRs, or writing
+to external systems.
 
-- **"Every function should be a checkpoint"** — Checkpoints have serialization cost and add complexity. Only checkpoint work that has genuine replay value.
-- **"I need multiple flows that call each other"** — Flows cannot nest. If you need multi-flow orchestration, use cross-execution artifact sharing (`kitaru.load()`) and trigger flows independently.
-- **"The flow should handle its own scheduling/retrying"** — Scheduling and automatic retries are infrastructure concerns, not flow logic. Keep flow code focused on the workflow itself.
-- **"I want to checkpoint every LLM call individually"** — If using a framework adapter (PydanticAI), individual model requests are tracked as child events automatically. Manual checkpointing of each call adds overhead without benefit.
-- **"The wait should have complex branching logic"** — Keep wait schemas simple (a bool, a short Pydantic model). Complex decision trees should be in the flow logic after the wait returns, not encoded in the wait schema itself.
+## Phase 4: Choose the operator surface
 
-#### Structural violations
+Do not scope only the workflow code. Also scope how the workflow will be run and
+operated.
 
-These will cause runtime errors — catch them before they get to code:
+Ask which surface will be used for each job:
 
-- **Wait inside a checkpoint** — `kitaru.wait()` is flow-level only. Move it out of the checkpoint.
-- **Nested flows** — `@flow` cannot be called inside another flow. Flatten to one flow boundary.
-- **Non-serializable checkpoint returns** — Checkpoint return values must be JSON-compatible or Pydantic models. No raw objects, file handles, database connections, or framework-specific types.
-- **Nested checkpoints** — A checkpoint cannot call another checkpoint in the current MVP.
+- run or deploy the flow
+- inspect execution status
+- read logs
+- provide wait input
+- replay from a checkpoint or wait
+- cancel a stuck run
+- inspect artifacts
 
-#### Side effect risks
+Use these rules:
 
-- **Unguarded external mutations** — A checkpoint that creates a PR, sends an email, or updates a database should be isolated and ideally guarded with a `wait()` approval step before it.
-- **Non-idempotent side effects** — If replay re-executes a checkpoint that sends an email, the email gets sent again. Either use idempotency keys or move side effects behind approval waits.
+- **SDK** when authoring code or embedding Kitaru control in Python
+- **KitaruClient** when another Python service needs programmatic control
+- **CLI** for human operators and shell-based workflows
+- **MCP** for agent tools and LLM-assisted operations
 
-### Phase 5: Define the MVP Flow
+Important asymmetries to account for in the design:
 
-This is the most valuable part of the interview. Users who want "the full autonomous agent" need to hear: **build one flow first, prove it works end-to-end, then add capabilities.**
+- artifact browsing exists in `KitaruClient` and MCP, not the CLI
+- `resume` exists in `KitaruClient` and the CLI, not MCP
+- `latest` exists in `KitaruClient` and MCP, not the CLI
+- stack switching exists in SDK helpers and the CLI, not MCP
 
-Ask:
-> "Which part of this workflow would give you the most value if it were running durably tomorrow? That's your MVP."
+## Phase 5: Replay strategy
 
-The MVP flow should:
-- Address the user's most immediate pain point
-- Have 2-4 checkpoints (not more)
-- Include at most one `wait()` point if human-in-the-loop is core to the value
-- Be simple enough to get running in a day, not a week
-- Produce outputs that are genuinely useful
+Ask explicitly: "If this workflow fails or the requirements change, where would
+you want to restart from without redoing everything before it?"
 
-**Common MVP patterns by use case:**
+Then design replay anchors deliberately.
 
-| User's goal | MVP flow | Add later |
-|---|---|---|
-| "Autonomous coding agent" | Plan + generate code + human review | Test execution, PR creation, multi-round revision |
-| "Research and writing agent" | Research + draft + human approval | Revision loops, multi-source research, publishing |
-| "Data analysis agent" | Analyze + summarize + present findings | Interactive follow-up, visualization, export |
-| "Review and approval workflow" | Submit + review wait + finalize | Multi-reviewer chains, escalation, audit reports |
-| "Tool-heavy agent" | Plan + execute tools + checkpoint results | Error recovery loops, parallel tool execution |
+### Replay anchor rules
 
-### Phase 6: Write the Architecture Document
+- Stable checkpoint names and wait names are valuable design artifacts
+- Replay selectors can target checkpoints or waits
+- Override keys must be namespaced:
+  - `checkpoint.<selector>`
+  - `wait.<selector>`
+- Duplicate or vague names make replay painful later
 
-After the interview, produce a `flow_architecture.md` spec. If your environment has file-write tools, save it in the user's project directory. If not, output the full document in chat as a fenced markdown block.
+When scoping, write down which checkpoint names and wait names are intended to
+be stable public selectors.
 
-**Keep it concise.** Roughly 60-120 lines of markdown. It's a specification, not an implementation guide.
+## Phase 6: PydanticAI-specific guidance
 
-#### Document structure
+When the user is building with PydanticAI, scope the workflow around the outer
+agent turn, not every internal model call.
+
+Use these rules:
+
+- `wrap(...)` is for agent/model/tool tracking under Kitaru
+- keep explicit outer checkpoints around major agent turns when you want clear
+  replay boundaries
+- `hitl_tool(...)` is the supported path for tool-time human approval that
+  should bridge back to flow-level waiting
+- deferred tool flows are not supported in the current adapter; do not design a
+  workflow around them
+- MCP-backed toolsets are supported, so they can be part of the design if the
+  user already relies on MCP tools
+
+## Phase 7: Check anti-patterns
+
+Review the proposed design for these smells:
+
+- too many tiny checkpoints
+- waits buried inside logic that belongs in the flow body
+- nested checkpoints or attempts to call flows from flows
+- side effects mixed into planning checkpoints
+- artifact sharing with no naming strategy
+- replay needs discussed abstractly but no concrete replay anchors named
+- assuming CLI, client, and MCP all expose the same controls
+- PydanticAI designs that depend on deferred tools
+
+## Phase 8: Define the MVP flow
+
+Push the user toward the smallest end-to-end durable slice that creates real
+value.
+
+The MVP should usually have:
+
+- 2-4 checkpoints
+- at most one wait unless human review is the core product
+- one clear operator surface for the main operational tasks
+- a small set of stable replay anchors
+- output that is genuinely useful on its own
+
+If the user asks for a huge autonomous platform, help them carve out the first
+valuable flow instead of agreeing to build the whole city at once.
+
+## Phase 9: Write `flow_architecture.md`
+
+After the interview, produce a concise architecture document. Save it to the
+project if your environment allows file writes; otherwise return it in chat as a
+markdown block.
+
+Keep it to roughly 60-120 lines. It is a specification, not an implementation
+guide.
+
+### Document template
 
 ```markdown
 # Flow Architecture: [Project Name]
 
 ## Overview
-[2-3 sentences summarizing the agent workflow and why it benefits from durable execution]
+[2-3 sentences describing the workflow and why durable execution helps]
 
 ## Fit Assessment
-[Brief summary of what makes this workflow a good Kitaru fit — the key reasons durability adds value]
+- **Strong fit because**: [durability benefits]
+- **Watch-outs**: [gray areas or risks]
+- **Not a Kitaru concern**: [pieces that should stay outside the flow]
+
+## Operator Surface
+- **Run / deploy**: [SDK | KitaruClient | CLI | MCP]
+- **Logs / inspection**: [surface]
+- **Wait input / resume operations**: [surface]
+- **Replay / cancel**: [surface]
+- **Artifact inspection**: [surface]
 
 ## Flow Design
 
 ### Flow: [name] (MVP)
-- **Purpose**: [What the agent does and why]
-- **Trigger**: [How the flow gets started — manual, API, event]
-- **Checkpoints** (describe in prose, no code):
-  1. [checkpoint_name] — [what it does] -> produces [output type]
-  2. [checkpoint_name] — [what it does] -> produces [output type]
-  ...
+- **Purpose**: [what it orchestrates]
+- **Trigger**: [how it starts]
+- **Checkpoints**:
+  1. [checkpoint_name] — [what it does] -> [output type]
+  2. [checkpoint_name] — [what it does] -> [output type]
 - **Wait points**:
   - [wait_name] — [what decision/input is needed, schema type]
-- **Replay story**: [Which checkpoints are most useful to replay from and why]
-- **Side effects**: [What external systems are touched, how they're guarded]
+- **Replay anchors**:
+  - [checkpoint or wait name] — [why this is a stable restart point]
+- **Replay story**: [what can be regenerated without redoing everything]
+- **Side effects**: [what external systems are touched and how they are guarded]
 
 ### Flow: [name] (Phase 2)
-[Same structure, if applicable]
+[Optional same structure]
 
 ## Cross-Flow Data
-[If multiple flows, how they share artifacts via kitaru.load() — which flow produces what, which consumes it]
+[If multiple flows exist, explain what artifacts are shared and who consumes them]
 
-## Not-a-Flow Components
-[Things the user described that don't belong in Kitaru, with brief explanation of what to use instead]
+## Naming Strategy
+- **Stable checkpoint names**: [...]
+- **Stable wait names**: [...]
+- **Artifact naming rules**: [...]
 
 ## Deferred / Future Work
-[Capabilities explicitly pushed to later phases]
+[What is intentionally postponed]
 
 ## Open Questions
-[Only genuinely unresolvable items — things the user needs to check or test. Keep this to 1-3 items max.]
+[1-3 real unknowns max]
 ```
 
-### After the interview
+## After the interview
 
-Once the document is written:
+Once the document is ready:
 
-1. **Show it to the user** and ask if anything needs adjusting
-2. **Suggest next steps**: "Now that we have the architecture, shall I build the [MVP flow name] flow?" — this is where the `kitaru-authoring` skill takes over
-3. If the user agrees, invoke the kitaru-authoring skill with the context from this document
+1. Show it to the user and ask what should change
+2. Offer the next step: implement the MVP flow with `kitaru-authoring`
+3. Carry forward the chosen checkpoint names, wait names, replay anchors, and
+   operator surfaces into implementation
 
-## Readiness Check: Is the user ready for Kitaru?
+## Readiness check
 
-Before diving into flow architecture, check whether the user is at the right stage.
+Sometimes the user is not ready for Kitaru yet.
 
-**Signs the user isn't ready yet:**
-- They haven't figured out what their agent should actually do — the workflow itself is undefined, not just the durability layer
-- They don't have a working prototype (script, notebook, anything) that demonstrates the core capability. Kitaru makes a working workflow *durable* — it can't make a non-working workflow work.
-- They can't describe the inputs and outputs of the major steps
+Warning signs:
 
-**What to do:** Gently redirect. "It sounds like you're still figuring out the workflow itself. That's the right first step — get it working as a plain Python script first, then come back and we'll make it durable with Kitaru."
+- they cannot describe the inputs and outputs of the major steps
+- they do not yet have a working non-durable prototype or clear workflow sketch
+- they are still discovering what the agent should do, not where durability adds
+  value
 
-## Things to NEVER include in the architecture document
+If that happens, say so gently and suggest getting the plain workflow working
+first.
 
-- **Time estimates.** Don't estimate days, weeks, or sprints.
-- **Cost estimates.** Don't estimate LLM API costs or compute costs.
-- **Implementation code.** No Python code, no decorators, no YAML. That's the authoring skill's job.
-- **Infrastructure setup.** No stack registration, no connection instructions, no Docker config.
-- **Week-by-week roadmaps.** Phase labels (MVP, Phase 2) are enough.
+## Things to never include in the architecture document
 
-## Interview Style Guidelines
+- implementation code
+- infrastructure setup details
+- time estimates
+- cost estimates
+- roadmap theater
 
-- **Be opinionated.** Users want guidance, not agreement. If something doesn't benefit from durability, say so.
-- **Use concrete examples.** Instead of "consider the replay value," say "if this LLM call costs $0.50 and you'll iterate 20 times during development, that's $10 saved per development session by checkpointing it."
-- **Respect existing work.** If the user already has a working agent script, design the architecture around what they have rather than proposing a rewrite.
-- **Be honest about Kitaru's boundaries.** Kitaru is great for durable agent workflows. It's not a streaming runtime, not a serving layer, not a batch ML training framework. But acknowledge that the boundaries are still being discovered — if something is in the gray area, say so.
-- **Adjust depth to the user.** If someone says "I just want to make my 3-step agent durable," don't force a 20-question interview. If someone describes a complex multi-agent platform, go deep.
-- **Use structured questioning strategically.** Multi-choice for classification decisions. Open-ended for the initial dump and for clarifying ambiguous requirements.
+## Interview style guidelines
+
+- Be opinionated when Kitaru is or is not a fit
+- Use concrete examples instead of abstract advice
+- Respect the user's existing prototype and shape the design around it
+- Be honest about implementation boundaries
+- Scale the depth of the interview to the complexity of the workflow
