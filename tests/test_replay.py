@@ -245,10 +245,8 @@ def test_wait_override_is_resolved_to_full_wait_key() -> None:
 
     wait = SimpleNamespace(
         id=uuid4(),
-        wait_condition_key="approve:0",
+        name="approve:0",
         created=t0 + timedelta(seconds=15),
-        upstream_step_names=["write"],
-        downstream_step_names=["publish"],
     )
 
     plan = build_replay_plan(

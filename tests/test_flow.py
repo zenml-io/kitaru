@@ -385,7 +385,7 @@ def test_replay_applies_wait_overrides_when_present() -> None:
         wait_overrides={"approve:0": True},
     )
 
-    pending_wait = SimpleNamespace(id="wait-id", wait_condition_key="approve:0")
+    pending_wait = SimpleNamespace(id="wait-id", name="approve:0")
 
     def _list_waits(*, status: str | None = None, **_: Any) -> SimpleNamespace:
         if status == "pending":

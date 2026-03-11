@@ -53,10 +53,8 @@ class _WaitRecord:
     """One wait condition candidate for replay selection."""
 
     wait_id: str
-    key: str
+    name: str
     created: datetime | None
-    upstream_step_names: tuple[str, ...]
-    downstream_step_names: tuple[str, ...]
 
 
 def _normalize_checkpoint_name(step_name: str) -> str:
@@ -176,19 +174,15 @@ def _wait_records(wait_conditions: Sequence[Any] | None) -> list[_WaitRecord]:
 
     records: list[_WaitRecord] = []
     for condition in wait_conditions:
-        key = getattr(condition, "wait_condition_key", None)
+        key = getattr(condition, "name", None)
         if not isinstance(key, str) or not key:
             continue
         wait_id = str(getattr(condition, "id", key))
-        upstream = tuple(getattr(condition, "upstream_step_names", None) or ())
-        downstream = tuple(getattr(condition, "downstream_step_names", None) or ())
         records.append(
             _WaitRecord(
                 wait_id=wait_id,
-                key=key,
+                name=key,
                 created=getattr(condition, "created", None),
-                upstream_step_names=upstream,
-                downstream_step_names=downstream,
             )
         )
 
@@ -203,7 +197,7 @@ def _available_checkpoint_selectors(checkpoints: Sequence[_OrderedCheckpoint]) -
 
 
 def _available_wait_selectors(waits: Sequence[_WaitRecord]) -> str:
-    names = sorted({wait.key for wait in waits})
+    names = sorted({wait.name for wait in waits})
     if not names:
         return "none"
     return ", ".join(names)
@@ -238,8 +232,8 @@ def _resolve_checkpoint_selector(
     )
 
 
-def _wait_prefix(wait_key: str) -> str:
-    return wait_key.split(":", maxsplit=1)[0]
+def _wait_prefix(name: str) -> str:
+    return name.split(":", maxsplit=1)[0]
 
 
 def _resolve_wait_selector(selector: str, waits: Sequence[_WaitRecord]) -> _WaitRecord:
@@ -248,7 +242,7 @@ def _resolve_wait_selector(selector: str, waits: Sequence[_WaitRecord]) -> _Wait
         for wait in waits
         if selector
         in {
-            wait.key,
+            wait.name,
             wait.wait_id,
         }
     ]
@@ -259,7 +253,7 @@ def _resolve_wait_selector(selector: str, waits: Sequence[_WaitRecord]) -> _Wait
             f"Replay selector '{selector}' matches multiple waits; use wait ID."
         )
 
-    prefix_matches = [wait for wait in waits if _wait_prefix(wait.key) == selector]
+    prefix_matches = [wait for wait in waits if _wait_prefix(wait.name) == selector]
     if len(prefix_matches) == 1:
         return prefix_matches[0]
     if len(prefix_matches) > 1:
@@ -401,22 +395,6 @@ def _frontier_index_for_wait(
     Falls back to timestamp comparison only for legacy runs missing adjacency
     metadata.
     """
-    downstream_indexes = [
-        index_by_invocation_id[name]
-        for name in wait.downstream_step_names
-        if name in index_by_invocation_id
-    ]
-    if downstream_indexes:
-        return min(downstream_indexes)
-
-    upstream_indexes = [
-        index_by_invocation_id[name]
-        for name in wait.upstream_step_names
-        if name in index_by_invocation_id
-    ]
-    if upstream_indexes:
-        return min(max(upstream_indexes) + 1, len(checkpoints))
-
     # Last resort: timestamp fallback for legacy runs without adjacency data.
     created_ts = _timestamp(wait.created)
     if created_ts != inf:
@@ -430,7 +408,7 @@ def _frontier_index_for_wait(
 
     raise KitaruRuntimeError(
         "Unable to resolve replay order for wait "
-        f"'{wait.key}': wait timing metadata is unavailable."
+        f"'{wait.name}': wait timing metadata is unavailable."
     )
 
 
@@ -541,7 +519,7 @@ def build_replay_plan(
     wait_overrides: dict[str, Any] = {}
     for selector, value in wait_override_selectors.items():
         wait_record = _resolve_wait_selector(selector, waits)
-        wait_overrides[wait_record.key] = value
+        wait_overrides[wait_record.name] = value
         frontier_candidates.append(
             _frontier_index_for_wait(
                 wait=wait_record,

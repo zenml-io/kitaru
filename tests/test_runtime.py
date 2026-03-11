@@ -70,8 +70,8 @@ def test_wait_runs_when_checkpoint_scope_is_suspended() -> None:
     """wait() should succeed once checkpoint scope is temporarily suspended."""
     execution_id, checkpoint_id = _scope_ids()
 
-    def mock_zenml_wait(**_: object) -> tuple[bool, object]:
-        return True, object()
+    def mock_zenml_wait(**_: object) -> bool:
+        return True
 
     with (
         _flow_scope(name="demo_flow", execution_id=execution_id),

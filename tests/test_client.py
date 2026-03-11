@@ -147,7 +147,7 @@ def _resolved_connection(project: str | None = None) -> ResolvedConnectionConfig
 
 def _dummy_wait_condition(
     *,
-    key: str,
+    name: str,
     wait_id: UUID | None = None,
     question: str | None = None,
     data_schema: dict[str, Any] | None = None,
@@ -155,7 +155,7 @@ def _dummy_wait_condition(
 ) -> Any:
     return SimpleNamespace(
         id=wait_id or uuid4(),
-        wait_condition_key=key,
+        name=name,
         question=question,
         data_schema=data_schema,
         wait_metadata=metadata or {},
@@ -549,7 +549,7 @@ def test_retry_rejects_non_failed_execution() -> None:
 def test_input_resolves_pending_wait_condition() -> None:
     run_id = uuid4()
     wait_condition = _dummy_wait_condition(
-        key="approve_deploy",
+        name="approve_deploy",
         question="Deploy to prod?",
         data_schema={"type": "boolean"},
     )
@@ -592,7 +592,6 @@ def test_input_resolves_pending_wait_condition() -> None:
 
     client_mock.resolve_run_wait_condition.assert_called_once_with(
         run_wait_condition_id=wait_condition.id,
-        status="resolved",
         resolution="continue",
         result=True,
     )
@@ -601,7 +600,7 @@ def test_input_resolves_pending_wait_condition() -> None:
 
 def test_get_surfaces_waiting_status_for_running_wait_condition() -> None:
     wait_condition = _dummy_wait_condition(
-        key="review_draft",
+        name="review_draft",
         question="Approve this draft?",
         data_schema={"type": "boolean"},
         metadata={"section": "intro"},
@@ -637,7 +636,7 @@ def test_get_surfaces_waiting_status_for_running_wait_condition() -> None:
 
 def test_get_surfaces_waiting_status_for_running_execution_with_listed_wait() -> None:
     wait_condition = _dummy_wait_condition(
-        key="approve_release:0",
+        name="approve_release:0",
         question="Approve release?",
         data_schema={"type": "boolean"},
         metadata={"topic": "kitaru-1"},
@@ -695,7 +694,7 @@ def test_input_rejects_missing_pending_wait() -> None:
 
 
 def test_input_rejects_unknown_wait_name() -> None:
-    wait_condition = _dummy_wait_condition(key="approve")
+    wait_condition = _dummy_wait_condition(name="approve")
     run = _DummyRun(
         status=_paused_status(),
         flow_name="flow_a",
@@ -721,7 +720,7 @@ def test_input_rejects_unknown_wait_name() -> None:
 
 
 def test_input_maps_validation_error() -> None:
-    wait_condition = _dummy_wait_condition(key="approve")
+    wait_condition = _dummy_wait_condition(name="approve")
     run = _DummyRun(
         status=_paused_status(),
         flow_name="flow_a",
@@ -801,7 +800,7 @@ def test_resume_restarts_paused_execution() -> None:
 
 
 def test_resume_rejects_when_pending_waits_exist() -> None:
-    wait_condition = _dummy_wait_condition(key="approve")
+    wait_condition = _dummy_wait_condition(name="approve")
     run = _DummyRun(
         status=_paused_status(),
         flow_name="flow_a",
@@ -1036,10 +1035,8 @@ def test_replay_fallback_applies_wait_overrides() -> None:
 
     wait = SimpleNamespace(
         id=uuid4(),
-        wait_condition_key="approve:0",
+        name="approve:0",
         created=None,
-        upstream_step_names=["fetch"],
-        downstream_step_names=["write"],
     )
 
     with (

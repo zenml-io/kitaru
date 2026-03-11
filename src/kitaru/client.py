@@ -672,7 +672,7 @@ def _map_pending_wait(wait_condition: Any) -> PendingWait:
 
     return PendingWait(
         wait_id=str(wait_condition.id),
-        name=wait_condition.wait_condition_key,
+        name=wait_condition.name,
         question=wait_condition.question,
         schema=schema,
         metadata=dict(wait_condition.wait_metadata),
@@ -695,7 +695,7 @@ def _list_run_wait_conditions(
     """Return wait-condition models for an execution."""
     try:
         wait_conditions_page = cast(Any, client._client()).list_run_wait_conditions(
-            run_name_or_id=run.id,
+            pipeline_run=run.id,
             project=client._project,
             status=status,
             hydrate=True,
@@ -776,9 +776,7 @@ def _select_pending_wait_condition(
         raise KitaruUsageError("`wait` must be a non-empty string.")
 
     key_matches = [
-        condition
-        for condition in pending_conditions
-        if condition.wait_condition_key == wait_selector
+        condition for condition in pending_conditions if condition.name == wait_selector
     ]
     if len(key_matches) == 1:
         return key_matches[0]
@@ -796,7 +794,7 @@ def _select_pending_wait_condition(
         return id_matches[0]
 
     available_waits = ", ".join(
-        sorted({condition.wait_condition_key for condition in pending_conditions})
+        sorted({condition.name for condition in pending_conditions})
     )
     raise KitaruStateError(
         f"Execution '{run.id}' has no pending wait '{wait_selector}'. "
@@ -1252,19 +1250,18 @@ class _ExecutionsAPI:
         try:
             cast(Any, self._client_ref._client()).resolve_run_wait_condition(
                 run_wait_condition_id=condition.id,
-                status=cast(Any, _WAIT_CONDITION_STATUS_RESOLVED),
                 resolution=cast(Any, _WAIT_CONDITION_RESOLUTION_CONTINUE),
                 result=value,
             )
         except (ValidationError, TypeError, ValueError) as exc:
             raise KitaruWaitValidationError(
                 "Wait input failed validation for "
-                f"'{condition.wait_condition_key}' on execution '{exec_id}': {exc}"
+                f"'{condition.name}' on execution '{exec_id}': {exc}"
             ) from exc
         except Exception as exc:
             raise KitaruBackendError(
                 "Failed to resolve wait condition "
-                f"'{condition.wait_condition_key}' for execution '{exec_id}': {exc}"
+                f"'{condition.name}' for execution '{exec_id}': {exc}"
             ) from exc
 
         return self.get(exec_id)

@@ -82,11 +82,11 @@ def wait(
 
     resolved_timeout = _DEFAULT_WAIT_TIMEOUT_SECONDS if timeout is None else timeout
     zenml_wait = _resolve_zenml_wait()
-    resolved_value, _ = zenml_wait(
+    resolved_value = zenml_wait(
         schema=schema,
         question=question,
         timeout=resolved_timeout,
         metadata=metadata,
-        key_prefix=name,
+        name=name,
     )
     return resolved_value

@@ -332,7 +332,7 @@ def _list_wait_conditions_for_run(run_id: str) -> list[Any]:
     """Fetch all wait conditions recorded for one execution."""
     try:
         wait_page = cast(Any, Client()).list_run_wait_conditions(
-            run_name_or_id=run_id,
+            pipeline_run=run_id,
             hydrate=True,
             sort_by="asc:created",
             size=200,
@@ -368,7 +368,7 @@ def _apply_wait_overrides(
     while unresolved and time.time() <= deadline:
         try:
             pending_page = zenml_client.list_run_wait_conditions(
-                run_name_or_id=run_id,
+                pipeline_run=run_id,
                 status="pending",
                 hydrate=True,
                 sort_by="asc:created",
@@ -385,8 +385,8 @@ def _apply_wait_overrides(
             ) from exc
 
         for condition in pending_page.items:
-            wait_key = getattr(condition, "wait_condition_key", None)
-            if wait_key not in unresolved:
+            name = getattr(condition, "name", None)
+            if name not in unresolved:
                 continue
 
             try:
@@ -394,15 +394,15 @@ def _apply_wait_overrides(
                     run_wait_condition_id=condition.id,
                     status=cast(Any, "resolved"),
                     resolution=cast(Any, "continue"),
-                    result=unresolved[wait_key],
+                    result=unresolved[name],
                 )
             except Exception as exc:
                 raise KitaruBackendError(
                     "Failed to apply replay wait override for "
-                    f"'{wait_key}' on execution '{run_id}': {exc}"
+                    f"'{name}' on execution '{run_id}': {exc}"
                 ) from exc
 
-            unresolved.pop(wait_key, None)
+            unresolved.pop(name, None)
 
         if not unresolved:
             return
