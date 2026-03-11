@@ -10,7 +10,7 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
@@ -33,13 +33,19 @@ from zenml.zen_server.deploy.deployer import LocalServerDeployer
 from _kitaru_bootstrap import resolve_installed_version
 from kitaru.client import Execution, ExecutionStatus, KitaruClient, LogEntry
 from kitaru.config import (
+    KITARU_AUTH_TOKEN_ENV,
     KITARU_PROJECT_ENV,
+    KITARU_SERVER_URL_ENV,
+    ZENML_STORE_API_KEY_ENV,
+    ZENML_STORE_URL_ENV,
+    ActiveEnvironmentVariable,
     ModelAliasEntry,
     ResolvedLogStore,
     StackInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
     active_stack_log_store,
+    list_active_kitaru_environment_variables,
     list_model_aliases,
     login_to_server,
     register_model_alias,
@@ -66,12 +72,6 @@ from kitaru.terminal import (
 )
 
 _UNKNOWN_VERSION = "unknown"
-AUTH_ENV_VARS = (
-    "ZENML_STORE_URL",
-    "ZENML_STORE_API_KEY",
-    "ZENML_STORE_USERNAME",
-    "ZENML_STORE_PASSWORD",
-)
 _SECRET_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 app = cyclopts.App(
@@ -138,6 +138,15 @@ class RuntimeSnapshot:
     warning: str | None = None
     log_store_status: str | None = None
     log_store_warning: str | None = None
+    environment: list[ActiveEnvironmentVariable] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SnapshotSection:
+    """One renderable snapshot section."""
+
+    title: str | None
+    rows: list[tuple[str, str]]
 
 
 @runtime_checkable
@@ -379,6 +388,43 @@ def _render_rich_snapshot(
     )
 
 
+def _render_rich_snapshot_sections(
+    title: str,
+    sections: list[SnapshotSection],
+    warning: str | None = None,
+) -> None:
+    """Render a multi-section snapshot as a styled Rich panel."""
+    lines = Text()
+    for index, section in enumerate(sections):
+        if index > 0:
+            lines.append("\n\n")
+        if section.title:
+            lines.append(section.title, style="bold magenta")
+            lines.append("\n")
+        for row_index, (label, value) in enumerate(section.rows):
+            lines.append(f"  {label}: ", style="bold cyan")
+            lines.append(value, style=_value_style(value))
+            if row_index < len(section.rows) - 1:
+                lines.append("\n")
+
+    elements: list[Text] = [lines]
+    if warning:
+        warn_text = Text("\n\n  Warning: ", style="bold yellow")
+        warn_text.append(warning, style="yellow")
+        elements.append(warn_text)
+
+    Console().print(
+        Panel(
+            Group(*elements),
+            title=f"[bold]{title}[/bold]",
+            title_align="left",
+            border_style="dim",
+            expand=False,
+            padding=(0, 1),
+        )
+    )
+
+
 def _print_success(message: str, detail: str | None = None) -> None:
     """Print a success message, styled when the terminal is interactive."""
     if _is_interactive():
@@ -435,7 +481,22 @@ def _connected_to_local_server() -> bool:
 
 def _ensure_no_auth_environment_overrides() -> None:
     """Fail early if auth environment variables would override the CLI."""
-    present = [env_var for env_var in AUTH_ENV_VARS if env_var in os.environ]
+    present: list[str] = []
+
+    if KITARU_SERVER_URL_ENV in os.environ:
+        present.append(KITARU_SERVER_URL_ENV)
+    elif ZENML_STORE_URL_ENV in os.environ:
+        present.append(ZENML_STORE_URL_ENV)
+
+    if KITARU_AUTH_TOKEN_ENV in os.environ:
+        present.append(KITARU_AUTH_TOKEN_ENV)
+    elif ZENML_STORE_API_KEY_ENV in os.environ:
+        present.append(ZENML_STORE_API_KEY_ENV)
+
+    for env_var in ("ZENML_STORE_USERNAME", "ZENML_STORE_PASSWORD"):
+        if env_var in os.environ:
+            present.append(env_var)
+
     if present:
         joined = ", ".join(present)
         _exit_with_error(
@@ -460,6 +521,7 @@ def _build_snapshot_without_local_store(
             "Connect to a Kitaru server to keep working, or install the local "
             "runtime dependencies if you want the built-in local stack."
         ),
+        environment=list_active_kitaru_environment_variables(),
     )
 
 
@@ -513,6 +575,7 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
         server_url=server_url,
         config_directory=str(_kitaru_config_dir()),
         local_server_status=_describe_local_server(),
+        environment=list_active_kitaru_environment_variables(),
     )
 
     if _uses_stale_local_server_url(server_url, snapshot.local_server_status):
@@ -858,6 +921,25 @@ def _render_plain_snapshot(
     return "\n".join(lines)
 
 
+def _render_plain_snapshot_sections(
+    title: str,
+    sections: list[SnapshotSection],
+    warning: str | None = None,
+) -> str:
+    """Render a multi-section snapshot as plain indented text."""
+    lines = [title]
+    for section in sections:
+        if section.title:
+            lines.append("")
+            lines.append(section.title)
+        for label, value in section.rows:
+            lines.append(f"  {label}: {value}")
+    if warning:
+        lines.append("")
+        lines.append(f"  Warning: {warning}")
+    return "\n".join(lines)
+
+
 def _emit_snapshot(
     title: str,
     rows: list[tuple[str, str]],
@@ -868,6 +950,25 @@ def _emit_snapshot(
         _render_rich_snapshot(title, rows, warning)
     else:
         print(_render_plain_snapshot(title, rows, warning))
+
+
+def _emit_snapshot_sections(
+    title: str,
+    sections: list[SnapshotSection],
+    warning: str | None = None,
+) -> None:
+    """Render multi-section snapshots in rich or plain-text mode."""
+    if _is_interactive():
+        _render_rich_snapshot_sections(title, sections, warning)
+    else:
+        print(_render_plain_snapshot_sections(title, sections, warning))
+
+
+def _environment_rows(
+    environment: list[ActiveEnvironmentVariable],
+) -> list[tuple[str, str]]:
+    """Build label/value rows for the active environment section."""
+    return [(entry.name, entry.value) for entry in environment]
 
 
 def _emit_run_snapshot(
@@ -1823,9 +1924,17 @@ def cancel_(
 def status() -> None:
     """Show the current connection state and active stack context."""
     snapshot = _build_runtime_snapshot()
-    _emit_snapshot(
+    sections = [SnapshotSection(title=None, rows=_status_rows(snapshot))]
+    if snapshot.environment:
+        sections.append(
+            SnapshotSection(
+                title="Environment",
+                rows=_environment_rows(snapshot.environment),
+            )
+        )
+    _emit_snapshot_sections(
         "Kitaru status",
-        _status_rows(snapshot),
+        sections,
         _combine_warnings(snapshot.warning, snapshot.log_store_warning),
     )
 

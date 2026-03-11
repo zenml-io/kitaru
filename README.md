@@ -134,6 +134,45 @@ kitaru model register <alias> --model <provider/model> [--secret <name-or-id>]
 kitaru model list
 ```
 
+### Headless / Docker / CI setup
+
+Kitaru can now be bootstrapped entirely from `KITARU_*` environment variables,
+which is the recommended public surface for containers, CI jobs, and other
+non-interactive environments.
+
+```bash
+# Connection
+export KITARU_SERVER_URL=https://my-server.example.com
+export KITARU_AUTH_TOKEN=kat_abc123...
+export KITARU_PROJECT=my-project
+
+# Execution
+export KITARU_STACK=my-remote-stack
+export KITARU_CACHE=true
+export KITARU_RETRIES=2
+
+# LLM
+export OPENAI_API_KEY=sk-...
+export KITARU_DEFAULT_MODEL=openai/gpt-4o
+
+# Housekeeping
+export KITARU_CONFIG_PATH=/app/.kitaru
+export KITARU_DEBUG=false
+export KITARU_ANALYTICS_OPT_IN=false
+```
+
+Two practical details matter here:
+
+- `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` must be set together.
+- When you connect to a remote server via env vars, `KITARU_PROJECT` is also required at first use.
+
+Under the hood, Kitaru translates its public `KITARU_*` connection/debug env
+vars into the ZenML env vars that the runtime already understands, so you do
+not need to set `ZENML_*` yourself.
+
+`kitaru status` will also show which `KITARU_*` vars are currently active and
+mask secret values like `KITARU_AUTH_TOKEN`.
+
 ### Primitives still in progress
 
 No core SDK primitives are currently flagged as in progress in this branch.

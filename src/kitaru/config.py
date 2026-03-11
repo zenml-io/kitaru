@@ -18,6 +18,7 @@ import re
 import tomllib
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
@@ -39,10 +40,13 @@ from zenml.cli.login import is_pro_server as _zenml_is_pro_server
 from zenml.client import Client
 from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
+from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
 from zenml.enums import MetadataResourceTypes
 from zenml.exceptions import AuthorizationException
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.utils import io_utils, yaml_utils
+
+from kitaru.errors import KitaruUsageError
 
 zenml_cli_utils = importlib.import_module("zenml.cli.utils")
 
@@ -65,6 +69,13 @@ KITARU_IMAGE_ENV = "KITARU_IMAGE"
 KITARU_SERVER_URL_ENV = "KITARU_SERVER_URL"
 KITARU_AUTH_TOKEN_ENV = "KITARU_AUTH_TOKEN"
 KITARU_PROJECT_ENV = "KITARU_PROJECT"
+KITARU_DEFAULT_MODEL_ENV = "KITARU_DEFAULT_MODEL"
+KITARU_CONFIG_PATH_ENV = "KITARU_CONFIG_PATH"
+KITARU_DEBUG_ENV = "KITARU_DEBUG"
+KITARU_ANALYTICS_OPT_IN_ENV = "KITARU_ANALYTICS_OPT_IN"
+
+ZENML_STORE_URL_ENV = "ZENML_STORE_URL"
+ZENML_STORE_API_KEY_ENV = "ZENML_STORE_API_KEY"
 
 FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
 
@@ -403,6 +414,14 @@ class ResolvedConnectionConfig(BaseModel):
     project: str | None = None
 
 
+@dataclass(frozen=True)
+class ActiveEnvironmentVariable:
+    """Public status view for one active Kitaru environment variable."""
+
+    name: str
+    value: str
+
+
 class FrozenExecutionSpec(BaseModel):
     """Versioned execution-spec snapshot persisted with each run."""
 
@@ -614,6 +633,25 @@ def _read_connection_env_config() -> KitaruConfig:
     return KitaruConfig.model_validate(values)
 
 
+def _read_zenml_connection_env_config() -> KitaruConfig:
+    """Read direct ZenML connection env vars for compatibility."""
+    values: dict[str, Any] = {}
+
+    raw_server_url = os.environ.get(ZENML_STORE_URL_ENV)
+    if raw_server_url is not None:
+        values["server_url"] = raw_server_url
+
+    raw_auth_token = os.environ.get(ZENML_STORE_API_KEY_ENV)
+    if raw_auth_token is not None:
+        values["auth_token"] = raw_auth_token
+
+    raw_project = os.environ.get(ENV_ZENML_ACTIVE_PROJECT_ID)
+    if raw_project is not None:
+        values["project"] = raw_project
+
+    return KitaruConfig.model_validate(values)
+
+
 def _read_global_execution_config() -> KitaruConfig:
     """Read execution defaults from global user config/runtime state."""
     try:
@@ -713,6 +751,27 @@ def _merge_connection_layer(
     )
 
 
+def _environment_has_remote_server_override() -> bool:
+    """Return whether env vars are driving a remote connection."""
+    for env_name in (KITARU_SERVER_URL_ENV, ZENML_STORE_URL_ENV):
+        raw_value = os.environ.get(env_name)
+        if raw_value is not None and raw_value.strip():
+            return True
+    return False
+
+
+def _validate_connection_config_for_use(
+    resolved: ResolvedConnectionConfig,
+) -> None:
+    """Validate connection config at first use."""
+    if _environment_has_remote_server_override() and not resolved.project:
+        raise KitaruUsageError(
+            "A remote Kitaru server is configured via environment variables, but "
+            "no project is active. Set KITARU_PROJECT (preferred) or "
+            "ZENML_ACTIVE_PROJECT_ID before using the SDK."
+        )
+
+
 def resolve_execution_config(
     *,
     decorator_overrides: KitaruConfig | None = None,
@@ -742,6 +801,7 @@ def resolve_execution_config(
 def resolve_connection_config(
     *,
     explicit: KitaruConfig | None = None,
+    validate_for_use: bool = False,
 ) -> ResolvedConnectionConfig:
     """Resolve connection configuration with connection-specific precedence.
 
@@ -754,11 +814,15 @@ def resolve_connection_config(
     resolved = ResolvedConnectionConfig()
     for layer in (
         _read_global_connection_config(),
+        _read_zenml_connection_env_config(),
         _read_connection_env_config(),
         _read_runtime_connection_config(),
         explicit or KitaruConfig(),
     ):
         resolved = _merge_connection_layer(resolved, layer)
+
+    if validate_for_use:
+        _validate_connection_config_for_use(resolved)
 
     return resolved
 
@@ -968,6 +1032,9 @@ def _suppress_zenml_cli_messages() -> Iterator[None]:
 
 def _kitaru_config_dir() -> Path:
     """Return the Kitaru-owned global config directory."""
+    custom_dir = os.environ.get(KITARU_CONFIG_PATH_ENV)
+    if custom_dir:
+        return Path(custom_dir)
     return Path(click.get_app_dir("kitaru"))
 
 
@@ -1330,8 +1397,7 @@ def resolve_model_selection(model: str | None) -> ResolvedModelSelection:
     """Resolve an explicit/default model input to a concrete LiteLLM model."""
     registry = _read_model_registry_config()
 
-    if model is not None:
-        requested_model = model.strip()
+    def _resolve_requested_model(requested_model: str) -> ResolvedModelSelection:
         if not requested_model:
             raise ValueError("Model identifier cannot be empty.")
 
@@ -1357,10 +1423,21 @@ def resolve_model_selection(model: str | None) -> ResolvedModelSelection:
             secret=None,
         )
 
+    if model is not None:
+        return _resolve_requested_model(model.strip())
+
+    env_default_model = os.environ.get(KITARU_DEFAULT_MODEL_ENV)
+    if env_default_model is not None:
+        stripped_env_default_model = env_default_model.strip()
+        if not stripped_env_default_model:
+            raise ValueError(f"`{KITARU_DEFAULT_MODEL_ENV}` is set but empty.")
+        return _resolve_requested_model(stripped_env_default_model)
+
     if not registry.aliases:
         raise ValueError(
             "No model alias is configured. Run `kitaru model register <alias> --model "
-            "<provider/model>` first, or pass a concrete model to kitaru.llm(...)."
+            f"<provider/model>` first, set {KITARU_DEFAULT_MODEL_ENV}, or pass a "
+            "concrete model to kitaru.llm(...)."
         )
 
     default_alias = registry.default
@@ -1386,6 +1463,51 @@ def resolve_model_selection(model: str | None) -> ResolvedModelSelection:
         resolved_model=alias_config.model,
         secret=alias_config.secret,
     )
+
+
+def _mask_environment_value(name: str, value: str) -> str:
+    """Mask secret-like environment values for status surfaces."""
+    if name not in {KITARU_AUTH_TOKEN_ENV, KITARU_LOG_STORE_API_KEY_ENV}:
+        return value
+
+    if len(value) >= 8:
+        return f"{value[:8]}***"
+    if len(value) >= 6:
+        return f"{value[:6]}***"
+    return "***"
+
+
+def list_active_kitaru_environment_variables() -> list[ActiveEnvironmentVariable]:
+    """Return the active public Kitaru environment variables in stable order."""
+    ordered_env_vars = (
+        KITARU_SERVER_URL_ENV,
+        KITARU_AUTH_TOKEN_ENV,
+        KITARU_PROJECT_ENV,
+        KITARU_STACK_ENV,
+        KITARU_CACHE_ENV,
+        KITARU_RETRIES_ENV,
+        KITARU_IMAGE_ENV,
+        KITARU_LOG_STORE_BACKEND_ENV,
+        KITARU_LOG_STORE_ENDPOINT_ENV,
+        KITARU_LOG_STORE_API_KEY_ENV,
+        KITARU_DEFAULT_MODEL_ENV,
+        KITARU_CONFIG_PATH_ENV,
+        KITARU_DEBUG_ENV,
+        KITARU_ANALYTICS_OPT_IN_ENV,
+    )
+
+    active: list[ActiveEnvironmentVariable] = []
+    for env_name in ordered_env_vars:
+        raw_value = os.environ.get(env_name)
+        if raw_value is None:
+            continue
+        active.append(
+            ActiveEnvironmentVariable(
+                name=env_name,
+                value=_mask_environment_value(env_name, raw_value),
+            )
+        )
+    return active
 
 
 def _normalize_stack_selector(name_or_id: str) -> str:

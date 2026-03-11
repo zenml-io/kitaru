@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kitaru.client import ExecutionStatus
-from kitaru.config import StackInfo
+from kitaru.config import ActiveEnvironmentVariable, StackInfo
 from kitaru.mcp.server import (
     RuntimeSnapshot,
     get_execution_logs,
@@ -329,6 +329,16 @@ def test_status_and_stack_tools_return_structured_payloads() -> None:
             "Active ZenML stack uses: artifact-store\n"
             "The Kitaru log-store preference is not wired into stack selection yet."
         ),
+        environment=[
+            ActiveEnvironmentVariable(
+                name="KITARU_SERVER_URL",
+                value="https://example.com",
+            ),
+            ActiveEnvironmentVariable(
+                name="KITARU_AUTH_TOKEN",
+                value="token-12***",
+            ),
+        ],
     )
 
     stacks = [
@@ -348,4 +358,6 @@ def test_status_and_stack_tools_return_structured_payloads() -> None:
         status_payload["log_store_status"]
         == "datadog (preferred) ⚠ stack uses artifact-store"
     )
+    assert status_payload["environment"][0]["name"] == "KITARU_SERVER_URL"
+    assert status_payload["environment"][1]["value"] == "token-12***"
     assert [stack["name"] for stack in stack_payload] == ["prod", "dev"]

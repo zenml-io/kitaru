@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from unittest.mock import Mock, patch
 
 import pytest
@@ -11,6 +12,39 @@ import kitaru
 
 def test_package_imports() -> None:
     assert kitaru.__name__ == "kitaru"
+
+
+def test_package_reload_applies_env_translations() -> None:
+    """Reloading the package should re-run env translation at import time."""
+    with patch("_kitaru_env.apply_env_translations") as apply_translations:
+        importlib.reload(kitaru)
+
+    apply_translations.assert_called_once_with()
+
+
+def test_package_import_does_not_require_project_until_first_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Import should tolerate missing project so benign commands still work."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    importlib.reload(kitaru)
+
+    assert kitaru.__name__ == "kitaru"
+
+
+def test_package_import_rejects_partial_connection_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Import should fail fast on server-only or token-only env config."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+
+    with pytest.raises(RuntimeError, match="KITARU_AUTH_TOKEN"):
+        importlib.reload(kitaru)
+
+    monkeypatch.delenv("KITARU_SERVER_URL", raising=False)
+    importlib.reload(kitaru)
 
 
 class TestPublicExports:

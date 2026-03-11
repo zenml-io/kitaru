@@ -511,6 +511,8 @@ class _FlowDefinition:
         Returns:
             A handle for the replayed execution.
         """
+        resolved_connection = resolve_connection_config(validate_for_use=True)
+
         try:
             original_run = Client().get_pipeline_run(
                 name_id_or_prefix=exec_id,
@@ -541,7 +543,7 @@ class _FlowDefinition:
         frozen_execution_spec = build_frozen_execution_spec(
             resolved_execution=resolved_execution,
             flow_defaults=self._decorator_config,
-            connection=resolve_connection_config(),
+            connection=resolved_connection,
         )
         configured_pipeline = self._pipeline.with_options(
             enable_cache=resolved_execution.cache,
@@ -609,7 +611,7 @@ class _FlowDefinition:
         frozen_execution_spec = build_frozen_execution_spec(
             resolved_execution=resolved_execution,
             flow_defaults=self._decorator_config,
-            connection=resolve_connection_config(),
+            connection=resolve_connection_config(validate_for_use=True),
         )
         configured_pipeline = self._pipeline.with_options(
             enable_cache=resolved_execution.cache,

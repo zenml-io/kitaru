@@ -148,6 +148,88 @@ def test_llm_executes_litellm_with_normalized_messages_and_tracking() -> None:
     assert logged_payload["cost_usd"] == 0.0025
 
 
+def test_llm_uses_env_default_model_when_no_explicit_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The llm call path should honor KITARU_DEFAULT_MODEL."""
+    execution_id, checkpoint_id = _flow_checkpoint_scope()
+    fake_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hello world"))],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        _hidden_params={},
+    )
+    monkeypatch.setenv("KITARU_DEFAULT_MODEL", "fast")
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+        patch(
+            "kitaru.llm.resolve_model_selection",
+            return_value=ResolvedModelSelection(
+                requested_model="fast",
+                alias="fast",
+                resolved_model="openai/gpt-4o-mini",
+                secret=None,
+            ),
+        ) as mock_resolve_model,
+        patch(
+            "kitaru.llm._resolve_credential_overlay", return_value=({}, "environment")
+        ),
+        patch("kitaru.llm.completion", return_value=fake_response),
+        patch("kitaru.llm.save"),
+        patch("kitaru.llm.log"),
+    ):
+        llm("Summarize this")
+
+    mock_resolve_model.assert_called_once_with(None)
+
+
+def test_llm_explicit_model_beats_env_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit model should still beat KITARU_DEFAULT_MODEL."""
+    execution_id, checkpoint_id = _flow_checkpoint_scope()
+    fake_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hello world"))],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        _hidden_params={},
+    )
+    monkeypatch.setenv("KITARU_DEFAULT_MODEL", "fast")
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+        patch(
+            "kitaru.llm.resolve_model_selection",
+            return_value=ResolvedModelSelection(
+                requested_model="openai/gpt-4.1-mini",
+                alias=None,
+                resolved_model="openai/gpt-4.1-mini",
+                secret=None,
+            ),
+        ) as mock_resolve_model,
+        patch(
+            "kitaru.llm._resolve_credential_overlay", return_value=({}, "environment")
+        ),
+        patch("kitaru.llm.completion", return_value=fake_response),
+        patch("kitaru.llm.save"),
+        patch("kitaru.llm.log"),
+    ):
+        llm("Summarize this", model="openai/gpt-4.1-mini")
+
+    mock_resolve_model.assert_called_once_with("openai/gpt-4.1-mini")
+
+
 def test_resolve_credential_overlay_prefers_environment_for_known_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

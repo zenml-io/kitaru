@@ -291,7 +291,7 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
         wrapped.run("payload", stack="invocation-stack", retries=3)
 
     resolve_execution_config_mock.assert_called_once()
-    resolve_connection_mock.assert_called_once()
+    resolve_connection_mock.assert_called_once_with(validate_for_use=True)
 
     resolve_call = resolve_execution_config_mock.call_args.kwargs
     decorator_overrides = resolve_call["decorator_overrides"]
@@ -335,7 +335,9 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
             "kitaru.flow.resolve_execution_config",
             return_value=_resolved_execution(stack="prod"),
         ),
-        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch(
+            "kitaru.flow.resolve_connection_config", return_value=object()
+        ) as resolve_connection_mock,
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
         patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
@@ -360,8 +362,30 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         input_overrides={"topic": "new topic"},
         step_input_overrides={"write": {"research": "edited"}},
     )
+    resolve_connection_mock.assert_called_once_with(validate_for_use=True)
     persist_mock.assert_called_once()
     assert persist_mock.call_args.kwargs["run_id"] == replayed_run.id
+
+
+def test_replay_validates_connection_before_loading_source_run() -> None:
+    """Replay should fail before touching ZenML if env project validation fails."""
+    base_pipeline = MagicMock()
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            side_effect=KitaruUsageError("Set KITARU_PROJECT"),
+        ) as resolve_connection_mock,
+        patch("kitaru.flow.Client") as client_cls,
+        pytest.raises(KitaruUsageError, match="KITARU_PROJECT"),
+    ):
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay("run-123", from_="write")
+
+    resolve_connection_mock.assert_called_once_with(validate_for_use=True)
+    client_cls.return_value.get_pipeline_run.assert_not_called()
 
 
 def test_flow_handle_wait_polls_until_complete() -> None:

@@ -89,6 +89,12 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - **Verify uploads work:** After uploading, `curl -sI <url>` should return HTTP 200. The boto3 API can succeed but the public domain may not be configured yet.
 - **`site/public/` assets must exist:** Astro doesn't error on missing `public/` files — it silently 404s at runtime. After adding references, verify the files exist.
 
+## Docs guidance
+
+- Treat `KITARU_*` environment variables as the public configuration surface in docs and examples. Mention `ZENML_*` only as a compatibility note when needed.
+- Static hand-written MDX pages under `docs/content/docs/` are tracked and can be edited directly when behavior changes.
+- Generated reference output should still come from the existing generation scripts rather than manual edits.
+
 ## Branching strategy
 
 - **`develop`** is the default branch and the target for all PRs.

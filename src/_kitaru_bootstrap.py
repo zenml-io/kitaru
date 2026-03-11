@@ -69,13 +69,22 @@ def _load_mcp_entrypoint() -> Callable[[], object]:
     return module.main
 
 
+def _apply_env_translations() -> None:
+    """Apply bootstrap-safe KITARU_* -> ZENML_* environment translations."""
+    from _kitaru_env import apply_env_translations
+
+    apply_env_translations()
+
+
 def cli_main() -> object:
     """Bootstrap the `kitaru` console script."""
     ensure_supported_python()
+    _apply_env_translations()
     return _load_cli_entrypoint()()
 
 
 def mcp_main() -> object:
     """Bootstrap the `kitaru-mcp` console script."""
     ensure_supported_python()
+    _apply_env_translations()
     return _load_mcp_entrypoint()()

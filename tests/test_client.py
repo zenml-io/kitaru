@@ -193,6 +193,20 @@ def test_client_rejects_connection_overrides() -> None:
         KitaruClient(server_url="https://example.com")
 
 
+def test_client_requires_project_for_env_driven_remote_connection() -> None:
+    """Client init should fail fast when env remote config has no project."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            side_effect=KitaruUsageError("Set KITARU_PROJECT before using the SDK."),
+        ) as resolve_connection,
+        pytest.raises(KitaruUsageError, match="KITARU_PROJECT"),
+    ):
+        KitaruClient()
+
+    resolve_connection.assert_called_once_with(validate_for_use=True)
+
+
 def test_get_maps_execution_details() -> None:
     frozen = FrozenExecutionSpec(
         version=1,

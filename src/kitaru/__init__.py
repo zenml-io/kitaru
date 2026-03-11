@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """Kitaru: durable execution for AI agents.
 
 Kitaru provides primitives for making AI agent workflows persistent,
@@ -36,6 +37,10 @@ The CLI also supports global runtime log-store configuration via
 ``kitaru run`` plus
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
+
+from _kitaru_env import apply_env_translations
+
+apply_env_translations()
 
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint

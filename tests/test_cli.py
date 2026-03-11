@@ -20,6 +20,7 @@ from kitaru.cli import (
     app,
 )
 from kitaru.client import ExecutionStatus, LogEntry
+from kitaru.config import ActiveEnvironmentVariable
 
 
 class _BrokenGlobalConfig:
@@ -983,6 +984,36 @@ def test_login_rejects_auth_environment_overrides(
     )
 
 
+def test_login_rejects_kitaru_auth_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Login should report public KITARU auth vars when they drive auth."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://env.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["login", "https://example.com"])
+
+    assert exc_info.value.code == 1
+    error_output = capsys.readouterr().err
+    assert "KITARU_SERVER_URL" in error_output
+    assert "KITARU_AUTH_TOKEN" in error_output
+    assert "ZENML_STORE_URL" not in error_output
+
+
+def test_logout_rejects_kitaru_auth_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Logout should also refuse to fight active KITARU auth env vars."""
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["logout"])
+
+    assert exc_info.value.code == 1
+    assert "KITARU_AUTH_TOKEN" in capsys.readouterr().err
+
+
 def test_logout_resets_remote_connection() -> None:
     """The logout helper should reset the active store and clear credentials."""
     fake_gc = Mock()
@@ -1770,6 +1801,45 @@ def test_status_renders_compact_snapshot(
     assert "Active stack: prod" in output
     assert "Config directory: /tmp/kitaru-config" in output
     assert "Project override" not in output
+    assert "Environment" not in output
+
+
+def test_status_renders_environment_section_with_masking(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Status should show active KITARU env vars and mask secret values."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.1.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        server_url="https://example.com",
+        active_user="alice",
+        active_stack="prod",
+        config_directory="/tmp/kitaru-config",
+        local_server_status="not started",
+        environment=[
+            ActiveEnvironmentVariable(
+                name="KITARU_SERVER_URL",
+                value="https://example.com",
+            ),
+            ActiveEnvironmentVariable(
+                name="KITARU_AUTH_TOKEN",
+                value="token-12***",
+            ),
+        ],
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Environment" in output
+    assert "KITARU_SERVER_URL: https://example.com" in output
+    assert "KITARU_AUTH_TOKEN: token-12***" in output
 
 
 def test_status_renders_log_store_mismatch_warning(

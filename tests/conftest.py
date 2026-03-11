@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """Shared test fixtures."""
 
 from __future__ import annotations
@@ -20,9 +21,43 @@ from zenml.constants import (
     ENV_ZENML_STORE_PREFIX,
 )
 
+_EARLY_TEST_ENV_VARS = (
+    "KITARU_SERVER_URL",
+    "KITARU_AUTH_TOKEN",
+    "KITARU_PROJECT",
+    "KITARU_STACK",
+    "KITARU_CACHE",
+    "KITARU_RETRIES",
+    "KITARU_IMAGE",
+    "KITARU_LOG_STORE_BACKEND",
+    "KITARU_LOG_STORE_ENDPOINT",
+    "KITARU_LOG_STORE_API_KEY",
+    "KITARU_DEFAULT_MODEL",
+    "KITARU_CONFIG_PATH",
+    "KITARU_DEBUG",
+    "KITARU_ANALYTICS_OPT_IN",
+    "ZENML_ACTIVE_PROJECT_ID",
+    "ZENML_DEBUG",
+    "ZENML_ANALYTICS_OPT_IN",
+)
+
+for _env_name in _EARLY_TEST_ENV_VARS:
+    os.environ.pop(_env_name, None)
+for _env_name in list(os.environ):
+    if _env_name.startswith(ENV_ZENML_STORE_PREFIX):
+        os.environ.pop(_env_name, None)
+
+_SRC_PATH = str(Path(__file__).resolve().parent.parent / "src")
+if _SRC_PATH not in sys.path:
+    sys.path.insert(0, _SRC_PATH)
+
 from kitaru.config import (
+    KITARU_ANALYTICS_OPT_IN_ENV,
     KITARU_AUTH_TOKEN_ENV,
     KITARU_CACHE_ENV,
+    KITARU_CONFIG_PATH_ENV,
+    KITARU_DEBUG_ENV,
+    KITARU_DEFAULT_MODEL_ENV,
     KITARU_IMAGE_ENV,
     KITARU_LOG_STORE_API_KEY_ENV,
     KITARU_LOG_STORE_BACKEND_ENV,
@@ -75,6 +110,10 @@ def isolated_zenml_global_config(
         KITARU_SERVER_URL_ENV,
         KITARU_AUTH_TOKEN_ENV,
         KITARU_PROJECT_ENV,
+        KITARU_DEFAULT_MODEL_ENV,
+        KITARU_CONFIG_PATH_ENV,
+        KITARU_DEBUG_ENV,
+        KITARU_ANALYTICS_OPT_IN_ENV,
     ):
         monkeypatch.delenv(env_name, raising=False)
 

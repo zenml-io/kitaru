@@ -4,7 +4,8 @@ description: Kitaru config directory, execution defaults, environment variables,
 ---
 
 This guide covers Kitaru's configuration system: where settings live on disk,
-how to set execution defaults, and how precedence is resolved.
+how to set execution defaults, how headless environments are bootstrapped, and
+how precedence is resolved.
 
 ## Config directory
 
@@ -31,6 +32,15 @@ you never need to interact with it directly.
 
 You can see the active config directory by running `kitaru status` or
 `kitaru info`.
+
+If you want to relocate that directory, set:
+
+```bash
+export KITARU_CONFIG_PATH=/app/.kitaru
+```
+
+Kitaru reads that path immediately, but it only creates the directory on first
+write.
 
 ## Configure runtime defaults in Python
 
@@ -69,6 +79,67 @@ handle = my_flow.run("kitaru", retries=3)
 
 In this example, resolved retries are `3`.
 
+## Environment variables
+
+Kitaru's public env-var surface uses `KITARU_*` names.
+
+### Connection
+
+These are the key env vars for non-interactive setup:
+
+- `KITARU_SERVER_URL`
+- `KITARU_AUTH_TOKEN`
+- `KITARU_PROJECT`
+
+Use them together for Docker, CI, or any other headless environment:
+
+```bash
+export KITARU_SERVER_URL=https://my-server.example.com
+export KITARU_AUTH_TOKEN=kat_abc123...
+export KITARU_PROJECT=my-project
+```
+
+There are two guardrails:
+
+1. `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` must be set together.
+2. If a remote server is configured via env vars, `KITARU_PROJECT` is required
+   at first use (`KitaruClient()`, `my_flow.run()`, replay, etc.).
+
+Internally, Kitaru translates these public env vars into the ZenML env vars the
+runtime already understands. That means you should configure `KITARU_*`, not
+`ZENML_*`, in normal Kitaru docs and examples.
+
+### Execution
+
+Execution settings:
+
+- `KITARU_STACK`
+- `KITARU_CACHE`
+- `KITARU_RETRIES`
+- `KITARU_IMAGE` (JSON object or plain image string)
+
+### LLM
+
+- `KITARU_DEFAULT_MODEL` sets the default model for `kitaru.llm()` when no
+  explicit `model=` argument is provided.
+- `KITARU_LLM_MOCK_RESPONSE` remains available for tests and demos.
+
+`KITARU_DEFAULT_MODEL` first tries local alias lookup. If the value is not a
+registered alias, Kitaru passes it straight through as a raw LiteLLM model
+string.
+
+### Housekeeping
+
+- `KITARU_CONFIG_PATH`
+- `KITARU_DEBUG`
+- `KITARU_ANALYTICS_OPT_IN`
+
+### `kitaru status`
+
+`kitaru status` shows an **Environment** section when `KITARU_*` vars are
+active. Secret values such as `KITARU_AUTH_TOKEN` and
+`KITARU_LOG_STORE_API_KEY` are masked.
+
 ## Precedence (highest to lowest)
 
 1. Invocation-time overrides (`my_flow.run(..., stack="prod")`)
@@ -79,20 +150,12 @@ In this example, resolved retries are `3`.
 6. Global user config (active stack and connection defaults)
 7. Built-in defaults (`local` stack, `cache=True`, `retries=0`)
 
-## Environment variables
+For connection-specific resolution, Kitaru uses this lower-to-higher order:
 
-Execution settings:
-
-- `KITARU_STACK`
-- `KITARU_CACHE`
-- `KITARU_RETRIES`
-- `KITARU_IMAGE` (JSON object or plain image string)
-
-Connection settings:
-
-- `KITARU_SERVER_URL`
-- `KITARU_AUTH_TOKEN`
-- `KITARU_PROJECT`
+1. Persisted global connection (`kitaru login`)
+2. Direct `ZENML_*` env vars for compatibility
+3. `KITARU_*` env vars
+4. Runtime overrides from `kitaru.configure(...)`
 
 ## Project config in pyproject.toml
 
@@ -172,20 +235,57 @@ def my_flow(topic: str) -> str:
     ...
 ```
 
-## Project override (internal/testing)
+## Project selection
 
-Kitaru uses a flat namespace — it silently works with the default project
-configured on the server. You never need to think about projects in normal
-usage.
+There are really two different stories here:
 
-For development and testing, you can override the project using:
+1. **Persisted login / default setup** — if you connect with `kitaru login`,
+   Kitaru can usually just follow the server-side default project and you do not
+   need to think about it much.
+2. **Env-driven remote bootstrap** — if you connect with `KITARU_SERVER_URL` /
+   `KITARU_AUTH_TOKEN`, then `KITARU_PROJECT` is required at first use.
+
+You can set the project explicitly with either:
 
 - **Environment variable:** `KITARU_PROJECT=my-project`
 - **SDK call:** `kitaru.configure(project="my-project")`
 
 When an explicit project override is set, it appears in `kitaru info` output
-as "Project override". It does not appear in `kitaru status` (which stays
-compact and user-focused).
+as "Project override". It does not appear in `kitaru status` except as part of
+the raw Environment section when `KITARU_PROJECT` itself is active.
+
+## Headless / Docker / CI recipe
+
+```bash
+# Connection
+export KITARU_SERVER_URL=https://my-server.example.com
+export KITARU_AUTH_TOKEN=kat_abc123...
+export KITARU_PROJECT=my-project
+
+# Execution
+export KITARU_STACK=my-remote-stack
+export KITARU_CACHE=true
+export KITARU_RETRIES=2
+
+# LLM
+export OPENAI_API_KEY=sk-...
+export KITARU_DEFAULT_MODEL=openai/gpt-4o
+
+# Observability
+export KITARU_LOG_STORE_BACKEND=external
+export KITARU_LOG_STORE_ENDPOINT=https://logs.example.com
+export KITARU_LOG_STORE_API_KEY=...
+
+# Housekeeping
+export KITARU_CONFIG_PATH=/app/.kitaru
+export KITARU_DEBUG=false
+export KITARU_ANALYTICS_OPT_IN=false
+```
+
+## Compatibility note
+
+Direct `ZENML_*` env vars still work because the underlying runtime understands
+them, but Kitaru docs use `KITARU_*` as the public interface.
 
 ## Frozen execution spec
 

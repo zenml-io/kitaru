@@ -12,7 +12,7 @@ import importlib.util
 import os
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -37,11 +37,13 @@ from kitaru.client import (
 )
 from kitaru.config import (
     KITARU_PROJECT_ENV,
+    ActiveEnvironmentVariable,
     ResolvedLogStore,
     StackInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
     active_stack_log_store,
+    list_active_kitaru_environment_variables,
     resolve_log_store,
 )
 from kitaru.config import list_stacks as get_available_stacks
@@ -88,6 +90,7 @@ class RuntimeSnapshot:
     warning: str | None = None
     log_store_status: str | None = None
     log_store_warning: str | None = None
+    environment: list[ActiveEnvironmentVariable] = field(default_factory=list)
 
 
 def _load_fastmcp_class() -> type[Any]:
@@ -460,6 +463,7 @@ def _build_snapshot_without_local_store(
             "Connect to a Kitaru server to keep working, or install the local "
             "runtime dependencies if you want the built-in local stack."
         ),
+        environment=list_active_kitaru_environment_variables(),
     )
 
 
@@ -504,15 +508,8 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
         server_url=server_url,
         config_directory=str(_kitaru_config_dir()),
         local_server_status=_describe_local_server(),
+        environment=list_active_kitaru_environment_variables(),
     )
-
-    # Detect explicit project override (env var or runtime configure())
-    project_env = os.environ.get(KITARU_PROJECT_ENV)
-    runtime_conn = _read_runtime_connection_config()
-    if project_env:
-        snapshot.project_override = project_env
-    elif runtime_conn.project:
-        snapshot.project_override = runtime_conn.project
 
     if _uses_stale_local_server_url(server_url, snapshot.local_server_status):
         snapshot.warning = (
@@ -521,6 +518,14 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
             "connection."
         )
         return snapshot
+
+    # Detect explicit project override (env var or runtime configure())
+    project_env = os.environ.get(KITARU_PROJECT_ENV)
+    runtime_conn = _read_runtime_connection_config()
+    if project_env:
+        snapshot.project_override = project_env
+    elif runtime_conn.project:
+        snapshot.project_override = runtime_conn.project
 
     try:
         client = Client()

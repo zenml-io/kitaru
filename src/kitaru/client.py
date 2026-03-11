@@ -1568,7 +1568,7 @@ class KitaruClient:
                 "project settings for now."
             )
 
-        resolved_connection = resolve_connection_config()
+        resolved_connection = resolve_connection_config(validate_for_use=True)
         self._project = resolved_connection.project
 
         self.executions = _ExecutionsAPI(self)

@@ -134,7 +134,8 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 
 - **Only document shipped features.** No "Coming Soon" sections.
 - **ZenML invisibility:** users should never need to know Kitaru is built on ZenML. Use Kitaru terminology (workflow, checkpoint, storage), not ZenML terms (orchestrator, artifact store, pipeline).
-- **Generated content is gitignored:** CLI docs (`cli.mdx` or `cli/`), `changelog.mdx`, and `reference/` are created by generation scripts and must not be hand-edited or committed. SDK reference uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
+- **Generated vs static docs:** generated CLI reference content, changelog output, and SDK reference pages come from generation scripts and should not be hand-edited. Static hand-written MDX pages under `docs/content/docs/` (for example `getting-started/*.mdx` or `cli/login.mdx`) are tracked and may be edited directly when the feature behavior changes. SDK reference still uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
+- **Environment-variable docs:** document `KITARU_*` env vars as the public surface. Mention `ZENML_*` only as a compatibility note when necessary to explain migration or interop.
 - **Frontmatter required:** every `.mdx` page needs `title` and `description`.
 
 ## Security & Configuration Notes

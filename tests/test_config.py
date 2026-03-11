@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,11 +11,15 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 from zenml.config.docker_settings import DockerSettings
+from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
 from zenml.utils import io_utils, yaml_utils
 
+from _kitaru_env import apply_env_translations
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
     KITARU_CACHE_ENV,
+    KITARU_CONFIG_PATH_ENV,
+    KITARU_DEFAULT_MODEL_ENV,
     KITARU_IMAGE_ENV,
     KITARU_LOG_STORE_BACKEND_ENV,
     KITARU_LOG_STORE_ENDPOINT_ENV,
@@ -30,6 +36,7 @@ from kitaru.config import (
     configure,
     current_stack,
     image_settings_to_docker_settings,
+    list_active_kitaru_environment_variables,
     list_model_aliases,
     list_stacks,
     persist_frozen_execution_spec,
@@ -42,6 +49,7 @@ from kitaru.config import (
     set_global_log_store,
     use_stack,
 )
+from kitaru.errors import KitaruUsageError
 
 
 class _FakeStackPage:
@@ -67,6 +75,105 @@ def _kitaru_config_path() -> Path:
     from kitaru.config import _kitaru_global_config_path
 
     return _kitaru_global_config_path()
+
+
+def test_apply_env_translations_sets_zenml_mirrors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Public KITARU env vars should populate the equivalent ZenML vars."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+    monkeypatch.setenv("KITARU_PROJECT", "demo-project")
+    monkeypatch.setenv("KITARU_DEBUG", "false")
+    monkeypatch.setenv("KITARU_ANALYTICS_OPT_IN", "true")
+
+    apply_env_translations()
+
+    assert os.environ["ZENML_STORE_URL"] == "https://server.example.com"
+    assert os.environ["ZENML_STORE_API_KEY"] == "token-123"
+    assert os.environ["ZENML_ACTIVE_PROJECT_ID"] == "demo-project"
+    assert os.environ["ZENML_DEBUG"] == "false"
+    assert os.environ["ZENML_ANALYTICS_OPT_IN"] == "true"
+
+
+def test_apply_env_translations_warns_and_overwrites_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KITARU env vars should win over conflicting ZenML env vars."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://kitaru.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+    monkeypatch.setenv("ZENML_STORE_URL", "https://zenml.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "other-token")
+
+    with pytest.warns(UserWarning, match="KITARU_SERVER_URL"):
+        apply_env_translations()
+
+    assert os.environ["ZENML_STORE_URL"] == "https://kitaru.example.com"
+    assert os.environ["ZENML_STORE_API_KEY"] == "token-123"
+
+
+def test_apply_env_translations_does_not_warn_when_values_already_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Matching KITARU/ZENML values should stay quiet."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://same.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+    monkeypatch.setenv("ZENML_STORE_URL", "https://same.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+
+    with warnings.catch_warnings(record=True) as recorded:
+        apply_env_translations()
+
+    assert len(recorded) == 0
+
+
+def test_apply_env_translations_is_idempotent_after_first_overwrite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-running translation should not keep warning once values match."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://kitaru.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+    monkeypatch.setenv("ZENML_STORE_URL", "https://zenml.example.com")
+
+    with pytest.warns(UserWarning):
+        apply_env_translations()
+
+    with warnings.catch_warnings(record=True) as recorded:
+        apply_env_translations()
+
+    assert len(recorded) == 0
+
+
+def test_apply_env_translations_rejects_partial_server_only_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server URL without any auth token should fail fast."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+
+    with pytest.raises(RuntimeError, match="KITARU_AUTH_TOKEN"):
+        apply_env_translations()
+
+
+def test_apply_env_translations_accepts_cross_namespace_auth_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct ZenML auth should satisfy fast-fail validation."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "fallback-token")
+
+    apply_env_translations()
+
+    assert os.environ["ZENML_STORE_URL"] == "https://server.example.com"
+
+
+def test_apply_env_translations_rejects_partial_token_only_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A token without any server URL should also fail fast."""
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    with pytest.raises(RuntimeError, match="KITARU_SERVER_URL"):
+        apply_env_translations()
 
 
 def test_log_store_defaults_to_artifact_store() -> None:
@@ -306,6 +413,55 @@ def test_resolve_model_selection_prefers_aliases_and_defaults() -> None:
     assert default_selection.resolved_model == "openai/gpt-4o-mini"
 
 
+def test_resolve_model_selection_uses_env_default_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KITARU_DEFAULT_MODEL should resolve through aliases first."""
+    register_model_alias("fast", model="openai/gpt-4o-mini", secret="openai-creds")
+    monkeypatch.setenv(KITARU_DEFAULT_MODEL_ENV, "fast")
+
+    selection = resolve_model_selection(None)
+
+    assert selection.alias == "fast"
+    assert selection.resolved_model == "openai/gpt-4o-mini"
+    assert selection.secret == "openai-creds"
+
+
+def test_resolve_model_selection_uses_env_default_raw_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown env default values should pass through as raw model strings."""
+    monkeypatch.setenv(KITARU_DEFAULT_MODEL_ENV, "openai/gpt-4.1-mini")
+
+    selection = resolve_model_selection(None)
+
+    assert selection.alias is None
+    assert selection.resolved_model == "openai/gpt-4.1-mini"
+
+
+def test_explicit_model_beats_env_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit model argument should beat KITARU_DEFAULT_MODEL."""
+    register_model_alias("fast", model="openai/gpt-4o-mini")
+    monkeypatch.setenv(KITARU_DEFAULT_MODEL_ENV, "fast")
+
+    selection = resolve_model_selection("anthropic/claude-sonnet-4-20250514")
+
+    assert selection.alias is None
+    assert selection.resolved_model == "anthropic/claude-sonnet-4-20250514"
+
+
+def test_empty_env_default_model_raises_clear_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty KITARU_DEFAULT_MODEL should fail with env-specific guidance."""
+    monkeypatch.setenv(KITARU_DEFAULT_MODEL_ENV, "   ")
+
+    with pytest.raises(ValueError, match=KITARU_DEFAULT_MODEL_ENV):
+        resolve_model_selection(None)
+
+
 def test_resolve_model_selection_requires_default_or_explicit_model() -> None:
     """`kitaru.llm(model=None)` should fail without a configured default alias."""
     with pytest.raises(ValueError, match="No model alias is configured"):
@@ -464,6 +620,51 @@ def test_kitaru_config_path_uses_kitaru_dir() -> None:
     path = _kitaru_config_path()
     assert path.parent.name == "kitaru-config"
     assert path.name == "config.yaml"
+
+
+def test_kitaru_config_path_env_overrides_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """KITARU_CONFIG_PATH should override the config directory lookup."""
+    from kitaru.config import _kitaru_config_dir
+
+    custom_dir = tmp_path / "custom-kitaru-home"
+    monkeypatch.setenv(KITARU_CONFIG_PATH_ENV, str(custom_dir))
+
+    resolved_dir = _kitaru_config_dir()
+
+    assert resolved_dir == custom_dir
+    assert not custom_dir.exists()
+
+
+def test_kitaru_config_path_dir_is_created_on_first_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The custom config directory should still be created lazily on write."""
+    custom_dir = tmp_path / "custom-kitaru-home"
+    monkeypatch.setenv(KITARU_CONFIG_PATH_ENV, str(custom_dir))
+
+    register_model_alias("fast", model="openai/gpt-4o-mini")
+
+    assert custom_dir.exists()
+    assert (custom_dir / "config.yaml").exists()
+
+
+def test_active_environment_variables_mask_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Status surfaces should receive masked secret values from config helpers."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123456")
+    monkeypatch.setenv(KITARU_DEFAULT_MODEL_ENV, "openai/gpt-4o")
+
+    active = list_active_kitaru_environment_variables()
+
+    assert [(entry.name, entry.value) for entry in active] == [
+        (KITARU_SERVER_URL_ENV, "https://server.example.com"),
+        ("KITARU_AUTH_TOKEN", "token-12***"),
+        (KITARU_DEFAULT_MODEL_ENV, "openai/gpt-4o"),
+    ]
 
 
 def test_legacy_config_is_ignored(tmp_path: Path) -> None:
@@ -729,6 +930,70 @@ def test_connection_resolution_precedence(
     assert resolved.server_url == "https://env.example.com"
     assert resolved.project == "explicit-project"
     assert resolved.auth_token == "global-token"
+
+
+def test_connection_resolution_reads_direct_zenml_env_below_kitaru(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct ZenML env should work, but KITARU env should still win."""
+    monkeypatch.setenv("ZENML_STORE_URL", "https://zenml.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "zenml-token")
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_PROJECT_ID, "zenml-project")
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://kitaru.example.com")
+    monkeypatch.setenv(KITARU_PROJECT_ENV, "kitaru-project")
+
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(
+            server_url="https://global.example.com",
+            auth_token="global-token",
+            project="global-project",
+        ),
+    ):
+        resolved = resolve_connection_config()
+
+    assert resolved.server_url == "https://kitaru.example.com"
+    assert resolved.auth_token == "zenml-token"
+    assert resolved.project == "kitaru-project"
+
+
+def test_connection_validation_requires_project_for_env_remote_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env-driven remote connections should require an explicit project."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+
+    with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
+        resolve_connection_config(validate_for_use=True)
+
+
+def test_connection_validation_accepts_zenml_project_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ZENML_ACTIVE_PROJECT_ID should satisfy the lazy project requirement."""
+    monkeypatch.setenv("ZENML_STORE_URL", "https://server.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "token-123")
+    monkeypatch.setenv(ENV_ZENML_ACTIVE_PROJECT_ID, "demo-project")
+
+    resolved = resolve_connection_config(validate_for_use=True)
+
+    assert resolved.project == "demo-project"
+
+
+def test_connection_validation_does_not_require_project_for_global_connection() -> None:
+    """Persisted global connections should keep working without env project state."""
+    with patch(
+        "kitaru.config._read_global_connection_config",
+        return_value=KitaruConfig(
+            server_url="https://global.example.com",
+            auth_token="global-token",
+        ),
+    ):
+        resolved = resolve_connection_config(validate_for_use=True)
+
+    assert resolved.server_url == "https://global.example.com"
+    assert resolved.project is None
 
 
 def test_build_and_persist_frozen_execution_spec() -> None:
