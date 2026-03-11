@@ -25,8 +25,8 @@
   /* Status */
   --color-success: #3D8C5C;
   --color-success-bg: #EDF5E9;
-  --color-blue: #2563EB;
-  --color-blue-bg: #EFF6FF;
+  --color-warm-status: #E8A840;
+  --color-warm-status-bg: #FFF8ED;
   --color-cost-up: #DC4A3D;
   --color-cost-up-bg: #FDDDE6;
 
@@ -128,9 +128,9 @@ body::before {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-@keyframes pulse-blue {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0.3); }
-  50% { box-shadow: 0 0 0 4px rgba(37,99,235,0); }
+@keyframes pulse-warm {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232,168,64,0.3); }
+  50% { box-shadow: 0 0 0 4px rgba(232,168,64,0); }
 }
 @keyframes livePulse {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(61,140,92,0.4); }
@@ -146,6 +146,7 @@ body::before {
    ═══════════════════════════════════════════════════ */
 .section-inner {
   max-width: 1200px;
+  width: 100%;
   margin: 0 auto;
   overflow: hidden;
 }
