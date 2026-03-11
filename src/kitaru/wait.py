@@ -27,7 +27,7 @@ _WAIT_INSIDE_CHECKPOINT_ERROR = (
 _DEFAULT_WAIT_TIMEOUT_SECONDS = 600
 
 
-def _resolve_zenml_wait() -> Callable[..., tuple[Any, Any]]:
+def _resolve_zenml_wait() -> Callable[..., Any]:
     """Load the upstream wait primitive from the installed ZenML build."""
     try:
         from zenml import wait as zenml_wait

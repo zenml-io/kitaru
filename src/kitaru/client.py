@@ -54,13 +54,11 @@ from kitaru.errors import (
     traceback_exception_type,
     traceback_last_line,
 )
-from kitaru.flow import _apply_wait_overrides
 from kitaru.replay import build_replay_plan
 
 _CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
 _PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
 _WAIT_CONDITION_STATUS_PENDING = "pending"
-_WAIT_CONDITION_STATUS_RESOLVED = "resolved"
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 
 
@@ -1317,7 +1315,7 @@ class _ExecutionsAPI:
         overrides: dict[str, Any] | None = None,
         **flow_inputs: Any,
     ) -> Execution:
-        """Replay an execution from a checkpoint or wait boundary."""
+        """Replay an execution from a checkpoint boundary."""
         source_run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
 
         run_status_value = str(getattr(source_run.status, "value", source_run.status))
@@ -1359,11 +1357,6 @@ class _ExecutionsAPI:
             from_=from_,
             overrides=overrides,
             flow_inputs=flow_inputs,
-            wait_conditions=_list_run_wait_conditions(
-                run=source_run,
-                client=self._client_ref,
-                status=None,
-            ),
         )
 
         try:
@@ -1394,11 +1387,6 @@ class _ExecutionsAPI:
         replayed_exec_id = str(getattr(replayed_run, "id", ""))
         if not replayed_exec_id:
             raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
-
-        _apply_wait_overrides(
-            run_id=replayed_exec_id,
-            wait_overrides=replay_plan.wait_overrides,
-        )
 
         return self.get(replayed_exec_id)
 

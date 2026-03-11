@@ -221,82 +221,20 @@ def test_parallel_branches_ordered_deterministically() -> None:
     assert plan.steps_to_skip == {"branch_a", "branch_b"}
 
 
-def test_wait_override_is_resolved_to_full_wait_key() -> None:
-    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    fetch = _step(
+def test_wait_overrides_are_rejected() -> None:
+    """Wait overrides should raise a clear error."""
+    step = _step(
         name="__kitaru_checkpoint_source_fetch",
         invocation_id="fetch",
-        started_at=t0,
-    )
-    write = _step(
-        name="__kitaru_checkpoint_source_write",
-        invocation_id="write",
-        started_at=t0 + timedelta(seconds=10),
-        upstream_steps=["fetch"],
-        inputs_v2={"research": [_input_spec("fetch", "output")]},
-    )
-    publish = _step(
-        name="__kitaru_checkpoint_source_publish",
-        invocation_id="publish",
-        started_at=t0 + timedelta(seconds=20),
-        upstream_steps=["write"],
-        inputs_v2={"draft": [_input_spec("write", "output")]},
+        started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
     )
 
-    wait = SimpleNamespace(
-        id=uuid4(),
-        name="approve:0",
-        created=t0 + timedelta(seconds=15),
-    )
-
-    plan = build_replay_plan(
-        run=_run(fetch, write, publish),
-        from_="publish",
-        overrides={"wait.approve": True},
-        wait_conditions=[wait],
-    )
-
-    assert plan.wait_overrides == {"approve:0": True}
-    assert plan.steps_to_skip == {"fetch", "write"}
-
-
-def test_wait_frontier_uses_dag_adjacency_over_timestamps() -> None:
-    """Wait frontier should prefer downstream_step_names over timestamps."""
-    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    step_a = _step(
-        name="__kitaru_checkpoint_source_a",
-        invocation_id="a",
-        started_at=t0,
-    )
-    step_b = _step(
-        name="__kitaru_checkpoint_source_b",
-        invocation_id="b",
-        started_at=t0 + timedelta(seconds=10),
-        upstream_steps=["a"],
-        inputs_v2={"input": [_input_spec("a", "output")]},
-    )
-
-    # Wait has downstream_step_names pointing to "b" but created timestamp
-    # that would place it before "a" in timestamp ordering.
-    wait = SimpleNamespace(
-        id=uuid4(),
-        wait_condition_key="review:0",
-        created=t0 - timedelta(seconds=100),
-        upstream_step_names=["a"],
-        downstream_step_names=["b"],
-    )
-
-    plan = build_replay_plan(
-        run=_run(step_a, step_b),
-        from_="b",
-        overrides={"wait.review": "approved"},
-        wait_conditions=[wait],
-    )
-
-    # DAG adjacency says wait is between a and b. from_="b" is index 1,
-    # wait frontier is min(downstream) = index 1. So frontier = 1, skip a.
-    assert plan.steps_to_skip == {"a"}
-    assert plan.wait_overrides == {"review:0": "approved"}
+    with pytest.raises(KitaruUsageError, match="not supported in replay"):
+        build_replay_plan(
+            run=_run(step),
+            from_="fetch",
+            overrides={"wait.approve": True},
+        )
 
 
 def test_build_replay_plan_rejects_invalid_override_prefix() -> None:
@@ -321,7 +259,7 @@ def test_build_replay_plan_rejects_unknown_selector() -> None:
         started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
     )
 
-    with pytest.raises(KitaruStateError, match="not found"):
+    with pytest.raises(KitaruStateError, match="Unknown checkpoint selector"):
         build_replay_plan(
             run=_run(step),
             from_="unknown",
