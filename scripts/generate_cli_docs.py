@@ -148,15 +148,19 @@ def _get_description(app: Any) -> str:
     return ""
 
 
+def _command_name(value: Any) -> str:
+    """Normalize a Cyclopts command name or key into its visible leaf name."""
+    name_parts: tuple[str, ...] = value if isinstance(value, tuple) else (str(value),)
+    return name_parts[-1]
+
+
 def build_command_tree(
     app: Any,
     parent_invocation: str = "",
+    registered_name: Any | None = None,
 ) -> CommandDoc:
     """Recursively build a normalized command tree from a cyclopts App."""
-    name_parts: tuple[str, ...] = (
-        app.name if isinstance(app.name, tuple) else (str(app.name),)
-    )
-    name = name_parts[-1]
+    name = _command_name(registered_name if registered_name is not None else app.name)
     invocation = f"{parent_invocation} {name}".strip() if parent_invocation else name
     slug = name
 
@@ -180,8 +184,14 @@ def build_command_tree(
 
     # Recurse into subcommands
     subcommands: list[CommandDoc] = []
-    for _cmd_name, sub_app in sorted(registered.items()):
-        subcommands.append(build_command_tree(sub_app, parent_invocation=invocation))
+    for cmd_name, sub_app in sorted(registered.items()):
+        subcommands.append(
+            build_command_tree(
+                sub_app,
+                parent_invocation=invocation,
+                registered_name=cmd_name,
+            )
+        )
 
     return CommandDoc(
         slug=slug,

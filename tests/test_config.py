@@ -19,27 +19,37 @@ from kitaru.config import (
     KITARU_LOG_STORE_ENDPOINT_ENV,
     KITARU_PROJECT_ENV,
     KITARU_RETRIES_ENV,
+    KITARU_SANDBOX_ENV,
     KITARU_SERVER_URL_ENV,
     KITARU_STACK_ENV,
     FrozenExecutionSpec,
     ImageSettings,
     KitaruConfig,
+    MontySandboxSettings,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
+    ResolvedMontySandboxSettings,
+    ResolvedSandboxConfig,
+    SandboxConfig,
+    SandboxProviderKind,
     build_frozen_execution_spec,
     configure,
     current_stack,
+    get_global_sandbox_config,
     image_settings_to_docker_settings,
     list_model_aliases,
     list_stacks,
     persist_frozen_execution_spec,
     register_model_alias,
     reset_global_log_store,
+    reset_global_sandbox_config,
     resolve_connection_config,
     resolve_execution_config,
     resolve_log_store,
     resolve_model_selection,
+    resolve_sandbox_config,
     set_global_log_store,
+    set_global_sandbox_config,
     use_stack,
 )
 
@@ -447,6 +457,113 @@ def test_configure_project_independent_of_execution() -> None:
     assert exec_resolved.stack == "gpu-prod"
     assert exec_resolved.cache is False
     assert conn_resolved.project == "staging-project"
+
+
+def test_set_sandbox_persists_global_override() -> None:
+    """Sandbox settings should persist to Kitaru global config."""
+    snapshot = set_global_sandbox_config(
+        {
+            "provider": "monty",
+            "monty": {
+                "max_duration_secs": 2.5,
+                "max_memory_mb": 128,
+                "type_check": False,
+            },
+        }
+    )
+
+    assert snapshot.provider == SandboxProviderKind.MONTY
+    assert snapshot.monty is not None
+    assert snapshot.monty.max_duration_secs == 2.5
+    persisted = yaml_utils.read_yaml(str(_kitaru_config_path()))
+    assert persisted["sandbox"]["provider"] == "monty"
+    assert persisted["sandbox"]["monty"]["max_memory_mb"] == 128
+
+
+def test_reset_sandbox_clears_persisted_override() -> None:
+    """Reset should remove the persisted sandbox config."""
+    set_global_sandbox_config("monty")
+
+    reset_global_sandbox_config()
+
+    assert get_global_sandbox_config() is None
+
+
+def test_configure_sets_runtime_sandbox_defaults() -> None:
+    """configure should accept sandbox overrides in the execution layer."""
+    snapshot = configure(
+        sandbox={
+            "provider": "monty",
+            "monty": {"max_duration_secs": 3.0, "max_memory_mb": 96},
+        }
+    )
+
+    assert snapshot.sandbox is not None
+    assert snapshot.sandbox.provider == SandboxProviderKind.MONTY
+    assert snapshot.sandbox.monty is not None
+    assert snapshot.sandbox.monty.max_duration_secs == 3.0
+
+
+def test_resolve_execution_config_supports_sandbox_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KITARU_SANDBOX should accept both simple and structured values."""
+    monkeypatch.setenv(
+        KITARU_SANDBOX_ENV,
+        '{"provider":"monty","monty":{"max_memory_mb":128}}',
+    )
+
+    resolved = resolve_execution_config()
+
+    assert resolved.sandbox == ResolvedSandboxConfig(
+        provider=SandboxProviderKind.MONTY,
+        monty=ResolvedMontySandboxSettings(
+            max_duration_secs=1.0,
+            max_memory_mb=128,
+            type_check=True,
+        ),
+    )
+
+
+def test_resolve_sandbox_config_follows_execution_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sandbox settings should merge across config layers just like image settings."""
+    pyproject_path = tmp_path / "pyproject.toml"
+    pyproject_path.write_text(
+        """
+[tool.kitaru.sandbox]
+provider = "monty"
+
+[tool.kitaru.sandbox.monty]
+max_duration_secs = 4.0
+max_memory_mb = 64
+type_check = false
+""".strip()
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(KITARU_SANDBOX_ENV, '{"monty":{"max_memory_mb":256}}')
+    configure(sandbox={"monty": {"type_check": True}})
+
+    resolved = resolve_sandbox_config(
+        decorator_overrides=KitaruConfig(
+            sandbox=SandboxConfig(monty=MontySandboxSettings(max_duration_secs=8.0))
+        ),
+        invocation_overrides=KitaruConfig(
+            sandbox=SandboxConfig(monty=MontySandboxSettings(max_memory_mb=512))
+        ),
+        start_dir=tmp_path,
+    )
+
+    assert resolved == ResolvedSandboxConfig(
+        provider=SandboxProviderKind.MONTY,
+        monty=ResolvedMontySandboxSettings(
+            max_duration_secs=8.0,
+            max_memory_mb=512,
+            type_check=True,
+        ),
+    )
 
 
 def test_global_connection_config_does_not_infer_project() -> None:

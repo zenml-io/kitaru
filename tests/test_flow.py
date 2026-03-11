@@ -13,7 +13,13 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
-from kitaru.config import ResolvedExecutionConfig
+from kitaru.config import (
+    _KITARU_RESOLVED_SANDBOX_ENV,
+    ResolvedExecutionConfig,
+    ResolvedMontySandboxSettings,
+    ResolvedSandboxConfig,
+    SandboxProviderKind,
+)
 from kitaru.errors import (
     FailureOrigin,
     KitaruStateError,
@@ -32,12 +38,14 @@ def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
 def _resolved_execution(
     *,
     stack: str | None = None,
+    sandbox: ResolvedSandboxConfig | None = None,
     cache: bool = True,
     retries: int = 0,
 ) -> ResolvedExecutionConfig:
     return ResolvedExecutionConfig(
         stack=stack,
         image=None,
+        sandbox=sandbox,
         cache=cache,
         retries=retries,
     )
@@ -308,6 +316,79 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
         frozen_execution_spec=frozen_spec,
     )
     configured_pipeline.assert_called_once_with("payload")
+
+
+def test_run_injects_resolved_sandbox_config_into_docker_settings() -> None:
+    """Flow submission should propagate resolved sandbox config into env settings."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    sandbox_config = ResolvedSandboxConfig(
+        provider=SandboxProviderKind.MONTY,
+        monty=ResolvedMontySandboxSettings(
+            max_duration_secs=2.0,
+            max_memory_mb=128,
+            type_check=False,
+        ),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(sandbox=sandbox_config),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    docker_settings = base_pipeline.with_options.call_args.kwargs["settings"]["docker"]
+    assert docker_settings.environment is not None
+    assert _KITARU_RESOLVED_SANDBOX_ENV in docker_settings.environment
+    assert (
+        '"provider":"monty"'
+        in docker_settings.environment[_KITARU_RESOLVED_SANDBOX_ENV]
+    )
+
+
+def test_run_wraps_submission_with_runtime_sandbox_context() -> None:
+    """Flow submission should install resolved sandbox config in runtime context."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    sandbox_config = ResolvedSandboxConfig(
+        provider=SandboxProviderKind.MONTY,
+        monty=ResolvedMontySandboxSettings(
+            max_duration_secs=1.0,
+            max_memory_mb=64,
+            type_check=True,
+        ),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(sandbox=sandbox_config),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow._submission_sandbox_config") as submission_sandbox_config,
+    ):
+        submission_sandbox_config.return_value.__enter__.return_value = None
+        submission_sandbox_config.return_value.__exit__.return_value = None
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    submission_sandbox_config.assert_called_once_with(sandbox_config)
 
 
 def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:

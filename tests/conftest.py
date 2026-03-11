@@ -21,6 +21,7 @@ from zenml.constants import (
 )
 
 from kitaru.config import (
+    _KITARU_RESOLVED_SANDBOX_ENV,
     KITARU_AUTH_TOKEN_ENV,
     KITARU_CACHE_ENV,
     KITARU_IMAGE_ENV,
@@ -29,6 +30,7 @@ from kitaru.config import (
     KITARU_LOG_STORE_ENDPOINT_ENV,
     KITARU_PROJECT_ENV,
     KITARU_RETRIES_ENV,
+    KITARU_SANDBOX_ENV,
     KITARU_SERVER_URL_ENV,
     KITARU_STACK_ENV,
     _reset_runtime_configuration,
@@ -71,9 +73,11 @@ def isolated_zenml_global_config(
         KITARU_CACHE_ENV,
         KITARU_RETRIES_ENV,
         KITARU_IMAGE_ENV,
+        KITARU_SANDBOX_ENV,
         KITARU_SERVER_URL_ENV,
         KITARU_AUTH_TOKEN_ENV,
         KITARU_PROJECT_ENV,
+        _KITARU_RESOLVED_SANDBOX_ENV,
     ):
         monkeypatch.delenv(env_name, raising=False)
 

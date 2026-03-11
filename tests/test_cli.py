@@ -103,6 +103,7 @@ def test_help_flag_lists_available_commands(
         "model",
         "executions",
         "run",
+        "sandbox",
     ):
         assert command in output
 
@@ -1194,6 +1195,110 @@ def test_log_store_reset_reports_environment_override(
     output = capsys.readouterr().out
     assert "Cleared global log-store override." in output
     assert "Effective backend: datadog (from environment settings)" in output
+
+
+def test_sandbox_set_persists_config(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru sandbox set monty` should persist the global sandbox config."""
+    with (
+        patch("kitaru.cli.set_global_sandbox_config") as mock_set,
+        patch("kitaru.cli.resolve_sandbox_config") as mock_resolve,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_set.return_value = SimpleNamespace(provider=SimpleNamespace(value="monty"))
+        mock_resolve.return_value = SimpleNamespace(
+            provider=SimpleNamespace(value="monty"),
+            monty=SimpleNamespace(
+                max_duration_secs=2.0,
+                max_memory_mb=128,
+                type_check=False,
+            ),
+        )
+        app(
+            [
+                "sandbox",
+                "set",
+                "monty",
+                "--max-duration-secs",
+                "2",
+                "--max-memory-mb",
+                "128",
+                "--type-check=false",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    mock_set.assert_called_once()
+    output = capsys.readouterr().out
+    assert "Saved sandbox configuration." in output
+    assert "Provider: monty" in output
+
+
+def test_sandbox_show_renders_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru sandbox show` should print the resolved sandbox config."""
+    with (
+        patch("kitaru.cli.resolve_sandbox_config") as mock_resolve,
+        patch("kitaru.cli.importlib.import_module") as mock_import_module,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_resolve.return_value = SimpleNamespace(
+            provider=SimpleNamespace(value="monty"),
+            monty=SimpleNamespace(
+                max_duration_secs=1.0,
+                max_memory_mb=64,
+                type_check=True,
+            ),
+        )
+        mock_import_module.return_value = object()
+        app(["sandbox", "show"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru sandbox" in output
+    assert "Provider: monty" in output
+    assert "SDK installed: yes" in output
+
+
+def test_sandbox_reset_clears_override(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru sandbox reset` should clear persisted sandbox config."""
+    with (
+        patch("kitaru.cli.reset_global_sandbox_config") as mock_reset,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["sandbox", "reset"])
+
+    assert exc_info.value.code == 0
+    mock_reset.assert_called_once_with()
+    assert "Cleared sandbox configuration." in capsys.readouterr().out
+
+
+def test_sandbox_test_runs_smoke_check(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru sandbox test` should run the provider smoke test."""
+    with (
+        patch("kitaru.cli.resolve_sandbox_config") as mock_resolve,
+        patch("kitaru.cli.run_sandbox_smoke_test") as mock_smoke_test,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_resolve.return_value = SimpleNamespace(
+            provider=SimpleNamespace(value="monty"),
+            monty=SimpleNamespace(
+                max_duration_secs=1.0,
+                max_memory_mb=64,
+                type_check=True,
+            ),
+        )
+        app(["sandbox", "test"])
+
+    assert exc_info.value.code == 0
+    mock_smoke_test.assert_called_once()
+    assert "Sandbox test passed." in capsys.readouterr().out
 
 
 def test_log_store_set_surfaces_validation_errors(

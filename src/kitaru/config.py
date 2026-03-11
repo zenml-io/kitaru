@@ -18,6 +18,7 @@ import re
 import tomllib
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
@@ -63,9 +64,11 @@ KITARU_STACK_ENV = "KITARU_STACK"
 KITARU_CACHE_ENV = "KITARU_CACHE"
 KITARU_RETRIES_ENV = "KITARU_RETRIES"
 KITARU_IMAGE_ENV = "KITARU_IMAGE"
+KITARU_SANDBOX_ENV = "KITARU_SANDBOX"
 KITARU_SERVER_URL_ENV = "KITARU_SERVER_URL"
 KITARU_AUTH_TOKEN_ENV = "KITARU_AUTH_TOKEN"
 KITARU_PROJECT_ENV = "KITARU_PROJECT"
+_KITARU_RESOLVED_SANDBOX_ENV = "KITARU_INTERNAL_SANDBOX_CONFIG"
 
 FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
 
@@ -249,6 +252,7 @@ class _KitaruGlobalConfig(BaseModel):
     version: int = 1
     log_store: LogStoreOverride | None = None
     model_registry: ModelRegistryConfig | None = None
+    sandbox: SandboxConfig | None = None
 
 
 class StackInfo(BaseModel):
@@ -325,11 +329,73 @@ class ImageSettings(BaseModel):
 ImageInput = str | DockerSettings | Mapping[str, Any] | ImageSettings
 
 
+class SandboxProviderKind(StrEnum):
+    """Known sandbox providers."""
+
+    MONTY = "monty"
+
+
+class MontySandboxSettings(BaseModel):
+    """Provider-specific configuration for Monty."""
+
+    max_duration_secs: float | None = None
+    max_memory_mb: int | None = None
+    type_check: bool | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("max_duration_secs")
+    @classmethod
+    def _validate_max_duration_secs(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if value <= 0:
+            raise ValueError("Monty max_duration_secs must be > 0.")
+        return value
+
+    @field_validator("max_memory_mb")
+    @classmethod
+    def _validate_max_memory_mb(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if value <= 0:
+            raise ValueError("Monty max_memory_mb must be > 0.")
+        return value
+
+
+class SandboxConfig(BaseModel):
+    """Sandbox configuration layer before defaults are resolved."""
+
+    provider: SandboxProviderKind | None = None
+    monty: MontySandboxSettings | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ResolvedMontySandboxSettings(BaseModel):
+    """Fully resolved Monty sandbox settings."""
+
+    max_duration_secs: float
+    max_memory_mb: int
+    type_check: bool
+
+
+class ResolvedSandboxConfig(BaseModel):
+    """Fully resolved sandbox configuration."""
+
+    provider: SandboxProviderKind
+    monty: ResolvedMontySandboxSettings
+
+
+SandboxInput = SandboxConfig | SandboxProviderKind | str | Mapping[str, Any]
+
+
 class KitaruConfig(BaseModel):
     """Unified Kitaru configuration model."""
 
     stack: str | None = None
     image: ImageSettings | None = None
+    sandbox: SandboxConfig | None = None
     cache: bool | None = None
     retries: int | None = None
     server_url: str | None = None
@@ -369,12 +435,18 @@ class KitaruConfig(BaseModel):
     def _coerce_image_input(cls, value: Any) -> Any:
         return _coerce_image_input(value)
 
+    @field_validator("sandbox", mode="before")
+    @classmethod
+    def _coerce_sandbox_value(cls, value: Any) -> Any:
+        return _coerce_sandbox_input(value)
+
 
 class ResolvedExecutionConfig(BaseModel):
     """Fully resolved execution settings for a flow run."""
 
     stack: str | None = None
     image: ImageSettings | None = None
+    sandbox: ResolvedSandboxConfig | None = None
     cache: bool
     retries: int
 
@@ -467,6 +539,32 @@ def _coerce_image_input(value: Any) -> ImageSettings | None:
     )
 
 
+def _coerce_sandbox_input(value: Any) -> SandboxConfig | None:
+    """Coerce supported sandbox inputs into :class:`SandboxConfig`."""
+    if value is None:
+        return None
+    if isinstance(value, SandboxConfig):
+        return value
+    if isinstance(value, SandboxProviderKind):
+        return SandboxConfig(provider=value)
+    if isinstance(value, str):
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("Sandbox configuration cannot be empty.")
+        try:
+            parsed_value = json.loads(normalized_value)
+        except json.JSONDecodeError:
+            return SandboxConfig(provider=normalized_value)
+        return SandboxConfig.model_validate(parsed_value)
+    if isinstance(value, Mapping):
+        return SandboxConfig.model_validate(dict(value))
+
+    raise TypeError(
+        "Unsupported sandbox configuration type. Expected str, dict, "
+        "SandboxConfig, SandboxProviderKind, or None."
+    )
+
+
 def _merge_image_settings(
     *,
     base: ImageSettings | None,
@@ -509,6 +607,85 @@ def _merge_image_settings(
             else base.replicate_local_python_environment
         ),
     )
+
+
+def _merge_monty_sandbox_settings(
+    *,
+    base: MontySandboxSettings | None,
+    override: MontySandboxSettings,
+) -> MontySandboxSettings:
+    """Merge one layer of Monty settings onto another."""
+    if base is None:
+        return override
+
+    return MontySandboxSettings(
+        max_duration_secs=(
+            override.max_duration_secs
+            if override.max_duration_secs is not None
+            else base.max_duration_secs
+        ),
+        max_memory_mb=(
+            override.max_memory_mb
+            if override.max_memory_mb is not None
+            else base.max_memory_mb
+        ),
+        type_check=(
+            override.type_check if override.type_check is not None else base.type_check
+        ),
+    )
+
+
+def _merge_sandbox_config(
+    *,
+    base: SandboxConfig | None,
+    override: SandboxConfig,
+) -> SandboxConfig:
+    """Merge a higher-precedence sandbox config over a lower-precedence one."""
+    if base is None:
+        return override
+
+    merged_monty = base.monty
+    if override.monty is not None:
+        merged_monty = _merge_monty_sandbox_settings(
+            base=merged_monty,
+            override=override.monty,
+        )
+
+    return SandboxConfig(
+        provider=override.provider if override.provider is not None else base.provider,
+        monty=merged_monty,
+    )
+
+
+def _resolve_sandbox_config(
+    sandbox_config: SandboxConfig | None,
+) -> ResolvedSandboxConfig | None:
+    """Resolve sandbox config defaults into a concrete provider config."""
+    if sandbox_config is None:
+        return None
+
+    provider = sandbox_config.provider
+    if provider is None:
+        if sandbox_config.monty is None:
+            return None
+        provider = SandboxProviderKind.MONTY
+
+    if provider == SandboxProviderKind.MONTY:
+        monty = sandbox_config.monty or MontySandboxSettings()
+        return ResolvedSandboxConfig(
+            provider=provider,
+            monty=ResolvedMontySandboxSettings(
+                max_duration_secs=(
+                    1.0 if monty.max_duration_secs is None else monty.max_duration_secs
+                ),
+                max_memory_mb=(
+                    64 if monty.max_memory_mb is None else monty.max_memory_mb
+                ),
+                type_check=(True if monty.type_check is None else monty.type_check),
+            ),
+        )
+
+    raise ValueError(f"Unsupported sandbox provider: {provider!r}")
 
 
 def _parse_bool_env(name: str, value: str) -> bool:
@@ -593,6 +770,10 @@ def _read_execution_env_config() -> KitaruConfig:
             parsed_image = stripped_image
         values["image"] = parsed_image
 
+    raw_sandbox = os.environ.get(KITARU_SANDBOX_ENV)
+    if raw_sandbox is not None:
+        values["sandbox"] = raw_sandbox
+
     return KitaruConfig.model_validate(values)
 
 
@@ -622,7 +803,13 @@ def _read_global_execution_config() -> KitaruConfig:
     except Exception:
         active_stack_name = None
 
-    return KitaruConfig(stack=active_stack_name)
+    global_config = _read_kitaru_global_config()
+    return KitaruConfig(
+        stack=active_stack_name,
+        sandbox=global_config.sandbox.model_copy(deep=True)
+        if global_config.sandbox is not None
+        else None,
+    )
 
 
 def _extract_store_token(store: Any) -> str | None:
@@ -690,9 +877,28 @@ def _merge_execution_layer(
         if merged_image.is_empty():
             merged_image = None
 
+    merged_sandbox = resolved.sandbox
+    if layer.sandbox is not None:
+        merged_sandbox = _resolve_sandbox_config(
+            _merge_sandbox_config(
+                base=(
+                    SandboxConfig(
+                        provider=resolved.sandbox.provider,
+                        monty=MontySandboxSettings.model_validate(
+                            resolved.sandbox.monty.model_dump(mode="python")
+                        ),
+                    )
+                    if resolved.sandbox is not None
+                    else None
+                ),
+                override=layer.sandbox,
+            )
+        )
+
     return ResolvedExecutionConfig(
         stack=layer.stack if layer.stack is not None else resolved.stack,
         image=merged_image,
+        sandbox=merged_sandbox,
         cache=layer.cache if layer.cache is not None else resolved.cache,
         retries=layer.retries if layer.retries is not None else resolved.retries,
     )
@@ -724,6 +930,7 @@ def resolve_execution_config(
     resolved = ResolvedExecutionConfig(
         stack=None,
         image=None,
+        sandbox=None,
         cache=True,
         retries=0,
     )
@@ -738,6 +945,20 @@ def resolve_execution_config(
         resolved = _merge_execution_layer(resolved, layer)
 
     return resolved
+
+
+def resolve_sandbox_config(
+    *,
+    decorator_overrides: KitaruConfig | None = None,
+    invocation_overrides: KitaruConfig | None = None,
+    start_dir: Path | None = None,
+) -> ResolvedSandboxConfig | None:
+    """Resolve only the sandbox configuration using execution precedence."""
+    return resolve_execution_config(
+        decorator_overrides=decorator_overrides,
+        invocation_overrides=invocation_overrides,
+        start_dir=start_dir,
+    ).sandbox
 
 
 def resolve_connection_config(
@@ -1286,6 +1507,40 @@ def reset_global_log_store() -> ResolvedLogStore:
     return resolve_log_store()
 
 
+def get_global_sandbox_config() -> SandboxConfig | None:
+    """Read the persisted global sandbox config without applying precedence."""
+    global_config = _read_kitaru_global_config()
+    if global_config.sandbox is None:
+        return None
+    return global_config.sandbox.model_copy(deep=True)
+
+
+def set_global_sandbox_config(
+    sandbox: SandboxInput,
+) -> SandboxConfig:
+    """Persist a global sandbox configuration."""
+    resolved_sandbox = _coerce_sandbox_input(sandbox)
+    if resolved_sandbox is None:
+        raise ValueError("Sandbox configuration cannot be empty.")
+
+    def _mutate(global_config: _KitaruGlobalConfig) -> None:
+        global_config.sandbox = resolved_sandbox
+
+    updated = _update_kitaru_global_config(_mutate)
+    if updated.sandbox is None:
+        raise RuntimeError("Sandbox configuration was not persisted.")
+    return updated.sandbox
+
+
+def reset_global_sandbox_config() -> None:
+    """Clear the persisted global sandbox configuration."""
+
+    def _mutate(global_config: _KitaruGlobalConfig) -> None:
+        global_config.sandbox = None
+
+    _update_kitaru_global_config(_mutate)
+
+
 def _read_model_registry_config() -> ModelRegistryConfig:
     """Read the local model registry from global config."""
     global_config = _read_kitaru_global_config()
@@ -1597,13 +1852,14 @@ def configure(
     *,
     stack: str | None | object = _UNSET,
     image: ImageInput | None | object = _UNSET,
+    sandbox: SandboxInput | None | object = _UNSET,
     cache: bool | None | object = _UNSET,
     retries: int | None | object = _UNSET,
     project: str | None | object = _UNSET,
 ) -> KitaruConfig:
     """Set process-local runtime defaults.
 
-    Execution-level fields (``stack``, ``image``, ``cache``, ``retries``)
+    Execution-level fields (``stack``, ``image``, ``sandbox``, ``cache``, ``retries``)
     update the execution precedence chain.  The ``project`` field updates
     the connection precedence chain and is intended as an internal /
     testing escape hatch — it is not a normal user-facing setting.
@@ -1611,6 +1867,7 @@ def configure(
     Args:
         stack: Default stack name/ID override.
         image: Default image settings override.
+        sandbox: Default sandbox configuration override.
         cache: Default cache behavior override.
         retries: Default retry-count override.
         project: Project override (internal/testing). Set to ``None``
@@ -1632,6 +1889,12 @@ def configure(
             candidate_execution.pop("image", None)
         else:
             candidate_execution["image"] = _coerce_image_input(image)
+
+    if sandbox is not _UNSET:
+        if sandbox is None:
+            candidate_execution.pop("sandbox", None)
+        else:
+            candidate_execution["sandbox"] = _coerce_sandbox_input(sandbox)
 
     if cache is not _UNSET:
         if cache is None:
