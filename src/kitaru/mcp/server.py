@@ -15,7 +15,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
 from enum import Enum
-from importlib.metadata import version as get_version
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol, runtime_checkable
@@ -25,6 +24,7 @@ from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 
+from _kitaru_bootstrap import resolve_installed_version
 from kitaru.client import (
     ArtifactRef,
     CheckpointAttempt,
@@ -46,7 +46,6 @@ from kitaru.config import (
 )
 from kitaru.config import list_stacks as get_available_stacks
 
-SDK_VERSION = get_version("kitaru")
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
 )
@@ -451,7 +450,7 @@ def _build_snapshot_without_local_store(
 ) -> RuntimeSnapshot:
     """Build a degraded snapshot when local runtime support is unavailable."""
     return RuntimeSnapshot(
-        sdk_version=SDK_VERSION,
+        sdk_version=resolve_installed_version(),
         connection="local mode (unavailable)",
         connection_target="unavailable",
         config_directory=str(_kitaru_config_dir()),
@@ -499,7 +498,7 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
         server_url = connection_target
 
     snapshot = RuntimeSnapshot(
-        sdk_version=SDK_VERSION,
+        sdk_version=resolve_installed_version(),
         connection=connection,
         connection_target=connection_target,
         server_url=server_url,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from datetime import datetime
-from importlib.metadata import version as get_version
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -63,24 +63,46 @@ def _execution_stub(
     )
 
 
+def test_importing_cli_does_not_resolve_version_metadata() -> None:
+    """Importing `kitaru.cli` should not resolve package metadata."""
+    import kitaru.cli as cli_module
+
+    with patch(
+        "_kitaru_bootstrap.resolve_installed_version",
+        side_effect=AssertionError("should not resolve version at import time"),
+    ):
+        reloaded = importlib.reload(cli_module)
+        assert reloaded.app.version == "unknown"
+
+    importlib.reload(cli_module)
+
+
 def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
-    """--version prints the package version and exits."""
-    with pytest.raises(SystemExit) as exc_info:
-        app(["--version"])
+    """--version prints the lazily resolved package version and exits."""
+    import kitaru.cli as cli_module
+
+    reloaded = importlib.reload(cli_module)
+    with patch("kitaru.cli.resolve_installed_version", return_value="9.9.9"):
+        reloaded._apply_runtime_version()
+        with pytest.raises(SystemExit) as exc_info:
+            reloaded.app(["--version"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    expected_version = get_version("kitaru")
-    assert expected_version in captured.out
+    assert "9.9.9" in captured.out
 
 
 def test_short_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
-    """-V also prints the version."""
-    with pytest.raises(SystemExit) as exc_info:
-        app(["-V"])
+    """-V also prints the lazily resolved package version."""
+    import kitaru.cli as cli_module
+
+    reloaded = importlib.reload(cli_module)
+    with patch("kitaru.cli.resolve_installed_version", return_value="8.8.8"):
+        reloaded._apply_runtime_version()
+        with pytest.raises(SystemExit) as exc_info:
+            reloaded.app(["-V"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    expected_version = get_version("kitaru")
-    assert expected_version in captured.out
+    assert "8.8.8" in captured.out
 
 
 def test_help_flag_lists_available_commands(
@@ -1731,7 +1753,7 @@ def test_status_renders_compact_snapshot(
         server_url="https://example.com",
         active_user="alice",
         active_stack="prod",
-        config_directory="/tmp/.config/kitaru",
+        config_directory="/tmp/kitaru-config",
         local_server_status="not started",
     )
 
@@ -1746,7 +1768,7 @@ def test_status_renders_compact_snapshot(
     assert "Kitaru status" in output
     assert "Connection: remote Kitaru server" in output
     assert "Active stack: prod" in output
-    assert "Config directory: /tmp/.config/kitaru" in output
+    assert "Config directory: /tmp/kitaru-config" in output
     assert "Project override" not in output
 
 
@@ -1761,7 +1783,7 @@ def test_status_renders_log_store_mismatch_warning(
         server_url="https://example.com",
         active_user="alice",
         active_stack="prod",
-        config_directory="/tmp/.config/kitaru",
+        config_directory="/tmp/kitaru-config",
         local_server_status="not started",
         log_store_status="datadog (preferred) ⚠ stack uses artifact-store",
         log_store_warning=(
@@ -1797,7 +1819,7 @@ def test_info_renders_detailed_snapshot(
         server_version="0.94.0",
         server_database="sqlite",
         server_deployment_type="oss",
-        config_directory="/tmp/.config/kitaru",
+        config_directory="/tmp/kitaru-config",
         local_server_status="not started",
     )
 
@@ -1827,7 +1849,7 @@ def test_info_shows_project_override_when_set(
         server_url="https://example.com",
         active_user="alice",
         active_stack="prod",
-        config_directory="/tmp/.config/kitaru",
+        config_directory="/tmp/kitaru-config",
         project_override="staging-project",
     )
 
@@ -1847,9 +1869,11 @@ def test_build_runtime_snapshot_handles_missing_local_store() -> None:
     with (
         patch("kitaru.cli.GlobalConfiguration", return_value=_BrokenGlobalConfig()),
         patch("kitaru.cli.get_local_server", side_effect=ImportError("missing")),
+        patch("kitaru.cli.resolve_installed_version", return_value="1.2.3"),
     ):
         snapshot = _build_runtime_snapshot()
 
+    assert snapshot.sdk_version == "1.2.3"
     assert snapshot.connection == "local mode (unavailable)"
     assert snapshot.connection_target == "unavailable"
     assert (
@@ -1865,7 +1889,7 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
     fake_gc = Mock()
     fake_gc.uses_local_store = False
     fake_gc.store_configuration = SimpleNamespace(url="http://127.0.0.1:8237")
-    fake_gc.config_directory = "/tmp/.config/kitaru"
+    fake_gc.config_directory = "/tmp/kitaru-config"
     fake_local_server = SimpleNamespace(
         config=SimpleNamespace(provider=SimpleNamespace(value="daemon")),
         status=SimpleNamespace(

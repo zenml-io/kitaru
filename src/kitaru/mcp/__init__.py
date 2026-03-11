@@ -23,6 +23,10 @@ def _require_mcp_dependencies() -> None:
 
 _require_mcp_dependencies()
 
-main = importlib.import_module("kitaru.mcp.server").main
+
+def main() -> object:
+    """Run the Kitaru MCP server entrypoint lazily."""
+    return importlib.import_module("kitaru.mcp.server").main()
+
 
 __all__ = ["main"]

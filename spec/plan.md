@@ -396,7 +396,7 @@ matters — build the most-needed operations first, not the easiest.
 - Implement local model registry:
   - CLI: `kitaru model register <alias> --model <litellm_model_id> [--secret <secret_name>]`
   - CLI: `kitaru model list`
-  - Storage: local user config (e.g. `~/.config/kitaru/models.json`)
+  - Storage: local user config in Kitaru's platform-standard app config directory
   - Aliases with optional ZenML secret references, independent of stacks
 - Credential resolution order:
   1. Process env vars already set → use them (LiteLLM reads natively)

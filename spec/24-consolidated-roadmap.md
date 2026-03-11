@@ -280,7 +280,7 @@ What's the minimum viable flow for a new user going from `kitaru login` to runni
 
 **Source:** spec 22
 
-Both completed. Config at `~/.config/kitaru/`, projects are a flat namespace using server default.
+Both completed. Config lives in Kitaru's platform-standard app config directory, and projects are a flat namespace using server default.
 
 ### 8c. Secrets
 

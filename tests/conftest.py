@@ -43,10 +43,11 @@ def isolated_zenml_global_config(
     config_dir = tmp_path / ".zenml"
     config_dir.mkdir()
 
-    # Redirect Kitaru's own config home (~/.config/kitaru/) into tmp_path
-    kitaru_home = tmp_path / ".config" / "kitaru"
+    # Redirect Kitaru's own app config dir into tmp_path.
+    kitaru_home = tmp_path / "kitaru-config"
     kitaru_home.mkdir(parents=True)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr("click.get_app_dir", lambda app_name: str(kitaru_home))
 
     monkeypatch.setenv(ENV_ZENML_CONFIG_PATH, str(config_dir))
 

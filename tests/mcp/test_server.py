@@ -314,7 +314,7 @@ def test_status_and_stack_tools_return_structured_payloads() -> None:
         sdk_version="0.1.0",
         connection="remote Kitaru server",
         connection_target="https://example.com",
-        config_directory="/tmp/.config/kitaru",
+        config_directory="/tmp/kitaru-config",
         server_url="https://example.com",
         active_user="alice",
         active_stack="prod",

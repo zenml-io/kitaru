@@ -10,13 +10,13 @@ How users connect to Kitaru, register infrastructure, and manage credentials. Th
 
 ## Config directory — COMPLETED
 
-**Decision:** Separate directories. Kitaru's own config lives at `~/.config/kitaru/`. ZenML's config stays at its default location (`~/.config/zenml/`) but is never referenced in user-facing output, docs, or CLI messages.
+**Decision:** Separate directories. Kitaru's own config lives in the platform-standard Kitaru app config directory (for example `~/.config/kitaru/` on Linux). ZenML's config stays at its default location but is never referenced in user-facing output, docs, or CLI messages.
 
-```
-~/.config/kitaru/
-  config.yaml          # Kitaru-specific (active stack, log-store, model aliases)
+```text
+Kitaru app config dir
+  config.yaml          # Kitaru-specific (log-store, model aliases)
 
-~/.config/zenml/       (hidden from user, never referenced)
+ZenML app config dir   (hidden from user, never referenced)
   global_config.yaml   # ZenML internals (auth, store URL)
   local_stores/        # ZenML local artifact stores
 ```
@@ -24,7 +24,7 @@ How users connect to Kitaru, register infrastructure, and manage credentials. Th
 **Rationale:** Kitaru IS ZenML under the hood, so the ZenML config directory must exist regardless (it holds auth tokens, store config, etc.). But users should never see the `zenml` name. The Kitaru config directory is the only one that appears in CLI output, error messages, or docs.
 
 **Implementation notes:**
-- Move `_kitaru_global_config_path()` in `src/kitaru/config.py` to use `~/.config/kitaru/` instead of nesting inside `GlobalConfiguration().config_directory`
+- Move `_kitaru_global_config_path()` in `src/kitaru/config.py` to use Kitaru's own platform-standard app config directory instead of nesting inside `GlobalConfiguration().config_directory`
 - Audit all CLI output (`kitaru info`, `kitaru status`, error messages) to ensure no ZenML config paths leak to the user
 - The `[tool.kitaru]` section in `pyproject.toml` is already correctly named
 

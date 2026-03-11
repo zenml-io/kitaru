@@ -140,7 +140,7 @@ No core SDK primitives are currently flagged as in progress in this branch.
 
 ## Development
 
-Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and [just](https://github.com/casey/just).
+Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and [just](https://github.com/casey/just). The `kitaru` and `kitaru-mcp` entrypoints fail fast with a clear error on older Python versions.
 
 ```bash
 uv sync                            # Install dependencies

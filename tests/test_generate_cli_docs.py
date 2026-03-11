@@ -1,10 +1,12 @@
 """Tests for the CLI documentation generator."""
 
+import importlib
 import json
 import shutil
 import tempfile
 from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -53,6 +55,19 @@ class TestBuildCommandTree:
             "stack",
             "status",
         ]
+
+    def test_building_tree_does_not_resolve_version_metadata(self) -> None:
+        """CLI docs introspection should not trigger version metadata lookup."""
+        with patch(
+            "_kitaru_bootstrap.resolve_installed_version",
+            side_effect=AssertionError("should not resolve version"),
+        ):
+            import kitaru.cli as cli_module
+
+            reloaded = importlib.reload(cli_module)
+            tree = build_command_tree(reloaded.app)
+
+        assert tree.name == "kitaru"
 
     def test_handles_subcommands(self) -> None:
         import cyclopts

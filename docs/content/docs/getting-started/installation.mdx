@@ -3,6 +3,14 @@ title: Installation
 description: Install Kitaru with uv or pip
 ---
 
+Kitaru requires **Python 3.11 or newer**.
+
+You can verify your interpreter with:
+
+```bash
+python --version
+```
+
 <Tabs items={["uv (recommended)", "pip"]}>
   <Tab value="uv (recommended)">
     ```bash
@@ -37,6 +45,10 @@ uv add kitaru --extra pydantic-ai
 ```bash
 kitaru --version
 ```
+
+If you run `kitaru` or `kitaru-mcp` on an older Python version, Kitaru now
+fails immediately with a clear error message instead of surfacing confusing
+startup metadata noise.
 
 ```bash
 kitaru --help

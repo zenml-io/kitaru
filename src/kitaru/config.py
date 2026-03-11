@@ -48,7 +48,6 @@ zenml_cli_utils = importlib.import_module("zenml.cli.utils")
 
 _DEFAULT_LOG_STORE_BACKEND = "artifact-store"
 _KITARU_GLOBAL_CONFIG_FILENAME = "config.yaml"
-_KITARU_LEGACY_CONFIG_FILENAME = "kitaru.yaml"
 _LOG_STORE_SOURCE_DEFAULT = "default"
 _LOG_STORE_SOURCE_ENVIRONMENT = "environment"
 _LOG_STORE_SOURCE_GLOBAL_USER_CONFIG = "global user config"
@@ -968,18 +967,13 @@ def _suppress_zenml_cli_messages() -> Iterator[None]:
 
 
 def _kitaru_config_dir() -> Path:
-    """Return the Kitaru-owned global config directory (``~/.config/kitaru/``)."""
-    return Path.home() / ".config" / "kitaru"
+    """Return the Kitaru-owned global config directory."""
+    return Path(click.get_app_dir("kitaru"))
 
 
 def _kitaru_global_config_path() -> Path:
     """Return the path to Kitaru's global config file."""
     return _kitaru_config_dir() / _KITARU_GLOBAL_CONFIG_FILENAME
-
-
-def _legacy_kitaru_global_config_path() -> Path:
-    """Return the legacy path inside ZenML's config directory."""
-    return Path(GlobalConfiguration().config_directory) / _KITARU_LEGACY_CONFIG_FILENAME
 
 
 def _parse_kitaru_config_file(config_path: Path) -> _KitaruGlobalConfig | None:
@@ -1007,13 +1001,7 @@ def _parse_kitaru_config_file(config_path: Path) -> _KitaruGlobalConfig | None:
 
 
 def _read_kitaru_global_config() -> _KitaruGlobalConfig:
-    """Read Kitaru global config from disk with legacy migration.
-
-    Precedence:
-    1. New path (``~/.config/kitaru/config.yaml``) — used if it exists.
-    2. Legacy path (``<zenml-config-dir>/kitaru.yaml``) — read and
-       automatically migrated to the new location.
-    3. Empty defaults if neither file exists.
+    """Read Kitaru global config from disk.
 
     Returns:
         Parsed Kitaru global config.
@@ -1021,15 +1009,9 @@ def _read_kitaru_global_config() -> _KitaruGlobalConfig:
     Raises:
         ValueError: If the config file exists but is malformed.
     """
-    new_path = _kitaru_global_config_path()
-    parsed = _parse_kitaru_config_file(new_path)
+    config_path = _kitaru_global_config_path()
+    parsed = _parse_kitaru_config_file(config_path)
     if parsed is not None:
-        return parsed
-
-    legacy_path = _legacy_kitaru_global_config_path()
-    parsed = _parse_kitaru_config_file(legacy_path)
-    if parsed is not None:
-        _write_kitaru_global_config(parsed)
         return parsed
 
     return _KitaruGlobalConfig()

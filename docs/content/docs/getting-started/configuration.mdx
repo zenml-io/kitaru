@@ -8,11 +8,21 @@ how to set execution defaults, and how precedence is resolved.
 
 ## Config directory
 
-Kitaru stores its user-facing configuration at:
+Kitaru stores its user-facing configuration in your platform's standard
+application config directory.
 
+Examples:
+
+```text
+Linux:   ~/.config/kitaru/
+macOS:   ~/Library/Application Support/kitaru/
+Windows: %APPDATA%\\kitaru\\
 ```
-~/.config/kitaru/
-  config.yaml    # Log-store, model aliases, and other Kitaru settings
+
+Inside that directory, Kitaru stores:
+
+```text
+config.yaml    # Log-store, model aliases, and other Kitaru settings
 ```
 
 This is the only config directory that appears in CLI output and error

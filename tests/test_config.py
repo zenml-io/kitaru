@@ -64,7 +64,9 @@ class _FakeStackPage:
 
 def _kitaru_config_path() -> Path:
     """Return the path used for persisted Kitaru global config in tests."""
-    return Path.home() / ".config" / "kitaru" / "config.yaml"
+    from kitaru.config import _kitaru_global_config_path
+
+    return _kitaru_global_config_path()
 
 
 def test_log_store_defaults_to_artifact_store() -> None:
@@ -458,18 +460,15 @@ def test_global_connection_config_does_not_infer_project() -> None:
 
 
 def test_kitaru_config_path_uses_kitaru_dir() -> None:
-    """Kitaru's config file should live under ~/.config/kitaru/."""
+    """Kitaru's config file should live under the app-specific config dir."""
     path = _kitaru_config_path()
-    assert path.parent.name == "kitaru"
-    assert path.parent.parent.name == ".config"
+    assert path.parent.name == "kitaru-config"
     assert path.name == "config.yaml"
 
 
-def test_legacy_config_migration(tmp_path: Path) -> None:
-    """Config from the legacy ZenML-based path should be auto-migrated."""
-    from kitaru.config import _legacy_kitaru_global_config_path
-
-    legacy_path = _legacy_kitaru_global_config_path()
+def test_legacy_config_is_ignored(tmp_path: Path) -> None:
+    """Legacy ZenML-side config should no longer be migrated or read."""
+    legacy_path = tmp_path / ".zenml" / "kitaru.yaml"
     io_utils.create_dir_recursive_if_not_exists(str(legacy_path.parent))
     yaml_utils.write_yaml(
         str(legacy_path),
@@ -483,10 +482,10 @@ def test_legacy_config_migration(tmp_path: Path) -> None:
     )
 
     snapshot = resolve_log_store()
-    assert snapshot.backend == "datadog"
+    assert snapshot.backend == "artifact-store"
 
     new_path = _kitaru_config_path()
-    assert new_path.exists()
+    assert not new_path.exists()
 
 
 def test_resolve_execution_config_applies_phase10_precedence(

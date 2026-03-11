@@ -12,7 +12,6 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from importlib.metadata import version as get_version
 from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any, Protocol, runtime_checkable
@@ -31,6 +30,7 @@ from zenml.models import SecretResponse
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
+from _kitaru_bootstrap import resolve_installed_version
 from kitaru.client import Execution, ExecutionStatus, KitaruClient, LogEntry
 from kitaru.config import (
     KITARU_PROJECT_ENV,
@@ -65,7 +65,7 @@ from kitaru.terminal import (
     is_interactive as is_terminal_interactive,
 )
 
-SDK_VERSION = get_version("kitaru")
+_UNKNOWN_VERSION = "unknown"
 AUTH_ENV_VARS = (
     "ZENML_STORE_URL",
     "ZENML_STORE_API_KEY",
@@ -77,7 +77,7 @@ _SECRET_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 app = cyclopts.App(
     name="kitaru",
     help="Durable execution for AI agents.",
-    version=SDK_VERSION,
+    version=_UNKNOWN_VERSION,
     version_flags=["--version", "-V"],
 )
 
@@ -106,6 +106,16 @@ app.command(stack_app)
 app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
+
+
+def _sdk_version() -> str:
+    """Resolve the installed SDK version lazily."""
+    return resolve_installed_version()
+
+
+def _apply_runtime_version() -> None:
+    """Populate the CLI app version just before command dispatch."""
+    app.version = _sdk_version()
 
 
 @dataclass
@@ -440,7 +450,7 @@ def _build_snapshot_without_local_store(
 ) -> RuntimeSnapshot:
     """Build a degraded snapshot when local Kitaru runtime support is unavailable."""
     return RuntimeSnapshot(
-        sdk_version=SDK_VERSION,
+        sdk_version=_sdk_version(),
         connection="local mode (unavailable)",
         connection_target="unavailable",
         config_directory=str(_kitaru_config_dir()),
@@ -497,7 +507,7 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
         server_url = store_cfg.url
 
     snapshot = RuntimeSnapshot(
-        sdk_version=SDK_VERSION,
+        sdk_version=_sdk_version(),
         connection=connection,
         connection_target=store_cfg.url,
         server_url=server_url,
@@ -1839,4 +1849,5 @@ def main() -> None:
 
 def cli() -> None:
     """Entry point for the `kitaru` console script."""
+    _apply_runtime_version()
     app()

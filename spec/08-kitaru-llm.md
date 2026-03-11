@@ -124,7 +124,7 @@ The registry conceptually stores:
 
 The `secret` field is optional — it references a ZenML secret by name that holds provider credentials. When present, `kitaru.llm()` fetches the secret at runtime to obtain API keys and other credentials.
 
-The exact on-disk schema and storage path (e.g. `~/.config/kitaru/models.json`) are not frozen yet.
+The exact on-disk schema and storage path live in Kitaru's platform-standard app config directory and are not part of the public contract.
 
 **Zero-config path:** Users who already have provider environment variables set (e.g. `OPENAI_API_KEY`) can use `kitaru.llm()` without registering anything — LiteLLM reads those env vars natively. The registry adds convenience (aliases, defaults, remote credential references) but is not required.
 
