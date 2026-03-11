@@ -15,7 +15,7 @@ from datetime import datetime
 from importlib.metadata import version as get_version
 from pathlib import Path
 from types import ModuleType
-from typing import Annotated, Any, Protocol, runtime_checkable
+from typing import Annotated, Any, Literal, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 import cyclopts
@@ -35,7 +35,11 @@ from kitaru.client import Execution, ExecutionStatus, KitaruClient, LogEntry
 from kitaru.config import (
     KITARU_PROJECT_ENV,
     ModelAliasEntry,
+    MontySandboxSettings,
     ResolvedLogStore,
+    ResolvedSandboxConfig,
+    SandboxConfig,
+    SandboxProviderKind,
     StackInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
@@ -44,8 +48,11 @@ from kitaru.config import (
     login_to_server,
     register_model_alias,
     reset_global_log_store,
+    reset_global_sandbox_config,
     resolve_log_store,
+    resolve_sandbox_config,
     set_global_log_store,
+    set_global_sandbox_config,
 )
 from kitaru.config import (
     current_stack as get_current_stack,
@@ -57,6 +64,7 @@ from kitaru.config import (
     use_stack as set_active_stack,
 )
 from kitaru.runtime import _submission_observer
+from kitaru.sandbox import run_sandbox_smoke_test
 from kitaru.terminal import (
     LiveExecutionRenderer,
     _suppress_zenml_console,
@@ -101,11 +109,16 @@ executions_app = cyclopts.App(
     name="executions",
     help="Inspect and manage flow executions.",
 )
+sandbox_app = cyclopts.App(
+    name="sandbox",
+    help="Manage sandbox provider settings and verify sandbox runtime access.",
+)
 app.command(log_store_app)
 app.command(stack_app)
 app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
+app.command(sandbox_app)
 
 
 @dataclass
@@ -623,6 +636,26 @@ def _log_store_detail(snapshot: ResolvedLogStore) -> str:
         return f"Effective backend: {snapshot.backend}"
 
     return f"Effective backend: {snapshot.backend} (from {snapshot.source} settings)"
+
+
+def _sandbox_rows(snapshot: ResolvedSandboxConfig | None) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru sandbox show`."""
+    if snapshot is None:
+        return [("Provider", "not configured")]
+
+    sdk_installed = "yes"
+    try:
+        importlib.import_module("pydantic_monty")
+    except ImportError:
+        sdk_installed = "no"
+
+    return [
+        ("Provider", snapshot.provider.value),
+        ("Max duration", f"{snapshot.monty.max_duration_secs:g}s"),
+        ("Max memory", f"{snapshot.monty.max_memory_mb} MB"),
+        ("Type check", "enabled" if snapshot.monty.type_check else "disabled"),
+        ("SDK installed", sdk_installed),
+    ]
 
 
 def _log_store_mismatch_details(
@@ -1265,6 +1298,97 @@ def reset() -> None:
         "Cleared global log-store override.",
         detail=_log_store_detail(snapshot),
     )
+
+
+@sandbox_app.command(name="set")
+def sandbox_set(
+    provider: Annotated[
+        Literal["monty"],
+        Parameter(help="Sandbox provider to persist globally."),
+    ],
+    *,
+    max_duration_secs: Annotated[
+        float,
+        Parameter(help="Maximum Python execution duration for one sandbox call."),
+    ] = 1.0,
+    max_memory_mb: Annotated[
+        int,
+        Parameter(help="Maximum memory budget for the Monty sandbox."),
+    ] = 64,
+    type_check: Annotated[
+        bool,
+        Parameter(help="Persist whether static type checking should be requested."),
+    ] = True,
+) -> None:
+    """Persist the global sandbox provider configuration."""
+    del provider
+    try:
+        set_global_sandbox_config(
+            SandboxConfig(
+                provider=SandboxProviderKind.MONTY,
+                monty=MontySandboxSettings(
+                    max_duration_secs=max_duration_secs,
+                    max_memory_mb=max_memory_mb,
+                    type_check=type_check,
+                ),
+            )
+        )
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+
+    resolved = resolve_sandbox_config()
+    if resolved is None:
+        _exit_with_error("Sandbox configuration was saved but could not be resolved.")
+        return
+
+    _print_success(
+        "Saved sandbox configuration.",
+        detail=(
+            f"Provider: {SandboxProviderKind.MONTY.value} | "
+            f"max_duration_secs={resolved.monty.max_duration_secs:g} | "
+            f"max_memory_mb={resolved.monty.max_memory_mb} | "
+            f"type_check={str(resolved.monty.type_check).lower()}"
+        ),
+    )
+
+
+@sandbox_app.command(name="show")
+def sandbox_show() -> None:
+    """Show the effective sandbox configuration for the current process."""
+    try:
+        snapshot = resolve_sandbox_config()
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+    _emit_snapshot("Kitaru sandbox", _sandbox_rows(snapshot))
+
+
+@sandbox_app.command(name="reset")
+def sandbox_reset() -> None:
+    """Clear the persisted sandbox configuration."""
+    reset_global_sandbox_config()
+    _print_success("Cleared sandbox configuration.")
+
+
+@sandbox_app.command(name="test")
+def sandbox_test() -> None:
+    """Run a small sandbox smoke test against the resolved provider config."""
+    try:
+        snapshot = resolve_sandbox_config()
+    except ValueError as exc:
+        _exit_with_error(str(exc))
+
+    if snapshot is None:
+        _exit_with_error(
+            "No sandbox provider is configured. Run `kitaru sandbox set monty` first."
+        )
+        return
+
+    try:
+        run_sandbox_smoke_test(snapshot)
+    except Exception as exc:
+        _exit_with_error(str(exc))
+
+    _print_success("Sandbox test passed.")
 
 
 @stack_app.command

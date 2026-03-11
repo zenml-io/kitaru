@@ -31,6 +31,7 @@ import kitaru
 
 kitaru.configure(
     stack="local",
+    sandbox="monty",
     cache=False,
     retries=1,
     image=kitaru.ImageSettings(
@@ -62,9 +63,9 @@ In this example, resolved retries are `3`.
 ## Precedence (highest to lowest)
 
 1. Invocation-time overrides (`my_flow.run(..., stack="prod")`)
-2. Flow decorator defaults (`@flow(stack="prod")`)
+2. Flow decorator defaults (`@flow(stack="prod", sandbox="monty")`)
 3. `kitaru.configure(...)`
-4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
+4. Environment variables (`KITARU_STACK`, `KITARU_SANDBOX`, `KITARU_SERVER_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
 6. Global user config (active stack and connection defaults)
 7. Built-in defaults (`local` stack, `cache=True`, `retries=0`)
@@ -77,6 +78,7 @@ Execution settings:
 - `KITARU_CACHE`
 - `KITARU_RETRIES`
 - `KITARU_IMAGE` (JSON object or plain image string)
+- `KITARU_SANDBOX` (`monty` or a JSON object)
 
 Connection settings:
 
@@ -97,7 +99,43 @@ base_image = "python:3.12-slim"
 
 [tool.kitaru.image.environment]
 OPENAI_API_KEY = "{{ OPENAI_KEY }}"
+
+[tool.kitaru.sandbox]
+provider = "monty"
+
+[tool.kitaru.sandbox.monty]
+max_duration_secs = 1.0
+max_memory_mb = 64
+type_check = true
 ```
+
+## Sandbox configuration
+
+Monty-backed sandbox sessions are configured through the same precedence chain as
+stack, image, cache, and retries. You can set them in Python:
+
+```python
+import kitaru
+
+kitaru.configure(
+    sandbox={
+        "provider": "monty",
+        "monty": {"max_memory_mb": 128, "max_duration_secs": 2.0},
+    }
+)
+```
+
+Or through the CLI:
+
+```bash
+kitaru sandbox set monty --max-duration-secs 2 --max-memory-mb 128
+kitaru sandbox show
+```
+
+Kitaru resolves the sandbox config at flow submission time and propagates the
+resolved value into remote execution environments. That way a replayed or remote
+run uses the same sandbox settings even if your local machine config changes
+later.
 
 ## Automatic package injection
 

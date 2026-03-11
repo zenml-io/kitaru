@@ -18,7 +18,7 @@ instead of starting over.
 <Callout type="info">
   Kitaru is in early development. Core SDK primitives are now available
   (`@flow`, `@checkpoint`, `kitaru.log()`, `kitaru.save()`,
-  `kitaru.load()`, `kitaru.configure()`), plus stack selection helpers
+  `kitaru.load()`, `kitaru.configure()`, `kitaru.sandbox()`), plus stack selection helpers
   (`list_stacks`, `current_stack`, `use_stack`), an MCP server (`kitaru-mcp`),
   and a Claude Code authoring skill available via the plugin marketplace.
 </Callout>
@@ -32,7 +32,9 @@ Kitaru **0.1.0** includes:
 - Artifact persistence + cross-execution reads with `kitaru.save()` / `kitaru.load()`
 - CLI connection commands (`login`, `logout`, `status`, `info`)
 - Runtime configuration defaults via `kitaru.configure(...)`
+- Monty-backed sandbox sessions via `kitaru.sandbox()`
 - Stack selection commands (`stack list/current/use`)
+- Global sandbox commands (`sandbox set/show/test/reset`)
 - Global runtime log-store commands (`log-store set/show/reset`)
 - Agent-native integrations: MCP server + Claude Code plugin marketplace skill
 - Project infrastructure (CI, testing, linting, type checking)

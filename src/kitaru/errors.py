@@ -82,6 +82,34 @@ class KitaruFeatureNotAvailableError(KitaruError, NotImplementedError):
     """Raised when a documented API is intentionally not implemented yet."""
 
 
+class KitaruSandboxError(KitaruError):
+    """Base class for sandbox-specific failures."""
+
+
+class KitaruSandboxConfigurationError(KitaruUsageError, KitaruSandboxError):
+    """Raised when sandbox configuration is invalid."""
+
+
+class KitaruSandboxCapabilityError(KitaruUsageError, KitaruSandboxError):
+    """Raised when a sandbox provider lacks a requested capability."""
+
+
+class KitaruSandboxNotConfiguredError(KitaruStateError, KitaruSandboxError):
+    """Raised when sandbox APIs are used without an active provider."""
+
+
+class KitaruSandboxSessionError(KitaruStateError, KitaruSandboxError):
+    """Raised when a sandbox session is invalid or no longer usable."""
+
+
+class KitaruSandboxExecutionError(KitaruRuntimeError, KitaruSandboxError):
+    """Raised when sandboxed code execution fails."""
+
+
+class KitaruSandboxProviderError(KitaruRuntimeError, KitaruSandboxError):
+    """Raised when the sandbox provider itself fails."""
+
+
 _DIVERGENCE_HINTS: Final[tuple[str, ...]] = (
     "diverg",
     "durable call sequence",
@@ -182,6 +210,13 @@ __all__ = [
     "KitaruFeatureNotAvailableError",
     "KitaruLogRetrievalError",
     "KitaruRuntimeError",
+    "KitaruSandboxCapabilityError",
+    "KitaruSandboxConfigurationError",
+    "KitaruSandboxError",
+    "KitaruSandboxExecutionError",
+    "KitaruSandboxNotConfiguredError",
+    "KitaruSandboxProviderError",
+    "KitaruSandboxSessionError",
     "KitaruStateError",
     "KitaruUsageError",
     "KitaruUserCodeError",

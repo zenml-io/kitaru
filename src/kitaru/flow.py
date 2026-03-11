@@ -24,9 +24,12 @@ from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
 from kitaru.config import (
+    _KITARU_RESOLVED_SANDBOX_ENV,
     ImageInput,
     ImageSettings,
     KitaruConfig,
+    ResolvedSandboxConfig,
+    SandboxInput,
     build_frozen_execution_spec,
     image_settings_to_docker_settings,
     persist_frozen_execution_spec,
@@ -44,7 +47,11 @@ from kitaru.errors import (
     traceback_last_line,
 )
 from kitaru.replay import build_replay_plan
-from kitaru.runtime import _flow_scope, _notify_submission_observer
+from kitaru.runtime import (
+    _flow_scope,
+    _notify_submission_observer,
+    _submission_sandbox_config,
+)
 
 ImageSetting = ImageInput
 
@@ -157,7 +164,9 @@ def _to_retry_config(retries: int) -> StepRetryConfig | None:
 
 
 def _build_settings(
+    *,
     image: ImageSettings | None,
+    sandbox: ResolvedSandboxConfig | None,
 ) -> dict[str, DockerSettings]:
     """Build ZenML settings payload for flow execution.
 
@@ -170,13 +179,23 @@ def _build_settings(
     Returns:
         Pipeline settings dictionary.
     """
-    return {DOCKER_SETTINGS_KEY: image_settings_to_docker_settings(image)}
+    docker_settings = image_settings_to_docker_settings(image)
+    if sandbox is not None:
+        environment = dict(docker_settings.environment or {})
+        environment[_KITARU_RESOLVED_SANDBOX_ENV] = sandbox.model_dump_json(
+            exclude_none=True
+        )
+        docker_settings = docker_settings.model_copy(
+            update={"environment": environment}
+        )
+    return {DOCKER_SETTINGS_KEY: docker_settings}
 
 
 def _build_execution_overrides(
     *,
     stack: str | None = None,
     image: ImageSetting | None = None,
+    sandbox: SandboxInput | None = None,
     cache: bool | None = None,
     retries: int | None = None,
 ) -> KitaruConfig:
@@ -186,6 +205,8 @@ def _build_execution_overrides(
         values["stack"] = stack
     if image is not None:
         values["image"] = image
+    if sandbox is not None:
+        values["sandbox"] = sandbox
     if cache is not None:
         values["cache"] = cache
     if retries is not None:
@@ -506,6 +527,7 @@ class _FlowDefinition:
         *,
         stack: str | None,
         image: ImageSetting | None,
+        sandbox: SandboxInput | None,
         cache: bool | None,
         retries: int | None,
     ) -> None:
@@ -515,6 +537,7 @@ class _FlowDefinition:
             func: User flow function.
             stack: Default stack override.
             image: Default image settings.
+            sandbox: Default sandbox settings.
             cache: Default cache behavior.
             retries: Default retry count.
         """
@@ -522,6 +545,7 @@ class _FlowDefinition:
         self._decorator_config = _build_execution_overrides(
             stack=stack,
             image=image,
+            sandbox=sandbox,
             cache=cache,
             retries=retries,
         )
@@ -554,6 +578,7 @@ class _FlowDefinition:
         *args: Any,
         stack: str | None = None,
         image: ImageSetting | None = None,
+        sandbox: SandboxInput | None = None,
         cache: bool | None = None,
         retries: int | None = None,
         **kwargs: Any,
@@ -564,6 +589,7 @@ class _FlowDefinition:
             *args: Flow input args.
             stack: Optional stack override.
             image: Optional image override.
+            sandbox: Optional sandbox override.
             cache: Optional cache override.
             retries: Optional retry override.
             **kwargs: Flow input kwargs.
@@ -577,6 +603,7 @@ class _FlowDefinition:
             invocation_overrides=_build_execution_overrides(
                 stack=stack,
                 image=image,
+                sandbox=sandbox,
                 cache=cache,
                 retries=retries,
             ),
@@ -590,6 +617,7 @@ class _FlowDefinition:
         overrides: dict[str, Any] | None = None,
         stack: str | None = None,
         image: ImageSetting | None = None,
+        sandbox: SandboxInput | None = None,
         cache: bool | None = None,
         retries: int | None = None,
         **flow_inputs: Any,
@@ -602,6 +630,7 @@ class _FlowDefinition:
             overrides: Optional `checkpoint.*` and `wait.*` override map.
             stack: Optional stack override for the replay run.
             image: Optional image override for the replay run.
+            sandbox: Optional sandbox override for the replay run.
             cache: Optional cache override for the replay run.
             retries: Optional retry override for the replay run.
             **flow_inputs: Optional flow input overrides.
@@ -633,6 +662,7 @@ class _FlowDefinition:
             invocation_overrides=_build_execution_overrides(
                 stack=stack,
                 image=image,
+                sandbox=sandbox,
                 cache=cache,
                 retries=retries,
             ),
@@ -645,10 +675,16 @@ class _FlowDefinition:
         configured_pipeline = self._pipeline.with_options(
             enable_cache=resolved_execution.cache,
             retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
-            settings=_build_settings(resolved_execution.image),
+            settings=_build_settings(
+                image=resolved_execution.image,
+                sandbox=resolved_execution.sandbox,
+            ),
         )
 
-        with _temporary_active_stack(resolved_execution.stack):
+        with (
+            _temporary_active_stack(resolved_execution.stack),
+            _submission_sandbox_config(resolved_execution.sandbox),
+        ):
             try:
                 replayed_run = configured_pipeline.replay(
                     pipeline_run=original_run.id,
@@ -718,10 +754,16 @@ class _FlowDefinition:
         configured_pipeline = self._pipeline.with_options(
             enable_cache=resolved_execution.cache,
             retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
-            settings=_build_settings(resolved_execution.image),
+            settings=_build_settings(
+                image=resolved_execution.image,
+                sandbox=resolved_execution.sandbox,
+            ),
         )
 
-        with _temporary_active_stack(resolved_execution.stack):
+        with (
+            _temporary_active_stack(resolved_execution.stack),
+            _submission_sandbox_config(resolved_execution.sandbox),
+        ):
             run = configured_pipeline(*args, **kwargs)
 
         if run is None:
@@ -738,6 +780,7 @@ class _FlowDefinition:
         *args: Any,
         stack: str | None = None,
         image: ImageSetting | None = None,
+        sandbox: SandboxInput | None = None,
         cache: bool | None = None,
         retries: int | None = None,
         **kwargs: Any,
@@ -750,6 +793,7 @@ class _FlowDefinition:
             *args: Flow input args.
             stack: Optional stack override.
             image: Optional image override.
+            sandbox: Optional sandbox override.
             cache: Optional cache override.
             retries: Optional retry override.
             **kwargs: Flow input kwargs.
@@ -761,6 +805,7 @@ class _FlowDefinition:
             *args,
             stack=stack,
             image=image,
+            sandbox=sandbox,
             cache=cache,
             retries=retries,
             **kwargs,
@@ -776,6 +821,7 @@ def flow(
     *,
     stack: str | None = None,
     image: ImageSetting | None = None,
+    sandbox: SandboxInput | None = None,
     cache: bool | None = None,
     retries: int | None = None,
 ) -> Callable[[Callable[..., Any]], _FlowDefinition]: ...
@@ -786,6 +832,7 @@ def flow(
     *,
     stack: str | None = None,
     image: ImageSetting | None = None,
+    sandbox: SandboxInput | None = None,
     cache: bool | None = None,
     retries: int | None = None,
 ) -> _FlowDefinition | Callable[[Callable[..., Any]], _FlowDefinition]:
@@ -805,6 +852,7 @@ def flow(
         func: Optional function for bare decorator use.
         stack: Default execution stack.
         image: Default image settings.
+        sandbox: Default sandbox settings.
         cache: Optional cache override (when omitted, lower-precedence config
             sources apply and eventually default to ``True``).
         retries: Optional retry override (when omitted, lower-precedence config
@@ -819,6 +867,7 @@ def flow(
             target,
             stack=stack,
             image=image,
+            sandbox=sandbox,
             cache=cache,
             retries=retries,
         )
