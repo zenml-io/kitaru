@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import sys
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
@@ -328,104 +328,6 @@ def _raise_for_unsuccessful_run(run: PipelineRunResponse) -> None:
     )
 
 
-def _list_wait_conditions_for_run(run_id: str) -> list[Any]:
-    """Fetch all wait conditions recorded for one execution."""
-    try:
-        wait_page = cast(Any, Client()).list_run_wait_conditions(
-            run_name_or_id=run_id,
-            hydrate=True,
-            sort_by="asc:created",
-            size=200,
-        )
-    except AttributeError:
-        return []
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to list wait conditions for execution '{run_id}': {exc}"
-        ) from exc
-
-    return list(wait_page.items)
-
-
-def _apply_wait_overrides(
-    *,
-    run_id: str,
-    wait_overrides: Mapping[str, Any],
-    timeout_seconds: int = 120,
-) -> None:
-    """Auto-resolve replayed waits using override values.
-
-    This helper polls for pending waits in the replayed execution and resolves
-    matching keys until all overrides are consumed or the timeout is reached.
-    """
-    if not wait_overrides:
-        return
-
-    unresolved = dict(wait_overrides)
-    deadline = time.time() + timeout_seconds
-    zenml_client = cast(Any, Client())
-
-    while unresolved and time.time() <= deadline:
-        try:
-            pending_page = zenml_client.list_run_wait_conditions(
-                run_name_or_id=run_id,
-                status="pending",
-                hydrate=True,
-                sort_by="asc:created",
-                size=200,
-            )
-        except AttributeError as exc:
-            raise KitaruRuntimeError(
-                "Replay wait overrides require an installed ZenML build with "
-                "wait-condition APIs."
-            ) from exc
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to poll pending waits for replayed execution '{run_id}': {exc}"
-            ) from exc
-
-        for condition in pending_page.items:
-            wait_key = getattr(condition, "wait_condition_key", None)
-            if wait_key not in unresolved:
-                continue
-
-            try:
-                zenml_client.resolve_run_wait_condition(
-                    run_wait_condition_id=condition.id,
-                    status=cast(Any, "resolved"),
-                    resolution=cast(Any, "continue"),
-                    result=unresolved[wait_key],
-                )
-            except Exception as exc:
-                raise KitaruBackendError(
-                    "Failed to apply replay wait override for "
-                    f"'{wait_key}' on execution '{run_id}': {exc}"
-                ) from exc
-
-            unresolved.pop(wait_key, None)
-
-        if not unresolved:
-            return
-
-        refreshed = zenml_client.get_pipeline_run(
-            name_id_or_prefix=run_id,
-            allow_name_prefix_match=False,
-            hydrate=False,
-        )
-        if refreshed.status.is_finished:
-            break
-
-        time.sleep(1)
-
-    if unresolved:
-        unresolved_keys = ", ".join(sorted(unresolved))
-        raise KitaruStateError(
-            "Replay started, but wait overrides were not applied in time for: "
-            f"{unresolved_keys}. You can still resolve waits manually with "
-            "`client.executions.input(...)`."
-        )
-
-
 class FlowHandle:
     """Handle for a running or finished flow execution."""
 
@@ -594,12 +496,12 @@ class _FlowDefinition:
         retries: int | None = None,
         **flow_inputs: Any,
     ) -> FlowHandle:
-        """Replay a prior execution from a checkpoint or wait boundary.
+        """Replay a prior execution from a checkpoint boundary.
 
         Args:
             exec_id: Source execution ID.
-            from_: Replay selector (checkpoint name/id/call-id or wait selector).
-            overrides: Optional `checkpoint.*` and `wait.*` override map.
+            from_: Checkpoint selector (name, invocation ID, or call ID).
+            overrides: Optional `checkpoint.*` override map.
             stack: Optional stack override for the replay run.
             image: Optional image override for the replay run.
             cache: Optional cache override for the replay run.
@@ -625,7 +527,6 @@ class _FlowDefinition:
             from_=from_,
             overrides=overrides,
             flow_inputs=flow_inputs,
-            wait_conditions=_list_wait_conditions_for_run(str(original_run.id)),
         )
 
         resolved_execution = resolve_execution_config(
@@ -680,11 +581,6 @@ class _FlowDefinition:
         persist_frozen_execution_spec(
             run_id=replayed_run.id,
             frozen_execution_spec=frozen_execution_spec,
-        )
-
-        _apply_wait_overrides(
-            run_id=str(replayed_run.id),
-            wait_overrides=replay_plan.wait_overrides,
         )
 
         return FlowHandle(replayed_run)

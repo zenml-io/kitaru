@@ -15,7 +15,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from math import inf
-from typing import Any, Literal
+from typing import Any
 
 from zenml.models import PipelineRunResponse, StepRunResponse
 
@@ -23,7 +23,6 @@ from kitaru.errors import KitaruRuntimeError, KitaruStateError, KitaruUsageError
 
 _CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
 _CHECKPOINT_OVERRIDE_PREFIX = "checkpoint."
-_WAIT_OVERRIDE_PREFIX = "wait."
 
 
 @dataclass(frozen=True)
@@ -34,7 +33,6 @@ class ReplayPlan:
     steps_to_skip: set[str]
     input_overrides: dict[str, Any]
     step_input_overrides: dict[str, dict[str, Any]]
-    wait_overrides: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -46,17 +44,6 @@ class _OrderedCheckpoint:
     call_id: str
     name: str
     step: StepRunResponse
-
-
-@dataclass(frozen=True)
-class _WaitRecord:
-    """One wait condition candidate for replay selection."""
-
-    wait_id: str
-    key: str
-    created: datetime | None
-    upstream_step_names: tuple[str, ...]
-    downstream_step_names: tuple[str, ...]
 
 
 def _normalize_checkpoint_name(step_name: str) -> str:
@@ -170,40 +157,8 @@ def _ordered_checkpoints(run: PipelineRunResponse) -> list[_OrderedCheckpoint]:
     return ordered
 
 
-def _wait_records(wait_conditions: Sequence[Any] | None) -> list[_WaitRecord]:
-    if not wait_conditions:
-        return []
-
-    records: list[_WaitRecord] = []
-    for condition in wait_conditions:
-        key = getattr(condition, "wait_condition_key", None)
-        if not isinstance(key, str) or not key:
-            continue
-        wait_id = str(getattr(condition, "id", key))
-        upstream = tuple(getattr(condition, "upstream_step_names", None) or ())
-        downstream = tuple(getattr(condition, "downstream_step_names", None) or ())
-        records.append(
-            _WaitRecord(
-                wait_id=wait_id,
-                key=key,
-                created=getattr(condition, "created", None),
-                upstream_step_names=upstream,
-                downstream_step_names=downstream,
-            )
-        )
-
-    return sorted(records, key=lambda record: _timestamp(record.created))
-
-
 def _available_checkpoint_selectors(checkpoints: Sequence[_OrderedCheckpoint]) -> str:
     names = sorted({checkpoint.name for checkpoint in checkpoints})
-    if not names:
-        return "none"
-    return ", ".join(names)
-
-
-def _available_wait_selectors(waits: Sequence[_WaitRecord]) -> str:
-    names = sorted({wait.key for wait in waits})
     if not names:
         return "none"
     return ", ".join(names)
@@ -235,41 +190,6 @@ def _resolve_checkpoint_selector(
     raise KitaruStateError(
         f"Unknown checkpoint selector '{selector}'. Available checkpoints: "
         f"{_available_checkpoint_selectors(checkpoints)}."
-    )
-
-
-def _wait_prefix(wait_key: str) -> str:
-    return wait_key.split(":", maxsplit=1)[0]
-
-
-def _resolve_wait_selector(selector: str, waits: Sequence[_WaitRecord]) -> _WaitRecord:
-    exact_matches = [
-        wait
-        for wait in waits
-        if selector
-        in {
-            wait.key,
-            wait.wait_id,
-        }
-    ]
-    if len(exact_matches) == 1:
-        return exact_matches[0]
-    if len(exact_matches) > 1:
-        raise KitaruStateError(
-            f"Replay selector '{selector}' matches multiple waits; use wait ID."
-        )
-
-    prefix_matches = [wait for wait in waits if _wait_prefix(wait.key) == selector]
-    if len(prefix_matches) == 1:
-        return prefix_matches[0]
-    if len(prefix_matches) > 1:
-        raise KitaruStateError(
-            f"Replay selector '{selector}' matches multiple waits; use full wait key."
-        )
-
-    raise KitaruStateError(
-        f"Unknown wait selector '{selector}'. Available waits: "
-        f"{_available_wait_selectors(waits)}."
     )
 
 
@@ -354,12 +274,11 @@ def _find_downstream_consumers(
 
 def _split_overrides(
     overrides: Mapping[str, Any] | None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> dict[str, Any]:
     checkpoint_overrides: dict[str, Any] = {}
-    wait_overrides: dict[str, Any] = {}
 
     if not overrides:
-        return checkpoint_overrides, wait_overrides
+        return checkpoint_overrides
 
     for key, value in overrides.items():
         if key.startswith(_CHECKPOINT_OVERRIDE_PREFIX):
@@ -372,110 +291,19 @@ def _split_overrides(
             checkpoint_overrides[selector] = value
             continue
 
-        if key.startswith(_WAIT_OVERRIDE_PREFIX):
-            selector = key.removeprefix(_WAIT_OVERRIDE_PREFIX).strip()
-            if not selector:
-                raise KitaruUsageError(
-                    "Wait override keys must include a selector after `wait.`."
-                )
-            wait_overrides[selector] = value
-            continue
+        if key.startswith("wait."):
+            raise KitaruUsageError(
+                "Wait overrides (`wait.*`) are not supported in replay. "
+                "If the replayed execution reaches a wait, resolve it "
+                "via `client.executions.input(...)` or "
+                "`kitaru executions input`."
+            )
 
         raise KitaruUsageError(
-            "Override keys must start with `checkpoint.` or `wait.`. "
-            f"Received: {key!r}."
+            f"Override keys must start with `checkpoint.`. Received: {key!r}."
         )
 
-    return checkpoint_overrides, wait_overrides
-
-
-def _frontier_index_for_wait(
-    *,
-    wait: _WaitRecord,
-    checkpoints: Sequence[_OrderedCheckpoint],
-    index_by_invocation_id: Mapping[str, int],
-) -> int:
-    """Resolve the replay frontier index for a wait override.
-
-    Uses DAG adjacency (downstream/upstream step names) as the primary signal.
-    Falls back to timestamp comparison only for legacy runs missing adjacency
-    metadata.
-    """
-    downstream_indexes = [
-        index_by_invocation_id[name]
-        for name in wait.downstream_step_names
-        if name in index_by_invocation_id
-    ]
-    if downstream_indexes:
-        return min(downstream_indexes)
-
-    upstream_indexes = [
-        index_by_invocation_id[name]
-        for name in wait.upstream_step_names
-        if name in index_by_invocation_id
-    ]
-    if upstream_indexes:
-        return min(max(upstream_indexes) + 1, len(checkpoints))
-
-    # Last resort: timestamp fallback for legacy runs without adjacency data.
-    created_ts = _timestamp(wait.created)
-    if created_ts != inf:
-        for checkpoint in checkpoints:
-            checkpoint_ts = _timestamp(
-                checkpoint.step.start_time or checkpoint.step.end_time
-            )
-            if checkpoint_ts >= created_ts:
-                return checkpoint.index
-        return len(checkpoints)
-
-    raise KitaruRuntimeError(
-        "Unable to resolve replay order for wait "
-        f"'{wait.key}': wait timing metadata is unavailable."
-    )
-
-
-def _resolve_replay_selector(
-    *,
-    selector: str,
-    checkpoints: Sequence[_OrderedCheckpoint],
-    waits: Sequence[_WaitRecord],
-    index_by_invocation_id: Mapping[str, int],
-) -> tuple[Literal["checkpoint", "wait"], int]:
-    if not selector.strip():
-        raise KitaruUsageError("`from_` must be a non-empty selector.")
-
-    checkpoint_match: _OrderedCheckpoint | None = None
-    wait_match: _WaitRecord | None = None
-
-    try:
-        checkpoint_match = _resolve_checkpoint_selector(selector, checkpoints)
-    except KitaruStateError:
-        checkpoint_match = None
-
-    try:
-        wait_match = _resolve_wait_selector(selector, waits)
-    except KitaruStateError:
-        wait_match = None
-
-    if checkpoint_match and wait_match:
-        raise KitaruStateError(
-            "Replay selector matches both a checkpoint and a wait. "
-            f"Use a more specific selector: {selector!r}."
-        )
-    if checkpoint_match:
-        return "checkpoint", checkpoint_match.index
-    if wait_match:
-        return "wait", _frontier_index_for_wait(
-            wait=wait_match,
-            checkpoints=checkpoints,
-            index_by_invocation_id=index_by_invocation_id,
-        )
-
-    raise KitaruStateError(
-        f"Replay selector '{selector}' was not found. Available checkpoints: "
-        f"{_available_checkpoint_selectors(checkpoints)}. Available waits: "
-        f"{_available_wait_selectors(waits)}."
-    )
+    return checkpoint_overrides
 
 
 def build_replay_plan(
@@ -484,16 +312,14 @@ def build_replay_plan(
     from_: str,
     overrides: Mapping[str, Any] | None = None,
     flow_inputs: Mapping[str, Any] | None = None,
-    wait_conditions: Sequence[Any] | None = None,
 ) -> ReplayPlan:
     """Build a replay plan for a completed/paused execution.
 
     Args:
         run: Source execution to replay from.
-        from_: Replay selector (`checkpoint`, invocation ID, call ID, wait key).
-        overrides: Optional checkpoint/wait override map.
+        from_: Checkpoint selector (checkpoint name, invocation ID, or call ID).
+        overrides: Optional checkpoint override map (`checkpoint.*` keys).
         flow_inputs: Optional flow input overrides.
-        wait_conditions: Optional run wait conditions from backend listing.
 
     Returns:
         A resolved replay plan.
@@ -509,22 +335,15 @@ def build_replay_plan(
             f"Execution '{run.id}' has no checkpoint history to replay."
         )
 
-    waits = _wait_records(wait_conditions)
-    checkpoint_overrides, wait_override_selectors = _split_overrides(overrides)
+    if not from_.strip():
+        raise KitaruUsageError("`from_` must be a non-empty selector.")
 
-    index_by_invocation_id = {
-        checkpoint.invocation_id: checkpoint.index for checkpoint in checkpoints
-    }
+    checkpoint_overrides = _split_overrides(overrides)
 
-    _, explicit_frontier = _resolve_replay_selector(
-        selector=from_,
-        checkpoints=checkpoints,
-        waits=waits,
-        index_by_invocation_id=index_by_invocation_id,
-    )
+    explicit_checkpoint = _resolve_checkpoint_selector(from_, checkpoints)
 
     step_input_overrides: dict[str, dict[str, Any]] = {}
-    frontier_candidates = [explicit_frontier]
+    frontier_candidates = [explicit_checkpoint.index]
 
     for selector, value in checkpoint_overrides.items():
         source = _resolve_checkpoint_selector(selector, checkpoints)
@@ -537,18 +356,6 @@ def build_replay_plan(
         # Anchor frontier at the source checkpoint, not the first consumer.
         # This keeps the source out of steps_to_skip so ZenML re-executes it.
         frontier_candidates.append(source.index)
-
-    wait_overrides: dict[str, Any] = {}
-    for selector, value in wait_override_selectors.items():
-        wait_record = _resolve_wait_selector(selector, waits)
-        wait_overrides[wait_record.key] = value
-        frontier_candidates.append(
-            _frontier_index_for_wait(
-                wait=wait_record,
-                checkpoints=checkpoints,
-                index_by_invocation_id=index_by_invocation_id,
-            )
-        )
 
     replay_frontier = min(frontier_candidates)
     steps_to_skip = {
@@ -569,7 +376,6 @@ def build_replay_plan(
         steps_to_skip=steps_to_skip,
         input_overrides=dict(flow_inputs or {}),
         step_input_overrides=step_input_overrides,
-        wait_overrides=wait_overrides,
     )
 
 

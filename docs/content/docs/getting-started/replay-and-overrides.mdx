@@ -1,6 +1,6 @@
 ---
 title: Replay and Overrides
-description: Replay executions from checkpoints or waits with flow/checkpoint/wait overrides
+description: Replay executions from checkpoints with flow and checkpoint overrides
 ---
 
 Replay creates a **new execution** from a previous one.
@@ -21,7 +21,6 @@ replayed = client.executions.replay(
     topic="New topic",
     overrides={
         "checkpoint.research": "Edited notes",
-        "wait.approve": False,
     },
 )
 
@@ -48,7 +47,7 @@ result = handle.wait()
 kitaru executions replay kr-a8f3c2 \
   --from write_draft \
   --args '{"topic":"New topic"}' \
-  --overrides '{"checkpoint.research":"Edited notes","wait.approve":false}'
+  --overrides '{"checkpoint.research":"Edited notes"}'
 ```
 
 ## Selector rules
@@ -56,24 +55,30 @@ kitaru executions replay kr-a8f3c2 \
 `from_` can target:
 
 - checkpoint name (for example `write_draft`)
-- checkpoint invocation/call ID
-- wait key (for example `approve:0`) or unique wait prefix (`approve`)
+- checkpoint invocation ID
+- checkpoint call ID
 
 If a selector is ambiguous, replay raises `KitaruStateError`.
 
 ## Override keys
 
-Replay override keys must start with:
-
-- `checkpoint.`
-- `wait.`
+Replay override keys must start with `checkpoint.`.
 
 Examples:
 
 - `checkpoint.research`
-- `wait.approve`
+- `checkpoint.fetch_data`
 
 Any other prefix raises `KitaruUsageError`.
+
+## Waits during replay
+
+Replay does not support overriding or pre-populating wait results. If a replayed
+execution reaches a `wait()` during normal execution, that wait behaves like any
+new wait and must be resolved through the normal wait input flow:
+
+- SDK: `client.executions.input(exec_id, wait="name", value=...)`
+- CLI: `kitaru executions input <exec_id> --wait name --value ...`
 
 ## Divergence
 

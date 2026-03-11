@@ -1715,7 +1715,7 @@ def replay_(
     from_: Annotated[
         str,
         Parameter(
-            help="Replay selector (checkpoint name/id/call-id or wait selector).",
+            help="Checkpoint selector (name, invocation ID, or call ID).",
             alias=["--from"],
         ),
     ],
@@ -1730,14 +1730,10 @@ def replay_(
     ] = None,
     overrides: Annotated[
         str | None,
-        Parameter(
-            help=(
-                "Replay overrides as a JSON object with `checkpoint.*` / `wait.*` keys."
-            )
-        ),
+        Parameter(help=("Replay overrides as a JSON object with `checkpoint.*` keys.")),
     ] = None,
 ) -> None:
-    """Replay an execution from a checkpoint/wait boundary."""
+    """Replay an execution from a checkpoint boundary."""
     try:
         flow_inputs = _parse_json_object(args, option_name="--args")
         parsed_overrides = _parse_json_object(overrides, option_name="--overrides")

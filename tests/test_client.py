@@ -147,7 +147,7 @@ def _resolved_connection(project: str | None = None) -> ResolvedConnectionConfig
 
 def _dummy_wait_condition(
     *,
-    key: str,
+    name: str,
     wait_id: UUID | None = None,
     question: str | None = None,
     data_schema: dict[str, Any] | None = None,
@@ -155,7 +155,7 @@ def _dummy_wait_condition(
 ) -> Any:
     return SimpleNamespace(
         id=wait_id or uuid4(),
-        wait_condition_key=key,
+        name=name,
         question=question,
         data_schema=data_schema,
         wait_metadata=metadata or {},
@@ -549,7 +549,7 @@ def test_retry_rejects_non_failed_execution() -> None:
 def test_input_resolves_pending_wait_condition() -> None:
     run_id = uuid4()
     wait_condition = _dummy_wait_condition(
-        key="approve_deploy",
+        name="approve_deploy",
         question="Deploy to prod?",
         data_schema={"type": "boolean"},
     )
@@ -592,7 +592,6 @@ def test_input_resolves_pending_wait_condition() -> None:
 
     client_mock.resolve_run_wait_condition.assert_called_once_with(
         run_wait_condition_id=wait_condition.id,
-        status="resolved",
         resolution="continue",
         result=True,
     )
@@ -601,7 +600,7 @@ def test_input_resolves_pending_wait_condition() -> None:
 
 def test_get_surfaces_waiting_status_for_running_wait_condition() -> None:
     wait_condition = _dummy_wait_condition(
-        key="review_draft",
+        name="review_draft",
         question="Approve this draft?",
         data_schema={"type": "boolean"},
         metadata={"section": "intro"},
@@ -637,7 +636,7 @@ def test_get_surfaces_waiting_status_for_running_wait_condition() -> None:
 
 def test_get_surfaces_waiting_status_for_running_execution_with_listed_wait() -> None:
     wait_condition = _dummy_wait_condition(
-        key="approve_release:0",
+        name="approve_release:0",
         question="Approve release?",
         data_schema={"type": "boolean"},
         metadata={"topic": "kitaru-1"},
@@ -695,7 +694,7 @@ def test_input_rejects_missing_pending_wait() -> None:
 
 
 def test_input_rejects_unknown_wait_name() -> None:
-    wait_condition = _dummy_wait_condition(key="approve")
+    wait_condition = _dummy_wait_condition(name="approve")
     run = _DummyRun(
         status=_paused_status(),
         flow_name="flow_a",
@@ -721,7 +720,7 @@ def test_input_rejects_unknown_wait_name() -> None:
 
 
 def test_input_maps_validation_error() -> None:
-    wait_condition = _dummy_wait_condition(key="approve")
+    wait_condition = _dummy_wait_condition(name="approve")
     run = _DummyRun(
         status=_paused_status(),
         flow_name="flow_a",
@@ -801,7 +800,7 @@ def test_resume_restarts_paused_execution() -> None:
 
 
 def test_resume_rejects_when_pending_waits_exist() -> None:
-    wait_condition = _dummy_wait_condition(key="approve")
+    wait_condition = _dummy_wait_condition(name="approve")
     run = _DummyRun(
         status=_paused_status(),
         flow_name="flow_a",
@@ -983,103 +982,6 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     assert replay_kwargs["pipeline_run"] == source_run.id
     assert replay_kwargs["skip"] == {"fetch"}
     assert execution.exec_id == str(replayed_run.id)
-
-
-def test_replay_fallback_applies_wait_overrides() -> None:
-    """Fallback client replay path should apply wait overrides after replay."""
-    fetch_step = _DummyStep(
-        name="__kitaru_checkpoint_source_fetch",
-        status=ZenMLExecutionStatus.COMPLETED,
-        outputs={"output": []},
-    )
-    fetch_step.spec = SimpleNamespace(
-        invocation_id="fetch",
-        upstream_steps=[],
-        inputs_v2={},
-    )
-
-    write_step = _DummyStep(
-        name="__kitaru_checkpoint_source_write",
-        status=ZenMLExecutionStatus.COMPLETED,
-        outputs={"output": []},
-    )
-    write_step.spec = SimpleNamespace(
-        invocation_id="write",
-        upstream_steps=["fetch"],
-        inputs_v2={},
-    )
-
-    source_run = _DummyRun(
-        status=ZenMLExecutionStatus.COMPLETED,
-        flow_name="__kitaru_pipeline_source_sample_flow",
-        steps={fetch_step.name: fetch_step, write_step.name: write_step},
-        snapshot=SimpleNamespace(
-            pipeline_spec=SimpleNamespace(
-                source=_snapshot_source(
-                    module="example.flow_module",
-                    attribute="__kitaru_pipeline_source_sample_flow",
-                )
-            )
-        ),
-    )
-    replayed_run = _DummyRun(
-        status=ZenMLExecutionStatus.RUNNING,
-        flow_name="sample_flow",
-    )
-
-    replay_pipeline = SimpleNamespace(
-        replay=MagicMock(return_value=_as_pipeline_run(replayed_run))
-    )
-    replay_module = SimpleNamespace(
-        __kitaru_pipeline_source_sample_flow=replay_pipeline,
-    )
-
-    wait = SimpleNamespace(
-        id=uuid4(),
-        wait_condition_key="approve:0",
-        created=None,
-        upstream_step_names=["fetch"],
-        downstream_step_names=["write"],
-    )
-
-    with (
-        patch(
-            "kitaru.client.resolve_connection_config",
-            return_value=_resolved_connection(),
-        ),
-        patch("kitaru.client.Client") as client_cls,
-        patch(
-            "kitaru.client._resolve_flow_for_replay",
-            side_effect=KitaruRuntimeError("no replay flow"),
-        ),
-        patch("kitaru.client._apply_wait_overrides") as apply_waits_mock,
-        patch("kitaru.client.importlib.import_module", return_value=replay_module),
-    ):
-        client_mock = client_cls.return_value
-        client_mock.get_pipeline_run.side_effect = [
-            _as_pipeline_run(source_run),
-            _as_pipeline_run(replayed_run),
-        ]
-        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
-
-        # First call: source run wait conditions (for replay planning).
-        # Second call: replayed run wait conditions (for execution mapping).
-        client_mock.list_run_wait_conditions.side_effect = [
-            SimpleNamespace(items=[wait]),
-            SimpleNamespace(items=[]),
-        ]
-
-        client = KitaruClient()
-        client.executions.replay(
-            str(source_run.id),
-            from_="write",
-            overrides={"wait.approve": True},
-        )
-
-    apply_waits_mock.assert_called_once_with(
-        run_id=str(replayed_run.id),
-        wait_overrides={"approve:0": True},
-    )
 
 
 def test_artifact_get_maps_producing_call_and_loads_value() -> None:

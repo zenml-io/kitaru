@@ -245,7 +245,7 @@ class TestPlaceholderBehavior:
     def test_wait_delegates_to_zenml_wait(self) -> None:
         from kitaru.runtime import _flow_scope
 
-        mock_zenml_wait = Mock(return_value=(True, object()))
+        mock_zenml_wait = Mock(return_value=True)
 
         with (
             _flow_scope(name="flow_a"),
@@ -266,7 +266,7 @@ class TestPlaceholderBehavior:
             question="Approve deploy?",
             timeout=600,
             metadata={"service": "api"},
-            key_prefix="approve_deploy",
+            name="approve_deploy",
         )
 
     def test_llm_requires_flow_context(self) -> None:
