@@ -15,6 +15,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`, `logs`), replaying from checkpoints/waits (`replay`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
 - **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, and local model aliases (`kitaru model register/list`)
+- **Sandboxed Python execution** — `kitaru.sandbox()` opens Monty-backed stateful Python sessions, with pause/resume support around `kitaru.wait(...)`
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
 - **Execution CLI** — `kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
@@ -66,6 +67,7 @@ The `examples/` directory contains runnable workflows showcasing each feature. I
 ```bash
 uv sync --extra local              # Core examples
 uv sync --extra local --extra mcp  # MCP server example
+uv sync --extra sandbox            # Monty sandbox support
 ```
 
 | Example | File | What it demonstrates |
@@ -76,6 +78,7 @@ uv sync --extra local --extra mcp  # MCP server example
 | Configuration | `examples/flow_with_configuration.py` | `kitaru.configure()` with precedence resolution |
 | Execution management | `examples/client_execution_management.py` | `KitaruClient` for inspecting and managing executions |
 | LLM calls | `examples/flow_with_llm.py` | `kitaru.llm()` with model aliases and metadata capture |
+| Sandboxes | `examples/monty_sandbox.py` | execution-scoped `kitaru.sandbox()` state surviving `kitaru.wait()` / resume |
 | Wait/resume | `examples/wait_and_resume.py` | `kitaru.wait()` and external input via client |
 | Replay/overrides | `examples/replay_with_overrides.py` | replay from checkpoint boundaries with `checkpoint.*` overrides |
 | PydanticAI adapter | `examples/pydantic_ai_adapter.py` | `wrap(agent)` with child-event lineage, run summaries, and capture policy |
@@ -125,6 +128,11 @@ kitaru log-store show         Show effective global runtime log backend
 kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]
 kitaru log-store reset        Clear global runtime log backend override
 
+kitaru sandbox set monty [--max-duration-secs <seconds>] [--max-memory-mb <mb>]
+kitaru sandbox show
+kitaru sandbox test
+kitaru sandbox reset
+
 kitaru secrets set <name> --KEY=value [--KEY=value ...]
 kitaru secrets show <name-or-id> [--show-values]
 kitaru secrets list
@@ -146,6 +154,7 @@ Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and [just](https://gith
 uv sync                            # Install dependencies
 uv sync --extra local              # Include local ZenML runtime components
 uv sync --extra mcp                # Include MCP server dependencies
+uv sync --extra sandbox            # Include Monty sandbox support
 uv sync --extra local --extra mcp  # Local runtime + MCP tools
 just --list                        # Show all available recipes
 just check             # Run all checks (format, lint, typecheck, typos, yaml)

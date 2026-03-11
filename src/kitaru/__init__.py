@@ -29,6 +29,7 @@ Current status:
   Kitaru exception hierarchy with failure journaling (`Execution.failure`,
   `CheckpointCall.attempts`).
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
+- Implemented: Monty-backed sandbox sessions via ``sandbox()``.
 
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset``, stack selection via
@@ -59,6 +60,13 @@ from kitaru.errors import (
     KitaruExecutionError,
     KitaruFeatureNotAvailableError,
     KitaruRuntimeError,
+    KitaruSandboxCapabilityError,
+    KitaruSandboxConfigurationError,
+    KitaruSandboxError,
+    KitaruSandboxExecutionError,
+    KitaruSandboxNotConfiguredError,
+    KitaruSandboxProviderError,
+    KitaruSandboxSessionError,
     KitaruStateError,
     KitaruUsageError,
     KitaruUserCodeError,
@@ -67,6 +75,12 @@ from kitaru.errors import (
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
+from kitaru.sandbox import (
+    SandboxCapabilities,
+    SandboxExecutionResult,
+    SandboxSession,
+    sandbox,
+)
 from kitaru.wait import wait
 
 __all__ = [
@@ -82,10 +96,20 @@ __all__ = [
     "KitaruExecutionError",
     "KitaruFeatureNotAvailableError",
     "KitaruRuntimeError",
+    "KitaruSandboxCapabilityError",
+    "KitaruSandboxConfigurationError",
+    "KitaruSandboxError",
+    "KitaruSandboxExecutionError",
+    "KitaruSandboxNotConfiguredError",
+    "KitaruSandboxProviderError",
+    "KitaruSandboxSessionError",
     "KitaruStateError",
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "SandboxCapabilities",
+    "SandboxExecutionResult",
+    "SandboxSession",
     "StackInfo",
     "checkpoint",
     "configure",
@@ -96,6 +120,7 @@ __all__ = [
     "llm",
     "load",
     "log",
+    "sandbox",
     "save",
     "use_stack",
     "wait",

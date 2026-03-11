@@ -6,15 +6,19 @@ It is not part of the public API surface.
 
 from __future__ import annotations
 
+import json
+import os
+import warnings
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Protocol
 
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.steps.step_context import StepContext
 
+from kitaru.config import _KITARU_RESOLVED_SANDBOX_ENV, ResolvedSandboxConfig
 from kitaru.errors import KitaruFeatureNotAvailableError
 
 
@@ -24,6 +28,7 @@ class _FlowScope:
 
     name: str | None
     execution_id: str | None = None
+    sandbox_config: ResolvedSandboxConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,28 @@ _LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", defau
 
 _SUBMISSION_OBSERVER: ContextVar[Callable[[str], None] | None] = ContextVar(
     "kitaru_submission_observer",
+    default=None,
+)
+_SUBMISSION_SANDBOX_CONFIG: ContextVar[ResolvedSandboxConfig | None] = ContextVar(
+    "kitaru_submission_sandbox_config",
+    default=None,
+)
+
+
+class _SandboxLifecycleManager(Protocol):
+    """Runtime hooks implemented by the sandbox subsystem."""
+
+    def close_checkpoint_scope(self, checkpoint_id: str | None) -> None: ...
+
+    def close_execution_scope(self, execution_id: str | None) -> None: ...
+
+    def before_wait(self, execution_id: str | None) -> None: ...
+
+    def after_wait(self, execution_id: str | None) -> None: ...
+
+
+_CURRENT_SANDBOX_MANAGER: ContextVar[_SandboxLifecycleManager | None] = ContextVar(
+    "kitaru_current_sandbox_manager",
     default=None,
 )
 
@@ -110,24 +137,63 @@ def _get_zenml_flow_name() -> str | None:
     return None
 
 
+def _sandbox_config_from_env() -> ResolvedSandboxConfig | None:
+    """Load a resolved sandbox config propagated through the runtime env."""
+    raw_value = os.environ.get(_KITARU_RESOLVED_SANDBOX_ENV)
+    if raw_value is None or not raw_value.strip():
+        return None
+    try:
+        return ResolvedSandboxConfig.model_validate_json(raw_value)
+    except Exception:
+        try:
+            return ResolvedSandboxConfig.model_validate(json.loads(raw_value))
+        except Exception:
+            warnings.warn(
+                "Ignoring invalid propagated sandbox configuration from "
+                f"{_KITARU_RESOLVED_SANDBOX_ENV}.",
+                stacklevel=2,
+            )
+            return None
+
+
 @contextmanager
 def _flow_scope(
     *,
     name: str | None,
     execution_id: str | None = None,
+    sandbox_config: ResolvedSandboxConfig | None = None,
 ) -> Iterator[None]:
     """Set flow runtime scope for the active execution context."""
     resolved_execution_id = (
         execution_id if execution_id is not None else _get_zenml_execution_id()
     )
+    resolved_sandbox_config = sandbox_config
+    if resolved_sandbox_config is None:
+        resolved_sandbox_config = _SUBMISSION_SANDBOX_CONFIG.get()
+    if resolved_sandbox_config is None:
+        resolved_sandbox_config = _sandbox_config_from_env()
     flow_token = _CURRENT_FLOW_SCOPE.set(
-        _FlowScope(name=name, execution_id=resolved_execution_id)
+        _FlowScope(
+            name=name,
+            execution_id=resolved_execution_id,
+            sandbox_config=resolved_sandbox_config,
+        )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
     try:
         yield
     finally:
+        sandbox_manager = _CURRENT_SANDBOX_MANAGER.get()
+        if sandbox_manager is not None:
+            try:
+                sandbox_manager.close_execution_scope(resolved_execution_id)
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to close sandbox execution scope: {exc}",
+                    stacklevel=2,
+                )
         _LLM_CALL_COUNTER.reset(llm_counter_token)
+        _CURRENT_SANDBOX_MANAGER.set(None)
         _CURRENT_FLOW_SCOPE.reset(flow_token)
 
 
@@ -158,6 +224,15 @@ def _checkpoint_scope(
     try:
         yield
     finally:
+        sandbox_manager = _CURRENT_SANDBOX_MANAGER.get()
+        if sandbox_manager is not None:
+            try:
+                sandbox_manager.close_checkpoint_scope(resolved_checkpoint_id)
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to close sandbox checkpoint scope: {exc}",
+                    stacklevel=2,
+                )
         _LLM_CALL_COUNTER.reset(llm_counter_token)
         _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
 
@@ -180,6 +255,17 @@ def _suspend_checkpoint_scope() -> Iterator[None]:
 def _get_current_flow() -> _FlowScope | None:
     """Get the currently active flow scope, if any."""
     return _CURRENT_FLOW_SCOPE.get()
+
+
+def _get_current_sandbox_config() -> ResolvedSandboxConfig | None:
+    """Return the sandbox config active in the current flow scope, if any."""
+    flow_scope = _get_current_flow()
+    if flow_scope is not None:
+        return flow_scope.sandbox_config
+    config = _SUBMISSION_SANDBOX_CONFIG.get()
+    if config is not None:
+        return config
+    return _sandbox_config_from_env()
 
 
 def _is_inside_flow() -> bool:
@@ -226,6 +312,48 @@ def _next_llm_call_name(prefix: str = "llm") -> str:
     next_index = _LLM_CALL_COUNTER.get() + 1
     _LLM_CALL_COUNTER.set(next_index)
     return f"{normalized_prefix}_{next_index}"
+
+
+@contextmanager
+def _submission_sandbox_config(
+    config: ResolvedSandboxConfig | None,
+) -> Iterator[None]:
+    """Temporarily install resolved sandbox config for flow submission."""
+    token = _SUBMISSION_SANDBOX_CONFIG.set(config)
+    try:
+        yield
+    finally:
+        _SUBMISSION_SANDBOX_CONFIG.reset(token)
+
+
+def _get_current_sandbox_manager() -> _SandboxLifecycleManager | None:
+    """Return the active sandbox runtime manager, if any."""
+    return _CURRENT_SANDBOX_MANAGER.get()
+
+
+def _set_current_sandbox_manager(
+    manager: _SandboxLifecycleManager | None,
+) -> _SandboxLifecycleManager | None:
+    """Install the active sandbox runtime manager and return the previous one."""
+    previous = _CURRENT_SANDBOX_MANAGER.get()
+    _CURRENT_SANDBOX_MANAGER.set(manager)
+    return previous
+
+
+def _sandbox_before_wait() -> None:
+    """Let the sandbox subsystem prepare active sessions before a wait."""
+    sandbox_manager = _CURRENT_SANDBOX_MANAGER.get()
+    if sandbox_manager is None:
+        return
+    sandbox_manager.before_wait(_get_current_execution_id())
+
+
+def _sandbox_after_wait() -> None:
+    """Let the sandbox subsystem restore active sessions after a wait."""
+    sandbox_manager = _CURRENT_SANDBOX_MANAGER.get()
+    if sandbox_manager is None:
+        return
+    sandbox_manager.after_wait(_get_current_execution_id())
 
 
 def _not_implemented(name: str) -> NoReturn:

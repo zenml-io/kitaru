@@ -5,11 +5,22 @@ from __future__ import annotations
 from unittest.mock import patch
 from uuid import uuid4
 
+from kitaru.config import (
+    _KITARU_RESOLVED_SANDBOX_ENV,
+    ResolvedMontySandboxSettings,
+    ResolvedSandboxConfig,
+    SandboxProviderKind,
+)
 from kitaru.runtime import (
     _checkpoint_scope,
     _flow_scope,
+    _get_current_sandbox_config,
     _is_inside_checkpoint,
     _is_inside_flow,
+    _sandbox_after_wait,
+    _sandbox_before_wait,
+    _set_current_sandbox_manager,
+    _submission_sandbox_config,
     _suspend_checkpoint_scope,
 )
 from kitaru.wait import wait
@@ -85,3 +96,72 @@ def test_wait_runs_when_checkpoint_scope_is_suspended() -> None:
         _suspend_checkpoint_scope(),
     ):
         assert wait(name="approve") is True
+
+
+def test_flow_scope_reads_submission_sandbox_config() -> None:
+    """Flow scope should capture resolved sandbox config from submission context."""
+    sandbox_config = ResolvedSandboxConfig(
+        provider=SandboxProviderKind.MONTY,
+        monty=ResolvedMontySandboxSettings(
+            max_duration_secs=1.0,
+            max_memory_mb=64,
+            type_check=True,
+        ),
+    )
+
+    with _submission_sandbox_config(sandbox_config), _flow_scope(name="demo"):
+        assert _get_current_sandbox_config() == sandbox_config
+
+
+def test_flow_scope_reads_sandbox_config_from_env(monkeypatch) -> None:
+    """Flow scope should fall back to the propagated sandbox env var."""
+    sandbox_config = ResolvedSandboxConfig(
+        provider=SandboxProviderKind.MONTY,
+        monty=ResolvedMontySandboxSettings(
+            max_duration_secs=2.0,
+            max_memory_mb=128,
+            type_check=False,
+        ),
+    )
+    monkeypatch.setenv(
+        _KITARU_RESOLVED_SANDBOX_ENV,
+        sandbox_config.model_dump_json(exclude_none=True),
+    )
+
+    with _flow_scope(name="demo"):
+        assert _get_current_sandbox_config() == sandbox_config
+
+
+def test_wait_hooks_delegate_to_active_sandbox_manager() -> None:
+    """Runtime wait helpers should call the active sandbox manager when present."""
+
+    class _Manager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str | None]] = []
+
+        def close_checkpoint_scope(self, checkpoint_id: str | None) -> None:
+            self.calls.append(("close_checkpoint_scope", checkpoint_id))
+
+        def close_execution_scope(self, execution_id: str | None) -> None:
+            self.calls.append(("close_execution_scope", execution_id))
+
+        def before_wait(self, execution_id: str | None) -> None:
+            self.calls.append(("before_wait", execution_id))
+
+        def after_wait(self, execution_id: str | None) -> None:
+            self.calls.append(("after_wait", execution_id))
+
+    sandbox_manager = _Manager()
+    _set_current_sandbox_manager(sandbox_manager)
+    execution_id, _ = _scope_ids()
+    try:
+        with _flow_scope(name="demo", execution_id=execution_id):
+            _sandbox_before_wait()
+            _sandbox_after_wait()
+    finally:
+        _set_current_sandbox_manager(None)
+
+    assert sandbox_manager.calls[:2] == [
+        ("before_wait", execution_id),
+        ("after_wait", execution_id),
+    ]

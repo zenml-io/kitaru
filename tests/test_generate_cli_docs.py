@@ -49,6 +49,7 @@ class TestBuildCommandTree:
             "logout",
             "model",
             "run",
+            "sandbox",
             "secrets",
             "stack",
             "status",
@@ -215,6 +216,7 @@ class TestWriteDocsTree:
             "logout",
             "model",
             "run",
+            "sandbox",
             "secrets",
             "stack",
             "status",
@@ -244,8 +246,16 @@ class TestWriteDocsTree:
             assert not (output_dir / command / "index.mdx").exists()
             assert not (output_dir / command / "meta.json").exists()
 
-        # executions, log-store, model, secrets, and stack have nested subcommands.
-        for command in ("executions", "log-store", "model", "secrets", "stack"):
+        # executions, log-store, model, sandbox, secrets, and stack
+        # have nested subcommands.
+        for command in (
+            "executions",
+            "log-store",
+            "model",
+            "sandbox",
+            "secrets",
+            "stack",
+        ):
             assert (output_dir / command / "index.mdx").exists()
             assert (output_dir / command / "meta.json").exists()
 
@@ -269,6 +279,10 @@ class TestWriteDocsTree:
         for command in ("list", "register"):
             assert (output_dir / "model" / f"{command}.mdx").exists()
             assert f"model/{command}.mdx" in files
+
+        for command in ("reset", "set", "show", "test"):
+            assert (output_dir / "sandbox" / f"{command}.mdx").exists()
+            assert f"sandbox/{command}.mdx" in files
 
         for command in ("delete", "list", "set", "show"):
             assert (output_dir / "secrets" / f"{command}.mdx").exists()

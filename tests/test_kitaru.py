@@ -55,6 +55,9 @@ class TestPublicExports:
     def test_kitaru_client_exists(self) -> None:
         assert hasattr(kitaru, "KitaruClient")
 
+    def test_sandbox_exists(self) -> None:
+        assert hasattr(kitaru, "sandbox")
+
     def test_all_exports_match(self) -> None:
         expected = {
             "FailureOrigin",
@@ -69,10 +72,20 @@ class TestPublicExports:
             "KitaruExecutionError",
             "KitaruFeatureNotAvailableError",
             "KitaruRuntimeError",
+            "KitaruSandboxCapabilityError",
+            "KitaruSandboxConfigurationError",
+            "KitaruSandboxError",
+            "KitaruSandboxExecutionError",
+            "KitaruSandboxNotConfiguredError",
+            "KitaruSandboxProviderError",
+            "KitaruSandboxSessionError",
             "KitaruStateError",
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",
+            "SandboxCapabilities",
+            "SandboxExecutionResult",
+            "SandboxSession",
             "StackInfo",
             "checkpoint",
             "configure",
@@ -84,6 +97,7 @@ class TestPublicExports:
             "load",
             "log",
             "save",
+            "sandbox",
             "use_stack",
             "wait",
         }

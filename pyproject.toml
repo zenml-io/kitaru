@@ -36,6 +36,9 @@ pydantic-ai = [
 mcp = [
     "mcp>=1.26.0",
 ]
+sandbox = [
+    "pydantic-monty>=0.0.8",
+]
 
 [project.scripts]
 kitaru = "kitaru.cli:cli"
@@ -68,6 +71,7 @@ dev = [
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
+    "pydantic-monty>=0.0.8",
     "pydantic-ai-slim>=0.2.0",
 ]
 
