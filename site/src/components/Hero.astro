@@ -2,7 +2,7 @@
 // Hero.astro — Hero section with side-by-side layout + tabbed code
 ---
 
-<section class="hero-section" style="padding: 120px clamp(24px, 5vw, 80px) 80px;">
+<section class="hero-section" style="height: calc(100dvh - 100px); padding: 0 clamp(24px, 5vw, 80px); display: flex; align-items: center; justify-content: center;">
   <div class="section-inner">
     <div class="hero-grid">
       <!-- Left: copy + form -->
@@ -47,6 +47,7 @@
               <button class="code-tab" data-tab="framework">With a framework</button>
             </div>
           </div>
+          <div class="hero-code-body">
           <!-- Plain Python tab -->
           <div class="code-tab-content active" id="tab-plain">
             <pre class="code-pre"><code><span class="kw">import</span> kitaru
@@ -85,6 +86,7 @@ coder <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span clas
 coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>, issue<span class="op">=</span><span class="str">"New bug"</span>)
 <span class="cmt"># Same code, any infra.</span>
 coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"gcp-production"</span>)</code></pre>
+          </div>
           </div>
         </div>
       </div>
@@ -127,10 +129,7 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
   }
 
   .gradient-text {
-    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-deep) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--color-accent);
   }
 
   .hero-form {
@@ -181,11 +180,11 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
 
   /* Code window */
   .code-window {
-    background: #1A1714;
+    background: #F0EBE3;
     border: 1px solid var(--color-border);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 8px 40px rgba(26,23,20,0.12);
+    box-shadow: none;
   }
 
   .code-header {
@@ -193,8 +192,8 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     align-items: center;
     padding: 12px 16px;
     gap: 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    background: rgba(26,23,20,0.95);
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    background: rgba(240,235,227,0.95);
   }
 
   .code-dot {
@@ -213,7 +212,7 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     font-family: var(--font-mono);
     font-size: 0.82rem;
     line-height: 1.75;
-    color: #E8E4DE;
+    color: #3D3530;
     overflow-x: auto;
     background: transparent;
   }
@@ -222,14 +221,14 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     font-family: inherit;
   }
 
-  .code-pre .kw { color: #C792EA; }
-  .code-pre .fn { color: #82AAFF; }
-  .code-pre .str { color: #C3E88D; }
-  .code-pre .var { color: #F78C6C; }
-  .code-pre .op { color: #89DDFF; }
-  .code-pre .num { color: #F78C6C; }
-  .code-pre .dec { color: #FFCB6B; }
-  .code-pre .cmt { color: #546E7A; font-style: italic; }
+  .code-pre .kw { color: #7D5C30; }
+  .code-pre .fn { color: #A85218; }
+  .code-pre .str { color: #277040; }
+  .code-pre .var { color: #3D3530; }
+  .code-pre .op { color: #746860; }
+  .code-pre .num { color: #3D3530; }
+  .code-pre .dec { color: #A85218; font-style: italic; }
+  .code-pre .cmt { color: #867D72; font-style: italic; }
 
   /* Tabs */
   .code-tabs {
@@ -244,14 +243,14 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     padding: 4px 14px;
     font-family: var(--font-mono);
     font-size: 0.7rem;
-    color: rgba(255,255,255,0.35);
+    color: rgba(0,0,0,0.35);
     cursor: pointer;
     border-radius: 4px;
     transition: all 0.2s;
   }
 
   .code-tab:hover {
-    color: rgba(255,255,255,0.6);
+    color: rgba(0,0,0,0.6);
   }
 
   .code-tab.active {
@@ -259,12 +258,17 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     color: #F17829;
   }
 
-  .code-tab-content {
-    display: none;
+  .hero-code-body {
+    display: grid;
   }
 
-  .code-tab-content.active {
-    display: block;
+  .hero-code-body > .code-tab-content {
+    grid-area: 1 / 1;
+    visibility: hidden;
+  }
+
+  .hero-code-body > .code-tab-content.active {
+    visibility: visible;
   }
 
   .hero-code-window {
@@ -274,7 +278,7 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
   .code-filename {
     font-family: var(--font-mono);
     font-size: 0.72rem;
-    color: rgba(255,255,255,0.35);
+    color: rgba(0,0,0,0.35);
     margin-left: 12px;
   }
 
@@ -290,6 +294,8 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
     }
 
     .hero-section {
+      height: auto !important;
+      min-height: calc(100dvh - 100px);
       padding-top: 80px !important;
       padding-bottom: 60px !important;
     }
@@ -303,7 +309,6 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
   @media (max-width: 900px) {
     .hero-left, .hero-right {
       min-width: 0;
-      overflow: hidden;
     }
   }
 
