@@ -303,13 +303,6 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
     lines.append("```")
     lines.append("")
 
-    if cmd.invocation == "kitaru secrets set":
-        lines.append(
-            "> Put `--output json` / `-o json` **before** any `--KEY=value` "
-            "secret assignments so Cyclopts does not treat it as another secret key."
-        )
-        lines.append("")
-
     # Global flags (root only)
     if is_root:
         lines.append("## Global Flags")

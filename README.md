@@ -149,6 +149,13 @@ kitaru model register <alias> --model <provider/model> [--secret <name-or-id>]
 kitaru model list
 ```
 
+Most agent-facing commands also support `--output json` (or `-o json`).
+That gives you one consistent machine-readable contract:
+
+- single-item commands emit `{command, item}`
+- list commands emit `{command, items, count}`
+- `kitaru executions logs --follow --output json` is the special case: it emits one JSON event per line while following the stream
+
 ### Headless / Docker / CI setup
 
 Kitaru can now be bootstrapped entirely from `KITARU_*` environment variables,

@@ -702,13 +702,6 @@ def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
             "`--OPENAI_API_KEY=sk-...`)."
         )
 
-    for token in raw_assignments:
-        if token in {"--output", "-o"} or token.startswith(("--output=", "-o=")):
-            raise ValueError(
-                "`--output` / `-o` must appear before secret assignments in "
-                "`kitaru secrets set`."
-            )
-
     parsed: dict[str, str] = {}
     idx = 0
     while idx < len(raw_assignments):

@@ -1647,11 +1647,24 @@ def test_secrets_set_rejects_invalid_assignments(
     assert "Invalid secret assignment" in capsys.readouterr().err
 
 
-def test_secrets_set_rejects_output_after_assignments(
+def test_secrets_set_json_output_accepts_output_after_assignments(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`--output` must come before secret assignments for `secrets set`."""
-    with pytest.raises(SystemExit) as exc_info:
+    """`kitaru secrets set` should accept `--output json` after assignments."""
+    fake_client = Mock()
+    fake_client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        values={"OPENAI_API_KEY": object()},
+        has_missing_values=False,
+        secret_values={"OPENAI_API_KEY": "sk-123"},
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
         app(
             [
                 "secrets",
@@ -1663,8 +1676,11 @@ def test_secrets_set_rejects_output_after_assignments(
             ]
         )
 
-    assert exc_info.value.code == 1
-    assert "must appear before secret assignments" in capsys.readouterr().err
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "secrets.set"
+    assert payload["item"]["name"] == "openai-creds"
+    assert payload["item"]["result"] == "created"
 
 
 def test_secrets_show_hides_values_by_default(

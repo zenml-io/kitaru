@@ -431,7 +431,6 @@ class TestWriteDocsTree:
 
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content
-        assert "Put `--output json` / `-o json` **before** any `--KEY=value`" in secrets_set_content
         assert "| `ASSIGNMENTS...` | `list[str]` | Yes |  |" in secrets_set_content
 
         stack_use_content = (output_dir / "stack" / "use.mdx").read_text()
