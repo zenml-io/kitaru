@@ -64,9 +64,10 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 #   uv pip install "zenml[server,secrets-aws,secrets-gcp,secrets-azure,
 #     secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,
 #     connectors-azure,azureml,sagemaker,vertex]>=X.Y.Z" "alembic==1.15.2"
+# Pinned to commit hash for tester stability; bump hash when updating
 RUN pip install --upgrade pip uv setuptools \
     && uv pip install \
-      "zenml[server,secrets-aws,secrets-gcp,secrets-azure,secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure,azureml,sagemaker,vertex] @ git+https://github.com/zenml-io/zenml.git@feature/kitaru" \
+      "zenml[server,secrets-aws,secrets-gcp,secrets-azure,secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure,azureml,sagemaker,vertex] @ git+https://github.com/zenml-io/zenml.git@a2d00d5cc3cc7dce2b2aeef17bd04e00fad067fb" \
       "alembic==1.15.2"
 
 # Install Kitaru from local source

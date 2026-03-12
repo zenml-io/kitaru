@@ -23,7 +23,8 @@ dependencies = [
     "pydantic>=2.0",
     "rich>=12.0.0",
     # TODO: revert to "zenml>=0.94.0" once feature/kitaru is merged and released
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@feature/kitaru",
+    # Pinned to commit hash for tester stability; bump hash when updating
+    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@a2d00d5cc3cc7dce2b2aeef17bd04e00fad067fb",
 ]
 
 [project.optional-dependencies]
