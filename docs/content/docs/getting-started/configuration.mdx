@@ -303,9 +303,20 @@ At flow start, Kitaru computes a fully resolved execution config and persists it
 with the execution metadata (`kitaru_execution_spec`). This keeps execution
 behavior stable even if config changes later.
 
+## Example in this repository
+
+```bash
+uv sync --extra local
+uv run -m examples.flow_with_configuration
+uv run pytest tests/test_phase10_configuration_example.py
+```
+
+For the broader catalog, see [Examples](/getting-started/examples).
+
 ## Related pages
 
 - [Stack Selection](/getting-started/stack-selection)
+- [Examples](/getting-started/examples)
 - [Secrets + Model Registration](/getting-started/secrets-and-model-registration)
 - [Tracked LLM Calls](/getting-started/llm-calls)
 - [Execution Model](/concepts/execution-model)

@@ -108,8 +108,25 @@ Each `kitaru.llm()` call records:
 - cost metadata when available
 - credential source metadata (`environment` or `secret`)
 
+## Example in this repository
+
+```bash
+uv sync --extra local
+
+# Register an alias (with or without a linked secret) before running the example.
+uv run kitaru model register fast --model openai/gpt-4o-mini
+uv run -m examples.flow_with_llm
+uv run pytest tests/test_phase12_llm_example.py
+```
+
+If you want the full credential-backed setup path first, start with
+[Secrets + Model Registration](/getting-started/secrets-and-model-registration).
+
+For the broader catalog, see [Examples](/getting-started/examples).
+
 ## Related pages
 
+- [Examples](/getting-started/examples)
 - [Secrets + Model Registration](/getting-started/secrets-and-model-registration)
 - [Manage Secrets](/getting-started/secrets)
 - [Configuration](/getting-started/configuration)

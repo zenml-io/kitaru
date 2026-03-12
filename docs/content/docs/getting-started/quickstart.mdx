@@ -85,6 +85,18 @@ What happens here:
 If you want to inspect that execution later, the execution ID you printed is the
 same ID used by `KitaruClient` and `kitaru executions ...`.
 
+## Prefer a repo example?
+
+If you would rather run a maintained example from this repository than type out
+your own `demo.py`, start here:
+
+```bash
+uv sync --extra local
+uv run -m examples.first_working_flow
+```
+
+For the broader catalog, see [Examples](/getting-started/examples).
+
 ## What's Next
 
 Now that Kitaru is installed and you've run a flow, follow the next path that
@@ -105,6 +117,11 @@ fits what you want to learn:
     title="Configuration"
     description="Configure runtime defaults and precedence"
     href="/getting-started/configuration"
+  />
+  <Card
+    title="Examples"
+    description="Browse runnable Kitaru workflows grouped by goal"
+    href="/getting-started/examples"
   />
   <Card
     title="Wait and Resume"

@@ -166,6 +166,8 @@ See the full setup guide at [MCP Server](/agent-integrations/mcp-server).
 
 ## Try the examples
 
+For the broader catalog, see [Examples](/getting-started/examples).
+
 ```bash
 uv sync --extra local
 uv run -m examples.client_execution_management
@@ -177,7 +179,7 @@ uv run pytest tests/test_phase15_wait_example.py
 uv run -m examples.replay_with_overrides
 uv run pytest tests/test_phase16_replay_example.py
 
-uv sync --extra mcp
+uv sync --extra local --extra mcp
 uv run -m examples.mcp_query_tools
 uv run pytest tests/mcp/test_phase19_mcp_example.py
 ```

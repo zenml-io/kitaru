@@ -1,74 +1,11 @@
-"""Phase 5 first working Kitaru workflow example.
+"""Compatibility wrapper.
 
-This is the smallest end-to-end example that exercises the current MVP
-primitives: ``@flow`` + ``@checkpoint``.
+Re-exports `examples.basic_flow.first_working_flow`.
 """
 
-from kitaru import checkpoint, flow
-
-
-@checkpoint
-def fetch_data(url: str) -> str:
-    """Fetch source data.
-
-    Args:
-        url: Source URL.
-
-    Returns:
-        Mocked source content.
-    """
-    _ = url
-    return "some data"
-
-
-@checkpoint
-def process_data(data: str) -> str:
-    """Transform source data.
-
-    Args:
-        data: Input data.
-
-    Returns:
-        Processed data.
-    """
-    return data.upper()
-
-
-# TODO: remove explicit base_image once kitaru and ZenML
-# feature/kitaru are released to PyPI — the auto-injection
-# of kitaru into Docker requirements will handle this automatically.
-# Build the dev image with: just dev-image
-@flow(image={"base_image": "strickvl/kitaru-dev:latest"})
-def my_agent(url: str) -> str:
-    """Run the example Kitaru workflow.
-
-    Args:
-        url: Source URL.
-
-    Returns:
-        Processed result.
-    """
-    data = fetch_data(url)
-    return process_data(data)
-
-
-def run_workflow(url: str = "https://example.com") -> str:
-    """Execute the example workflow and return its output.
-
-    Args:
-        url: Source URL.
-
-    Returns:
-        Workflow output.
-    """
-    return my_agent.run(url).wait()
-
-
-def main() -> None:
-    """Run the example as a script."""
-    result = run_workflow()
-    print(result)
-
+# ruff: noqa: F403
+from examples.basic_flow.first_working_flow import *
+from examples.basic_flow.first_working_flow import main
 
 if __name__ == "__main__":
     main()

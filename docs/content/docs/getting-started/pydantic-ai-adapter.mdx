@@ -80,6 +80,7 @@ When the agent invokes this tool, the adapter translates it to a flow-level `kit
 ```bash
 uv sync --extra local --extra pydantic-ai
 uv run -m examples.pydantic_ai_adapter
+uv run pytest tests/test_phase17_pydantic_ai_example.py
 ```
 
 The example prints:
@@ -88,3 +89,5 @@ The example prints:
 - final result
 - child-event count captured under checkpoint metadata
 - run summary count for wrapped agent runs
+
+For the broader catalog, see [Examples](/getting-started/examples).

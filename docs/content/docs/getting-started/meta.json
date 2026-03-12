@@ -4,6 +4,7 @@
   "pages": [
     "installation",
     "quickstart",
+    "examples",
     "configuration",
     "execution-management",
     "execution-logs",

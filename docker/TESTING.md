@@ -52,7 +52,7 @@ server setup is required for local use.
 ### 3. Run your first flow
 
 ```bash
-uv run python -m examples.first_working_flow
+uv run -m examples.first_working_flow
 ```
 
 This runs a simple two-checkpoint flow (`fetch_data` → `process_data`)
@@ -75,16 +75,18 @@ uv run kitaru executions logs <EXECUTION_ID>
 ### 5. Try more examples
 
 Each example demonstrates a different Kitaru primitive. Run them in
-order of complexity.
+order of complexity. The implementations are now grouped into subdirectories
+under `examples/`, but the stable commands below still work from the repo root.
+See `examples/README.md` for the full catalog.
 
-> **Note:** Some example files contain `image={"base_image": ...}`
+> **Note:** Some example implementations contain `image={"base_image": ...}`
 > settings in their `@flow` decorator. These only apply when running on
 > remote/containerized stacks — you can ignore them for local testing.
 
 #### Structured logging (`kitaru.log()`)
 
 ```bash
-uv run python -m examples.flow_with_logging
+uv run -m examples.flow_with_logging
 ```
 
 Logs structured metadata at both flow and checkpoint scope. After
@@ -94,7 +96,7 @@ running, you can separately inspect runtime log lines with
 #### Artifact save/load (`kitaru.save()` / `kitaru.load()`)
 
 ```bash
-uv run python -m examples.flow_with_artifacts
+uv run -m examples.flow_with_artifacts
 ```
 
 Demonstrates persisting and loading named artifacts across executions.
@@ -104,7 +106,7 @@ first.
 #### Wait for human input (`kitaru.wait()`)
 
 ```bash
-uv run python -m examples.wait_and_resume
+uv run -m examples.wait_and_resume
 ```
 
 This is the human-in-the-loop example. It starts a flow that pauses
@@ -120,7 +122,7 @@ uv run kitaru executions resume <EXEC_ID>
 #### Replay with overrides
 
 ```bash
-uv run python -m examples.replay_with_overrides
+uv run -m examples.replay_with_overrides
 ```
 
 Runs a flow, then replays it from a specific checkpoint with an
@@ -134,7 +136,7 @@ capability.
 uv run kitaru model register fast --model openai/gpt-4o-mini
 export OPENAI_API_KEY=sk-...
 
-uv run python -m examples.flow_with_llm
+uv run -m examples.flow_with_llm
 ```
 
 Makes tracked LLM calls with token/cost metadata logged automatically.
@@ -142,7 +144,7 @@ Makes tracked LLM calls with token/cost metadata logged automatically.
 #### PydanticAI adapter — no API key needed
 
 ```bash
-uv run python -m examples.pydantic_ai_adapter
+uv run -m examples.pydantic_ai_adapter
 ```
 
 Wraps a PydanticAI agent with Kitaru tracking. Uses `TestModel` so no
