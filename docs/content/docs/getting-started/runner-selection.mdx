@@ -1,0 +1,65 @@
+---
+title: Select an Active Runner
+description: List, inspect, and switch the active runner used by Kitaru executions
+---
+
+This guide shows how to choose the active runner for your Kitaru environment.
+
+## What the active runner does
+
+The active runner is your default execution target.
+
+When you run a flow without passing `runner=...`, Kitaru uses the active runner.
+
+## Show the current runner
+
+```bash
+kitaru runner current
+```
+
+## List available runners
+
+```bash
+kitaru runner list
+```
+
+The list includes each runner ID and marks the active one.
+
+## Switch to another runner
+
+```bash
+kitaru runner use production
+```
+
+You can pass either a runner name or a runner ID.
+
+The selected runner is persisted as your default until you switch it again.
+
+## Use the Python SDK
+
+```python
+import kitaru
+
+print(kitaru.current_runner())
+print(kitaru.list_runners())
+kitaru.use_runner("production")
+```
+
+Each runner entry is returned as `RunnerInfo(id, name, is_active)`.
+
+## Precedence with flow-level runner overrides
+
+The active runner is only one layer in the Phase 10 precedence chain. Higher
+layers can override it:
+
+1. `my_flow.run(..., runner="gpu-cluster")`
+2. `@flow(runner="gpu-cluster")`
+3. `kitaru.configure(runner="gpu-cluster")`
+4. `KITARU_RUNNER`
+5. `pyproject.toml` (`[tool.kitaru].runner`)
+6. currently active runner
+
+## Related pages
+
+- [Flows](/concepts/flows)
+- [CLI runner commands](/cli/runner)

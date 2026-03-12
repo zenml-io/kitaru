@@ -34,7 +34,7 @@ if execution.failure:
 Execution details include:
 
 - start/end timestamps
-- stack name
+- runner name
 - summary metadata
 - checkpoint calls
 - pending wait details (`execution.pending_wait`)
@@ -117,7 +117,7 @@ value = context_artifact.load()
 ```bash
 # Start a flow from a module/file target
 kitaru run agent.py:content_pipeline --args '{"topic":"AI safety"}'
-kitaru run agent.py:content_pipeline --stack prod --args '{"topic":"AI safety"}'
+kitaru run agent.py:content_pipeline --runner prod --args '{"topic":"AI safety"}'
 
 # Inspect and filter executions
 kitaru executions get kr-a8f3c2
@@ -128,9 +128,9 @@ kitaru executions list --status waiting --output json
 kitaru executions logs kr-a8f3c2 --checkpoint write_draft
 kitaru executions logs kr-a8f3c2 --output json
 
-# Agent/script-friendly status and stack inspection
+# Agent/script-friendly status and runner inspection
 kitaru status --output json
-kitaru stack list --output json
+kitaru runner list --output json
 
 # Wait-input and lifecycle actions
 kitaru executions input kr-a8f3c2 --wait approve_deploy --value true

@@ -211,7 +211,7 @@ def test_get_maps_execution_details() -> None:
     frozen = FrozenExecutionSpec(
         version=1,
         resolved_execution=ResolvedExecutionConfig(
-            stack="local",
+            runner="local",
             image=None,
             cache=True,
             retries=0,
@@ -255,7 +255,7 @@ def test_get_maps_execution_details() -> None:
     assert execution.flow_name == "content_flow"
     assert execution.status == ExecutionStatus.COMPLETED
     assert execution.frozen_execution_spec is not None
-    assert execution.frozen_execution_spec.resolved_execution.stack == "local"
+    assert execution.frozen_execution_spec.resolved_execution.runner == "local"
     assert execution.failure is None
 
     assert len(execution.checkpoints) == 1
@@ -1323,11 +1323,11 @@ def test_logs_map_otel_retrieval_errors_to_kitaru_error() -> None:
         patch("kitaru.client.Client") as client_cls,
         patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
         patch(
-            "kitaru.client.active_stack_log_store",
+            "kitaru.client.active_runner_log_store",
             return_value=SimpleNamespace(
                 backend="otel",
                 endpoint="https://logs.example.com",
-                stack_name="prod",
+                runner_name="prod",
             ),
         ),
     ):

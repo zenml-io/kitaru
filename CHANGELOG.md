@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru login` and `kitaru logout` now refuse both `ZENML_*` and `KITARU_*` auth environment overrides, and report the public `KITARU_*` names when those are driving auth
 - Kitaru now supports `KITARU_CONFIG_PATH` for relocating its config directory and `KITARU_DEFAULT_MODEL` for setting the default `kitaru.llm()` model without touching the alias registry
 - The production Docker image now uses `KITARU_DEBUG` / `KITARU_ANALYTICS_OPT_IN` defaults and documents `KITARU_SERVER_URL` / `KITARU_AUTH_TOKEN` / `KITARU_PROJECT` for headless server connection setup
-- `kitaru status` and `kitaru log-store show` now surface a mismatch warning when the Kitaru log-store preference differs from the active ZenML stack log store
+- `kitaru status` and `kitaru log-store show` now surface a mismatch warning when the Kitaru log-store preference differs from the active runner's ZenML stack log store
 - Kitaru's global config file now lives in Kitaru's OS-aware app config directory (for example `~/.config/kitaru/config.yaml` on Linux or `~/Library/Application Support/kitaru/config.yaml` on macOS)
 - CLI output (`kitaru status`, `kitaru info`) no longer exposes ZenML config paths or local stores path
 - Project is no longer inferred from ZenML's active project; `ResolvedConnectionConfig.project` only reflects explicit overrides via `KITARU_PROJECT` env var or `kitaru.configure(project=...)`
@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Justfile recipes: `just server-image` and `just server-image-push` for local Docker builds
 - Phase 16 replay support: replay planning (`src/kitaru/replay.py`), `KitaruClient.executions.replay(...)`, flow-object replay (`my_flow.replay(...)`), `kitaru executions replay`, and fully-enabled MCP replay tool responses
 - Replay docs and examples: `/getting-started/replay-and-overrides`, updated execution/error/MCP docs, and `examples/replay_with_overrides.py`
-- Agent-native MCP server surface: optional `kitaru[mcp]` extra, `kitaru-mcp` console entry point, and Phase 19 MCP tools for execution/artifact/status/stack queries
+- Agent-native MCP server surface: optional `kitaru[mcp]` extra, `kitaru-mcp` console entry point, and Phase 19 MCP tools for execution/artifact/status/runner queries
 - Claude Code authoring skill: `.claude-plugin/skills/kitaru-authoring/SKILL.md` (installable via plugin marketplace)
 - Phase 19 example workflow: `examples/mcp_query_tools.py`
 - MCP-focused tests: import guard coverage (`tests/test_mcp_import_guard.py`) and tool wrapper tests (`tests/mcp/test_server.py`)
@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Typed Kitaru exception hierarchy (`KitaruError`, `KitaruContextError`, `KitaruStateError`, `KitaruExecutionError`, `KitaruUserCodeError`, `KitaruDivergenceError`, `KitaruFeatureNotAvailableError`, and related types)
 - Failure journaling in `KitaruClient`: structured execution-level failure details (`execution.failure`) and per-checkpoint retry attempt history (`checkpoint.attempts`)
 - Phase 14 execution CLI commands: `kitaru run`, `kitaru executions get/list/retry/cancel`
-- `kitaru run` JSON argument parsing for flow input kwargs and optional `--stack` deploy mode
+- `kitaru run` JSON argument parsing for flow input kwargs and optional `--runner` deploy mode
 - Getting Started error-handling docs page (`/getting-started/error-handling`)
 - `kitaru.llm()` implementation with LiteLLM backend, context-aware flow/checkpoint behavior, prompt/response artifact capture, and automatic usage/cost/latency metadata logging
 - Local model alias registry persisted in Kitaru's user config file, including default alias behavior and model-resolution helpers for `kitaru.llm()`
@@ -77,8 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Artifact taxonomy validation for explicit `kitaru.save(..., type=...)` values (`prompt`, `response`, `context`, `input`, `output`, `blob`)
 - Phase 8 example workflow: `examples/flow_with_artifacts.py`
 - Global log-store configuration with `kitaru log-store set/show/reset`
-- Active stack selection in SDK via `kitaru.list_stacks()`, `kitaru.current_stack()`, and `kitaru.use_stack()`
-- Active stack CLI commands: `kitaru stack list/current/use`
+- Active runner selection in SDK via `kitaru.list_runners()`, `kitaru.current_runner()`, and `kitaru.use_runner()`
+- Active runner CLI commands: `kitaru runner list/current/use`
 - Runtime configuration API: `kitaru.configure(...)`
 - Unified config models: `kitaru.KitaruConfig` and `kitaru.ImageSettings`
 - Execution config precedence resolution across invocation/decorator/runtime/env/project/global/default layers

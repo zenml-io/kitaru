@@ -47,8 +47,8 @@ from kitaru.config import (
     ActiveEnvironmentVariable,
     ModelAliasEntry,
     ResolvedLogStore,
-    StackInfo,
-    active_stack_log_store,
+    RunnerInfo,
+    active_runner_log_store,
     list_model_aliases,
     login_to_server,
     register_model_alias,
@@ -57,13 +57,13 @@ from kitaru.config import (
     set_global_log_store,
 )
 from kitaru.config import (
-    current_stack as get_current_stack,
+    current_runner as get_current_runner,
 )
 from kitaru.config import (
-    list_stacks as get_available_stacks,
+    list_runners as get_available_runners,
 )
 from kitaru.config import (
-    use_stack as set_active_stack,
+    use_runner as set_active_runner,
 )
 from kitaru.inspection import (
     RuntimeSnapshot,
@@ -73,10 +73,10 @@ from kitaru.inspection import (
     serialize_log_entry,
     serialize_model_alias,
     serialize_resolved_log_store,
+    serialize_runner,
     serialize_runtime_snapshot,
     serialize_secret_detail,
     serialize_secret_summary,
-    serialize_stack,
 )
 from kitaru.inspection import (
     build_runtime_snapshot as _build_runtime_snapshot,
@@ -113,9 +113,9 @@ log_store_app = cyclopts.App(
     name="log-store",
     help="Manage global runtime log-store settings.",
 )
-stack_app = cyclopts.App(
-    name="stack",
-    help="Inspect and switch the active stack.",
+runner_app = cyclopts.App(
+    name="runner",
+    help="Inspect and switch the active runner.",
 )
 secrets_app = cyclopts.App(
     name="secrets",
@@ -130,7 +130,7 @@ executions_app = cyclopts.App(
     help="Inspect and manage flow executions.",
 )
 app.command(log_store_app)
-app.command(stack_app)
+app.command(runner_app)
 app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
@@ -348,7 +348,7 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
         ("Status", execution.status.value),
         ("Started", _format_timestamp(execution.started_at)),
         ("Ended", _format_timestamp(execution.ended_at)),
-        ("Stack", execution.stack_name or "not available"),
+        ("Runner", execution.runner_name or "not available"),
         ("Pending wait", pending_wait_name),
         ("Wait question", pending_wait_question),
         ("Failure", failure_summary),
@@ -368,7 +368,7 @@ def _execution_list_rows(executions: list[Execution]) -> list[tuple[str, str]]:
         detail = (
             f"{execution.flow_name or 'unknown flow'} | "
             f"{execution.status.value} | "
-            f"stack={execution.stack_name or 'not set'}"
+            f"runner={execution.runner_name or 'not set'}"
         )
         rows.append((execution.exec_id, detail))
     return rows
@@ -377,11 +377,11 @@ def _execution_list_rows(executions: list[Execution]) -> list[tuple[str, str]]:
 def _run_rows(
     *,
     target: str,
-    stack: str | None,
+    runner: str | None,
     execution: Execution,
 ) -> list[tuple[str, str]]:
     """Build label/value rows for `kitaru run` output."""
-    invocation = "deploy" if stack else "run"
+    invocation = "deploy" if runner else "run"
     return [
         ("Target", target),
         ("Invocation", invocation),
@@ -600,7 +600,7 @@ def _status_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
     rows.extend(
         [
             ("Active user", snapshot.active_user or "unavailable"),
-            ("Active stack", snapshot.active_stack or "unavailable"),
+            ("Active runner", snapshot.active_runner or "unavailable"),
             ("Config directory", snapshot.config_directory),
         ]
     )
@@ -622,7 +622,7 @@ def _info_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
         ("Server database", snapshot.server_database or "unavailable"),
         ("Server deployment", snapshot.server_deployment_type or "unavailable"),
         ("Active user", snapshot.active_user or "unavailable"),
-        ("Active stack", snapshot.active_stack or "unavailable"),
+        ("Active runner", snapshot.active_runner or "unavailable"),
         ("Repository root", snapshot.repository_root or "not set"),
         ("Config directory", snapshot.config_directory),
         ("Local server", snapshot.local_server_status or "not started"),
@@ -650,25 +650,25 @@ def _log_store_detail(snapshot: ResolvedLogStore) -> str:
     return f"Effective backend: {snapshot.backend} (from {snapshot.source} settings)"
 
 
-def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
-    """Build label/value rows for `kitaru stack list`."""
-    if not stacks:
-        return [("Stacks", "none found")]
+def _runner_list_rows(runners: list[RunnerInfo]) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru runner list`."""
+    if not runners:
+        return [("Runners", "none found")]
 
     return [
         (
-            stack.name,
-            f"{stack.id}{' (active)' if stack.is_active else ''}",
+            runner.name,
+            f"{runner.id}{' (active)' if runner.is_active else ''}",
         )
-        for stack in stacks
+        for runner in runners
     ]
 
 
-def _current_stack_rows(stack: StackInfo) -> list[tuple[str, str]]:
-    """Build label/value rows for `kitaru stack current`."""
+def _current_runner_rows(runner: RunnerInfo) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru runner current`."""
     return [
-        ("Active stack", stack.name),
-        ("Stack ID", stack.id),
+        ("Active runner", runner.name),
+        ("Runner ID", runner.id),
     ]
 
 
@@ -914,7 +914,7 @@ def _environment_rows(
 def _emit_run_snapshot(
     *,
     target: str,
-    stack: str | None,
+    runner: str | None,
     exec_id: str,
 ) -> None:
     """Emit the post-run snapshot for non-interactive or deploy paths."""
@@ -925,7 +925,7 @@ def _emit_run_snapshot(
             "Kitaru run",
             [
                 ("Target", target),
-                ("Invocation", "deploy" if stack else "run"),
+                ("Invocation", "deploy" if runner else "run"),
                 ("Execution ID", exec_id),
             ],
             warning=(
@@ -937,7 +937,7 @@ def _emit_run_snapshot(
 
     _emit_snapshot(
         "Kitaru run",
-        _run_rows(target=target, stack=stack, execution=execution),
+        _run_rows(target=target, runner=runner, execution=execution),
     )
 
 
@@ -1266,7 +1266,7 @@ def _log_store_payload(snapshot: ResolvedLogStore) -> dict[str, Any]:
     _, mismatch_warning = _log_store_mismatch_details(snapshot)
     return serialize_resolved_log_store(
         snapshot,
-        active_store=active_stack_log_store(),
+        active_store=active_runner_log_store(),
         warning=mismatch_warning,
     )
 
@@ -1274,13 +1274,13 @@ def _log_store_payload(snapshot: ResolvedLogStore) -> dict[str, Any]:
 def _run_payload(
     *,
     target: str,
-    stack: str | None,
+    runner: str | None,
     exec_id: str,
 ) -> dict[str, Any]:
     """Build a structured payload for `kitaru run` JSON output."""
     payload: dict[str, Any] = {
         "target": target,
-        "invocation": "deploy" if stack else "run",
+        "invocation": "deploy" if runner else "run",
         "exec_id": exec_id,
         "execution": None,
         "warning": None,
@@ -1486,13 +1486,13 @@ def reset(output: OutputFormatOption = "text") -> None:
     )
 
 
-@stack_app.command
+@runner_app.command
 def list_(output: OutputFormatOption = "text") -> None:
-    """List stacks visible to the current user."""
-    command = "stack.list"
+    """List runners visible to the current user."""
+    command = "runner.list"
     output_format = _resolve_output_format(output)
     try:
-        stacks = get_available_stacks()
+        runners = get_available_runners()
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
@@ -1504,21 +1504,21 @@ def list_(output: OutputFormatOption = "text") -> None:
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(
             command,
-            [serialize_stack(stack) for stack in stacks],
+            [serialize_runner(runner) for runner in runners],
             output=output_format,
         )
         return
 
-    _emit_snapshot("Kitaru stacks", _stack_list_rows(stacks))
+    _emit_snapshot("Kitaru runners", _runner_list_rows(runners))
 
 
-@stack_app.command
+@runner_app.command
 def current(output: OutputFormatOption = "text") -> None:
-    """Show the currently active stack."""
-    command = "stack.current"
+    """Show the currently active runner."""
+    command = "runner.current"
     output_format = _resolve_output_format(output)
     try:
-        stack = get_current_stack()
+        runner = get_current_runner()
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
@@ -1528,25 +1528,25 @@ def current(output: OutputFormatOption = "text") -> None:
         )
 
     if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, serialize_stack(stack), output=output_format)
+        _emit_json_item(command, serialize_runner(runner), output=output_format)
         return
 
-    _emit_snapshot("Kitaru stack", _current_stack_rows(stack))
+    _emit_snapshot("Kitaru runner", _current_runner_rows(runner))
 
 
-@stack_app.command
+@runner_app.command
 def use(
-    stack: Annotated[
+    runner: Annotated[
         str,
-        Parameter(help="Stack name or ID to activate."),
+        Parameter(help="Runner name or ID to activate."),
     ],
     output: OutputFormatOption = "text",
 ) -> None:
-    """Use a stack as the active default by name or ID."""
-    command = "stack.use"
+    """Use a runner as the active default by name or ID."""
+    command = "runner.use"
     output_format = _resolve_output_format(output)
     try:
-        selected_stack = set_active_stack(stack)
+        selected_runner = set_active_runner(runner)
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
@@ -1556,12 +1556,14 @@ def use(
         )
 
     if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, serialize_stack(selected_stack), output=output_format)
+        _emit_json_item(
+            command, serialize_runner(selected_runner), output=output_format
+        )
         return
 
     _print_success(
-        f"Activated stack: {selected_stack.name}",
-        detail=f"Stack ID: {selected_stack.id}",
+        f"Activated runner: {selected_runner.name}",
+        detail=f"Runner ID: {selected_runner.id}",
     )
 
 
@@ -1823,9 +1825,9 @@ def run(
             )
         ),
     ] = None,
-    stack: Annotated[
+    runner: Annotated[
         str | None,
-        Parameter(help="Optional stack name/ID for deploy-style execution."),
+        Parameter(help="Optional runner name/ID for deploy-style execution."),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
@@ -1834,7 +1836,7 @@ def run(
     output_format = _resolve_output_format(output)
     use_live = (
         is_terminal_interactive()
-        and not stack
+        and not runner
         and output_format == CLIOutputFormat.TEXT
     )
 
@@ -1848,8 +1850,8 @@ def run(
                 target=target,
                 flow_inputs=flow_inputs,
             )
-        elif stack:
-            handle = flow_target.deploy(stack=stack, **flow_inputs)
+        elif runner:
+            handle = flow_target.deploy(runner=runner, **flow_inputs)
         else:
             handle = flow_target.run(**flow_inputs)
 
@@ -1871,13 +1873,13 @@ def run(
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
-            _run_payload(target=target, stack=stack, exec_id=handle.exec_id),
+            _run_payload(target=target, runner=runner, exec_id=handle.exec_id),
             output=output_format,
         )
         return
 
     _print_success(f"Started flow execution: {handle.exec_id}")
-    _emit_run_snapshot(target=target, stack=stack, exec_id=handle.exec_id)
+    _emit_run_snapshot(target=target, runner=runner, exec_id=handle.exec_id)
 
 
 @executions_app.command
@@ -2300,7 +2302,7 @@ def cancel_(
 
 @app.command
 def status(output: OutputFormatOption = "text") -> None:
-    """Show the current connection state and active stack context."""
+    """Show the current connection state and active runner context."""
     output_format = _resolve_output_format(output)
     snapshot = _build_runtime_snapshot()
     if output_format == CLIOutputFormat.JSON:

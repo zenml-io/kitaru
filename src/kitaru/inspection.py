@@ -29,13 +29,13 @@ from kitaru.client import (
 from kitaru.config import (
     KITARU_PROJECT_ENV,
     ActiveEnvironmentVariable,
-    ActiveStackLogStore,
+    ActiveRunnerLogStore,
     ModelAliasEntry,
     ResolvedLogStore,
-    StackInfo,
+    RunnerInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
-    active_stack_log_store,
+    active_runner_log_store,
     list_active_kitaru_environment_variables,
     resolve_log_store,
 )
@@ -52,7 +52,7 @@ class RuntimeSnapshot:
     server_url: str | None = None
     active_user: str | None = None
     project_override: str | None = None
-    active_stack: str | None = None
+    active_runner: str | None = None
     repository_root: str | None = None
     server_version: str | None = None
     server_database: str | None = None
@@ -113,7 +113,7 @@ def _build_snapshot_without_local_store(
         warning=(
             "Local Kitaru runtime support is unavailable in this environment. "
             "Connect to a Kitaru server to keep working, or install the local "
-            "runtime dependencies if you want the built-in local stack."
+            "runtime dependencies if you want the built-in local runner."
         ),
         environment=list_active_kitaru_environment_variables(),
     )
@@ -140,24 +140,25 @@ def log_store_mismatch_details(
     if preferred.source == "default":
         return None, None
 
-    active_store = active_stack_log_store()
+    active_store = active_runner_log_store()
     if active_store is None:
         return None, None
 
     if active_store.backend == preferred.backend:
         return None, None
 
-    status_row = f"{preferred.backend} (preferred) ⚠ stack uses {active_store.backend}"
+    status_row = f"{preferred.backend} (preferred) ⚠ runner uses {active_store.backend}"
 
     active_label = active_store.backend
-    if active_store.stack_name:
-        active_label = f"{active_store.backend} (stack: {active_store.stack_name})"
+    if active_store.runner_name:
+        active_label = f"{active_store.backend} (runner: {active_store.runner_name})"
 
     warning = "\n".join(
         [
-            f"Active ZenML stack uses: {active_label}",
-            "The Kitaru log-store preference is not wired into stack selection yet.",
-            "Actual runtime logs go to the stack's log store, not this preference.",
+            f"Active runner uses: {active_label}",
+            "The Kitaru log-store preference is not wired into runner selection yet.",
+            "Actual runtime logs go to the active runner's ZenML stack log "
+            "store, not this preference.",
         ]
     )
     return status_row, warning
@@ -219,7 +220,7 @@ def build_runtime_snapshot() -> RuntimeSnapshot:
         client = Client()
         store_info = client.zen_store.get_store_info()
         snapshot.active_user = client.active_user.name
-        snapshot.active_stack = client.active_stack_model.name
+        snapshot.active_runner = client.active_stack_model.name
         snapshot.repository_root = str(client.root) if client.root else None
         snapshot.server_version = str(store_info.version)
         snapshot.server_database = str(store_info.database_type)
@@ -375,7 +376,7 @@ def serialize_execution_summary(execution: Execution) -> dict[str, Any]:
         "status": execution.status.value,
         "started_at": to_jsonable(execution.started_at, fallback_repr=True),
         "ended_at": to_jsonable(execution.ended_at, fallback_repr=True),
-        "stack_name": execution.stack_name,
+        "runner_name": execution.runner_name,
         "status_reason": execution.status_reason,
         "pending_wait": serialize_pending_wait(execution.pending_wait),
         "failure": serialize_failure(execution.failure),
@@ -404,12 +405,12 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
     }
 
 
-def serialize_stack(stack: StackInfo) -> dict[str, Any]:
-    """Serialize stack information for structured output."""
+def serialize_runner(runner: RunnerInfo) -> dict[str, Any]:
+    """Serialize runner information for structured output."""
     return {
-        "id": stack.id,
-        "name": stack.name,
-        "is_active": stack.is_active,
+        "id": runner.id,
+        "name": runner.name,
+        "is_active": runner.is_active,
     }
 
 
@@ -482,7 +483,7 @@ def serialize_secret_detail(
 def serialize_resolved_log_store(
     snapshot: ResolvedLogStore,
     *,
-    active_store: ActiveStackLogStore | None = None,
+    active_store: ActiveRunnerLogStore | None = None,
     warning: str | None = None,
 ) -> dict[str, Any]:
     """Serialize effective log-store information."""
@@ -491,7 +492,7 @@ def serialize_resolved_log_store(
         "endpoint": snapshot.endpoint,
         "api_key_configured": bool(snapshot.api_key),
         "source": snapshot.source,
-        "active_stack_backend": active_store.backend if active_store else None,
-        "active_stack_name": active_store.stack_name if active_store else None,
+        "active_runner_backend": active_store.backend if active_store else None,
+        "active_runner_name": active_store.runner_name if active_store else None,
         "warning": warning,
     }

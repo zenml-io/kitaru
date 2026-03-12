@@ -50,20 +50,20 @@ ImageSetting = ImageInput
 
 
 @contextmanager
-def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
-    """Temporarily activate a stack for one flow invocation.
+def _temporary_active_runner(runner_name_or_id: str | None) -> Iterator[None]:
+    """Temporarily activate a runner for one flow invocation.
 
     Args:
-        stack_name_or_id: Optional stack name or ID. When ``None``, the
+        runner_name_or_id: Optional runner name or ID. When ``None``, the
             currently active ZenML stack is used unchanged.
     """
-    if not stack_name_or_id:
+    if not runner_name_or_id:
         yield
         return
 
     client = Client()
     old_stack_id = client.active_stack_model.id
-    client.activate_stack(stack_name_or_id)
+    client.activate_stack(runner_name_or_id)
     try:
         yield
     finally:
@@ -175,15 +175,15 @@ def _build_settings(
 
 def _build_execution_overrides(
     *,
-    stack: str | None = None,
+    runner: str | None = None,
     image: ImageSetting | None = None,
     cache: bool | None = None,
     retries: int | None = None,
 ) -> KitaruConfig:
     """Build a partial execution config from flow/run/deploy overrides."""
     values: dict[str, Any] = {}
-    if stack is not None:
-        values["stack"] = stack
+    if runner is not None:
+        values["runner"] = runner
     if image is not None:
         values["image"] = image
     if cache is not None:
@@ -406,7 +406,7 @@ class _FlowDefinition:
         self,
         func: Callable[..., Any],
         *,
-        stack: str | None,
+        runner: str | None,
         image: ImageSetting | None,
         cache: bool | None,
         retries: int | None,
@@ -415,14 +415,14 @@ class _FlowDefinition:
 
         Args:
             func: User flow function.
-            stack: Default stack override.
+            runner: Default runner override.
             image: Default image settings.
             cache: Default cache behavior.
             retries: Default retry count.
         """
         self._func = func
         self._decorator_config = _build_execution_overrides(
-            stack=stack,
+            runner=runner,
             image=image,
             cache=cache,
             retries=retries,
@@ -454,7 +454,7 @@ class _FlowDefinition:
     def run(
         self,
         *args: Any,
-        stack: str | None = None,
+        runner: str | None = None,
         image: ImageSetting | None = None,
         cache: bool | None = None,
         retries: int | None = None,
@@ -464,7 +464,7 @@ class _FlowDefinition:
 
         Args:
             *args: Flow input args.
-            stack: Optional stack override.
+            runner: Optional runner override.
             image: Optional image override.
             cache: Optional cache override.
             retries: Optional retry override.
@@ -477,7 +477,7 @@ class _FlowDefinition:
             args=args,
             kwargs=kwargs,
             invocation_overrides=_build_execution_overrides(
-                stack=stack,
+                runner=runner,
                 image=image,
                 cache=cache,
                 retries=retries,
@@ -490,7 +490,7 @@ class _FlowDefinition:
         *,
         from_: str,
         overrides: dict[str, Any] | None = None,
-        stack: str | None = None,
+        runner: str | None = None,
         image: ImageSetting | None = None,
         cache: bool | None = None,
         retries: int | None = None,
@@ -502,7 +502,7 @@ class _FlowDefinition:
             exec_id: Source execution ID.
             from_: Checkpoint selector (name, invocation ID, or call ID).
             overrides: Optional `checkpoint.*` override map.
-            stack: Optional stack override for the replay run.
+            runner: Optional runner override for the replay run.
             image: Optional image override for the replay run.
             cache: Optional cache override for the replay run.
             retries: Optional retry override for the replay run.
@@ -534,7 +534,7 @@ class _FlowDefinition:
         resolved_execution = resolve_execution_config(
             decorator_overrides=self._decorator_config,
             invocation_overrides=_build_execution_overrides(
-                stack=stack,
+                runner=runner,
                 image=image,
                 cache=cache,
                 retries=retries,
@@ -551,7 +551,7 @@ class _FlowDefinition:
             settings=_build_settings(resolved_execution.image),
         )
 
-        with _temporary_active_stack(resolved_execution.stack):
+        with _temporary_active_runner(resolved_execution.runner):
             try:
                 replayed_run = configured_pipeline.replay(
                     pipeline_run=original_run.id,
@@ -619,7 +619,7 @@ class _FlowDefinition:
             settings=_build_settings(resolved_execution.image),
         )
 
-        with _temporary_active_stack(resolved_execution.stack):
+        with _temporary_active_runner(resolved_execution.runner):
             run = configured_pipeline(*args, **kwargs)
 
         if run is None:
@@ -634,7 +634,7 @@ class _FlowDefinition:
     def deploy(
         self,
         *args: Any,
-        stack: str | None = None,
+        runner: str | None = None,
         image: ImageSetting | None = None,
         cache: bool | None = None,
         retries: int | None = None,
@@ -642,11 +642,11 @@ class _FlowDefinition:
     ) -> FlowHandle:
         """Run a flow execution, signaling remote/deployment intent.
 
-        This is semantic sugar for `.run(..., stack=...)`.
+        This is semantic sugar for `.run(..., runner=...)`.
 
         Args:
             *args: Flow input args.
-            stack: Optional stack override.
+            runner: Optional runner override.
             image: Optional image override.
             cache: Optional cache override.
             retries: Optional retry override.
@@ -657,7 +657,7 @@ class _FlowDefinition:
         """
         return self.run(
             *args,
-            stack=stack,
+            runner=runner,
             image=image,
             cache=cache,
             retries=retries,
@@ -672,7 +672,7 @@ def flow(func: Callable[..., Any], /) -> _FlowDefinition: ...
 @overload
 def flow(
     *,
-    stack: str | None = None,
+    runner: str | None = None,
     image: ImageSetting | None = None,
     cache: bool | None = None,
     retries: int | None = None,
@@ -682,7 +682,7 @@ def flow(
 def flow(
     func: Callable[..., Any] | None = None,
     *,
-    stack: str | None = None,
+    runner: str | None = None,
     image: ImageSetting | None = None,
     cache: bool | None = None,
     retries: int | None = None,
@@ -695,13 +695,13 @@ def flow(
         def my_flow(...):
             ...
 
-        @flow(stack="prod", retries=2)
+        @flow(runner="prod", retries=2)
         def my_other_flow(...):
             ...
 
     Args:
         func: Optional function for bare decorator use.
-        stack: Default execution stack.
+        runner: Default execution runner.
         image: Default image settings.
         cache: Optional cache override (when omitted, lower-precedence config
             sources apply and eventually default to ``True``).
@@ -715,7 +715,7 @@ def flow(
     def _decorate(target: Callable[..., Any]) -> _FlowDefinition:
         return _FlowDefinition(
             target,
-            stack=stack,
+            runner=runner,
             image=image,
             cache=cache,
             retries=retries,

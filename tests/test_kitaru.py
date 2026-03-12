@@ -77,14 +77,14 @@ class TestPublicExports:
     def test_connect_exists(self) -> None:
         assert hasattr(kitaru, "connect")
 
-    def test_list_stacks_exists(self) -> None:
-        assert hasattr(kitaru, "list_stacks")
+    def test_list_runners_exists(self) -> None:
+        assert hasattr(kitaru, "list_runners")
 
-    def test_current_stack_exists(self) -> None:
-        assert hasattr(kitaru, "current_stack")
+    def test_current_runner_exists(self) -> None:
+        assert hasattr(kitaru, "current_runner")
 
-    def test_use_stack_exists(self) -> None:
-        assert hasattr(kitaru, "use_stack")
+    def test_use_runner_exists(self) -> None:
+        assert hasattr(kitaru, "use_runner")
 
     def test_kitaru_client_exists(self) -> None:
         assert hasattr(kitaru, "KitaruClient")
@@ -107,18 +107,18 @@ class TestPublicExports:
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",
-            "StackInfo",
+            "RunnerInfo",
             "checkpoint",
             "configure",
             "connect",
-            "current_stack",
+            "current_runner",
             "flow",
-            "list_stacks",
+            "list_runners",
             "llm",
             "load",
             "log",
             "save",
-            "use_stack",
+            "use_runner",
             "wait",
         }
         assert set(kitaru.__all__) == expected
@@ -226,16 +226,16 @@ class TestImplementedConnectionPrimitive:
         with pytest.raises(ValueError, match="Invalid Kitaru server URL"):
             kitaru.connect("example.com")
 
-    def test_current_stack_returns_stack_info(self) -> None:
+    def test_current_runner_returns_runner_info(self) -> None:
         with patch("kitaru.config.Client") as client_cls:
             client_cls.return_value.active_stack_model.id = "stack-prod-id"
             client_cls.return_value.active_stack_model.name = "prod"
 
-            stack = kitaru.current_stack()
+            runner = kitaru.current_runner()
 
-        assert stack.name == "prod"
-        assert stack.id == "stack-prod-id"
-        assert stack.is_active is True
+        assert runner.name == "prod"
+        assert runner.id == "stack-prod-id"
+        assert runner.is_active is True
 
 
 class TestPlaceholderBehavior:

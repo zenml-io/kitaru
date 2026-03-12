@@ -43,7 +43,7 @@ def _execution_stub(
     exec_id: str,
     flow_name: str,
     status: ExecutionStatus,
-    stack_name: str | None = "prod",
+    runner_name: str | None = "prod",
     pending_wait: SimpleNamespace | None = None,
     failure: SimpleNamespace | None = None,
     status_reason: str | None = None,
@@ -56,7 +56,7 @@ def _execution_stub(
         status=status,
         started_at=datetime(2026, 3, 7, 10, 0, 0),
         ended_at=datetime(2026, 3, 7, 10, 1, 0),
-        stack_name=stack_name,
+        runner_name=runner_name,
         pending_wait=pending_wait,
         failure=failure,
         status_reason=status_reason,
@@ -125,7 +125,7 @@ def test_help_flag_lists_available_commands(
         "status",
         "info",
         "log-store",
-        "stack",
+        "runner",
         "secrets",
         "model",
         "executions",
@@ -212,13 +212,13 @@ def test_executions_list_applies_filters(
             exec_id="kr-200",
             flow_name="content_pipeline",
             status=ExecutionStatus.WAITING,
-            stack_name="prod",
+            runner_name="prod",
         ),
         _execution_stub(
             exec_id="kr-199",
             flow_name="content_pipeline",
             status=ExecutionStatus.RUNNING,
-            stack_name="prod",
+            runner_name="prod",
         ),
     ]
 
@@ -247,7 +247,7 @@ def test_executions_list_applies_filters(
     )
     output = capsys.readouterr().out
     assert "Kitaru executions" in output
-    assert "kr-200: content_pipeline | waiting | stack=prod" in output
+    assert "kr-200: content_pipeline | waiting | runner=prod" in output
 
 
 def test_executions_logs_renders_default_output(
@@ -883,10 +883,10 @@ def test_run_reports_exec_id_when_detail_lookup_fails(
     assert "Warning: Execution started successfully" in output
 
 
-def test_run_uses_deploy_when_stack_is_provided(
+def test_run_uses_deploy_when_runner_is_provided(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru run --stack` should call `.deploy(...)` on the flow."""
+    """`kitaru run --runner` should call `.deploy(...)` on the flow."""
     fake_flow = SimpleNamespace(
         run=Mock(),
         deploy=Mock(return_value=SimpleNamespace(exec_id="kr-601")),
@@ -896,7 +896,7 @@ def test_run_uses_deploy_when_stack_is_provided(
         exec_id="kr-601",
         flow_name="content_pipeline",
         status=ExecutionStatus.RUNNING,
-        stack_name="prod",
+        runner_name="prod",
     )
 
     with (
@@ -908,7 +908,7 @@ def test_run_uses_deploy_when_stack_is_provided(
             [
                 "run",
                 "agent.py:content_pipeline",
-                "--stack",
+                "--runner",
                 "prod",
                 "--args",
                 '{"topic": "AI safety"}',
@@ -917,7 +917,7 @@ def test_run_uses_deploy_when_stack_is_provided(
 
     assert exc_info.value.code == 0
     fake_flow.run.assert_not_called()
-    fake_flow.deploy.assert_called_once_with(stack="prod", topic="AI safety")
+    fake_flow.deploy.assert_called_once_with(runner="prod", topic="AI safety")
     output = capsys.readouterr().out
     assert "Invocation: deploy" in output
 
@@ -1249,13 +1249,21 @@ def test_log_store_show_renders_snapshot(
     assert "Source: environment" in output
 
 
-def test_log_store_show_warns_on_stack_mismatch(
+def test_log_store_show_warns_on_runner_mismatch(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru log-store show` should explain preference vs active-stack mismatch."""
+    """`kitaru log-store show` should explain preference vs active-runner mismatch."""
     with (
         patch("kitaru.cli.resolve_log_store") as mock_resolve,
-        patch("kitaru.cli.active_stack_log_store") as mock_active,
+        patch(
+            "kitaru.cli._log_store_mismatch_details",
+            return_value=(
+                "datadog (preferred) ⚠ runner uses artifact-store",
+                "Active runner uses: artifact-store (runner: local)\n"
+                "The Kitaru log-store preference is not wired into runner "
+                "selection yet.",
+            ),
+        ),
         pytest.raises(SystemExit) as exc_info,
     ):
         mock_resolve.return_value = SimpleNamespace(
@@ -1264,17 +1272,12 @@ def test_log_store_show_warns_on_stack_mismatch(
             api_key="top-secret",
             source="global user config",
         )
-        mock_active.return_value = SimpleNamespace(
-            backend="artifact-store",
-            endpoint=None,
-            stack_name="local",
-        )
         app(["log-store", "show"])
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "Active ZenML stack uses: artifact-store" in output
-    assert "not wired into stack selection yet" in output
+    assert "Active runner uses: artifact-store (runner: local)" in output
+    assert "not wired into runner selection yet" in output
 
 
 def test_log_store_set_reports_environment_override(
@@ -1835,86 +1838,86 @@ def test_secrets_delete_surfaces_backend_errors(
     assert "already deleted" in capsys.readouterr().err
 
 
-def test_stack_list_renders_snapshot(
+def test_runner_list_renders_snapshot(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru stack list` should render visible stacks and active marker."""
+    """`kitaru runner list` should render visible runners and active marker."""
     with (
-        patch("kitaru.cli.get_available_stacks") as mock_list_stacks,
+        patch("kitaru.cli.get_available_runners") as mock_list_runners,
         pytest.raises(SystemExit) as exc_info,
     ):
-        mock_list_stacks.return_value = [
+        mock_list_runners.return_value = [
             SimpleNamespace(id="stack-local-id", name="local", is_active=False),
             SimpleNamespace(id="stack-prod-id", name="prod", is_active=True),
         ]
-        app(["stack", "list"])
+        app(["runner", "list"])
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "Kitaru stacks" in output
+    assert "Kitaru runners" in output
     assert "local: stack-local-id" in output
     assert "prod: stack-prod-id (active)" in output
 
 
-def test_stack_current_renders_snapshot(
+def test_runner_current_renders_snapshot(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru stack current` should show active stack details."""
+    """`kitaru runner current` should show active runner details."""
     with (
-        patch("kitaru.cli.get_current_stack") as mock_current_stack,
+        patch("kitaru.cli.get_current_runner") as mock_current_runner,
         pytest.raises(SystemExit) as exc_info,
     ):
-        mock_current_stack.return_value = SimpleNamespace(
+        mock_current_runner.return_value = SimpleNamespace(
             id="stack-prod-id",
             name="prod",
             is_active=True,
         )
-        app(["stack", "current"])
+        app(["runner", "current"])
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "Kitaru stack" in output
-    assert "Active stack: prod" in output
-    assert "Stack ID: stack-prod-id" in output
+    assert "Kitaru runner" in output
+    assert "Active runner: prod" in output
+    assert "Runner ID: stack-prod-id" in output
 
 
-def test_stack_use_delegates_to_config(
+def test_runner_use_delegates_to_config(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru stack use` should activate and report the selected stack."""
+    """`kitaru runner use` should activate and report the selected runner."""
     with (
-        patch("kitaru.cli.set_active_stack") as mock_use_stack,
+        patch("kitaru.cli.set_active_runner") as mock_use_runner,
         pytest.raises(SystemExit) as exc_info,
     ):
-        mock_use_stack.return_value = SimpleNamespace(
+        mock_use_runner.return_value = SimpleNamespace(
             id="stack-prod-id",
             name="prod",
             is_active=True,
         )
-        app(["stack", "use", "prod"])
+        app(["runner", "use", "prod"])
 
     assert exc_info.value.code == 0
-    mock_use_stack.assert_called_once_with("prod")
+    mock_use_runner.assert_called_once_with("prod")
     output = capsys.readouterr().out
-    assert "Activated stack: prod" in output
-    assert "Stack ID: stack-prod-id" in output
+    assert "Activated runner: prod" in output
+    assert "Runner ID: stack-prod-id" in output
 
 
-def test_stack_use_surfaces_validation_errors(
+def test_runner_use_surfaces_validation_errors(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Stack validation errors should surface as CLI-friendly failures."""
+    """Runner validation errors should surface as CLI-friendly failures."""
     with (
         patch(
-            "kitaru.cli.set_active_stack",
-            side_effect=ValueError("Stack name or ID cannot be empty."),
+            "kitaru.cli.set_active_runner",
+            side_effect=ValueError("Runner name or ID cannot be empty."),
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["stack", "use", "prod"])
+        app(["runner", "use", "prod"])
 
     assert exc_info.value.code == 1
-    assert "Stack name or ID cannot be empty." in capsys.readouterr().err
+    assert "Runner name or ID cannot be empty." in capsys.readouterr().err
 
 
 def test_status_renders_compact_snapshot(
@@ -1927,7 +1930,7 @@ def test_status_renders_compact_snapshot(
         connection_target="https://example.com",
         server_url="https://example.com",
         active_user="alice",
-        active_stack="prod",
+        active_runner="prod",
         config_directory="/tmp/kitaru-config",
         local_server_status="not started",
     )
@@ -1942,7 +1945,7 @@ def test_status_renders_compact_snapshot(
     output = capsys.readouterr().out
     assert "Kitaru status" in output
     assert "Connection: remote Kitaru server" in output
-    assert "Active stack: prod" in output
+    assert "Active runner: prod" in output
     assert "Config directory: /tmp/kitaru-config" in output
     assert "Project override" not in output
     assert "Environment" not in output
@@ -1958,7 +1961,7 @@ def test_status_renders_environment_section_with_masking(
         connection_target="https://example.com",
         server_url="https://example.com",
         active_user="alice",
-        active_stack="prod",
+        active_runner="prod",
         config_directory="/tmp/kitaru-config",
         local_server_status="not started",
         environment=[
@@ -1996,13 +1999,13 @@ def test_status_renders_log_store_mismatch_warning(
         connection_target="https://example.com",
         server_url="https://example.com",
         active_user="alice",
-        active_stack="prod",
+        active_runner="prod",
         config_directory="/tmp/kitaru-config",
         local_server_status="not started",
-        log_store_status="datadog (preferred) ⚠ stack uses artifact-store",
+        log_store_status="datadog (preferred) ⚠ runner uses artifact-store",
         log_store_warning=(
-            "Active ZenML stack uses: artifact-store\n"
-            "The Kitaru log-store preference is not wired into stack selection yet."
+            "Active ZenML runner uses: artifact-store\n"
+            "The Kitaru log-store preference is not wired into runner selection yet."
         ),
     )
 
@@ -2014,8 +2017,8 @@ def test_status_renders_log_store_mismatch_warning(
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "Log store: datadog (preferred) ⚠ stack uses artifact-store" in output
-    assert "Active ZenML stack uses: artifact-store" in output
+    assert "Log store: datadog (preferred) ⚠ runner uses artifact-store" in output
+    assert "Active ZenML runner uses: artifact-store" in output
 
 
 def test_info_renders_detailed_snapshot(
@@ -2028,7 +2031,7 @@ def test_info_renders_detailed_snapshot(
         connection_target="https://example.com",
         server_url="https://example.com",
         active_user="alice",
-        active_stack="prod",
+        active_runner="prod",
         repository_root="/work/repo",
         server_version="0.94.0",
         server_database="sqlite",
@@ -2062,7 +2065,7 @@ def test_info_shows_project_override_when_set(
         connection_target="https://example.com",
         server_url="https://example.com",
         active_user="alice",
-        active_stack="prod",
+        active_runner="prod",
         config_directory="/tmp/kitaru-config",
         project_override="staging-project",
     )
@@ -2135,21 +2138,21 @@ def test_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     }
 
 
-def test_stack_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru stack list --output json` should emit serialized stacks."""
+def test_runner_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru runner list --output json` should emit serialized runners."""
     with (
-        patch("kitaru.cli.get_available_stacks") as mock_list_stacks,
+        patch("kitaru.cli.get_available_runners") as mock_list_runners,
         pytest.raises(SystemExit) as exc_info,
     ):
-        mock_list_stacks.return_value = [
+        mock_list_runners.return_value = [
             SimpleNamespace(id="stack-local-id", name="local", is_active=False),
             SimpleNamespace(id="stack-prod-id", name="prod", is_active=True),
         ]
-        app(["stack", "list", "--output", "json"])
+        app(["runner", "list", "--output", "json"])
 
     assert exc_info.value.code == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["command"] == "stack.list"
+    assert payload["command"] == "runner.list"
     assert payload["count"] == 2
     assert payload["items"][1]["is_active"] is True
 
@@ -2221,7 +2224,7 @@ def test_status_json_output(capsys: pytest.CaptureFixture[str]) -> None:
         connection_target="https://example.com",
         server_url="https://example.com",
         active_user="alice",
-        active_stack="prod",
+        active_runner="prod",
         config_directory="/tmp/kitaru-config",
         local_server_status="not started",
     )
@@ -2236,7 +2239,7 @@ def test_status_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "status"
     assert payload["item"]["connection"] == "remote Kitaru server"
-    assert payload["item"]["active_stack"] == "prod"
+    assert payload["item"]["active_runner"] == "prod"
 
 
 def test_build_runtime_snapshot_handles_missing_local_store() -> None:

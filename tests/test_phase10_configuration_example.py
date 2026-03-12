@@ -14,7 +14,7 @@ def test_phase10_configuration_example_runs_end_to_end() -> None:
     assert frozen_execution_spec["version"] == 1
 
     resolved = frozen_execution_spec["resolved_execution"]
-    assert resolved["stack"] == "default"
+    assert resolved["runner"] == "default"
     assert resolved["cache"] is True
     assert resolved["retries"] == 3
     assert resolved["image"]["base_image"] == "python:3.12-slim"

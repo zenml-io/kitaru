@@ -3,7 +3,7 @@
 This module contains:
 
 - global config helpers for runtime log-store settings
-- stack-selection helpers
+- runner-selection helpers
 - runtime configuration via ``kitaru.configure(...)``
 - config precedence resolution for execution and connection settings
 """
@@ -62,7 +62,7 @@ KITARU_LOG_STORE_BACKEND_ENV = "KITARU_LOG_STORE_BACKEND"
 KITARU_LOG_STORE_ENDPOINT_ENV = "KITARU_LOG_STORE_ENDPOINT"
 KITARU_LOG_STORE_API_KEY_ENV = "KITARU_LOG_STORE_API_KEY"
 
-KITARU_STACK_ENV = "KITARU_STACK"
+KITARU_RUNNER_ENV = "KITARU_RUNNER"
 KITARU_CACHE_ENV = "KITARU_CACHE"
 KITARU_RETRIES_ENV = "KITARU_RETRIES"
 KITARU_IMAGE_ENV = "KITARU_IMAGE"
@@ -162,12 +162,12 @@ class ResolvedLogStore(BaseModel):
     ]
 
 
-class ActiveStackLogStore(BaseModel):
-    """Active stack log-store backend resolved from the current ZenML stack."""
+class ActiveRunnerLogStore(BaseModel):
+    """Active runner log-store backend resolved from the current ZenML stack."""
 
     backend: str
     endpoint: str | None = None
-    stack_name: str | None = None
+    runner_name: str | None = None
 
 
 class ModelAliasConfig(BaseModel):
@@ -261,8 +261,8 @@ class _KitaruGlobalConfig(BaseModel):
     model_registry: ModelRegistryConfig | None = None
 
 
-class StackInfo(BaseModel):
-    """Public stack information exposed by Kitaru SDK helpers."""
+class RunnerInfo(BaseModel):
+    """Public runner information exposed by Kitaru SDK helpers."""
 
     id: str
     name: str
@@ -338,7 +338,7 @@ ImageInput = str | DockerSettings | Mapping[str, Any] | ImageSettings
 class KitaruConfig(BaseModel):
     """Unified Kitaru configuration model."""
 
-    stack: str | None = None
+    runner: str | None = None
     image: ImageSettings | None = None
     cache: bool | None = None
     retries: int | None = None
@@ -348,7 +348,7 @@ class KitaruConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    @field_validator("stack", "auth_token", "project")
+    @field_validator("runner", "auth_token", "project")
     @classmethod
     def _normalize_optional_non_empty(cls, value: str | None) -> str | None:
         if value is None:
@@ -383,19 +383,19 @@ class KitaruConfig(BaseModel):
 class ResolvedExecutionConfig(BaseModel):
     """Fully resolved execution settings for a flow run."""
 
-    stack: str | None = None
+    runner: str | None = None
     image: ImageSettings | None = None
     cache: bool
     retries: int
 
-    @field_validator("stack")
+    @field_validator("runner")
     @classmethod
-    def _validate_stack(cls, value: str | None) -> str | None:
+    def _validate_runner(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized_value = value.strip()
         if not normalized_value:
-            raise ValueError("Stack cannot be empty.")
+            raise ValueError("Runner cannot be empty.")
         return normalized_value
 
     @field_validator("retries")
@@ -429,6 +429,29 @@ class FrozenExecutionSpec(BaseModel):
     resolved_execution: ResolvedExecutionConfig
     flow_defaults: KitaruConfig
     connection: ResolvedConnectionConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_stack_fields(
+        cls,
+        value: Any,
+    ) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+
+        normalized = dict(value)
+        for field_name in ("resolved_execution", "flow_defaults"):
+            field_value = normalized.get(field_name)
+            if not isinstance(field_value, Mapping):
+                continue
+            if "runner" in field_value or "stack" not in field_value:
+                continue
+            normalized[field_name] = {
+                **field_value,
+                "runner": field_value["stack"],
+            }
+
+        return normalized
 
 
 _RUNTIME_EXECUTION_OVERRIDES: dict[str, Any] = {}
@@ -574,6 +597,11 @@ def _read_project_config(start_dir: Path | None = None) -> KitaruConfig:
         raise ValueError(
             f"Invalid {pyproject_path}: expected [tool.kitaru] to be a table."
         )
+    if "stack" in kitaru_config:
+        raise ValueError(
+            f"Invalid {pyproject_path}: `[tool.kitaru].stack` was renamed to "
+            "`[tool.kitaru].runner`."
+        )
 
     return KitaruConfig.model_validate(kitaru_config)
 
@@ -582,9 +610,15 @@ def _read_execution_env_config() -> KitaruConfig:
     """Read execution-related Kitaru config values from environment."""
     values: dict[str, Any] = {}
 
-    raw_stack = os.environ.get(KITARU_STACK_ENV)
-    if raw_stack is not None:
-        values["stack"] = raw_stack
+    raw_legacy_stack = os.environ.get("KITARU_STACK")
+    if raw_legacy_stack is not None:
+        raise ValueError(
+            "`KITARU_STACK` was renamed to `KITARU_RUNNER`; use the new name."
+        )
+
+    raw_runner = os.environ.get(KITARU_RUNNER_ENV)
+    if raw_runner is not None:
+        values["runner"] = raw_runner
 
     raw_cache = os.environ.get(KITARU_CACHE_ENV)
     if raw_cache is not None:
@@ -655,11 +689,11 @@ def _read_zenml_connection_env_config() -> KitaruConfig:
 def _read_global_execution_config() -> KitaruConfig:
     """Read execution defaults from global user config/runtime state."""
     try:
-        active_stack_name = current_stack().name
+        active_runner_name = current_runner().name
     except Exception:
-        active_stack_name = None
+        active_runner_name = None
 
-    return KitaruConfig(stack=active_stack_name)
+    return KitaruConfig(runner=active_runner_name)
 
 
 def _extract_store_token(store: Any) -> str | None:
@@ -728,7 +762,7 @@ def _merge_execution_layer(
             merged_image = None
 
     return ResolvedExecutionConfig(
-        stack=layer.stack if layer.stack is not None else resolved.stack,
+        runner=layer.runner if layer.runner is not None else resolved.runner,
         image=merged_image,
         cache=layer.cache if layer.cache is not None else resolved.cache,
         retries=layer.retries if layer.retries is not None else resolved.retries,
@@ -780,7 +814,7 @@ def resolve_execution_config(
 ) -> ResolvedExecutionConfig:
     """Resolve execution configuration according to Phase 10 precedence."""
     resolved = ResolvedExecutionConfig(
-        stack=None,
+        runner=None,
         image=None,
         cache=True,
         retries=0,
@@ -1256,8 +1290,8 @@ def _extract_log_store_endpoint(log_store: Any) -> str | None:
     return normalized
 
 
-def active_stack_log_store() -> ActiveStackLogStore | None:
-    """Return the runtime log-store backend from the active ZenML stack."""
+def active_runner_log_store() -> ActiveRunnerLogStore | None:
+    """Return the runtime log-store backend from the active runner."""
     try:
         client = Client()
         active_stack = client.active_stack
@@ -1269,14 +1303,14 @@ def active_stack_log_store() -> ActiveStackLogStore | None:
     flavor = getattr(log_store, "flavor", None)
     raw_backend = flavor if isinstance(flavor, str) else log_store.__class__.__name__
 
-    stack_name = getattr(active_stack_model, "name", None)
-    if not isinstance(stack_name, str):
-        stack_name = None
+    runner_name = getattr(active_stack_model, "name", None)
+    if not isinstance(runner_name, str):
+        runner_name = None
 
-    return ActiveStackLogStore(
+    return ActiveRunnerLogStore(
         backend=_normalize_log_store_backend_name(raw_backend),
         endpoint=_extract_log_store_endpoint(log_store),
-        stack_name=stack_name,
+        runner_name=runner_name,
     )
 
 
@@ -1483,7 +1517,7 @@ def list_active_kitaru_environment_variables() -> list[ActiveEnvironmentVariable
         KITARU_SERVER_URL_ENV,
         KITARU_AUTH_TOKEN_ENV,
         KITARU_PROJECT_ENV,
-        KITARU_STACK_ENV,
+        KITARU_RUNNER_ENV,
         KITARU_CACHE_ENV,
         KITARU_RETRIES_ENV,
         KITARU_IMAGE_ENV,
@@ -1510,45 +1544,45 @@ def list_active_kitaru_environment_variables() -> list[ActiveEnvironmentVariable
     return active
 
 
-def _normalize_stack_selector(name_or_id: str) -> str:
-    """Validate and normalize a stack selector provided by a user."""
+def _normalize_runner_selector(name_or_id: str) -> str:
+    """Validate and normalize a runner selector provided by a user."""
     normalized_selector = name_or_id.strip()
     if not normalized_selector:
-        raise ValueError("Stack name or ID cannot be empty.")
+        raise ValueError("Runner name or ID cannot be empty.")
 
     return normalized_selector
 
 
-def _stack_info_from_model(
+def _runner_info_from_model(
     stack_model: Any,
     *,
     active_stack_id: str | None,
-) -> StackInfo:
-    """Convert a runtime stack model to Kitaru's public stack shape."""
+) -> RunnerInfo:
+    """Convert a runtime stack model to Kitaru's public runner shape."""
     try:
-        stack_id = str(stack_model.id)
-        stack_name = str(stack_model.name)
+        runner_id = str(stack_model.id)
+        runner_name = str(stack_model.name)
     except AttributeError as exc:
         raise RuntimeError(
-            "Unable to read stack information from the configured runtime."
+            "Unable to read runner information from the configured runtime."
         ) from exc
 
-    return StackInfo(
-        id=stack_id,
-        name=stack_name,
-        is_active=stack_id == active_stack_id,
+    return RunnerInfo(
+        id=runner_id,
+        name=runner_name,
+        is_active=runner_id == active_stack_id,
     )
 
 
-def _iter_available_stacks(client: Client) -> Iterable[Any]:
-    """Return all available stacks from the runtime, including later pages."""
+def _iter_available_runners(client: Client) -> Iterable[Any]:
+    """Return all available runners from the runtime, including later pages."""
     first_page = client.list_stacks()
     if not isinstance(first_page, Iterable) or isinstance(first_page, (str, bytes)):
         raise RuntimeError(
-            "Unexpected stack list response from the configured runtime."
+            "Unexpected runner list response from the configured runtime."
         )
 
-    stack_models = list(first_page)
+    runner_models = list(first_page)
 
     total_pages_raw = getattr(first_page, "total_pages", 1)
     page_size_raw = getattr(first_page, "max_size", 1)
@@ -1568,54 +1602,54 @@ def _iter_available_stacks(client: Client) -> Iterable[Any]:
             page_result, (str, bytes)
         ):
             raise RuntimeError(
-                "Unexpected stack list response from the configured runtime."
+                "Unexpected runner list response from the configured runtime."
             )
-        stack_models.extend(page_result)
+        runner_models.extend(page_result)
 
-    return stack_models
+    return runner_models
 
 
-def current_stack() -> StackInfo:
-    """Return the currently active stack.
+def current_runner() -> RunnerInfo:
+    """Return the currently active runner.
 
-    The active stack is managed by the underlying runtime and persisted in the
+    The active runner is managed by the underlying runtime and persisted in the
     runtime's global user configuration.
     """
     active_stack_model = Client().active_stack_model
     active_stack_id = str(active_stack_model.id)
-    return _stack_info_from_model(
+    return _runner_info_from_model(
         active_stack_model,
         active_stack_id=active_stack_id,
     )
 
 
-def list_stacks() -> list[StackInfo]:
-    """List stacks visible to the current user and mark the active one."""
+def list_runners() -> list[RunnerInfo]:
+    """List runners visible to the current user and mark the active one."""
     client = Client()
     active_stack_id = str(client.active_stack_model.id)
 
     return [
-        _stack_info_from_model(stack_model, active_stack_id=active_stack_id)
-        for stack_model in _iter_available_stacks(client)
+        _runner_info_from_model(stack_model, active_stack_id=active_stack_id)
+        for stack_model in _iter_available_runners(client)
     ]
 
 
-def use_stack(name_or_id: str) -> StackInfo:
-    """Set the active stack and return the resulting active stack info.
+def use_runner(name_or_id: str) -> RunnerInfo:
+    """Set the active runner and return the resulting active runner info.
 
     Args:
-        name_or_id: Stack name or stack ID.
+        name_or_id: Runner name or runner ID.
 
     Returns:
-        Information about the newly active stack.
+        Information about the newly active runner.
 
     Raises:
         ValueError: If the selector is empty.
     """
-    selector = _normalize_stack_selector(name_or_id)
+    selector = _normalize_runner_selector(name_or_id)
     client = Client()
     client.activate_stack(selector)
-    return current_stack()
+    return current_runner()
 
 
 def _login_to_server_target(
@@ -1699,7 +1733,7 @@ def _login_to_server_target(
 
 def configure(
     *,
-    stack: str | None | object = _UNSET,
+    runner: str | None | object = _UNSET,
     image: ImageInput | None | object = _UNSET,
     cache: bool | None | object = _UNSET,
     retries: int | None | object = _UNSET,
@@ -1707,13 +1741,13 @@ def configure(
 ) -> KitaruConfig:
     """Set process-local runtime defaults.
 
-    Execution-level fields (``stack``, ``image``, ``cache``, ``retries``)
+    Execution-level fields (``runner``, ``image``, ``cache``, ``retries``)
     update the execution precedence chain.  The ``project`` field updates
     the connection precedence chain and is intended as an internal /
     testing escape hatch — it is not a normal user-facing setting.
 
     Args:
-        stack: Default stack name/ID override.
+        runner: Default runner name/ID override.
         image: Default image settings override.
         cache: Default cache behavior override.
         retries: Default retry-count override.
@@ -1725,11 +1759,11 @@ def configure(
     """
     candidate_execution = dict(_RUNTIME_EXECUTION_OVERRIDES)
 
-    if stack is not _UNSET:
-        if stack is None:
-            candidate_execution.pop("stack", None)
+    if runner is not _UNSET:
+        if runner is None:
+            candidate_execution.pop("runner", None)
         else:
-            candidate_execution["stack"] = stack
+            candidate_execution["runner"] = runner
 
     if image is not _UNSET:
         if image is None:

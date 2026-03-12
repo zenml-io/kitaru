@@ -23,8 +23,8 @@ Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``connect()``,
-  ``configure()``, stack selection helpers (``list_stacks()``,
-  ``current_stack()``, ``use_stack()``), model alias helpers via CLI
+  ``configure()``, runner selection helpers (``list_runners()``,
+  ``current_runner()``, ``use_runner()``), model alias helpers via CLI
   (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
   (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts), and a typed
   Kitaru exception hierarchy with failure journaling (`Execution.failure`,
@@ -32,8 +32,8 @@ Current status:
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
-``kitaru log-store set/show/reset``, stack selection via
-``kitaru stack list/current/use``, and execution lifecycle commands via
+``kitaru log-store set/show/reset``, runner selection via
+``kitaru runner list/current/use``, and execution lifecycle commands via
 ``kitaru run`` plus
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
@@ -48,12 +48,12 @@ from kitaru.client import KitaruClient
 from kitaru.config import (
     ImageSettings,
     KitaruConfig,
-    StackInfo,
+    RunnerInfo,
     configure,
     connect,
-    current_stack,
-    list_stacks,
-    use_stack,
+    current_runner,
+    list_runners,
+    use_runner,
 )
 from kitaru.errors import (
     FailureOrigin,
@@ -91,17 +91,17 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
-    "StackInfo",
+    "RunnerInfo",
     "checkpoint",
     "configure",
     "connect",
-    "current_stack",
+    "current_runner",
     "flow",
-    "list_stacks",
+    "list_runners",
     "llm",
     "load",
     "log",
     "save",
-    "use_stack",
+    "use_runner",
     "wait",
 ]

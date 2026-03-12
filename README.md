@@ -128,10 +128,10 @@ kitaru-mcp                    Run the MCP server (requires kitaru[mcp])
 kitaru login <server>         Connect to a Kitaru server
 kitaru login <server> --api-key <key>
 kitaru logout                 Log out and clear stored auth state
-kitaru status                 Show connection state and active stack
+kitaru status                 Show connection state and active runner
 kitaru info                   Show detailed environment information
 
-kitaru run <target> --args <json> [--stack <name>]
+kitaru run <target> --args <json> [--runner <name>]
 kitaru executions get <exec_id>
 kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
 kitaru executions input <exec_id> --wait <wait_name_or_id> --value <json>
@@ -141,9 +141,9 @@ kitaru executions resume <exec_id>
 kitaru executions retry <exec_id>
 kitaru executions cancel <exec_id>
 
-kitaru stack list             List visible stacks
-kitaru stack current          Show the active stack
-kitaru stack use <name-or-id> Switch active stack
+kitaru runner list             List visible runners
+kitaru runner current          Show the active runner
+kitaru runner use <name-or-id> Switch active runner
 
 kitaru log-store show         Show effective global runtime log backend
 kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]
@@ -178,7 +178,7 @@ export KITARU_AUTH_TOKEN=kat_abc123...
 export KITARU_PROJECT=my-project
 
 # Execution
-export KITARU_STACK=my-remote-stack
+export KITARU_RUNNER=my-remote-stack
 export KITARU_CACHE=true
 export KITARU_RETRIES=2
 
