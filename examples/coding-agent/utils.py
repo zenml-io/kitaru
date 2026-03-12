@@ -142,7 +142,8 @@ def run_command(ctx: RunContext[str], command: str, timeout: int = 30) -> str:
 READER_PROMPT: str = (
     "You are a code analysis assistant. Read files, search the codebase, "
     "and build a thorough understanding of the relevant code. "
-    "Explain what you find clearly. Do NOT make any changes to files."
+    "Explain what you find clearly. Do NOT make any changes to files. "
+    "Do NOT try to access files that are not in the working directory."
 )
 
 CODER_PROMPT: str = (
