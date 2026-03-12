@@ -60,6 +60,10 @@ def _execution_stub(
         pending_wait=pending_wait,
         failure=failure,
         status_reason=status_reason,
+        metadata={},
+        artifacts=[],
+        frozen_execution_spec=None,
+        original_exec_id=None,
         checkpoints=checkpoints or [],
     )
 
@@ -137,6 +141,27 @@ def test_no_args_shows_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "kitaru" in captured.out.lower()
+
+
+def test_executions_help_lists_all_supported_subcommands(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions --help` should show the full execution command surface."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "--help"])
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out.lower()
+    for command in (
+        "get",
+        "list",
+        "logs",
+        "input",
+        "replay",
+        "retry",
+        "resume",
+        "cancel",
+    ):
+        assert command in output
 
 
 def test_executions_get_renders_execution_details(
@@ -329,7 +354,7 @@ def test_executions_logs_grouped_output(
 def test_executions_logs_json_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`--output json` should emit JSONL entries."""
+    """`--output json` should emit a JSON envelope for non-follow mode."""
     fake_client = Mock()
     fake_client.executions.logs.return_value = [
         LogEntry(
@@ -350,14 +375,68 @@ def test_executions_logs_json_output(
     assert exc_info.value.code == 0
     stdout = capsys.readouterr().out.strip()
     payload = json.loads(stdout)
-    assert payload["message"] == "Starting research"
-    assert payload["checkpoint_name"] == "research"
+    assert payload["command"] == "executions.logs"
+    assert payload["count"] == 1
+    assert payload["items"][0]["message"] == "Starting research"
+    assert payload["items"][0]["checkpoint_name"] == "research"
+
+
+def test_executions_logs_follow_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--follow --output json` should emit JSONL event objects."""
+    running = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+    completed = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.COMPLETED,
+    )
+    entry = LogEntry(
+        message="Starting research",
+        level="INFO",
+        timestamp="2026-03-09T10:01:12+00:00",
+        checkpoint_name="research",
+    )
+
+    fake_client = Mock()
+    fake_client.executions.logs.side_effect = [[entry], [entry]]
+    fake_client.executions.get.side_effect = [running, completed]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru.cli.time.sleep"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "logs",
+                "kr-123",
+                "--follow",
+                "--output",
+                "json",
+                "--interval",
+                "0.01",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    assert lines[0]["command"] == "executions.logs"
+    assert lines[0]["event"] == "log"
+    assert lines[0]["item"]["message"] == "Starting research"
+    assert lines[-1]["event"] == "terminal"
+    assert lines[-1]["item"]["status"] == "completed"
 
 
 def test_executions_logs_rejects_invalid_flag_combination(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Grouped text sections are incompatible with JSONL output."""
+    """Grouped text sections are incompatible with JSON output."""
     with pytest.raises(SystemExit) as exc_info:
         app(
             [
@@ -371,7 +450,9 @@ def test_executions_logs_rejects_invalid_flag_combination(
         )
 
     assert exc_info.value.code == 1
-    assert "cannot be combined" in capsys.readouterr().err
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "executions.logs"
+    assert "cannot be combined" in payload["error"]["message"]
 
 
 def test_executions_logs_rejects_checkpoint_with_runner_source(
@@ -565,6 +646,33 @@ def test_executions_input_rejects_invalid_json(
 
     assert exc_info.value.code == 1
     assert "Invalid JSON for `--value`" in capsys.readouterr().err
+
+
+def test_executions_input_json_error_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON mode failures should emit structured errors on stderr."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "input",
+                "kr-123",
+                "--wait",
+                "approve_deploy",
+                "--value",
+                "{invalid",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["command"] == "executions.input"
+    assert "Invalid JSON for `--value`" in payload["error"]["message"]
 
 
 def test_executions_replay_parses_json_and_reports_success(
@@ -1539,6 +1647,26 @@ def test_secrets_set_rejects_invalid_assignments(
     assert "Invalid secret assignment" in capsys.readouterr().err
 
 
+def test_secrets_set_rejects_output_after_assignments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--output` must come before secret assignments for `secrets set`."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "--OPENAI_API_KEY=sk-123",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "must appear before secret assignments" in capsys.readouterr().err
+
+
 def test_secrets_show_hides_values_by_default(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1934,12 +2062,175 @@ def test_info_shows_project_override_when_set(
     assert "Project override: staging-project" in output
 
 
+def test_run_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru run --output json` should emit a structured result."""
+    fake_flow = SimpleNamespace(
+        run=Mock(return_value=SimpleNamespace(exec_id="kr-777"))
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = _execution_stub(
+        exec_id="kr-777",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.RUNNING,
+    )
+
+    with (
+        patch("kitaru.cli._load_flow_target", return_value=fake_flow),
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "run",
+                "agent.py:content_pipeline",
+                "--args",
+                '{"topic": "AI safety"}',
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "run"
+    assert payload["item"]["exec_id"] == "kr-777"
+    assert payload["item"]["invocation"] == "run"
+    assert payload["item"]["execution"]["status"] == "running"
+
+
+def test_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru login --output json` should emit a structured success payload."""
+    with (
+        patch("kitaru.cli.login_to_server") as mock_login,
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="https://example.com",
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login", "https://example.com/", "--project", "demo", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    mock_login.assert_called_once()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "login",
+        "item": {"server_url": "https://example.com", "project": "demo"},
+    }
+
+
+def test_stack_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru stack list --output json` should emit serialized stacks."""
+    with (
+        patch("kitaru.cli.get_available_stacks") as mock_list_stacks,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_stacks.return_value = [
+            SimpleNamespace(id="stack-local-id", name="local", is_active=False),
+            SimpleNamespace(id="stack-prod-id", name="prod", is_active=True),
+        ]
+        app(["stack", "list", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "stack.list"
+    assert payload["count"] == 2
+    assert payload["items"][1]["is_active"] is True
+
+
+def test_model_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru model list --output json` should emit serialized aliases."""
+    with (
+        patch("kitaru.cli.list_model_aliases") as mock_list_models,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_models.return_value = [
+            SimpleNamespace(
+                alias="fast",
+                model="openai/gpt-4o-mini",
+                secret="openai-creds",
+                is_default=True,
+            )
+        ]
+        app(["model", "list", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "model.list"
+    assert payload["items"][0]["alias"] == "fast"
+    assert payload["items"][0]["is_default"] is True
+
+
+def test_secrets_set_json_output_accepts_output_before_assignments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets set --output json` should still parse assignment tokens."""
+    fake_client = Mock()
+    fake_client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        values={"OPENAI_API_KEY": object()},
+        has_missing_values=False,
+        secret_values={"OPENAI_API_KEY": "sk-123"},
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "--output",
+                "json",
+                "--OPENAI_API_KEY=sk-123",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "secrets.set"
+    assert payload["item"]["name"] == "openai-creds"
+    assert payload["item"]["result"] == "created"
+
+
+def test_status_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru status --output json` should emit the full snapshot payload."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.1.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        server_url="https://example.com",
+        active_user="alice",
+        active_stack="prod",
+        config_directory="/tmp/kitaru-config",
+        local_server_status="not started",
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "status"
+    assert payload["item"]["connection"] == "remote Kitaru server"
+    assert payload["item"]["active_stack"] == "prod"
+
+
 def test_build_runtime_snapshot_handles_missing_local_store() -> None:
     """Status/info should degrade gracefully if local mode support is missing."""
     with (
-        patch("kitaru.cli.GlobalConfiguration", return_value=_BrokenGlobalConfig()),
-        patch("kitaru.cli.get_local_server", side_effect=ImportError("missing")),
-        patch("kitaru.cli.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru.inspection.GlobalConfiguration", return_value=_BrokenGlobalConfig()
+        ),
+        patch("kitaru.inspection.get_local_server", side_effect=ImportError("missing")),
+        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
     ):
         snapshot = _build_runtime_snapshot()
 
@@ -1969,11 +2260,11 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
     )
 
     with (
-        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
-        patch("kitaru.cli._connected_to_local_server", return_value=False),
-        patch("kitaru.cli.get_local_server", return_value=fake_local_server),
+        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.inspection.connected_to_local_server", return_value=False),
+        patch("kitaru.inspection.get_local_server", return_value=fake_local_server),
         patch(
-            "kitaru.cli.Client",
+            "kitaru.inspection.Client",
             side_effect=AssertionError("Client should not be queried"),
         ),
     ):
@@ -1985,7 +2276,9 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
 
 def test_describe_local_server_handles_missing_local_backend() -> None:
     """Local server rendering should not crash when local server extras are missing."""
-    with patch("kitaru.cli.get_local_server", side_effect=ImportError("missing")):
+    with patch(
+        "kitaru.inspection.get_local_server", side_effect=ImportError("missing")
+    ):
         status = _describe_local_server()
 
     assert status == "unavailable (local runtime support not installed)"

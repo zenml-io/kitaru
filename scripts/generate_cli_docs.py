@@ -4,7 +4,7 @@ Introspects the cyclopts App object, extracts command metadata, and writes
 structured MDX files with frontmatter + meta.json files for FumaDocs navigation.
 
 Output directory: docs/content/docs/cli/
-Generated files are gitignored — they only exist after running this script.
+Generated files are tracked in git and should be regenerated after CLI changes.
 
 Usage:
     uv run python scripts/generate_cli_docs.py
@@ -39,6 +39,8 @@ class ParameterDoc:
     required: bool
     default: str | None
     is_flag: bool
+    positional_token: str | None = None
+    option_names: list[str] = field(default_factory=list)
 
     @property
     def names_display(self) -> str:
@@ -92,6 +94,71 @@ def _format_default(value: Any) -> str | None:
     return f"`{value!r}`"
 
 
+def _supports_positional(arg: Any) -> bool:
+    """Return whether a cyclopts argument should be documented positionally."""
+    kind = getattr(arg.field_info, "kind", None)
+    if kind not in {
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    }:
+        return False
+
+    return arg.required or _is_variadic_hint(arg.hint)
+
+
+def _is_variadic_hint(hint: Any) -> bool:
+    """Return whether a positional parameter consumes multiple values."""
+    origin = getattr(hint, "__origin__", None)
+    return origin in {list, tuple, set}
+
+
+def _positional_token(arg: Any) -> str | None:
+    """Build a positional usage token from the underlying Python parameter."""
+    if not _supports_positional(arg):
+        return None
+
+    field_name = getattr(arg.field_info, "name", None)
+    if not field_name:
+        return None
+
+    token = field_name.upper()
+    if _is_variadic_hint(arg.hint):
+        token += "..."
+    return token
+
+
+def _format_usage_token(parameter: ParameterDoc) -> str | None:
+    """Render one positional token for the usage line."""
+    token = parameter.positional_token
+    if token is None:
+        return None
+    if parameter.required:
+        return token
+    return f"[{token}]"
+
+
+def _build_usage(
+    invocation: str,
+    parameters: list[ParameterDoc],
+    *,
+    has_subcommands: bool,
+) -> str:
+    """Render a command usage string from normalized parameter docs."""
+    usage_parts = [invocation]
+    if has_subcommands:
+        usage_parts.append("COMMAND")
+
+    for parameter in parameters:
+        usage_token = _format_usage_token(parameter)
+        if usage_token is not None:
+            usage_parts.append(usage_token)
+
+    if any(parameter.option_names for parameter in parameters):
+        usage_parts.append("[OPTIONS]")
+
+    return " ".join(usage_parts)
+
+
 def _extract_parameters(app: Any) -> list[ParameterDoc]:
     """Extract parameter docs from a cyclopts App's argument collection."""
     try:
@@ -104,7 +171,16 @@ def _extract_parameters(app: Any) -> list[ParameterDoc]:
         if not arg.show:
             continue
 
-        names = list(arg.parameter.name) if arg.parameter.name else list(arg.names)
+        positional_token = _positional_token(arg)
+        explicit_aliases = list(getattr(arg.parameter, "alias", ()) or ())
+        if positional_token is not None:
+            names = [positional_token, *explicit_aliases]
+            option_names = explicit_aliases
+        else:
+            option_names = (
+                list(arg.parameter.name) if arg.parameter.name else list(arg.names)
+            )
+            names = option_names
         help_text = arg.parameter.help or ""
         type_name = _type_display(arg.hint)
         required = arg.required
@@ -119,6 +195,8 @@ def _extract_parameters(app: Any) -> list[ParameterDoc]:
                 required=required,
                 default=default,
                 is_flag=is_flag,
+                positional_token=positional_token,
+                option_names=option_names,
             )
         )
     return params
@@ -162,21 +240,10 @@ def build_command_tree(
 
     description = _get_description(app)
 
-    # Build usage string
     params = _extract_parameters(app)
-    has_options = any(n.startswith("--") for p in params for n in p.names)
-    has_args = any(not n.startswith("-") for p in params for n in p.names)
     registered = getattr(app, "_registered_commands", {})
     has_subcommands = bool(registered)
-
-    usage_parts = [invocation]
-    if has_subcommands:
-        usage_parts.append("COMMAND")
-    if has_args:
-        usage_parts.append("[ARGS]")
-    if has_options:
-        usage_parts.append("[OPTIONS]")
-    usage = " ".join(usage_parts)
+    usage = _build_usage(invocation, params, has_subcommands=has_subcommands)
 
     # Recurse into subcommands
     subcommands: list[CommandDoc] = []
@@ -236,6 +303,13 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
     lines.append("```")
     lines.append("")
 
+    if cmd.invocation == "kitaru secrets set":
+        lines.append(
+            "> Put `--output json` / `-o json` **before** any `--KEY=value` "
+            "secret assignments so Cyclopts does not treat it as another secret key."
+        )
+        lines.append("")
+
     # Global flags (root only)
     if is_root:
         lines.append("## Global Flags")
@@ -245,6 +319,28 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
         lines.append("| `--help`, `-h` | Display help and exit |")
         lines.append("| `--version`, `-V` | Display the installed version and exit |")
         lines.append("")
+        lines.append("## Output formats")
+        lines.append("")
+        lines.append(
+            "Most agent-facing commands support `--output json` "
+            "(or `-o json`) in addition to the default text output."
+        )
+        lines.append("")
+        lines.append(
+            "- **Text output** is designed for people reading the terminal directly."
+        )
+        lines.append(
+            "- **JSON output** is designed for agents and scripts "
+            "that need a stable structure."
+        )
+        lines.append("- Single-item commands emit `{command, item}`.")
+        lines.append("- List commands emit `{command, items, count}`.")
+        lines.append(
+            "- `kitaru executions logs --follow --output json` is the "
+            "special case: it emits one JSON event per line while following "
+            "the stream."
+        )
+        lines.append("")
 
     # Parameters table
     if cmd.parameters:
@@ -253,7 +349,7 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
         lines.append("| Name | Type | Required | Default | Description |")
         lines.append("| --- | --- | --- | --- | --- |")
         for p in cmd.parameters:
-            names_str = ", ".join(f"`{n}`" for n in p.names)
+            names_str = p.names_display
             type_str = f"`{p.type_name}`" if p.type_name else ""
             req_str = "Yes" if p.required else "No"
             default_str = p.default or ""

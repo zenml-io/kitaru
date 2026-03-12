@@ -121,9 +121,16 @@ kitaru run agent.py:content_pipeline --stack prod --args '{"topic":"AI safety"}'
 
 # Inspect and filter executions
 kitaru executions get kr-a8f3c2
+kitaru executions get kr-a8f3c2 --output json
 kitaru executions list
 kitaru executions list --status waiting --flow content_pipeline --limit 20
+kitaru executions list --status waiting --output json
 kitaru executions logs kr-a8f3c2 --checkpoint write_draft
+kitaru executions logs kr-a8f3c2 --output json
+
+# Agent/script-friendly status and stack inspection
+kitaru status --output json
+kitaru stack list --output json
 
 # Wait-input and lifecycle actions
 kitaru executions input kr-a8f3c2 --wait approve_deploy --value true

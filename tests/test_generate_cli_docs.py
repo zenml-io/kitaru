@@ -20,6 +20,14 @@ from generate_cli_docs import (
 )
 
 
+def _find_command(root: CommandDoc, *names: str) -> CommandDoc:
+    """Return a command by following its subcommand path."""
+    current = root
+    for name in names:
+        current = next(sub for sub in current.subcommands if sub.name == name)
+    return current
+
+
 @pytest.fixture
 def output_dir() -> Generator[Path]:
     """Temporary directory for generated docs."""
@@ -54,6 +62,22 @@ class TestBuildCommandTree:
             "secrets",
             "stack",
             "status",
+        ]
+
+    def test_executions_tree_includes_logs_and_replay(self) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        executions = _find_command(tree, "executions")
+        assert [sub.name for sub in executions.subcommands] == [
+            "cancel",
+            "get",
+            "input",
+            "list",
+            "logs",
+            "replay",
+            "resume",
+            "retry",
         ]
 
     def test_building_tree_does_not_resolve_version_metadata(self) -> None:
@@ -103,6 +127,35 @@ class TestBuildCommandTree:
         assert sub.parameters[0].help == "Bind address."
         assert sub.parameters[0].required is False
 
+    def test_builds_usage_from_positional_parameters(self) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+
+        login = _find_command(tree, "login")
+        run = _find_command(tree, "run")
+        get = _find_command(tree, "executions", "get")
+        secrets_set = _find_command(tree, "secrets", "set")
+        stack_use = _find_command(tree, "stack", "use")
+
+        assert login.usage == "kitaru login SERVER [OPTIONS]"
+        assert login.parameters[0].names == ["SERVER", "--server-url"]
+
+        assert run.usage == "kitaru run TARGET [OPTIONS]"
+        assert run.parameters[0].names == ["TARGET"]
+
+        assert get.usage.startswith("kitaru executions get EXEC_ID")
+        assert get.parameters[0].names == ["EXEC_ID"]
+
+        assert secrets_set.usage.startswith("kitaru secrets set NAME ASSIGNMENTS...")
+        assert [parameter.names for parameter in secrets_set.parameters[:2]] == [
+            ["NAME"],
+            ["ASSIGNMENTS..."],
+        ]
+
+        assert stack_use.usage.startswith("kitaru stack use STACK")
+        assert stack_use.parameters[0].names == ["STACK"]
+
 
 class TestRenderCommandPage:
     """Tests for MDX page rendering."""
@@ -132,6 +185,19 @@ class TestRenderCommandPage:
         assert "## Global Flags" in page
         assert "`--help`" in page
         assert "`--version`" in page
+
+    def test_root_page_has_output_formats_section(self) -> None:
+        cmd = CommandDoc(
+            slug="kitaru",
+            name="kitaru",
+            invocation="kitaru",
+            description="Test.",
+            usage="kitaru",
+        )
+        page = render_command_page(cmd, is_root=True)
+        assert "## Output formats" in page
+        assert "`--output json`" in page
+        assert "{command, item}" in page
 
     def test_subcommand_page_has_no_global_flags(self) -> None:
         cmd = CommandDoc(
@@ -235,6 +301,26 @@ class TestWriteDocsTree:
             "status",
         ]
 
+    def test_nested_meta_includes_all_execution_commands(
+        self, output_dir: Path
+    ) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        write_docs_tree(tree, output_dir)
+
+        meta = json.loads((output_dir / "executions" / "meta.json").read_text())
+        assert meta["pages"] == [
+            "cancel",
+            "get",
+            "input",
+            "list",
+            "logs",
+            "replay",
+            "resume",
+            "retry",
+        ]
+
     def test_frontmatter_present_in_generated_page(self, output_dir: Path) -> None:
         from kitaru.cli import app
 
@@ -258,6 +344,33 @@ class TestWriteDocsTree:
             # No directory or meta.json for leaf commands
             assert not (output_dir / command / "index.mdx").exists()
             assert not (output_dir / command / "meta.json").exists()
+
+    def test_generated_executions_docs_include_logs_and_replay(
+        self, output_dir: Path
+    ) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        write_docs_tree(tree, output_dir)
+
+        executions_meta = json.loads(
+            (output_dir / "executions" / "meta.json").read_text()
+        )
+        assert "logs" in executions_meta["pages"]
+        assert "replay" in executions_meta["pages"]
+        assert (output_dir / "executions" / "logs.mdx").exists()
+        assert (output_dir / "executions" / "replay.mdx").exists()
+
+    def test_generated_command_page_includes_output_option(
+        self, output_dir: Path
+    ) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        files = write_docs_tree(tree, output_dir)
+
+        run_page = (output_dir / "run.mdx").read_text()
+        assert "`--output`, `-o`" in run_page
 
         # executions, log-store, model, secrets, and stack have nested subcommands.
         for command in ("executions", "log-store", "model", "secrets", "stack"):
@@ -295,6 +408,35 @@ class TestWriteDocsTree:
         for command in ("current", "list", "use"):
             assert (output_dir / "stack" / f"{command}.mdx").exists()
             assert f"stack/{command}.mdx" in files
+
+    def test_generated_pages_render_positional_usage_and_aliases(
+        self, output_dir: Path
+    ) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        write_docs_tree(tree, output_dir)
+
+        get_content = (output_dir / "executions" / "get.mdx").read_text()
+        assert "kitaru executions get EXEC_ID" in get_content
+        assert "| `EXEC_ID` | `str` | Yes |  | Execution ID. |" in get_content
+
+        login_content = (output_dir / "login.mdx").read_text()
+        assert "kitaru login SERVER [OPTIONS]" in login_content
+        assert "| `SERVER`, `--server-url` | `str` | Yes |  |" in login_content
+
+        run_content = (output_dir / "run.mdx").read_text()
+        assert "kitaru run TARGET [OPTIONS]" in run_content
+        assert "| `TARGET` | `str` | Yes |  |" in run_content
+
+        secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
+        assert "--KEY=value" in secrets_set_content
+        assert "Put `--output json` / `-o json` **before** any `--KEY=value`" in secrets_set_content
+        assert "| `ASSIGNMENTS...` | `list[str]` | Yes |  |" in secrets_set_content
+
+        stack_use_content = (output_dir / "stack" / "use.mdx").read_text()
+        assert "kitaru stack use STACK" in stack_use_content
+        assert "| `STACK` | `str` | Yes |  |" in stack_use_content
 
     def test_nested_subcommands_create_directories(self, output_dir: Path) -> None:
         import cyclopts

@@ -68,7 +68,7 @@ uv run kitaru executions list
 # Get details of the latest execution (copy the ID from the list output)
 uv run kitaru executions get <EXECUTION_ID>
 
-# View logs/metadata
+# View runtime logs
 uv run kitaru executions logs <EXECUTION_ID>
 ```
 
@@ -88,8 +88,8 @@ uv run python -m examples.flow_with_logging
 ```
 
 Logs structured metadata at both flow and checkpoint scope. After
-running, inspect with `uv run kitaru executions logs <ID>` to see the
-logged metadata.
+running, you can separately inspect runtime log lines with
+`uv run kitaru executions logs <ID>`.
 
 #### Artifact save/load (`kitaru.save()` / `kitaru.load()`)
 
@@ -179,7 +179,7 @@ Add this to your Cursor MCP config (`.cursor/mcp.json`):
 Once connected, your AI assistant can:
 
 - **List and inspect executions** — "show me my recent kitaru runs"
-- **Read execution logs** — "what metadata did my last flow log?"
+- **Read execution logs** — "what did my last flow print?"
 - **Browse artifacts** — "load the output of the research checkpoint"
 - **Run flows** — "run examples.first_working_flow:my_agent"
 - **Provide wait input** — "approve the pending wait"
@@ -238,7 +238,7 @@ docker stop kitaru-server && docker rm kitaru-server
 | `uv run kitaru info` | Detailed environment info |
 | `uv run kitaru executions list` | List recent flow executions |
 | `uv run kitaru executions get <ID>` | Detailed view of one execution |
-| `uv run kitaru executions logs <ID>` | View logged metadata |
+| `uv run kitaru executions logs <ID>` | View runtime logs |
 | `uv run kitaru executions replay <ID> --from <checkpoint>` | Replay from a checkpoint |
 | `uv run kitaru stack list` | List available stacks |
 | `uv run kitaru model register <alias> --model <model>` | Register an LLM model alias |
