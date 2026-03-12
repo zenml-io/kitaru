@@ -1,6 +1,12 @@
 """Phase 12 example: tracked model calls with `kitaru.llm()`.
 
-Before running this example, register a model alias and set credentials:
+Before running this example, the main setup path is:
+
+    kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+    kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+
+For quick local testing, you can also skip the linked secret and just export
+the provider key:
 
     kitaru model register fast --model openai/gpt-4o-mini
     export OPENAI_API_KEY=sk-...

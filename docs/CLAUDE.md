@@ -30,6 +30,9 @@ single Cloudflare Worker.
   generation scripts and gitignored. SDK reference uses a two-step pipeline:
   `scripts/generate_sdk_docs.py` (Python extraction) + `docs/scripts/convert-sdk-docs.mjs`
   (Node MDX conversion via fumadocs-python).
+- **CLI reference fixes belong in the generator/source:** if command syntax is
+  wrong in generated CLI docs, fix `scripts/generate_cli_docs.py` and/or
+  `src/kitaru/cli.py`, then regenerate. Never hand-edit generated CLI pages.
 - **Respect static export constraints:** No server-side features (middleware,
   rewrites, cookies, ISR). All content must be buildable at build time.
 - **Only document shipped features.** No "Coming Soon" sections for unimplemented
@@ -37,6 +40,10 @@ single Cloudflare Worker.
 - **ZenML invisibility:** Users should never need to know Kitaru is built on
   ZenML underneath. Never say "orchestrator", "artifact store", or "pipeline"
   in user-facing docs — use Kitaru terminology (workflow, checkpoint, storage).
+- **Secret docs must stay honest:** only `kitaru.llm()` auto-resolves
+  alias-linked secrets today. If you need to document non-LLM secret access,
+  keep it in a clearly marked advanced or low-level note instead of implying a
+  first-class Kitaru helper exists.
 - **Frontmatter required:** Every `.mdx` page needs `title` and `description`.
 
 ## Content Structure
