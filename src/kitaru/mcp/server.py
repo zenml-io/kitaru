@@ -17,7 +17,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 from zenml.client import Client
@@ -39,14 +39,20 @@ from kitaru.config import (
     KITARU_PROJECT_ENV,
     ActiveEnvironmentVariable,
     ResolvedLogStore,
-    RunnerInfo,
+    _create_runner_operation,
+    _delete_runner_operation,
     _kitaru_config_dir,
+    _list_runner_entries,
     _read_runtime_connection_config,
     active_runner_log_store,
     list_active_kitaru_environment_variables,
     resolve_log_store,
 )
-from kitaru.config import list_runners as get_available_runners
+from kitaru.inspection import (
+    serialize_runner,
+    serialize_runner_create_result,
+    serialize_runner_delete_result,
+)
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
@@ -342,15 +348,6 @@ def _serialize_artifact_value(value: Any) -> dict[str, Any]:
             "value_format": "repr",
             "value_type": value_type,
         }
-
-
-def _serialize_runner(runner: RunnerInfo) -> dict[str, Any]:
-    """Serialize runner information for MCP output."""
-    return {
-        "id": runner.id,
-        "name": runner.name,
-        "is_active": runner.is_active,
-    }
 
 
 def _serialize_runtime_snapshot(snapshot: RuntimeSnapshot) -> dict[str, Any]:
@@ -852,7 +849,42 @@ def kitaru_status() -> dict[str, Any]:
 @mcp.tool()
 def kitaru_runners_list() -> list[dict[str, Any]]:
     """List available runners from the active connection context."""
-    return [_serialize_runner(runner) for runner in get_available_runners()]
+    return [
+        serialize_runner(entry.runner, is_managed=entry.is_managed)
+        for entry in _list_runner_entries()
+    ]
+
+
+@mcp.tool()
+def manage_runner(
+    action: Literal["create", "delete"],
+    name: str,
+    activate: bool = True,
+    recursive: bool = False,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Create or delete a local runner."""
+    if action == "create":
+        if recursive or force:
+            raise ValueError(
+                '`recursive` and `force` are only valid when action="delete".'
+            )
+        return serialize_runner_create_result(
+            _create_runner_operation(name, activate=activate)
+        )
+
+    if action == "delete":
+        if not activate:
+            raise ValueError('`activate` is only valid when action="create".')
+        return serialize_runner_delete_result(
+            _delete_runner_operation(
+                name,
+                recursive=recursive,
+                force=force,
+            )
+        )
+
+    raise ValueError('`action` must be "create" or "delete".')
 
 
 def main() -> None:

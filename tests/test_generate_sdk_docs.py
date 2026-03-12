@@ -190,4 +190,10 @@ class TestExtractApi:
         config_funcs = set(
             filtered.get("modules", {}).get("config", {}).get("functions", {}).keys()
         )
-        assert {"list_runners", "current_runner", "use_runner"}.issubset(config_funcs)
+        assert {
+            "create_runner",
+            "delete_runner",
+            "list_runners",
+            "current_runner",
+            "use_runner",
+        }.issubset(config_funcs)

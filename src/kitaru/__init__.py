@@ -23,8 +23,9 @@ Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``connect()``,
-  ``configure()``, runner selection helpers (``list_runners()``,
-  ``current_runner()``, ``use_runner()``), model alias helpers via CLI
+  ``configure()``, runner lifecycle helpers (``list_runners()``,
+  ``current_runner()``, ``use_runner()``, ``create_runner()``,
+  ``delete_runner()``), model alias helpers via CLI
   (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
   (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts), and a typed
   Kitaru exception hierarchy with failure journaling (`Execution.failure`,
@@ -32,8 +33,8 @@ Current status:
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
-``kitaru log-store set/show/reset``, runner selection via
-``kitaru runner list/current/use``, and execution lifecycle commands via
+``kitaru log-store set/show/reset``, runner lifecycle via
+``kitaru runner list/current/use/create/delete``, and execution lifecycle commands via
 ``kitaru run`` plus
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
@@ -51,7 +52,9 @@ from kitaru.config import (
     RunnerInfo,
     configure,
     connect,
+    create_runner,
     current_runner,
+    delete_runner,
     list_runners,
     use_runner,
 )
@@ -95,7 +98,9 @@ __all__ = [
     "checkpoint",
     "configure",
     "connect",
+    "create_runner",
     "current_runner",
+    "delete_runner",
     "flow",
     "list_runners",
     "llm",

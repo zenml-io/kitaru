@@ -1920,6 +1920,159 @@ def test_runner_use_surfaces_validation_errors(
     assert "Runner name or ID cannot be empty." in capsys.readouterr().err
 
 
+def test_runner_create_reports_auto_activation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru runner create` should report creation and auto-activation."""
+    with (
+        patch("kitaru.cli._create_runner_operation") as mock_create_runner,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_runner.return_value = SimpleNamespace(
+            runner=SimpleNamespace(id="stack-dev-id", name="dev", is_active=True),
+            previous_active_runner="default",
+            components_created=("dev (orchestrator)", "dev (artifact_store)"),
+        )
+        app(["runner", "create", "dev"])
+
+    assert exc_info.value.code == 0
+    mock_create_runner.assert_called_once_with("dev", activate=True)
+    output = capsys.readouterr().out
+    assert "Created runner: dev" in output
+    assert "Active runner: default → dev" in output
+
+
+def test_runner_create_no_activate_skips_active_runner_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru runner create --no-activate` should not print an activation line."""
+    with (
+        patch("kitaru.cli._create_runner_operation") as mock_create_runner,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_runner.return_value = SimpleNamespace(
+            runner=SimpleNamespace(id="stack-dev-id", name="dev", is_active=False),
+            previous_active_runner=None,
+            components_created=("dev (orchestrator)", "dev (artifact_store)"),
+        )
+        app(["runner", "create", "dev", "--no-activate"])
+
+    assert exc_info.value.code == 0
+    mock_create_runner.assert_called_once_with("dev", activate=False)
+    output = capsys.readouterr().out
+    assert "Created runner: dev" in output
+    assert "Active runner:" not in output
+
+
+def test_runner_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru runner create --output json` should emit operation metadata."""
+    with (
+        patch("kitaru.cli._create_runner_operation") as mock_create_runner,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_runner.return_value = SimpleNamespace(
+            runner=SimpleNamespace(id="stack-dev-id", name="dev", is_active=True),
+            previous_active_runner="default",
+            components_created=("dev (orchestrator)", "dev (artifact_store)"),
+        )
+        app(["runner", "create", "dev", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "runner.create",
+        "item": {
+            "id": "stack-dev-id",
+            "name": "dev",
+            "is_active": True,
+            "previous_active_runner": "default",
+            "components_created": [
+                "dev (orchestrator)",
+                "dev (artifact_store)",
+            ],
+        },
+    }
+
+
+def test_runner_delete_reports_deleted_components_and_new_active_runner(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru runner delete` should render the full forced recursive summary."""
+    with (
+        patch("kitaru.cli._delete_runner_operation") as mock_delete_runner,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_delete_runner.return_value = SimpleNamespace(
+            deleted_runner="dev",
+            components_deleted=("dev (orchestrator)", "dev (artifact_store)"),
+            new_active_runner="default",
+            recursive=True,
+        )
+        app(["runner", "delete", "dev", "--recursive", "--force"])
+
+    assert exc_info.value.code == 0
+    mock_delete_runner.assert_called_once_with(
+        "dev",
+        recursive=True,
+        force=True,
+    )
+    output = capsys.readouterr().out
+    assert "Deleted runner: dev" in output
+    assert "Deleted components: dev (orchestrator), dev (artifact_store)" in output
+    assert "Active runner: default" in output
+
+
+def test_runner_delete_simple_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru runner delete` should keep simple non-recursive output compact."""
+    with (
+        patch("kitaru.cli._delete_runner_operation") as mock_delete_runner,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_delete_runner.return_value = SimpleNamespace(
+            deleted_runner="dev",
+            components_deleted=(),
+            new_active_runner=None,
+            recursive=False,
+        )
+        app(["runner", "delete", "dev"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Deleted runner: dev" in output
+    assert "Deleted components:" not in output
+    assert "Active runner:" not in output
+
+
+def test_runner_delete_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru runner delete --output json` should emit structured delete details."""
+    with (
+        patch("kitaru.cli._delete_runner_operation") as mock_delete_runner,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_delete_runner.return_value = SimpleNamespace(
+            deleted_runner="dev",
+            components_deleted=("dev (orchestrator)", "dev (artifact_store)"),
+            new_active_runner="default",
+            recursive=True,
+        )
+        app(["runner", "delete", "dev", "--recursive", "--force", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "runner.delete",
+        "item": {
+            "deleted_runner": "dev",
+            "components_deleted": [
+                "dev (orchestrator)",
+                "dev (artifact_store)",
+            ],
+            "new_active_runner": "default",
+            "recursive": True,
+        },
+    }
+
+
 def test_status_renders_compact_snapshot(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -2141,12 +2294,26 @@ def test_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:
 def test_runner_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     """`kitaru runner list --output json` should emit serialized runners."""
     with (
-        patch("kitaru.cli.get_available_runners") as mock_list_runners,
+        patch("kitaru.cli._list_runner_entries") as mock_list_runner_entries,
         pytest.raises(SystemExit) as exc_info,
     ):
-        mock_list_runners.return_value = [
-            SimpleNamespace(id="stack-local-id", name="local", is_active=False),
-            SimpleNamespace(id="stack-prod-id", name="prod", is_active=True),
+        mock_list_runner_entries.return_value = [
+            SimpleNamespace(
+                runner=SimpleNamespace(
+                    id="stack-local-id",
+                    name="local",
+                    is_active=False,
+                ),
+                is_managed=False,
+            ),
+            SimpleNamespace(
+                runner=SimpleNamespace(
+                    id="stack-prod-id",
+                    name="prod",
+                    is_active=True,
+                ),
+                is_managed=True,
+            ),
         ]
         app(["runner", "list", "--output", "json"])
 
@@ -2155,6 +2322,8 @@ def test_runner_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["command"] == "runner.list"
     assert payload["count"] == 2
     assert payload["items"][1]["is_active"] is True
+    assert payload["items"][0]["is_managed"] is False
+    assert payload["items"][1]["is_managed"] is True
 
 
 def test_model_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:

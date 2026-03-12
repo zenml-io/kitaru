@@ -35,6 +35,8 @@ from kitaru.config import (
     RunnerInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
+    _RunnerCreateResult,
+    _RunnerDeleteResult,
     active_runner_log_store,
     list_active_kitaru_environment_variables,
     resolve_log_store,
@@ -405,12 +407,37 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
     }
 
 
-def serialize_runner(runner: RunnerInfo) -> dict[str, Any]:
+def serialize_runner(
+    runner: RunnerInfo,
+    *,
+    is_managed: bool | None = None,
+) -> dict[str, Any]:
     """Serialize runner information for structured output."""
-    return {
+    payload = {
         "id": runner.id,
         "name": runner.name,
         "is_active": runner.is_active,
+    }
+    if is_managed is not None:
+        payload["is_managed"] = is_managed
+    return payload
+
+
+def serialize_runner_create_result(result: _RunnerCreateResult) -> dict[str, Any]:
+    """Serialize runner-create operation details."""
+    payload = serialize_runner(result.runner)
+    payload["previous_active_runner"] = result.previous_active_runner
+    payload["components_created"] = list(result.components_created)
+    return payload
+
+
+def serialize_runner_delete_result(result: _RunnerDeleteResult) -> dict[str, Any]:
+    """Serialize runner-delete operation details."""
+    return {
+        "deleted_runner": result.deleted_runner,
+        "components_deleted": list(result.components_deleted),
+        "new_active_runner": result.new_active_runner,
+        "recursive": result.recursive,
     }
 
 

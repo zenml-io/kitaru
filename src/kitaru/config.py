@@ -41,8 +41,8 @@ from zenml.client import Client
 from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
-from zenml.enums import MetadataResourceTypes
-from zenml.exceptions import AuthorizationException
+from zenml.enums import MetadataResourceTypes, StackComponentType
+from zenml.exceptions import AuthorizationException, EntityExistsError
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.utils import io_utils, yaml_utils
 
@@ -57,6 +57,8 @@ _LOG_STORE_SOURCE_ENVIRONMENT = "environment"
 _LOG_STORE_SOURCE_GLOBAL_USER_CONFIG = "global user config"
 _LOG_STORE_BACKEND_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _MODEL_ALIAS_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_RUNNER_MANAGED_LABEL_KEY = "kitaru.managed"
+_RUNNER_MANAGED_LABEL_VALUE = "true"
 
 KITARU_LOG_STORE_BACKEND_ENV = "KITARU_LOG_STORE_BACKEND"
 KITARU_LOG_STORE_ENDPOINT_ENV = "KITARU_LOG_STORE_ENDPOINT"
@@ -267,6 +269,42 @@ class RunnerInfo(BaseModel):
     id: str
     name: str
     is_active: bool
+
+
+@dataclass(frozen=True)
+class _RunnerComponent:
+    """Internal reference to a runner-owned stack component."""
+
+    component_id: str
+    name: str
+    kind: Literal["orchestrator", "artifact_store"]
+
+
+@dataclass(frozen=True)
+class _RunnerListEntry:
+    """Internal structured runner list item with managed-state metadata."""
+
+    runner: RunnerInfo
+    is_managed: bool
+
+
+@dataclass(frozen=True)
+class _RunnerCreateResult:
+    """Structured result for runner creation operations."""
+
+    runner: RunnerInfo
+    previous_active_runner: str | None
+    components_created: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _RunnerDeleteResult:
+    """Structured result for runner deletion operations."""
+
+    deleted_runner: str
+    components_deleted: tuple[str, ...]
+    new_active_runner: str | None
+    recursive: bool
 
 
 class ImageSettings(BaseModel):
@@ -1553,6 +1591,266 @@ def _normalize_runner_selector(name_or_id: str) -> str:
     return normalized_selector
 
 
+def _runner_name_collision_message(name: str) -> str:
+    """Return the user-facing message for runner-name collisions."""
+    return (
+        f'A runner named "{name}" already exists. To activate it, run '
+        f"'kitaru runner use {name}'."
+    )
+
+
+def _component_collision_message(
+    name: str,
+    component_type: StackComponentType,
+) -> str:
+    """Return the user-facing message for runner component collisions."""
+    return (
+        f"Cannot create runner '{name}' because a {component_type.value} named "
+        f"'{name}' already exists. Kitaru always creates fresh runner "
+        "components and never reuses existing ones."
+    )
+
+
+def _stack_is_managed(stack_model: Any) -> bool:
+    """Return whether a stack carries Kitaru's managed-runner label."""
+    raw_labels = getattr(stack_model, "labels", None)
+    if not isinstance(raw_labels, Mapping):
+        return False
+
+    raw_value = raw_labels.get(_RUNNER_MANAGED_LABEL_KEY)
+    if raw_value is None:
+        return False
+
+    return str(raw_value).strip().lower() == _RUNNER_MANAGED_LABEL_VALUE
+
+
+def _format_runner_component_label(
+    name: str,
+    kind: Literal["orchestrator", "artifact_store"],
+) -> str:
+    """Format one runner component for user-facing structured output."""
+    return f"{name} ({kind})"
+
+
+def _delete_runner_components_best_effort(
+    client: Client,
+    components: list[_RunnerComponent],
+) -> str | None:
+    """Best-effort cleanup for runner components created during a failed create."""
+    cleanup_errors: list[str] = []
+
+    for component in reversed(components):
+        component_type = (
+            StackComponentType.ORCHESTRATOR
+            if component.kind == "orchestrator"
+            else StackComponentType.ARTIFACT_STORE
+        )
+        try:
+            client.delete_stack_component(component.component_id, component_type)
+        except Exception as exc:  # pragma: no cover - cleanup failure path
+            cleanup_errors.append(
+                f"{_format_runner_component_label(component.name, component.kind)}: "
+                f"{exc}"
+            )
+
+    if not cleanup_errors:
+        return None
+
+    return "Cleanup also failed for: " + "; ".join(cleanup_errors)
+
+
+def _list_runner_entries() -> list[_RunnerListEntry]:
+    """List runners with active + managed metadata for structured output."""
+    client = Client()
+    active_stack_id = str(client.active_stack_model.id)
+
+    return [
+        _RunnerListEntry(
+            runner=_runner_info_from_model(
+                stack_model,
+                active_stack_id=active_stack_id,
+            ),
+            is_managed=_stack_is_managed(stack_model),
+        )
+        for stack_model in _iter_available_runners(client)
+    ]
+
+
+def _create_runner_operation(
+    name: str,
+    *,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+) -> _RunnerCreateResult:
+    """Create a new local runner and return structured operation details."""
+    selector = _normalize_runner_selector(name)
+    client = Client()
+
+    if any(
+        stack_model.name == selector for stack_model in _iter_available_runners(client)
+    ):
+        raise ValueError(_runner_name_collision_message(selector))
+
+    previous_active_runner = str(client.active_stack_model.name) if activate else None
+    merged_labels = dict(labels or {})
+    merged_labels[_RUNNER_MANAGED_LABEL_KEY] = _RUNNER_MANAGED_LABEL_VALUE
+
+    created_components: list[_RunnerComponent] = []
+    components_created = (
+        _format_runner_component_label(selector, "orchestrator"),
+        _format_runner_component_label(selector, "artifact_store"),
+    )
+
+    try:
+        orchestrator = client.create_stack_component(
+            name=selector,
+            flavor="local",
+            component_type=StackComponentType.ORCHESTRATOR,
+            configuration={},
+        )
+        created_components.append(
+            _RunnerComponent(
+                component_id=str(orchestrator.id),
+                name=selector,
+                kind="orchestrator",
+            )
+        )
+    except EntityExistsError as exc:
+        raise ValueError(
+            _component_collision_message(selector, StackComponentType.ORCHESTRATOR)
+        ) from exc
+
+    try:
+        artifact_store = client.create_stack_component(
+            name=selector,
+            flavor="local",
+            component_type=StackComponentType.ARTIFACT_STORE,
+            configuration={},
+        )
+        created_components.append(
+            _RunnerComponent(
+                component_id=str(artifact_store.id),
+                name=selector,
+                kind="artifact_store",
+            )
+        )
+    except EntityExistsError as exc:
+        cleanup_warning = _delete_runner_components_best_effort(
+            client, created_components
+        )
+        message = _component_collision_message(
+            selector, StackComponentType.ARTIFACT_STORE
+        )
+        if cleanup_warning:
+            message = f"{message} {cleanup_warning}"
+        raise ValueError(message) from exc
+    except Exception as exc:
+        cleanup_warning = _delete_runner_components_best_effort(
+            client, created_components
+        )
+        if cleanup_warning:
+            raise RuntimeError(f"{exc} {cleanup_warning}") from exc
+        raise
+
+    try:
+        stack_model = client.create_stack(
+            name=selector,
+            components={
+                StackComponentType.ORCHESTRATOR: selector,
+                StackComponentType.ARTIFACT_STORE: selector,
+            },
+            labels=merged_labels,
+        )
+    except EntityExistsError as exc:
+        cleanup_warning = _delete_runner_components_best_effort(
+            client, created_components
+        )
+        message = _runner_name_collision_message(selector)
+        if cleanup_warning:
+            message = f"{message} {cleanup_warning}"
+        raise ValueError(message) from exc
+    except Exception as exc:
+        cleanup_warning = _delete_runner_components_best_effort(
+            client, created_components
+        )
+        message = str(exc)
+        if cleanup_warning:
+            message = f"{message} {cleanup_warning}"
+        raise RuntimeError(message) from exc
+
+    if activate:
+        client.activate_stack(selector)
+        runner = current_runner()
+    else:
+        runner = _runner_info_from_model(
+            stack_model,
+            active_stack_id=str(client.active_stack_model.id),
+        )
+
+    return _RunnerCreateResult(
+        runner=runner,
+        previous_active_runner=previous_active_runner,
+        components_created=components_created,
+    )
+
+
+def _delete_runner_operation(
+    name_or_id: str,
+    *,
+    recursive: bool = False,
+    force: bool = False,
+) -> _RunnerDeleteResult:
+    """Delete a runner and return structured operation details."""
+    selector = _normalize_runner_selector(name_or_id)
+    client = Client()
+    target_stack = client.get_stack(
+        selector,
+        allow_name_prefix_match=False,
+    )
+    active_stack = client.active_stack_model
+    is_active = str(target_stack.id) == str(active_stack.id)
+
+    if is_active and not force:
+        raise ValueError(
+            "Cannot delete the active runner. Use '--force' to delete and fall "
+            "back to the default runner, or switch first with 'kitaru runner use "
+            "<other>'."
+        )
+
+    components_deleted: tuple[str, ...] = ()
+    if recursive and _stack_is_managed(target_stack):
+        deletable_components: list[str] = []
+        for component_type, component_kind in (
+            (StackComponentType.ORCHESTRATOR, "orchestrator"),
+            (StackComponentType.ARTIFACT_STORE, "artifact_store"),
+        ):
+            component_models = target_stack.components.get(component_type, [])
+            if not component_models:
+                continue
+
+            component_model = component_models[0]
+            stacks = client.list_stacks(component_id=component_model.id, size=2, page=1)
+            if len(stacks) == 1 and str(stacks[0].id) == str(target_stack.id):
+                deletable_components.append(
+                    _format_runner_component_label(target_stack.name, component_kind)
+                )
+        components_deleted = tuple(deletable_components)
+
+    new_active_runner: str | None = None
+    if is_active and force:
+        client.activate_stack("default")
+        new_active_runner = current_runner().name
+
+    client.delete_stack(target_stack.id, recursive=recursive)
+
+    return _RunnerDeleteResult(
+        deleted_runner=str(target_stack.name),
+        components_deleted=components_deleted,
+        new_active_runner=new_active_runner,
+        recursive=recursive,
+    )
+
+
 def _runner_info_from_model(
     stack_model: Any,
     *,
@@ -1625,13 +1923,35 @@ def current_runner() -> RunnerInfo:
 
 def list_runners() -> list[RunnerInfo]:
     """List runners visible to the current user and mark the active one."""
-    client = Client()
-    active_stack_id = str(client.active_stack_model.id)
+    return [entry.runner for entry in _list_runner_entries()]
 
-    return [
-        _runner_info_from_model(stack_model, active_stack_id=active_stack_id)
-        for stack_model in _iter_available_runners(client)
-    ]
+
+def create_runner(
+    name: str,
+    *,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+) -> RunnerInfo:
+    """Create a new local runner and optionally activate it."""
+    return _create_runner_operation(
+        name,
+        activate=activate,
+        labels=labels,
+    ).runner
+
+
+def delete_runner(
+    name_or_id: str,
+    *,
+    recursive: bool = False,
+    force: bool = False,
+) -> None:
+    """Delete a runner and optionally its components."""
+    _delete_runner_operation(
+        name_or_id,
+        recursive=recursive,
+        force=force,
+    )
 
 
 def use_runner(name_or_id: str) -> RunnerInfo:

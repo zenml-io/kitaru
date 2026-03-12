@@ -86,6 +86,12 @@ class TestPublicExports:
     def test_use_runner_exists(self) -> None:
         assert hasattr(kitaru, "use_runner")
 
+    def test_create_runner_exists(self) -> None:
+        assert hasattr(kitaru, "create_runner")
+
+    def test_delete_runner_exists(self) -> None:
+        assert hasattr(kitaru, "delete_runner")
+
     def test_kitaru_client_exists(self) -> None:
         assert hasattr(kitaru, "KitaruClient")
 
@@ -111,7 +117,9 @@ class TestPublicExports:
             "checkpoint",
             "configure",
             "connect",
+            "create_runner",
             "current_runner",
+            "delete_runner",
             "flow",
             "list_runners",
             "llm",

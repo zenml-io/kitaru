@@ -49,6 +49,16 @@ uv run kitaru --version
 You should see Kitaru reporting a local default runner. No login or
 server setup is required for local use.
 
+If you want to test runner lifecycle management explicitly, create a disposable
+local runner:
+
+```bash
+uv run kitaru runner create scratch
+uv run kitaru runner list
+```
+
+That gives you a second local runner to switch to or delete while testing.
+
 ### 3. Run your first flow
 
 ```bash
@@ -243,6 +253,8 @@ docker stop kitaru-server && docker rm kitaru-server
 | `uv run kitaru executions logs <ID>` | View runtime logs |
 | `uv run kitaru executions replay <ID> --from <checkpoint>` | Replay from a checkpoint |
 | `uv run kitaru runner list` | List available runners |
+| `uv run kitaru runner create <name>` | Create and auto-activate a local runner |
+| `uv run kitaru runner delete <name> --recursive --force` | Remove a disposable runner and switch back to default if needed |
 | `uv run kitaru model register <alias> --model <model>` | Register an LLM model alias |
 | `uv run kitaru secrets set <name> --KEY=value` | Store a secret |
 

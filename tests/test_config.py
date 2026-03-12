@@ -12,6 +12,8 @@ from unittest.mock import Mock, call, patch
 import pytest
 from zenml.config.docker_settings import DockerSettings
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
+from zenml.enums import StackComponentType
+from zenml.exceptions import EntityExistsError
 from zenml.utils import io_utils, yaml_utils
 
 from _kitaru_env import apply_env_translations
@@ -32,9 +34,14 @@ from kitaru.config import (
     KitaruConfig,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
+    _create_runner_operation,
+    _delete_runner_operation,
+    _list_runner_entries,
     build_frozen_execution_spec,
     configure,
+    create_runner,
     current_runner,
+    delete_runner,
     image_settings_to_docker_settings,
     list_active_kitaru_environment_variables,
     list_model_aliases,
@@ -68,6 +75,38 @@ class _FakeRunnerPage:
 
     def __iter__(self) -> Iterator[SimpleNamespace]:
         return iter(self.items)
+
+
+def _stack_component(component_id: str, name: str) -> SimpleNamespace:
+    """Return a minimal stack-component model stub for runner tests."""
+    return SimpleNamespace(id=component_id, name=name)
+
+
+def _stack_model(
+    *,
+    stack_id: str,
+    name: str,
+    labels: dict[str, str] | None = None,
+    orchestrator_id: str | None = None,
+    artifact_store_id: str | None = None,
+) -> SimpleNamespace:
+    """Return a minimal stack model stub for runner tests."""
+    components: dict[StackComponentType, list[SimpleNamespace]] = {}
+    if orchestrator_id is not None:
+        components[StackComponentType.ORCHESTRATOR] = [
+            _stack_component(orchestrator_id, name)
+        ]
+    if artifact_store_id is not None:
+        components[StackComponentType.ARTIFACT_STORE] = [
+            _stack_component(artifact_store_id, name)
+        ]
+
+    return SimpleNamespace(
+        id=stack_id,
+        name=name,
+        labels=labels or {},
+        components=components,
+    )
 
 
 def _kitaru_config_path() -> Path:
@@ -517,6 +556,348 @@ def test_list_runners_fetches_all_pages() -> None:
     assert [runner.name for runner in runners] == ["local", "staging", "prod"]
     assert [runner.is_active for runner in runners] == [False, False, True]
     client_mock.list_stacks.assert_has_calls([call(), call(page=2, size=1)])
+
+
+def test_list_runner_entries_include_managed_flag() -> None:
+    """Structured runner entries should expose derived managed status."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+    )
+    client_mock = SimpleNamespace(
+        active_stack_model=default,
+        list_stacks=lambda: [default, dev],
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        entries = _list_runner_entries()
+
+    assert [(entry.runner.name, entry.is_managed) for entry in entries] == [
+        ("default", False),
+        ("dev", True),
+    ]
+
+
+def test_create_runner_creates_local_components_and_activates() -> None:
+    """Create should build local components, create the stack, and activate it."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+        orchestrator_id="orc-dev-id",
+        artifact_store_id="art-dev-id",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeRunnerPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.create_stack_component.side_effect = [
+        SimpleNamespace(id="orc-dev-id"),
+        SimpleNamespace(id="art-dev-id"),
+    ]
+    client_mock.create_stack.return_value = created_stack
+
+    def _activate_stack(_: str) -> None:
+        client_mock.active_stack_model = created_stack
+
+    client_mock.activate_stack.side_effect = _activate_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_runner_operation("dev")
+
+    client_mock.create_stack_component.assert_has_calls(
+        [
+            call(
+                name="dev",
+                flavor="local",
+                component_type=StackComponentType.ORCHESTRATOR,
+                configuration={},
+            ),
+            call(
+                name="dev",
+                flavor="local",
+                component_type=StackComponentType.ARTIFACT_STORE,
+                configuration={},
+            ),
+        ]
+    )
+    assert result.runner.name == "dev"
+    assert result.runner.is_active is True
+    assert result.previous_active_runner == "default"
+    assert result.components_created == (
+        "dev (orchestrator)",
+        "dev (artifact_store)",
+    )
+
+
+def test_create_runner_public_wrapper_returns_runner_info() -> None:
+    """Public create_runner should return only the runner info from the operation."""
+    with patch("kitaru.config._create_runner_operation") as mock_create:
+        mock_create.return_value = SimpleNamespace(
+            runner=SimpleNamespace(id="stack-dev-id", name="dev", is_active=True)
+        )
+
+        runner = create_runner("dev")
+
+    mock_create.assert_called_once_with("dev", activate=True, labels=None)
+    assert runner.name == "dev"
+    assert runner.is_active is True
+
+
+def test_create_runner_without_activation_keeps_previous_active_runner() -> None:
+    """Create with activate=False should not switch the active runner."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+        orchestrator_id="orc-dev-id",
+        artifact_store_id="art-dev-id",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeRunnerPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.create_stack_component.side_effect = [
+        SimpleNamespace(id="orc-dev-id"),
+        SimpleNamespace(id="art-dev-id"),
+    ]
+    client_mock.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_runner_operation("dev", activate=False)
+
+    client_mock.activate_stack.assert_not_called()
+    assert client_mock.active_stack_model.name == "default"
+    assert result.previous_active_runner is None
+    assert result.runner.name == "dev"
+    assert result.runner.is_active is False
+
+
+def test_create_runner_rejects_existing_stack_name() -> None:
+    """Create should fail fast with a helpful message when the stack exists."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    existing = _stack_model(stack_id="stack-dev-id", name="dev")
+    client_mock = SimpleNamespace(
+        active_stack_model=default,
+        list_stacks=lambda: [default, existing],
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(ValueError, match='A runner named "dev" already exists'),
+    ):
+        create_runner("dev")
+
+
+def test_create_runner_component_collision_reports_fresh_component_policy() -> None:
+    """Create should explain that Kitaru never reuses existing components."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeRunnerPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.create_stack_component.side_effect = EntityExistsError("exists")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(ValueError, match="never reuses existing ones"),
+    ):
+        create_runner("dev")
+
+
+def test_create_runner_cleans_up_components_if_stack_creation_fails() -> None:
+    """Create should delete orphaned components in reverse order on stack failure."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeRunnerPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.create_stack_component.side_effect = [
+        SimpleNamespace(id="orc-dev-id"),
+        SimpleNamespace(id="art-dev-id"),
+    ]
+    client_mock.create_stack.side_effect = RuntimeError("stack create failed")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(RuntimeError, match="stack create failed"),
+    ):
+        create_runner("dev")
+
+    client_mock.delete_stack_component.assert_has_calls(
+        [
+            call("art-dev-id", StackComponentType.ARTIFACT_STORE),
+            call("orc-dev-id", StackComponentType.ORCHESTRATOR),
+        ]
+    )
+
+
+def test_create_runner_applies_managed_label_and_preserves_extra_labels() -> None:
+    """Create should always force the managed label while preserving caller labels."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true", "owner": "ml"},
+        orchestrator_id="orc-dev-id",
+        artifact_store_id="art-dev-id",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeRunnerPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.create_stack_component.side_effect = [
+        SimpleNamespace(id="orc-dev-id"),
+        SimpleNamespace(id="art-dev-id"),
+    ]
+    client_mock.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        create_runner(
+            "dev",
+            labels={"owner": "ml", "kitaru.managed": "false"},
+        )
+
+    assert client_mock.create_stack.call_args.kwargs["labels"] == {
+        "owner": "ml",
+        "kitaru.managed": "true",
+    }
+
+
+def test_delete_runner_deletes_non_active_runner() -> None:
+    """Delete should remove a non-active runner without switching anything."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _stack_model(stack_id="stack-dev-id", name="dev")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.return_value = dev
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _delete_runner_operation("dev")
+        public_result = delete_runner("dev-id")
+
+    client_mock.get_stack.assert_has_calls(
+        [
+            call("dev", allow_name_prefix_match=False),
+            call("dev-id", allow_name_prefix_match=False),
+        ]
+    )
+    client_mock.delete_stack.assert_has_calls(
+        [
+            call("stack-dev-id", recursive=False),
+            call("stack-dev-id", recursive=False),
+        ]
+    )
+    assert result.deleted_runner == "dev"
+    assert result.components_deleted == ()
+    assert result.new_active_runner is None
+    assert public_result is None
+
+
+def test_delete_runner_recursive_managed_runner_reports_unshared_components() -> None:
+    """Recursive delete should report only the managed components it can remove."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+        orchestrator_id="orc-dev-id",
+        artifact_store_id="art-dev-id",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.return_value = dev
+    client_mock.list_stacks.side_effect = [[dev], [dev]]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _delete_runner_operation("dev", recursive=True)
+
+    client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=True)
+    assert result.components_deleted == (
+        "dev (orchestrator)",
+        "dev (artifact_store)",
+    )
+    assert result.recursive is True
+
+
+def test_delete_runner_recursive_unmanaged_runner_reports_no_components() -> None:
+    """Recursive delete should not claim component ownership for unmanaged stacks."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    legacy = _stack_model(
+        stack_id="stack-legacy-id",
+        name="legacy",
+        orchestrator_id="orc-legacy-id",
+        artifact_store_id="art-legacy-id",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.return_value = legacy
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _delete_runner_operation("legacy", recursive=True)
+
+    client_mock.list_stacks.assert_not_called()
+    assert result.components_deleted == ()
+
+
+def test_delete_runner_rejects_active_runner_without_force() -> None:
+    """Delete should guard against removing the active runner by default."""
+    active = _stack_model(stack_id="stack-dev-id", name="dev")
+    client_mock = Mock()
+    client_mock.active_stack_model = active
+    client_mock.get_stack.return_value = active
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(ValueError, match="Cannot delete the active runner"),
+    ):
+        delete_runner("dev")
+
+    client_mock.delete_stack.assert_not_called()
+
+
+def test_delete_runner_force_switches_to_default_before_deleting() -> None:
+    """Forced delete should fall back to the default runner before removal."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    active = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = active
+    client_mock.get_stack.return_value = active
+
+    def _activate_stack(_: str) -> None:
+        client_mock.active_stack_model = default
+
+    client_mock.activate_stack.side_effect = _activate_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _delete_runner_operation("dev", force=True)
+
+    client_mock.activate_stack.assert_called_once_with("default")
+    client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=False)
+    assert result.new_active_runner == "default"
 
 
 def test_use_runner_switches_active_runner() -> None:

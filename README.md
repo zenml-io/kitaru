@@ -16,6 +16,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
 - **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, local model aliases (`kitaru model register/list`), and env-first secret resolution for known providers
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
+- **Runner lifecycle** — `kitaru.create_runner()` / `kitaru.delete_runner()`, `kitaru runner create/delete`, automatic activation for new local runners, and `is_managed` in structured runner listings
 - **Execution CLI** — `kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
@@ -141,9 +142,13 @@ kitaru executions resume <exec_id>
 kitaru executions retry <exec_id>
 kitaru executions cancel <exec_id>
 
-kitaru runner list             List visible runners
-kitaru runner current          Show the active runner
-kitaru runner use <name-or-id> Switch active runner
+kitaru runner list                     List visible runners
+kitaru runner current                  Show the active runner
+kitaru runner use <name-or-id>         Switch active runner
+kitaru runner create <name>            Create a local runner and activate it
+kitaru runner create <name> --no-activate
+kitaru runner delete <name-or-id>      Delete a runner
+kitaru runner delete <name-or-id> --recursive [--force]
 
 kitaru log-store show         Show effective global runtime log backend
 kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]

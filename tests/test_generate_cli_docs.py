@@ -80,6 +80,19 @@ class TestBuildCommandTree:
             "retry",
         ]
 
+    def test_runner_tree_includes_create_and_delete(self) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        runner = _find_command(tree, "runner")
+        assert [sub.name for sub in runner.subcommands] == [
+            "create",
+            "current",
+            "delete",
+            "list",
+            "use",
+        ]
+
     def test_building_tree_does_not_resolve_version_metadata(self) -> None:
         """CLI docs introspection should not trigger version metadata lookup."""
         with patch(
@@ -405,7 +418,7 @@ class TestWriteDocsTree:
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content
 
-        for command in ("current", "list", "use"):
+        for command in ("create", "current", "delete", "list", "use"):
             assert (output_dir / "runner" / f"{command}.mdx").exists()
             assert f"runner/{command}.mdx" in files
 

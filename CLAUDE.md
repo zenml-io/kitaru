@@ -185,7 +185,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.log()` | Implemented |
 | `kitaru.save()` | Implemented |
 | `kitaru.load()` | Implemented |
-| Runner selection (`list_runners` / `current_runner` / `use_runner`) | Implemented |
+| Runner lifecycle (`list_runners` / `current_runner` / `use_runner` / `create_runner` / `delete_runner`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
 | `KitaruClient` (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifact browsing) | Implemented |
 | Execution CLI (`kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |

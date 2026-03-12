@@ -48,6 +48,9 @@ from kitaru.config import (
     ModelAliasEntry,
     ResolvedLogStore,
     RunnerInfo,
+    _create_runner_operation,
+    _delete_runner_operation,
+    _list_runner_entries,
     active_runner_log_store,
     list_model_aliases,
     login_to_server,
@@ -74,6 +77,8 @@ from kitaru.inspection import (
     serialize_model_alias,
     serialize_resolved_log_store,
     serialize_runner,
+    serialize_runner_create_result,
+    serialize_runner_delete_result,
     serialize_runtime_snapshot,
     serialize_secret_detail,
     serialize_secret_summary,
@@ -115,7 +120,7 @@ log_store_app = cyclopts.App(
 )
 runner_app = cyclopts.App(
     name="runner",
-    help="Inspect and switch the active runner.",
+    help="Inspect, create, delete, and switch runners.",
 )
 secrets_app = cyclopts.App(
     name="secrets",
@@ -1492,7 +1497,11 @@ def list_(output: OutputFormatOption = "text") -> None:
     command = "runner.list"
     output_format = _resolve_output_format(output)
     try:
-        runners = get_available_runners()
+        if output_format == CLIOutputFormat.JSON:
+            runner_entries = _list_runner_entries()
+            runners = [entry.runner for entry in runner_entries]
+        else:
+            runners = get_available_runners()
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
@@ -1504,7 +1513,10 @@ def list_(output: OutputFormatOption = "text") -> None:
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(
             command,
-            [serialize_runner(runner) for runner in runners],
+            [
+                serialize_runner(entry.runner, is_managed=entry.is_managed)
+                for entry in runner_entries
+            ],
             output=output_format,
         )
         return
@@ -1565,6 +1577,97 @@ def use(
         f"Activated runner: {selected_runner.name}",
         detail=f"Runner ID: {selected_runner.id}",
     )
+
+
+@runner_app.command
+def create(
+    name: Annotated[
+        str,
+        Parameter(help="Runner name."),
+    ],
+    no_activate: Annotated[
+        bool,
+        Parameter(help="Create without activating the runner."),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Create a new local runner."""
+    command = "runner.create"
+    output_format = _resolve_output_format(output)
+    try:
+        result = _create_runner_operation(name, activate=not no_activate)
+    except Exception as exc:  # pragma: no cover - exercised via CLI behavior
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            serialize_runner_create_result(result),
+            output=output_format,
+        )
+        return
+
+    _print_success(f"Created runner: {result.runner.name}")
+    if result.previous_active_runner is not None:
+        print(f"Active runner: {result.previous_active_runner} → {result.runner.name}")
+
+
+@runner_app.command
+def delete(
+    runner: Annotated[
+        str,
+        Parameter(help="Runner name or ID to delete."),
+    ],
+    recursive: Annotated[
+        bool,
+        Parameter(help="Delete the runner and any unshared managed components."),
+    ] = False,
+    force: Annotated[
+        bool,
+        Parameter(
+            help=(
+                "Allow deleting the active runner by falling back to the "
+                "default runner."
+            )
+        ),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Delete a runner by name or ID."""
+    command = "runner.delete"
+    output_format = _resolve_output_format(output)
+    try:
+        result = _delete_runner_operation(
+            runner,
+            recursive=recursive,
+            force=force,
+        )
+    except Exception as exc:  # pragma: no cover - exercised via CLI behavior
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            serialize_runner_delete_result(result),
+            output=output_format,
+        )
+        return
+
+    _print_success(f"Deleted runner: {result.deleted_runner}")
+    if result.components_deleted:
+        print(f"Deleted components: {', '.join(result.components_deleted)}")
+    if result.new_active_runner is not None:
+        print(f"Active runner: {result.new_active_runner}")
 
 
 @model_app.command

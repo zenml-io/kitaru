@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- `kitaru runner list --output json` and MCP `kitaru_runners_list` now include `is_managed`, derived from the runner's `kitaru.managed` label
 - Examples are now grouped into topic-focused subdirectories under `examples/`, each with its own README, while the stable `uv run -m examples.<module>` entrypoints continue to work; the root README, docs site, and tester guide now point to a unified examples catalog
 - Kitaru now treats `KITARU_*` environment variables as the public configuration surface for remote connection/bootstrap, translating the supported connection/debug vars into `ZENML_*` env vars before CLI/SDK startup
 - Connection resolution now understands direct `ZENML_*` env vars as a compatibility layer below `KITARU_*`, while env-driven remote connections fail at first use unless an explicit project is set
@@ -26,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru.configure()` now accepts a `project` parameter for internal/testing use
 
 ### Added
+- Local runner lifecycle support across SDK, CLI, and MCP: `kitaru.create_runner()`, `kitaru.delete_runner()`, `kitaru runner create/delete`, and MCP `manage_runner`
+- New local-runner semantics: `kitaru runner create <name>` auto-activates by default, `--no-activate` leaves the current runner unchanged, and forced active-runner deletion falls back to the default runner
 - Kitaru-branded live terminal output: `kitaru run` now shows a Rich Live checkpoint-by-checkpoint progress display during interactive sessions, replacing ZenML's console output with Kitaru-themed visuals
 - Runtime log retrieval lane: `KitaruClient.executions.logs(...)`, `kitaru executions logs` (with `--follow`, `--grouped`, `-v`/`-vv`, and JSONL output), and MCP `get_execution_logs`
 - Runtime log retrieval docs updates across logging/log-store guides plus a new getting-started page for execution logs

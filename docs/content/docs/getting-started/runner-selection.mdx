@@ -1,15 +1,11 @@
 ---
-title: Select an Active Runner
-description: List, inspect, and switch the active runner used by Kitaru executions
+title: Manage Runners
+description: Create, inspect, switch, and delete the runners Kitaru uses for execution
 ---
 
-This guide shows how to choose the active runner for your Kitaru environment.
+This guide shows how to manage runners in Kitaru.
 
-## What the active runner does
-
-The active runner is your default execution target.
-
-When you run a flow without passing `runner=...`, Kitaru uses the active runner.
+A runner is Kitaru's user-facing name for a ZenML stack. It is your execution target: when you run a flow without passing `runner=...`, Kitaru uses the active runner.
 
 ## Show the current runner
 
@@ -23,7 +19,49 @@ kitaru runner current
 kitaru runner list
 ```
 
-The list includes each runner ID and marks the active one.
+The table view shows each runner ID and marks the active one.
+
+If you need machine-readable output, use JSON:
+
+```bash
+kitaru runner list --output json
+```
+
+Each list item includes:
+
+- `id`
+- `name`
+- `is_active`
+- `is_managed`
+
+`is_managed` is `true` for runners created by Kitaru's `runner create` command.
+
+## Create a local runner
+
+```bash
+kitaru runner create dev
+```
+
+By default, Kitaru creates:
+
+- a local orchestrator named `dev`
+- a local artifact store named `dev`
+- a runner named `dev`
+
+Then it automatically activates the new runner.
+
+You will see output like:
+
+```text
+Created runner: dev
+Active runner: default → dev
+```
+
+If you want to create the runner without switching to it yet:
+
+```bash
+kitaru runner create dev --no-activate
+```
 
 ## Switch to another runner
 
@@ -35,6 +73,26 @@ You can pass either a runner name or a runner ID.
 
 The selected runner is persisted as your default until you switch it again.
 
+## Delete a runner
+
+To delete only the runner record and keep its components:
+
+```bash
+kitaru runner delete dev
+```
+
+To also remove Kitaru-managed components that are not shared with other runners:
+
+```bash
+kitaru runner delete dev --recursive
+```
+
+If the runner you are deleting is currently active, Kitaru protects you by default. Use `--force` to switch back to the default runner first and then continue:
+
+```bash
+kitaru runner delete dev --recursive --force
+```
+
 ## Use the Python SDK
 
 ```python
@@ -42,15 +100,19 @@ import kitaru
 
 print(kitaru.current_runner())
 print(kitaru.list_runners())
+
+kitaru.create_runner("dev")
 kitaru.use_runner("production")
+kitaru.delete_runner("dev", recursive=True, force=True)
 ```
 
-Each runner entry is returned as `RunnerInfo(id, name, is_active)`.
+The SDK keeps `RunnerInfo` intentionally small: `id`, `name`, and `is_active`.
+
+That means `is_managed` is part of structured list output, not part of `RunnerInfo` itself.
 
 ## Precedence with flow-level runner overrides
 
-The active runner is only one layer in the Phase 10 precedence chain. Higher
-layers can override it:
+The active runner is only one layer in the execution precedence chain. Higher layers can override it:
 
 1. `my_flow.run(..., runner="gpu-cluster")`
 2. `@flow(runner="gpu-cluster")`

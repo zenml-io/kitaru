@@ -25,6 +25,7 @@ from kitaru.mcp.server import (
     kitaru_executions_run,
     kitaru_runners_list,
     kitaru_status,
+    manage_runner,
 )
 
 
@@ -341,14 +342,20 @@ def test_status_and_runner_tools_return_structured_payloads() -> None:
         ],
     )
 
-    runners = [
-        RunnerInfo(id="stack-1", name="prod", is_active=True),
-        RunnerInfo(id="stack-2", name="dev", is_active=False),
+    runner_entries = [
+        SimpleNamespace(
+            runner=RunnerInfo(id="stack-1", name="prod", is_active=True),
+            is_managed=True,
+        ),
+        SimpleNamespace(
+            runner=RunnerInfo(id="stack-2", name="dev", is_active=False),
+            is_managed=False,
+        ),
     ]
 
     with (
         patch("kitaru.mcp.server._build_runtime_snapshot", return_value=snapshot),
-        patch("kitaru.mcp.server.get_available_runners", return_value=runners),
+        patch("kitaru.mcp.server._list_runner_entries", return_value=runner_entries),
     ):
         status_payload = kitaru_status()
         runner_payload = kitaru_runners_list()
@@ -361,3 +368,64 @@ def test_status_and_runner_tools_return_structured_payloads() -> None:
     assert status_payload["environment"][0]["name"] == "KITARU_SERVER_URL"
     assert status_payload["environment"][1]["value"] == "token-12***"
     assert [runner["name"] for runner in runner_payload] == ["prod", "dev"]
+    assert [runner["is_managed"] for runner in runner_payload] == [True, False]
+
+
+def test_manage_runner_create_returns_structured_result() -> None:
+    """MCP manage_runner(create) should reuse the CLI-style serialized payload."""
+    with patch("kitaru.mcp.server._create_runner_operation") as mock_create_runner:
+        mock_create_runner.return_value = SimpleNamespace(
+            runner=RunnerInfo(id="stack-dev-id", name="dev", is_active=True),
+            previous_active_runner="default",
+            components_created=("dev (orchestrator)", "dev (artifact_store)"),
+        )
+
+        payload = manage_runner("create", "dev", activate=True)
+
+    mock_create_runner.assert_called_once_with("dev", activate=True)
+    assert payload == {
+        "id": "stack-dev-id",
+        "name": "dev",
+        "is_active": True,
+        "previous_active_runner": "default",
+        "components_created": ["dev (orchestrator)", "dev (artifact_store)"],
+    }
+
+
+def test_manage_runner_delete_returns_structured_result() -> None:
+    """MCP manage_runner(delete) should return delete metadata."""
+    with patch("kitaru.mcp.server._delete_runner_operation") as mock_delete_runner:
+        mock_delete_runner.return_value = SimpleNamespace(
+            deleted_runner="dev",
+            components_deleted=("dev (orchestrator)", "dev (artifact_store)"),
+            new_active_runner="default",
+            recursive=True,
+        )
+
+        payload = manage_runner(
+            "delete",
+            "dev",
+            recursive=True,
+            force=True,
+        )
+
+    mock_delete_runner.assert_called_once_with(
+        "dev",
+        recursive=True,
+        force=True,
+    )
+    assert payload == {
+        "deleted_runner": "dev",
+        "components_deleted": ["dev (orchestrator)", "dev (artifact_store)"],
+        "new_active_runner": "default",
+        "recursive": True,
+    }
+
+
+def test_manage_runner_rejects_irrelevant_flags() -> None:
+    """MCP manage_runner should reject flag combinations that do not fit the action."""
+    with pytest.raises(ValueError, match='only valid when action="delete"'):
+        manage_runner("create", "dev", recursive=True)
+
+    with pytest.raises(ValueError, match='only valid when action="create"'):
+        manage_runner("delete", "dev", activate=False)
