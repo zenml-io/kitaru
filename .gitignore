@@ -229,6 +229,7 @@ design/
 .claude/*
 !.claude/settings.json
 !.claude/skills/
+.claude/skills/kitaru-authoring
 
 # Codex
 .codex/*
