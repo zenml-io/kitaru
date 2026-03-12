@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from examples import wait_and_resume
+from examples.execution_management import wait_and_resume
 
 from kitaru.errors import KitaruStateError
 

@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from examples.pydantic_ai_adapter import run_workflow
+from examples.pydantic_ai_agent.pydantic_ai_adapter import run_workflow
 
 
 def test_phase17_pydantic_ai_example_runs_end_to_end() -> None:

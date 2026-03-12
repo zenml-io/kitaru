@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from examples.first_working_flow import run_workflow
+from examples.basic_flow.first_working_flow import run_workflow
 
 
 def test_phase5_first_working_example_runs_end_to_end() -> None:

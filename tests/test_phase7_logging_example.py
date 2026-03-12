@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from examples.flow_with_logging import writing_agent
+from examples.basic_flow.flow_with_logging import writing_agent
 from zenml.client import Client
 
 

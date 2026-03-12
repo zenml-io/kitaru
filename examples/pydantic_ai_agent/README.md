@@ -1,13 +1,11 @@
 # PydanticAI adapter example
 
-This directory shows how to wrap an existing PydanticAI agent and keep Kitaru’s
+This directory shows how to wrap an existing PydanticAI agent and keep Kitaru's
 durability and observability around it.
-
-Run it with the stable flat entrypoint:
 
 ```bash
 uv sync --extra local --extra pydantic-ai
-uv run -m examples.pydantic_ai_adapter
+uv run -m examples.pydantic_ai_agent.pydantic_ai_adapter
 ```
 
 For the full catalog, see [../README.md](../README.md).

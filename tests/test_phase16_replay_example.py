@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from examples.replay_with_overrides import run_workflow
+from examples.replay.replay_with_overrides import run_workflow
 
 
 def test_phase16_replay_example_runs_end_to_end() -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from examples.flow_with_llm import run_workflow
+from examples.llm.flow_with_llm import run_workflow
 
 from kitaru.config import register_model_alias
 

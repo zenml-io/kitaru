@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from examples.wait_and_resume import run_workflow
+from examples.execution_management.wait_and_resume import run_workflow
 
 from kitaru.errors import KitaruFeatureNotAvailableError
 from kitaru.wait import _resolve_zenml_wait

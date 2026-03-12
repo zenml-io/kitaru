@@ -71,13 +71,13 @@ second terminal once the wait condition is reached.
 
 ```bash
 uv sync --extra local
-uv run -m examples.wait_and_resume --mode interactive
+uv run -m examples.execution_management.wait_and_resume --mode interactive
 ```
 
 Auto mode (useful for CI-style checks):
 
 ```bash
-uv run -m examples.wait_and_resume --mode auto
+uv run -m examples.execution_management.wait_and_resume --mode auto
 uv run pytest tests/test_phase15_wait_example.py
 ```
 

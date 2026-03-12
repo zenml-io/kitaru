@@ -183,7 +183,7 @@ Once connected, your AI assistant can:
 - **List and inspect executions** — "show me my recent kitaru runs"
 - **Read execution logs** — "what did my last flow print?"
 - **Browse artifacts** — "load the output of the research checkpoint"
-- **Run flows** — "run examples.first_working_flow:my_agent"
+- **Run flows** — "run examples.basic_flow.first_working_flow:my_agent"
 - **Provide wait input** — "approve the pending wait"
 - **Replay executions** — "replay my last run from write_draft"
 - **Check status** — "what runner am I connected to?"

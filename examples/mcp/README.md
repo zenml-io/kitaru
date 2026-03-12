@@ -3,11 +3,9 @@
 This group is for assistant-native tooling: it shows how the Kitaru MCP server
 can inspect executions and artifacts from an AI client.
 
-Run it with the stable flat entrypoint:
-
 ```bash
 uv sync --extra local --extra mcp
-uv run -m examples.mcp_query_tools
+uv run -m examples.mcp.mcp_query_tools
 ```
 
 For the full catalog, see [../README.md](../README.md).

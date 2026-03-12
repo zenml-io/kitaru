@@ -853,7 +853,7 @@ def _import_module_for_replay(module_name: str, run_id: str | Any) -> Any:
 
     1. Direct ``importlib.import_module`` (exact match).
     2. Search ``sys.modules`` for a suffix match (e.g. the module is loaded
-       as ``examples.replay_with_overrides``).
+       as ``examples.replay.replay_with_overrides``).
     3. Return ``__main__`` — when invoked via ``python -m pkg.mod``, the
        module is loaded as ``__main__`` and won't appear under its dotted
        name in ``sys.modules``.

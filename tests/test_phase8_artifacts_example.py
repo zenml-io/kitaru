@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from examples.flow_with_artifacts import run_workflow
+from examples.basic_flow.flow_with_artifacts import run_workflow
 from zenml.client import Client
 from zenml.enums import ArtifactSaveType
 

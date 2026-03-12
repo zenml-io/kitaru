@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from examples.flow_with_configuration import run_workflow
+from examples.basic_flow.flow_with_configuration import run_workflow
 
 
 def test_phase10_configuration_example_runs_end_to_end() -> None:

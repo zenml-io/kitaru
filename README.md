@@ -79,21 +79,21 @@ uv sync --extra local --extra mcp           # MCP query tools example
 
 | Category | Example | Run | What it demonstrates |
 |---|---|---|---|
-| Core workflow basics | Basic flow | `uv run -m examples.first_working_flow` | The smallest end-to-end `@flow` + `@checkpoint` workflow |
-| Core workflow basics | Structured logging | `uv run -m examples.flow_with_logging` | `kitaru.log()` metadata at both flow and checkpoint scope |
-| Core workflow basics | Artifacts | `uv run -m examples.flow_with_artifacts` | `kitaru.save()` / `kitaru.load()` across executions |
-| Core workflow basics | Configuration | `uv run -m examples.flow_with_configuration` | `kitaru.configure()` defaults, overrides, and frozen execution specs |
-| Execution lifecycle | Execution management | `uv run -m examples.client_execution_management` | `KitaruClient` for inspecting runs, artifacts, and execution metadata |
-| Execution lifecycle | Wait and resume | `uv run -m examples.wait_and_resume` | `kitaru.wait()` plus manual or automatic resume flows |
-| Execution lifecycle | Replay with overrides | `uv run -m examples.replay_with_overrides` | Replay from a checkpoint boundary with targeted `checkpoint.*` overrides |
-| LLMs and integrations | Tracked LLM calls | `uv run -m examples.flow_with_llm` | `kitaru.llm()` with model aliases, prompt/response capture, and usage metadata |
-| LLMs and integrations | PydanticAI adapter | `uv run -m examples.pydantic_ai_adapter` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary |
-| LLMs and integrations | MCP query tools | `uv run -m examples.mcp_query_tools` | Query executions and artifacts through the Kitaru MCP server |
+| Core workflow basics | Basic flow | `uv run -m examples.basic_flow.first_working_flow` | The smallest end-to-end `@flow` + `@checkpoint` workflow |
+| Core workflow basics | Structured logging | `uv run -m examples.basic_flow.flow_with_logging` | `kitaru.log()` metadata at both flow and checkpoint scope |
+| Core workflow basics | Artifacts | `uv run -m examples.basic_flow.flow_with_artifacts` | `kitaru.save()` / `kitaru.load()` across executions |
+| Core workflow basics | Configuration | `uv run -m examples.basic_flow.flow_with_configuration` | `kitaru.configure()` defaults, overrides, and frozen execution specs |
+| Execution lifecycle | Execution management | `uv run -m examples.execution_management.client_execution_management` | `KitaruClient` for inspecting runs, artifacts, and execution metadata |
+| Execution lifecycle | Wait and resume | `uv run -m examples.execution_management.wait_and_resume` | `kitaru.wait()` plus manual or automatic resume flows |
+| Execution lifecycle | Replay with overrides | `uv run -m examples.replay.replay_with_overrides` | Replay from a checkpoint boundary with targeted `checkpoint.*` overrides |
+| LLMs and integrations | Tracked LLM calls | `uv run -m examples.llm.flow_with_llm` | `kitaru.llm()` with model aliases, prompt/response capture, and usage metadata |
+| LLMs and integrations | PydanticAI adapter | `uv run -m examples.pydantic_ai_agent.pydantic_ai_adapter` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary |
+| LLMs and integrations | MCP query tools | `uv run -m examples.mcp.mcp_query_tools` | Query executions and artifacts through the Kitaru MCP server |
 
 Run any example with:
 
 ```bash
-uv run -m examples.<module_name>
+uv run -m examples.<group>.<module_name>
 ```
 
 For the LLM example, the most reusable setup is to store credentials in a
