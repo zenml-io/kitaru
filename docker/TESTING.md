@@ -214,23 +214,61 @@ concepts and Claude Code will pick it up automatically.
 If you want a client-server setup (e.g. to share state across machines
 or test the login flow), you can run the server as a Docker container.
 
-### 1. Start the server
+For **branch testing**, build the image from your current checkout first.
+That guarantees you are testing the code on disk rather than a stale
+published tag.
+
+### 1. Build the server image locally
 
 ```bash
-docker run -d --name kitaru-server -p 8080:8080 zenmldocker/kitaru:latest
+just server-image REPO=kitaru-local TAG=dev
+# or, if you do not have `just` installed:
+docker build -f docker/Dockerfile --target server -t kitaru-local:dev .
 ```
 
-The server starts on port 8080. Give it a few seconds to initialize.
+This creates a local image tag called `kitaru-local:dev`.
 
-### 2. Connect your local client
+> Once a fixed image is published, you can substitute that published tag.
+> Until then, do not assume `zenmldocker/kitaru:latest` contains the
+> latest Docker login fix.
+
+### 2. Start the server
+
+```bash
+docker run -d --name kitaru-server -p 8080:8080 kitaru-local:dev
+```
+
+The server can take a little while to initialize on first startup.
+Wait for the health endpoint to report success before you try to log in:
+
+```bash
+until curl -fsS http://localhost:8080/health >/dev/null; do sleep 2; done
+```
+
+> Use `/health` for readiness — not `/`. A missing or half-initialized
+> dashboard can make `/` misleading.
+
+### 3. Connect your local client
 
 ```bash
 uv run kitaru login http://localhost:8080
 ```
 
+This uses browser-based device authorization. A few practical notes:
+
+- The CLI prints a `/devices/verify?...` URL. Open that URL in a browser
+  on the same machine that published port `8080`.
+- If your browser does not open automatically, copy/paste the printed URL
+  manually.
+- If the browser page shows `{"detail":"An unexpected error occurred."}`
+  or the CLI keeps polling with `authorization_pending`, the image likely
+  does not contain the bundled dashboard assets. Rebuild the image from
+  the current branch or switch to a newer published tag.
+- If login stalls, `docker logs kitaru-server` is the first place to look.
+
 After login, `uv run kitaru status` should show the server connection.
 
-### 3. Run examples as before
+### 4. Run examples as before
 
 All the examples from Option A work the same way — the only
 difference is that executions are now stored on the server instead of

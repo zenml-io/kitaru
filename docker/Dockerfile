@@ -20,6 +20,10 @@ ARG VIRTUAL_ENV=/opt/venv
 ARG USERNAME=kitaru
 ARG USER_UID=1000
 ARG USER_GID=1000
+ARG ZENML_REPO_URL=https://github.com/zenml-io/zenml.git
+ARG ZENML_GIT_REF=a2d00d5cc3cc7dce2b2aeef17bd04e00fad067fb
+ARG ZENML_DASHBOARD_TAG=v0.41.4
+ARG ZENML_SERVER_EXTRAS=server,secrets-aws,secrets-gcp,secrets-azure,secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure,azureml,sagemaker,vertex
 
 # ---------------------------------------------------------------------------
 # Base: minimal Python runtime
@@ -40,6 +44,10 @@ RUN set -ex \
 FROM base AS builder
 
 ARG VIRTUAL_ENV
+ARG ZENML_REPO_URL
+ARG ZENML_GIT_REF
+ARG ZENML_DASHBOARD_TAG
+ARG ZENML_SERVER_EXTRAS
 
 ENV \
   VIRTUAL_ENV=$VIRTUAL_ENV \
@@ -49,32 +57,65 @@ ENV \
 
 WORKDIR /build
 
-# git is needed for the git-based ZenML dependency (temporary)
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# The temporary ZenML git-ref packaging flow needs git for checkout and the
+# dashboard bundling script needs curl/openssl/tar/CA certs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash \
+      ca-certificates \
+      curl \
+      git \
+      openssl \
+      tar \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
+RUN pip install --upgrade pip uv setuptools
+
+# Install Kitaru from local source first. The authoritative ZenML install comes
+# afterwards because Kitaru's dependency metadata still points at the raw git
+# URL and would otherwise overwrite the dashboard-bundled install.
+COPY . /tmp/kitaru
+RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
+
 # Install ZenML with the same server + cloud extras that the official
-# zenmldocker/zenml-server image ships.  Alembic is pinned for migration
+# zenmldocker/zenml-server image ships. Alembic is pinned for migration
 # stability (matches ZenML's own pin).
 #
 # TODO: Switch to released PyPI version once feature/kitaru is merged:
 #   uv pip install "zenml[server,secrets-aws,secrets-gcp,secrets-azure,
 #     secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,
 #     connectors-azure,azureml,sagemaker,vertex]>=X.Y.Z" "alembic==1.15.2"
-# Pinned to commit hash for tester stability; bump hash when updating
-RUN pip install --upgrade pip uv setuptools \
-    && uv pip install \
-      "zenml[server,secrets-aws,secrets-gcp,secrets-azure,secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure,azureml,sagemaker,vertex] @ git+https://github.com/zenml-io/zenml.git@a2d00d5cc3cc7dce2b2aeef17bd04e00fad067fb" \
-      "alembic==1.15.2"
+# Pinned to commit hash for tester stability; bump hash when updating.
+RUN git clone "$ZENML_REPO_URL" /build/zenml \
+    && cd /build/zenml \
+    && git checkout "$ZENML_GIT_REF" \
+    && TAG="$ZENML_DASHBOARD_TAG" bash scripts/install-dashboard.sh \
+    && uv pip install --reinstall ".[${ZENML_SERVER_EXTRAS}]" "alembic==1.15.2"
 
-# Install Kitaru from local source
-COPY . /tmp/kitaru
-RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
+# Fail the build early if the installed ZenML package still lacks the dashboard
+# bundle required by browser-based device authentication.
+RUN python - <<'PY'
+from __future__ import annotations
 
-RUN pip freeze > requirements.txt
+import inspect
+from pathlib import Path
+
+import zenml
+
+package_dir = Path(inspect.getfile(zenml)).resolve().parent
+index_path = package_dir / "zen_server" / "dashboard" / "index.html"
+if not index_path.is_file():
+    raise SystemExit(
+        "ZenML dashboard assets missing from installed package: "
+        f"{index_path}"
+    )
+print(f"Verified ZenML dashboard assets at {index_path}")
+PY
+
+RUN pip freeze > requirements.txt \
+    && python -c "from pathlib import Path; path = Path('requirements.txt'); text = path.read_text(); path.write_text(text.replace('zenml @ file:///build/zenml', 'zenml @ git+${ZENML_REPO_URL}@${ZENML_GIT_REF}'))"
 
 # ---------------------------------------------------------------------------
 # Server: clean runtime image

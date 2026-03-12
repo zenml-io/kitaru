@@ -44,6 +44,51 @@ jobs:
           jobSummary: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build server image
+        run: docker build -f docker/Dockerfile --target server -t kitaru-ci-server
+          .
+      - name: Start server container
+        run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 kitaru-ci-server
+      - name: Wait for health endpoint
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/health >/tmp/kitaru-health.txt; then
+              cat /tmp/kitaru-health.txt
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server did not become healthy in time." >&2
+          exit 1
+      - name: Verify bundled dashboard assets exist in the installed package
+        run: |
+          set -euo pipefail
+          docker exec kitaru-ci-server /opt/venv/bin/python -c "import inspect; from pathlib import Path; import zenml; index = Path(inspect.getfile(zenml)).resolve().parent / 'zen_server' / 'dashboard' / 'index.html'; assert index.is_file(), index; print(index)"
+      - name: Smoke test device verification route
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o /tmp/device-verify-response.txt -w '%{http_code}' 'http://127.0.0.1:18080/devices/verify?device_id=test&user_code=test')
+          test "$status" = "200"
+          if grep -q 'An unexpected error occurred' /tmp/device-verify-response.txt; then
+            echo "Device verification route returned the generic unexpected-error payload." >&2
+            cat /tmp/device-verify-response.txt >&2
+            exit 1
+          fi
+          if docker logs kitaru-ci-server 2>&1 | grep -q 'TemplateNotFound'; then
+            echo "TemplateNotFound appeared in container logs after hitting /devices/verify." >&2
+            exit 1
+          fi
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker logs kitaru-ci-server || true
+      - name: Stop server container
+        if: always()
+        run: docker rm -f kitaru-ci-server || true
   test:
     runs-on: ubuntu-latest
     strategy:
