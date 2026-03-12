@@ -49,7 +49,7 @@ ENV \
 
 WORKDIR /build
 
-# git is needed for the branch-based ZenML dependency (temporary)
+# git is needed for the git-based ZenML dependency (temporary)
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
