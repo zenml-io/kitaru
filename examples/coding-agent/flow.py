@@ -1,4 +1,4 @@
-import argparse
+import click
 
 import kitaru
 from kitaru import checkpoint, flow
@@ -63,13 +63,11 @@ def coding_agent(task: str, cwd: str = ".") -> str:
     return implement(task, implementation_plan, cwd)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Durable coding agent (PydanticAI).")
-    parser.add_argument("--task", required=True)
-    parser.add_argument("--cwd", default=".")
-    args = parser.parse_args()
-
-    handle = coding_agent.run(args.task, args.cwd)
+@click.command(help="Durable coding agent (PydanticAI).")
+@click.option('--task', required=True, help='The coding task to execute')
+@click.option('--cwd', default='.', help='The current working directory')
+def main(task: str, cwd: str) -> None:
+    handle = coding_agent.run(task, cwd)
     print(f"exec_id: {handle.exec_id}")
     print(handle.wait())
 
