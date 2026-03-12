@@ -28,14 +28,19 @@ Kitaru's current release includes:
 - `@flow` — mark a function as a durable workflow
 - `@checkpoint` — mark a function as a persisted work unit
 - `kitaru.log()` — attach structured metadata to the current scope
+- `kitaru.wait()` — pause a flow until external input is supplied
+- `kitaru.llm()` — make tracked model calls with prompt/response capture
 - `kitaru.connect()` — connect to a Kitaru server
+- `kitaru.configure()` — set process-local runtime defaults
 - `kitaru.save()` / `kitaru.load()` — persist and load named artifacts in checkpoints
 - `kitaru.list_stacks()` / `kitaru.current_stack()` / `kitaru.use_stack()` — manage the default stack
+- `KitaruClient` — inspect executions, fetch logs, resolve waits, retry, replay, and browse artifacts
 - `FlowHandle` — interact with a running or finished execution
 
-<Callout type="warn">
-  Some symbols are still scaffolded: `wait`, `llm`, `configure`, and
-  `KitaruClient`. Calling these currently raises `NotImplementedError`.
+<Callout type="info">
+  All of the primitives listed here ship today. Some capabilities are
+  backend-dependent — for example, runtime log retrieval requires a
+  server-backed connection — but they are part of the supported Kitaru surface.
 </Callout>
 
 ## Explore the concepts

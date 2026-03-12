@@ -10,12 +10,11 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any, Protocol, runtime_checkable
-from urllib.parse import urlparse
 
 import cyclopts
 from cyclopts import Parameter
@@ -27,14 +26,21 @@ from zenml.config.global_config import GlobalConfiguration
 from zenml.exceptions import EntityExistsError, ZenKeyError
 from zenml.login.credentials_store import get_credentials_store
 from zenml.models import SecretResponse
-from zenml.utils.server_utils import connected_to_local_server, get_local_server
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
 from _kitaru_bootstrap import resolve_installed_version
+from kitaru.cli_output import (
+    CLIOutputFormat,
+    CommandEnvelope,
+    emit_command_envelope,
+    normalize_output_format,
+)
+from kitaru.cli_output import (
+    exit_with_error as _structured_exit_with_error,
+)
 from kitaru.client import Execution, ExecutionStatus, KitaruClient, LogEntry
 from kitaru.config import (
     KITARU_AUTH_TOKEN_ENV,
-    KITARU_PROJECT_ENV,
     KITARU_SERVER_URL_ENV,
     ZENML_STORE_API_KEY_ENV,
     ZENML_STORE_URL_ENV,
@@ -42,10 +48,7 @@ from kitaru.config import (
     ModelAliasEntry,
     ResolvedLogStore,
     StackInfo,
-    _kitaru_config_dir,
-    _read_runtime_connection_config,
     active_stack_log_store,
-    list_active_kitaru_environment_variables,
     list_model_aliases,
     login_to_server,
     register_model_alias,
@@ -61,6 +64,31 @@ from kitaru.config import (
 )
 from kitaru.config import (
     use_stack as set_active_stack,
+)
+from kitaru.inspection import (
+    RuntimeSnapshot,
+    describe_local_server,
+    serialize_execution,
+    serialize_execution_summary,
+    serialize_log_entry,
+    serialize_model_alias,
+    serialize_resolved_log_store,
+    serialize_runtime_snapshot,
+    serialize_secret_detail,
+    serialize_secret_summary,
+    serialize_stack,
+)
+from kitaru.inspection import (
+    build_runtime_snapshot as _build_runtime_snapshot,
+)
+from kitaru.inspection import (
+    combine_warnings as _combine_warnings,
+)
+from kitaru.inspection import (
+    connected_to_local_server_safe as _connected_to_local_server,
+)
+from kitaru.inspection import (
+    log_store_mismatch_details as _log_store_mismatch_details,
 )
 from kitaru.runtime import _submission_observer
 from kitaru.terminal import (
@@ -118,35 +146,54 @@ def _apply_runtime_version() -> None:
     app.version = _sdk_version()
 
 
-@dataclass
-class RuntimeSnapshot:
-    """Resolved runtime information for `kitaru status` and `kitaru info`."""
-
-    sdk_version: str
-    connection: str
-    connection_target: str
-    config_directory: str
-    server_url: str | None = None
-    active_user: str | None = None
-    project_override: str | None = None
-    active_stack: str | None = None
-    repository_root: str | None = None
-    server_version: str | None = None
-    server_database: str | None = None
-    server_deployment_type: str | None = None
-    local_server_status: str | None = None
-    warning: str | None = None
-    log_store_status: str | None = None
-    log_store_warning: str | None = None
-    environment: list[ActiveEnvironmentVariable] = field(default_factory=list)
-
-
 @dataclass(frozen=True)
 class SnapshotSection:
     """One renderable snapshot section."""
 
     title: str | None
     rows: list[tuple[str, str]]
+
+
+@dataclass(frozen=True)
+class LogoutResult:
+    """Structured logout result for text and JSON output."""
+
+    mode: str
+    target: str | None = None
+    local_fallback_available: bool | None = None
+
+    def __str__(self) -> str:
+        """Render the legacy logout message string."""
+        return _logout_result_message(self)
+
+    def __contains__(self, needle: str) -> bool:
+        """Support substring assertions against the rendered logout message."""
+        return needle in str(self)
+
+    def __eq__(self, other: object) -> bool:
+        """Preserve dataclass equality while allowing direct string comparison."""
+        if isinstance(other, str):
+            return str(self) == other
+        if isinstance(other, LogoutResult):
+            return (
+                self.mode,
+                self.target,
+                self.local_fallback_available,
+            ) == (
+                other.mode,
+                other.target,
+                other.local_fallback_available,
+            )
+        return NotImplemented
+
+
+OutputFormatOption = Annotated[
+    str,
+    Parameter(
+        alias=["-o"],
+        help='Output format: "text" (default) or "json".',
+    ),
+]
 
 
 @runtime_checkable
@@ -438,8 +485,38 @@ def _print_success(message: str, detail: str | None = None) -> None:
             print(f"  {detail}")
 
 
-def _exit_with_error(message: str) -> None:
-    """Print a friendly CLI error and exit with a non-zero status."""
+def _resolve_output_format(raw_output: str) -> CLIOutputFormat:
+    """Normalize a CLI output mode and fail with a text error if invalid."""
+    try:
+        return normalize_output_format(raw_output)
+    except ValueError as exc:
+        _structured_exit_with_error(
+            "cli",
+            str(exc),
+            output=CLIOutputFormat.TEXT,
+            error_type=type(exc).__name__,
+        )
+
+
+def _exit_with_error(
+    command: str,
+    message: str | None = None,
+    *,
+    output: CLIOutputFormat = CLIOutputFormat.TEXT,
+    error_type: str | None = None,
+) -> None:
+    """Print a format-aware CLI error and exit with a non-zero status."""
+    if message is None:
+        message = command
+        command = "cli"
+
+    if output == CLIOutputFormat.JSON:
+        _structured_exit_with_error(
+            command,
+            message,
+            output=output,
+            error_type=error_type,
+        )
     if _is_interactive(stderr=True):
         err = Text("Error: ", style="bold red")
         err.append(message, style="red")
@@ -450,36 +527,15 @@ def _exit_with_error(message: str) -> None:
 
 
 def _describe_local_server() -> str:
-    """Summarize the state of the local Kitaru-compatible server, if any."""
-    try:
-        local_server = get_local_server()
-    except ImportError:
-        return "unavailable (local runtime support not installed)"
-    if local_server is None:
-        return "not started"
-
-    provider = local_server.config.provider.value
-    if local_server.status and local_server.status.url:
-        return f"running at {local_server.status.url} ({provider})"
-
-    if local_server.status and local_server.status.status_message:
-        return (
-            f"registered but unavailable ({provider}: "
-            f"{local_server.status.status_message})"
-        )
-
-    return f"registered but unavailable ({provider})"
+    """Expose the local-server summary helper for CLI tests and snapshots."""
+    return describe_local_server()
 
 
-def _connected_to_local_server() -> bool:
-    """Safely check whether the current client is bound to a local server."""
-    try:
-        return connected_to_local_server()
-    except ImportError:
-        return False
-
-
-def _ensure_no_auth_environment_overrides() -> None:
+def _ensure_no_auth_environment_overrides(
+    *,
+    command: str = "auth",
+    output: CLIOutputFormat = CLIOutputFormat.TEXT,
+) -> None:
     """Fail early if auth environment variables would override the CLI."""
     present: list[str] = []
 
@@ -500,42 +556,12 @@ def _ensure_no_auth_environment_overrides() -> None:
     if present:
         joined = ", ".join(present)
         _exit_with_error(
+            command,
             "Kitaru login/logout cannot override existing auth environment "
             f"variables ({joined}). Unset them first, or rely on those "
-            "environment variables directly."
+            "environment variables directly.",
+            output=output,
         )
-
-
-def _build_snapshot_without_local_store(
-    gc: GlobalConfiguration, _exc: Exception
-) -> RuntimeSnapshot:
-    """Build a degraded snapshot when local Kitaru runtime support is unavailable."""
-    return RuntimeSnapshot(
-        sdk_version=_sdk_version(),
-        connection="local mode (unavailable)",
-        connection_target="unavailable",
-        config_directory=str(_kitaru_config_dir()),
-        local_server_status=_describe_local_server(),
-        warning=(
-            "Local Kitaru runtime support is unavailable in this environment. "
-            "Connect to a Kitaru server to keep working, or install the local "
-            "runtime dependencies if you want the built-in local stack."
-        ),
-        environment=list_active_kitaru_environment_variables(),
-    )
-
-
-def _uses_stale_local_server_url(
-    server_url: str | None, local_server_status: str | None
-) -> bool:
-    """Check for a localhost URL that points at a stopped local server."""
-    if not server_url or not local_server_status:
-        return False
-
-    hostname = urlparse(server_url).hostname
-    return hostname in {"127.0.0.1", "localhost", "::1"} and (
-        "unavailable" in local_server_status
-    )
 
 
 def _clear_persisted_store_configuration(gc: GlobalConfiguration) -> None:
@@ -547,80 +573,6 @@ def _clear_persisted_store_configuration(gc: GlobalConfiguration) -> None:
     gc._active_stack = None
     gc._active_project = None
     gc._write_config()
-
-
-def _build_runtime_snapshot() -> RuntimeSnapshot:
-    """Resolve the current Kitaru runtime state from ZenML-backed config."""
-    gc = GlobalConfiguration()
-    try:
-        store_cfg = gc.store_configuration
-        uses_local_store = gc.uses_local_store
-    except ImportError as exc:
-        return _build_snapshot_without_local_store(gc, exc)
-
-    if uses_local_store:
-        connection = "local database"
-        server_url = None
-    elif _connected_to_local_server():
-        connection = "local Kitaru server"
-        server_url = store_cfg.url
-    else:
-        connection = "remote Kitaru server"
-        server_url = store_cfg.url
-
-    snapshot = RuntimeSnapshot(
-        sdk_version=_sdk_version(),
-        connection=connection,
-        connection_target=store_cfg.url,
-        server_url=server_url,
-        config_directory=str(_kitaru_config_dir()),
-        local_server_status=_describe_local_server(),
-        environment=list_active_kitaru_environment_variables(),
-    )
-
-    if _uses_stale_local_server_url(server_url, snapshot.local_server_status):
-        snapshot.warning = (
-            "The configured Kitaru server points to a stopped local server. "
-            "Start it again or run `kitaru logout` to clear the stale "
-            "connection."
-        )
-        return snapshot
-
-    # Detect explicit project override (env var or runtime configure())
-    project_env = os.environ.get(KITARU_PROJECT_ENV)
-    runtime_conn = _read_runtime_connection_config()
-    if project_env:
-        snapshot.project_override = project_env
-    elif runtime_conn.project:
-        snapshot.project_override = runtime_conn.project
-
-    try:
-        client = Client()
-        store_info = client.zen_store.get_store_info()
-        snapshot.active_user = client.active_user.name
-        snapshot.active_stack = client.active_stack_model.name
-        snapshot.repository_root = str(client.root) if client.root else None
-        snapshot.server_version = str(store_info.version)
-        snapshot.server_database = str(store_info.database_type)
-        snapshot.server_deployment_type = str(store_info.deployment_type)
-    except Exception as exc:  # pragma: no cover - exercised via CLI behavior
-        snapshot.warning = f"Unable to query the configured store: {exc}"
-
-    try:
-        preferred_log_store = resolve_log_store()
-    except ValueError as exc:
-        snapshot.log_store_warning = (
-            f"Unable to resolve Kitaru log-store preference: {exc}"
-        )
-        return snapshot
-
-    log_store_status, log_store_warning = _log_store_mismatch_details(
-        preferred_log_store
-    )
-    snapshot.log_store_status = log_store_status
-    snapshot.log_store_warning = log_store_warning
-
-    return snapshot
 
 
 def _get_connected_server_url() -> str | None:
@@ -696,44 +648,6 @@ def _log_store_detail(snapshot: ResolvedLogStore) -> str:
         return f"Effective backend: {snapshot.backend}"
 
     return f"Effective backend: {snapshot.backend} (from {snapshot.source} settings)"
-
-
-def _log_store_mismatch_details(
-    preferred: ResolvedLogStore,
-) -> tuple[str | None, str | None]:
-    """Return status-row + warning text when preferred and active backends differ."""
-    if preferred.source == "default":
-        return None, None
-
-    active_store = active_stack_log_store()
-    if active_store is None:
-        return None, None
-
-    if active_store.backend == preferred.backend:
-        return None, None
-
-    status_row = f"{preferred.backend} (preferred) ⚠ stack uses {active_store.backend}"
-
-    active_label = active_store.backend
-    if active_store.stack_name:
-        active_label = f"{active_store.backend} (stack: {active_store.stack_name})"
-
-    warning = "\n".join(
-        [
-            f"Active ZenML stack uses: {active_label}",
-            "The Kitaru log-store preference is not wired into stack selection yet.",
-            "Actual runtime logs go to the stack's log store, not this preference.",
-        ]
-    )
-    return status_row, warning
-
-
-def _combine_warnings(*warnings: str | None) -> str | None:
-    """Combine non-empty warning messages into one multiline block."""
-    rendered = [warning for warning in warnings if warning]
-    if not rendered:
-        return None
-    return "\n".join(rendered)
 
 
 def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
@@ -964,6 +878,32 @@ def _emit_snapshot_sections(
         print(_render_plain_snapshot_sections(title, sections, warning))
 
 
+def _emit_json_item(
+    command: str,
+    item: dict[str, Any],
+    *,
+    output: CLIOutputFormat,
+) -> None:
+    """Emit a single structured JSON item when JSON mode is enabled."""
+    emit_command_envelope(
+        CommandEnvelope(command=command, item=item),
+        output=output,
+    )
+
+
+def _emit_json_items(
+    command: str,
+    items: list[dict[str, Any]],
+    *,
+    output: CLIOutputFormat,
+) -> None:
+    """Emit a structured JSON list result when JSON mode is enabled."""
+    emit_command_envelope(
+        CommandEnvelope(command=command, items=items, count=len(items)),
+        output=output,
+    )
+
+
 def _environment_rows(
     environment: list[ActiveEnvironmentVariable],
 ) -> list[tuple[str, str]]:
@@ -1018,14 +958,6 @@ def _run_with_live_display(
     return handle
 
 
-def _normalize_log_output(output: str) -> str:
-    """Normalize and validate the `executions logs` output format."""
-    normalized = output.strip().lower()
-    if normalized not in {"text", "json"}:
-        raise ValueError("`--output` must be either `text` or `json`.")
-    return normalized
-
-
 def _format_log_timestamp(value: str | None) -> str:
     """Render an optional ISO timestamp in a compact CLI-friendly shape."""
     if value is None:
@@ -1061,43 +993,36 @@ def _format_log_entry(entry: LogEntry, *, verbosity: int) -> str:
     return f"{timestamp} {level:<5} [{module}] {entry.message}"
 
 
-def _serialize_log_entry(entry: LogEntry) -> dict[str, Any]:
-    """Serialize one log entry for JSONL output."""
-    payload: dict[str, Any] = {"message": entry.message}
-    for key, value in (
-        ("level", entry.level),
-        ("timestamp", entry.timestamp),
-        ("source", entry.source),
-        ("checkpoint_name", entry.checkpoint_name),
-        ("module", entry.module),
-        ("filename", entry.filename),
-        ("lineno", entry.lineno),
-    ):
-        if value is not None:
-            payload[key] = value
-
-    return payload
-
-
-def _emit_control_message(message: str, *, output: str) -> None:
-    """Emit non-log control/status text for text or JSONL output modes."""
-    if output == "json":
-        print(message, file=sys.stderr)
-    else:
+def _emit_control_message(message: str, *, output: CLIOutputFormat) -> None:
+    """Emit non-log control/status text for text output mode."""
+    if output == CLIOutputFormat.TEXT:
         print(message)
+
+
+def _emit_json_log_event(event: str, item: dict[str, Any]) -> None:
+    """Emit one JSONL log-stream event."""
+    print(
+        json.dumps(
+            {
+                "command": "executions.logs",
+                "event": event,
+                "item": item,
+            }
+        )
+    )
 
 
 def _emit_log_entries(
     entries: list[LogEntry],
     *,
-    output: str,
+    output: CLIOutputFormat,
     grouped: bool,
     verbosity: int,
 ) -> None:
-    """Emit log entries in text or JSONL format."""
-    if output == "json":
+    """Emit log entries in text or JSON follow-stream format."""
+    if output == CLIOutputFormat.JSON:
         for entry in entries:
-            print(json.dumps(_serialize_log_entry(entry)))
+            _emit_json_log_event("log", serialize_log_entry(entry))
         return
 
     if not grouped:
@@ -1120,8 +1045,16 @@ def _emit_log_entries(
             print(_format_log_entry(entry, verbosity=verbosity))
 
 
-def _emit_empty_logs_message(exec_id: str, *, output: str) -> None:
+def _emit_empty_logs_message(
+    exec_id: str,
+    *,
+    output: CLIOutputFormat,
+) -> None:
     """Emit a friendly empty-state message when no runtime logs were found."""
+    if output == CLIOutputFormat.JSON:
+        _emit_json_items("executions.logs", [], output=output)
+        return
+
     _emit_control_message(
         f"No log entries found for execution {exec_id}.",
         output=output,
@@ -1152,7 +1085,7 @@ def _follow_execution_logs(
     checkpoint: str | None,
     source: str,
     limit: int | None,
-    output: str,
+    output: CLIOutputFormat,
     grouped: bool,
     verbosity: int,
     interval: float,
@@ -1187,51 +1120,94 @@ def _follow_execution_logs(
 
         execution = client.executions.get(exec_id)
         if execution.status == ExecutionStatus.COMPLETED:
-            _emit_control_message("[Execution completed successfully]", output=output)
+            if output == CLIOutputFormat.JSON:
+                _emit_json_log_event(
+                    "terminal",
+                    {
+                        "status": ExecutionStatus.COMPLETED.value,
+                        "message": "Execution completed successfully",
+                    },
+                )
+            else:
+                _emit_control_message(
+                    "[Execution completed successfully]",
+                    output=output,
+                )
             return 0
         if execution.status == ExecutionStatus.FAILED:
             failure_reason = execution.status_reason or "execution failed"
             if execution.failure is not None:
                 failure_reason = execution.failure.message
-            _emit_control_message(
-                f"[Execution failed: {failure_reason}]",
-                output=output,
-            )
+            if output == CLIOutputFormat.JSON:
+                _emit_json_log_event(
+                    "terminal",
+                    {
+                        "status": ExecutionStatus.FAILED.value,
+                        "message": failure_reason,
+                    },
+                )
+            else:
+                _emit_control_message(
+                    f"[Execution failed: {failure_reason}]",
+                    output=output,
+                )
             return 1
         if execution.status == ExecutionStatus.CANCELLED:
-            _emit_control_message("[Execution cancelled]", output=output)
+            if output == CLIOutputFormat.JSON:
+                _emit_json_log_event(
+                    "terminal",
+                    {
+                        "status": ExecutionStatus.CANCELLED.value,
+                        "message": "Execution cancelled",
+                    },
+                )
+            else:
+                _emit_control_message("[Execution cancelled]", output=output)
             return 1
 
         if execution.status == ExecutionStatus.WAITING:
             wait_name = "unknown"
+            wait_id: str | None = None
+            wait_question: str | None = None
             if execution.pending_wait is not None:
                 wait_name = execution.pending_wait.name
+                wait_id = execution.pending_wait.wait_id
+                wait_question = execution.pending_wait.question
             if wait_name != last_wait_name:
-                _emit_control_message(
-                    f"[Execution is waiting for input on: {wait_name}]",
-                    output=output,
-                )
+                if output == CLIOutputFormat.JSON:
+                    _emit_json_log_event(
+                        "waiting",
+                        {
+                            "wait_name": wait_name,
+                            "wait_id": wait_id,
+                            "question": wait_question,
+                        },
+                    )
+                else:
+                    _emit_control_message(
+                        f"[Execution is waiting for input on: {wait_name}]",
+                        output=output,
+                    )
                 last_wait_name = wait_name
 
         time.sleep(interval)
 
 
-def _logout_current_connection() -> str:
+def _logout_current_connection() -> LogoutResult:
     """Reset the active connection and clear current stored credentials."""
     gc = GlobalConfiguration()
 
     if _connected_to_local_server():
         LocalServerDeployer().remove_server()
-        return "Logged out from the local Kitaru server."
+        return LogoutResult(mode="local_server")
 
     try:
         if gc.uses_local_store:
-            return "Kitaru is already using its local default store."
+            return LogoutResult(mode="local_store")
         server_url = gc.store_configuration.url.rstrip("/")
     except ImportError:
-        return (
-            "Kitaru is not connected to a remote server, and local mode is "
-            "unavailable in this environment."
+        return LogoutResult(
+            mode="unavailable",
         )
     local_fallback_available = True
     try:
@@ -1240,15 +1216,85 @@ def _logout_current_connection() -> str:
         local_fallback_available = False
         _clear_persisted_store_configuration(gc)
 
-    suffix = ""
-    if not local_fallback_available:
-        suffix = " (local fallback unavailable in this environment)"
-
     if server_url.startswith(("http://", "https://")):
         get_credentials_store().clear_credentials(server_url)
-        return f"Logged out from Kitaru server: {server_url}{suffix}"
+        return LogoutResult(
+            mode="remote_server",
+            target=server_url,
+            local_fallback_available=local_fallback_available,
+        )
 
-    return f"Disconnected from store: {server_url}{suffix}"
+    return LogoutResult(
+        mode="remote_store",
+        target=server_url,
+        local_fallback_available=local_fallback_available,
+    )
+
+
+def _logout_result_payload(result: LogoutResult) -> dict[str, Any]:
+    """Serialize a logout result for JSON output."""
+    return {
+        "mode": result.mode,
+        "target": result.target,
+        "local_fallback_available": result.local_fallback_available,
+    }
+
+
+def _logout_result_message(result: LogoutResult) -> str:
+    """Render the legacy text message for a logout result."""
+    if result.mode == "local_server":
+        return "Logged out from the local Kitaru server."
+    if result.mode == "local_store":
+        return "Kitaru is already using its local default store."
+    if result.mode == "unavailable":
+        return (
+            "Kitaru is not connected to a remote server, and local mode is "
+            "unavailable in this environment."
+        )
+
+    suffix = ""
+    if result.local_fallback_available is False:
+        suffix = " (local fallback unavailable in this environment)"
+
+    if result.mode == "remote_server":
+        return f"Logged out from Kitaru server: {result.target}{suffix}"
+    return f"Disconnected from store: {result.target}{suffix}"
+
+
+def _log_store_payload(snapshot: ResolvedLogStore) -> dict[str, Any]:
+    """Serialize effective log-store state for JSON output."""
+    _, mismatch_warning = _log_store_mismatch_details(snapshot)
+    return serialize_resolved_log_store(
+        snapshot,
+        active_store=active_stack_log_store(),
+        warning=mismatch_warning,
+    )
+
+
+def _run_payload(
+    *,
+    target: str,
+    stack: str | None,
+    exec_id: str,
+) -> dict[str, Any]:
+    """Build a structured payload for `kitaru run` JSON output."""
+    payload: dict[str, Any] = {
+        "target": target,
+        "invocation": "deploy" if stack else "run",
+        "exec_id": exec_id,
+        "execution": None,
+        "warning": None,
+    }
+    try:
+        execution = KitaruClient().executions.get(exec_id)
+    except Exception as exc:
+        payload["warning"] = (
+            f"Execution started successfully, but details are not available yet: {exc}"
+        )
+        return payload
+
+    payload["execution"] = serialize_execution(execution)
+    return payload
 
 
 @app.command
@@ -1292,9 +1338,12 @@ def login(
             alias=["--pro-api-url"],
         ),
     ] = None,
+    output: OutputFormatOption = "text",
 ) -> None:
     """Connect to a Kitaru server and persist the session globally."""
-    _ensure_no_auth_environment_overrides()
+    command = "login"
+    output_format = _resolve_output_format(output)
+    _ensure_no_auth_environment_overrides(command=command, output=output_format)
 
     try:
         login_to_server(
@@ -1307,17 +1356,43 @@ def login(
             cloud_api_url=cloud_api_url,
         )
     except (RuntimeError, ValueError) as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
 
     connected_server_url = _get_connected_server_url() or server.rstrip("/")
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            {
+                "server_url": connected_server_url,
+                "project": project,
+            },
+            output=output_format,
+        )
+        return
+
     _print_success(f"Connected to Kitaru server: {connected_server_url}")
 
 
 @app.command
-def logout() -> None:
+def logout(output: OutputFormatOption = "text") -> None:
     """Log out from the current Kitaru server and clear stored auth state."""
-    _ensure_no_auth_environment_overrides()
-    _print_success(_logout_current_connection())
+    command = "logout"
+    output_format = _resolve_output_format(output)
+    _ensure_no_auth_environment_overrides(command=command, output=output_format)
+    result = _logout_current_connection()
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            _logout_result_payload(result),
+            output=output_format,
+        )
+        return
+    _print_success(_logout_result_message(result))
 
 
 @log_store_app.command
@@ -1335,8 +1410,11 @@ def set(
         str | None,
         Parameter(help="Optional API key or secret placeholder."),
     ] = None,
+    output: OutputFormatOption = "text",
 ) -> None:
     """Set the global runtime log-store backend override."""
+    command = "log-store.set"
+    output_format = _resolve_output_format(output)
     try:
         snapshot = set_global_log_store(
             backend,
@@ -1344,7 +1422,16 @@ def set(
             api_key=api_key,
         )
     except ValueError as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
+        return
 
     _print_success(
         "Saved global log-store override.",
@@ -1353,24 +1440,45 @@ def set(
 
 
 @log_store_app.command
-def show() -> None:
+def show(output: OutputFormatOption = "text") -> None:
     """Show the effective global runtime log-store configuration."""
+    command = "log-store.show"
+    output_format = _resolve_output_format(output)
     try:
         snapshot = resolve_log_store()
     except ValueError as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
 
     _, mismatch_warning = _log_store_mismatch_details(snapshot)
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
+        return
     _emit_snapshot("Kitaru log store", _log_store_rows(snapshot), mismatch_warning)
 
 
 @log_store_app.command
-def reset() -> None:
+def reset(output: OutputFormatOption = "text") -> None:
     """Clear the persisted global runtime log-store override."""
+    command = "log-store.reset"
+    output_format = _resolve_output_format(output)
     try:
         snapshot = reset_global_log_store()
     except ValueError as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
+        return
 
     _print_success(
         "Cleared global log-store override.",
@@ -1379,23 +1487,49 @@ def reset() -> None:
 
 
 @stack_app.command
-def list_() -> None:
+def list_(output: OutputFormatOption = "text") -> None:
     """List stacks visible to the current user."""
+    command = "stack.list"
+    output_format = _resolve_output_format(output)
     try:
         stacks = get_available_stacks()
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_items(
+            command,
+            [serialize_stack(stack) for stack in stacks],
+            output=output_format,
+        )
+        return
 
     _emit_snapshot("Kitaru stacks", _stack_list_rows(stacks))
 
 
 @stack_app.command
-def current() -> None:
+def current(output: OutputFormatOption = "text") -> None:
     """Show the currently active stack."""
+    command = "stack.current"
+    output_format = _resolve_output_format(output)
     try:
         stack = get_current_stack()
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_stack(stack), output=output_format)
+        return
 
     _emit_snapshot("Kitaru stack", _current_stack_rows(stack))
 
@@ -1406,12 +1540,24 @@ def use(
         str,
         Parameter(help="Stack name or ID to activate."),
     ],
+    output: OutputFormatOption = "text",
 ) -> None:
-    """Set the active stack by name or ID."""
+    """Use a stack as the active default by name or ID."""
+    command = "stack.use"
+    output_format = _resolve_output_format(output)
     try:
         selected_stack = set_active_stack(stack)
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_stack(selected_stack), output=output_format)
+        return
 
     _print_success(
         f"Activated stack: {selected_stack.name}",
@@ -1436,14 +1582,28 @@ def register(
         str | None,
         Parameter(help="Optional secret name/ID containing provider credentials."),
     ] = None,
+    output: OutputFormatOption = "text",
 ) -> None:
-    """Create or update a local model alias used by `kitaru.llm()`."""
+    """Register or update a local model alias used by `kitaru.llm()`."""
+    command = "model.register"
+    output_format = _resolve_output_format(output)
     try:
         if secret is not None:
             _resolve_secret_exact(Client(), secret)
         alias_entry = register_model_alias(alias, model=model, secret=secret)
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command, serialize_model_alias(alias_entry), output=output_format
+        )
+        return
 
     detail = f"Model: {alias_entry.model}"
     if alias_entry.secret:
@@ -1458,12 +1618,27 @@ def register(
 
 
 @model_app.command
-def list___() -> None:
+def list___(output: OutputFormatOption = "text") -> None:
     """List local model aliases used by `kitaru.llm()`."""
+    command = "model.list"
+    output_format = _resolve_output_format(output)
     try:
         aliases = list_model_aliases()
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_items(
+            command,
+            [serialize_model_alias(entry) for entry in aliases],
+            output=output_format,
+        )
+        return
 
     _emit_snapshot("Kitaru models", _model_rows(aliases))
 
@@ -1481,8 +1656,11 @@ def set_(
             allow_leading_hyphen=True,
         ),
     ],
+    output: OutputFormatOption = "text",
 ) -> None:
-    """Create or update a secret with env-var-style key names."""
+    """Set a secret with env-var-style key names, creating it if needed."""
+    command = "secrets.set"
+    output_format = _resolve_output_format(output)
     try:
         parsed_assignments = _parse_secret_assignments(assignments)
         client = Client()
@@ -1502,7 +1680,18 @@ def set_(
             )
             action = "Updated"
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        payload = serialize_secret_summary(secret)
+        payload["result"] = action.lower()
+        _emit_json_item(command, payload, output=output_format)
+        return
 
     _print_success(
         f"{action} secret: {secret.name}",
@@ -1520,12 +1709,28 @@ def show_(
         bool,
         Parameter(help="Display raw secret values in command output."),
     ] = False,
+    output: OutputFormatOption = "text",
 ) -> None:
     """Show a secret with metadata and optional raw values."""
+    command = "secrets.show"
+    output_format = _resolve_output_format(output)
     try:
         secret = _resolve_secret_exact(Client(), name_or_id)
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            serialize_secret_detail(secret, show_values=show_values),
+            output=output_format,
+        )
+        return
 
     _emit_snapshot(
         "Kitaru secret",
@@ -1534,12 +1739,30 @@ def show_(
 
 
 @secrets_app.command
-def list__() -> None:
+def list__(output: OutputFormatOption = "text") -> None:
     """List all secrets visible to the current user context."""
+    command = "secrets.list"
+    output_format = _resolve_output_format(output)
     try:
         secrets = _list_accessible_secrets(Client())
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        ordered = sorted(
+            secrets, key=lambda secret: (secret.name.lower(), str(secret.id))
+        )
+        _emit_json_items(
+            command,
+            [serialize_secret_summary(secret) for secret in ordered],
+            output=output_format,
+        )
+        return
 
     _emit_snapshot("Kitaru secrets", _secret_list_rows(secrets))
 
@@ -1550,14 +1773,28 @@ def delete_(
         str,
         Parameter(help="Secret name or ID."),
     ],
+    output: OutputFormatOption = "text",
 ) -> None:
     """Delete a secret by exact name or exact ID."""
+    command = "secrets.delete"
+    output_format = _resolve_output_format(output)
     try:
         client = Client()
         secret = _resolve_secret_exact(client, name_or_id)
         client.delete_secret(name_id_or_prefix=str(secret.id))
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        payload = serialize_secret_summary(secret)
+        payload["result"] = "deleted"
+        _emit_json_item(command, payload, output=output_format)
+        return
 
     _print_success(
         f"Deleted secret: {secret.name}",
@@ -1590,9 +1827,16 @@ def run(
         str | None,
         Parameter(help="Optional stack name/ID for deploy-style execution."),
     ] = None,
+    output: OutputFormatOption = "text",
 ) -> None:
-    """Start a flow execution from a module/file target."""
-    use_live = is_terminal_interactive() and not stack
+    """Run a flow from a module/file target."""
+    command = "run"
+    output_format = _resolve_output_format(output)
+    use_live = (
+        is_terminal_interactive()
+        and not stack
+        and output_format == CLIOutputFormat.TEXT
+    )
 
     try:
         flow_target = _load_flow_target(target)
@@ -1614,11 +1858,26 @@ def run(
                 "Flow execution did not return a valid handle with an `exec_id`."
             )
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
 
-    if not use_live:
-        _print_success(f"Started flow execution: {handle.exec_id}")
-        _emit_run_snapshot(target=target, stack=stack, exec_id=handle.exec_id)
+    if use_live:
+        return
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            _run_payload(target=target, stack=stack, exec_id=handle.exec_id),
+            output=output_format,
+        )
+        return
+
+    _print_success(f"Started flow execution: {handle.exec_id}")
+    _emit_run_snapshot(target=target, stack=stack, exec_id=handle.exec_id)
 
 
 @executions_app.command
@@ -1627,12 +1886,24 @@ def get_(
         str,
         Parameter(help="Execution ID."),
     ],
+    output: OutputFormatOption = "text",
 ) -> None:
     """Show detailed information for one execution."""
+    command = "executions.get"
+    output_format = _resolve_output_format(output)
     try:
         execution = KitaruClient().executions.get(exec_id)
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        return
 
     _emit_snapshot("Kitaru execution", _execution_rows(execution))
 
@@ -1654,8 +1925,11 @@ def list____(
         int | None,
         Parameter(help="Maximum number of executions to return."),
     ] = None,
+    output: OutputFormatOption = "text",
 ) -> None:
     """List executions with optional filters."""
+    command = "executions.list"
+    output_format = _resolve_output_format(output)
     try:
         executions = KitaruClient().executions.list(
             status=status,
@@ -1663,7 +1937,20 @@ def list____(
             limit=limit,
         )
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_items(
+            command,
+            [serialize_execution_summary(execution) for execution in executions],
+            output=output_format,
+        )
+        return
 
     _emit_snapshot("Kitaru executions", _execution_list_rows(executions))
 
@@ -1703,10 +1990,7 @@ def logs_(
         bool,
         Parameter(help="Group output by checkpoint with section headers."),
     ] = False,
-    output: Annotated[
-        str,
-        Parameter(help='Output format: "text" (default) or "json" (JSONL).'),
-    ] = "text",
+    output: OutputFormatOption = "text",
     verbosity: Annotated[
         int,
         Parameter(
@@ -1717,19 +2001,29 @@ def logs_(
     ] = 0,
 ) -> None:
     """Fetch runtime log entries for an execution."""
-    try:
-        output_format = _normalize_log_output(output)
-    except ValueError as exc:
-        _exit_with_error(str(exc))
+    command = "executions.logs"
+    output_format = _resolve_output_format(output)
 
-    if grouped and output_format == "json":
-        _exit_with_error("`--grouped` cannot be combined with `--output json`.")
+    if grouped and output_format == CLIOutputFormat.JSON:
+        _exit_with_error(
+            command,
+            "`--grouped` cannot be combined with `--output json`.",
+            output=output_format,
+        )
 
     if checkpoint and source.strip().lower() == "runner":
-        _exit_with_error("`--checkpoint` cannot be combined with `--source runner`.")
+        _exit_with_error(
+            command,
+            "`--checkpoint` cannot be combined with `--source runner`.",
+            output=output_format,
+        )
 
     if interval <= 0:
-        _exit_with_error("`--interval` must be > 0.")
+        _exit_with_error(
+            command,
+            "`--interval` must be > 0.",
+            output=output_format,
+        )
 
     verbosity = min(verbosity, 2)
 
@@ -1749,10 +2043,21 @@ def logs_(
                 interval=interval,
             )
         except KeyboardInterrupt:
-            _emit_control_message("[Log follow interrupted]", output=output_format)
+            if output_format == CLIOutputFormat.JSON:
+                _emit_json_log_event(
+                    "interrupted",
+                    {"message": "Log follow interrupted"},
+                )
+            else:
+                _emit_control_message("[Log follow interrupted]", output=output_format)
             raise SystemExit(1) from None
         except Exception as exc:
-            _exit_with_error(str(exc))
+            _exit_with_error(
+                command,
+                str(exc),
+                output=output_format,
+                error_type=type(exc).__name__,
+            )
 
         raise SystemExit(exit_code)
 
@@ -1764,7 +2069,20 @@ def logs_(
             limit=limit,
         )
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_items(
+            command,
+            [serialize_log_entry(entry) for entry in entries],
+            output=output_format,
+        )
+        return
 
     if not entries:
         _emit_empty_logs_message(exec_id, output=output_format)
@@ -1798,8 +2116,11 @@ def input_(
             )
         ),
     ],
+    output: OutputFormatOption = "text",
 ) -> None:
     """Resolve pending wait input for an execution."""
+    command = "executions.input"
+    output_format = _resolve_output_format(output)
     try:
         parsed_value = _parse_json_value(value, option_name="--value")
         execution = KitaruClient().executions.input(
@@ -1808,7 +2129,16 @@ def input_(
             value=parsed_value,
         )
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        return
 
     _print_success(
         f"Resolved wait input for execution: {execution.exec_id}",
@@ -1843,8 +2173,11 @@ def replay_(
         str | None,
         Parameter(help=("Replay overrides as a JSON object with `checkpoint.*` keys.")),
     ] = None,
+    output: OutputFormatOption = "text",
 ) -> None:
     """Replay an execution from a checkpoint boundary."""
+    command = "executions.replay"
+    output_format = _resolve_output_format(output)
     try:
         flow_inputs = _parse_json_object(args, option_name="--args")
         parsed_overrides = _parse_json_object(overrides, option_name="--overrides")
@@ -1855,7 +2188,16 @@ def replay_(
             **flow_inputs,
         )
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        return
 
     _print_success(
         f"Replayed execution: {execution.exec_id}",
@@ -1869,12 +2211,24 @@ def retry_(
         str,
         Parameter(help="Execution ID."),
     ],
+    output: OutputFormatOption = "text",
 ) -> None:
     """Retry a failed execution as same-execution recovery."""
+    command = "executions.retry"
+    output_format = _resolve_output_format(output)
     try:
         execution = KitaruClient().executions.retry(exec_id)
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        return
 
     _print_success(
         f"Retried execution: {execution.exec_id}",
@@ -1888,12 +2242,24 @@ def resume_(
         str,
         Parameter(help="Execution ID."),
     ],
+    output: OutputFormatOption = "text",
 ) -> None:
     """Resume a paused execution after wait input is resolved."""
+    command = "executions.resume"
+    output_format = _resolve_output_format(output)
     try:
         execution = KitaruClient().executions.resume(exec_id)
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        return
 
     _print_success(
         f"Resumed execution: {execution.exec_id}",
@@ -1907,12 +2273,24 @@ def cancel_(
         str,
         Parameter(help="Execution ID."),
     ],
+    output: OutputFormatOption = "text",
 ) -> None:
     """Cancel a running execution."""
+    command = "executions.cancel"
+    output_format = _resolve_output_format(output)
     try:
         execution = KitaruClient().executions.cancel(exec_id)
     except Exception as exc:
-        _exit_with_error(str(exc))
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_execution(execution), output=output_format)
+        return
 
     _print_success(
         f"Cancelled execution: {execution.exec_id}",
@@ -1921,9 +2299,16 @@ def cancel_(
 
 
 @app.command
-def status() -> None:
+def status(output: OutputFormatOption = "text") -> None:
     """Show the current connection state and active stack context."""
+    output_format = _resolve_output_format(output)
     snapshot = _build_runtime_snapshot()
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            "status", serialize_runtime_snapshot(snapshot), output=output_format
+        )
+        return
+
     sections = [SnapshotSection(title=None, rows=_status_rows(snapshot))]
     if snapshot.environment:
         sections.append(
@@ -1940,9 +2325,16 @@ def status() -> None:
 
 
 @app.command
-def info() -> None:
+def info(output: OutputFormatOption = "text") -> None:
     """Show detailed environment information for the current setup."""
+    output_format = _resolve_output_format(output)
     snapshot = _build_runtime_snapshot()
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            "info", serialize_runtime_snapshot(snapshot), output=output_format
+        )
+        return
+
     _emit_snapshot(
         "Kitaru info",
         _info_rows(snapshot),

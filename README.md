@@ -10,16 +10,16 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 
 - **Flows and checkpoints** — `@flow` and `@checkpoint` decorators for durable, replayable workflows with concurrent execution via `.submit()` / `.result()`
 - **Artifact persistence** — `kitaru.save()` / `kitaru.load()` for explicit artifact storage and cross-execution reuse inside checkpoints
-- **Structured logging + runtime log retrieval** — `kitaru.log()` attaches metadata to executions/checkpoints, and runtime logs are retrievable via `KitaruClient.executions.logs(...)`, `kitaru executions logs`, and the MCP `get_execution_logs` tool
+- **Structured logging + runtime log retrieval** — `kitaru.log()` attaches metadata to executions/checkpoints, and runtime logs are retrievable via `KitaruClient.executions.logs(...)`, `kitaru executions logs`, and the MCP `get_execution_logs` tool on server-backed connections, with clear errors for local DB / OTEL export-only cases
 - **Configuration** — `kitaru.configure(...)`, environment variables, and `[tool.kitaru]` in `pyproject.toml`, with precedence resolved at flow start and persisted per execution
-- **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`, `logs`), replaying from checkpoints/waits (`replay`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
+- **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`, `logs`), replaying from checkpoint boundaries (`replay`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
-- **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, and local model aliases (`kitaru model register/list`)
+- **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, local model aliases (`kitaru model register/list`), and env-first secret resolution for known providers
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
 - **Execution CLI** — `kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
-- **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus a Claude Code authoring skill available via the plugin marketplace
+- **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus Claude Code scoping and authoring skills available via the plugin marketplace
 
 ### SDK primitives
 
@@ -84,15 +84,30 @@ uv sync --extra local --extra mcp  # MCP server example
 Run any example with:
 
 ```bash
-uv run python -m examples.<module_name>
+uv run -m examples.<module_name>
 ```
 
-For the LLM example, register a model alias and set your API key first:
+For the LLM example, the most reusable setup is to store credentials in a
+secret and link that secret to a local model alias:
+
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+```
+
+For quick local testing, you can also skip the linked secret and just export
+the provider key:
 
 ```bash
 kitaru model register fast --model openai/gpt-4o-mini
 export OPENAI_API_KEY=sk-...
 ```
+
+For known providers, environment variables override a linked secret when both
+are present.
+
+See the full walkthrough:
+https://kitaru.ai/docs/getting-started/secrets-and-model-registration
 
 ### CLI
 

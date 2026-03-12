@@ -47,7 +47,7 @@ called and attaches metadata to the right target:
 ```
 inside a checkpoint  →  metadata attaches to that checkpoint
 inside a flow only   →  metadata attaches to the execution
-outside a flow       →  raises RuntimeError
+outside a flow       →  raises KitaruContextError
 ```
 
 This means you can log at both levels in the same workflow:
@@ -126,11 +126,16 @@ Retrieve logs with:
 
 Configure the preferred backend destination with `kitaru log-store ...`.
 
-The precedence for runtime log storage is:
+The precedence for Kitaru's preferred runtime log backend is:
 
 1. **Environment variables** (highest priority)
 2. **Global user config** (set via `kitaru log-store set`)
 3. **Built-in default** (the `artifact-store` backend)
+
+The active stack log store still controls where runtime logs are actually
+emitted at execution time. If that active destination differs from Kitaru's
+saved preference, `kitaru status` and `kitaru log-store show` will warn about
+the mismatch.
 
 For full details, see [View Execution Runtime Logs](/getting-started/execution-logs)
 and [Configure Runtime Log Storage](/getting-started/log-store).

@@ -93,7 +93,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Wrapped PydanticAI `run()` / `run_sync()` calls at flow scope now use a synthetic `llm_call` checkpoint boundary so adapter tracking remains available outside explicit checkpoints
 - Kitaru global config persistence now uses field-preserving updates, so log-store and model-registry settings no longer clobber each other
 - Updated README, CLAUDE guide, AGENTS guide, and docs pages to reflect shipped LLM/model-registry functionality and current implemented primitive status
-- Updated execution-management docs to cover shipped replay/wait/input/resume commands and to defer only execution log streaming
+- Updated the CLI/docs surface so generated command reference pages show real positional usage, `executions logs`/`executions replay` appear everywhere they should, and runtime logs are documented separately from structured metadata
+- Added a dedicated secrets + model registration walkthrough and clarified the current secret story: `kitaru.llm()` auto-resolves linked secrets, while non-LLM secret access remains a low-level pattern
+- Updated quickstart, docs, and README wording to reflect shipped replay/log/MCP behavior, typed errors, and current Claude Code skill packaging
 
 ## [0.1.0] - 2026-03-06
 

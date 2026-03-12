@@ -51,6 +51,7 @@ Execution tools:
 - `kitaru_executions_list`
 - `kitaru_executions_get`
 - `kitaru_executions_latest`
+- `get_execution_logs`
 - `kitaru_executions_run`
 - `kitaru_executions_cancel`
 - `kitaru_executions_input`
@@ -87,6 +88,12 @@ If you can run `kitaru status`, MCP tools use that same connection.
 - `operation: "replay"`
 - the serialized replayed execution payload
 
-Use `from_` for checkpoint/wait selection, optional `flow_inputs` for flow
-parameter overrides, and optional `overrides` for `checkpoint.*` / `wait.*`
-overrides.
+Use `from_` for checkpoint selection, optional `flow_inputs` for flow
+parameter overrides, and optional `overrides` for `checkpoint.*` overrides.
+
+Replay does not support `wait.*` overrides. If the replayed execution reaches a
+wait, resolve it through the normal input flow afterward.
+
+MCP currently exposes `kitaru_executions_input` but not a separate resume tool.
+If your backend requires an explicit resume step after input resolution, use the
+CLI or SDK `resume(...)` surface.

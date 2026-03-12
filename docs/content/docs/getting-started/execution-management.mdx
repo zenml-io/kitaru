@@ -1,6 +1,6 @@
 ---
 title: Manage Executions with KitaruClient and CLI
-description: Inspect execution status, resolve waits, and manage lifecycle actions
+description: Inspect execution status, fetch runtime logs, resolve waits, and manage lifecycle actions
 ---
 
 `KitaruClient` is the programmatic API for managing and inspecting executions
@@ -55,6 +55,18 @@ completed_for_flow = client.executions.list(
 latest = client.executions.latest(flow="content_pipeline")
 ```
 
+## Fetch runtime logs
+
+```python
+entries = client.executions.logs(exec_id, checkpoint="write_draft", limit=100)
+for entry in entries:
+    print(entry.timestamp, entry.level, entry.checkpoint_name, entry.message)
+```
+
+Runtime log retrieval requires a server-backed connection. For CLI options,
+follow mode, grouped output, and retrieval caveats, see
+[View Execution Runtime Logs](/getting-started/execution-logs).
+
 ## Resolve wait input (resume path)
 
 ```python
@@ -77,11 +89,11 @@ execution = client.executions.resume(exec_id)
 # Same-execution retry (failed executions only)
 retried = client.executions.retry(exec_id)
 
-# Replay into a new execution from a checkpoint or wait boundary
+# Replay into a new execution from a checkpoint boundary
 replayed = client.executions.replay(
     exec_id,
     from_="write_draft",
-    overrides={"checkpoint.research": "Edited notes", "wait.approve": False},
+    overrides={"checkpoint.research": "Edited notes"},
     topic="New topic",
 )
 
@@ -111,6 +123,7 @@ kitaru run agent.py:content_pipeline --stack prod --args '{"topic":"AI safety"}'
 kitaru executions get kr-a8f3c2
 kitaru executions list
 kitaru executions list --status waiting --flow content_pipeline --limit 20
+kitaru executions logs kr-a8f3c2 --checkpoint write_draft
 
 # Wait-input and lifecycle actions
 kitaru executions input kr-a8f3c2 --wait approve_deploy --value true
@@ -134,31 +147,30 @@ Then use tool calls like:
 
 - `kitaru_executions_list(status="waiting")`
 - `kitaru_executions_input(exec_id=..., wait=..., value=...)`
+- `get_execution_logs(exec_id=...)`
 - `kitaru_artifacts_get(artifact_id=...)`
 - `kitaru_status()`
 
+If your backend requires an explicit resume step after wait input is resolved,
+use the CLI or SDK `resume(...)` call. MCP does not currently expose a separate
+resume tool.
+
 See the full setup guide at [MCP Server](/agent-integrations/mcp-server).
-
-## Current limitations
-
-The following execution surface is still deferred:
-
-- `kitaru executions logs ...`
 
 ## Try the examples
 
 ```bash
 uv sync --extra local
-uv run python -m examples.client_execution_management
+uv run -m examples.client_execution_management
 uv run pytest tests/test_phase11_client_example.py
 
-uv run python -m examples.wait_and_resume
+uv run -m examples.wait_and_resume
 uv run pytest tests/test_phase15_wait_example.py
 
-uv run python -m examples.replay_with_overrides
+uv run -m examples.replay_with_overrides
 uv run pytest tests/test_phase16_replay_example.py
 
 uv sync --extra mcp
-uv run python -m examples.mcp_query_tools
+uv run -m examples.mcp_query_tools
 uv run pytest tests/mcp/test_phase19_mcp_example.py
 ```

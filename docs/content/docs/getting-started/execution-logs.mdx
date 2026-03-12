@@ -33,8 +33,11 @@ kitaru executions logs <exec_id> -vv
 # Group output by checkpoint
 kitaru executions logs <exec_id> --grouped
 
-# JSONL output (one JSON object per line)
+# Structured JSON output
 kitaru executions logs <exec_id> --output json
+
+# JSONL event stream while following
+kitaru executions logs <exec_id> --follow --output json
 
 # Follow until terminal state
 kitaru executions logs <exec_id> --follow
@@ -42,6 +45,9 @@ kitaru executions logs <exec_id> --follow
 # Runner/orchestrator logs
 kitaru executions logs <exec_id> --source runner
 ```
+
+`--grouped` cannot be combined with `--output json` because grouped mode emits
+human-readable section headers rather than a structured machine-readable shape.
 
 ## Checkpoint filtering
 
@@ -55,17 +61,47 @@ kitaru executions logs <exec_id> --checkpoint research
 `--checkpoint` cannot be combined with `--source runner` because runner logs are
 execution-level, not checkpoint-level.
 
+## Prerequisites and retrieval limits
+
+Runtime log retrieval is available through the SDK, CLI, and MCP, but two
+important limits apply:
+
+1. **Server-backed connection required.** `KitaruClient().executions.logs(...)`
+   calls backend log endpoints. In local database mode, those endpoints do not
+   exist, so Kitaru raises a clear `KitaruLogRetrievalError`.
+2. **OTEL export-only backends are not retrievable through Kitaru.** In that
+   setup, Kitaru surfaces a clear retrieval error and points you at the OTEL
+   backend instead of pretending the logs are available in-process.
+
+## JSON output behavior
+
+For normal (non-follow) retrieval, `--output json` emits one JSON document:
+
+- single top-level `command` field (`executions.logs`)
+- `items` list containing serialized log entries
+- `count` with the number of returned entries
+
+For follow mode, `--output json` switches to **JSONL events** instead of one
+final document. Each line is a JSON object with:
+
+- `command: "executions.logs"`
+- `event`: one of `log`, `waiting`, `terminal`, or `interrupted`
+- `item`: the event payload
+
 ## Follow mode behavior
 
 `--follow` polls on an interval (default `3.0s`) and exits when execution
-reaches a terminal state:
+reaches a terminal state.
+
+In text mode you will see terminal banners like:
 
 - `[Execution completed successfully]` (exit code `0`)
 - `[Execution failed: ...]` (exit code `1`)
 - `[Execution cancelled]` (exit code `1`)
 
-When execution is waiting for input, follow mode prints a waiting banner and
-continues polling.
+In JSON mode the equivalent terminal information is emitted as a `terminal`
+event line. When execution is waiting for input, follow mode emits a waiting
+banner in text mode or a `waiting` event in JSON mode.
 
 ## Python SDK example
 
@@ -77,12 +113,6 @@ entries = client.executions.logs("kr-a8f3c2", checkpoint="research", limit=100)
 for entry in entries:
     print(entry.timestamp, entry.level, entry.checkpoint_name, entry.message)
 ```
-
-## OTEL and other retrieval limits
-
-If the active backend is OTEL export-only, Kitaru will return a clear retrieval
-error instead of pretending logs are available in-process. In that case, view
-logs in your OTEL backend directly.
 
 ## Related pages
 

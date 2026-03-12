@@ -42,17 +42,24 @@ uv add kitaru --extra pydantic-ai
 
 ## Verify Installation
 
-```bash
-kitaru --version
-```
+<Tabs items={["uv project", "pip environment"]}>
+  <Tab value="uv project">
+    ```bash
+    uv run kitaru --version
+    uv run kitaru --help
+    ```
+  </Tab>
+  <Tab value="pip environment">
+    ```bash
+    kitaru --version
+    kitaru --help
+    ```
+  </Tab>
+</Tabs>
 
-If you run `kitaru` or `kitaru-mcp` on an older Python version, Kitaru now
-fails immediately with a clear error message instead of surfacing confusing
-startup metadata noise.
-
-```bash
-kitaru --help
-```
+If you run `kitaru` or `kitaru-mcp` on an older Python version, Kitaru fails
+immediately with a clear error message instead of surfacing confusing startup
+metadata noise.
 
 ## Requirements
 

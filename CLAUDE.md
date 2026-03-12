@@ -32,6 +32,7 @@ scripts/              # Doc generation + site merge scripts
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
 .claude-plugin/       # Claude Code plugin marketplace + skill distribution
+  skills/kitaru-scoping/    # Kitaru scoping skill (SKILL.md)
   skills/kitaru-authoring/  # Kitaru authoring skill (SKILL.md)
 docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing runner)
 spec/                 # SDK design specifications (reference material)
@@ -94,6 +95,8 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - Treat `KITARU_*` environment variables as the public configuration surface in docs and examples. Mention `ZENML_*` only as a compatibility note when needed.
 - Static hand-written MDX pages under `docs/content/docs/` are tracked and can be edited directly when behavior changes.
 - Generated reference output should still come from the existing generation scripts rather than manual edits.
+- Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
+- If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or `src/kitaru/cli.py`, not the generated `docs/content/docs/cli/*` output.
 
 ## Branching strategy
 
@@ -183,14 +186,14 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.load()` | Implemented |
 | Stack selection (`list_stacks` / `current_stack` / `use_stack`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
-| `KitaruClient` (`get/list/latest/logs/input/resume/cancel/replay` + artifact browsing) | Implemented |
+| `KitaruClient` (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifact browsing) | Implemented |
 | Execution CLI (`kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
 | `KitaruClient.executions.replay()` | Implemented |
 
 ### Key design patterns
 
-- **Flows cannot nest** — no `@flow` inside another flow
+- **Flows are top-level orchestration boundaries** — direct flow calls are blocked; start executions with `.run()` / `.deploy()`
 - **Nested checkpoint calls are blocked in the current MVP implementation**
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive
 - **Replay** works by re-running the flow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute

@@ -48,7 +48,8 @@ Behind the scenes:
     On success, the flow's return value is extracted and returned
   </Step>
   <Step>
-    On failure, a `RuntimeError` is raised
+    On failure, `handle.wait()` raises `KitaruExecutionError` (or a more
+    specific subclass)
   </Step>
 </Steps>
 
@@ -85,14 +86,16 @@ def no_result() -> None:
 
 ### Failed executions
 
-If a flow execution fails, Kitaru raises a `RuntimeError` with context about
-what went wrong:
+If a flow execution fails, Kitaru raises a typed `KitaruExecutionError` with
+context about what went wrong:
 
 ```python
+import kitaru
+
 try:
     result = my_agent.run("bad-input").wait()
-except RuntimeError as e:
-    print(e)  # includes execution ID and status
+except kitaru.KitaruExecutionError as exc:
+    print(exc.exec_id, exc.status, exc.failure_origin)
 ```
 
 ### `handle.get()` on an unfinished execution
@@ -101,10 +104,12 @@ except RuntimeError as e:
 it raises immediately:
 
 ```python
+import kitaru
+
 handle = my_agent.run("https://example.com")
 try:
     result = handle.get()  # raises if not yet finished
-except RuntimeError:
+except kitaru.KitaruStateError:
     result = handle.wait()  # block until done instead
 ```
 
@@ -114,11 +119,11 @@ Kitaru raises errors immediately when SDK rules are violated:
 
 | Situation | Error |
 |---|---|
-| Calling a checkpoint outside a flow | `RuntimeError` |
-| Nesting one checkpoint inside another | `RuntimeError` |
-| Using `.submit()` outside a running flow | `RuntimeError` |
-| Calling `kitaru.log()` outside a flow | `RuntimeError` |
-| Passing negative `retries` | `ValueError` |
+| Calling a checkpoint outside a flow | `KitaruContextError` |
+| Nesting one checkpoint inside another | `KitaruContextError` |
+| Using `.submit()` outside a running flow | `KitaruContextError` |
+| Calling `kitaru.log()` outside a flow | `KitaruContextError` |
+| Passing negative `retries` | `KitaruUsageError` |
 
 These are not runtime failures — they are guardrails that catch mistakes at the
 point where they happen.
@@ -146,17 +151,6 @@ def always_fresh(url: str) -> str:
 # Or override per-run
 handle = my_agent.run("https://example.com", cache=False)
 ```
-
-## Current limitations
-
-Kitaru is under active development. The following are not yet available as
-user-facing APIs:
-
-- **Replay** — `client.executions.replay(...)` and `kitaru executions replay`
-- **Execution log streaming** — `kitaru executions logs ...`
-
-Everything else in this page (`flow`, `checkpoint`, `wait`, `llm`,
-`configure`, and execution browsing/input/retry/cancel APIs) is available.
 
 ## Next steps
 

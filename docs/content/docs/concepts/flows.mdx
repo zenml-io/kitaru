@@ -72,7 +72,7 @@ access to the running execution:
 
 <Callout type="info">
   `handle.get()` does **not** wait. If the execution is still running, it raises
-  a `RuntimeError`. Use `handle.wait()` when you want to block.
+  a `KitaruStateError`. Use `handle.wait()` when you want to block.
 </Callout>
 
 ## Runtime options
@@ -107,14 +107,14 @@ active stack. You can inspect or change it with `kitaru stack current` and
 
 ## Rules to know
 
-- **Flows cannot nest.** You cannot call a `@flow` from inside another flow.
 - **Flow functions should compose checkpoints.** The flow body is the
   orchestration layer — heavy work belongs in
   [checkpoints](/concepts/checkpoints).
 - **Use `.run()` to invoke flows.** Direct calls (`my_agent(...)`) are not
-  supported. Use `my_agent.run(...)` to start an execution.
+  supported and raise `KitaruUsageError`. Use `my_agent.run(...)` to start an
+  execution.
 - **Retries must be non-negative.** Passing a negative `retries` value raises a
-  `ValueError`.
+  `KitaruUsageError`.
 
 ## Next steps
 

@@ -9,35 +9,59 @@ description: Use kitaru.llm() with local model aliases and optional secret-backe
 - response artifact capture
 - usage/cost/latency metadata logging
 
-## 1) Register a model alias
+<Callout type="info">
+  If you want the full setup path from stored credentials to an actual flow run,
+  start with
+  [Secrets + Model Registration](/getting-started/secrets-and-model-registration).
+</Callout>
 
-```bash
-kitaru model register fast --model openai/gpt-4o-mini
-```
+## Model selection order
 
-You can also attach a secret for remote credential lookup:
+When you call `kitaru.llm()`, Kitaru resolves the model in this order:
+
+1. the explicit `model=` argument
+2. `KITARU_DEFAULT_MODEL`
+3. your local default alias
+
+If `KITARU_DEFAULT_MODEL` matches a registered alias, Kitaru resolves that
+alias. Otherwise it treats the value as a raw LiteLLM model string.
+
+## Register a model alias
 
 ```bash
 kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
 ```
 
-List aliases:
+You can also register an alias without a linked secret:
+
+```bash
+kitaru model register fast --model openai/gpt-4o-mini
+```
+
+List aliases with:
 
 ```bash
 kitaru model list
 ```
 
-## 2) Configure credentials
+## Credential resolution order
 
-### Local quick path
+For known providers such as OpenAI, Anthropic, and Gemini, Kitaru resolves
+credentials in this order:
 
-Set provider credentials in your environment (LiteLLM reads them directly):
+1. provider credentials already present in the environment
+2. the secret linked to the resolved alias
+3. otherwise, fail with a setup error
+
+That means environment variables win over a linked secret for known providers.
+
+### Environment-backed setup
 
 ```bash
 export OPENAI_API_KEY=sk-...
 ```
 
-### Secret-backed path
+### Secret-backed setup
 
 Store provider keys in a Kitaru secret:
 
@@ -45,9 +69,10 @@ Store provider keys in a Kitaru secret:
 kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
 ```
 
-When an alias includes `--secret openai-creds`, `kitaru.llm()` fetches that secret at runtime.
+When an alias includes `--secret openai-creds`, `kitaru.llm()` loads that
+secret at runtime if the required environment variable is not already set.
 
-## 3) Call `kitaru.llm()` in a flow
+## Call `kitaru.llm()` inside a flow
 
 ```python
 from kitaru import flow
@@ -72,8 +97,20 @@ def writer(topic: str) -> str:
 - **Inside a flow (outside checkpoints):** `kitaru.llm()` runs as a synthetic durable call boundary.
 - **Inside a checkpoint:** it is tracked as a child event; the enclosing checkpoint remains the replay boundary.
 
+## What Kitaru records
+
+Each `kitaru.llm()` call records:
+
+- prompt artifacts
+- response artifacts
+- token usage
+- latency
+- cost metadata when available
+- credential source metadata (`environment` or `secret`)
+
 ## Related pages
 
+- [Secrets + Model Registration](/getting-started/secrets-and-model-registration)
 - [Manage Secrets](/getting-started/secrets)
 - [Configuration](/getting-started/configuration)
 - [CLI model commands](/cli/model)

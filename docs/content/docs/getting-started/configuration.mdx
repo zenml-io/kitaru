@@ -126,7 +126,11 @@ Execution settings:
 
 `KITARU_DEFAULT_MODEL` first tries local alias lookup. If the value is not a
 registered alias, Kitaru passes it straight through as a raw LiteLLM model
-string.
+string. This lookup happens before Kitaru falls back to the locally configured
+default alias.
+
+If you want the full secret-backed setup path for `kitaru.llm()`, see
+[Secrets + Model Registration](/getting-started/secrets-and-model-registration).
 
 ### Housekeeping
 
@@ -147,8 +151,11 @@ active. Secret values such as `KITARU_AUTH_TOKEN` and
 3. `kitaru.configure(...)`
 4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
-6. Global user config (active stack and connection defaults)
-7. Built-in defaults (`local` stack, `cache=True`, `retries=0`)
+6. Global user config (including active stack and connection defaults)
+7. Built-in defaults (`cache=True`, `retries=0`)
+
+In practice, `stack` starts unset in the built-in defaults and is then resolved
+from the active stack when one is available.
 
 For connection-specific resolution, Kitaru uses this lower-to-higher order:
 
@@ -175,9 +182,8 @@ OPENAI_API_KEY = "{{ OPENAI_KEY }}"
 ## Automatic package injection
 
 Kitaru automatically adds itself to the container image requirements for remote
-execution. You never need to add `kitaru` to your `requirements` list manually —
-it is injected at build time so that remote containers always have the SDK
-available.
+execution when Kitaru is assembling the image from requirements. You usually do
+not need to add `kitaru` to your `requirements` list manually.
 
 If you specify your own requirements, Kitaru appends itself without duplicating:
 
@@ -201,6 +207,10 @@ kitaru.configure(
 )
 # Remote container installs: kitaru>=0.2.0, httpx (no duplicate)
 ```
+
+If you specify a custom `base_image` or `dockerfile`, you control the image
+contents yourself. In that case, Kitaru does **not** auto-inject the SDK, so
+your image must already include `kitaru`.
 
 ### Replicating your local environment
 
@@ -272,8 +282,8 @@ export OPENAI_API_KEY=sk-...
 export KITARU_DEFAULT_MODEL=openai/gpt-4o
 
 # Observability
-export KITARU_LOG_STORE_BACKEND=external
-export KITARU_LOG_STORE_ENDPOINT=https://logs.example.com
+export KITARU_LOG_STORE_BACKEND=datadog
+export KITARU_LOG_STORE_ENDPOINT=https://http-intake.logs.datadoghq.com
 export KITARU_LOG_STORE_API_KEY=...
 
 # Housekeeping
@@ -296,5 +306,7 @@ behavior stable even if config changes later.
 ## Related pages
 
 - [Stack Selection](/getting-started/stack-selection)
+- [Secrets + Model Registration](/getting-started/secrets-and-model-registration)
+- [Tracked LLM Calls](/getting-started/llm-calls)
 - [Execution Model](/concepts/execution-model)
 - [Python configuration reference](/reference/python/config)

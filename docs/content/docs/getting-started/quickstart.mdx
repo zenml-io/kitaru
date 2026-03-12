@@ -1,10 +1,12 @@
 ---
 title: Quickstart
-description: Get up and running with Kitaru in five minutes
+description: Install Kitaru, verify the CLI, and run a tiny durable flow
 ---
 
-This guide walks you through installing Kitaru and verifying that everything
-works.
+This guide walks you through installing Kitaru, verifying the CLI, and running
+your first small flow.
+
+Kitaru requires **Python 3.11 or newer**.
 
 ## Install
 
@@ -21,25 +23,72 @@ works.
   </Tab>
 </Tabs>
 
-## Verify
+## Verify the CLI
 
-Check that the CLI is available:
+<Tabs items={["uv project", "pip environment"]}>
+  <Tab value="uv project">
+    ```bash
+    uv run kitaru --version
+    uv run kitaru --help
+    ```
+  </Tab>
+  <Tab value="pip environment">
+    ```bash
+    kitaru --version
+    kitaru --help
+    ```
+  </Tab>
+</Tabs>
 
-```bash
-kitaru --version
+## Run your first flow
+
+Create a small script named `demo.py`:
+
+```python
+from kitaru import checkpoint, flow
+
+@checkpoint
+def fetch(topic: str) -> str:
+    return f"notes about {topic}"
+
+@flow
+def demo(topic: str) -> str:
+    return fetch(topic).upper()
+
+handle = demo.run("kitaru")
+print("Execution:", handle.exec_id)
+print("Result:", handle.wait())
 ```
 
-You should see the installed version number (e.g. `0.1.0`).
+Then run it:
 
-Run `--help` to see available commands:
+<Tabs items={["uv (recommended)", "pip environment"]}>
+  <Tab value="uv (recommended)">
+    ```bash
+    uv run demo.py
+    ```
+  </Tab>
+  <Tab value="pip environment">
+    ```bash
+    python demo.py
+    ```
+  </Tab>
+</Tabs>
 
-```bash
-kitaru --help
-```
+What happens here:
+
+1. `@checkpoint` marks a durable unit of work
+2. `@flow` defines the outer execution boundary
+3. `demo.run(...)` starts a new execution and returns a `FlowHandle`
+4. `handle.wait()` blocks until the execution finishes and returns the flow result
+
+If you want to inspect that execution later, the execution ID you printed is the
+same ID used by `KitaruClient` and `kitaru executions ...`.
 
 ## What's Next
 
-Now that Kitaru is installed, learn how the core primitives work:
+Now that Kitaru is installed and you've run a flow, follow the next path that
+fits what you want to learn:
 
 <Cards>
   <Card
@@ -48,14 +97,9 @@ Now that Kitaru is installed, learn how the core primitives work:
     href="/concepts"
   />
   <Card
-    title="Flows"
-    description="Define durable execution boundaries"
-    href="/concepts/flows"
-  />
-  <Card
-    title="Checkpoints"
-    description="Break work into persisted units"
-    href="/concepts/checkpoints"
+    title="Execution Management"
+    description="Inspect runs, fetch logs, replay, retry, and resume"
+    href="/getting-started/execution-management"
   />
   <Card
     title="Configuration"
@@ -63,18 +107,23 @@ Now that Kitaru is installed, learn how the core primitives work:
     href="/getting-started/configuration"
   />
   <Card
-    title="Artifacts"
-    description="Save and load named artifacts across executions"
-    href="/getting-started/artifacts"
+    title="Wait and Resume"
+    description="Pause flows for external input and continue later"
+    href="/getting-started/wait-and-resume"
   />
   <Card
-    title="Stack Selection"
-    description="Choose the default execution stack"
-    href="/getting-started/stack-selection"
+    title="Tracked LLM Calls"
+    description="Use kitaru.llm() with captured prompt/response artifacts"
+    href="/getting-started/llm-calls"
   />
   <Card
-    title="Runtime Log Store"
-    description="Configure where runtime logs are sent"
-    href="/getting-started/log-store"
+    title="Secrets + Model Setup"
+    description="Store provider credentials, register an alias, and use kitaru.llm()"
+    href="/getting-started/secrets-and-model-registration"
+  />
+  <Card
+    title="MCP Server"
+    description="Query and manage executions through assistant tool calls"
+    href="/agent-integrations/mcp-server"
   />
 </Cards>

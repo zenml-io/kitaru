@@ -9,35 +9,38 @@ or change your Python control flow.
 
 ## Vision
 
-Kitaru will provide a small set of primitives — workflows, checkpoints, wait
-points, and structured logging — that let you write normal Python code while
-getting durable execution guarantees underneath. When something fails halfway
-through a multi-step agent workflow, Kitaru replays from the last checkpoint
-instead of starting over.
+Kitaru provides a small set of primitives — workflows, checkpoints, wait
+points, tracked LLM calls, artifacts, and structured logging — that let you
+write normal Python code while getting durable execution guarantees underneath.
+When something fails halfway through a multi-step agent workflow, Kitaru can
+reuse earlier checkpoint results instead of starting over from scratch.
 
 <Callout type="info">
-  Kitaru is in early development. Core SDK primitives are now available
-  (`@flow`, `@checkpoint`, `kitaru.log()`, `kitaru.save()`,
-  `kitaru.load()`, `kitaru.configure()`), plus stack selection helpers
-  (`list_stacks`, `current_stack`, `use_stack`), an MCP server (`kitaru-mcp`),
-  and a Claude Code authoring skill available via the plugin marketplace.
+  Kitaru is still early, but the core user-facing surface is already shipped:
+  `@flow`, `@checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`,
+  `kitaru.configure()`, `kitaru.wait()`, `kitaru.llm()`, `KitaruClient`,
+  stack helpers, runtime log retrieval, `kitaru-mcp`, Claude Code skills, and
+  the PydanticAI adapter.
 </Callout>
 
 ## Current Status
 
-Kitaru **0.1.0** includes:
+The current release includes:
 
 - Core SDK execution primitives: `@flow` and `@checkpoint`
 - Structured metadata logging with `kitaru.log()`
 - Artifact persistence + cross-execution reads with `kitaru.save()` / `kitaru.load()`
-- CLI connection commands (`login`, `logout`, `status`, `info`)
+- Durable wait/resume via `kitaru.wait()` plus `input(...)` / `resume(...)`
+- Tracked LLM calls via `kitaru.llm()` with model aliases and secret-backed credentials
 - Runtime configuration defaults via `kitaru.configure(...)`
-- Stack selection commands (`stack list/current/use`)
-- Global runtime log-store commands (`log-store set/show/reset`)
-- Agent-native integrations: MCP server + Claude Code plugin marketplace skill
-- Project infrastructure (CI, testing, linting, type checking)
+- Stack selection + runtime log-store commands (`stack ...`, `log-store ...`)
+- Execution management via `KitaruClient` and `kitaru executions ...`
+- Runtime log retrieval via SDK, CLI, and MCP `get_execution_logs`
+- Secrets and model alias management from the CLI
+- Agent-native integrations: MCP server, Claude Code skills, and PydanticAI adapter
+- Typed exceptions and structured failure journaling
 
-Additional SDK primitives and framework adapters are under active development.
+More adapters and higher-level ergonomics are still under active development.
 
 ## Next Steps
 
@@ -48,24 +51,34 @@ Additional SDK primitives and framework adapters are under active development.
     href="/getting-started/installation"
   />
   <Card
+    title="Quickstart"
+    description="Run a tiny flow end to end"
+    href="/getting-started/quickstart"
+  />
+  <Card
     title="Core Concepts"
     description="Understand flows, checkpoints, and the execution model"
     href="/concepts"
   />
   <Card
-    title="CLI Reference"
-    description="Available commands and options"
-    href="/cli"
+    title="Execution Management"
+    description="Inspect runs, replay, retry, resume, and fetch logs"
+    href="/getting-started/execution-management"
   />
   <Card
-    title="MCP Server"
-    description="Query and manage executions via MCP tools"
-    href="/agent-integrations/mcp-server"
+    title="Wait and Resume"
+    description="Pause flows for external input and continue the same execution"
+    href="/getting-started/wait-and-resume"
   />
   <Card
-    title="Claude Code Skill"
-    description="Install the Kitaru authoring skill from the plugin marketplace"
-    href="/agent-integrations/claude-code-skill"
+    title="Tracked LLM Calls"
+    description="Use kitaru.llm() with aliases, secrets, and captured artifacts"
+    href="/getting-started/llm-calls"
+  />
+  <Card
+    title="Secrets + Model Registration"
+    description="Store provider credentials, register a model alias, and use kitaru.llm()"
+    href="/getting-started/secrets-and-model-registration"
   />
   <Card
     title="Configuration"
@@ -73,18 +86,23 @@ Additional SDK primitives and framework adapters are under active development.
     href="/getting-started/configuration"
   />
   <Card
-    title="Artifacts"
-    description="Save and load named artifacts across executions"
-    href="/getting-started/artifacts"
+    title="MCP Server"
+    description="Query and manage executions via MCP tools"
+    href="/agent-integrations/mcp-server"
   />
   <Card
-    title="Stack Selection"
-    description="Choose and inspect the default execution stack"
-    href="/getting-started/stack-selection"
+    title="Claude Code Skills"
+    description="Install the Kitaru scoping and authoring skills"
+    href="/agent-integrations/claude-code-skill"
   />
   <Card
-    title="Runtime Log Store"
-    description="Configure global runtime log backend behavior"
-    href="/getting-started/log-store"
+    title="CLI Reference"
+    description="Browse the generated command reference"
+    href="/cli"
+  />
+  <Card
+    title="Blog"
+    description="Read essays on durable execution, agent infrastructure, and Kitaru's design"
+    href="https://kitaru.ai/blog"
   />
 </Cards>
