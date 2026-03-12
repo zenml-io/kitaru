@@ -244,21 +244,6 @@ docker stop kitaru-server && docker rm kitaru-server
 | `uv run kitaru model register <alias> --model <model>` | Register an LLM model alias |
 | `uv run kitaru secrets set <name> --KEY=value` | Store a secret |
 
-## Configuration via environment variables
-
-Kitaru reads `KITARU_*` environment variables for configuration:
-
-| Variable | Purpose |
-|---|---|
-| `KITARU_SERVER_URL` | Server URL (alternative to `kitaru login`) |
-| `KITARU_AUTH_TOKEN` | Auth token for server connection |
-| `KITARU_PROJECT` | Active project/workspace |
-| `KITARU_DEBUG` | Enable debug output (`true`/`false`) |
-| `KITARU_ANALYTICS_OPT_IN` | Analytics opt-in (`true`/`false`) |
-
-Note: `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` must be set together.
-For most testing, `uv run kitaru login <url>` is simpler than env vars.
-
 ## Giving feedback
 
 We'd love to hear what works, what's confusing, and what's missing.
