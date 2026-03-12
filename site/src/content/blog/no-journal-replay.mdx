@@ -74,3 +74,9 @@ The durable execution world and the ML pipeline world evolved independently. Tem
 AI agents are a different beast. They're long-running, expensive, unpredictable, and you want humans in the loop. The ML pipeline world — where each step is a pod that caches its output — turns out to be a much better foundation for that workload than replaying journals.
 
 Kitaru connects these two worlds. ZenML's "spin up a step, cache the output, skip on rerun" machinery, repurposed as a durable execution model for agents. No journal. No determinism. Just cached checkpoints and normal Python.
+
+## Continue in the docs
+
+- [Checkpoints](/docs/concepts/checkpoints)
+- [Replay and Overrides](/docs/getting-started/replay-and-overrides)
+- [Wait and Resume](/docs/getting-started/wait-and-resume)
