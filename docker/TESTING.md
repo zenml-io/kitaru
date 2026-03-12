@@ -18,7 +18,7 @@ fastest way to try it.
 ### 1. Install Kitaru
 
 ```bash
-# Clone the repo (requires access to the private repo)
+# Clone the repo
 git clone https://github.com/zenml-io/kitaru.git
 cd kitaru
 

@@ -35,7 +35,6 @@ scripts/              # Doc generation + site merge scripts
   skills/kitaru-scoping/    # Kitaru scoping skill (SKILL.md)
   skills/kitaru-authoring/  # Kitaru authoring skill (SKILL.md)
 docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing runner)
-spec/                 # SDK design specifications (reference material)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
@@ -83,7 +82,7 @@ uv run scripts/r2-upload.py output.avif --frontmatter
 
 Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NOT require these — only the upload script needs them.
 
-**Team members:** R2 credentials (Account ID, Access Key, Secret Key) are stored in [1Password](***REMOVED***) (ZenML team access required).
+**Team members:** R2 credentials (Account ID, Access Key, Secret Key) are stored in 1Password (ask Alex for the item name; ZenML team access required).
 
 ### Gotchas
 
