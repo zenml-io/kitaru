@@ -96,26 +96,12 @@ RUN git clone "$ZENML_REPO_URL" /build/zenml \
 
 # Fail the build early if the installed ZenML package still lacks the dashboard
 # bundle required by browser-based device authentication.
-RUN python - <<'PY'
-from __future__ import annotations
-
-import inspect
-from pathlib import Path
-
-import zenml
-
-package_dir = Path(inspect.getfile(zenml)).resolve().parent
-index_path = package_dir / "zen_server" / "dashboard" / "index.html"
-if not index_path.is_file():
-    raise SystemExit(
-        "ZenML dashboard assets missing from installed package: "
-        f"{index_path}"
-    )
-print(f"Verified ZenML dashboard assets at {index_path}")
-PY
+RUN DASHBOARD="$(python -c 'import zenml; print(zenml.__path__[0])')/zen_server/dashboard/index.html" \
+    && test -f "$DASHBOARD" || { echo "Dashboard assets missing: $DASHBOARD" >&2; exit 1; } \
+    && echo "Verified ZenML dashboard assets at $DASHBOARD"
 
 RUN pip freeze > requirements.txt \
-    && python -c "from pathlib import Path; path = Path('requirements.txt'); text = path.read_text(); path.write_text(text.replace('zenml @ file:///build/zenml', 'zenml @ git+${ZENML_REPO_URL}@${ZENML_GIT_REF}'))"
+    && sed -i "s|zenml @ file:///build/zenml|zenml @ git+${ZENML_REPO_URL}@${ZENML_GIT_REF}|" requirements.txt
 
 # ---------------------------------------------------------------------------
 # Server: clean runtime image

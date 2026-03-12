@@ -77,7 +77,6 @@ def test_dockerfile_fails_fast_if_dashboard_assets_are_missing() -> None:
     """The image build should include an explicit dashboard asset sentinel."""
     dockerfile = _read_dockerfile()
     assert "ARG ZENML_DASHBOARD_TAG=" in dockerfile
-    assert "import inspect" in dockerfile
     assert "import zenml" in dockerfile
-    assert 'dashboard" / "index.html"' in dockerfile
-    assert "ZenML dashboard assets missing from installed package" in dockerfile
+    assert "zen_server/dashboard/index.html" in dockerfile
+    assert "Dashboard assets missing" in dockerfile

@@ -68,7 +68,7 @@ jobs:
       - name: Verify bundled dashboard assets exist in the installed package
         run: |
           set -euo pipefail
-          docker exec kitaru-ci-server /opt/venv/bin/python -c "import inspect; from pathlib import Path; import zenml; index = Path(inspect.getfile(zenml)).resolve().parent / 'zen_server' / 'dashboard' / 'index.html'; assert index.is_file(), index; print(index)"
+          docker exec kitaru-ci-server sh -c 'DASHBOARD="$(/opt/venv/bin/python -c "import zenml; print(zenml.__path__[0])")/zen_server/dashboard/index.html" && test -f "$DASHBOARD" && echo "OK: $DASHBOARD"'
       - name: Smoke test device verification route
         run: |
           set -euo pipefail
