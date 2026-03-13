@@ -78,6 +78,7 @@ def _stack_create_result_stub(
     is_active: bool = True,
     previous_active_stack: str | None = "default",
     stack_type: str = "local",
+    components_created: tuple[str, ...] | None = None,
     service_connectors_created: tuple[str, ...] = (),
     resources: dict[str, str] | None = None,
 ) -> SimpleNamespace:
@@ -85,7 +86,8 @@ def _stack_create_result_stub(
     return SimpleNamespace(
         stack=SimpleNamespace(id=f"stack-{name}-id", name=name, is_active=is_active),
         previous_active_stack=previous_active_stack,
-        components_created=(f"{name} (orchestrator)", f"{name} (artifact_store)"),
+        components_created=components_created
+        or (f"{name} (orchestrator)", f"{name} (artifact_store)"),
         stack_type=stack_type,
         service_connectors_created=service_connectors_created,
         resources=resources,
@@ -2282,11 +2284,17 @@ def test_stack_create_kubernetes_json_output(
         mock_create_stack.return_value = _stack_create_result_stub(
             name="my-k8s",
             stack_type="kubernetes",
+            components_created=(
+                "my-k8s-orchestrator (orchestrator)",
+                "my-k8s-artifacts (artifact_store)",
+                "my-k8s-registry (container_registry)",
+            ),
             service_connectors_created=("my-k8s-aws",),
             resources={
                 "provider": "aws",
                 "cluster": "demo-cluster",
                 "region": "us-east-1",
+                "namespace": "ml",
                 "artifact_store": "s3://bucket/kitaru",
                 "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
             },
@@ -2321,8 +2329,9 @@ def test_stack_create_kubernetes_json_output(
             "is_active": True,
             "previous_active_stack": "default",
             "components_created": [
-                "my-k8s (orchestrator)",
-                "my-k8s (artifact_store)",
+                "my-k8s-orchestrator (orchestrator)",
+                "my-k8s-artifacts (artifact_store)",
+                "my-k8s-registry (container_registry)",
             ],
             "stack_type": "kubernetes",
             "service_connectors_created": ["my-k8s-aws"],
@@ -2330,6 +2339,7 @@ def test_stack_create_kubernetes_json_output(
                 "provider": "aws",
                 "cluster": "demo-cluster",
                 "region": "us-east-1",
+                "namespace": "ml",
                 "artifact_store": "s3://bucket/kitaru",
                 "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
             },
@@ -2337,11 +2347,19 @@ def test_stack_create_kubernetes_json_output(
     }
 
 
-def test_stack_create_kubernetes_surfaces_backend_stub(
+def test_stack_create_kubernetes_surfaces_backend_failure(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Phase 2 should still surface the backend stub until Phase 3 lands."""
-    with pytest.raises(SystemExit) as exc_info:
+    """CLI should surface Kubernetes backend failures without mangling them."""
+    with (
+        patch(
+            "kitaru.cli._create_stack_operation",
+            side_effect=RuntimeError(
+                "Created Kubernetes stack 'my-k8s' but failed to activate it."
+            ),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
         app(
             [
                 "stack",
@@ -2362,7 +2380,8 @@ def test_stack_create_kubernetes_surfaces_backend_stub(
 
     assert exc_info.value.code == 1
     assert (
-        "Kubernetes stack creation is not implemented yet." in capsys.readouterr().err
+        "Created Kubernetes stack 'my-k8s' but failed to activate it."
+        in capsys.readouterr().err
     )
 
 

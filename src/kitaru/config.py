@@ -42,8 +42,24 @@ from zenml.client import Client
 from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
-from zenml.enums import MetadataResourceTypes, StackComponentType
+from zenml.enums import (
+    ContainerRegistryFlavor,
+    MetadataResourceTypes,
+    StackComponentType,
+)
 from zenml.exceptions import AuthorizationException, EntityExistsError
+from zenml.integrations.aws import (
+    AWS_CONNECTOR_TYPE,
+    AWS_CONTAINER_REGISTRY_FLAVOR,
+    AWS_RESOURCE_TYPE,
+)
+from zenml.integrations.gcp import (
+    GCP_ARTIFACT_STORE_FLAVOR,
+    GCP_CONNECTOR_TYPE,
+    GCP_RESOURCE_TYPE,
+)
+from zenml.models.v2.core.stack import StackRequest
+from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.utils import io_utils, yaml_utils
 
@@ -299,6 +315,16 @@ class KubernetesStackSpec(BaseModel):
     verify: bool = True
 
     model_config = ConfigDict(extra="forbid")
+
+
+@dataclass(frozen=True)
+class _ResolvedKubernetesConnectorSpec:
+    """Resolved ZenML connector information for Kubernetes stack creation."""
+
+    connector_info: ServiceConnectorInfo
+    verify_connector_type: str
+    verify_resource_type: str
+    verify_configuration: dict[str, Any]
 
 
 _StackComponentKind = Literal[
@@ -1623,6 +1649,316 @@ def list_active_kitaru_environment_variables() -> list[ActiveEnvironmentVariable
     return active
 
 
+def _infer_gcp_project_id_from_container_registry(container_registry: str) -> str:
+    """Infer the GCP project ID from a GAR or GCR container registry URI."""
+    normalized_registry = container_registry.strip()
+    if not normalized_registry:
+        raise ValueError("Container registry URI cannot be empty.")
+
+    normalized_registry = re.sub(r"^[a-z]+://", "", normalized_registry)
+    normalized_registry = normalized_registry.rstrip("/")
+    host, _, raw_path = normalized_registry.partition("/")
+    path_parts = [part for part in raw_path.split("/") if part]
+
+    gar_hosts = {"docker.pkg.dev"}
+    gcr_hosts = {"gcr.io", "us.gcr.io", "eu.gcr.io", "asia.gcr.io"}
+    if (
+        host in gar_hosts or host.endswith("-docker.pkg.dev") or host in gcr_hosts
+    ) and path_parts:
+        return path_parts[0]
+
+    raise ValueError(
+        "Cannot infer GCP project ID from container registry URI "
+        f"'{container_registry}'. Use an Artifact Registry or GCR URI that "
+        "includes the project segment."
+    )
+
+
+def _artifact_store_resource_id(
+    artifact_store_uri: str,
+    provider: CloudProvider,
+) -> str:
+    """Return the canonical connector resource ID for an artifact store URI."""
+    parsed = urlparse(artifact_store_uri)
+    if provider == CloudProvider.AWS and parsed.scheme == "s3" and parsed.netloc:
+        return f"s3://{parsed.netloc}"
+    if provider == CloudProvider.GCP and parsed.scheme == "gs" and parsed.netloc:
+        return f"gs://{parsed.netloc}"
+    raise ValueError(
+        f"Unsupported artifact store URI '{artifact_store_uri}' for provider "
+        f"'{provider.value}'."
+    )
+
+
+def _container_registry_resource_id(
+    container_registry: str,
+    provider: CloudProvider,
+) -> str:
+    """Return the connector resource ID for a container registry URI."""
+    normalized_registry = re.sub(r"^[a-z]+://", "", container_registry.strip())
+    normalized_registry = normalized_registry.rstrip("/")
+    if not normalized_registry:
+        raise ValueError("Container registry URI cannot be empty.")
+
+    if provider == CloudProvider.AWS:
+        return normalized_registry.split("/", 1)[0]
+    return normalized_registry
+
+
+def _resolve_kubernetes_connector_spec(
+    spec: KubernetesStackSpec,
+) -> _ResolvedKubernetesConnectorSpec:
+    """Translate Kitaru's Kubernetes credentials into ZenML connector info."""
+    normalized_credentials = spec.credentials.strip() if spec.credentials else None
+
+    if spec.provider == CloudProvider.AWS:
+        auth_method = "implicit"
+        configuration: dict[str, Any] = {"region": spec.region}
+
+        if normalized_credentials:
+            method, separator, raw_value = normalized_credentials.partition(":")
+            if not separator:
+                raise ValueError(
+                    "Invalid AWS credentials format. Use one of: "
+                    "aws-profile:PROFILE, aws-access-keys:KEY:SECRET, "
+                    "aws-session-token:KEY:SECRET:TOKEN."
+                )
+
+            normalized_method = method.strip().lower()
+            credential_value = raw_value.strip()
+            if normalized_method == "aws-profile":
+                if not credential_value:
+                    raise ValueError("AWS profile name cannot be empty.")
+                configuration["profile_name"] = credential_value
+            elif normalized_method in {"aws-access-key", "aws-access-keys"}:
+                access_key_id, middle, secret_access_key = credential_value.partition(
+                    ":"
+                )
+                if (
+                    not middle
+                    or not access_key_id.strip()
+                    or not secret_access_key.strip()
+                ):
+                    raise ValueError(
+                        "aws-access-keys credentials must be in the format "
+                        "aws-access-keys:ACCESS_KEY_ID:SECRET_ACCESS_KEY."
+                    )
+                auth_method = "secret-key"
+                configuration.update(
+                    {
+                        "aws_access_key_id": access_key_id.strip(),
+                        "aws_secret_access_key": secret_access_key.strip(),
+                    }
+                )
+            elif normalized_method == "aws-session-token":
+                access_key_id, first_sep, remainder = credential_value.partition(":")
+                secret_access_key, second_sep, session_token = remainder.partition(":")
+                if (
+                    not first_sep
+                    or not second_sep
+                    or not access_key_id.strip()
+                    or not secret_access_key.strip()
+                    or not session_token.strip()
+                ):
+                    raise ValueError(
+                        "aws-session-token credentials must be in the format "
+                        "aws-session-token:ACCESS_KEY_ID:SECRET_ACCESS_KEY:SESSION_TOKEN."
+                    )
+                auth_method = "sts-token"
+                configuration.update(
+                    {
+                        "aws_access_key_id": access_key_id.strip(),
+                        "aws_secret_access_key": secret_access_key.strip(),
+                        "aws_session_token": session_token.strip(),
+                    }
+                )
+            else:
+                raise ValueError(
+                    "Unsupported AWS credentials method. Use one of: "
+                    "aws-profile, aws-access-keys, aws-session-token."
+                )
+
+        return _ResolvedKubernetesConnectorSpec(
+            connector_info=ServiceConnectorInfo(
+                type=AWS_CONNECTOR_TYPE,
+                auth_method=auth_method,
+                configuration=dict(configuration),
+            ),
+            verify_connector_type=AWS_CONNECTOR_TYPE,
+            verify_resource_type=AWS_RESOURCE_TYPE,
+            verify_configuration=dict(configuration),
+        )
+
+    if spec.provider == CloudProvider.GCP:
+        project_id = _infer_gcp_project_id_from_container_registry(
+            spec.container_registry
+        )
+        auth_method = "implicit"
+        configuration = {"project_id": project_id}
+
+        if normalized_credentials:
+            method, separator, raw_value = normalized_credentials.partition(":")
+            if not separator:
+                raise ValueError(
+                    "Invalid GCP credentials format. Use "
+                    "gcp-service-account:/path/to/key.json."
+                )
+            normalized_method = method.strip().lower()
+            if normalized_method != "gcp-service-account":
+                raise ValueError(
+                    "Unsupported GCP credentials method. Use: gcp-service-account."
+                )
+
+            credential_path_raw = raw_value.strip()
+            if not credential_path_raw:
+                raise ValueError("GCP service account file path cannot be empty.")
+            credential_path = Path(credential_path_raw).expanduser()
+            try:
+                service_account_json = credential_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise ValueError(
+                    "Unable to read GCP service account file "
+                    f"'{credential_path}': {exc}"
+                ) from exc
+
+            auth_method = "service-account"
+            configuration.update({"service_account_json": service_account_json})
+
+        return _ResolvedKubernetesConnectorSpec(
+            connector_info=ServiceConnectorInfo(
+                type=GCP_CONNECTOR_TYPE,
+                auth_method=auth_method,
+                configuration=dict(configuration),
+            ),
+            verify_connector_type=GCP_CONNECTOR_TYPE,
+            verify_resource_type=GCP_RESOURCE_TYPE,
+            verify_configuration=dict(configuration),
+        )
+
+    raise ValueError(f"Unsupported cloud provider: {spec.provider}")
+
+
+def _build_kubernetes_stack_request(
+    name: str,
+    *,
+    spec: KubernetesStackSpec,
+    connector_spec: _ResolvedKubernetesConnectorSpec,
+    labels: dict[str, str] | None,
+) -> StackRequest:
+    """Build the one-shot ZenML stack request for a Kubernetes stack."""
+    merged_labels = dict(labels or {})
+    merged_labels[_STACK_MANAGED_LABEL_KEY] = _STACK_MANAGED_LABEL_VALUE
+
+    artifact_store_flavor = (
+        "s3" if spec.provider == CloudProvider.AWS else GCP_ARTIFACT_STORE_FLAVOR
+    )
+    container_registry_flavor = (
+        AWS_CONTAINER_REGISTRY_FLAVOR
+        if spec.provider == CloudProvider.AWS
+        else ContainerRegistryFlavor.GCP.value
+    )
+
+    return StackRequest(
+        name=name,
+        labels=merged_labels,
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                ComponentInfo(
+                    flavor="kubernetes",
+                    service_connector_index=0,
+                    service_connector_resource_id=spec.cluster,
+                    configuration={"kubernetes_namespace": spec.namespace},
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                ComponentInfo(
+                    flavor=artifact_store_flavor,
+                    service_connector_index=0,
+                    service_connector_resource_id=_artifact_store_resource_id(
+                        spec.artifact_store, spec.provider
+                    ),
+                    configuration={"path": spec.artifact_store},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                ComponentInfo(
+                    flavor=container_registry_flavor,
+                    service_connector_index=0,
+                    service_connector_resource_id=_container_registry_resource_id(
+                        spec.container_registry, spec.provider
+                    ),
+                    configuration={"uri": spec.container_registry},
+                )
+            ],
+        },
+        service_connectors=[
+            ServiceConnectorInfo(
+                type=connector_spec.connector_info.type,
+                auth_method=connector_spec.connector_info.auth_method,
+                configuration=dict(connector_spec.connector_info.configuration),
+            )
+        ],
+    )
+
+
+def _get_required_stack_component(
+    stack_model: Any,
+    component_type: StackComponentType,
+) -> Any:
+    """Return the single component of a required stack type from a stack model."""
+    raw_components = getattr(stack_model, "components", None)
+    if not isinstance(raw_components, Mapping):
+        raise RuntimeError(
+            "Unable to inspect components from the created Kubernetes stack."
+        )
+
+    components = raw_components.get(component_type, [])
+    if len(components) != 1:
+        raise RuntimeError(
+            "Created Kubernetes stack is missing the expected "
+            f"{component_type.value} component."
+        )
+    return components[0]
+
+
+def _extract_kubernetes_stack_components(
+    stack_model: Any,
+) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
+    """Extract created component and connector names from a hydrated stack."""
+    ordered_components = (
+        (StackComponentType.ORCHESTRATOR, "orchestrator"),
+        (StackComponentType.ARTIFACT_STORE, "artifact_store"),
+        (StackComponentType.CONTAINER_REGISTRY, "container_registry"),
+    )
+    component_labels: list[str] = []
+    connector_names: list[str] = []
+    seen_connector_names: set[str] = set()
+    missing_connector_metadata = False
+
+    for component_type, kind in ordered_components:
+        component = _get_required_stack_component(stack_model, component_type)
+        component_name = str(getattr(component, "name", "")).strip()
+        if not component_name:
+            raise RuntimeError(
+                "Unable to inspect components from the created Kubernetes stack."
+            )
+        component_labels.append(_format_stack_component_label(component_name, kind))
+
+        connector = getattr(component, "connector", None)
+        if connector is None:
+            missing_connector_metadata = True
+            continue
+        connector_name = str(getattr(connector, "name", "")).strip()
+        if not connector_name:
+            missing_connector_metadata = True
+            continue
+        if connector_name not in seen_connector_names:
+            seen_connector_names.add(connector_name)
+            connector_names.append(connector_name)
+
+    return tuple(component_labels), tuple(connector_names), missing_connector_metadata
+
+
 def _normalize_stack_selector(name_or_id: str) -> str:
     """Validate and normalize a stack selector provided by a user."""
     normalized_selector = name_or_id.strip()
@@ -1730,9 +2066,88 @@ def _create_kubernetes_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
 ) -> _StackCreateResult:
-    """Placeholder for future Kubernetes stack creation support."""
-    del name, spec, activate, labels
-    raise NotImplementedError("Kubernetes stack creation is not implemented yet.")
+    """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
+    selector = _normalize_stack_selector(name)
+    client = Client()
+
+    if any(
+        stack_model.name == selector for stack_model in _iter_available_stacks(client)
+    ):
+        raise ValueError(_stack_name_collision_message(selector))
+
+    previous_active_stack = str(client.active_stack_model.name) if activate else None
+    connector_spec = _resolve_kubernetes_connector_spec(spec)
+
+    client.create_service_connector(
+        name=selector,
+        connector_type=connector_spec.verify_connector_type,
+        resource_type=connector_spec.verify_resource_type,
+        auth_method=connector_spec.connector_info.auth_method,
+        configuration=connector_spec.verify_configuration,
+        verify=spec.verify,
+        list_resources=False,
+        register=False,
+    )
+
+    stack_request = _build_kubernetes_stack_request(
+        selector,
+        spec=spec,
+        connector_spec=connector_spec,
+        labels=labels,
+    )
+    client._validate_stack_configuration(stack_request)
+
+    try:
+        created_stack = client.zen_store.create_stack(stack=stack_request)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to create Kubernetes stack '{selector}'. ZenML rolled back "
+            "any partially created components and service connectors. Original "
+            f"error: {exc}"
+        ) from exc
+
+    components_created, service_connectors_created, missing_connector_metadata = (
+        _extract_kubernetes_stack_components(created_stack)
+    )
+    if missing_connector_metadata:
+        try:
+            refreshed_stack = client.get_stack(created_stack.id, hydrate=True)
+        except Exception:
+            refreshed_stack = None
+        if refreshed_stack is not None:
+            components_created, service_connectors_created, _ = (
+                _extract_kubernetes_stack_components(refreshed_stack)
+            )
+
+    if activate:
+        try:
+            client.activate_stack(created_stack.id)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Created Kubernetes stack '{selector}' but failed to activate "
+                "it. The stack was created successfully and remains available; "
+                f"run 'kitaru stack use {selector}' to activate it manually. "
+                f"Original error: {exc}"
+            ) from exc
+        active_stack_id = str(created_stack.id)
+    else:
+        active_stack_id = str(client.active_stack_model.id)
+
+    return _StackCreateResult(
+        stack=_stack_info_from_model(created_stack, active_stack_id=active_stack_id),
+        previous_active_stack=previous_active_stack,
+        components_created=components_created,
+        stack_type=StackType.KUBERNETES.value,
+        service_connectors_created=service_connectors_created,
+        resources={
+            "provider": spec.provider.value,
+            "cluster": spec.cluster,
+            "region": spec.region,
+            "namespace": spec.namespace,
+            "artifact_store": spec.artifact_store,
+            "container_registry": spec.container_registry,
+        },
+    )
 
 
 def _create_stack_operation(

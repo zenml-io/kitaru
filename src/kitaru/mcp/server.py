@@ -38,7 +38,10 @@ from kitaru.client import (
 from kitaru.config import (
     KITARU_PROJECT_ENV,
     ActiveEnvironmentVariable,
+    CloudProvider,
+    KubernetesStackSpec,
     ResolvedLogStore,
+    StackType,
     _create_stack_operation,
     _delete_stack_operation,
     _kitaru_config_dir,
@@ -853,6 +856,117 @@ def kitaru_stacks_list() -> list[dict[str, Any]]:
     ]
 
 
+def _normalize_optional_manage_stack_string(value: str | None) -> str | None:
+    """Normalize an optional manage_stack string, treating blanks as omitted."""
+    if value is None:
+        return None
+    normalized_value = value.strip()
+    return normalized_value or None
+
+
+def _normalize_manage_stack_type(raw_stack_type: str) -> StackType:
+    """Normalize an MCP stack-type argument into the internal enum."""
+    normalized_type = raw_stack_type.strip().lower()
+    try:
+        return StackType(normalized_type)
+    except ValueError as exc:
+        raise ValueError(
+            f"Unsupported stack type: {raw_stack_type}. Use 'local' or 'kubernetes'."
+        ) from exc
+
+
+def _infer_manage_stack_cloud_provider(artifact_store_uri: str) -> CloudProvider:
+    """Infer the cloud provider from a Kubernetes artifact-store URI."""
+    if artifact_store_uri.startswith("s3://"):
+        return CloudProvider.AWS
+    if artifact_store_uri.startswith("gs://"):
+        return CloudProvider.GCP
+    raise ValueError(
+        f"Cannot infer cloud provider from '{artifact_store_uri}'. "
+        "Use an s3:// or gs:// URI."
+    )
+
+
+def _build_manage_stack_kubernetes_spec(
+    *,
+    stack_type: StackType,
+    artifact_store: str | None,
+    container_registry: str | None,
+    cluster: str | None,
+    region: str | None,
+    namespace: str | None,
+    credentials: str | None,
+    verify: bool,
+) -> KubernetesStackSpec | None:
+    """Validate manage_stack inputs and build a Kubernetes spec when needed."""
+    normalized_artifact_store = _normalize_optional_manage_stack_string(artifact_store)
+    normalized_container_registry = _normalize_optional_manage_stack_string(
+        container_registry
+    )
+    normalized_cluster = _normalize_optional_manage_stack_string(cluster)
+    normalized_region = _normalize_optional_manage_stack_string(region)
+    normalized_namespace = _normalize_optional_manage_stack_string(namespace)
+    normalized_credentials = _normalize_optional_manage_stack_string(credentials)
+
+    kubernetes_option_fields = [
+        ("artifact_store", artifact_store is not None),
+        ("container_registry", container_registry is not None),
+        ("cluster", cluster is not None),
+        ("region", region is not None),
+        ("namespace", namespace is not None),
+        ("credentials", credentials is not None),
+        ("verify", not verify),
+    ]
+
+    if stack_type == StackType.LOCAL:
+        provided_kubernetes_fields = [
+            field_name
+            for field_name, is_provided in kubernetes_option_fields
+            if is_provided
+        ]
+        if provided_kubernetes_fields:
+            rendered_fields = ", ".join(
+                f"`{field_name}`" for field_name in provided_kubernetes_fields
+            )
+            raise ValueError(
+                'Kubernetes-only options require `stack_type="kubernetes"`: '
+                + rendered_fields
+            )
+        return None
+
+    missing_required_fields = [
+        field_name
+        for field_name, value in (
+            ("artifact_store", normalized_artifact_store),
+            ("container_registry", normalized_container_registry),
+            ("cluster", normalized_cluster),
+            ("region", normalized_region),
+        )
+        if value is None
+    ]
+    if missing_required_fields:
+        rendered_fields = ", ".join(
+            f"`{field_name}`" for field_name in missing_required_fields
+        )
+        raise ValueError('`stack_type="kubernetes"` requires: ' + rendered_fields + ".")
+
+    assert normalized_artifact_store is not None
+    assert normalized_container_registry is not None
+    assert normalized_cluster is not None
+    assert normalized_region is not None
+
+    return KubernetesStackSpec(
+        provider=_infer_manage_stack_cloud_provider(normalized_artifact_store),
+        artifact_store=normalized_artifact_store,
+        container_registry=normalized_container_registry,
+        cluster=normalized_cluster,
+        region=normalized_region,
+        namespace=normalized_namespace or "default",
+        credentials=normalized_credentials,
+        verify=verify,
+    )
+
+
 @mcp.tool()
 def manage_stack(
     action: Literal["create", "delete"],
@@ -860,20 +974,72 @@ def manage_stack(
     activate: bool = True,
     recursive: bool = False,
     force: bool = False,
+    stack_type: str = "local",
+    artifact_store: str | None = None,
+    container_registry: str | None = None,
+    cluster: str | None = None,
+    region: str | None = None,
+    namespace: str | None = None,
+    credentials: str | None = None,
+    verify: bool = True,
 ) -> dict[str, Any]:
-    """Create or delete a local stack."""
+    """Create or delete a local or Kubernetes-backed stack."""
     if action == "create":
         if recursive or force:
             raise ValueError(
                 '`recursive` and `force` are only valid when action="delete".'
             )
+        normalized_stack_type = _normalize_manage_stack_type(stack_type)
+        kubernetes_spec = _build_manage_stack_kubernetes_spec(
+            stack_type=normalized_stack_type,
+            artifact_store=artifact_store,
+            container_registry=container_registry,
+            cluster=cluster,
+            region=region,
+            namespace=namespace,
+            credentials=credentials,
+            verify=verify,
+        )
+        if normalized_stack_type == StackType.LOCAL:
+            return serialize_stack_create_result(
+                _create_stack_operation(name, activate=activate)
+            )
+
         return serialize_stack_create_result(
-            _create_stack_operation(name, activate=activate)
+            _create_stack_operation(
+                name,
+                stack_type=normalized_stack_type,
+                activate=activate,
+                kubernetes=kubernetes_spec,
+            )
         )
 
     if action == "delete":
         if not activate:
             raise ValueError('`activate` is only valid when action="create".')
+        normalized_stack_type = _normalize_manage_stack_type(stack_type)
+        kubernetes_create_only_fields = [
+            field_name
+            for field_name, is_provided in (
+                ("stack_type", normalized_stack_type != StackType.LOCAL),
+                ("artifact_store", artifact_store is not None),
+                ("container_registry", container_registry is not None),
+                ("cluster", cluster is not None),
+                ("region", region is not None),
+                ("namespace", namespace is not None),
+                ("credentials", credentials is not None),
+                ("verify", not verify),
+            )
+            if is_provided
+        ]
+        if kubernetes_create_only_fields:
+            rendered_fields = ", ".join(
+                f"`{field_name}`" for field_name in kubernetes_create_only_fields
+            )
+            raise ValueError(
+                'Kubernetes create options are only valid when action="create": '
+                + rendered_fields
+            )
         return serialize_stack_delete_result(
             _delete_stack_operation(
                 name,

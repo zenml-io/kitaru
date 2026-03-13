@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import warnings
 from collections.abc import Iterator
@@ -113,6 +114,59 @@ def _stack_model(
         name=name,
         labels=labels or {},
         components=components,
+    )
+
+
+def _kubernetes_stack_component(
+    component_id: str,
+    name: str,
+    *,
+    connector_name: str | None = None,
+) -> SimpleNamespace:
+    """Return a minimal hydrated Kubernetes stack-component stub."""
+    connector = (
+        SimpleNamespace(name=connector_name) if connector_name is not None else None
+    )
+    return SimpleNamespace(id=component_id, name=name, connector=connector)
+
+
+def _kubernetes_stack_model(
+    *,
+    stack_id: str,
+    name: str,
+    connector_name: str | None = "dev-connector",
+    orchestrator_name: str = "dev-orchestrator",
+    artifact_store_name: str = "dev-artifacts",
+    container_registry_name: str = "dev-registry",
+) -> SimpleNamespace:
+    """Return a minimal hydrated Kubernetes stack model stub."""
+    return SimpleNamespace(
+        id=stack_id,
+        name=name,
+        labels={"kitaru.managed": "true"},
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _kubernetes_stack_component(
+                    "orc-id",
+                    orchestrator_name,
+                    connector_name=connector_name,
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _kubernetes_stack_component(
+                    "art-id",
+                    artifact_store_name,
+                    connector_name=connector_name,
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _kubernetes_stack_component(
+                    "reg-id",
+                    container_registry_name,
+                    connector_name=connector_name,
+                )
+            ],
+        },
     )
 
 
@@ -737,26 +791,433 @@ def test_create_stack_dispatcher_rejects_unsupported_stack_type() -> None:
     mock_client.assert_not_called()
 
 
-def test_create_kubernetes_stack_operation_not_implemented() -> None:
-    """Phase 1 should keep Kubernetes creation as an explicit stub."""
+def test_create_kubernetes_stack_operation_creates_aws_stack_and_activates() -> None:
+    """Kubernetes create should build a one-shot AWS stack request and activate it."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+        namespace="ml",
+        credentials="aws-access-keys:AKIA123:secret456",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _kubernetes_stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        connector_name=None,
+        orchestrator_name="dev-orchestrator-4x9z",
+        artifact_store_name="dev-artifacts-4x9z",
+        container_registry_name="dev-registry-4x9z",
+    )
+    hydrated_stack = _kubernetes_stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        connector_name="dev-aws-4x9z",
+        orchestrator_name="dev-orchestrator-4x9z",
+        artifact_store_name="dev-artifacts-4x9z",
+        container_registry_name="dev-registry-4x9z",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_kubernetes_stack_operation(
+            "dev",
+            spec=spec,
+            labels={"owner": "ml"},
+        )
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="dev",
+        connector_type="aws",
+        resource_type="aws-generic",
+        auth_method="secret-key",
+        configuration={
+            "region": "eu-west-1",
+            "aws_access_key_id": "AKIA123",
+            "aws_secret_access_key": "secret456",
+        },
+        verify=True,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.name == "dev"
+    assert stack_request.labels == {"owner": "ml", "kitaru.managed": "true"}
+    assert len(stack_request.service_connectors) == 1
+    connector_info = stack_request.service_connectors[0]
+    assert connector_info.type == "aws"
+    assert connector_info.auth_method == "secret-key"
+    assert connector_info.configuration == {
+        "region": "eu-west-1",
+        "aws_access_key_id": "AKIA123",
+        "aws_secret_access_key": "secret456",
+    }
+
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.flavor == "kubernetes"
+    assert orchestrator.configuration == {"kubernetes_namespace": "ml"}
+    assert orchestrator.service_connector_index == 0
+    assert orchestrator.service_connector_resource_id == "demo-cluster"
+
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "s3"
+    assert artifact_store.configuration == {"path": "s3://bucket/path"}
+    assert artifact_store.service_connector_index == 0
+    assert artifact_store.service_connector_resource_id == "s3://bucket"
+
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "aws"
+    assert container_registry.configuration == {
+        "uri": "123456789012.dkr.ecr.eu-west-1.amazonaws.com"
+    }
+    assert container_registry.service_connector_index == 0
+    assert (
+        container_registry.service_connector_resource_id
+        == "123456789012.dkr.ecr.eu-west-1.amazonaws.com"
+    )
+
+    client_mock.zen_store.create_stack.assert_called_once_with(stack=stack_request)
+    client_mock.get_stack.assert_called_once_with("stack-dev-id", hydrate=True)
+    client_mock.activate_stack.assert_called_once_with("stack-dev-id")
+    assert result.stack.name == "dev"
+    assert result.stack.is_active is True
+    assert result.previous_active_stack == "default"
+    assert result.components_created == (
+        "dev-orchestrator-4x9z (orchestrator)",
+        "dev-artifacts-4x9z (artifact_store)",
+        "dev-registry-4x9z (container_registry)",
+    )
+    assert result.stack_type == "kubernetes"
+    assert result.service_connectors_created == ("dev-aws-4x9z",)
+    assert result.resources == {
+        "provider": "aws",
+        "cluster": "demo-cluster",
+        "region": "eu-west-1",
+        "namespace": "ml",
+        "artifact_store": "s3://bucket/path",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+    }
+
+
+def test_create_kubernetes_stack_operation_creates_gcp_stack_without_verification(
+    tmp_path: Path,
+) -> None:
+    """GCP Kubernetes create should read service-account JSON and honor verify=False."""
+    service_account_path = tmp_path / "gcp-service-account.json"
+    service_account_json = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "demo-project",
+            "private_key_id": "key-id",
+            "private_key": (
+                "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n"
+            ),
+            "client_email": "demo@demo-project.iam.gserviceaccount.com",
+            "client_id": "1234567890",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/demo",
+        }
+    )
+    service_account_path.write_text(service_account_json, encoding="utf-8")
     spec = KubernetesStackSpec(
         provider=CloudProvider.GCP,
         artifact_store="gs://bucket/path",
-        container_registry="europe-west4-docker.pkg.dev/demo/repo",
-        cluster="demo-cluster",
+        container_registry="europe-west4-docker.pkg.dev/demo-project/demo-repo",
+        cluster="demo-gke",
         region="europe-west4",
+        credentials=f"gcp-service-account:{service_account_path}",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _kubernetes_stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        connector_name="dev-gcp",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_kubernetes_stack_operation(
+            "dev",
+            spec=spec,
+            activate=False,
+        )
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="dev",
+        connector_type="gcp",
+        resource_type="gcp-generic",
+        auth_method="service-account",
+        configuration={
+            "project_id": "demo-project",
+            "service_account_json": service_account_json,
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "gcp"
+    assert artifact_store.service_connector_resource_id == "gs://bucket"
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "gcp"
+    assert (
+        container_registry.service_connector_resource_id
+        == "europe-west4-docker.pkg.dev/demo-project/demo-repo"
+    )
+    client_mock.activate_stack.assert_not_called()
+    assert result.stack.is_active is False
+    assert result.previous_active_stack is None
+    assert result.service_connectors_created == ("dev-gcp",)
+    assert result.resources == {
+        "provider": "gcp",
+        "cluster": "demo-gke",
+        "region": "europe-west4",
+        "namespace": "default",
+        "artifact_store": "gs://bucket/path",
+        "container_registry": "europe-west4-docker.pkg.dev/demo-project/demo-repo",
+    }
+
+
+def test_create_kubernetes_stack_operation_tolerates_refetch_failure() -> None:
+    """Metadata hydration should be best-effort after the stack is already created."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _kubernetes_stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        connector_name=None,
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.side_effect = RuntimeError("hydrate failed")
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_kubernetes_stack_operation(
+            "dev",
+            spec=spec,
+            activate=False,
+        )
+
+    client_mock.get_stack.assert_called_once_with("stack-dev-id", hydrate=True)
+    assert result.components_created == (
+        "dev-orchestrator (orchestrator)",
+        "dev-artifacts (artifact_store)",
+        "dev-registry (container_registry)",
+    )
+    assert result.service_connectors_created == ()
+
+
+def test_create_kubernetes_stack_operation_rejects_invalid_aws_credentials() -> None:
+    """Malformed AWS credentials should fail before any connector or stack calls."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+        credentials="aws-access-keys:missing-secret-only",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
     )
 
     with (
-        patch("kitaru.config.Client") as mock_client,
+        patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(
-            NotImplementedError,
-            match=r"Kubernetes stack creation is not implemented yet\.",
+            ValueError,
+            match=r"aws-access-keys credentials must be in the format",
         ),
     ):
         _create_kubernetes_stack_operation("dev", spec=spec)
 
-    mock_client.assert_not_called()
+    client_mock.create_service_connector.assert_not_called()
+    client_mock._validate_stack_configuration.assert_not_called()
+
+
+def test_create_kubernetes_stack_operation_rejects_empty_gcp_service_account_path() -> (
+    None
+):
+    """An empty GCP service-account credential path should fail clearly."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.GCP,
+        artifact_store="gs://bucket/path",
+        container_registry="europe-west4-docker.pkg.dev/demo-project/demo-repo",
+        cluster="demo-gke",
+        region="europe-west4",
+        credentials="gcp-service-account:",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            ValueError,
+            match=r"GCP service account file path cannot be empty\.",
+        ),
+    ):
+        _create_kubernetes_stack_operation("dev", spec=spec)
+
+    client_mock.create_service_connector.assert_not_called()
+
+
+def test_create_kubernetes_stack_operation_rejects_unparsable_gcp_registry() -> None:
+    """GCP creation should fail early if the project ID cannot be inferred."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.GCP,
+        artifact_store="gs://bucket/path",
+        container_registry="registry.example.com/demo",
+        cluster="demo-gke",
+        region="europe-west4",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            ValueError,
+            match=r"Cannot infer GCP project ID from container registry URI",
+        ),
+    ):
+        _create_kubernetes_stack_operation("dev", spec=spec)
+
+    client_mock.create_service_connector.assert_not_called()
+    client_mock._validate_stack_configuration.assert_not_called()
+
+
+def test_create_kubernetes_stack_operation_wraps_store_create_failure() -> None:
+    """Store create failures should surface rollback guidance and skip activation."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.side_effect = RuntimeError("boom")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            RuntimeError,
+            match=(
+                r"ZenML rolled back any partially created components and "
+                r"service connectors"
+            ),
+        ),
+    ):
+        _create_kubernetes_stack_operation("dev", spec=spec)
+
+    client_mock.activate_stack.assert_not_called()
+    client_mock.delete_stack_component.assert_not_called()
+    client_mock.delete_service_connector.assert_not_called()
+
+
+def test_create_kubernetes_stack_operation_reports_activation_failure() -> None:
+    """Activation failures should keep the created stack and guide manual recovery."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _kubernetes_stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        connector_name="dev-aws",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.activate_stack.side_effect = RuntimeError("cannot switch")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            RuntimeError,
+            match=r"Created Kubernetes stack 'dev' but failed to activate it",
+        ),
+    ):
+        _create_kubernetes_stack_operation("dev", spec=spec)
+
+    client_mock.zen_store.create_stack.assert_called_once()
+    client_mock.delete_stack_component.assert_not_called()
+    client_mock.delete_service_connector.assert_not_called()
 
 
 def test_create_stack_without_activation_keeps_previous_active_stack() -> None:

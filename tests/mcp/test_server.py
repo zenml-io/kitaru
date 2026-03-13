@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from kitaru.client import ExecutionStatus
-from kitaru.config import ActiveEnvironmentVariable, StackInfo
+from kitaru.config import (
+    ActiveEnvironmentVariable,
+    CloudProvider,
+    KubernetesStackSpec,
+    StackInfo,
+    StackType,
+)
 from kitaru.mcp.server import (
     RuntimeSnapshot,
     get_execution_logs,
@@ -424,6 +431,245 @@ def test_manage_stack_delete_returns_structured_result() -> None:
         "new_active_stack": "default",
         "recursive": True,
     }
+
+
+@pytest.mark.parametrize(
+    ("artifact_store", "container_registry", "region", "expected_provider"),
+    [
+        (
+            "s3://my-bucket/kitaru",
+            "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+            "eu-west-1",
+            CloudProvider.AWS,
+        ),
+        (
+            "gs://my-bucket/kitaru",
+            "europe-west4-docker.pkg.dev/my-project/my-repo/my-image",
+            "europe-west4",
+            CloudProvider.GCP,
+        ),
+    ],
+)
+def test_manage_stack_create_kubernetes_dispatches_structured_spec(
+    artifact_store: str,
+    container_registry: str,
+    region: str,
+    expected_provider: CloudProvider,
+) -> None:
+    """MCP Kubernetes create should build a shared serialized stack result."""
+    with patch("kitaru.mcp.server._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-k8s-id", name="k8s-dev", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "k8s-dev (orchestrator)",
+                "k8s-dev (artifact_store)",
+                "k8s-dev (container_registry)",
+            ),
+            stack_type="kubernetes",
+            service_connectors_created=("k8s-dev-connector",),
+            resources={
+                "provider": expected_provider.value,
+                "cluster": "cluster-1",
+                "region": region,
+                "namespace": "ml-team",
+                "artifact_store": artifact_store,
+                "container_registry": container_registry,
+            },
+        )
+
+        payload = manage_stack(
+            "create",
+            "k8s-dev",
+            stack_type="kubernetes",
+            activate=False,
+            artifact_store=artifact_store,
+            container_registry=container_registry,
+            cluster="cluster-1",
+            region=region,
+            namespace="ml-team",
+            verify=False,
+        )
+
+    mock_create_stack.assert_called_once()
+    assert mock_create_stack.call_args.args == ("k8s-dev",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.KUBERNETES
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+
+    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    assert isinstance(kubernetes_spec, KubernetesStackSpec)
+    assert kubernetes_spec.provider == expected_provider
+    assert kubernetes_spec.artifact_store == artifact_store
+    assert kubernetes_spec.container_registry == container_registry
+    assert kubernetes_spec.cluster == "cluster-1"
+    assert kubernetes_spec.region == region
+    assert kubernetes_spec.namespace == "ml-team"
+    assert kubernetes_spec.credentials is None
+    assert kubernetes_spec.verify is False
+
+    assert payload == {
+        "id": "stack-k8s-id",
+        "name": "k8s-dev",
+        "is_active": False,
+        "previous_active_stack": None,
+        "components_created": [
+            "k8s-dev (orchestrator)",
+            "k8s-dev (artifact_store)",
+            "k8s-dev (container_registry)",
+        ],
+        "stack_type": "kubernetes",
+        "service_connectors_created": ["k8s-dev-connector"],
+        "resources": {
+            "provider": expected_provider.value,
+            "cluster": "cluster-1",
+            "region": region,
+            "namespace": "ml-team",
+            "artifact_store": artifact_store,
+            "container_registry": container_registry,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["artifact_store", "container_registry", "cluster", "region"],
+)
+def test_manage_stack_create_kubernetes_requires_required_fields(
+    missing_field: str,
+) -> None:
+    """Kubernetes MCP create should reject missing required inputs early."""
+    create_kwargs: dict[str, str | None] = {
+        "stack_type": "kubernetes",
+        "artifact_store": "s3://my-bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru",
+        "cluster": "cluster-1",
+        "region": "eu-west-1",
+    }
+    create_kwargs[missing_field] = None
+
+    with (
+        patch("kitaru.mcp.server._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match="requires:"),
+    ):
+        manage_stack("create", "k8s-dev", **create_kwargs)
+
+    mock_create_stack.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "extra_kwargs",
+    [
+        {"artifact_store": "s3://my-bucket/kitaru"},
+        {"container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"},
+        {"cluster": "cluster-1"},
+        {"region": "eu-west-1"},
+        {"namespace": "ml-team"},
+        {"credentials": "implicit"},
+        {"verify": False},
+    ],
+)
+def test_manage_stack_create_local_rejects_kubernetes_only_options(
+    extra_kwargs: dict[str, Any],
+) -> None:
+    """Local MCP create should reject Kubernetes-only inputs."""
+    with (
+        patch("kitaru.mcp.server._create_stack_operation") as mock_create_stack,
+        pytest.raises(
+            ValueError,
+            match='Kubernetes-only options require `stack_type="kubernetes"`',
+        ),
+    ):
+        manage_stack("create", "dev", **extra_kwargs)
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_kubernetes_normalizes_blank_optional_inputs() -> None:
+    """Blank optional Kubernetes inputs should normalize cleanly before dispatch."""
+    with patch("kitaru.mcp.server._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-k8s-id", name="k8s-dev", is_active=True),
+            previous_active_stack=None,
+            components_created=(
+                "k8s-dev (orchestrator)",
+                "k8s-dev (artifact_store)",
+                "k8s-dev (container_registry)",
+            ),
+            stack_type="kubernetes",
+            service_connectors_created=(),
+            resources=None,
+        )
+
+        manage_stack(
+            "create",
+            "k8s-dev",
+            stack_type="kubernetes",
+            artifact_store="  gs://my-bucket/kitaru  ",
+            container_registry=(
+                "  europe-west4-docker.pkg.dev/my-project/my-repo/my-image  "
+            ),
+            cluster="  cluster-1  ",
+            region="  europe-west4  ",
+            namespace="   ",
+            credentials="   ",
+        )
+
+    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    assert isinstance(kubernetes_spec, KubernetesStackSpec)
+    assert kubernetes_spec.provider == CloudProvider.GCP
+    assert kubernetes_spec.artifact_store == "gs://my-bucket/kitaru"
+    assert (
+        kubernetes_spec.container_registry
+        == "europe-west4-docker.pkg.dev/my-project/my-repo/my-image"
+    )
+    assert kubernetes_spec.cluster == "cluster-1"
+    assert kubernetes_spec.region == "europe-west4"
+    assert kubernetes_spec.namespace == "default"
+    assert kubernetes_spec.credentials is None
+    assert kubernetes_spec.verify is True
+
+
+def test_manage_stack_create_kubernetes_rejects_unknown_provider() -> None:
+    """MCP create should fail fast when provider inference cannot resolve."""
+    with (
+        patch("kitaru.mcp.server._create_stack_operation") as mock_create_stack,
+        pytest.raises(ValueError, match="Cannot infer cloud provider"),
+    ):
+        manage_stack(
+            "create",
+            "k8s-dev",
+            stack_type="kubernetes",
+            artifact_store="az://my-bucket/kitaru",
+            container_registry="registry.example.com/kitaru",
+            cluster="cluster-1",
+            region="westeurope",
+        )
+
+    mock_create_stack.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "delete_kwargs",
+    [
+        {"stack_type": "kubernetes"},
+        {"artifact_store": "s3://my-bucket/kitaru"},
+        {"verify": False},
+    ],
+)
+def test_manage_stack_delete_rejects_kubernetes_create_options(
+    delete_kwargs: dict[str, Any],
+) -> None:
+    """Delete should reject Kubernetes creation inputs."""
+    with (
+        patch("kitaru.mcp.server._delete_stack_operation") as mock_delete_stack,
+        pytest.raises(
+            ValueError,
+            match='Kubernetes create options are only valid when action="create"',
+        ),
+    ):
+        manage_stack("delete", "dev", **delete_kwargs)
+
+    mock_delete_stack.assert_not_called()
 
 
 def test_manage_stack_rejects_irrelevant_flags() -> None:
