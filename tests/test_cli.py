@@ -94,6 +94,56 @@ def _stack_create_result_stub(
     )
 
 
+def _stack_details_stub(
+    *,
+    name: str = "my-k8s",
+    stack_id: str | None = None,
+    is_active: bool = True,
+    is_managed: bool = True,
+    stack_type: str = "kubernetes",
+    components: list[SimpleNamespace] | None = None,
+) -> SimpleNamespace:
+    """Build a lightweight stack-details object for `stack show` CLI tests."""
+    return SimpleNamespace(
+        stack=SimpleNamespace(
+            id=stack_id or f"stack-{name}-id",
+            name=name,
+            is_active=is_active,
+        ),
+        is_managed=is_managed,
+        stack_type=stack_type,
+        components=components
+        if components is not None
+        else [
+            SimpleNamespace(
+                role="runner",
+                name=f"{name}-runner",
+                backend="kubernetes",
+                details=(
+                    ("cluster", "demo-cluster"),
+                    ("region", "us-east-1"),
+                    ("namespace", "default"),
+                ),
+                purpose=None,
+            ),
+            SimpleNamespace(
+                role="storage",
+                name=f"{name}-storage",
+                backend="s3",
+                details=(("location", "s3://bucket/kitaru"),),
+                purpose=None,
+            ),
+            SimpleNamespace(
+                role="image_registry",
+                name=f"{name}-registry",
+                backend="aws",
+                details=(("location", "123456789012.dkr.ecr.us-east-1.amazonaws.com"),),
+                purpose=None,
+            ),
+        ],
+    )
+
+
 def test_importing_cli_does_not_resolve_version_metadata() -> None:
     """Importing `kitaru.cli` should not resolve package metadata."""
     import kitaru.cli as cli_module
@@ -1907,6 +1957,112 @@ def test_stack_current_renders_snapshot(
     assert "Stack ID: stack-prod-id" in output
 
 
+def test_stack_show_renders_translated_component_snapshot(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru stack show` should render Kitaru component labels and details."""
+    with (
+        patch("kitaru.cli._show_stack_operation") as mock_show_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_show_stack.return_value = _stack_details_stub()
+        app(["stack", "show", "my-k8s"])
+
+    assert exc_info.value.code == 0
+    mock_show_stack.assert_called_once_with("my-k8s")
+    output = capsys.readouterr().out
+    assert "Kitaru stack" in output
+    assert "Name: my-k8s" in output
+    assert "Type: kubernetes" in output
+    assert "Managed: yes" in output
+    assert "Runner: my-k8s-runner (kubernetes)" in output
+    assert "cluster: demo-cluster" in output
+    assert "Storage: my-k8s-storage (s3); location: s3://bucket/kitaru" in output
+    assert (
+        "Image registry: my-k8s-registry (aws); location: "
+        "123456789012.dkr.ecr.us-east-1.amazonaws.com" in output
+    )
+    assert "artifact_store" not in output
+    assert "container_registry" not in output
+
+
+def test_stack_show_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru stack show --output json` should emit translated stack details."""
+    with (
+        patch("kitaru.cli._show_stack_operation") as mock_show_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_show_stack.return_value = _stack_details_stub()
+        app(["stack", "show", "my-k8s", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "stack.show",
+        "item": {
+            "id": "stack-my-k8s-id",
+            "name": "my-k8s",
+            "is_active": True,
+            "is_managed": True,
+            "stack_type": "kubernetes",
+            "components": [
+                {
+                    "role": "runner",
+                    "name": "my-k8s-runner",
+                    "backend": "kubernetes",
+                    "details": {
+                        "cluster": "demo-cluster",
+                        "region": "us-east-1",
+                        "namespace": "default",
+                    },
+                },
+                {
+                    "role": "storage",
+                    "name": "my-k8s-storage",
+                    "backend": "s3",
+                    "details": {
+                        "location": "s3://bucket/kitaru",
+                    },
+                },
+                {
+                    "role": "image_registry",
+                    "name": "my-k8s-registry",
+                    "backend": "aws",
+                    "details": {
+                        "location": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                    },
+                },
+            ],
+        },
+    }
+
+
+def test_stack_show_surfaces_structured_json_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`stack show` should reuse the standard JSON error envelope."""
+    with (
+        patch(
+            "kitaru.cli._show_stack_operation",
+            side_effect=ValueError("Stack 'ghost' not found."),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["stack", "show", "ghost", "--output", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload == {
+        "command": "stack.show",
+        "error": {
+            "message": "Stack 'ghost' not found.",
+            "type": "ValueError",
+        },
+    }
+
+
 def test_stack_use_delegates_to_config(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -2457,6 +2613,80 @@ def test_stack_delete_json_output(capsys: pytest.CaptureFixture[str]) -> None:
             "components_deleted": [
                 "dev (orchestrator)",
                 "dev (artifact_store)",
+            ],
+            "new_active_stack": "default",
+            "recursive": True,
+        },
+    }
+
+
+def test_stack_delete_kubernetes_output_includes_container_registry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Recursive Kubernetes delete output should list the registry clearly."""
+    with (
+        patch("kitaru.cli._delete_stack_operation") as mock_delete_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_delete_stack.return_value = SimpleNamespace(
+            deleted_stack="my-k8s",
+            components_deleted=(
+                "my-k8s-orchestrator (orchestrator)",
+                "my-k8s-artifacts (artifact_store)",
+                "my-k8s-registry (container_registry)",
+            ),
+            new_active_stack="default",
+            recursive=True,
+        )
+        app(["stack", "delete", "my-k8s", "--recursive", "--force"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Deleted stack: my-k8s" in output
+    assert "my-k8s-registry (container_registry)" in output
+    assert "service connector" not in output.lower()
+
+
+def test_stack_delete_kubernetes_json_output_keeps_existing_shape(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Recursive Kubernetes delete JSON should only expand the component list."""
+    with (
+        patch("kitaru.cli._delete_stack_operation") as mock_delete_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_delete_stack.return_value = SimpleNamespace(
+            deleted_stack="my-k8s",
+            components_deleted=(
+                "my-k8s-orchestrator (orchestrator)",
+                "my-k8s-artifacts (artifact_store)",
+                "my-k8s-registry (container_registry)",
+            ),
+            new_active_stack="default",
+            recursive=True,
+        )
+        app(
+            [
+                "stack",
+                "delete",
+                "my-k8s",
+                "--recursive",
+                "--force",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "stack.delete",
+        "item": {
+            "deleted_stack": "my-k8s",
+            "components_deleted": [
+                "my-k8s-orchestrator (orchestrator)",
+                "my-k8s-artifacts (artifact_store)",
+                "my-k8s-registry (container_registry)",
             ],
             "new_active_stack": "default",
             "recursive": True,

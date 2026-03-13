@@ -44,6 +44,7 @@ from kitaru.config import (
     _delete_stack_components_best_effort,
     _delete_stack_operation,
     _list_stack_entries,
+    _show_stack_operation,
     _StackComponent,
     build_frozen_execution_spec,
     configure,
@@ -85,9 +86,28 @@ class _FakeStackPage:
         return iter(self.items)
 
 
-def _stack_component(component_id: str, name: str) -> SimpleNamespace:
-    """Return a minimal stack-component model stub for stack tests."""
-    return SimpleNamespace(id=component_id, name=name)
+def _stack_component(
+    component_id: str,
+    name: str,
+    *,
+    flavor: str | None = None,
+    configuration: dict[str, Any] | None = None,
+    connector: SimpleNamespace | None = None,
+    service_connector_resource_id: str | None = None,
+    connector_resource_id: str | None = None,
+    resource_id: str | None = None,
+) -> SimpleNamespace:
+    """Return a minimal hydrated stack-component model stub for stack tests."""
+    return SimpleNamespace(
+        id=component_id,
+        name=name,
+        flavor=flavor,
+        configuration=configuration or {},
+        connector=connector,
+        service_connector_resource_id=service_connector_resource_id,
+        connector_resource_id=connector_resource_id,
+        resource_id=resource_id,
+    )
 
 
 def _stack_model(
@@ -97,15 +117,16 @@ def _stack_model(
     labels: dict[str, str] | None = None,
     orchestrator_id: str | None = None,
     artifact_store_id: str | None = None,
+    components: dict[Any, list[SimpleNamespace]] | None = None,
 ) -> SimpleNamespace:
     """Return a minimal stack model stub for stack tests."""
-    components: dict[StackComponentType, list[SimpleNamespace]] = {}
+    stack_components = dict(components or {})
     if orchestrator_id is not None:
-        components[StackComponentType.ORCHESTRATOR] = [
+        stack_components[StackComponentType.ORCHESTRATOR] = [
             _stack_component(orchestrator_id, name)
         ]
     if artifact_store_id is not None:
-        components[StackComponentType.ARTIFACT_STORE] = [
+        stack_components[StackComponentType.ARTIFACT_STORE] = [
             _stack_component(artifact_store_id, name)
         ]
 
@@ -113,7 +134,7 @@ def _stack_model(
         id=stack_id,
         name=name,
         labels=labels or {},
-        components=components,
+        components=stack_components,
     )
 
 
@@ -122,12 +143,30 @@ def _kubernetes_stack_component(
     name: str,
     *,
     connector_name: str | None = None,
+    connector_id: str | None = None,
+    flavor: str | None = None,
+    configuration: dict[str, Any] | None = None,
+    connector_configuration: dict[str, Any] | None = None,
+    service_connector_resource_id: str | None = None,
 ) -> SimpleNamespace:
     """Return a minimal hydrated Kubernetes stack-component stub."""
     connector = (
-        SimpleNamespace(name=connector_name) if connector_name is not None else None
+        SimpleNamespace(
+            name=connector_name,
+            id=connector_id,
+            configuration=connector_configuration or {},
+        )
+        if connector_name is not None or connector_id is not None
+        else None
     )
-    return SimpleNamespace(id=component_id, name=name, connector=connector)
+    return _stack_component(
+        component_id,
+        name,
+        flavor=flavor,
+        configuration=configuration,
+        connector=connector,
+        service_connector_resource_id=service_connector_resource_id,
+    )
 
 
 def _kubernetes_stack_model(
@@ -135,6 +174,7 @@ def _kubernetes_stack_model(
     stack_id: str,
     name: str,
     connector_name: str | None = "dev-connector",
+    connector_id: str | None = None,
     orchestrator_name: str = "dev-orchestrator",
     artifact_store_name: str = "dev-artifacts",
     container_registry_name: str = "dev-registry",
@@ -150,6 +190,11 @@ def _kubernetes_stack_model(
                     "orc-id",
                     orchestrator_name,
                     connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="kubernetes",
+                    configuration={"kubernetes_namespace": "default"},
+                    connector_configuration={"region": "us-east-1"},
+                    service_connector_resource_id="demo-cluster",
                 )
             ],
             StackComponentType.ARTIFACT_STORE: [
@@ -157,6 +202,9 @@ def _kubernetes_stack_model(
                     "art-id",
                     artifact_store_name,
                     connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="s3",
+                    configuration={"path": "s3://bucket/kitaru"},
                 )
             ],
             StackComponentType.CONTAINER_REGISTRY: [
@@ -164,6 +212,11 @@ def _kubernetes_stack_model(
                     "reg-id",
                     container_registry_name,
                     connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="aws",
+                    configuration={
+                        "uri": "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+                    },
                 )
             ],
         },
@@ -641,6 +694,203 @@ def test_list_stack_entries_include_managed_flag() -> None:
     ]
 
 
+def test_show_stack_operation_returns_local_stack_details() -> None:
+    """stack show should translate a local stack into Kitaru roles."""
+    stack_summary = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+    )
+    hydrated_stack = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-dev-id", "dev-runner", flavor="local")
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _stack_component(
+                    "art-dev-id",
+                    "dev-storage",
+                    flavor="local",
+                    configuration={"path": "/tmp/kitaru"},
+                )
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = stack_summary
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("dev")
+
+    assert details.stack.name == "dev"
+    assert details.stack.id == "stack-dev-id"
+    assert details.stack.is_active is True
+    assert details.is_managed is True
+    assert details.stack_type == "local"
+    assert [component.role for component in details.components] == [
+        "runner",
+        "storage",
+    ]
+    assert details.components[0].name == "dev-runner"
+    assert details.components[0].backend == "local"
+    assert details.components[0].details == ()
+    assert details.components[1].details == (("location", "/tmp/kitaru"),)
+    client_mock.get_stack.assert_called_once_with("stack-dev-id", hydrate=True)
+
+
+def test_show_stack_operation_prefers_exact_id_over_name_collision() -> None:
+    """stack show should prefer an exact ID match over a same-text name match."""
+    id_match_summary = _stack_model(stack_id="shared-selector", name="dev")
+    name_match_summary = _stack_model(stack_id="stack-other-id", name="shared-selector")
+    hydrated_stack = _stack_model(
+        stack_id="shared-selector",
+        name="dev",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-dev-id", "dev-runner", flavor="local")
+            ]
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = name_match_summary
+    client_mock.list_stacks.return_value = [name_match_summary, id_match_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("shared-selector")
+
+    assert details.stack.id == "shared-selector"
+    assert details.stack.name == "dev"
+    client_mock.get_stack.assert_called_once_with("shared-selector", hydrate=True)
+
+
+def test_show_stack_operation_returns_kubernetes_stack_details() -> None:
+    """stack show should translate Kubernetes stack fields into Kitaru terms."""
+    stack_summary = _stack_model(stack_id="stack-k8s-id", name="my-k8s")
+    hydrated_stack = _kubernetes_stack_model(stack_id="stack-k8s-id", name="my-k8s")
+    client_mock = Mock()
+    client_mock.active_stack_model = hydrated_stack
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("my-k8s")
+
+    assert details.stack_type == "kubernetes"
+    assert details.is_managed is True
+    assert [component.role for component in details.components] == [
+        "runner",
+        "storage",
+        "image_registry",
+    ]
+    assert details.components[0].details == (
+        ("cluster", "demo-cluster"),
+        ("region", "us-east-1"),
+        ("namespace", "default"),
+    )
+    assert details.components[1].details == (("location", "s3://bucket/kitaru"),)
+    assert details.components[2].details == (
+        ("location", "123456789012.dkr.ecr.us-east-1.amazonaws.com"),
+    )
+
+
+def test_show_stack_operation_classifies_custom_stacks_and_additional_components() -> (
+    None
+):
+    """Non-local/Kubernetes stacks should fall back to custom details output."""
+    stack_summary = _stack_model(stack_id="stack-custom-id", name="custom")
+    hydrated_stack = _stack_model(
+        stack_id="stack-custom-id",
+        name="custom",
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component("orc-custom-id", "custom-runner", flavor="airflow")
+            ],
+            StackComponentType.EXPERIMENT_TRACKER: [
+                _stack_component("exp-custom-id", "mlflow", flavor="mlflow")
+            ],
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = stack_summary
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("custom")
+
+    assert details.stack_type == "custom"
+    assert [component.role for component in details.components] == [
+        "runner",
+        "additional_component",
+    ]
+    assert details.components[1].purpose == "experiment_tracker"
+
+
+def test_show_stack_operation_preserves_unknown_component_types() -> None:
+    """stack show should keep unknown component types as additional components."""
+    stack_summary = _stack_model(stack_id="stack-future-id", name="future")
+    hydrated_stack = _stack_model(
+        stack_id="stack-future-id",
+        name="future",
+        components={
+            "future_component": [
+                _stack_component("future-id", "future-addon", flavor="mystery")
+            ]
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = stack_summary
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("future")
+
+    assert details.stack_type == "custom"
+    assert len(details.components) == 1
+    assert details.components[0].role == "additional_component"
+    assert details.components[0].purpose == "future_component"
+
+
+def test_show_stack_operation_raises_when_stack_is_missing() -> None:
+    """stack show should report missing stacks with the selector in the error."""
+    client_mock = Mock()
+    client_mock.active_stack_model = _stack_model(
+        stack_id="stack-default-id", name="default"
+    )
+    client_mock.list_stacks.return_value = []
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(ValueError, match=r"Stack 'ghost' not found\."),
+    ):
+        _show_stack_operation("ghost")
+
+
+def test_show_stack_operation_wraps_hydration_failures() -> None:
+    """stack show should wrap backend hydration errors with stack context."""
+    stack_summary = _stack_model(stack_id="stack-dev-id", name="dev")
+    client_mock = Mock()
+    client_mock.active_stack_model = stack_summary
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.side_effect = RuntimeError("backend unavailable")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            RuntimeError,
+            match="Unable to inspect stack 'dev': backend unavailable",
+        ),
+    ):
+        _show_stack_operation("dev")
+
+
 def test_create_stack_creates_local_components_and_activates() -> None:
     """Create should build local components, create the stack, and activate it."""
     default = _stack_model(stack_id="stack-default-id", name="default")
@@ -866,7 +1116,10 @@ def test_create_kubernetes_stack_operation_creates_aws_stack_and_activates() -> 
 
     orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
     assert orchestrator.flavor == "kubernetes"
-    assert orchestrator.configuration == {"kubernetes_namespace": "ml"}
+    assert orchestrator.configuration == {
+        "kubernetes_namespace": "ml",
+        "region": "eu-west-1",
+    }
     assert orchestrator.service_connector_index == 0
     assert orchestrator.service_connector_resource_id == "demo-cluster"
 
@@ -980,6 +1233,11 @@ def test_create_kubernetes_stack_operation_creates_gcp_stack_without_verificatio
         register=False,
     )
     stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.configuration == {
+        "kubernetes_namespace": "default",
+        "region": "europe-west4",
+    }
     artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
     assert artifact_store.flavor == "gcp"
     assert artifact_store.service_connector_resource_id == "gs://bucket"
@@ -1401,6 +1659,8 @@ def test_delete_stack_deletes_non_active_stack() -> None:
     assert result.deleted_stack == "dev"
     assert result.components_deleted == ()
     assert result.new_active_stack is None
+    client_mock.list_service_connectors.assert_not_called()
+    client_mock.delete_service_connector.assert_not_called()
     assert public_result is None
 
 
@@ -1423,6 +1683,8 @@ def test_delete_stack_recursive_managed_stack_reports_unshared_components() -> N
         result = _delete_stack_operation("dev", recursive=True)
 
     client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=True)
+    client_mock.list_service_connectors.assert_not_called()
+    client_mock.delete_service_connector.assert_not_called()
     assert result.components_deleted == (
         "dev (orchestrator)",
         "dev (artifact_store)",
@@ -1447,6 +1709,8 @@ def test_delete_stack_recursive_unmanaged_stack_reports_no_components() -> None:
         result = _delete_stack_operation("legacy", recursive=True)
 
     client_mock.list_stacks.assert_not_called()
+    client_mock.list_service_connectors.assert_not_called()
+    client_mock.delete_service_connector.assert_not_called()
     assert result.components_deleted == ()
 
 
@@ -1489,6 +1753,239 @@ def test_delete_stack_force_switches_to_default_before_deleting() -> None:
     client_mock.activate_stack.assert_called_once_with("default")
     client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=False)
     assert result.new_active_stack == "default"
+
+
+def test_delete_stack_recursive_kubernetes_deletes_unshared_connector() -> None:
+    """Recursive Kubernetes delete should include the registry.
+
+    It should also clean up orphaned connectors.
+    """
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.side_effect = [dev, default]
+    client_mock.list_stacks.side_effect = [
+        [dev],
+        [dev],
+        [dev],
+        _FakeStackPage(items=[default], total_pages=1, max_size=50),
+    ]
+    client_mock.list_service_connectors.return_value = [
+        SimpleNamespace(name="dev-connector")
+    ]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=True)
+    client_mock.list_service_connectors.assert_called_once_with(
+        name="dev-connector",
+        page=1,
+        size=2,
+        hydrate=True,
+    )
+    client_mock.delete_service_connector.assert_called_once_with("dev-connector")
+    assert result.components_deleted == (
+        "dev-orchestrator (orchestrator)",
+        "dev-artifacts (artifact_store)",
+        "dev-registry (container_registry)",
+    )
+
+
+def test_delete_stack_recursive_kubernetes_keeps_shared_connector() -> None:
+    """Recursive Kubernetes delete should leave shared connectors alone."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    prod = _kubernetes_stack_model(
+        stack_id="stack-prod-id",
+        name="prod",
+        connector_name="dev-connector",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.side_effect = [dev, default, prod]
+    client_mock.list_stacks.side_effect = [
+        [dev],
+        [dev],
+        [dev],
+        _FakeStackPage(items=[default, prod], total_pages=1, max_size=50),
+    ]
+    client_mock.list_service_connectors.return_value = [
+        SimpleNamespace(name="dev-connector")
+    ]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_service_connector.assert_not_called()
+
+
+def test_delete_stack_k8s_keeps_shared_connector_with_id_stack() -> None:
+    """Shared connectors should be preserved with an ID-only remaining stack."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    prod = _kubernetes_stack_model(
+        stack_id="stack-prod-id",
+        name="prod",
+        connector_name=None,
+        connector_id="connector-dev-id",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.side_effect = [dev, default, prod]
+    client_mock.list_stacks.side_effect = [
+        [dev],
+        [dev],
+        [dev],
+        _FakeStackPage(items=[default, prod], total_pages=1, max_size=50),
+    ]
+
+    def _list_service_connectors(**kwargs: Any) -> list[SimpleNamespace]:
+        if kwargs.get("name") == "dev-connector":
+            return [SimpleNamespace(id="connector-dev-id", name="dev-connector")]
+        if kwargs.get("id") == "connector-dev-id":
+            return [SimpleNamespace(id="connector-dev-id", name="dev-connector")]
+        return []
+
+    client_mock.list_service_connectors.side_effect = _list_service_connectors
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_service_connector.assert_not_called()
+
+
+def test_delete_stack_k8s_skips_cleanup_on_incomplete_metadata() -> None:
+    """Cleanup should stop when another stack has an unidentifiable connector."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    prod = SimpleNamespace(
+        id="stack-prod-id",
+        name="prod",
+        labels={"kitaru.managed": "true"},
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _stack_component(
+                    "prod-orc-id",
+                    "prod-orchestrator",
+                    flavor="kubernetes",
+                    connector=SimpleNamespace(configuration={"region": "us-east-1"}),
+                )
+            ]
+        },
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.side_effect = [dev, default, prod]
+    client_mock.list_stacks.side_effect = [
+        [dev],
+        [dev],
+        [dev],
+        _FakeStackPage(items=[default, prod], total_pages=1, max_size=50),
+    ]
+    client_mock.list_service_connectors.return_value = [
+        SimpleNamespace(id="connector-dev-id", name="dev-connector")
+    ]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_service_connector.assert_not_called()
+
+
+def test_delete_stack_recursive_kubernetes_skips_cleanup_on_scan_failure() -> None:
+    """Connector cleanup should bail out when the remaining-stack scan is uncertain."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.return_value = dev
+    client_mock.list_stacks.side_effect = [
+        [dev],
+        [dev],
+        [dev],
+        RuntimeError("scan failed"),
+    ]
+    client_mock.list_service_connectors.return_value = [
+        SimpleNamespace(name="dev-connector")
+    ]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=True)
+    client_mock.delete_service_connector.assert_not_called()
+    assert result.deleted_stack == "dev"
+
+
+def test_delete_stack_recursive_kubernetes_skips_cleanup_on_lookup_failure() -> None:
+    """Connector lookup errors after stack deletion should not bubble up."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.return_value = dev
+    client_mock.list_stacks.side_effect = [[dev], [dev], [dev]]
+    client_mock.list_service_connectors.side_effect = RuntimeError(
+        "connector lookup failed"
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=True)
+    client_mock.delete_service_connector.assert_not_called()
+    assert result.deleted_stack == "dev"
+
+
+def test_delete_stack_recursive_kubernetes_skips_cleanup_on_delete_failure() -> None:
+    """A failed stack delete should not attempt any connector cleanup afterwards."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.return_value = dev
+    client_mock.list_stacks.side_effect = [[dev], [dev], [dev]]
+    client_mock.list_service_connectors.return_value = [
+        SimpleNamespace(name="dev-connector")
+    ]
+    client_mock.delete_stack.side_effect = RuntimeError("delete failed")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(RuntimeError, match="delete failed"),
+    ):
+        _delete_stack_operation("dev", recursive=True)
+
+    client_mock.delete_service_connector.assert_not_called()
+
+
+def test_delete_stack_recursive_kubernetes_does_not_report_shared_registry() -> None:
+    """Shared container registries should be omitted from the delete summary."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    dev = _kubernetes_stack_model(stack_id="stack-dev-id", name="dev")
+    shared_stack = _stack_model(stack_id="stack-shared-id", name="shared")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.get_stack.side_effect = [dev, default]
+    client_mock.list_stacks.side_effect = [
+        [dev],
+        [dev],
+        [dev, shared_stack],
+        _FakeStackPage(items=[default], total_pages=1, max_size=50),
+    ]
+    client_mock.list_service_connectors.return_value = [
+        SimpleNamespace(id="connector-dev-id", name="dev-connector")
+    ]
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _delete_stack_operation("dev", recursive=True)
+
+    assert result.components_deleted == (
+        "dev-orchestrator (orchestrator)",
+        "dev-artifacts (artifact_store)",
+    )
 
 
 def test_use_stack_switches_active_stack() -> None:
