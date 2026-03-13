@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 15 wait/resume example."""
+"""Unit tests for the wait/resume example."""
 
 from __future__ import annotations
 

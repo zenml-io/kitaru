@@ -1,4 +1,4 @@
-"""Integration test for the Phase 16 replay example workflow."""
+"""Integration test for the replay example workflow."""
 
 from __future__ import annotations
 

@@ -1,8 +1,8 @@
-"""Phase 8 example: explicit artifact save/load across executions.
+"""Explicit artifact save/load across executions.
 
 This example demonstrates:
-- implicit checkpoint output reuse via `kitaru.load(exec_id, "research")`
-- explicit named artifact reuse via `kitaru.save(...)/kitaru.load(...)`
+- implicit checkpoint output reuse via ``kitaru.load(exec_id, "research")``
+- explicit named artifact reuse via ``kitaru.save(...)`` / ``kitaru.load(...)``
 """
 
 import kitaru
@@ -24,7 +24,6 @@ def research(topic: str) -> str:
         "research_context",
         {"topic": topic, "notes": notes},
         type="context",
-        tags=["phase8"],
     )
     return notes
 

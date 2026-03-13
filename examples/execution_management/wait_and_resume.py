@@ -39,10 +39,7 @@ def publish_release_note(draft: str) -> str:
     return f"PUBLISHED: {draft}"
 
 
-# TODO: remove explicit base_image once kitaru and ZenML
-# feature/pause-pipeline-runs are released to PyPI — the auto-injection
-# of kitaru into Docker requirements will handle this automatically.
-# Build the dev image with: just dev-image
+# TODO: remove explicit base_image once kitaru is on PyPI
 @flow(image={"base_image": "strickvl/kitaru-dev:latest"})
 def wait_for_approval_flow(topic: str) -> str:
     """Gate publication behind a durable human-approval wait."""

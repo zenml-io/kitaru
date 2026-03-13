@@ -1,4 +1,4 @@
-"""Integration test for the Phase 11 client execution example workflow."""
+"""Integration test for the client execution example workflow."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Integration test for the Phase 8 save/load artifact example workflow."""
+"""Integration test for the save/load artifact example workflow."""
 
 from __future__ import annotations
 

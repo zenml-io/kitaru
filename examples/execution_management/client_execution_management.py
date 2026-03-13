@@ -1,4 +1,4 @@
-"""Phase 11 example: inspect and browse executions with `KitaruClient`.
+"""Inspect and browse executions with ``KitaruClient``.
 
 This example demonstrates:
 - starting a flow and waiting for completion

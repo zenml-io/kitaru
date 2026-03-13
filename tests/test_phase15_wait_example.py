@@ -1,4 +1,4 @@
-"""Integration test for the Phase 15 wait/resume example workflow.
+"""Integration test for the wait/resume example workflow.
 
 The example itself is manual (prints CLI commands for a second terminal).
 This test drives the same flow and APIs programmatically so CI can validate

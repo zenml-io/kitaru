@@ -1,4 +1,4 @@
-"""Phase 7 example: structured metadata with `kitaru.log()`.
+"""Structured metadata with ``kitaru.log()``.
 
 This example shows both logging scopes:
 - flow-level metadata (execution-level)

@@ -1,18 +1,16 @@
-"""Phase 17 example: wrap a PydanticAI agent with Kitaru tracking.
+"""Wrap a PydanticAI agent with Kitaru tracking.
 
-This example uses `pydantic_ai.models.test.TestModel`, so it does not need API keys.
+This example uses ``pydantic_ai.models.test.TestModel``, so it does not
+need API keys.
 
 Run with:
 
     uv sync --extra local --extra pydantic-ai
-    uv run python -m examples.pydantic_ai_adapter
+    uv run python -m examples.pydantic_ai_agent.pydantic_ai_adapter
 """
-
-from typing import Any, cast
 
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
-from zenml.client import Client
 
 from kitaru import checkpoint, flow
 from kitaru.adapters import pydantic_ai as kp
@@ -46,40 +44,22 @@ def research_flow(topic: str) -> str:
     return run_research(topic)
 
 
-def run_workflow(
-    topic: str = "kitaru",
-) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
-    """Run the workflow and return execution plus adapter diagnostics."""
+def run_workflow(topic: str = "kitaru") -> tuple[str, str]:
+    """Run the workflow.
+
+    Returns:
+        Tuple of (execution_id, result).
+    """
     handle = research_flow.run(topic)
-    raw_result = handle.wait()
-    if not isinstance(raw_result, str):
-        raise RuntimeError("Expected research_flow() to return a string result.")
-
-    run = Client().get_pipeline_run(handle.exec_id, allow_name_prefix_match=False)
-    hydrated_run = run.get_hydrated_version()
-
-    child_events: dict[str, Any] = {}
-    run_summaries: dict[str, Any] = {}
-
-    for step in hydrated_run.steps.values():
-        events_metadata = step.run_metadata.get("pydantic_ai_events")
-        if isinstance(events_metadata, dict):
-            child_events.update(cast(dict[str, Any], events_metadata))
-
-        summaries_metadata = step.run_metadata.get("pydantic_ai_run_summaries")
-        if isinstance(summaries_metadata, dict):
-            run_summaries.update(cast(dict[str, Any], summaries_metadata))
-
-    return handle.exec_id, raw_result, child_events, run_summaries
+    result = handle.wait()
+    return handle.exec_id, result
 
 
 def main() -> None:
     """Run the example as a script."""
-    execution_id, result, child_events, run_summaries = run_workflow()
+    execution_id, result = run_workflow()
     print(f"Execution ID: {execution_id}")
     print(f"Result: {result}")
-    print(f"Tracked child events: {len(child_events)}")
-    print(f"Tracked run summaries: {len(run_summaries)}")
 
 
 if __name__ == "__main__":
