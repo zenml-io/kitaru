@@ -27,25 +27,25 @@ from kitaru.config import (
     KITARU_LOG_STORE_ENDPOINT_ENV,
     KITARU_PROJECT_ENV,
     KITARU_RETRIES_ENV,
-    KITARU_RUNNER_ENV,
     KITARU_SERVER_URL_ENV,
+    KITARU_STACK_ENV,
     FrozenExecutionSpec,
     ImageSettings,
     KitaruConfig,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
-    _create_runner_operation,
-    _delete_runner_operation,
-    _list_runner_entries,
+    _create_stack_operation,
+    _delete_stack_operation,
+    _list_stack_entries,
     build_frozen_execution_spec,
     configure,
-    create_runner,
-    current_runner,
-    delete_runner,
+    create_stack,
+    current_stack,
+    delete_stack,
     image_settings_to_docker_settings,
     list_active_kitaru_environment_variables,
     list_model_aliases,
-    list_runners,
+    list_stacks,
     persist_frozen_execution_spec,
     register_model_alias,
     reset_global_log_store,
@@ -54,13 +54,13 @@ from kitaru.config import (
     resolve_log_store,
     resolve_model_selection,
     set_global_log_store,
-    use_runner,
+    use_stack,
 )
 from kitaru.errors import KitaruUsageError
 
 
-class _FakeRunnerPage:
-    """Simple iterable page used to test runner pagination behavior."""
+class _FakeStackPage:
+    """Simple iterable page used to test stack pagination behavior."""
 
     def __init__(
         self,
@@ -78,7 +78,7 @@ class _FakeRunnerPage:
 
 
 def _stack_component(component_id: str, name: str) -> SimpleNamespace:
-    """Return a minimal stack-component model stub for runner tests."""
+    """Return a minimal stack-component model stub for stack tests."""
     return SimpleNamespace(id=component_id, name=name)
 
 
@@ -90,7 +90,7 @@ def _stack_model(
     orchestrator_id: str | None = None,
     artifact_store_id: str | None = None,
 ) -> SimpleNamespace:
-    """Return a minimal stack model stub for runner tests."""
+    """Return a minimal stack model stub for stack tests."""
     components: dict[StackComponentType, list[SimpleNamespace]] = {}
     if orchestrator_id is not None:
         components[StackComponentType.ORCHESTRATOR] = [
@@ -507,21 +507,21 @@ def test_resolve_model_selection_requires_default_or_explicit_model() -> None:
         resolve_model_selection(None)
 
 
-def test_current_runner_returns_active_runner_info() -> None:
-    """current_runner should expose the currently active runner."""
-    active_runner = SimpleNamespace(id="stack-local-id", name="local")
-    client_mock = SimpleNamespace(active_stack_model=active_runner)
+def test_current_stack_returns_active_stack_info() -> None:
+    """current_stack should expose the currently active stack."""
+    active_stack = SimpleNamespace(id="stack-local-id", name="local")
+    client_mock = SimpleNamespace(active_stack_model=active_stack)
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        runner = current_runner()
+        stack = current_stack()
 
-    assert runner.id == "stack-local-id"
-    assert runner.name == "local"
-    assert runner.is_active is True
+    assert stack.id == "stack-local-id"
+    assert stack.name == "local"
+    assert stack.is_active is True
 
 
-def test_list_runners_marks_active_runner() -> None:
-    """list_runners should flag only the active runner in the returned list."""
+def test_list_stacks_marks_active_stack() -> None:
+    """list_stacks should flag only the active stack in the returned list."""
     local = SimpleNamespace(id="stack-local-id", name="local")
     prod = SimpleNamespace(id="stack-prod-id", name="prod")
     client_mock = SimpleNamespace(
@@ -530,36 +530,36 @@ def test_list_runners_marks_active_runner() -> None:
     )
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        runners = list_runners()
+        stacks = list_stacks()
 
-    assert [(runner.name, runner.is_active) for runner in runners] == [
+    assert [(stack.name, stack.is_active) for stack in stacks] == [
         ("local", False),
         ("prod", True),
     ]
 
 
-def test_list_runners_fetches_all_pages() -> None:
-    """list_runners should collect runners from all pages exposed by the runtime."""
+def test_list_stacks_fetches_all_pages() -> None:
+    """list_stacks should collect stacks from all pages exposed by the runtime."""
     local = SimpleNamespace(id="stack-local-id", name="local")
     staging = SimpleNamespace(id="stack-staging-id", name="staging")
     prod = SimpleNamespace(id="stack-prod-id", name="prod")
     client_mock = Mock()
     client_mock.active_stack_model = prod
     client_mock.list_stacks.side_effect = [
-        _FakeRunnerPage(items=[local], total_pages=2, max_size=1),
-        _FakeRunnerPage(items=[staging, prod], total_pages=2, max_size=1),
+        _FakeStackPage(items=[local], total_pages=2, max_size=1),
+        _FakeStackPage(items=[staging, prod], total_pages=2, max_size=1),
     ]
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        runners = list_runners()
+        stacks = list_stacks()
 
-    assert [runner.name for runner in runners] == ["local", "staging", "prod"]
-    assert [runner.is_active for runner in runners] == [False, False, True]
+    assert [stack.name for stack in stacks] == ["local", "staging", "prod"]
+    assert [stack.is_active for stack in stacks] == [False, False, True]
     client_mock.list_stacks.assert_has_calls([call(), call(page=2, size=1)])
 
 
-def test_list_runner_entries_include_managed_flag() -> None:
-    """Structured runner entries should expose derived managed status."""
+def test_list_stack_entries_include_managed_flag() -> None:
+    """Structured stack entries should expose derived managed status."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     dev = _stack_model(
         stack_id="stack-dev-id",
@@ -572,15 +572,15 @@ def test_list_runner_entries_include_managed_flag() -> None:
     )
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        entries = _list_runner_entries()
+        entries = _list_stack_entries()
 
-    assert [(entry.runner.name, entry.is_managed) for entry in entries] == [
+    assert [(entry.stack.name, entry.is_managed) for entry in entries] == [
         ("default", False),
         ("dev", True),
     ]
 
 
-def test_create_runner_creates_local_components_and_activates() -> None:
+def test_create_stack_creates_local_components_and_activates() -> None:
     """Create should build local components, create the stack, and activate it."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     created_stack = _stack_model(
@@ -592,7 +592,7 @@ def test_create_runner_creates_local_components_and_activates() -> None:
     )
     client_mock = Mock()
     client_mock.active_stack_model = default
-    client_mock.list_stacks.return_value = _FakeRunnerPage(
+    client_mock.list_stacks.return_value = _FakeStackPage(
         items=[default],
         total_pages=1,
         max_size=50,
@@ -609,7 +609,7 @@ def test_create_runner_creates_local_components_and_activates() -> None:
     client_mock.activate_stack.side_effect = _activate_stack
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        result = _create_runner_operation("dev")
+        result = _create_stack_operation("dev")
 
     client_mock.create_stack_component.assert_has_calls(
         [
@@ -627,31 +627,31 @@ def test_create_runner_creates_local_components_and_activates() -> None:
             ),
         ]
     )
-    assert result.runner.name == "dev"
-    assert result.runner.is_active is True
-    assert result.previous_active_runner == "default"
+    assert result.stack.name == "dev"
+    assert result.stack.is_active is True
+    assert result.previous_active_stack == "default"
     assert result.components_created == (
         "dev (orchestrator)",
         "dev (artifact_store)",
     )
 
 
-def test_create_runner_public_wrapper_returns_runner_info() -> None:
-    """Public create_runner should return only the runner info from the operation."""
-    with patch("kitaru.config._create_runner_operation") as mock_create:
+def test_create_stack_public_wrapper_returns_stack_info() -> None:
+    """Public create_stack should return only the stack info from the operation."""
+    with patch("kitaru.config._create_stack_operation") as mock_create:
         mock_create.return_value = SimpleNamespace(
-            runner=SimpleNamespace(id="stack-dev-id", name="dev", is_active=True)
+            stack=SimpleNamespace(id="stack-dev-id", name="dev", is_active=True)
         )
 
-        runner = create_runner("dev")
+        stack = create_stack("dev")
 
     mock_create.assert_called_once_with("dev", activate=True, labels=None)
-    assert runner.name == "dev"
-    assert runner.is_active is True
+    assert stack.name == "dev"
+    assert stack.is_active is True
 
 
-def test_create_runner_without_activation_keeps_previous_active_runner() -> None:
-    """Create with activate=False should not switch the active runner."""
+def test_create_stack_without_activation_keeps_previous_active_stack() -> None:
+    """Create with activate=False should not switch the active stack."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     created_stack = _stack_model(
         stack_id="stack-dev-id",
@@ -662,7 +662,7 @@ def test_create_runner_without_activation_keeps_previous_active_runner() -> None
     )
     client_mock = Mock()
     client_mock.active_stack_model = default
-    client_mock.list_stacks.return_value = _FakeRunnerPage(
+    client_mock.list_stacks.return_value = _FakeStackPage(
         items=[default],
         total_pages=1,
         max_size=50,
@@ -674,16 +674,16 @@ def test_create_runner_without_activation_keeps_previous_active_runner() -> None
     client_mock.create_stack.return_value = created_stack
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        result = _create_runner_operation("dev", activate=False)
+        result = _create_stack_operation("dev", activate=False)
 
     client_mock.activate_stack.assert_not_called()
     assert client_mock.active_stack_model.name == "default"
-    assert result.previous_active_runner is None
-    assert result.runner.name == "dev"
-    assert result.runner.is_active is False
+    assert result.previous_active_stack is None
+    assert result.stack.name == "dev"
+    assert result.stack.is_active is False
 
 
-def test_create_runner_rejects_existing_stack_name() -> None:
+def test_create_stack_rejects_existing_stack_name() -> None:
     """Create should fail fast with a helpful message when the stack exists."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     existing = _stack_model(stack_id="stack-dev-id", name="dev")
@@ -694,17 +694,17 @@ def test_create_runner_rejects_existing_stack_name() -> None:
 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
-        pytest.raises(ValueError, match='A runner named "dev" already exists'),
+        pytest.raises(ValueError, match='A stack named "dev" already exists'),
     ):
-        create_runner("dev")
+        create_stack("dev")
 
 
-def test_create_runner_component_collision_reports_fresh_component_policy() -> None:
+def test_create_stack_component_collision_reports_fresh_component_policy() -> None:
     """Create should explain that Kitaru never reuses existing components."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     client_mock = Mock()
     client_mock.active_stack_model = default
-    client_mock.list_stacks.return_value = _FakeRunnerPage(
+    client_mock.list_stacks.return_value = _FakeStackPage(
         items=[default],
         total_pages=1,
         max_size=50,
@@ -715,15 +715,15 @@ def test_create_runner_component_collision_reports_fresh_component_policy() -> N
         patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(ValueError, match="never reuses existing ones"),
     ):
-        create_runner("dev")
+        create_stack("dev")
 
 
-def test_create_runner_cleans_up_components_if_stack_creation_fails() -> None:
+def test_create_stack_cleans_up_components_if_stack_creation_fails() -> None:
     """Create should delete orphaned components in reverse order on stack failure."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     client_mock = Mock()
     client_mock.active_stack_model = default
-    client_mock.list_stacks.return_value = _FakeRunnerPage(
+    client_mock.list_stacks.return_value = _FakeStackPage(
         items=[default],
         total_pages=1,
         max_size=50,
@@ -738,7 +738,7 @@ def test_create_runner_cleans_up_components_if_stack_creation_fails() -> None:
         patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(RuntimeError, match="stack create failed"),
     ):
-        create_runner("dev")
+        create_stack("dev")
 
     client_mock.delete_stack_component.assert_has_calls(
         [
@@ -748,7 +748,7 @@ def test_create_runner_cleans_up_components_if_stack_creation_fails() -> None:
     )
 
 
-def test_create_runner_applies_managed_label_and_preserves_extra_labels() -> None:
+def test_create_stack_applies_managed_label_and_preserves_extra_labels() -> None:
     """Create should always force the managed label while preserving caller labels."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     created_stack = _stack_model(
@@ -760,7 +760,7 @@ def test_create_runner_applies_managed_label_and_preserves_extra_labels() -> Non
     )
     client_mock = Mock()
     client_mock.active_stack_model = default
-    client_mock.list_stacks.return_value = _FakeRunnerPage(
+    client_mock.list_stacks.return_value = _FakeStackPage(
         items=[default],
         total_pages=1,
         max_size=50,
@@ -772,7 +772,7 @@ def test_create_runner_applies_managed_label_and_preserves_extra_labels() -> Non
     client_mock.create_stack.return_value = created_stack
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        create_runner(
+        create_stack(
             "dev",
             labels={"owner": "ml", "kitaru.managed": "false"},
         )
@@ -783,8 +783,8 @@ def test_create_runner_applies_managed_label_and_preserves_extra_labels() -> Non
     }
 
 
-def test_delete_runner_deletes_non_active_runner() -> None:
-    """Delete should remove a non-active runner without switching anything."""
+def test_delete_stack_deletes_non_active_stack() -> None:
+    """Delete should remove a non-active stack without switching anything."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     dev = _stack_model(stack_id="stack-dev-id", name="dev")
     client_mock = Mock()
@@ -792,8 +792,8 @@ def test_delete_runner_deletes_non_active_runner() -> None:
     client_mock.get_stack.return_value = dev
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        result = _delete_runner_operation("dev")
-        public_result = delete_runner("dev-id")
+        result = _delete_stack_operation("dev")
+        public_result = delete_stack("dev-id")
 
     client_mock.get_stack.assert_has_calls(
         [
@@ -807,13 +807,13 @@ def test_delete_runner_deletes_non_active_runner() -> None:
             call("stack-dev-id", recursive=False),
         ]
     )
-    assert result.deleted_runner == "dev"
+    assert result.deleted_stack == "dev"
     assert result.components_deleted == ()
-    assert result.new_active_runner is None
+    assert result.new_active_stack is None
     assert public_result is None
 
 
-def test_delete_runner_recursive_managed_runner_reports_unshared_components() -> None:
+def test_delete_stack_recursive_managed_stack_reports_unshared_components() -> None:
     """Recursive delete should report only the managed components it can remove."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     dev = _stack_model(
@@ -829,7 +829,7 @@ def test_delete_runner_recursive_managed_runner_reports_unshared_components() ->
     client_mock.list_stacks.side_effect = [[dev], [dev]]
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        result = _delete_runner_operation("dev", recursive=True)
+        result = _delete_stack_operation("dev", recursive=True)
 
     client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=True)
     assert result.components_deleted == (
@@ -839,7 +839,7 @@ def test_delete_runner_recursive_managed_runner_reports_unshared_components() ->
     assert result.recursive is True
 
 
-def test_delete_runner_recursive_unmanaged_runner_reports_no_components() -> None:
+def test_delete_stack_recursive_unmanaged_stack_reports_no_components() -> None:
     """Recursive delete should not claim component ownership for unmanaged stacks."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     legacy = _stack_model(
@@ -853,14 +853,14 @@ def test_delete_runner_recursive_unmanaged_runner_reports_no_components() -> Non
     client_mock.get_stack.return_value = legacy
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        result = _delete_runner_operation("legacy", recursive=True)
+        result = _delete_stack_operation("legacy", recursive=True)
 
     client_mock.list_stacks.assert_not_called()
     assert result.components_deleted == ()
 
 
-def test_delete_runner_rejects_active_runner_without_force() -> None:
-    """Delete should guard against removing the active runner by default."""
+def test_delete_stack_rejects_active_stack_without_force() -> None:
+    """Delete should guard against removing the active stack by default."""
     active = _stack_model(stack_id="stack-dev-id", name="dev")
     client_mock = Mock()
     client_mock.active_stack_model = active
@@ -868,15 +868,15 @@ def test_delete_runner_rejects_active_runner_without_force() -> None:
 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
-        pytest.raises(ValueError, match="Cannot delete the active runner"),
+        pytest.raises(ValueError, match="Cannot delete the active stack"),
     ):
-        delete_runner("dev")
+        delete_stack("dev")
 
     client_mock.delete_stack.assert_not_called()
 
 
-def test_delete_runner_force_switches_to_default_before_deleting() -> None:
-    """Forced delete should fall back to the default runner before removal."""
+def test_delete_stack_force_switches_to_default_before_deleting() -> None:
+    """Forced delete should fall back to the default stack before removal."""
     default = _stack_model(stack_id="stack-default-id", name="default")
     active = _stack_model(
         stack_id="stack-dev-id",
@@ -893,15 +893,15 @@ def test_delete_runner_force_switches_to_default_before_deleting() -> None:
     client_mock.activate_stack.side_effect = _activate_stack
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        result = _delete_runner_operation("dev", force=True)
+        result = _delete_stack_operation("dev", force=True)
 
     client_mock.activate_stack.assert_called_once_with("default")
     client_mock.delete_stack.assert_called_once_with("stack-dev-id", recursive=False)
-    assert result.new_active_runner == "default"
+    assert result.new_active_stack == "default"
 
 
-def test_use_runner_switches_active_runner() -> None:
-    """use_runner should delegate activation and return the new active runner."""
+def test_use_stack_switches_active_stack() -> None:
+    """use_stack should delegate activation and return the new active stack."""
     local_stack = SimpleNamespace(id="stack-local-id", name="local")
     prod_stack = SimpleNamespace(id="stack-prod-id", name="prod")
     client_mock = SimpleNamespace(active_stack_model=local_stack)
@@ -913,7 +913,7 @@ def test_use_runner_switches_active_runner() -> None:
     client_mock.activate_stack = activate_stack
 
     with patch("kitaru.config.Client", return_value=client_mock):
-        selected = use_runner("prod")
+        selected = use_stack("prod")
 
     activate_stack.assert_called_once_with("prod")
     assert selected.name == "prod"
@@ -921,16 +921,16 @@ def test_use_runner_switches_active_runner() -> None:
     assert selected.is_active is True
 
 
-def test_use_runner_rejects_empty_selector() -> None:
-    """use_runner should fail fast on empty runner names/IDs."""
+def test_use_stack_rejects_empty_selector() -> None:
+    """use_stack should fail fast on empty stack names/IDs."""
     with pytest.raises(ValueError, match="cannot be empty"):
-        use_runner("   ")
+        use_stack("   ")
 
 
 def test_configure_sets_runtime_execution_defaults() -> None:
     """configure should update process-local execution defaults."""
     snapshot = configure(
-        runner="gpu-prod",
+        stack="gpu-prod",
         cache=False,
         retries=2,
         image={
@@ -939,7 +939,7 @@ def test_configure_sets_runtime_execution_defaults() -> None:
         },
     )
 
-    assert snapshot.runner == "gpu-prod"
+    assert snapshot.stack == "gpu-prod"
     assert snapshot.cache is False
     assert snapshot.retries == 2
     assert snapshot.image is not None
@@ -949,11 +949,11 @@ def test_configure_sets_runtime_execution_defaults() -> None:
 
 def test_configure_can_clear_runtime_override_fields() -> None:
     """configure should allow clearing previously set runtime overrides."""
-    configure(runner="gpu-prod", cache=False, retries=2)
+    configure(stack="gpu-prod", cache=False, retries=2)
 
-    snapshot = configure(runner=None, cache=None, retries=None, image=None)
+    snapshot = configure(stack=None, cache=None, retries=None, image=None)
 
-    assert snapshot.runner is None
+    assert snapshot.stack is None
     assert snapshot.cache is None
     assert snapshot.retries is None
     assert snapshot.image is None
@@ -978,12 +978,12 @@ def test_configure_clears_runtime_project_override() -> None:
 
 def test_configure_project_independent_of_execution() -> None:
     """Project and execution overrides should not interfere with each other."""
-    configure(runner="gpu-prod", cache=False, project="staging-project")
+    configure(stack="gpu-prod", cache=False, project="staging-project")
 
     exec_resolved = resolve_execution_config()
     conn_resolved = resolve_connection_config()
 
-    assert exec_resolved.runner == "gpu-prod"
+    assert exec_resolved.stack == "gpu-prod"
     assert exec_resolved.cache is False
     assert conn_resolved.project == "staging-project"
 
@@ -1079,7 +1079,7 @@ def test_resolve_execution_config_applies_phase10_precedence(
     pyproject_path.write_text(
         """
 [tool.kitaru]
-runner = "project-runner"
+stack = "project-stack"
 cache = false
 retries = 1
 
@@ -1092,7 +1092,7 @@ SHARED = "project"
 """.strip()
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(KITARU_RUNNER_ENV, "env-runner")
+    monkeypatch.setenv(KITARU_STACK_ENV, "env-stack")
     monkeypatch.setenv(KITARU_CACHE_ENV, "true")
     monkeypatch.setenv(KITARU_RETRIES_ENV, "3")
     monkeypatch.setenv(
@@ -1103,14 +1103,14 @@ SHARED = "project"
         ),
     )
     configure(
-        runner="runtime-stack",
+        stack="runtime-stack",
         cache=False,
         retries=4,
         image={"environment": {"FROM_RUNTIME": "1", "SHARED": "runtime"}},
     )
 
     with patch(
-        "kitaru.config.current_runner",
+        "kitaru.config.current_stack",
         return_value=SimpleNamespace(name="global-stack"),
     ):
         resolved = resolve_execution_config(
@@ -1122,7 +1122,7 @@ SHARED = "project"
                 ),
             ),
             invocation_overrides=KitaruConfig(
-                runner="invocation-stack",
+                stack="invocation-stack",
                 retries=6,
                 image=ImageSettings(
                     environment={"FROM_INVOCATION": "1", "SHARED": "invocation"}
@@ -1131,7 +1131,7 @@ SHARED = "project"
             start_dir=tmp_path,
         )
 
-    assert resolved.runner == "invocation-stack"
+    assert resolved.stack == "invocation-stack"
     assert resolved.cache is True
     assert resolved.retries == 6
     assert resolved.image is not None
@@ -1163,7 +1163,7 @@ def test_resolve_execution_config_supports_string_image_env(
     monkeypatch.setenv(KITARU_IMAGE_ENV, "python:3.12-slim")
 
     with patch(
-        "kitaru.config.current_runner",
+        "kitaru.config.current_stack",
         return_value=SimpleNamespace(name="global-stack"),
     ):
         resolved = resolve_execution_config()
@@ -1381,7 +1381,7 @@ def test_build_and_persist_frozen_execution_spec() -> None:
     """Frozen execution specs should be serializable and persisted as metadata."""
     frozen_execution_spec = build_frozen_execution_spec(
         resolved_execution=ResolvedExecutionConfig(
-            runner="prod",
+            stack="prod",
             cache=False,
             retries=2,
             image=ImageSettings(
@@ -1415,7 +1415,7 @@ def test_build_and_persist_frozen_execution_spec() -> None:
     assert FROZEN_EXECUTION_SPEC_METADATA_KEY in metadata_payload
     assert (
         metadata_payload[FROZEN_EXECUTION_SPEC_METADATA_KEY]["resolved_execution"][
-            "runner"
+            "stack"
         ]
         == "prod"
     )

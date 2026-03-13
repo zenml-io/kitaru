@@ -29,15 +29,15 @@ from kitaru.client import (
 from kitaru.config import (
     KITARU_PROJECT_ENV,
     ActiveEnvironmentVariable,
-    ActiveRunnerLogStore,
+    ActiveStackLogStore,
     ModelAliasEntry,
     ResolvedLogStore,
-    RunnerInfo,
+    StackInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
-    _RunnerCreateResult,
-    _RunnerDeleteResult,
-    active_runner_log_store,
+    _StackCreateResult,
+    _StackDeleteResult,
+    active_stack_log_store,
     list_active_kitaru_environment_variables,
     resolve_log_store,
 )
@@ -54,7 +54,7 @@ class RuntimeSnapshot:
     server_url: str | None = None
     active_user: str | None = None
     project_override: str | None = None
-    active_runner: str | None = None
+    active_stack: str | None = None
     repository_root: str | None = None
     server_version: str | None = None
     server_database: str | None = None
@@ -112,10 +112,13 @@ def _build_snapshot_without_local_store(
         connection_target="unavailable",
         config_directory=str(_kitaru_config_dir()),
         local_server_status=describe_local_server(),
-        warning=(
-            "Local Kitaru runtime support is unavailable in this environment. "
-            "Connect to a Kitaru server to keep working, or install the local "
-            "runtime dependencies if you want the built-in local runner."
+        warning=combine_warnings(
+            (
+                "Local Kitaru runtime support is unavailable in this environment. "
+                "Connect to a Kitaru server to keep working, or install the local "
+                "runtime dependencies if you want the built-in local stack."
+            ),
+            _legacy_runner_env_warning(),
         ),
         environment=list_active_kitaru_environment_variables(),
     )
@@ -135,6 +138,13 @@ def uses_stale_local_server_url(
     )
 
 
+def _legacy_runner_env_warning() -> str | None:
+    """Return a warning when the legacy stack-selection env var is still set."""
+    if os.environ.get("KITARU_RUNNER") is None:
+        return None
+    return "`KITARU_RUNNER` was renamed to `KITARU_STACK`; update your environment."
+
+
 def log_store_mismatch_details(
     preferred: ResolvedLogStore,
 ) -> tuple[str | None, str | None]:
@@ -142,24 +152,24 @@ def log_store_mismatch_details(
     if preferred.source == "default":
         return None, None
 
-    active_store = active_runner_log_store()
+    active_store = active_stack_log_store()
     if active_store is None:
         return None, None
 
     if active_store.backend == preferred.backend:
         return None, None
 
-    status_row = f"{preferred.backend} (preferred) ⚠ runner uses {active_store.backend}"
+    status_row = f"{preferred.backend} (preferred) ⚠ stack uses {active_store.backend}"
 
     active_label = active_store.backend
-    if active_store.runner_name:
-        active_label = f"{active_store.backend} (runner: {active_store.runner_name})"
+    if active_store.stack_name:
+        active_label = f"{active_store.backend} (stack: {active_store.stack_name})"
 
     warning = "\n".join(
         [
-            f"Active runner uses: {active_label}",
-            "The Kitaru log-store preference is not wired into runner selection yet.",
-            "Actual runtime logs go to the active runner's ZenML stack log "
+            f"Active stack uses: {active_label}",
+            "The Kitaru log-store preference is not wired into stack selection yet.",
+            "Actual runtime logs go to the active stack's ZenML stack log "
             "store, not this preference.",
         ]
     )
@@ -204,10 +214,13 @@ def build_runtime_snapshot() -> RuntimeSnapshot:
     )
 
     if uses_stale_local_server_url(server_url, snapshot.local_server_status):
-        snapshot.warning = (
-            "The configured Kitaru server points to a stopped local server. "
-            "Start it again or run `kitaru logout` to clear the stale "
-            "connection."
+        snapshot.warning = combine_warnings(
+            (
+                "The configured Kitaru server points to a stopped local server. "
+                "Start it again or run `kitaru logout` to clear the stale "
+                "connection."
+            ),
+            _legacy_runner_env_warning(),
         )
         return snapshot
 
@@ -222,7 +235,7 @@ def build_runtime_snapshot() -> RuntimeSnapshot:
         client = Client()
         store_info = client.zen_store.get_store_info()
         snapshot.active_user = client.active_user.name
-        snapshot.active_runner = client.active_stack_model.name
+        snapshot.active_stack = client.active_stack_model.name
         snapshot.repository_root = str(client.root) if client.root else None
         snapshot.server_version = str(store_info.version)
         snapshot.server_database = str(store_info.database_type)
@@ -243,6 +256,7 @@ def build_runtime_snapshot() -> RuntimeSnapshot:
     )
     snapshot.log_store_status = log_store_status
     snapshot.log_store_warning = log_store_warning
+    snapshot.warning = combine_warnings(snapshot.warning, _legacy_runner_env_warning())
     return snapshot
 
 
@@ -378,7 +392,7 @@ def serialize_execution_summary(execution: Execution) -> dict[str, Any]:
         "status": execution.status.value,
         "started_at": to_jsonable(execution.started_at, fallback_repr=True),
         "ended_at": to_jsonable(execution.ended_at, fallback_repr=True),
-        "runner_name": execution.runner_name,
+        "stack_name": execution.stack_name,
         "status_reason": execution.status_reason,
         "pending_wait": serialize_pending_wait(execution.pending_wait),
         "failure": serialize_failure(execution.failure),
@@ -407,36 +421,36 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
     }
 
 
-def serialize_runner(
-    runner: RunnerInfo,
+def serialize_stack(
+    stack: StackInfo,
     *,
     is_managed: bool | None = None,
 ) -> dict[str, Any]:
-    """Serialize runner information for structured output."""
+    """Serialize stack information for structured output."""
     payload = {
-        "id": runner.id,
-        "name": runner.name,
-        "is_active": runner.is_active,
+        "id": stack.id,
+        "name": stack.name,
+        "is_active": stack.is_active,
     }
     if is_managed is not None:
         payload["is_managed"] = is_managed
     return payload
 
 
-def serialize_runner_create_result(result: _RunnerCreateResult) -> dict[str, Any]:
-    """Serialize runner-create operation details."""
-    payload = serialize_runner(result.runner)
-    payload["previous_active_runner"] = result.previous_active_runner
+def serialize_stack_create_result(result: _StackCreateResult) -> dict[str, Any]:
+    """Serialize stack-create operation details."""
+    payload = serialize_stack(result.stack)
+    payload["previous_active_stack"] = result.previous_active_stack
     payload["components_created"] = list(result.components_created)
     return payload
 
 
-def serialize_runner_delete_result(result: _RunnerDeleteResult) -> dict[str, Any]:
-    """Serialize runner-delete operation details."""
+def serialize_stack_delete_result(result: _StackDeleteResult) -> dict[str, Any]:
+    """Serialize stack-delete operation details."""
     return {
-        "deleted_runner": result.deleted_runner,
+        "deleted_stack": result.deleted_stack,
         "components_deleted": list(result.components_deleted),
-        "new_active_runner": result.new_active_runner,
+        "new_active_stack": result.new_active_stack,
         "recursive": result.recursive,
     }
 
@@ -510,7 +524,7 @@ def serialize_secret_detail(
 def serialize_resolved_log_store(
     snapshot: ResolvedLogStore,
     *,
-    active_store: ActiveRunnerLogStore | None = None,
+    active_store: ActiveStackLogStore | None = None,
     warning: str | None = None,
 ) -> dict[str, Any]:
     """Serialize effective log-store information."""
@@ -519,7 +533,7 @@ def serialize_resolved_log_store(
         "endpoint": snapshot.endpoint,
         "api_key_configured": bool(snapshot.api_key),
         "source": snapshot.source,
-        "active_runner_backend": active_store.backend if active_store else None,
-        "active_runner_name": active_store.runner_name if active_store else None,
+        "active_stack_backend": active_store.backend if active_store else None,
+        "active_stack_name": active_store.stack_name if active_store else None,
         "warning": warning,
     }

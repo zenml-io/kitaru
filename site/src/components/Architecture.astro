@@ -58,9 +58,9 @@
 
     <div class="arch-deploy-note" data-reveal data-reveal-delay="3">
       <div class="deploy-cmd">
-        <code><span style="color: var(--color-accent);">$</span> kitaru runner create prod --runner kubernetes --artifact-store s3://my-bucket</code>
+        <code><span style="color: var(--color-accent);">$</span> kitaru stack use prod</code>
       </div>
-      <p>One command wires your infra. <code>kitaru dev</code> runs locally, <code>kitaru runner use prod</code> targets your cloud. Same code, any runner.</p>
+      <p>Kitaru runs locally by default, and <code>kitaru stack use prod</code> targets your cloud. Same code, any stack.</p>
     </div>
   </div>
 </section>

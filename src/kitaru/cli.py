@@ -47,11 +47,11 @@ from kitaru.config import (
     ActiveEnvironmentVariable,
     ModelAliasEntry,
     ResolvedLogStore,
-    RunnerInfo,
-    _create_runner_operation,
-    _delete_runner_operation,
-    _list_runner_entries,
-    active_runner_log_store,
+    StackInfo,
+    _create_stack_operation,
+    _delete_stack_operation,
+    _list_stack_entries,
+    active_stack_log_store,
     list_model_aliases,
     login_to_server,
     register_model_alias,
@@ -60,13 +60,13 @@ from kitaru.config import (
     set_global_log_store,
 )
 from kitaru.config import (
-    current_runner as get_current_runner,
+    current_stack as get_current_stack,
 )
 from kitaru.config import (
-    list_runners as get_available_runners,
+    list_stacks as get_available_stacks,
 )
 from kitaru.config import (
-    use_runner as set_active_runner,
+    use_stack as set_active_stack,
 )
 from kitaru.inspection import (
     RuntimeSnapshot,
@@ -76,12 +76,12 @@ from kitaru.inspection import (
     serialize_log_entry,
     serialize_model_alias,
     serialize_resolved_log_store,
-    serialize_runner,
-    serialize_runner_create_result,
-    serialize_runner_delete_result,
     serialize_runtime_snapshot,
     serialize_secret_detail,
     serialize_secret_summary,
+    serialize_stack,
+    serialize_stack_create_result,
+    serialize_stack_delete_result,
 )
 from kitaru.inspection import (
     build_runtime_snapshot as _build_runtime_snapshot,
@@ -118,9 +118,9 @@ log_store_app = cyclopts.App(
     name="log-store",
     help="Manage global runtime log-store settings.",
 )
-runner_app = cyclopts.App(
-    name="runner",
-    help="Inspect, create, delete, and switch runners.",
+stack_app = cyclopts.App(
+    name="stack",
+    help="Inspect, create, delete, and switch stacks.",
 )
 secrets_app = cyclopts.App(
     name="secrets",
@@ -135,7 +135,7 @@ executions_app = cyclopts.App(
     help="Inspect and manage flow executions.",
 )
 app.command(log_store_app)
-app.command(runner_app)
+app.command(stack_app)
 app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
@@ -353,7 +353,7 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
         ("Status", execution.status.value),
         ("Started", _format_timestamp(execution.started_at)),
         ("Ended", _format_timestamp(execution.ended_at)),
-        ("Runner", execution.runner_name or "not available"),
+        ("Stack", execution.stack_name or "not available"),
         ("Pending wait", pending_wait_name),
         ("Wait question", pending_wait_question),
         ("Failure", failure_summary),
@@ -373,7 +373,7 @@ def _execution_list_rows(executions: list[Execution]) -> list[tuple[str, str]]:
         detail = (
             f"{execution.flow_name or 'unknown flow'} | "
             f"{execution.status.value} | "
-            f"runner={execution.runner_name or 'not set'}"
+            f"stack={execution.stack_name or 'not set'}"
         )
         rows.append((execution.exec_id, detail))
     return rows
@@ -382,11 +382,11 @@ def _execution_list_rows(executions: list[Execution]) -> list[tuple[str, str]]:
 def _run_rows(
     *,
     target: str,
-    runner: str | None,
+    stack: str | None,
     execution: Execution,
 ) -> list[tuple[str, str]]:
     """Build label/value rows for `kitaru run` output."""
-    invocation = "deploy" if runner else "run"
+    invocation = "deploy" if stack else "run"
     return [
         ("Target", target),
         ("Invocation", invocation),
@@ -605,7 +605,7 @@ def _status_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
     rows.extend(
         [
             ("Active user", snapshot.active_user or "unavailable"),
-            ("Active runner", snapshot.active_runner or "unavailable"),
+            ("Active stack", snapshot.active_stack or "unavailable"),
             ("Config directory", snapshot.config_directory),
         ]
     )
@@ -627,7 +627,7 @@ def _info_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
         ("Server database", snapshot.server_database or "unavailable"),
         ("Server deployment", snapshot.server_deployment_type or "unavailable"),
         ("Active user", snapshot.active_user or "unavailable"),
-        ("Active runner", snapshot.active_runner or "unavailable"),
+        ("Active stack", snapshot.active_stack or "unavailable"),
         ("Repository root", snapshot.repository_root or "not set"),
         ("Config directory", snapshot.config_directory),
         ("Local server", snapshot.local_server_status or "not started"),
@@ -655,25 +655,25 @@ def _log_store_detail(snapshot: ResolvedLogStore) -> str:
     return f"Effective backend: {snapshot.backend} (from {snapshot.source} settings)"
 
 
-def _runner_list_rows(runners: list[RunnerInfo]) -> list[tuple[str, str]]:
-    """Build label/value rows for `kitaru runner list`."""
-    if not runners:
-        return [("Runners", "none found")]
+def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru stack list`."""
+    if not stacks:
+        return [("Stacks", "none found")]
 
     return [
         (
-            runner.name,
-            f"{runner.id}{' (active)' if runner.is_active else ''}",
+            stack.name,
+            f"{stack.id}{' (active)' if stack.is_active else ''}",
         )
-        for runner in runners
+        for stack in stacks
     ]
 
 
-def _current_runner_rows(runner: RunnerInfo) -> list[tuple[str, str]]:
-    """Build label/value rows for `kitaru runner current`."""
+def _current_stack_rows(stack: StackInfo) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru stack current`."""
     return [
-        ("Active runner", runner.name),
-        ("Runner ID", runner.id),
+        ("Active stack", stack.name),
+        ("Stack ID", stack.id),
     ]
 
 
@@ -919,7 +919,7 @@ def _environment_rows(
 def _emit_run_snapshot(
     *,
     target: str,
-    runner: str | None,
+    stack: str | None,
     exec_id: str,
 ) -> None:
     """Emit the post-run snapshot for non-interactive or deploy paths."""
@@ -930,7 +930,7 @@ def _emit_run_snapshot(
             "Kitaru run",
             [
                 ("Target", target),
-                ("Invocation", "deploy" if runner else "run"),
+                ("Invocation", "deploy" if stack else "run"),
                 ("Execution ID", exec_id),
             ],
             warning=(
@@ -942,7 +942,7 @@ def _emit_run_snapshot(
 
     _emit_snapshot(
         "Kitaru run",
-        _run_rows(target=target, runner=runner, execution=execution),
+        _run_rows(target=target, stack=stack, execution=execution),
     )
 
 
@@ -1271,7 +1271,7 @@ def _log_store_payload(snapshot: ResolvedLogStore) -> dict[str, Any]:
     _, mismatch_warning = _log_store_mismatch_details(snapshot)
     return serialize_resolved_log_store(
         snapshot,
-        active_store=active_runner_log_store(),
+        active_store=active_stack_log_store(),
         warning=mismatch_warning,
     )
 
@@ -1279,13 +1279,13 @@ def _log_store_payload(snapshot: ResolvedLogStore) -> dict[str, Any]:
 def _run_payload(
     *,
     target: str,
-    runner: str | None,
+    stack: str | None,
     exec_id: str,
 ) -> dict[str, Any]:
     """Build a structured payload for `kitaru run` JSON output."""
     payload: dict[str, Any] = {
         "target": target,
-        "invocation": "deploy" if runner else "run",
+        "invocation": "deploy" if stack else "run",
         "exec_id": exec_id,
         "execution": None,
         "warning": None,
@@ -1491,17 +1491,17 @@ def reset(output: OutputFormatOption = "text") -> None:
     )
 
 
-@runner_app.command
+@stack_app.command
 def list_(output: OutputFormatOption = "text") -> None:
-    """List runners visible to the current user."""
-    command = "runner.list"
+    """List stacks visible to the current user."""
+    command = "stack.list"
     output_format = _resolve_output_format(output)
     try:
         if output_format == CLIOutputFormat.JSON:
-            runner_entries = _list_runner_entries()
-            runners = [entry.runner for entry in runner_entries]
+            stack_entries = _list_stack_entries()
+            stacks = [entry.stack for entry in stack_entries]
         else:
-            runners = get_available_runners()
+            stacks = get_available_stacks()
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
@@ -1514,23 +1514,23 @@ def list_(output: OutputFormatOption = "text") -> None:
         _emit_json_items(
             command,
             [
-                serialize_runner(entry.runner, is_managed=entry.is_managed)
-                for entry in runner_entries
+                serialize_stack(entry.stack, is_managed=entry.is_managed)
+                for entry in stack_entries
             ],
             output=output_format,
         )
         return
 
-    _emit_snapshot("Kitaru runners", _runner_list_rows(runners))
+    _emit_snapshot("Kitaru stacks", _stack_list_rows(stacks))
 
 
-@runner_app.command
+@stack_app.command
 def current(output: OutputFormatOption = "text") -> None:
-    """Show the currently active runner."""
-    command = "runner.current"
+    """Show the currently active stack."""
+    command = "stack.current"
     output_format = _resolve_output_format(output)
     try:
-        runner = get_current_runner()
+        stack = get_current_stack()
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
@@ -1540,25 +1540,25 @@ def current(output: OutputFormatOption = "text") -> None:
         )
 
     if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, serialize_runner(runner), output=output_format)
+        _emit_json_item(command, serialize_stack(stack), output=output_format)
         return
 
-    _emit_snapshot("Kitaru runner", _current_runner_rows(runner))
+    _emit_snapshot("Kitaru stack", _current_stack_rows(stack))
 
 
-@runner_app.command
+@stack_app.command
 def use(
-    runner: Annotated[
+    stack: Annotated[
         str,
-        Parameter(help="Runner name or ID to activate."),
+        Parameter(help="Stack name or ID to activate."),
     ],
     output: OutputFormatOption = "text",
 ) -> None:
-    """Use a runner as the active default by name or ID."""
-    command = "runner.use"
+    """Use a stack as the active default by name or ID."""
+    command = "stack.use"
     output_format = _resolve_output_format(output)
     try:
-        selected_runner = set_active_runner(runner)
+        selected_stack = set_active_stack(stack)
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
@@ -1568,34 +1568,32 @@ def use(
         )
 
     if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command, serialize_runner(selected_runner), output=output_format
-        )
+        _emit_json_item(command, serialize_stack(selected_stack), output=output_format)
         return
 
     _print_success(
-        f"Activated runner: {selected_runner.name}",
-        detail=f"Runner ID: {selected_runner.id}",
+        f"Activated stack: {selected_stack.name}",
+        detail=f"Stack ID: {selected_stack.id}",
     )
 
 
-@runner_app.command
+@stack_app.command
 def create(
     name: Annotated[
         str,
-        Parameter(help="Runner name."),
+        Parameter(help="Stack name."),
     ],
     no_activate: Annotated[
         bool,
-        Parameter(help="Create without activating the runner."),
+        Parameter(help="Create without activating the stack."),
     ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a new local runner."""
-    command = "runner.create"
+    """Create a new local stack."""
+    command = "stack.create"
     output_format = _resolve_output_format(output)
     try:
-        result = _create_runner_operation(name, activate=not no_activate)
+        result = _create_stack_operation(name, activate=not no_activate)
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
@@ -1607,43 +1605,42 @@ def create(
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
-            serialize_runner_create_result(result),
+            serialize_stack_create_result(result),
             output=output_format,
         )
         return
 
-    _print_success(f"Created runner: {result.runner.name}")
-    if result.previous_active_runner is not None:
-        print(f"Active runner: {result.previous_active_runner} → {result.runner.name}")
+    _print_success(f"Created stack: {result.stack.name}")
+    if result.previous_active_stack is not None:
+        print(f"Active stack: {result.previous_active_stack} → {result.stack.name}")
 
 
-@runner_app.command
+@stack_app.command
 def delete(
-    runner: Annotated[
+    stack: Annotated[
         str,
-        Parameter(help="Runner name or ID to delete."),
+        Parameter(help="Stack name or ID to delete."),
     ],
     recursive: Annotated[
         bool,
-        Parameter(help="Delete the runner and any unshared managed components."),
+        Parameter(help="Delete the stack and any unshared managed components."),
     ] = False,
     force: Annotated[
         bool,
         Parameter(
             help=(
-                "Allow deleting the active runner by falling back to the "
-                "default runner."
+                "Allow deleting the active stack by falling back to the default stack."
             )
         ),
     ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Delete a runner by name or ID."""
-    command = "runner.delete"
+    """Delete a stack by name or ID."""
+    command = "stack.delete"
     output_format = _resolve_output_format(output)
     try:
-        result = _delete_runner_operation(
-            runner,
+        result = _delete_stack_operation(
+            stack,
             recursive=recursive,
             force=force,
         )
@@ -1658,16 +1655,16 @@ def delete(
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
-            serialize_runner_delete_result(result),
+            serialize_stack_delete_result(result),
             output=output_format,
         )
         return
 
-    _print_success(f"Deleted runner: {result.deleted_runner}")
+    _print_success(f"Deleted stack: {result.deleted_stack}")
     if result.components_deleted:
         print(f"Deleted components: {', '.join(result.components_deleted)}")
-    if result.new_active_runner is not None:
-        print(f"Active runner: {result.new_active_runner}")
+    if result.new_active_stack is not None:
+        print(f"Active stack: {result.new_active_stack}")
 
 
 @model_app.command
@@ -1928,9 +1925,9 @@ def run(
             )
         ),
     ] = None,
-    runner: Annotated[
+    stack: Annotated[
         str | None,
-        Parameter(help="Optional runner name/ID for deploy-style execution."),
+        Parameter(help="Optional stack name/ID for deploy-style execution."),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
@@ -1939,7 +1936,7 @@ def run(
     output_format = _resolve_output_format(output)
     use_live = (
         is_terminal_interactive()
-        and not runner
+        and not stack
         and output_format == CLIOutputFormat.TEXT
     )
 
@@ -1953,8 +1950,8 @@ def run(
                 target=target,
                 flow_inputs=flow_inputs,
             )
-        elif runner:
-            handle = flow_target.deploy(runner=runner, **flow_inputs)
+        elif stack:
+            handle = flow_target.deploy(stack=stack, **flow_inputs)
         else:
             handle = flow_target.run(**flow_inputs)
 
@@ -1976,13 +1973,13 @@ def run(
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
-            _run_payload(target=target, runner=runner, exec_id=handle.exec_id),
+            _run_payload(target=target, stack=stack, exec_id=handle.exec_id),
             output=output_format,
         )
         return
 
     _print_success(f"Started flow execution: {handle.exec_id}")
-    _emit_run_snapshot(target=target, runner=runner, exec_id=handle.exec_id)
+    _emit_run_snapshot(target=target, stack=stack, exec_id=handle.exec_id)
 
 
 @executions_app.command
@@ -2405,7 +2402,7 @@ def cancel_(
 
 @app.command
 def status(output: OutputFormatOption = "text") -> None:
-    """Show the current connection state and active runner context."""
+    """Show the current connection state and active stack context."""
     output_format = _resolve_output_format(output)
     snapshot = _build_runtime_snapshot()
     if output_format == CLIOutputFormat.JSON:

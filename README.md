@@ -16,7 +16,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
 - **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, local model aliases (`kitaru model register/list`), and env-first secret resolution for known providers
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
-- **Runner lifecycle** — `kitaru.create_runner()` / `kitaru.delete_runner()`, `kitaru runner create/delete`, automatic activation for new local runners, and `is_managed` in structured runner listings
+- **Stack lifecycle** — `kitaru.create_stack()` / `kitaru.delete_stack()`, `kitaru stack create/delete`, automatic activation for new local stacks, and `is_managed` in structured stack listings
 - **Execution CLI** — `kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
@@ -129,10 +129,10 @@ kitaru-mcp                    Run the MCP server (requires kitaru[mcp])
 kitaru login <server>         Connect to a Kitaru server
 kitaru login <server> --api-key <key>
 kitaru logout                 Log out and clear stored auth state
-kitaru status                 Show connection state and active runner
+kitaru status                 Show connection state and active stack
 kitaru info                   Show detailed environment information
 
-kitaru run <target> --args <json> [--runner <name>]
+kitaru run <target> --args <json> [--stack <name>]
 kitaru executions get <exec_id>
 kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
 kitaru executions input <exec_id> --wait <wait_name_or_id> --value <json>
@@ -142,13 +142,13 @@ kitaru executions resume <exec_id>
 kitaru executions retry <exec_id>
 kitaru executions cancel <exec_id>
 
-kitaru runner list                     List visible runners
-kitaru runner current                  Show the active runner
-kitaru runner use <name-or-id>         Switch active runner
-kitaru runner create <name>            Create a local runner and activate it
-kitaru runner create <name> --no-activate
-kitaru runner delete <name-or-id>      Delete a runner
-kitaru runner delete <name-or-id> --recursive [--force]
+kitaru stack list                     List visible stacks
+kitaru stack current                  Show the active stack
+kitaru stack use <name-or-id>         Switch active stack
+kitaru stack create <name>            Create a local stack and activate it
+kitaru stack create <name> --no-activate
+kitaru stack delete <name-or-id>      Delete a stack
+kitaru stack delete <name-or-id> --recursive [--force]
 
 kitaru log-store show         Show effective global runtime log backend
 kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]
@@ -183,7 +183,7 @@ export KITARU_AUTH_TOKEN=kat_abc123...
 export KITARU_PROJECT=my-project
 
 # Execution
-export KITARU_RUNNER=my-remote-stack
+export KITARU_STACK=my-remote-stack
 export KITARU_CACHE=true
 export KITARU_RETRIES=2
 

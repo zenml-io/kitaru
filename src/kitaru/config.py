@@ -3,7 +3,7 @@
 This module contains:
 
 - global config helpers for runtime log-store settings
-- runner-selection helpers
+- stack-selection helpers
 - runtime configuration via ``kitaru.configure(...)``
 - config precedence resolution for execution and connection settings
 """
@@ -57,14 +57,14 @@ _LOG_STORE_SOURCE_ENVIRONMENT = "environment"
 _LOG_STORE_SOURCE_GLOBAL_USER_CONFIG = "global user config"
 _LOG_STORE_BACKEND_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _MODEL_ALIAS_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-_RUNNER_MANAGED_LABEL_KEY = "kitaru.managed"
-_RUNNER_MANAGED_LABEL_VALUE = "true"
+_STACK_MANAGED_LABEL_KEY = "kitaru.managed"
+_STACK_MANAGED_LABEL_VALUE = "true"
 
 KITARU_LOG_STORE_BACKEND_ENV = "KITARU_LOG_STORE_BACKEND"
 KITARU_LOG_STORE_ENDPOINT_ENV = "KITARU_LOG_STORE_ENDPOINT"
 KITARU_LOG_STORE_API_KEY_ENV = "KITARU_LOG_STORE_API_KEY"
 
-KITARU_RUNNER_ENV = "KITARU_RUNNER"
+KITARU_STACK_ENV = "KITARU_STACK"
 KITARU_CACHE_ENV = "KITARU_CACHE"
 KITARU_RETRIES_ENV = "KITARU_RETRIES"
 KITARU_IMAGE_ENV = "KITARU_IMAGE"
@@ -164,12 +164,12 @@ class ResolvedLogStore(BaseModel):
     ]
 
 
-class ActiveRunnerLogStore(BaseModel):
-    """Active runner log-store backend resolved from the current ZenML stack."""
+class ActiveStackLogStore(BaseModel):
+    """Active stack log-store backend resolved from the current ZenML stack."""
 
     backend: str
     endpoint: str | None = None
-    runner_name: str | None = None
+    stack_name: str | None = None
 
 
 class ModelAliasConfig(BaseModel):
@@ -263,8 +263,8 @@ class _KitaruGlobalConfig(BaseModel):
     model_registry: ModelRegistryConfig | None = None
 
 
-class RunnerInfo(BaseModel):
-    """Public runner information exposed by Kitaru SDK helpers."""
+class StackInfo(BaseModel):
+    """Public stack information exposed by Kitaru SDK helpers."""
 
     id: str
     name: str
@@ -272,8 +272,8 @@ class RunnerInfo(BaseModel):
 
 
 @dataclass(frozen=True)
-class _RunnerComponent:
-    """Internal reference to a runner-owned stack component."""
+class _StackComponent:
+    """Internal reference to a stack-owned stack component."""
 
     component_id: str
     name: str
@@ -281,29 +281,29 @@ class _RunnerComponent:
 
 
 @dataclass(frozen=True)
-class _RunnerListEntry:
-    """Internal structured runner list item with managed-state metadata."""
+class _StackListEntry:
+    """Internal structured stack list item with managed-state metadata."""
 
-    runner: RunnerInfo
+    stack: StackInfo
     is_managed: bool
 
 
 @dataclass(frozen=True)
-class _RunnerCreateResult:
-    """Structured result for runner creation operations."""
+class _StackCreateResult:
+    """Structured result for stack creation operations."""
 
-    runner: RunnerInfo
-    previous_active_runner: str | None
+    stack: StackInfo
+    previous_active_stack: str | None
     components_created: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class _RunnerDeleteResult:
-    """Structured result for runner deletion operations."""
+class _StackDeleteResult:
+    """Structured result for stack deletion operations."""
 
-    deleted_runner: str
+    deleted_stack: str
     components_deleted: tuple[str, ...]
-    new_active_runner: str | None
+    new_active_stack: str | None
     recursive: bool
 
 
@@ -376,7 +376,7 @@ ImageInput = str | DockerSettings | Mapping[str, Any] | ImageSettings
 class KitaruConfig(BaseModel):
     """Unified Kitaru configuration model."""
 
-    runner: str | None = None
+    stack: str | None = None
     image: ImageSettings | None = None
     cache: bool | None = None
     retries: int | None = None
@@ -386,7 +386,7 @@ class KitaruConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    @field_validator("runner", "auth_token", "project")
+    @field_validator("stack", "auth_token", "project")
     @classmethod
     def _normalize_optional_non_empty(cls, value: str | None) -> str | None:
         if value is None:
@@ -421,19 +421,19 @@ class KitaruConfig(BaseModel):
 class ResolvedExecutionConfig(BaseModel):
     """Fully resolved execution settings for a flow run."""
 
-    runner: str | None = None
+    stack: str | None = None
     image: ImageSettings | None = None
     cache: bool
     retries: int
 
-    @field_validator("runner")
+    @field_validator("stack")
     @classmethod
-    def _validate_runner(cls, value: str | None) -> str | None:
+    def _validate_stack(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized_value = value.strip()
         if not normalized_value:
-            raise ValueError("Runner cannot be empty.")
+            raise ValueError("Stack cannot be empty.")
         return normalized_value
 
     @field_validator("retries")
@@ -482,11 +482,11 @@ class FrozenExecutionSpec(BaseModel):
             field_value = normalized.get(field_name)
             if not isinstance(field_value, Mapping):
                 continue
-            if "runner" in field_value or "stack" not in field_value:
+            if "stack" in field_value or "runner" not in field_value:
                 continue
             normalized[field_name] = {
                 **field_value,
-                "runner": field_value["stack"],
+                "stack": field_value["runner"],
             }
 
         return normalized
@@ -635,10 +635,10 @@ def _read_project_config(start_dir: Path | None = None) -> KitaruConfig:
         raise ValueError(
             f"Invalid {pyproject_path}: expected [tool.kitaru] to be a table."
         )
-    if "stack" in kitaru_config:
+    if "runner" in kitaru_config:
         raise ValueError(
-            f"Invalid {pyproject_path}: `[tool.kitaru].stack` was renamed to "
-            "`[tool.kitaru].runner`."
+            f"Invalid {pyproject_path}: `[tool.kitaru].runner` was renamed to "
+            "`[tool.kitaru].stack`."
         )
 
     return KitaruConfig.model_validate(kitaru_config)
@@ -648,15 +648,15 @@ def _read_execution_env_config() -> KitaruConfig:
     """Read execution-related Kitaru config values from environment."""
     values: dict[str, Any] = {}
 
-    raw_legacy_stack = os.environ.get("KITARU_STACK")
-    if raw_legacy_stack is not None:
+    raw_legacy_runner = os.environ.get("KITARU_RUNNER")
+    if raw_legacy_runner is not None:
         raise ValueError(
-            "`KITARU_STACK` was renamed to `KITARU_RUNNER`; use the new name."
+            "`KITARU_RUNNER` was renamed to `KITARU_STACK`; use the new name."
         )
 
-    raw_runner = os.environ.get(KITARU_RUNNER_ENV)
-    if raw_runner is not None:
-        values["runner"] = raw_runner
+    raw_stack = os.environ.get(KITARU_STACK_ENV)
+    if raw_stack is not None:
+        values["stack"] = raw_stack
 
     raw_cache = os.environ.get(KITARU_CACHE_ENV)
     if raw_cache is not None:
@@ -727,11 +727,11 @@ def _read_zenml_connection_env_config() -> KitaruConfig:
 def _read_global_execution_config() -> KitaruConfig:
     """Read execution defaults from global user config/runtime state."""
     try:
-        active_runner_name = current_runner().name
+        active_stack_name = current_stack().name
     except Exception:
-        active_runner_name = None
+        active_stack_name = None
 
-    return KitaruConfig(runner=active_runner_name)
+    return KitaruConfig(stack=active_stack_name)
 
 
 def _extract_store_token(store: Any) -> str | None:
@@ -800,7 +800,7 @@ def _merge_execution_layer(
             merged_image = None
 
     return ResolvedExecutionConfig(
-        runner=layer.runner if layer.runner is not None else resolved.runner,
+        stack=layer.stack if layer.stack is not None else resolved.stack,
         image=merged_image,
         cache=layer.cache if layer.cache is not None else resolved.cache,
         retries=layer.retries if layer.retries is not None else resolved.retries,
@@ -852,7 +852,7 @@ def resolve_execution_config(
 ) -> ResolvedExecutionConfig:
     """Resolve execution configuration according to Phase 10 precedence."""
     resolved = ResolvedExecutionConfig(
-        runner=None,
+        stack=None,
         image=None,
         cache=True,
         retries=0,
@@ -1328,8 +1328,8 @@ def _extract_log_store_endpoint(log_store: Any) -> str | None:
     return normalized
 
 
-def active_runner_log_store() -> ActiveRunnerLogStore | None:
-    """Return the runtime log-store backend from the active runner."""
+def active_stack_log_store() -> ActiveStackLogStore | None:
+    """Return the runtime log-store backend from the active stack."""
     try:
         client = Client()
         active_stack = client.active_stack
@@ -1341,14 +1341,14 @@ def active_runner_log_store() -> ActiveRunnerLogStore | None:
     flavor = getattr(log_store, "flavor", None)
     raw_backend = flavor if isinstance(flavor, str) else log_store.__class__.__name__
 
-    runner_name = getattr(active_stack_model, "name", None)
-    if not isinstance(runner_name, str):
-        runner_name = None
+    stack_name = getattr(active_stack_model, "name", None)
+    if not isinstance(stack_name, str):
+        stack_name = None
 
-    return ActiveRunnerLogStore(
+    return ActiveStackLogStore(
         backend=_normalize_log_store_backend_name(raw_backend),
         endpoint=_extract_log_store_endpoint(log_store),
-        runner_name=runner_name,
+        stack_name=stack_name,
     )
 
 
@@ -1555,7 +1555,8 @@ def list_active_kitaru_environment_variables() -> list[ActiveEnvironmentVariable
         KITARU_SERVER_URL_ENV,
         KITARU_AUTH_TOKEN_ENV,
         KITARU_PROJECT_ENV,
-        KITARU_RUNNER_ENV,
+        "KITARU_RUNNER",
+        KITARU_STACK_ENV,
         KITARU_CACHE_ENV,
         KITARU_RETRIES_ENV,
         KITARU_IMAGE_ENV,
@@ -1582,20 +1583,20 @@ def list_active_kitaru_environment_variables() -> list[ActiveEnvironmentVariable
     return active
 
 
-def _normalize_runner_selector(name_or_id: str) -> str:
-    """Validate and normalize a runner selector provided by a user."""
+def _normalize_stack_selector(name_or_id: str) -> str:
+    """Validate and normalize a stack selector provided by a user."""
     normalized_selector = name_or_id.strip()
     if not normalized_selector:
-        raise ValueError("Runner name or ID cannot be empty.")
+        raise ValueError("Stack name or ID cannot be empty.")
 
     return normalized_selector
 
 
-def _runner_name_collision_message(name: str) -> str:
-    """Return the user-facing message for runner-name collisions."""
+def _stack_name_collision_message(name: str) -> str:
+    """Return the user-facing message for stack-name collisions."""
     return (
-        f'A runner named "{name}" already exists. To activate it, run '
-        f"'kitaru runner use {name}'."
+        f'A stack named "{name}" already exists. To activate it, run '
+        f"'kitaru stack use {name}'."
     )
 
 
@@ -1603,40 +1604,40 @@ def _component_collision_message(
     name: str,
     component_type: StackComponentType,
 ) -> str:
-    """Return the user-facing message for runner component collisions."""
+    """Return the user-facing message for stack component collisions."""
     return (
-        f"Cannot create runner '{name}' because a {component_type.value} named "
-        f"'{name}' already exists. Kitaru always creates fresh runner "
+        f"Cannot create stack '{name}' because a {component_type.value} named "
+        f"'{name}' already exists. Kitaru always creates fresh stack "
         "components and never reuses existing ones."
     )
 
 
 def _stack_is_managed(stack_model: Any) -> bool:
-    """Return whether a stack carries Kitaru's managed-runner label."""
+    """Return whether a stack carries Kitaru's managed-stack label."""
     raw_labels = getattr(stack_model, "labels", None)
     if not isinstance(raw_labels, Mapping):
         return False
 
-    raw_value = raw_labels.get(_RUNNER_MANAGED_LABEL_KEY)
+    raw_value = raw_labels.get(_STACK_MANAGED_LABEL_KEY)
     if raw_value is None:
         return False
 
-    return str(raw_value).strip().lower() == _RUNNER_MANAGED_LABEL_VALUE
+    return str(raw_value).strip().lower() == _STACK_MANAGED_LABEL_VALUE
 
 
-def _format_runner_component_label(
+def _format_stack_component_label(
     name: str,
     kind: Literal["orchestrator", "artifact_store"],
 ) -> str:
-    """Format one runner component for user-facing structured output."""
+    """Format one stack component for user-facing structured output."""
     return f"{name} ({kind})"
 
 
-def _delete_runner_components_best_effort(
+def _delete_stack_components_best_effort(
     client: Client,
-    components: list[_RunnerComponent],
+    components: list[_StackComponent],
 ) -> str | None:
-    """Best-effort cleanup for runner components created during a failed create."""
+    """Best-effort cleanup for stack components created during a failed create."""
     cleanup_errors: list[str] = []
 
     for component in reversed(components):
@@ -1649,7 +1650,7 @@ def _delete_runner_components_best_effort(
             client.delete_stack_component(component.component_id, component_type)
         except Exception as exc:  # pragma: no cover - cleanup failure path
             cleanup_errors.append(
-                f"{_format_runner_component_label(component.name, component.kind)}: "
+                f"{_format_stack_component_label(component.name, component.kind)}: "
                 f"{exc}"
             )
 
@@ -1659,46 +1660,46 @@ def _delete_runner_components_best_effort(
     return "Cleanup also failed for: " + "; ".join(cleanup_errors)
 
 
-def _list_runner_entries() -> list[_RunnerListEntry]:
-    """List runners with active + managed metadata for structured output."""
+def _list_stack_entries() -> list[_StackListEntry]:
+    """List stacks with active + managed metadata for structured output."""
     client = Client()
     active_stack_id = str(client.active_stack_model.id)
 
     return [
-        _RunnerListEntry(
-            runner=_runner_info_from_model(
+        _StackListEntry(
+            stack=_stack_info_from_model(
                 stack_model,
                 active_stack_id=active_stack_id,
             ),
             is_managed=_stack_is_managed(stack_model),
         )
-        for stack_model in _iter_available_runners(client)
+        for stack_model in _iter_available_stacks(client)
     ]
 
 
-def _create_runner_operation(
+def _create_stack_operation(
     name: str,
     *,
     activate: bool = True,
     labels: dict[str, str] | None = None,
-) -> _RunnerCreateResult:
-    """Create a new local runner and return structured operation details."""
-    selector = _normalize_runner_selector(name)
+) -> _StackCreateResult:
+    """Create a new local stack and return structured operation details."""
+    selector = _normalize_stack_selector(name)
     client = Client()
 
     if any(
-        stack_model.name == selector for stack_model in _iter_available_runners(client)
+        stack_model.name == selector for stack_model in _iter_available_stacks(client)
     ):
-        raise ValueError(_runner_name_collision_message(selector))
+        raise ValueError(_stack_name_collision_message(selector))
 
-    previous_active_runner = str(client.active_stack_model.name) if activate else None
+    previous_active_stack = str(client.active_stack_model.name) if activate else None
     merged_labels = dict(labels or {})
-    merged_labels[_RUNNER_MANAGED_LABEL_KEY] = _RUNNER_MANAGED_LABEL_VALUE
+    merged_labels[_STACK_MANAGED_LABEL_KEY] = _STACK_MANAGED_LABEL_VALUE
 
-    created_components: list[_RunnerComponent] = []
+    created_components: list[_StackComponent] = []
     components_created = (
-        _format_runner_component_label(selector, "orchestrator"),
-        _format_runner_component_label(selector, "artifact_store"),
+        _format_stack_component_label(selector, "orchestrator"),
+        _format_stack_component_label(selector, "artifact_store"),
     )
 
     try:
@@ -1709,7 +1710,7 @@ def _create_runner_operation(
             configuration={},
         )
         created_components.append(
-            _RunnerComponent(
+            _StackComponent(
                 component_id=str(orchestrator.id),
                 name=selector,
                 kind="orchestrator",
@@ -1728,14 +1729,14 @@ def _create_runner_operation(
             configuration={},
         )
         created_components.append(
-            _RunnerComponent(
+            _StackComponent(
                 component_id=str(artifact_store.id),
                 name=selector,
                 kind="artifact_store",
             )
         )
     except EntityExistsError as exc:
-        cleanup_warning = _delete_runner_components_best_effort(
+        cleanup_warning = _delete_stack_components_best_effort(
             client, created_components
         )
         message = _component_collision_message(
@@ -1745,7 +1746,7 @@ def _create_runner_operation(
             message = f"{message} {cleanup_warning}"
         raise ValueError(message) from exc
     except Exception as exc:
-        cleanup_warning = _delete_runner_components_best_effort(
+        cleanup_warning = _delete_stack_components_best_effort(
             client, created_components
         )
         if cleanup_warning:
@@ -1762,15 +1763,15 @@ def _create_runner_operation(
             labels=merged_labels,
         )
     except EntityExistsError as exc:
-        cleanup_warning = _delete_runner_components_best_effort(
+        cleanup_warning = _delete_stack_components_best_effort(
             client, created_components
         )
-        message = _runner_name_collision_message(selector)
+        message = _stack_name_collision_message(selector)
         if cleanup_warning:
             message = f"{message} {cleanup_warning}"
         raise ValueError(message) from exc
     except Exception as exc:
-        cleanup_warning = _delete_runner_components_best_effort(
+        cleanup_warning = _delete_stack_components_best_effort(
             client, created_components
         )
         message = str(exc)
@@ -1780,28 +1781,28 @@ def _create_runner_operation(
 
     if activate:
         client.activate_stack(selector)
-        runner = current_runner()
+        stack = current_stack()
     else:
-        runner = _runner_info_from_model(
+        stack = _stack_info_from_model(
             stack_model,
             active_stack_id=str(client.active_stack_model.id),
         )
 
-    return _RunnerCreateResult(
-        runner=runner,
-        previous_active_runner=previous_active_runner,
+    return _StackCreateResult(
+        stack=stack,
+        previous_active_stack=previous_active_stack,
         components_created=components_created,
     )
 
 
-def _delete_runner_operation(
+def _delete_stack_operation(
     name_or_id: str,
     *,
     recursive: bool = False,
     force: bool = False,
-) -> _RunnerDeleteResult:
-    """Delete a runner and return structured operation details."""
-    selector = _normalize_runner_selector(name_or_id)
+) -> _StackDeleteResult:
+    """Delete a stack and return structured operation details."""
+    selector = _normalize_stack_selector(name_or_id)
     client = Client()
     target_stack = client.get_stack(
         selector,
@@ -1812,8 +1813,8 @@ def _delete_runner_operation(
 
     if is_active and not force:
         raise ValueError(
-            "Cannot delete the active runner. Use '--force' to delete and fall "
-            "back to the default runner, or switch first with 'kitaru runner use "
+            "Cannot delete the active stack. Use '--force' to delete and fall "
+            "back to the default stack, or switch first with 'kitaru stack use "
             "<other>'."
         )
 
@@ -1832,55 +1833,55 @@ def _delete_runner_operation(
             stacks = client.list_stacks(component_id=component_model.id, size=2, page=1)
             if len(stacks) == 1 and str(stacks[0].id) == str(target_stack.id):
                 deletable_components.append(
-                    _format_runner_component_label(target_stack.name, component_kind)
+                    _format_stack_component_label(target_stack.name, component_kind)
                 )
         components_deleted = tuple(deletable_components)
 
-    new_active_runner: str | None = None
+    new_active_stack: str | None = None
     if is_active and force:
         client.activate_stack("default")
-        new_active_runner = current_runner().name
+        new_active_stack = current_stack().name
 
     client.delete_stack(target_stack.id, recursive=recursive)
 
-    return _RunnerDeleteResult(
-        deleted_runner=str(target_stack.name),
+    return _StackDeleteResult(
+        deleted_stack=str(target_stack.name),
         components_deleted=components_deleted,
-        new_active_runner=new_active_runner,
+        new_active_stack=new_active_stack,
         recursive=recursive,
     )
 
 
-def _runner_info_from_model(
+def _stack_info_from_model(
     stack_model: Any,
     *,
     active_stack_id: str | None,
-) -> RunnerInfo:
-    """Convert a runtime stack model to Kitaru's public runner shape."""
+) -> StackInfo:
+    """Convert a runtime stack model to Kitaru's public stack shape."""
     try:
-        runner_id = str(stack_model.id)
-        runner_name = str(stack_model.name)
+        stack_id = str(stack_model.id)
+        stack_name = str(stack_model.name)
     except AttributeError as exc:
         raise RuntimeError(
-            "Unable to read runner information from the configured runtime."
+            "Unable to read stack information from the configured runtime."
         ) from exc
 
-    return RunnerInfo(
-        id=runner_id,
-        name=runner_name,
-        is_active=runner_id == active_stack_id,
+    return StackInfo(
+        id=stack_id,
+        name=stack_name,
+        is_active=stack_id == active_stack_id,
     )
 
 
-def _iter_available_runners(client: Client) -> Iterable[Any]:
-    """Return all available runners from the runtime, including later pages."""
+def _iter_available_stacks(client: Client) -> Iterable[Any]:
+    """Return all available stacks from the runtime, including later pages."""
     first_page = client.list_stacks()
     if not isinstance(first_page, Iterable) or isinstance(first_page, (str, bytes)):
         raise RuntimeError(
-            "Unexpected runner list response from the configured runtime."
+            "Unexpected stack list response from the configured runtime."
         )
 
-    runner_models = list(first_page)
+    stack_models = list(first_page)
 
     total_pages_raw = getattr(first_page, "total_pages", 1)
     page_size_raw = getattr(first_page, "max_size", 1)
@@ -1900,76 +1901,76 @@ def _iter_available_runners(client: Client) -> Iterable[Any]:
             page_result, (str, bytes)
         ):
             raise RuntimeError(
-                "Unexpected runner list response from the configured runtime."
+                "Unexpected stack list response from the configured runtime."
             )
-        runner_models.extend(page_result)
+        stack_models.extend(page_result)
 
-    return runner_models
+    return stack_models
 
 
-def current_runner() -> RunnerInfo:
-    """Return the currently active runner.
+def current_stack() -> StackInfo:
+    """Return the currently active stack.
 
-    The active runner is managed by the underlying runtime and persisted in the
+    The active stack is managed by the underlying runtime and persisted in the
     runtime's global user configuration.
     """
     active_stack_model = Client().active_stack_model
     active_stack_id = str(active_stack_model.id)
-    return _runner_info_from_model(
+    return _stack_info_from_model(
         active_stack_model,
         active_stack_id=active_stack_id,
     )
 
 
-def list_runners() -> list[RunnerInfo]:
-    """List runners visible to the current user and mark the active one."""
-    return [entry.runner for entry in _list_runner_entries()]
+def list_stacks() -> list[StackInfo]:
+    """List stacks visible to the current user and mark the active one."""
+    return [entry.stack for entry in _list_stack_entries()]
 
 
-def create_runner(
+def create_stack(
     name: str,
     *,
     activate: bool = True,
     labels: dict[str, str] | None = None,
-) -> RunnerInfo:
-    """Create a new local runner and optionally activate it."""
-    return _create_runner_operation(
+) -> StackInfo:
+    """Create a new local stack and optionally activate it."""
+    return _create_stack_operation(
         name,
         activate=activate,
         labels=labels,
-    ).runner
+    ).stack
 
 
-def delete_runner(
+def delete_stack(
     name_or_id: str,
     *,
     recursive: bool = False,
     force: bool = False,
 ) -> None:
-    """Delete a runner and optionally its components."""
-    _delete_runner_operation(
+    """Delete a stack and optionally its components."""
+    _delete_stack_operation(
         name_or_id,
         recursive=recursive,
         force=force,
     )
 
 
-def use_runner(name_or_id: str) -> RunnerInfo:
-    """Set the active runner and return the resulting active runner info.
+def use_stack(name_or_id: str) -> StackInfo:
+    """Set the active stack and return the resulting active stack info.
 
     Args:
-        name_or_id: Runner name or runner ID.
+        name_or_id: Stack name or stack ID.
 
     Returns:
-        Information about the newly active runner.
+        Information about the newly active stack.
 
     Raises:
         ValueError: If the selector is empty.
     """
-    selector = _normalize_runner_selector(name_or_id)
+    selector = _normalize_stack_selector(name_or_id)
     client = Client()
     client.activate_stack(selector)
-    return current_runner()
+    return current_stack()
 
 
 def _login_to_server_target(
@@ -2053,7 +2054,7 @@ def _login_to_server_target(
 
 def configure(
     *,
-    runner: str | None | object = _UNSET,
+    stack: str | None | object = _UNSET,
     image: ImageInput | None | object = _UNSET,
     cache: bool | None | object = _UNSET,
     retries: int | None | object = _UNSET,
@@ -2061,13 +2062,13 @@ def configure(
 ) -> KitaruConfig:
     """Set process-local runtime defaults.
 
-    Execution-level fields (``runner``, ``image``, ``cache``, ``retries``)
+    Execution-level fields (``stack``, ``image``, ``cache``, ``retries``)
     update the execution precedence chain.  The ``project`` field updates
     the connection precedence chain and is intended as an internal /
     testing escape hatch — it is not a normal user-facing setting.
 
     Args:
-        runner: Default runner name/ID override.
+        stack: Default stack name/ID override.
         image: Default image settings override.
         cache: Default cache behavior override.
         retries: Default retry-count override.
@@ -2079,11 +2080,11 @@ def configure(
     """
     candidate_execution = dict(_RUNTIME_EXECUTION_OVERRIDES)
 
-    if runner is not _UNSET:
-        if runner is None:
-            candidate_execution.pop("runner", None)
+    if stack is not _UNSET:
+        if stack is None:
+            candidate_execution.pop("stack", None)
         else:
-            candidate_execution["runner"] = runner
+            candidate_execution["stack"] = stack
 
     if image is not _UNSET:
         if image is None:

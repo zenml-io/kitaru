@@ -19,7 +19,7 @@ docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
 site/                 # Astro landing page + runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (e.g. /api/waitlist with KV)
 scripts/              # Doc generation + site merge scripts (includes SDK reference extraction)
-docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing runner)
+docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing stack)
 spec/                 # SDK design specifications (planning material, not shipped code)
 design/               # Design docs, meeting notes (gitignored, never commit)
 wrangler.toml         # Unified Cloudflare Worker deployment config
@@ -39,7 +39,7 @@ Astro is the runtime shell because it owns the `/api/waitlist` endpoint (backed 
 
 ## Build, Test, and Development Commands
 
-Use `uv` for Python dependency management and `just` as the command runner.
+Use `uv` for Python dependency management and `just` as the command stack.
 
 ### Python workflows
 

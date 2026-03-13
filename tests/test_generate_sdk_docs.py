@@ -191,9 +191,9 @@ class TestExtractApi:
             filtered.get("modules", {}).get("config", {}).get("functions", {}).keys()
         )
         assert {
-            "create_runner",
-            "delete_runner",
-            "list_runners",
-            "current_runner",
-            "use_runner",
+            "create_stack",
+            "delete_stack",
+            "list_stacks",
+            "current_stack",
+            "use_stack",
         }.issubset(config_funcs)

@@ -23,9 +23,9 @@ Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``connect()``,
-  ``configure()``, runner lifecycle helpers (``list_runners()``,
-  ``current_runner()``, ``use_runner()``, ``create_runner()``,
-  ``delete_runner()``), model alias helpers via CLI
+  ``configure()``, stack lifecycle helpers (``list_stacks()``,
+  ``current_stack()``, ``use_stack()``, ``create_stack()``,
+  ``delete_stack()``), model alias helpers via CLI
   (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
   (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts), and a typed
   Kitaru exception hierarchy with failure journaling (`Execution.failure`,
@@ -33,8 +33,8 @@ Current status:
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via
-``kitaru log-store set/show/reset``, runner lifecycle via
-``kitaru runner list/current/use/create/delete``, and execution lifecycle commands via
+``kitaru log-store set/show/reset``, stack lifecycle via
+``kitaru stack list/current/use/create/delete``, and execution lifecycle commands via
 ``kitaru run`` plus
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
@@ -49,14 +49,14 @@ from kitaru.client import KitaruClient
 from kitaru.config import (
     ImageSettings,
     KitaruConfig,
-    RunnerInfo,
+    StackInfo,
     configure,
     connect,
-    create_runner,
-    current_runner,
-    delete_runner,
-    list_runners,
-    use_runner,
+    create_stack,
+    current_stack,
+    delete_stack,
+    list_stacks,
+    use_stack,
 )
 from kitaru.errors import (
     FailureOrigin,
@@ -94,19 +94,19 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
-    "RunnerInfo",
+    "StackInfo",
     "checkpoint",
     "configure",
     "connect",
-    "create_runner",
-    "current_runner",
-    "delete_runner",
+    "create_stack",
+    "current_stack",
+    "delete_stack",
     "flow",
-    "list_runners",
+    "list_stacks",
     "llm",
     "load",
     "log",
     "save",
-    "use_runner",
+    "use_stack",
     "wait",
 ]

@@ -95,7 +95,7 @@ def sample_execution(
         status=ExecutionStatus.WAITING,
         started_at=started_at,
         ended_at=None,
-        runner_name="prod",
+        stack_name="prod",
         metadata={"team": "platform"},
         status_reason=None,
         failure=None,

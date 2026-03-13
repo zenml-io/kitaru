@@ -19,7 +19,7 @@ reuse earlier checkpoint results instead of starting over from scratch.
   Kitaru is still early, but the core user-facing surface is already shipped:
   `@flow`, `@checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`,
   `kitaru.configure()`, `kitaru.wait()`, `kitaru.llm()`, `KitaruClient`,
-  runner helpers, runtime log retrieval, `kitaru-mcp`, Claude Code skills, and
+  stack helpers, runtime log retrieval, `kitaru-mcp`, Claude Code skills, and
   the PydanticAI adapter.
 </Callout>
 
@@ -33,7 +33,7 @@ The current release includes:
 - Durable wait/resume via `kitaru.wait()` plus `input(...)` / `resume(...)`
 - Tracked LLM calls via `kitaru.llm()` with model aliases and secret-backed credentials
 - Runtime configuration defaults via `kitaru.configure(...)`
-- Runner selection + runtime log-store commands (`runner ...`, `log-store ...`)
+- Stack selection + runtime log-store commands (`stack ...`, `log-store ...`)
 - Execution management via `KitaruClient` and `kitaru executions ...`
 - Runtime log retrieval via SDK, CLI, and MCP `get_execution_logs`
 - Secrets and model alias management from the CLI

@@ -47,7 +47,7 @@ def _make_execution(
         status=status,
         started_at=started_at or datetime(2026, 3, 7, 10, 0, 0, tzinfo=UTC),
         ended_at=ended_at or datetime(2026, 3, 7, 10, 1, 0, tzinfo=UTC),
-        runner_name="local",
+        stack_name="local",
         metadata={},
         status_reason=None,
         failure=failure,

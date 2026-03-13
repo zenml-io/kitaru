@@ -13,7 +13,7 @@
     "pydantic-ai-adapter",
     "error-handling",
     "artifacts",
-    "runner-selection",
+    "stack-selection",
     "log-store",
     "secrets-and-model-registration",
     "secrets",

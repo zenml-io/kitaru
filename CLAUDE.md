@@ -34,7 +34,7 @@ scripts/              # Doc generation + site merge scripts
 .claude-plugin/       # Claude Code plugin marketplace + skill distribution
   skills/kitaru-scoping/    # Kitaru scoping skill (SKILL.md)
   skills/kitaru-authoring/  # Kitaru authoring skill (SKILL.md)
-docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing runner)
+docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing stack)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
@@ -114,7 +114,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 
 ## Development commands
 
-This project uses [just](https://github.com/casey/just) as a command runner. Run `just --list` to see all recipes.
+This project uses [just](https://github.com/casey/just) as a command stack. Run `just --list` to see all recipes.
 
 ```bash
 # Setup
@@ -184,7 +184,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.log()` | Implemented |
 | `kitaru.save()` | Implemented |
 | `kitaru.load()` | Implemented |
-| Runner lifecycle (`list_runners` / `current_runner` / `use_runner` / `create_runner` / `delete_runner`) | Implemented |
+| Stack lifecycle (`list_stacks` / `current_stack` / `use_stack` / `create_stack` / `delete_stack`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
 | `KitaruClient` (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifact browsing) | Implemented |
 | Execution CLI (`kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |
@@ -212,7 +212,7 @@ Current MVP observability includes:
 - `kitaru.log()` for structured metadata on executions/checkpoints
 - Runtime log retrieval via `KitaruClient.executions.logs(...)`, `kitaru executions logs`, and MCP `get_execution_logs`
 - Global runtime log-store configuration via `kitaru log-store set/show/reset`
-  (defaults to `artifact-store`, supports global external backend override, and now warns when preference differs from the active runner log store)
+  (defaults to `artifact-store`, supports global external backend override, and now warns when preference differs from the active stack log store)
 
 Future work will add richer OpenTelemetry-native tracing and exporter integration.
 

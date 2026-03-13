@@ -50,7 +50,7 @@ Use `kitaru.configure(...)` to set process-local defaults:
 import kitaru
 
 kitaru.configure(
-    runner="local",
+    stack="local",
     cache=False,
     retries=1,
     image=kitaru.ImageSettings(
@@ -113,7 +113,7 @@ runtime already understands. That means you should configure `KITARU_*`, not
 
 Execution settings:
 
-- `KITARU_RUNNER`
+- `KITARU_STACK`
 - `KITARU_CACHE`
 - `KITARU_RETRIES`
 - `KITARU_IMAGE` (JSON object or plain image string)
@@ -146,16 +146,16 @@ active. Secret values such as `KITARU_AUTH_TOKEN` and
 
 ## Precedence (highest to lowest)
 
-1. Invocation-time overrides (`my_flow.run(..., runner="prod")`)
-2. Flow decorator defaults (`@flow(runner="prod")`)
+1. Invocation-time overrides (`my_flow.run(..., stack="prod")`)
+2. Flow decorator defaults (`@flow(stack="prod")`)
 3. `kitaru.configure(...)`
-4. Environment variables (`KITARU_RUNNER`, `KITARU_SERVER_URL`, etc.)
+4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
-6. Global user config (including active runner and connection defaults)
+6. Global user config (including active stack and connection defaults)
 7. Built-in defaults (`cache=True`, `retries=0`)
 
-In practice, `runner` starts unset in the built-in defaults and is then resolved
-from the active runner when one is available.
+In practice, `stack` starts unset in the built-in defaults and is then resolved
+from the active stack when one is available.
 
 For connection-specific resolution, Kitaru uses this lower-to-higher order:
 
@@ -168,7 +168,7 @@ For connection-specific resolution, Kitaru uses this lower-to-higher order:
 
 ```toml
 [tool.kitaru]
-runner = "prod"
+stack = "prod"
 cache = false
 retries = 2
 
@@ -273,7 +273,7 @@ export KITARU_AUTH_TOKEN=kat_abc123...
 export KITARU_PROJECT=my-project
 
 # Execution
-export KITARU_RUNNER=my-remote-stack
+export KITARU_STACK=my-remote-stack
 export KITARU_CACHE=true
 export KITARU_RETRIES=2
 
@@ -315,7 +315,7 @@ For the broader catalog, see [Examples](/getting-started/examples).
 
 ## Related pages
 
-- [Runner Selection](/getting-started/runner-selection)
+- [Stack Selection](/getting-started/stack-selection)
 - [Examples](/getting-started/examples)
 - [Secrets + Model Registration](/getting-started/secrets-and-model-registration)
 - [Tracked LLM Calls](/getting-started/llm-calls)

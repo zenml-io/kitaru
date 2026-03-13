@@ -19,7 +19,7 @@ effectively.
 | **Execution** | A single run of a flow, identified by a unique ID |
 | **Structured metadata** | Key-value data you attach to executions and checkpoints with `kitaru.log()` |
 | **Runtime log storage** | Where runtime logs are sent (configured separately from structured metadata) |
-| **Active runner** | The default execution target used when no per-run `runner=...` override is passed |
+| **Active stack** | The default execution target used when no per-run `stack=...` override is passed |
 
 ## What you can use today
 
@@ -33,7 +33,7 @@ Kitaru's current release includes:
 - `kitaru.connect()` — connect to a Kitaru server
 - `kitaru.configure()` — set process-local runtime defaults
 - `kitaru.save()` / `kitaru.load()` — persist and load named artifacts in checkpoints
-- `kitaru.list_runners()` / `kitaru.current_runner()` / `kitaru.use_runner()` — manage the default runner
+- `kitaru.list_stacks()` / `kitaru.current_stack()` / `kitaru.use_stack()` — manage the default stack
 - `KitaruClient` — inspect executions, fetch logs, resolve waits, retry, replay, and browse artifacts
 - `FlowHandle` — interact with a running or finished execution
 

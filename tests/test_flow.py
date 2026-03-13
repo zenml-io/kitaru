@@ -31,12 +31,12 @@ def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
 
 def _resolved_execution(
     *,
-    runner: str | None = None,
+    stack: str | None = None,
     cache: bool = True,
     retries: int = 0,
 ) -> ResolvedExecutionConfig:
     return ResolvedExecutionConfig(
-        runner=runner,
+        stack=stack,
         image=None,
         cache=cache,
         retries=retries,
@@ -147,7 +147,7 @@ def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
         delattr(module, alias)
 
 
-def test_deploy_is_run_sugar_with_runner_override() -> None:
+def test_deploy_is_run_sugar_with_stack_override() -> None:
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
     base_pipeline = MagicMock()
@@ -163,21 +163,21 @@ def test_deploy_is_run_sugar_with_runner_override() -> None:
         patch("kitaru.flow.Client", return_value=client_mock),
         patch(
             "kitaru.flow.resolve_execution_config",
-            return_value=_resolved_execution(runner="prod"),
+            return_value=_resolved_execution(stack="prod"),
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
     ):
         wrapped = flow(
-            runner="dev",
+            stack="dev",
             image="python:3.12",
             cache=False,
             retries=2,
         )(lambda x: x)
         wrapped.deploy(
             1,
-            runner="prod",
+            stack="prod",
             image=DockerSettings(parent_image="python:3.13"),
             cache=True,
             retries=0,
@@ -203,7 +203,7 @@ def test_direct_call_raises_usage_error() -> None:
         wrapped("input")
 
 
-def test_run_restores_previous_runner_if_submission_fails() -> None:
+def test_run_restores_previous_stack_if_submission_fails() -> None:
     configured_pipeline = MagicMock(side_effect=RuntimeError("submission failed"))
     base_pipeline = MagicMock()
     base_pipeline.with_options.return_value = configured_pipeline
@@ -218,7 +218,7 @@ def test_run_restores_previous_runner_if_submission_fails() -> None:
         patch("kitaru.flow.Client", return_value=client_mock),
         patch(
             "kitaru.flow.resolve_execution_config",
-            return_value=_resolved_execution(runner="prod"),
+            return_value=_resolved_execution(stack="prod"),
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
@@ -226,7 +226,7 @@ def test_run_restores_previous_runner_if_submission_fails() -> None:
         pytest.raises(RuntimeError, match="submission failed"),
     ):
         wrapped = flow(lambda: None)
-        wrapped.run(runner="prod")
+        wrapped.run(stack="prod")
 
     assert client_mock.activate_stack.call_args_list == [
         call("prod"),
@@ -274,7 +274,7 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
         patch("kitaru.flow.pipeline", return_value=zenml_decorator),
         patch(
             "kitaru.flow.resolve_execution_config",
-            return_value=_resolved_execution(runner="resolved-stack", cache=False),
+            return_value=_resolved_execution(stack="resolved-stack", cache=False),
         ) as resolve_execution_config_mock,
         patch("kitaru.flow.resolve_connection_config") as resolve_connection_mock,
         patch(
@@ -287,8 +287,8 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
         patch("kitaru.flow.Client") as client_cls,
     ):
         client_cls.return_value.active_stack_model.id = "old-stack-id"
-        wrapped = flow(runner="decorator-stack", cache=True, retries=2)(lambda x: x)
-        wrapped.run("payload", runner="invocation-stack", retries=3)
+        wrapped = flow(stack="decorator-stack", cache=True, retries=2)(lambda x: x)
+        wrapped.run("payload", stack="invocation-stack", retries=3)
 
     resolve_execution_config_mock.assert_called_once()
     resolve_connection_mock.assert_called_once_with(validate_for_use=True)
@@ -296,10 +296,10 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
     resolve_call = resolve_execution_config_mock.call_args.kwargs
     decorator_overrides = resolve_call["decorator_overrides"]
     invocation_overrides = resolve_call["invocation_overrides"]
-    assert decorator_overrides.runner == "decorator-stack"
+    assert decorator_overrides.stack == "decorator-stack"
     assert decorator_overrides.cache is True
     assert decorator_overrides.retries == 2
-    assert invocation_overrides.runner == "invocation-stack"
+    assert invocation_overrides.stack == "invocation-stack"
     assert invocation_overrides.retries == 3
 
     build_frozen_spec_mock.assert_called_once()
@@ -333,7 +333,7 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         patch("kitaru.flow.Client") as client_cls,
         patch(
             "kitaru.flow.resolve_execution_config",
-            return_value=_resolved_execution(runner="prod"),
+            return_value=_resolved_execution(stack="prod"),
         ),
         patch(
             "kitaru.flow.resolve_connection_config", return_value=object()

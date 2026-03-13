@@ -46,18 +46,18 @@ uv run kitaru status
 uv run kitaru --version
 ```
 
-You should see Kitaru reporting a local default runner. No login or
+You should see Kitaru reporting a local default stack. No login or
 server setup is required for local use.
 
-If you want to test runner lifecycle management explicitly, create a disposable
-local runner:
+If you want to test stack lifecycle management explicitly, create a disposable
+local stack:
 
 ```bash
-uv run kitaru runner create scratch
-uv run kitaru runner list
+uv run kitaru stack create scratch
+uv run kitaru stack list
 ```
 
-That gives you a second local runner to switch to or delete while testing.
+That gives you a second local stack to switch to or delete while testing.
 
 ### 3. Run your first flow
 
@@ -91,7 +91,7 @@ See `examples/README.md` for the full catalog.
 
 > **Note:** Some example implementations contain `image={"base_image": ...}`
 > settings in their `@flow` decorator. These only apply when running on
-> remote/containerized runners — you can ignore them for local testing.
+> remote/containerized stacks — you can ignore them for local testing.
 
 #### Structured logging (`kitaru.log()`)
 
@@ -196,7 +196,7 @@ Once connected, your AI assistant can:
 - **Run flows** — "run examples.basic_flow.first_working_flow:my_agent"
 - **Provide wait input** — "approve the pending wait"
 - **Replay executions** — "replay my last run from write_draft"
-- **Check status** — "what runner am I connected to?"
+- **Check status** — "what stack am I connected to?"
 
 This is a great way to explore Kitaru interactively — run a few
 examples first, then ask your AI assistant questions about what
@@ -284,15 +284,15 @@ docker stop kitaru-server && docker rm kitaru-server
 
 | Command | What it does |
 |---|---|
-| `uv run kitaru status` | Show connection state and active runner |
+| `uv run kitaru status` | Show connection state and active stack |
 | `uv run kitaru info` | Detailed environment info |
 | `uv run kitaru executions list` | List recent flow executions |
 | `uv run kitaru executions get <ID>` | Detailed view of one execution |
 | `uv run kitaru executions logs <ID>` | View runtime logs |
 | `uv run kitaru executions replay <ID> --from <checkpoint>` | Replay from a checkpoint |
-| `uv run kitaru runner list` | List available runners |
-| `uv run kitaru runner create <name>` | Create and auto-activate a local runner |
-| `uv run kitaru runner delete <name> --recursive --force` | Remove a disposable runner and switch back to default if needed |
+| `uv run kitaru stack list` | List available stacks |
+| `uv run kitaru stack create <name>` | Create and auto-activate a local stack |
+| `uv run kitaru stack delete <name> --recursive --force` | Remove a disposable stack and switch back to default if needed |
 | `uv run kitaru model register <alias> --model <model>` | Register an LLM model alias |
 | `uv run kitaru secrets set <name> --KEY=value` | Store a secret |
 

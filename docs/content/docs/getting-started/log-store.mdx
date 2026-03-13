@@ -14,10 +14,10 @@ Kitaru has two separate observability channels:
 
 By default, runtime logs use `artifact-store`.
 
-## Important: preference vs active runner
+## Important: preference vs active stack
 
 `kitaru log-store set` stores a Kitaru-side preference. ZenML runtime log
-capture still follows the active runner's ZenML stack log-store component. If they differ,
+capture still follows the active stack's ZenML stack log-store component. If they differ,
 Kitaru now shows a warning in:
 
 - `kitaru log-store show`

@@ -65,8 +65,8 @@ from kitaru.config import (
     KITARU_LOG_STORE_ENDPOINT_ENV,
     KITARU_PROJECT_ENV,
     KITARU_RETRIES_ENV,
-    KITARU_RUNNER_ENV,
     KITARU_SERVER_URL_ENV,
+    KITARU_STACK_ENV,
     _reset_runtime_configuration,
 )
 
@@ -104,7 +104,7 @@ def isolated_zenml_global_config(
         KITARU_LOG_STORE_BACKEND_ENV,
         KITARU_LOG_STORE_ENDPOINT_ENV,
         KITARU_LOG_STORE_API_KEY_ENV,
-        KITARU_RUNNER_ENV,
+        KITARU_STACK_ENV,
         KITARU_CACHE_ENV,
         KITARU_RETRIES_ENV,
         KITARU_IMAGE_ENV,
@@ -117,7 +117,7 @@ def isolated_zenml_global_config(
         KITARU_ANALYTICS_OPT_IN_ENV,
     ):
         monkeypatch.delenv(env_name, raising=False)
-    monkeypatch.delenv("KITARU_STACK", raising=False)
+    monkeypatch.delenv("KITARU_RUNNER", raising=False)
 
     _reset_runtime_configuration()
 

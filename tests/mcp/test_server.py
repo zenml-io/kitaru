@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kitaru.client import ExecutionStatus
-from kitaru.config import ActiveEnvironmentVariable, RunnerInfo
+from kitaru.config import ActiveEnvironmentVariable, StackInfo
 from kitaru.mcp.server import (
     RuntimeSnapshot,
     get_execution_logs,
@@ -23,9 +23,9 @@ from kitaru.mcp.server import (
     kitaru_executions_replay,
     kitaru_executions_retry,
     kitaru_executions_run,
-    kitaru_runners_list,
+    kitaru_stacks_list,
     kitaru_status,
-    manage_runner,
+    manage_stack,
 )
 
 
@@ -52,16 +52,16 @@ def test_executions_list_calls_client_and_serializes(
     assert payload[0]["pending_wait"]["name"] == "approve_draft"
 
 
-def test_executions_list_runner_filter_happens_after_fetch(
+def test_executions_list_stack_filter_happens_after_fetch(
     mock_kitaru_client: MagicMock,
     sample_execution,
 ) -> None:
-    """Runner filtering should happen client-side without truncating early."""
-    other_runner = replace(sample_execution, exec_id="kr-other", runner_name="dev")
-    mock_kitaru_client.executions.list.return_value = [other_runner, sample_execution]
+    """Stack filtering should happen client-side without truncating early."""
+    other_stack = replace(sample_execution, exec_id="kr-other", stack_name="dev")
+    mock_kitaru_client.executions.list.return_value = [other_stack, sample_execution]
 
     with patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client):
-        payload = kitaru_executions_list(runner="prod", limit=1)
+        payload = kitaru_executions_list(stack="prod", limit=1)
 
     mock_kitaru_client.executions.list.assert_called_once_with(
         flow=None,
@@ -85,15 +85,15 @@ def test_executions_get_returns_full_execution(
     assert payload["checkpoints"][0]["name"] == "write_summary"
 
 
-def test_executions_latest_with_runner_filter(
+def test_executions_latest_with_stack_filter(
     mock_kitaru_client: MagicMock,
     sample_execution,
 ) -> None:
-    """Latest tool should support runner filtering even though client API does not."""
+    """Latest tool should support stack filtering even though client API does not."""
     mock_kitaru_client.executions.list.return_value = [sample_execution]
 
     with patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client):
-        payload = kitaru_executions_latest(runner="prod")
+        payload = kitaru_executions_latest(stack="prod")
 
     assert payload["exec_id"] == sample_execution.exec_id
     mock_kitaru_client.executions.latest.assert_not_called()
@@ -185,10 +185,10 @@ def test_executions_run_returns_warning_when_details_unavailable(
         payload = kitaru_executions_run(
             "agent.py:content_pipeline",
             args={"topic": "ai safety"},
-            runner="prod",
+            stack="prod",
         )
 
-    flow_target.deploy.assert_called_once_with(runner="prod", topic="ai safety")
+    flow_target.deploy.assert_called_once_with(stack="prod", topic="ai safety")
     assert payload["exec_id"] == "kr-new"
     assert payload["execution"] is None
     assert "details are not available yet" in payload["warning"]
@@ -309,8 +309,8 @@ def test_artifact_tools_call_client_and_serialize(
     assert loaded["value_format"] == "repr"
 
 
-def test_status_and_runner_tools_return_structured_payloads() -> None:
-    """Status and runner tools should expose query-friendly JSON objects."""
+def test_status_and_stack_tools_return_structured_payloads() -> None:
+    """Status and stack tools should expose query-friendly JSON objects."""
     snapshot = RuntimeSnapshot(
         sdk_version="0.1.0",
         connection="remote Kitaru server",
@@ -318,17 +318,17 @@ def test_status_and_runner_tools_return_structured_payloads() -> None:
         config_directory="/tmp/kitaru-config",
         server_url="https://example.com",
         active_user="alice",
-        active_runner="prod",
+        active_stack="prod",
         repository_root="/work/repo",
         server_version="0.99.0",
         server_database="postgres",
         server_deployment_type="kubernetes",
         local_server_status="not started",
         warning=None,
-        log_store_status="datadog (preferred) ⚠ runner uses artifact-store",
+        log_store_status="datadog (preferred) ⚠ stack uses artifact-store",
         log_store_warning=(
-            "Active ZenML runner uses: artifact-store\n"
-            "The Kitaru log-store preference is not wired into runner selection yet."
+            "Active ZenML stack uses: artifact-store\n"
+            "The Kitaru log-store preference is not wired into stack selection yet."
         ),
         environment=[
             ActiveEnvironmentVariable(
@@ -342,90 +342,90 @@ def test_status_and_runner_tools_return_structured_payloads() -> None:
         ],
     )
 
-    runner_entries = [
+    stack_entries = [
         SimpleNamespace(
-            runner=RunnerInfo(id="stack-1", name="prod", is_active=True),
+            stack=StackInfo(id="stack-1", name="prod", is_active=True),
             is_managed=True,
         ),
         SimpleNamespace(
-            runner=RunnerInfo(id="stack-2", name="dev", is_active=False),
+            stack=StackInfo(id="stack-2", name="dev", is_active=False),
             is_managed=False,
         ),
     ]
 
     with (
         patch("kitaru.mcp.server._build_runtime_snapshot", return_value=snapshot),
-        patch("kitaru.mcp.server._list_runner_entries", return_value=runner_entries),
+        patch("kitaru.mcp.server._list_stack_entries", return_value=stack_entries),
     ):
         status_payload = kitaru_status()
-        runner_payload = kitaru_runners_list()
+        stack_payload = kitaru_stacks_list()
 
-    assert status_payload["active_runner"] == "prod"
+    assert status_payload["active_stack"] == "prod"
     assert (
         status_payload["log_store_status"]
-        == "datadog (preferred) ⚠ runner uses artifact-store"
+        == "datadog (preferred) ⚠ stack uses artifact-store"
     )
     assert status_payload["environment"][0]["name"] == "KITARU_SERVER_URL"
     assert status_payload["environment"][1]["value"] == "token-12***"
-    assert [runner["name"] for runner in runner_payload] == ["prod", "dev"]
-    assert [runner["is_managed"] for runner in runner_payload] == [True, False]
+    assert [stack["name"] for stack in stack_payload] == ["prod", "dev"]
+    assert [stack["is_managed"] for stack in stack_payload] == [True, False]
 
 
-def test_manage_runner_create_returns_structured_result() -> None:
-    """MCP manage_runner(create) should reuse the CLI-style serialized payload."""
-    with patch("kitaru.mcp.server._create_runner_operation") as mock_create_runner:
-        mock_create_runner.return_value = SimpleNamespace(
-            runner=RunnerInfo(id="stack-dev-id", name="dev", is_active=True),
-            previous_active_runner="default",
+def test_manage_stack_create_returns_structured_result() -> None:
+    """MCP manage_stack(create) should reuse the CLI-style serialized payload."""
+    with patch("kitaru.mcp.server._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-dev-id", name="dev", is_active=True),
+            previous_active_stack="default",
             components_created=("dev (orchestrator)", "dev (artifact_store)"),
         )
 
-        payload = manage_runner("create", "dev", activate=True)
+        payload = manage_stack("create", "dev", activate=True)
 
-    mock_create_runner.assert_called_once_with("dev", activate=True)
+    mock_create_stack.assert_called_once_with("dev", activate=True)
     assert payload == {
         "id": "stack-dev-id",
         "name": "dev",
         "is_active": True,
-        "previous_active_runner": "default",
+        "previous_active_stack": "default",
         "components_created": ["dev (orchestrator)", "dev (artifact_store)"],
     }
 
 
-def test_manage_runner_delete_returns_structured_result() -> None:
-    """MCP manage_runner(delete) should return delete metadata."""
-    with patch("kitaru.mcp.server._delete_runner_operation") as mock_delete_runner:
-        mock_delete_runner.return_value = SimpleNamespace(
-            deleted_runner="dev",
+def test_manage_stack_delete_returns_structured_result() -> None:
+    """MCP manage_stack(delete) should return delete metadata."""
+    with patch("kitaru.mcp.server._delete_stack_operation") as mock_delete_stack:
+        mock_delete_stack.return_value = SimpleNamespace(
+            deleted_stack="dev",
             components_deleted=("dev (orchestrator)", "dev (artifact_store)"),
-            new_active_runner="default",
+            new_active_stack="default",
             recursive=True,
         )
 
-        payload = manage_runner(
+        payload = manage_stack(
             "delete",
             "dev",
             recursive=True,
             force=True,
         )
 
-    mock_delete_runner.assert_called_once_with(
+    mock_delete_stack.assert_called_once_with(
         "dev",
         recursive=True,
         force=True,
     )
     assert payload == {
-        "deleted_runner": "dev",
+        "deleted_stack": "dev",
         "components_deleted": ["dev (orchestrator)", "dev (artifact_store)"],
-        "new_active_runner": "default",
+        "new_active_stack": "default",
         "recursive": True,
     }
 
 
-def test_manage_runner_rejects_irrelevant_flags() -> None:
-    """MCP manage_runner should reject flag combinations that do not fit the action."""
+def test_manage_stack_rejects_irrelevant_flags() -> None:
+    """MCP manage_stack should reject flag combinations that do not fit the action."""
     with pytest.raises(ValueError, match='only valid when action="delete"'):
-        manage_runner("create", "dev", recursive=True)
+        manage_stack("create", "dev", recursive=True)
 
     with pytest.raises(ValueError, match='only valid when action="create"'):
-        manage_runner("delete", "dev", activate=False)
+        manage_stack("delete", "dev", activate=False)

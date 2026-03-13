@@ -188,9 +188,9 @@ def _build_header(
         header.append_text(_status_text(execution.status))
         header.append("\n")
 
-        if execution.runner_name:
-            header.append("  Runner: ", style=_LABEL_STYLE)
-            header.append(execution.runner_name)
+        if execution.stack_name:
+            header.append("  Stack: ", style=_LABEL_STYLE)
+            header.append(execution.stack_name)
             header.append("\n")
 
         header.append("  Elapsed: ", style=_LABEL_STYLE)

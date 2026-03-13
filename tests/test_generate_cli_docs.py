@@ -59,8 +59,8 @@ class TestBuildCommandTree:
             "logout",
             "model",
             "run",
-            "runner",
             "secrets",
+            "stack",
             "status",
         ]
 
@@ -80,12 +80,12 @@ class TestBuildCommandTree:
             "retry",
         ]
 
-    def test_runner_tree_includes_create_and_delete(self) -> None:
+    def test_stack_tree_includes_create_and_delete(self) -> None:
         from kitaru.cli import app
 
         tree = build_command_tree(app)
-        runner = _find_command(tree, "runner")
-        assert [sub.name for sub in runner.subcommands] == [
+        stack = _find_command(tree, "stack")
+        assert [sub.name for sub in stack.subcommands] == [
             "create",
             "current",
             "delete",
@@ -149,7 +149,7 @@ class TestBuildCommandTree:
         run = _find_command(tree, "run")
         get = _find_command(tree, "executions", "get")
         secrets_set = _find_command(tree, "secrets", "set")
-        runner_use = _find_command(tree, "runner", "use")
+        stack_use = _find_command(tree, "stack", "use")
 
         assert login.usage == "kitaru login SERVER [OPTIONS]"
         assert login.parameters[0].names == ["SERVER", "--server-url"]
@@ -166,8 +166,8 @@ class TestBuildCommandTree:
             ["ASSIGNMENTS..."],
         ]
 
-        assert runner_use.usage.startswith("kitaru runner use RUNNER")
-        assert runner_use.parameters[0].names == ["RUNNER"]
+        assert stack_use.usage.startswith("kitaru stack use STACK")
+        assert stack_use.parameters[0].names == ["STACK"]
 
 
 class TestRenderCommandPage:
@@ -309,8 +309,8 @@ class TestWriteDocsTree:
             "logout",
             "model",
             "run",
-            "runner",
             "secrets",
+            "stack",
             "status",
         ]
 
@@ -385,8 +385,8 @@ class TestWriteDocsTree:
         run_page = (output_dir / "run.mdx").read_text()
         assert "`--output`, `-o`" in run_page
 
-        # executions, log-store, model, secrets, and runner have nested subcommands.
-        for command in ("executions", "log-store", "model", "secrets", "runner"):
+        # executions, log-store, model, secrets, and stack have nested subcommands.
+        for command in ("executions", "log-store", "model", "secrets", "stack"):
             assert (output_dir / command / "index.mdx").exists()
             assert (output_dir / command / "meta.json").exists()
 
@@ -419,8 +419,8 @@ class TestWriteDocsTree:
         assert "--KEY=value" in secrets_set_content
 
         for command in ("create", "current", "delete", "list", "use"):
-            assert (output_dir / "runner" / f"{command}.mdx").exists()
-            assert f"runner/{command}.mdx" in files
+            assert (output_dir / "stack" / f"{command}.mdx").exists()
+            assert f"stack/{command}.mdx" in files
 
     def test_generated_pages_render_positional_usage_and_aliases(
         self, output_dir: Path
@@ -446,9 +446,9 @@ class TestWriteDocsTree:
         assert "--KEY=value" in secrets_set_content
         assert "| `ASSIGNMENTS...` | `list[str]` | Yes |  |" in secrets_set_content
 
-        runner_use_content = (output_dir / "runner" / "use.mdx").read_text()
-        assert "kitaru runner use RUNNER" in runner_use_content
-        assert "| `RUNNER` | `str` | Yes |  |" in runner_use_content
+        stack_use_content = (output_dir / "stack" / "use.mdx").read_text()
+        assert "kitaru stack use STACK" in stack_use_content
+        assert "| `STACK` | `str` | Yes |  |" in stack_use_content
 
     def test_nested_subcommands_create_directories(self, output_dir: Path) -> None:
         import cyclopts

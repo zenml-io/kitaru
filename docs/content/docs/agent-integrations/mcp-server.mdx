@@ -66,7 +66,8 @@ Artifact tools:
 Connection tools:
 
 - `kitaru_status`
-- `kitaru_runners_list`
+- `kitaru_stacks_list`
+- `manage_stack`
 
 ## Example query flow
 
@@ -74,6 +75,9 @@ Connection tools:
 2. Ask the user to confirm an action for a pending wait
 3. Call `kitaru_executions_input(exec_id=..., wait=..., value=...)`
 4. Re-check state via `kitaru_executions_get(exec_id)`
+
+To provision or clean up a local stack, use `manage_stack(action="create", name="local-dev")`
+or `manage_stack(action="delete", name="local-dev", force=True)`.
 
 ## Authentication and context
 

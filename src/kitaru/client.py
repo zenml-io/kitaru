@@ -36,7 +36,7 @@ from zenml.zen_stores.rest_zen_store import RestZenStore
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
     FrozenExecutionSpec,
-    active_runner_log_store,
+    active_stack_log_store,
     resolve_connection_config,
     resolve_log_store,
 )
@@ -181,7 +181,7 @@ class Execution:
     status: ExecutionStatus
     started_at: datetime | None
     ended_at: datetime | None
-    runner_name: str | None
+    stack_name: str | None
     metadata: dict[str, Any]
     status_reason: str | None
     failure: FailureInfo | None
@@ -233,15 +233,15 @@ class Execution:
 
 
 @contextmanager
-def _temporary_active_runner(runner_name_or_id: str | None) -> Iterator[None]:
-    """Temporarily activate a runner while running an operation."""
-    if not runner_name_or_id:
+def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
+    """Temporarily activate a stack while running an operation."""
+    if not stack_name_or_id:
         yield
         return
 
     client = Client()
     old_stack_id = client.active_stack_model.id
-    client.activate_stack(runner_name_or_id)
+    client.activate_stack(stack_name_or_id)
     try:
         yield
     finally:
@@ -484,11 +484,11 @@ def _parse_frozen_execution_spec(raw_value: Any) -> FrozenExecutionSpec | None:
         field_value = normalized_raw_value.get(field_name)
         if not isinstance(field_value, Mapping):
             continue
-        if "runner" in field_value or "stack" not in field_value:
+        if "stack" in field_value or "runner" not in field_value:
             continue
         normalized_raw_value[field_name] = {
             **field_value,
-            "runner": field_value["stack"],
+            "stack": field_value["runner"],
         }
 
     try:
@@ -951,12 +951,12 @@ def _restart_run_from_snapshot(
         )
     if snapshot.stack is None:
         raise KitaruRuntimeError(
-            f"Unable to {operation_name} execution because snapshot runner "
+            f"Unable to {operation_name} execution because snapshot stack "
             "metadata is missing."
         )
 
     try:
-        with _temporary_active_runner(str(snapshot.stack.id)):
+        with _temporary_active_stack(str(snapshot.stack.id)):
             active_stack = client._client().active_stack
             orchestrator = cast(Any, active_stack.orchestrator)
             orchestrator.restart(
@@ -1059,9 +1059,9 @@ def _map_execution(
     if run.original_run is not None:
         original_exec_id = str(run.original_run.id)
 
-    runner_name: str | None = None
+    stack_name: str | None = None
     if run.stack is not None:
-        runner_name = run.stack.name
+        stack_name = run.stack.name
 
     return Execution(
         exec_id=str(run.id),
@@ -1069,7 +1069,7 @@ def _map_execution(
         status=status,
         started_at=run.start_time,
         ended_at=run.end_time,
-        runner_name=runner_name,
+        stack_name=stack_name,
         metadata=metadata,
         status_reason=status_reason,
         failure=failure,
@@ -1103,7 +1103,7 @@ class _ExecutionsAPI:
 
     def _resolve_log_endpoint_hint(self) -> str | None:
         """Resolve a best-effort endpoint hint for log-retrieval errors."""
-        active_log_store = active_runner_log_store()
+        active_log_store = active_stack_log_store()
         if active_log_store is not None and active_log_store.endpoint:
             return active_log_store.endpoint
 

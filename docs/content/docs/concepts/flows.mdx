@@ -50,11 +50,11 @@ result = my_agent.run("https://example.com").wait()
 ### `.deploy()` (remote intent)
 
 ```python
-handle = my_agent.deploy("https://example.com", runner="production")
+handle = my_agent.deploy("https://example.com", stack="production")
 ```
 
 `.deploy()` is semantic sugar for `.run()` that signals remote execution
-intent. Today it behaves identically to `.run()` with a `runner` parameter —
+intent. Today it behaves identically to `.run()` with a `stack` parameter —
 it exists to make your code more readable when the intent is deployment rather
 than local development.
 
@@ -95,15 +95,15 @@ handle = my_agent.run("https://example.com", retries=3, cache=True)
 |---|---|---|
 | `retries` | `0` | Number of automatic retries on failure |
 | `cache` | `True` | Whether checkpoint results can be reused from previous runs |
-| `runner` | `None` | Target execution environment for this run (overrides the active runner default) |
+| `stack` | `None` | Target execution environment for this run (overrides the active stack default) |
 | `image` | `None` | Container image for remote execution (string, mapping, or settings object). Supports `base_image`, `requirements`, `environment`, `apt_packages`, `replicate_local_python_environment`, and `dockerfile`. |
 
 Per-run values override decorator defaults. If you don't pass an override, the
 decorator default applies.
 
-When neither per-run nor decorator `runner` values are set, Kitaru uses your
-active runner. You can inspect or change it with `kitaru runner current` and
-`kitaru runner use <name-or-id>` (or the matching SDK helpers).
+When neither per-run nor decorator `stack` values are set, Kitaru uses your
+active stack. You can inspect or change it with `kitaru stack current` and
+`kitaru stack use <name-or-id>` (or the matching SDK helpers).
 
 ## Rules to know
 

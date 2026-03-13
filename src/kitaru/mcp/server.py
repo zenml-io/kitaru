@@ -2,7 +2,7 @@
 
 This module exposes structured MCP tools for querying and managing Kitaru
 executions. The server reuses `KitaruClient` and selected CLI-equivalent logic
-for status and runner inspection.
+for status and stack inspection.
 """
 
 from __future__ import annotations
@@ -39,19 +39,19 @@ from kitaru.config import (
     KITARU_PROJECT_ENV,
     ActiveEnvironmentVariable,
     ResolvedLogStore,
-    _create_runner_operation,
-    _delete_runner_operation,
+    _create_stack_operation,
+    _delete_stack_operation,
     _kitaru_config_dir,
-    _list_runner_entries,
+    _list_stack_entries,
     _read_runtime_connection_config,
-    active_runner_log_store,
+    active_stack_log_store,
     list_active_kitaru_environment_variables,
     resolve_log_store,
 )
 from kitaru.inspection import (
-    serialize_runner,
-    serialize_runner_create_result,
-    serialize_runner_delete_result,
+    serialize_stack,
+    serialize_stack_create_result,
+    serialize_stack_delete_result,
 )
 
 _MCP_INSTALL_ERROR = (
@@ -87,7 +87,7 @@ class RuntimeSnapshot:
     server_url: str | None = None
     active_user: str | None = None
     project_override: str | None = None
-    active_runner: str | None = None
+    active_stack: str | None = None
     repository_root: str | None = None
     server_version: str | None = None
     server_database: str | None = None
@@ -303,7 +303,7 @@ def _serialize_execution_summary(execution: Execution) -> dict[str, Any]:
         "status": execution.status.value,
         "started_at": _to_jsonable(execution.started_at, fallback_repr=True),
         "ended_at": _to_jsonable(execution.ended_at, fallback_repr=True),
-        "runner_name": execution.runner_name,
+        "stack_name": execution.stack_name,
         "status_reason": execution.status_reason,
         "pending_wait": _serialize_pending_wait(execution.pending_wait),
         "failure": _serialize_failure(execution.failure),
@@ -362,24 +362,24 @@ def _log_store_mismatch_details(
     if preferred.source == "default":
         return None, None
 
-    active_store = active_runner_log_store()
+    active_store = active_stack_log_store()
     if active_store is None:
         return None, None
 
     if active_store.backend == preferred.backend:
         return None, None
 
-    status_row = f"{preferred.backend} (preferred) ⚠ runner uses {active_store.backend}"
+    status_row = f"{preferred.backend} (preferred) ⚠ stack uses {active_store.backend}"
 
     active_label = active_store.backend
-    if active_store.runner_name:
-        active_label = f"{active_store.backend} (runner: {active_store.runner_name})"
+    if active_store.stack_name:
+        active_label = f"{active_store.backend} (stack: {active_store.stack_name})"
 
     warning = "\n".join(
         [
-            f"Active runner uses: {active_label}",
-            "The Kitaru log-store preference is not wired into runner selection yet.",
-            "Actual runtime logs go to the active runner's ZenML stack log "
+            f"Active stack uses: {active_label}",
+            "The Kitaru log-store preference is not wired into stack selection yet.",
+            "Actual runtime logs go to the active stack's ZenML stack log "
             "store, not this preference.",
         ]
     )
@@ -459,7 +459,7 @@ def _build_snapshot_without_local_store(
         warning=(
             "Local Kitaru runtime support is unavailable in this environment. "
             "Connect to a Kitaru server to keep working, or install the local "
-            "runtime dependencies if you want the built-in local runner."
+            "runtime dependencies if you want the built-in local stack."
         ),
         environment=list_active_kitaru_environment_variables(),
     )
@@ -529,7 +529,7 @@ def _build_runtime_snapshot() -> RuntimeSnapshot:
         client = Client()
         store_info = client.zen_store.get_store_info()
         snapshot.active_user = client.active_user.name
-        snapshot.active_runner = client.active_stack_model.name
+        snapshot.active_stack = client.active_stack_model.name
         snapshot.repository_root = str(client.root) if client.root else None
         snapshot.server_version = str(store_info.version)
         snapshot.server_database = str(store_info.database_type)
@@ -559,20 +559,18 @@ def _list_executions_filtered(
     *,
     flow: str | None,
     status: str | None,
-    runner: str | None,
+    stack: str | None,
     limit: int | None,
 ) -> list[Execution]:
-    """List executions with optional post-filtering for runner."""
+    """List executions with optional post-filtering for stack."""
     if limit is not None and limit < 1:
         raise ValueError("`limit` must be >= 1 when provided.")
 
-    if runner is None:
+    if stack is None:
         return client.executions.list(flow=flow, status=status, limit=limit)
 
     executions = client.executions.list(flow=flow, status=status, limit=None)
-    filtered = [
-        execution for execution in executions if execution.runner_name == runner
-    ]
+    filtered = [execution for execution in executions if execution.stack_name == stack]
     if limit is not None:
         return filtered[:limit]
     return filtered
@@ -583,17 +581,17 @@ def _latest_execution_filtered(
     *,
     flow: str | None,
     status: str | None,
-    runner: str | None,
+    stack: str | None,
 ) -> Execution:
-    """Resolve the latest execution with optional runner filtering."""
-    if runner is None:
+    """Resolve the latest execution with optional stack filtering."""
+    if stack is None:
         return client.executions.latest(flow=flow, status=status)
 
     executions = _list_executions_filtered(
         client,
         flow=flow,
         status=status,
-        runner=runner,
+        stack=stack,
         limit=1,
     )
     if executions:
@@ -604,7 +602,7 @@ def _latest_execution_filtered(
         filters.append(f"flow={flow!r}")
     if status is not None:
         filters.append(f"status={status!r}")
-    filters.append(f"runner={runner!r}")
+    filters.append(f"stack={stack!r}")
     raise LookupError(f"No executions found for {' and '.join(filters)}.")
 
 
@@ -651,16 +649,16 @@ def _validate_wait_input_schema(
 def kitaru_executions_list(
     status: str | None = None,
     flow: str | None = None,
-    runner: str | None = None,
+    stack: str | None = None,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """List executions with optional status/flow/runner filters."""
+    """List executions with optional status/flow/stack filters."""
     client = KitaruClient()
     executions = _list_executions_filtered(
         client,
         flow=flow,
         status=status,
-        runner=runner,
+        stack=stack,
         limit=limit,
     )
     return [_serialize_execution_summary(execution) for execution in executions]
@@ -677,7 +675,7 @@ def kitaru_executions_get(exec_id: str) -> dict[str, Any]:
 def kitaru_executions_latest(
     status: str | None = None,
     flow: str | None = None,
-    runner: str | None = None,
+    stack: str | None = None,
 ) -> dict[str, Any]:
     """Get the most recent execution matching the provided filters."""
     client = KitaruClient()
@@ -685,7 +683,7 @@ def kitaru_executions_latest(
         client,
         flow=flow,
         status=status,
-        runner=runner,
+        stack=stack,
     )
     return _serialize_execution(execution)
 
@@ -714,7 +712,7 @@ def get_execution_logs(
 def kitaru_executions_run(
     target: str,
     args: dict[str, Any] | None = None,
-    runner: str | None = None,
+    stack: str | None = None,
 ) -> dict[str, Any]:
     """Start or deploy a flow from `<module_or_file>:<flow_name>` target."""
     if args is not None and not isinstance(args, dict):
@@ -723,8 +721,8 @@ def kitaru_executions_run(
     flow_target = _load_flow_target(target)
     flow_inputs = args or {}
 
-    if runner:
-        handle = flow_target.deploy(runner=runner, **flow_inputs)
+    if stack:
+        handle = flow_target.deploy(stack=stack, **flow_inputs)
         invocation = "deploy"
     else:
         handle = flow_target.run(**flow_inputs)
@@ -847,37 +845,37 @@ def kitaru_status() -> dict[str, Any]:
 
 
 @mcp.tool()
-def kitaru_runners_list() -> list[dict[str, Any]]:
-    """List available runners from the active connection context."""
+def kitaru_stacks_list() -> list[dict[str, Any]]:
+    """List available stacks from the active connection context."""
     return [
-        serialize_runner(entry.runner, is_managed=entry.is_managed)
-        for entry in _list_runner_entries()
+        serialize_stack(entry.stack, is_managed=entry.is_managed)
+        for entry in _list_stack_entries()
     ]
 
 
 @mcp.tool()
-def manage_runner(
+def manage_stack(
     action: Literal["create", "delete"],
     name: str,
     activate: bool = True,
     recursive: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Create or delete a local runner."""
+    """Create or delete a local stack."""
     if action == "create":
         if recursive or force:
             raise ValueError(
                 '`recursive` and `force` are only valid when action="delete".'
             )
-        return serialize_runner_create_result(
-            _create_runner_operation(name, activate=activate)
+        return serialize_stack_create_result(
+            _create_stack_operation(name, activate=activate)
         )
 
     if action == "delete":
         if not activate:
             raise ValueError('`activate` is only valid when action="create".')
-        return serialize_runner_delete_result(
-            _delete_runner_operation(
+        return serialize_stack_delete_result(
+            _delete_stack_operation(
                 name,
                 recursive=recursive,
                 force=force,

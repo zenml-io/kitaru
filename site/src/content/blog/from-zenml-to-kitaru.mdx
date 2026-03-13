@@ -32,7 +32,7 @@ Not everything about ZenML was wrong for agents. Some things were exactly right:
 
 **Artifact versioning.** Every intermediate result stored, versioned, and comparable. This is just as valuable for agent checkpoints as it is for training pipeline outputs. We kept this.
 
-**Infrastructure abstraction.** "This code runs on my laptop and on Kubernetes with zero changes." Same principle in Kitaru — `pip install kitaru` locally, `kitaru runner use prod` for your cloud.
+**Infrastructure abstraction.** "This code runs on my laptop and on Kubernetes with zero changes." Same principle in Kitaru — `pip install kitaru` locally, `kitaru stack use prod` for your cloud.
 
 **Reproducibility.** The ability to go back to any previous run and understand exactly what happened. For ML, this meant tracing a model to its training data. For agents, it means replaying an execution from any checkpoint.
 
