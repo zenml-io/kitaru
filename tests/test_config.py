@@ -7,6 +7,7 @@ import warnings
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -29,14 +30,20 @@ from kitaru.config import (
     KITARU_RETRIES_ENV,
     KITARU_SERVER_URL_ENV,
     KITARU_STACK_ENV,
+    CloudProvider,
     FrozenExecutionSpec,
     ImageSettings,
     KitaruConfig,
+    KubernetesStackSpec,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
+    StackType,
+    _create_kubernetes_stack_operation,
     _create_stack_operation,
+    _delete_stack_components_best_effort,
     _delete_stack_operation,
     _list_stack_entries,
+    _StackComponent,
     build_frozen_execution_spec,
     configure,
     create_stack,
@@ -634,6 +641,9 @@ def test_create_stack_creates_local_components_and_activates() -> None:
         "dev (orchestrator)",
         "dev (artifact_store)",
     )
+    assert result.stack_type == "local"
+    assert result.service_connectors_created == ()
+    assert result.resources is None
 
 
 def test_create_stack_public_wrapper_returns_stack_info() -> None:
@@ -648,6 +658,105 @@ def test_create_stack_public_wrapper_returns_stack_info() -> None:
     mock_create.assert_called_once_with("dev", activate=True, labels=None)
     assert stack.name == "dev"
     assert stack.is_active is True
+
+
+def test_create_stack_dispatcher_defaults_to_local_flow() -> None:
+    """Dispatcher should route default create requests to the local flow."""
+    expected_result = SimpleNamespace(name="local-result")
+
+    with patch(
+        "kitaru.config._create_local_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_local:
+        result = _create_stack_operation("dev")
+
+    mock_create_local.assert_called_once_with("dev", activate=True, labels=None)
+    assert result is expected_result
+
+
+def test_create_stack_dispatcher_requires_kubernetes_spec() -> None:
+    """Kubernetes dispatcher requests should fail fast without a spec."""
+    with (
+        patch("kitaru.config.Client") as mock_client,
+        pytest.raises(
+            ValueError,
+            match=r"Kubernetes spec required for --type kubernetes\.",
+        ),
+    ):
+        _create_stack_operation("dev", stack_type=StackType.KUBERNETES)
+
+    mock_client.assert_not_called()
+
+
+def test_create_stack_dispatcher_routes_kubernetes_requests() -> None:
+    """Dispatcher should pass Kubernetes requests through to the future helper."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789.dkr.ecr.eu-west-1.amazonaws.com/my-repo",
+        cluster="demo-cluster",
+        region="eu-west-1",
+        namespace="ml",
+        credentials="aws-dev",
+        verify=False,
+    )
+    expected_result = SimpleNamespace(name="kubernetes-result")
+
+    with patch(
+        "kitaru.config._create_kubernetes_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_kubernetes:
+        result = _create_stack_operation(
+            "dev",
+            stack_type=StackType.KUBERNETES,
+            kubernetes=spec,
+            activate=False,
+            labels={"owner": "ml"},
+        )
+
+    mock_create_kubernetes.assert_called_once_with(
+        "dev",
+        spec=spec,
+        activate=False,
+        labels={"owner": "ml"},
+    )
+    assert result is expected_result
+
+
+def test_create_stack_dispatcher_rejects_unsupported_stack_type() -> None:
+    """Dispatcher should reject unknown stack types instead of guessing."""
+    with (
+        patch("kitaru.config.Client") as mock_client,
+        pytest.raises(ValueError, match="Unsupported stack type: weird"),
+    ):
+        _create_stack_operation(
+            "dev",
+            stack_type=cast(Any, "weird"),
+        )
+
+    mock_client.assert_not_called()
+
+
+def test_create_kubernetes_stack_operation_not_implemented() -> None:
+    """Phase 1 should keep Kubernetes creation as an explicit stub."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.GCP,
+        artifact_store="gs://bucket/path",
+        container_registry="europe-west4-docker.pkg.dev/demo/repo",
+        cluster="demo-cluster",
+        region="europe-west4",
+    )
+
+    with (
+        patch("kitaru.config.Client") as mock_client,
+        pytest.raises(
+            NotImplementedError,
+            match=r"Kubernetes stack creation is not implemented yet\.",
+        ),
+    ):
+        _create_kubernetes_stack_operation("dev", spec=spec)
+
+    mock_client.assert_not_called()
 
 
 def test_create_stack_without_activation_keeps_previous_active_stack() -> None:
@@ -681,6 +790,9 @@ def test_create_stack_without_activation_keeps_previous_active_stack() -> None:
     assert result.previous_active_stack is None
     assert result.stack.name == "dev"
     assert result.stack.is_active is False
+    assert result.stack_type == "local"
+    assert result.service_connectors_created == ()
+    assert result.resources is None
 
 
 def test_create_stack_rejects_existing_stack_name() -> None:
@@ -745,6 +857,24 @@ def test_create_stack_cleans_up_components_if_stack_creation_fails() -> None:
             call("art-dev-id", StackComponentType.ARTIFACT_STORE),
             call("orc-dev-id", StackComponentType.ORCHESTRATOR),
         ]
+    )
+
+
+def test_delete_stack_components_best_effort_handles_container_registry() -> None:
+    """Cleanup should delete container registries using the correct component type."""
+    client_mock = Mock()
+    component = _StackComponent(
+        component_id="registry-dev-id",
+        name="dev",
+        kind="container_registry",
+    )
+
+    warning = _delete_stack_components_best_effort(client_mock, [component])
+
+    assert warning is None
+    client_mock.delete_stack_component.assert_called_once_with(
+        "registry-dev-id",
+        StackComponentType.CONTAINER_REGISTRY,
     )
 
 

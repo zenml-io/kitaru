@@ -19,6 +19,7 @@ import tomllib
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
@@ -271,13 +272,49 @@ class StackInfo(BaseModel):
     is_active: bool
 
 
+class StackType(StrEnum):
+    """Supported internal stack creation modes."""
+
+    LOCAL = "local"
+    KUBERNETES = "kubernetes"
+
+
+class CloudProvider(StrEnum):
+    """Supported cloud providers for Kubernetes-backed stacks."""
+
+    AWS = "aws"
+    GCP = "gcp"
+
+
+class KubernetesStackSpec(BaseModel):
+    """Internal request model for future Kubernetes stack creation."""
+
+    provider: CloudProvider
+    artifact_store: str
+    container_registry: str
+    cluster: str
+    region: str
+    namespace: str = "default"
+    credentials: str | None = None
+    verify: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
+_StackComponentKind = Literal[
+    "orchestrator",
+    "artifact_store",
+    "container_registry",
+]
+
+
 @dataclass(frozen=True)
 class _StackComponent:
     """Internal reference to a stack-owned stack component."""
 
     component_id: str
     name: str
-    kind: Literal["orchestrator", "artifact_store"]
+    kind: _StackComponentKind
 
 
 @dataclass(frozen=True)
@@ -295,6 +332,9 @@ class _StackCreateResult:
     stack: StackInfo
     previous_active_stack: str | None
     components_created: tuple[str, ...]
+    stack_type: str = StackType.LOCAL.value
+    service_connectors_created: tuple[str, ...] = ()
+    resources: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -1627,7 +1667,7 @@ def _stack_is_managed(stack_model: Any) -> bool:
 
 def _format_stack_component_label(
     name: str,
-    kind: Literal["orchestrator", "artifact_store"],
+    kind: _StackComponentKind,
 ) -> str:
     """Format one stack component for user-facing structured output."""
     return f"{name} ({kind})"
@@ -1639,13 +1679,19 @@ def _delete_stack_components_best_effort(
 ) -> str | None:
     """Best-effort cleanup for stack components created during a failed create."""
     cleanup_errors: list[str] = []
+    component_types: dict[_StackComponentKind, StackComponentType] = {
+        "orchestrator": StackComponentType.ORCHESTRATOR,
+        "artifact_store": StackComponentType.ARTIFACT_STORE,
+        "container_registry": StackComponentType.CONTAINER_REGISTRY,
+    }
 
     for component in reversed(components):
-        component_type = (
-            StackComponentType.ORCHESTRATOR
-            if component.kind == "orchestrator"
-            else StackComponentType.ARTIFACT_STORE
-        )
+        try:
+            component_type = component_types[component.kind]
+        except KeyError as exc:  # pragma: no cover - defensive type guard
+            raise ValueError(
+                f"Unsupported stack component kind: {component.kind}"
+            ) from exc
         try:
             client.delete_stack_component(component.component_id, component_type)
         except Exception as exc:  # pragma: no cover - cleanup failure path
@@ -1677,7 +1723,48 @@ def _list_stack_entries() -> list[_StackListEntry]:
     ]
 
 
+def _create_kubernetes_stack_operation(
+    name: str,
+    *,
+    spec: KubernetesStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+) -> _StackCreateResult:
+    """Placeholder for future Kubernetes stack creation support."""
+    del name, spec, activate, labels
+    raise NotImplementedError("Kubernetes stack creation is not implemented yet.")
+
+
 def _create_stack_operation(
+    name: str,
+    *,
+    stack_type: StackType = StackType.LOCAL,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    kubernetes: KubernetesStackSpec | None = None,
+) -> _StackCreateResult:
+    """Create a stack by dispatching to the requested stack type flow."""
+    if stack_type == StackType.LOCAL:
+        return _create_local_stack_operation(
+            name,
+            activate=activate,
+            labels=labels,
+        )
+
+    if stack_type == StackType.KUBERNETES:
+        if kubernetes is None:
+            raise ValueError("Kubernetes spec required for --type kubernetes.")
+        return _create_kubernetes_stack_operation(
+            name,
+            spec=kubernetes,
+            activate=activate,
+            labels=labels,
+        )
+
+    raise ValueError(f"Unsupported stack type: {stack_type}")
+
+
+def _create_local_stack_operation(
     name: str,
     *,
     activate: bool = True,
@@ -1792,6 +1879,7 @@ def _create_stack_operation(
         stack=stack,
         previous_active_stack=previous_active_stack,
         components_created=components_created,
+        stack_type=StackType.LOCAL.value,
     )
 
 
