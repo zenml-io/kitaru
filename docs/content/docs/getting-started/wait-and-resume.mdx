@@ -66,20 +66,22 @@ Input is validated against the wait schema:
 
 ## Example in this repository
 
-Interactive mode (default): the script prints exact CLI commands to run from a
-second terminal once the wait condition is reached.
+The example script prints exact CLI commands to run from a second terminal once
+the wait condition is reached:
 
 ```bash
 uv sync --extra local
-uv run -m examples.execution_management.wait_and_resume --mode interactive
+uv run -m examples.execution_management.wait_and_resume
 ```
 
-Auto mode (useful for CI-style checks):
+1. Run the command above — it starts the flow and blocks.
+2. When the flow reaches `wait()`, the script prints `kitaru executions input ...`
+   and `kitaru executions resume ...` commands.
+3. Open a second terminal and run those commands to approve and resume.
+4. The original terminal continues and prints the final result.
 
-```bash
-uv run -m examples.execution_management.wait_and_resume --mode auto
-uv run pytest tests/test_phase15_wait_example.py
-```
+Automated CI coverage for the same flow lives in
+`tests/test_phase15_wait_example.py`.
 
 For the broader catalog, see [Examples](/getting-started/examples).
 
