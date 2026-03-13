@@ -32,6 +32,8 @@ from kitaru.config import (
     ActiveStackLogStore,
     ModelAliasEntry,
     ResolvedLogStore,
+    StackComponentDetails,
+    StackDetails,
     StackInfo,
     _kitaru_config_dir,
     _read_runtime_connection_config,
@@ -458,6 +460,34 @@ def serialize_stack_delete_result(result: _StackDeleteResult) -> dict[str, Any]:
         "new_active_stack": result.new_active_stack,
         "recursive": result.recursive,
     }
+
+
+def _serialize_stack_component_details(
+    component: StackComponentDetails,
+) -> dict[str, Any]:
+    """Serialize one translated stack component for structured stack output."""
+    payload: dict[str, Any] = {
+        "role": component.role,
+        "name": component.name,
+    }
+    if component.backend is not None:
+        payload["backend"] = component.backend
+    if component.details:
+        payload["details"] = dict(component.details)
+    if component.purpose is not None:
+        payload["purpose"] = component.purpose
+    return payload
+
+
+def serialize_stack_details(details: StackDetails) -> dict[str, Any]:
+    """Serialize stack inspection details for `stack show` style output."""
+    payload = serialize_stack(details.stack, is_managed=details.is_managed)
+    payload["stack_type"] = details.stack_type
+    payload["components"] = [
+        _serialize_stack_component_details(component)
+        for component in details.components
+    ]
+    return payload
 
 
 def serialize_runtime_snapshot(snapshot: RuntimeSnapshot) -> dict[str, Any]:

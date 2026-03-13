@@ -5,7 +5,9 @@ description: Create, inspect, switch, and delete the stacks Kitaru uses for exec
 
 This guide shows how to manage stacks in Kitaru.
 
-A stack is Kitaru's user-facing name for a ZenML stack. It is your execution target: when you run a flow without passing `stack=...`, Kitaru uses the active stack.
+A stack is the named execution environment Kitaru uses as a persisted fallback target when no higher-precedence stack source is set.
+
+This page covers the general stack story: current stack, switching, local stack creation, deletion, and precedence. If you want the end-to-end workflow for a Kubernetes-backed stack, use [Kubernetes Stacks](/getting-started/kubernetes-stacks).
 
 ## Show the current stack
 
@@ -73,6 +75,8 @@ You can pass either a stack name or a stack ID.
 
 The selected stack is persisted as your default until you switch it again.
 
+This command changes the fallback stack Kitaru will use when no higher-precedence override is present. It does **not** rewrite any per-flow or per-run overrides.
+
 ## Delete a stack
 
 To delete only the stack record and keep its components:
@@ -121,7 +125,17 @@ The active stack is only one layer in the execution precedence chain. Higher lay
 5. `pyproject.toml` (`[tool.kitaru].stack`)
 6. currently active stack
 
+In story form:
+
+- `kitaru stack use prod` changes your persisted default stack
+- `kitaru.configure(stack="gpu-cluster")` changes the default only for the current Python process
+- `@flow(stack="gpu-cluster")` binds a default to one specific flow definition
+- `my_flow.run(stack="gpu-cluster")` or `my_flow.deploy(stack="gpu-cluster")` overrides everything else for that one execution
+
+Those higher-precedence overrides do **not** change the active stack you see in `kitaru stack current`; they are temporary execution-time bindings
+
 ## Related pages
 
+- [Kubernetes Stacks](/getting-started/kubernetes-stacks)
 - [Flows](/concepts/flows)
 - [CLI stack commands](/cli/stack)

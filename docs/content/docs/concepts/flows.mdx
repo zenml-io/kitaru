@@ -101,9 +101,18 @@ handle = my_agent.run("https://example.com", retries=3, cache=True)
 Per-run values override decorator defaults. If you don't pass an override, the
 decorator default applies.
 
-When neither per-run nor decorator `stack` values are set, Kitaru uses your
-active stack. You can inspect or change it with `kitaru stack current` and
-`kitaru stack use <name-or-id>` (or the matching SDK helpers).
+For `stack`, the full precedence chain is:
+
+1. `.run(..., stack="...")` / `.deploy(..., stack="...")`
+2. `@flow(stack="...")`
+3. `kitaru.configure(stack="...")`
+4. `KITARU_STACK`
+5. `[tool.kitaru].stack` in `pyproject.toml`
+6. active stack selected via `kitaru stack use ...`
+
+When a higher layer supplies `stack`, Kitaru binds that stack only for the
+submission of that execution and then restores the previous active stack.
+That override does **not** permanently switch your default stack.
 
 ## Rules to know
 

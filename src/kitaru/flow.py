@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -47,6 +48,7 @@ from kitaru.replay import build_replay_plan
 from kitaru.runtime import _flow_scope, _notify_submission_observer
 
 ImageSetting = ImageInput
+_STACK_BINDING_LOCK = threading.RLock()
 
 
 @contextmanager
@@ -57,17 +59,18 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
         stack_name_or_id: Optional stack name or ID. When ``None``, the
             currently active ZenML stack is used unchanged.
     """
-    if not stack_name_or_id:
-        yield
-        return
+    with _STACK_BINDING_LOCK:
+        if not stack_name_or_id:
+            yield
+            return
 
-    client = Client()
-    old_stack_id = client.active_stack_model.id
-    client.activate_stack(stack_name_or_id)
-    try:
-        yield
-    finally:
-        client.activate_stack(old_stack_id)
+        client = Client()
+        old_stack_id = client.active_stack_model.id
+        client.activate_stack(stack_name_or_id)
+        try:
+            yield
+        finally:
+            client.activate_stack(old_stack_id)
 
 
 def _pipeline_source_alias_name(func: Callable[..., Any]) -> str:

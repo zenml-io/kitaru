@@ -1,0 +1,216 @@
+---
+title: Kubernetes Stacks
+description: Create, inspect, use, and clean up Kubernetes-backed stacks in Kitaru
+---
+
+This guide shows the practical workflow for Kubernetes-backed stacks in Kitaru: create one, inspect it, decide whether it should become your default, and clean it up safely when you are done.
+
+Use this page for the story and the happy path. For exact flag syntax and every supported option, use the generated CLI reference for [`kitaru stack create`](/cli/stack/create), [`kitaru stack show`](/cli/stack/show), [`kitaru stack delete`](/cli/stack/delete), and [`kitaru run`](/cli/run).
+
+## Before you start
+
+This guide assumes you already have the infrastructure pieces in place.
+
+You should have:
+
+- a Kitaru environment you can already use locally
+- a Kubernetes cluster you want Kitaru to run against
+- an artifact store URI such as `s3://...` or `gs://...`
+- a container registry URI that your cluster can pull from
+- cloud credentials available if your setup needs them
+
+In story form: Kitaru can assemble the stack for you, but it does not create the bucket, registry, or cluster itself. Those need to exist first.
+
+## Fast path: create a Kubernetes stack from flags
+
+Here is a realistic AWS-flavored example:
+
+```bash
+kitaru stack create prod-k8s \
+  --type kubernetes \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com \
+  --cluster prod-cluster \
+  --region eu-west-1 \
+  --namespace ml
+```
+
+By default, Kitaru activates the new stack as soon as creation succeeds.
+
+If you want to create it without switching your persisted default stack yet:
+
+```bash
+kitaru stack create prod-k8s \
+  --type kubernetes \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com \
+  --cluster prod-cluster \
+  --region eu-west-1 \
+  --namespace ml \
+  --no-activate
+```
+
+The same flow works for GCP-backed stacks. The main difference is that your artifact store starts with `gs://...` and your registry URI should be a GCP registry URI.
+
+If your environment needs explicit credentials, pass them at create time:
+
+```bash
+kitaru stack create prod-k8s \
+  --type kubernetes \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com \
+  --cluster prod-cluster \
+  --region eu-west-1 \
+  --credentials aws-profile:production
+```
+
+For the full option list, see [`kitaru stack create`](/cli/stack/create).
+
+## Inspect what Kitaru created
+
+Once the stack exists, these three commands tell slightly different stories:
+
+### Show one stack in detail
+
+```bash
+kitaru stack show prod-k8s
+```
+
+Use this when you want the translated Kitaru view of one stack: runner, storage, image registry, and any additional components.
+
+### Show your current persisted default stack
+
+```bash
+kitaru stack current
+```
+
+Use this when you want to know which stack Kitaru will fall back to if nothing higher in the precedence chain overrides it.
+
+### List available stacks
+
+```bash
+kitaru stack list
+```
+
+Use this when you want the wider picture: what exists, which one is active, and which stacks were created as Kitaru-managed stacks.
+
+Reference pages:
+
+- [`kitaru stack show`](/cli/stack/show)
+- [`kitaru stack current`](/cli/stack/current)
+- [`kitaru stack list`](/cli/stack/list)
+
+## Repeatable path: create from YAML
+
+If you want a stack definition you can keep in the repo or reuse across environments, put the inputs in a YAML file.
+
+Example `stack.yaml`:
+
+```yaml
+name: prod-k8s
+type: kubernetes
+artifact_store: s3://my-bucket/kitaru
+container_registry: 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+cluster: prod-cluster
+region: eu-west-1
+namespace: ml
+credentials: aws-profile:production
+verify: false
+activate: false
+```
+
+Then create the stack with:
+
+```bash
+kitaru stack create -f stack.yaml
+```
+
+In YAML, use `snake_case` keys such as `artifact_store` and `container_registry`, and use `verify: false` if you want verification disabled. The file schema does not accept CLI-style keys such as `artifact-store`, `container-registry`, or `no_verify`.
+
+If you provide both YAML values and CLI flags, the CLI values win. That means you can keep most of the configuration in the file and still override one or two fields when needed:
+
+```bash
+kitaru stack create prod-k8s-staging \
+  -f stack.yaml \
+  --region eu-central-1 \
+  --namespace staging \
+  --no-activate
+```
+
+In story form: think of the YAML file as your saved baseline, and the CLI flags as the sticky notes you place on top for this one run.
+
+## Use the stack permanently vs temporarily
+
+There are two different moves here, and it helps to keep them separate.
+
+### Make it your persisted default
+
+```bash
+kitaru stack use prod-k8s
+```
+
+This changes the stack Kitaru falls back to when no higher-precedence override is present.
+
+### Use it only for one execution
+
+```bash
+kitaru run path/to/flow.py:my_flow --stack prod-k8s
+```
+
+This uses `prod-k8s` for that one execution only.
+
+The important distinction is:
+
+- `kitaru stack use ...` changes your persisted fallback stack
+- `kitaru run ... --stack ...` changes only that one execution
+- flow-level and runtime-level stack overrides also remain temporary
+
+So if you do a one-off remote run, `kitaru stack current` should still show the same persisted default afterward.
+
+If you want the full precedence story, see:
+
+- [Configuration](/getting-started/configuration)
+- [Flows](/concepts/flows)
+- [`kitaru run`](/cli/run)
+- [`kitaru stack use`](/cli/stack/use)
+
+## Delete safely
+
+There are three common delete paths.
+
+### Delete only the stack record
+
+```bash
+kitaru stack delete prod-k8s
+```
+
+Use this when you want to remove the stack entry but leave the underlying components alone.
+
+### Delete the stack and clean up Kitaru-managed components
+
+```bash
+kitaru stack delete prod-k8s --recursive
+```
+
+Use this when you want Kitaru to also remove Kitaru-managed components that are not shared with other stacks.
+
+### Delete an active stack and force a safe switch first
+
+```bash
+kitaru stack delete prod-k8s --recursive --force
+```
+
+Use this when the stack you are deleting is currently active. Kitaru will switch away first and then continue.
+
+For exact behavior and flags, see [`kitaru stack delete`](/cli/stack/delete).
+
+## Full reference
+
+When you need exact command syntax instead of the walkthrough, jump to:
+
+- [Stack command overview](/cli/stack)
+- [`kitaru stack create`](/cli/stack/create)
+- [`kitaru stack show`](/cli/stack/show)
+- [`kitaru stack use`](/cli/stack/use)
+- [`kitaru stack delete`](/cli/stack/delete)
+- [`kitaru run`](/cli/run)

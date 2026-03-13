@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, call, patch
@@ -20,7 +21,12 @@ from kitaru.errors import (
     KitaruUsageError,
     KitaruUserCodeError,
 )
-from kitaru.flow import FlowHandle, _wrap_flow_entrypoint, flow
+from kitaru.flow import (
+    FlowHandle,
+    _temporary_active_stack,
+    _wrap_flow_entrypoint,
+    flow,
+)
 from kitaru.replay import ReplayPlan
 from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
@@ -310,6 +316,34 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
     configured_pipeline.assert_called_once_with("payload")
 
 
+def test_run_resolves_config_with_decorator_stack_when_invocation_omits_it() -> None:
+    """Decorator stack defaults should flow into config resolution unchanged."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="decorator-stack"),
+        ) as resolve_execution_config_mock,
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.Client") as client_cls,
+    ):
+        client_cls.return_value.active_stack_model.id = "old-stack-id"
+        wrapped = flow(stack="decorator-stack")(lambda: None)
+        wrapped.run()
+
+    resolve_call = resolve_execution_config_mock.call_args.kwargs
+    assert resolve_call["decorator_overrides"].stack == "decorator-stack"
+    assert resolve_call["invocation_overrides"].stack is None
+
+
 def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
     source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
     replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
@@ -367,6 +401,48 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
     assert persist_mock.call_args.kwargs["run_id"] == replayed_run.id
 
 
+def test_replay_resolves_config_with_invocation_stack_override() -> None:
+    """Replay should pass invocation stack overrides through the shared resolver."""
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="invocation-stack"),
+        ) as resolve_execution_config_mock,
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch(
+            "kitaru.flow.build_replay_plan",
+            return_value=ReplayPlan(
+                original_run_id=str(source_run.id),
+                steps_to_skip=set(),
+                input_overrides={},
+                step_input_overrides={},
+            ),
+        ),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.active_stack_model.id = "old-stack-id"
+        client_instance.get_pipeline_run.return_value = source_run
+
+        wrapped = flow(stack="decorator-stack")(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write", stack="invocation-stack")
+
+    resolve_call = resolve_execution_config_mock.call_args.kwargs
+    assert resolve_call["decorator_overrides"].stack == "decorator-stack"
+    assert resolve_call["invocation_overrides"].stack == "invocation-stack"
+
+
 def test_replay_validates_connection_before_loading_source_run() -> None:
     """Replay should fail before touching ZenML if env project validation fails."""
     base_pipeline = MagicMock()
@@ -386,6 +462,129 @@ def test_replay_validates_connection_before_loading_source_run() -> None:
 
     resolve_connection_mock.assert_called_once_with(validate_for_use=True)
     client_cls.return_value.get_pipeline_run.assert_not_called()
+
+
+def test_temporary_active_stack_serializes_concurrent_bindings() -> None:
+    """Concurrent temporary stack bindings should not interleave within one process."""
+    first_entered = threading.Event()
+    second_attempted = threading.Event()
+    release_first = threading.Event()
+    second_client_created = threading.Event()
+    activation_order: list[str] = []
+    thread_errors: list[Exception] = []
+
+    client_one = MagicMock()
+    client_one.active_stack_model = SimpleNamespace(id="old-stack-1")
+
+    client_two = MagicMock()
+    client_two.active_stack_model = SimpleNamespace(id="old-stack-2")
+
+    def _activate_one(stack_name_or_id: str) -> None:
+        activation_order.append(stack_name_or_id)
+        if stack_name_or_id == "stack-1":
+            first_entered.set()
+            assert release_first.wait(timeout=1), (
+                "First stack binding was not released."
+            )
+
+    def _activate_two(stack_name_or_id: str) -> None:
+        activation_order.append(stack_name_or_id)
+
+    client_one.activate_stack.side_effect = _activate_one
+    client_two.activate_stack.side_effect = _activate_two
+
+    def _client_factory() -> MagicMock:
+        if not first_entered.is_set():
+            return client_one
+        second_client_created.set()
+        return client_two
+
+    def _worker(
+        stack_name_or_id: str, *, mark_attempt: threading.Event | None = None
+    ) -> None:
+        try:
+            if mark_attempt is not None:
+                mark_attempt.set()
+            with _temporary_active_stack(stack_name_or_id):
+                return
+        except Exception as exc:  # pragma: no cover - propagated via assertion below
+            thread_errors.append(exc)
+
+    with patch("kitaru.flow.Client", side_effect=_client_factory):
+        first_thread = threading.Thread(target=_worker, args=("stack-1",))
+        second_thread = threading.Thread(
+            target=_worker,
+            args=("stack-2",),
+            kwargs={"mark_attempt": second_attempted},
+        )
+
+        first_thread.start()
+        assert first_entered.wait(timeout=1), "First stack binding never entered."
+
+        second_thread.start()
+        assert second_attempted.wait(timeout=1), "Second stack binding never attempted."
+        assert not second_client_created.wait(timeout=0.1)
+
+        release_first.set()
+        first_thread.join(timeout=1)
+        second_thread.join(timeout=1)
+
+    assert not thread_errors
+    assert activation_order == ["stack-1", "old-stack-1", "stack-2", "old-stack-2"]
+
+
+def test_temporary_active_stack_serializes_default_stack_reads() -> None:
+    """A submission without an explicit stack should still wait for a temporary bind."""
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_attempted = threading.Event()
+    second_entered = threading.Event()
+    thread_errors: list[Exception] = []
+
+    client = MagicMock()
+    client.active_stack_model = SimpleNamespace(id="old-stack-id")
+
+    def _activate(stack_name_or_id: str) -> None:
+        if stack_name_or_id == "stack-1":
+            first_entered.set()
+            assert release_first.wait(timeout=1), (
+                "First stack binding was not released."
+            )
+
+    client.activate_stack.side_effect = _activate
+
+    def _worker_explicit() -> None:
+        try:
+            with _temporary_active_stack("stack-1"):
+                return
+        except Exception as exc:  # pragma: no cover - propagated via assertion below
+            thread_errors.append(exc)
+
+    def _worker_default() -> None:
+        try:
+            second_attempted.set()
+            with _temporary_active_stack(None):
+                second_entered.set()
+        except Exception as exc:  # pragma: no cover - propagated via assertion below
+            thread_errors.append(exc)
+
+    with patch("kitaru.flow.Client", return_value=client):
+        first_thread = threading.Thread(target=_worker_explicit)
+        second_thread = threading.Thread(target=_worker_default)
+
+        first_thread.start()
+        assert first_entered.wait(timeout=1), "First stack binding never entered."
+
+        second_thread.start()
+        assert second_attempted.wait(timeout=1), "Second stack binding never attempted."
+        assert not second_entered.wait(timeout=0.1)
+
+        release_first.set()
+        first_thread.join(timeout=1)
+        second_thread.join(timeout=1)
+
+    assert not thread_errors
+    assert second_entered.is_set()
 
 
 def test_flow_handle_wait_polls_until_complete() -> None:

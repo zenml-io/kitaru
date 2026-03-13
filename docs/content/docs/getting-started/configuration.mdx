@@ -70,14 +70,22 @@ arguments can override both.
 ```python
 from kitaru import flow
 
-@flow(cache=True, retries=2)
+@flow(cache=True, retries=2, stack="gpu-cluster")
 def my_flow(topic: str) -> str:
     ...
 
-handle = my_flow.run("kitaru", retries=3)
+handle = my_flow.run("kitaru", retries=3, stack="prod-cluster")
 ```
 
-In this example, resolved retries are `3`.
+In this example, resolved retries are `3`, and the execution runs on
+`prod-cluster` for that one submission.
+
+The important distinction is:
+
+- `kitaru.configure(stack="...")` sets a process-local default
+- `@flow(stack="...")` sets a default for one flow definition
+- `my_flow.run(stack="...")` / `my_flow.deploy(stack="...")` override both for one execution
+- none of those change the persisted active stack selected by `kitaru stack use ...`
 
 ## Environment variables
 
@@ -151,11 +159,11 @@ active. Secret values such as `KITARU_AUTH_TOKEN` and
 3. `kitaru.configure(...)`
 4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
-6. Global user config (including active stack and connection defaults)
+6. Persisted active stack fallback plus global user config (for example connection defaults)
 7. Built-in defaults (`cache=True`, `retries=0`)
 
 In practice, `stack` starts unset in the built-in defaults and is then resolved
-from the active stack when one is available.
+from the persisted active stack when one is available.
 
 For connection-specific resolution, Kitaru uses this lower-to-higher order:
 
