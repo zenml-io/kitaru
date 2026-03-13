@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -142,6 +143,13 @@ def _stack_details_stub(
             ),
         ],
     )
+
+
+def _write_stack_create_file(tmp_path: Path, content: str) -> Path:
+    """Write a temporary stack-create YAML file for CLI tests."""
+    path = tmp_path / "stack.yaml"
+    path.write_text(content)
+    return path
 
 
 def test_importing_cli_does_not_resolve_version_metadata() -> None:
@@ -2238,6 +2246,32 @@ def test_stack_create_rejects_unsupported_stack_type_json(
     }
 
 
+def test_stack_create_rejects_blank_type_override(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An explicit blank --type should fail instead of silently defaulting to local."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-k8s
+type: kubernetes
+artifact_store: s3://bucket/kitaru
+container_registry: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+cluster: demo-cluster
+region: us-east-1
+""".strip(),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "--file", str(stack_file), "--type", ""])
+
+    assert exc_info.value.code == 1
+    assert (
+        "Unsupported stack type: . Use 'local' or 'kubernetes'."
+        in capsys.readouterr().err
+    )
+
+
 def test_stack_create_kubernetes_rejects_unsupported_artifact_store_scheme(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -2501,6 +2535,242 @@ def test_stack_create_kubernetes_json_output(
             },
         },
     }
+
+
+def test_stack_create_from_file_builds_local_stack(tmp_path: Path) -> None:
+    """YAML-only local stack creation should use file inputs."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-local
+type: local
+activate: true
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(name="yaml-local")
+        app(["stack", "create", "--file", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    mock_create_stack.assert_called_once_with(
+        "yaml-local",
+        stack_type=StackType.LOCAL,
+        activate=True,
+        kubernetes=None,
+    )
+
+
+def test_stack_create_from_file_builds_kubernetes_stack(tmp_path: Path) -> None:
+    """YAML-only Kubernetes creation should build the same structured spec as flags."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-k8s
+type: kubernetes
+artifact_store: s3://bucket/kitaru
+container_registry: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+cluster: demo-cluster
+region: us-east-1
+namespace: ml
+credentials: aws-profile:demo
+verify: false
+activate: false
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-k8s",
+            stack_type="kubernetes",
+            previous_active_stack=None,
+        )
+        app(["stack", "create", "-f", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.args == ("yaml-k8s",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.KUBERNETES
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    assert isinstance(kubernetes_spec, KubernetesStackSpec)
+    assert kubernetes_spec.model_dump(mode="json") == {
+        "provider": "aws",
+        "artifact_store": "s3://bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        "cluster": "demo-cluster",
+        "region": "us-east-1",
+        "namespace": "ml",
+        "credentials": "aws-profile:demo",
+        "verify": False,
+    }
+
+
+def test_stack_create_cli_overrides_file_values(tmp_path: Path) -> None:
+    """Explicit CLI values should override YAML inputs while preserving the rest."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-k8s
+type: kubernetes
+artifact_store: s3://bucket/kitaru
+container_registry: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+cluster: demo-cluster
+region: us-east-1
+namespace: yaml-ns
+credentials: aws-profile:demo
+verify: true
+activate: true
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="cli-name",
+            stack_type="kubernetes",
+            previous_active_stack=None,
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "cli-name",
+                "--file",
+                str(stack_file),
+                "--region",
+                "eu-west-1",
+                "--namespace",
+                "cli-ns",
+                "--no-activate",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.args == ("cli-name",)
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    assert isinstance(kubernetes_spec, KubernetesStackSpec)
+    assert kubernetes_spec.model_dump(mode="json") == {
+        "provider": "aws",
+        "artifact_store": "s3://bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        "cluster": "demo-cluster",
+        "region": "eu-west-1",
+        "namespace": "cli-ns",
+        "credentials": "aws-profile:demo",
+        "verify": False,
+    }
+
+
+def test_stack_create_from_file_uses_yaml_name_when_positional_omitted(
+    tmp_path: Path,
+) -> None:
+    """File mode should allow omitting the positional stack name."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-name
+type: local
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(name="yaml-name")
+        app(["stack", "create", "-f", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.args == ("yaml-name",)
+
+
+def test_stack_create_from_file_requires_name_somewhere(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The merged create inputs still require a non-empty final name."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+type: local
+""".strip(),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "-f", str(stack_file)])
+
+    assert exc_info.value.code == 1
+    assert "Stack name or ID cannot be empty." in capsys.readouterr().err
+
+
+def test_stack_create_from_file_surfaces_invalid_yaml_json_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Invalid YAML file contents should route through the structured error path."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: broken
+type: [unterminated
+""".strip(),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "-f", str(stack_file), "--output", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "stack.create"
+    assert payload["error"]["type"] == "ValueError"
+    assert "Invalid YAML in stack config file" in payload["error"]["message"]
+
+
+def test_stack_create_from_file_rejects_unknown_keys(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Unknown YAML keys should fail fast with a clear schema error."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-name
+type: local
+unexpected: true
+""".strip(),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "-f", str(stack_file)])
+
+    assert exc_info.value.code == 1
+    assert "Unsupported stack config keys" in capsys.readouterr().err
+
+
+def test_stack_create_from_file_rejects_non_string_keys(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Top-level YAML keys must stay string-based for predictable schema validation."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-name
+1: local
+""".strip(),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "-f", str(stack_file)])
+
+    assert exc_info.value.code == 1
+    assert "can only use string keys" in capsys.readouterr().err
 
 
 def test_stack_create_kubernetes_surfaces_backend_failure(

@@ -90,6 +90,7 @@ class TestBuildCommandTree:
             "current",
             "delete",
             "list",
+            "show",
             "use",
         ]
 
@@ -149,6 +150,7 @@ class TestBuildCommandTree:
         run = _find_command(tree, "run")
         get = _find_command(tree, "executions", "get")
         secrets_set = _find_command(tree, "secrets", "set")
+        stack_create = _find_command(tree, "stack", "create")
         stack_use = _find_command(tree, "stack", "use")
 
         assert login.usage == "kitaru login SERVER [OPTIONS]"
@@ -165,6 +167,11 @@ class TestBuildCommandTree:
             ["NAME"],
             ["ASSIGNMENTS..."],
         ]
+
+        assert stack_create.parameters[0].names == ["NAME"]
+        assert all(
+            "--name" not in parameter.names for parameter in stack_create.parameters
+        )
 
         assert stack_use.usage.startswith("kitaru stack use STACK")
         assert stack_use.parameters[0].names == ["STACK"]

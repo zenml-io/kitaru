@@ -26,6 +26,7 @@ from zenml.config.global_config import GlobalConfiguration
 from zenml.exceptions import EntityExistsError, ZenKeyError
 from zenml.login.credentials_store import get_credentials_store
 from zenml.models import SecretResponse
+from zenml.utils import yaml_utils
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
 from _kitaru_bootstrap import resolve_installed_version
@@ -54,6 +55,7 @@ from kitaru.config import (
     _create_stack_operation,
     _delete_stack_operation,
     _list_stack_entries,
+    _show_stack_operation,
     active_stack_log_store,
     list_model_aliases,
     login_to_server,
@@ -85,6 +87,7 @@ from kitaru.inspection import (
     serialize_stack,
     serialize_stack_create_result,
     serialize_stack_delete_result,
+    serialize_stack_details,
 )
 from kitaru.inspection import (
     build_runtime_snapshot as _build_runtime_snapshot,
@@ -193,6 +196,22 @@ class LogoutResult:
                 other.local_fallback_available,
             )
         return NotImplemented
+
+
+@dataclass(frozen=True)
+class _StackCreateInputs:
+    """Normalized stack-create inputs before backend validation."""
+
+    name: str | None = None
+    type: str | None = None
+    activate: bool | None = None
+    artifact_store: str | None = None
+    container_registry: str | None = None
+    cluster: str | None = None
+    region: str | None = None
+    namespace: str | None = None
+    credentials: str | None = None
+    verify: bool | None = None
 
 
 OutputFormatOption = Annotated[
@@ -405,6 +424,161 @@ def _build_kubernetes_stack_spec_from_cli(
         namespace=normalized_namespace or "default",
         credentials=normalized_credentials,
         verify=not no_verify,
+    )
+
+
+_STACK_CREATE_FILE_KEY_ALIASES = {
+    "artifact-store": "artifact_store",
+    "container-registry": "container_registry",
+}
+_STACK_CREATE_FILE_SUPPORTED_KEYS = {
+    "name",
+    "type",
+    "activate",
+    "artifact_store",
+    "artifact-store",
+    "container_registry",
+    "container-registry",
+    "cluster",
+    "region",
+    "namespace",
+    "credentials",
+    "verify",
+}
+_STACK_CREATE_FILE_STRING_KEYS = {
+    "name",
+    "type",
+    "artifact_store",
+    "container_registry",
+    "cluster",
+    "region",
+    "namespace",
+    "credentials",
+}
+_STACK_CREATE_FILE_BOOLEAN_KEYS = {
+    "activate",
+    "verify",
+}
+
+
+def _normalize_stack_create_file_mapping(
+    raw: dict[str, Any],
+    *,
+    source: Path,
+) -> _StackCreateInputs:
+    """Validate and normalize a stack-create YAML mapping."""
+    non_string_keys = [repr(key) for key in raw if not isinstance(key, str)]
+    if non_string_keys:
+        raise ValueError(
+            f"Stack config file '{source}' can only use string keys: "
+            + ", ".join(sorted(non_string_keys))
+        )
+
+    unknown_keys = sorted(
+        key for key in raw if key not in _STACK_CREATE_FILE_SUPPORTED_KEYS
+    )
+    if unknown_keys:
+        raise ValueError(
+            f"Unsupported stack config keys in '{source}': " + ", ".join(unknown_keys)
+        )
+
+    normalized_values: dict[str, Any] = {}
+    canonical_sources: dict[str, str] = {}
+    for raw_key, value in raw.items():
+        canonical_key = _STACK_CREATE_FILE_KEY_ALIASES.get(raw_key, raw_key)
+        existing_source = canonical_sources.get(canonical_key)
+        if existing_source is not None:
+            raise ValueError(
+                f"Stack config file '{source}' cannot define both "
+                f"'{existing_source}' and '{raw_key}'."
+            )
+
+        if canonical_key in _STACK_CREATE_FILE_STRING_KEYS:
+            if value is not None and not isinstance(value, str):
+                raise ValueError(
+                    f"Stack config key '{raw_key}' in '{source}' must be a string."
+                )
+        elif (
+            canonical_key in _STACK_CREATE_FILE_BOOLEAN_KEYS
+            and value is not None
+            and not isinstance(value, bool)
+        ):
+            raise ValueError(
+                f"Stack config key '{raw_key}' in '{source}' must be a boolean."
+            )
+
+        canonical_sources[canonical_key] = raw_key
+        normalized_values[canonical_key] = value
+
+    return _StackCreateInputs(**normalized_values)
+
+
+def _load_stack_create_file(path: Path) -> _StackCreateInputs:
+    """Load stack-create inputs from a YAML file."""
+    if not path.exists() or not path.is_file():
+        raise ValueError(f"Stack config file not found: {path}")
+
+    try:
+        raw = yaml_utils.read_yaml(str(path))
+    except Exception as exc:
+        raise ValueError(f"Invalid YAML in stack config file '{path}': {exc}") from exc
+
+    if raw is None:
+        return _StackCreateInputs()
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Stack config file '{path}' must contain a top-level mapping."
+        )
+
+    return _normalize_stack_create_file_mapping(raw, source=path)
+
+
+def _merge_stack_create_inputs(
+    *,
+    cli_inputs: _StackCreateInputs,
+    file_inputs: _StackCreateInputs | None,
+) -> _StackCreateInputs:
+    """Merge CLI and YAML stack-create inputs with CLI precedence."""
+    file_inputs = file_inputs or _StackCreateInputs()
+    return _StackCreateInputs(
+        name=cli_inputs.name if cli_inputs.name is not None else file_inputs.name,
+        type=cli_inputs.type if cli_inputs.type is not None else file_inputs.type,
+        activate=(
+            cli_inputs.activate
+            if cli_inputs.activate is not None
+            else file_inputs.activate
+        ),
+        artifact_store=(
+            cli_inputs.artifact_store
+            if cli_inputs.artifact_store is not None
+            else file_inputs.artifact_store
+        ),
+        container_registry=(
+            cli_inputs.container_registry
+            if cli_inputs.container_registry is not None
+            else file_inputs.container_registry
+        ),
+        cluster=(
+            cli_inputs.cluster
+            if cli_inputs.cluster is not None
+            else file_inputs.cluster
+        ),
+        region=(
+            cli_inputs.region if cli_inputs.region is not None else file_inputs.region
+        ),
+        namespace=(
+            cli_inputs.namespace
+            if cli_inputs.namespace is not None
+            else file_inputs.namespace
+        ),
+        credentials=(
+            cli_inputs.credentials
+            if cli_inputs.credentials is not None
+            else file_inputs.credentials
+        ),
+        verify=(
+            cli_inputs.verify if cli_inputs.verify is not None else file_inputs.verify
+        ),
     )
 
 
@@ -817,6 +991,63 @@ def _current_stack_rows(stack: StackInfo) -> list[tuple[str, str]]:
         ("Active stack", stack.name),
         ("Stack ID", stack.id),
     ]
+
+
+def _format_stack_component_summary(component: Any) -> str:
+    """Render one stack component for `kitaru stack show` text output."""
+    summary = str(getattr(component, "name", "<unnamed>"))
+    backend = getattr(component, "backend", None)
+    if backend:
+        summary += f" ({backend})"
+
+    for key, value in getattr(component, "details", ()):
+        summary += f"; {key.replace('_', ' ')}: {value}"
+
+    purpose = getattr(component, "purpose", None)
+    if purpose:
+        summary += f"; purpose: {purpose}"
+
+    return summary
+
+
+def _stack_show_rows(details: Any) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru stack show`."""
+    rows: list[tuple[str, str]] = [
+        ("Name", details.stack.name),
+        ("ID", details.stack.id),
+        ("Type", str(details.stack_type)),
+        ("Active", "yes" if details.stack.is_active else "no"),
+        ("Managed", "yes" if getattr(details, "is_managed", False) else "no"),
+    ]
+
+    components = list(getattr(details, "components", ()))
+    if not components:
+        rows.append(("Components", "None reported"))
+        return rows
+
+    component_labels = {
+        "runner": "Runner",
+        "storage": "Storage",
+        "image_registry": "Image registry",
+        "additional_component": "Additional component",
+    }
+    label_counts: dict[str, int] = {}
+
+    for component in components:
+        base_label = component_labels.get(
+            getattr(component, "role", "additional_component"),
+            "Additional component",
+        )
+        label_counts[base_label] = label_counts.get(base_label, 0) + 1
+        suffix = f" #{label_counts[base_label]}" if label_counts[base_label] > 1 else ""
+        rows.append(
+            (
+                f"{base_label}{suffix}",
+                _format_stack_component_summary(component),
+            )
+        )
+
+    return rows
 
 
 def _model_rows(entries: list[ModelAliasEntry]) -> list[tuple[str, str]]:
@@ -1587,7 +1818,7 @@ def set(
 
 
 @log_store_app.command
-def show(output: OutputFormatOption = "text") -> None:
+def show__(output: OutputFormatOption = "text") -> None:
     """Show the effective global runtime log-store configuration."""
     command = "log-store.show"
     output_format = _resolve_output_format(output)
@@ -1689,6 +1920,38 @@ def current(output: OutputFormatOption = "text") -> None:
 
 
 @stack_app.command
+def show(
+    name_or_id: Annotated[
+        str,
+        Parameter(help="Stack name or ID."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Show translated details for a stack by name or ID."""
+    command = "stack.show"
+    output_format = _resolve_output_format(output)
+    try:
+        details = _show_stack_operation(name_or_id)
+    except Exception as exc:  # pragma: no cover - exercised via CLI behavior
+        _exit_with_error(
+            command,
+            str(exc),
+            output=output_format,
+            error_type=builtins.type(exc).__name__,
+        )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            serialize_stack_details(details),
+            output=output_format,
+        )
+        return
+
+    _emit_snapshot("Kitaru stack", _stack_show_rows(details))
+
+
+@stack_app.command
 def use(
     stack: Annotated[
         str,
@@ -1722,17 +1985,26 @@ def use(
 @stack_app.command
 def create(
     name: Annotated[
-        str,
-        Parameter(help="Stack name."),
-    ],
+        str | None,
+        Parameter(help="Stack name. Required unless provided in --file."),
+    ] = None,
+    /,
+    *,
+    file: Annotated[
+        Path | None,
+        Parameter(
+            help="Load stack configuration from a YAML file.",
+            alias=["-f"],
+        ),
+    ] = None,
     no_activate: Annotated[
-        bool,
+        bool | None,
         Parameter(help="Create without activating the stack."),
-    ] = False,
+    ] = None,
     type: Annotated[
-        str,
+        str | None,
         Parameter(help="Stack type: local or kubernetes."),
-    ] = "local",
+    ] = None,
     artifact_store: Annotated[
         str | None,
         Parameter(help="Artifact store URI for Kubernetes stacks (s3:// or gs://)."),
@@ -1758,30 +2030,59 @@ def create(
         Parameter(help="Optional credentials reference for Kubernetes stacks."),
     ] = None,
     no_verify: Annotated[
-        bool,
+        bool | None,
         Parameter(help="Skip credential verification for Kubernetes stacks."),
-    ] = False,
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Create a local or Kubernetes-backed stack."""
     command = "stack.create"
     output_format = _resolve_output_format(output)
     try:
-        stack_type = _normalize_stack_type(type)
+        file_inputs = _load_stack_create_file(file) if file is not None else None
+        merged_inputs = _merge_stack_create_inputs(
+            cli_inputs=_StackCreateInputs(
+                name=name,
+                type=type,
+                activate=False if no_activate else None,
+                artifact_store=artifact_store,
+                container_registry=container_registry,
+                cluster=cluster,
+                region=region,
+                namespace=namespace,
+                credentials=credentials,
+                verify=False if no_verify else None,
+            ),
+            file_inputs=file_inputs,
+        )
+        normalized_name = _normalize_optional_cli_string(merged_inputs.name)
+        if normalized_name is None:
+            raise ValueError("Stack name or ID cannot be empty.")
+
+        raw_stack_type = (
+            merged_inputs.type
+            if merged_inputs.type is not None
+            else StackType.LOCAL.value
+        )
+        stack_type = _normalize_stack_type(raw_stack_type)
         kubernetes_spec = _build_kubernetes_stack_spec_from_cli(
             stack_type=stack_type,
-            artifact_store=artifact_store,
-            container_registry=container_registry,
-            cluster=cluster,
-            region=region,
-            namespace=namespace,
-            credentials=credentials,
-            no_verify=no_verify,
+            artifact_store=merged_inputs.artifact_store,
+            container_registry=merged_inputs.container_registry,
+            cluster=merged_inputs.cluster,
+            region=merged_inputs.region,
+            namespace=merged_inputs.namespace,
+            credentials=merged_inputs.credentials,
+            no_verify=not (
+                merged_inputs.verify if merged_inputs.verify is not None else True
+            ),
         )
         result = _create_stack_operation(
-            name,
+            normalized_name,
             stack_type=stack_type,
-            activate=not no_activate,
+            activate=merged_inputs.activate
+            if merged_inputs.activate is not None
+            else True,
             kubernetes=kubernetes_spec,
         )
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior

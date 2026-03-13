@@ -18,7 +18,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
 - **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, local model aliases (`kitaru model register/list`), and env-first secret resolution for known providers
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
-- **Stack lifecycle** — `kitaru.create_stack()` / `kitaru.delete_stack()`, `kitaru stack create/delete`, automatic activation for new local stacks, and `is_managed` in structured stack listings
+- **Stack lifecycle** — `kitaru.create_stack()` / `kitaru.delete_stack()`, `kitaru stack create/delete/show`, YAML-backed `kitaru stack create -f stack.yaml`, automatic activation for new local stacks, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings
 - **Execution CLI** — `kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
@@ -146,8 +146,10 @@ kitaru executions cancel <exec_id>
 
 kitaru stack list                     List visible stacks
 kitaru stack current                  Show the active stack
+kitaru stack show <name-or-id>        Inspect one stack in Kitaru vocabulary
 kitaru stack use <name-or-id>         Switch active stack
 kitaru stack create <name>            Create a local stack and activate it
+kitaru stack create -f stack.yaml     Create a stack from a YAML config file
 kitaru stack create <name> --no-activate
 kitaru stack delete <name-or-id>      Delete a stack
 kitaru stack delete <name-or-id> --recursive [--force]
