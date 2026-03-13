@@ -20,7 +20,11 @@ from kitaru.cli import (
     app,
 )
 from kitaru.client import ExecutionStatus, LogEntry
-from kitaru.config import ActiveEnvironmentVariable
+from kitaru.config import (
+    ActiveEnvironmentVariable,
+    KubernetesStackSpec,
+    StackType,
+)
 
 
 class _BrokenGlobalConfig:
@@ -65,6 +69,26 @@ def _execution_stub(
         frozen_execution_spec=None,
         original_exec_id=None,
         checkpoints=checkpoints or [],
+    )
+
+
+def _stack_create_result_stub(
+    *,
+    name: str = "dev",
+    is_active: bool = True,
+    previous_active_stack: str | None = "default",
+    stack_type: str = "local",
+    service_connectors_created: tuple[str, ...] = (),
+    resources: dict[str, str] | None = None,
+) -> SimpleNamespace:
+    """Build a lightweight stack-create result object for CLI tests."""
+    return SimpleNamespace(
+        stack=SimpleNamespace(id=f"stack-{name}-id", name=name, is_active=is_active),
+        previous_active_stack=previous_active_stack,
+        components_created=(f"{name} (orchestrator)", f"{name} (artifact_store)"),
+        stack_type=stack_type,
+        service_connectors_created=service_connectors_created,
+        resources=resources,
     )
 
 
@@ -1928,15 +1952,16 @@ def test_stack_create_reports_auto_activation(
         patch("kitaru.cli._create_stack_operation") as mock_create_stack,
         pytest.raises(SystemExit) as exc_info,
     ):
-        mock_create_stack.return_value = SimpleNamespace(
-            stack=SimpleNamespace(id="stack-dev-id", name="dev", is_active=True),
-            previous_active_stack="default",
-            components_created=("dev (orchestrator)", "dev (artifact_store)"),
-        )
+        mock_create_stack.return_value = _stack_create_result_stub()
         app(["stack", "create", "dev"])
 
     assert exc_info.value.code == 0
-    mock_create_stack.assert_called_once_with("dev", activate=True)
+    mock_create_stack.assert_called_once_with(
+        "dev",
+        stack_type=StackType.LOCAL,
+        activate=True,
+        kubernetes=None,
+    )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
     assert "Active stack: default → dev" in output
@@ -1950,15 +1975,19 @@ def test_stack_create_no_activate_skips_active_stack_line(
         patch("kitaru.cli._create_stack_operation") as mock_create_stack,
         pytest.raises(SystemExit) as exc_info,
     ):
-        mock_create_stack.return_value = SimpleNamespace(
-            stack=SimpleNamespace(id="stack-dev-id", name="dev", is_active=False),
+        mock_create_stack.return_value = _stack_create_result_stub(
+            is_active=False,
             previous_active_stack=None,
-            components_created=("dev (orchestrator)", "dev (artifact_store)"),
         )
         app(["stack", "create", "dev", "--no-activate"])
 
     assert exc_info.value.code == 0
-    mock_create_stack.assert_called_once_with("dev", activate=False)
+    mock_create_stack.assert_called_once_with(
+        "dev",
+        stack_type=StackType.LOCAL,
+        activate=False,
+        kubernetes=None,
+    )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
     assert "Active stack:" not in output
@@ -1970,11 +1999,7 @@ def test_stack_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
         patch("kitaru.cli._create_stack_operation") as mock_create_stack,
         pytest.raises(SystemExit) as exc_info,
     ):
-        mock_create_stack.return_value = SimpleNamespace(
-            stack=SimpleNamespace(id="stack-dev-id", name="dev", is_active=True),
-            previous_active_stack="default",
-            components_created=("dev (orchestrator)", "dev (artifact_store)"),
-        )
+        mock_create_stack.return_value = _stack_create_result_stub()
         app(["stack", "create", "dev", "--output", "json"])
 
     assert exc_info.value.code == 0
@@ -1990,8 +2015,355 @@ def test_stack_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
                 "dev (orchestrator)",
                 "dev (artifact_store)",
             ],
+            "stack_type": "local",
         },
     }
+
+
+def test_stack_create_rejects_kubernetes_flags_for_local_stack(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Local stack creation should reject Kubernetes-only flags."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--artifact-store", "s3://bucket/kitaru"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "Kubernetes-only options require --type kubernetes: --artifact-store"
+        in capsys.readouterr().err
+    )
+
+
+def test_stack_create_rejects_blank_kubernetes_flags_for_local_stack(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Blank Kubernetes-only flag values still count as explicit local-stack inputs."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--artifact-store", "   "])
+
+    assert exc_info.value.code == 1
+    assert (
+        "Kubernetes-only options require --type kubernetes: --artifact-store"
+        in capsys.readouterr().err
+    )
+
+
+def test_stack_create_kubernetes_requires_all_mandatory_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Kubernetes stack creation should report all missing required flags."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "kubernetes"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--type kubernetes requires: --artifact-store, --container-registry, "
+        "--cluster, --region."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_rejects_unsupported_stack_type_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid stack types should use the structured JSON error contract."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "modal", "--output", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload == {
+        "command": "stack.create",
+        "error": {
+            "message": ("Unsupported stack type: modal. Use 'local' or 'kubernetes'."),
+            "type": "ValueError",
+        },
+    }
+
+
+def test_stack_create_kubernetes_rejects_unsupported_artifact_store_scheme(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Provider inference should reject unsupported artifact-store schemes."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "dev",
+                "--type",
+                "kubernetes",
+                "--artifact-store",
+                "az://bucket/kitaru",
+                "--container-registry",
+                "registry.example.com/repo",
+                "--cluster",
+                "demo-cluster",
+                "--region",
+                "westeurope",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert (
+        "Cannot infer cloud provider from 'az://bucket/kitaru'. "
+        "Use an s3:// or gs:// URI."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_kubernetes_builds_aws_spec() -> None:
+    """AWS-backed Kubernetes stacks should infer provider and defaults."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-k8s",
+            stack_type="kubernetes",
+            resources={
+                "provider": "aws",
+                "cluster": "demo-cluster",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-k8s",
+                "--type",
+                "kubernetes",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--cluster",
+                "demo-cluster",
+                "--region",
+                "us-east-1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    mock_create_stack.assert_called_once()
+    assert mock_create_stack.call_args.args == ("my-k8s",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.KUBERNETES
+    assert mock_create_stack.call_args.kwargs["activate"] is True
+    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    assert isinstance(kubernetes_spec, KubernetesStackSpec)
+    assert kubernetes_spec.model_dump(mode="json") == {
+        "provider": "aws",
+        "artifact_store": "s3://bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        "cluster": "demo-cluster",
+        "region": "us-east-1",
+        "namespace": "default",
+        "credentials": None,
+        "verify": True,
+    }
+
+
+def test_stack_create_kubernetes_builds_gcp_spec_with_credentials_and_no_verify() -> (
+    None
+):
+    """GCP-backed Kubernetes stacks should preserve raw credentials and verify flag."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-k8s",
+            stack_type="kubernetes",
+            resources={
+                "provider": "gcp",
+                "cluster": "demo-cluster",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-k8s",
+                "--type",
+                "kubernetes",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--cluster",
+                "demo-cluster",
+                "--region",
+                "us-central1",
+                "--namespace",
+                "agents",
+                "--credentials",
+                "gcp-service-account:/tmp/key.json",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    assert isinstance(kubernetes_spec, KubernetesStackSpec)
+    assert kubernetes_spec.model_dump(mode="json") == {
+        "provider": "gcp",
+        "artifact_store": "gs://bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+        "cluster": "demo-cluster",
+        "region": "us-central1",
+        "namespace": "agents",
+        "credentials": "gcp-service-account:/tmp/key.json",
+        "verify": False,
+    }
+
+
+def test_stack_create_kubernetes_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Kubernetes stack creation should render provider/resource details."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-k8s",
+            stack_type="kubernetes",
+            resources={
+                "provider": "aws",
+                "cluster": "demo-cluster",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-k8s",
+                "--type",
+                "kubernetes",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--cluster",
+                "demo-cluster",
+                "--region",
+                "us-east-1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Created stack: my-k8s (kubernetes)" in output
+    assert "Provider:" in output and "aws" in output
+    assert "Cluster:" in output and "demo-cluster (us-east-1)" in output
+    assert "Artifacts:" in output and "s3://bucket/kitaru" in output
+    assert (
+        "Registry:" in output
+        and "123456789012.dkr.ecr.us-east-1.amazonaws.com" in output
+    )
+    assert "Active stack: default → my-k8s" in output
+
+
+def test_stack_create_kubernetes_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Kubernetes stack creation JSON should include future-ready metadata."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-k8s",
+            stack_type="kubernetes",
+            service_connectors_created=("my-k8s-aws",),
+            resources={
+                "provider": "aws",
+                "cluster": "demo-cluster",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-k8s",
+                "--type",
+                "kubernetes",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--cluster",
+                "demo-cluster",
+                "--region",
+                "us-east-1",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "stack.create",
+        "item": {
+            "id": "stack-my-k8s-id",
+            "name": "my-k8s",
+            "is_active": True,
+            "previous_active_stack": "default",
+            "components_created": [
+                "my-k8s (orchestrator)",
+                "my-k8s (artifact_store)",
+            ],
+            "stack_type": "kubernetes",
+            "service_connectors_created": ["my-k8s-aws"],
+            "resources": {
+                "provider": "aws",
+                "cluster": "demo-cluster",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+            },
+        },
+    }
+
+
+def test_stack_create_kubernetes_surfaces_backend_stub(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Phase 2 should still surface the backend stub until Phase 3 lands."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "my-k8s",
+                "--type",
+                "kubernetes",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--cluster",
+                "demo-cluster",
+                "--region",
+                "us-east-1",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert (
+        "Kubernetes stack creation is not implemented yet." in capsys.readouterr().err
+    )
 
 
 def test_stack_delete_reports_deleted_components_and_new_active_stack(

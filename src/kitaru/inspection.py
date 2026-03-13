@@ -442,6 +442,11 @@ def serialize_stack_create_result(result: _StackCreateResult) -> dict[str, Any]:
     payload = serialize_stack(result.stack)
     payload["previous_active_stack"] = result.previous_active_stack
     payload["components_created"] = list(result.components_created)
+    payload["stack_type"] = result.stack_type
+    if result.service_connectors_created:
+        payload["service_connectors_created"] = list(result.service_connectors_created)
+    if result.resources:
+        payload["resources"] = result.resources
     return payload
 
 

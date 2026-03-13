@@ -378,6 +378,9 @@ def test_manage_stack_create_returns_structured_result() -> None:
             stack=StackInfo(id="stack-dev-id", name="dev", is_active=True),
             previous_active_stack="default",
             components_created=("dev (orchestrator)", "dev (artifact_store)"),
+            stack_type="local",
+            service_connectors_created=(),
+            resources=None,
         )
 
         payload = manage_stack("create", "dev", activate=True)
@@ -389,6 +392,7 @@ def test_manage_stack_create_returns_structured_result() -> None:
         "is_active": True,
         "previous_active_stack": "default",
         "components_created": ["dev (orchestrator)", "dev (artifact_store)"],
+        "stack_type": "local",
     }
 
 

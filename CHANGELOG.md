@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - `kitaru stack list --output json` and MCP `kitaru_stacks_list` now include `is_managed`, derived from the stack's `kitaru.managed` label
+- `kitaru stack create` now accepts explicit stack type selection (`--type local|kubernetes`), validates and plumbs Kubernetes provisioning flags, infers the cloud provider from the artifact-store URI (`s3://` -> AWS, `gs://` -> GCP), and includes `stack_type` in create-result payloads ahead of Phase 3 Kubernetes provisioning
 - Examples are now grouped into topic-focused subdirectories under `examples/`, each with its own README, while the stable `uv run -m examples.<module>` entrypoints continue to work; the root README, docs site, and tester guide now point to a unified examples catalog
 - Kitaru now treats `KITARU_*` environment variables as the public configuration surface for remote connection/bootstrap, translating the supported connection/debug vars into `ZENML_*` env vars before CLI/SDK startup
 - Connection resolution now understands direct `ZENML_*` env vars as a compatibility layer below `KITARU_*`, while env-driven remote connections fail at first use unless an explicit project is set

@@ -45,9 +45,12 @@ from kitaru.config import (
     ZENML_STORE_API_KEY_ENV,
     ZENML_STORE_URL_ENV,
     ActiveEnvironmentVariable,
+    CloudProvider,
+    KubernetesStackSpec,
     ModelAliasEntry,
     ResolvedLogStore,
     StackInfo,
+    StackType,
     _create_stack_operation,
     _delete_stack_operation,
     _list_stack_entries,
@@ -300,6 +303,109 @@ def _parse_json_object(
             '(for example: \'{"topic": "AI"}\').'
         )
     return parsed
+
+
+def _normalize_optional_cli_string(value: str | None) -> str | None:
+    """Normalize an optional CLI string, treating blanks as omitted."""
+    if value is None:
+        return None
+    normalized_value = value.strip()
+    return normalized_value or None
+
+
+def _normalize_stack_type(raw_type: str) -> StackType:
+    """Normalize a stack-type flag into the internal enum."""
+    normalized_type = raw_type.strip().lower()
+    try:
+        return StackType(normalized_type)
+    except ValueError as exc:
+        raise ValueError(
+            f"Unsupported stack type: {raw_type}. Use 'local' or 'kubernetes'."
+        ) from exc
+
+
+def _infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
+    """Infer the cloud provider from an artifact store URI."""
+    if artifact_store_uri.startswith("s3://"):
+        return CloudProvider.AWS
+    if artifact_store_uri.startswith("gs://"):
+        return CloudProvider.GCP
+    raise ValueError(
+        f"Cannot infer cloud provider from '{artifact_store_uri}'. "
+        "Use an s3:// or gs:// URI."
+    )
+
+
+def _build_kubernetes_stack_spec_from_cli(
+    *,
+    stack_type: StackType,
+    artifact_store: str | None,
+    container_registry: str | None,
+    cluster: str | None,
+    region: str | None,
+    namespace: str | None,
+    credentials: str | None,
+    no_verify: bool,
+) -> KubernetesStackSpec | None:
+    """Validate stack-create CLI flags and build a Kubernetes spec."""
+    normalized_artifact_store = _normalize_optional_cli_string(artifact_store)
+    normalized_container_registry = _normalize_optional_cli_string(container_registry)
+    normalized_cluster = _normalize_optional_cli_string(cluster)
+    normalized_region = _normalize_optional_cli_string(region)
+    normalized_namespace = _normalize_optional_cli_string(namespace)
+    normalized_credentials = _normalize_optional_cli_string(credentials)
+
+    kubernetes_option_flags = [
+        ("--artifact-store", artifact_store is not None),
+        ("--container-registry", container_registry is not None),
+        ("--cluster", cluster is not None),
+        ("--region", region is not None),
+        ("--namespace", namespace is not None),
+        ("--credentials", credentials is not None),
+        ("--no-verify", no_verify),
+    ]
+
+    if stack_type == StackType.LOCAL:
+        provided_kubernetes_flags = [
+            flag for flag, is_provided in kubernetes_option_flags if is_provided
+        ]
+        if provided_kubernetes_flags:
+            raise ValueError(
+                "Kubernetes-only options require --type kubernetes: "
+                + ", ".join(provided_kubernetes_flags)
+            )
+        return None
+
+    missing_required_flags = [
+        flag
+        for flag, value in (
+            ("--artifact-store", normalized_artifact_store),
+            ("--container-registry", normalized_container_registry),
+            ("--cluster", normalized_cluster),
+            ("--region", normalized_region),
+        )
+        if value is None
+    ]
+    if missing_required_flags:
+        raise ValueError(
+            "--type kubernetes requires: " + ", ".join(missing_required_flags) + "."
+        )
+
+    assert normalized_artifact_store is not None
+    assert normalized_container_registry is not None
+    assert normalized_cluster is not None
+    assert normalized_region is not None
+
+    return KubernetesStackSpec(
+        provider=_infer_cloud_provider(normalized_artifact_store),
+        artifact_store=normalized_artifact_store,
+        container_registry=normalized_container_registry,
+        cluster=normalized_cluster,
+        region=normalized_region,
+        namespace=normalized_namespace or "default",
+        credentials=normalized_credentials,
+        verify=not no_verify,
+    )
 
 
 def _format_timestamp(value: datetime | None) -> str:
@@ -667,6 +773,42 @@ def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
         )
         for stack in stacks
     ]
+
+
+def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
+    """Build optional detail rows for stack-create success output."""
+    if (
+        getattr(result, "stack_type", StackType.LOCAL.value)
+        != StackType.KUBERNETES.value
+    ):
+        return []
+
+    resources = getattr(result, "resources", None)
+    if not isinstance(resources, dict):
+        return []
+
+    rows: list[tuple[str, str]] = []
+    provider = resources.get("provider")
+    if provider:
+        rows.append(("Provider:", str(provider)))
+
+    cluster = resources.get("cluster")
+    region = resources.get("region")
+    if cluster:
+        cluster_value = str(cluster)
+        if region:
+            cluster_value = f"{cluster_value} ({region})"
+        rows.append(("Cluster:", cluster_value))
+
+    artifact_store = resources.get("artifact_store")
+    if artifact_store:
+        rows.append(("Artifacts:", str(artifact_store)))
+
+    container_registry = resources.get("container_registry")
+    if container_registry:
+        rows.append(("Registry:", str(container_registry)))
+
+    return rows
 
 
 def _current_stack_rows(stack: StackInfo) -> list[tuple[str, str]]:
@@ -1507,7 +1649,7 @@ def list_(output: OutputFormatOption = "text") -> None:
             command,
             str(exc),
             output=output_format,
-            error_type=type(exc).__name__,
+            error_type=builtins.type(exc).__name__,
         )
 
     if output_format == CLIOutputFormat.JSON:
@@ -1587,19 +1729,67 @@ def create(
         bool,
         Parameter(help="Create without activating the stack."),
     ] = False,
+    type: Annotated[
+        str,
+        Parameter(help="Stack type: local or kubernetes."),
+    ] = "local",
+    artifact_store: Annotated[
+        str | None,
+        Parameter(help="Artifact store URI for Kubernetes stacks (s3:// or gs://)."),
+    ] = None,
+    container_registry: Annotated[
+        str | None,
+        Parameter(help="Container registry URI for Kubernetes stacks."),
+    ] = None,
+    cluster: Annotated[
+        str | None,
+        Parameter(help="Kubernetes cluster name."),
+    ] = None,
+    region: Annotated[
+        str | None,
+        Parameter(help="Cloud region."),
+    ] = None,
+    namespace: Annotated[
+        str | None,
+        Parameter(help="Kubernetes namespace (defaults to `default`)."),
+    ] = None,
+    credentials: Annotated[
+        str | None,
+        Parameter(help="Optional credentials reference for Kubernetes stacks."),
+    ] = None,
+    no_verify: Annotated[
+        bool,
+        Parameter(help="Skip credential verification for Kubernetes stacks."),
+    ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a new local stack."""
+    """Create a local or Kubernetes-backed stack."""
     command = "stack.create"
     output_format = _resolve_output_format(output)
     try:
-        result = _create_stack_operation(name, activate=not no_activate)
+        stack_type = _normalize_stack_type(type)
+        kubernetes_spec = _build_kubernetes_stack_spec_from_cli(
+            stack_type=stack_type,
+            artifact_store=artifact_store,
+            container_registry=container_registry,
+            cluster=cluster,
+            region=region,
+            namespace=namespace,
+            credentials=credentials,
+            no_verify=no_verify,
+        )
+        result = _create_stack_operation(
+            name,
+            stack_type=stack_type,
+            activate=not no_activate,
+            kubernetes=kubernetes_spec,
+        )
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         _exit_with_error(
             command,
             str(exc),
             output=output_format,
-            error_type=type(exc).__name__,
+            error_type=builtins.type(exc).__name__,
         )
 
     if output_format == CLIOutputFormat.JSON:
@@ -1610,7 +1800,15 @@ def create(
         )
         return
 
-    _print_success(f"Created stack: {result.stack.name}")
+    created_message = f"Created stack: {result.stack.name}"
+    if (
+        getattr(result, "stack_type", StackType.LOCAL.value)
+        == StackType.KUBERNETES.value
+    ):
+        created_message += " (kubernetes)"
+    _print_success(created_message)
+    for label, value in _stack_create_detail_rows(result):
+        print(f"{label:<12} {value}")
     if result.previous_active_stack is not None:
         print(f"Active stack: {result.previous_active_stack} → {result.stack.name}")
 
