@@ -4,6 +4,8 @@ Durable execution for AI agents, built on [ZenML](https://zenml.io).
 
 Kitaru makes agent workflows **persistent, replayable, and observable** using a small set of Python primitives. No graph DSL, no framework lock-in — just decorators on your existing code.
 
+> **Getting started?** See the [Early Tester Guide](GETTING_STARTED.md) for step-by-step setup, examples, and MCP integration instructions.
+
 ## Features
 
 Kitaru is under active development. The core SDK primitives are implemented and functional:

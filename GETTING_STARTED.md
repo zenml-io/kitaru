@@ -28,8 +28,8 @@ uv sync --extra mcp --extra pydantic-ai
 # Or minimal install (core only, no MCP/PydanticAI support)
 uv sync
 
-# Or with pip
-pip install ".[mcp,pydantic-ai]"
+# Or with pip (editable install)
+pip install -e ".[mcp,pydantic-ai]"
 ```
 
 The extras give you:
@@ -62,7 +62,7 @@ That gives you a second local stack to switch to or delete while testing.
 ### 3. Run your first flow
 
 ```bash
-uv run -m examples.first_working_flow
+uv run -m examples.basic_flow.first_working_flow
 ```
 
 This runs a simple two-checkpoint flow (`fetch_data` → `process_data`)
@@ -85,9 +85,8 @@ uv run kitaru executions logs <EXECUTION_ID>
 ### 5. Try more examples
 
 Each example demonstrates a different Kitaru primitive. Run them in
-order of complexity. The implementations are now grouped into subdirectories
-under `examples/`, but the stable commands below still work from the repo root.
-See `examples/README.md` for the full catalog.
+order of complexity. Examples are grouped into subdirectories under
+`examples/`. See `examples/README.md` for the full catalog.
 
 > **Note:** Some example implementations contain `image={"base_image": ...}`
 > settings in their `@flow` decorator. These only apply when running on
@@ -96,7 +95,7 @@ See `examples/README.md` for the full catalog.
 #### Structured logging (`kitaru.log()`)
 
 ```bash
-uv run -m examples.flow_with_logging
+uv run -m examples.basic_flow.flow_with_logging
 ```
 
 Logs structured metadata at both flow and checkpoint scope. After
@@ -106,7 +105,7 @@ running, you can separately inspect runtime log lines with
 #### Artifact save/load (`kitaru.save()` / `kitaru.load()`)
 
 ```bash
-uv run -m examples.flow_with_artifacts
+uv run -m examples.basic_flow.flow_with_artifacts
 ```
 
 Demonstrates persisting and loading named artifacts across executions.
@@ -116,7 +115,7 @@ first.
 #### Wait for human input (`kitaru.wait()`)
 
 ```bash
-uv run -m examples.wait_and_resume
+uv run -m examples.execution_management.wait_and_resume
 ```
 
 This is the human-in-the-loop example. It starts a flow that pauses
@@ -132,7 +131,7 @@ uv run kitaru executions resume <EXEC_ID>
 #### Replay with overrides
 
 ```bash
-uv run -m examples.replay_with_overrides
+uv run -m examples.replay.replay_with_overrides
 ```
 
 Runs a flow, then replays it from a specific checkpoint with an
@@ -146,7 +145,7 @@ capability.
 uv run kitaru model register fast --model openai/gpt-4o-mini
 export OPENAI_API_KEY=sk-...
 
-uv run -m examples.flow_with_llm
+uv run -m examples.llm.flow_with_llm
 ```
 
 Makes tracked LLM calls with token/cost metadata logged automatically.
@@ -154,7 +153,7 @@ Makes tracked LLM calls with token/cost metadata logged automatically.
 #### PydanticAI adapter — no API key needed
 
 ```bash
-uv run -m examples.pydantic_ai_adapter
+uv run -m examples.pydantic_ai_agent.pydantic_ai_adapter
 ```
 
 Wraps a PydanticAI agent with Kitaru tracking. Uses `TestModel` so no
