@@ -9,7 +9,8 @@ import pytest
 from zenml.enums import MetadataResourceTypes
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 
-from kitaru.logging import log
+from kitaru.errors import KitaruStateError
+from kitaru.logging import _parse_scope_uuid, log
 from kitaru.runtime import _checkpoint_scope, _flow_scope
 
 
@@ -18,6 +19,22 @@ def _get_logged_resource(client_mock: MagicMock) -> RunMetadataResource:
     resources = client_mock.create_run_metadata.call_args.kwargs["resources"]
     assert len(resources) == 1
     return resources[0]
+
+
+@pytest.mark.parametrize("scope_name", ["execution", "checkpoint"])
+def test_parse_scope_uuid_returns_uuid(scope_name: str) -> None:
+    execution_id = str(uuid4())
+
+    assert _parse_scope_uuid(execution_id, scope_name=scope_name) == UUID(execution_id)
+
+
+@pytest.mark.parametrize("scope_name", ["execution", "checkpoint"])
+def test_parse_scope_uuid_rejects_invalid_uuid(scope_name: str) -> None:
+    with pytest.raises(
+        KitaruStateError,
+        match=rf"kitaru\.log\(\) found an invalid {scope_name} ID",
+    ):
+        _parse_scope_uuid("exec-not-a-uuid", scope_name=scope_name)
 
 
 def test_log_raises_outside_flow() -> None:

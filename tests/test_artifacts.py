@@ -9,7 +9,8 @@ from uuid import UUID, uuid4
 import pytest
 from zenml.enums import ArtifactSaveType, ArtifactType
 
-from kitaru.artifacts import load, save
+from kitaru.artifacts import _parse_scope_uuid, load, save
+from kitaru.errors import KitaruStateError
 from kitaru.runtime import _checkpoint_scope, _flow_scope
 
 
@@ -44,6 +45,47 @@ def _hydrated_run(
 def _scope_ids() -> tuple[str, str]:
     """Return valid execution and checkpoint IDs for runtime scopes."""
     return str(uuid4()), str(uuid4())
+
+
+@pytest.mark.parametrize(
+    ("api_name", "scope_name"),
+    [
+        ("save", "execution"),
+        ("save", "checkpoint"),
+        ("load", "execution"),
+    ],
+)
+def test_parse_scope_uuid_returns_uuid(api_name: str, scope_name: str) -> None:
+    execution_id, _ = _scope_ids()
+
+    assert _parse_scope_uuid(
+        execution_id,
+        scope_name=scope_name,
+        api_name=api_name,
+    ) == UUID(execution_id)
+
+
+@pytest.mark.parametrize(
+    ("api_name", "scope_name"),
+    [
+        ("save", "execution"),
+        ("save", "checkpoint"),
+        ("load", "execution"),
+    ],
+)
+def test_parse_scope_uuid_rejects_invalid_uuid(
+    api_name: str,
+    scope_name: str,
+) -> None:
+    with pytest.raises(
+        KitaruStateError,
+        match=rf"kitaru\.{api_name}\(\) found an invalid {scope_name} ID",
+    ):
+        _parse_scope_uuid(
+            "bad-execution-id",
+            scope_name=scope_name,
+            api_name=api_name,
+        )
 
 
 def test_save_raises_outside_checkpoint() -> None:

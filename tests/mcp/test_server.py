@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,6 +20,7 @@ from kitaru.config import (
 )
 from kitaru.mcp.server import (
     RuntimeSnapshot,
+    _load_flow_target,
     get_execution_logs,
     kitaru_artifacts_get,
     kitaru_artifacts_list,
@@ -34,6 +36,70 @@ from kitaru.mcp.server import (
     kitaru_status,
     manage_stack,
 )
+
+
+def _write_flow_target_module(path: Path, *, marker: str) -> None:
+    """Create a minimal flow target module for direct loader tests."""
+    path.write_text(
+        "class _FakeFlow:\n"
+        f"    marker = {marker!r}\n"
+        "    def run(self, *args, **kwargs):\n"
+        "        return None\n"
+        "    def deploy(self, *args, **kwargs):\n"
+        "        return None\n\n"
+        "demo_flow = _FakeFlow()\n",
+        encoding="utf-8",
+    )
+
+
+def test_load_flow_target_supports_module_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_name = f"temp_mcp_flow_module_{tmp_path.name.replace('-', '_')}"
+    module_path = tmp_path / f"{module_name}.py"
+    _write_flow_target_module(module_path, marker="module")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    flow_target = _load_flow_target(f"{module_name}:demo_flow")
+
+    assert cast(Any, flow_target).marker == "module"
+
+
+def test_load_flow_target_supports_python_file_paths(tmp_path: Path) -> None:
+    module_path = tmp_path / "demo_flow.py"
+    _write_flow_target_module(module_path, marker="file")
+
+    flow_target = _load_flow_target(f"{module_path}:demo_flow")
+
+    assert cast(Any, flow_target).marker == "file"
+
+
+def test_load_flow_target_reports_missing_module() -> None:
+    with pytest.raises(ValueError, match="Unable to import flow module") as exc_info:
+        _load_flow_target("definitely_missing_mcp_flow_module:demo_flow")
+
+    assert "definitely_missing_mcp_flow_module" in str(exc_info.value)
+
+
+def test_load_flow_target_reports_missing_attribute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_name = f"temp_mcp_missing_attr_{tmp_path.name.replace('-', '_')}"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text("other_name = object()\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    with pytest.raises(ValueError, match="has no attribute `demo_flow`"):
+        _load_flow_target(f"{module_name}:demo_flow")
+
+
+def test_load_flow_target_rejects_invalid_target_format() -> None:
+    with pytest.raises(
+        ValueError, match="must use `<module_or_file>:<flow_name>` format"
+    ):
+        _load_flow_target("content_pipeline")
 
 
 def test_executions_list_calls_client_and_serializes(

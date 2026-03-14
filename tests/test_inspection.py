@@ -1,0 +1,690 @@
+"""Tests for `kitaru.inspection` serialization helpers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import Enum
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
+from uuid import uuid4
+
+import pytest
+
+from kitaru.client import (
+    ArtifactRef,
+    CheckpointAttempt,
+    CheckpointCall,
+    Execution,
+    ExecutionStatus,
+    FailureInfo,
+    LogEntry,
+    PendingWait,
+)
+from kitaru.config import (
+    ActiveEnvironmentVariable,
+    ActiveStackLogStore,
+    FrozenExecutionSpec,
+    ImageSettings,
+    KitaruConfig,
+    ModelAliasEntry,
+    ResolvedConnectionConfig,
+    ResolvedExecutionConfig,
+    ResolvedLogStore,
+    StackComponentDetails,
+    StackDetails,
+    StackInfo,
+    _StackCreateResult,
+    _StackDeleteResult,
+)
+from kitaru.errors import FailureOrigin
+from kitaru.inspection import (
+    RuntimeSnapshot,
+    serialize_artifact_ref,
+    serialize_checkpoint_attempt,
+    serialize_checkpoint_call,
+    serialize_execution,
+    serialize_execution_summary,
+    serialize_failure,
+    serialize_log_entry,
+    serialize_model_alias,
+    serialize_pending_wait,
+    serialize_resolved_log_store,
+    serialize_runtime_snapshot,
+    serialize_secret_detail,
+    serialize_secret_summary,
+    serialize_stack,
+    serialize_stack_create_result,
+    serialize_stack_delete_result,
+    serialize_stack_details,
+    to_jsonable,
+)
+
+
+@dataclass(frozen=True)
+class _NestedData:
+    label: str
+    created_at: datetime
+    tags: tuple[str, ...]
+
+
+class _Color(Enum):
+    RED = "red"
+
+
+class _ModelDumpable:
+    def model_dump(self, *, mode: str) -> dict[str, object]:
+        assert mode == "python"
+        return {
+            "timestamp": datetime(2026, 3, 14, 12, 0, tzinfo=UTC),
+            "values": {3, 1},
+        }
+
+
+class _Unjsonable:
+    def __repr__(self) -> str:
+        return "<unjsonable>"
+
+
+def _sample_failure() -> FailureInfo:
+    return FailureInfo(
+        message="Checkpoint failed",
+        exception_type="ValueError",
+        traceback="Traceback...\nValueError: boom",
+        origin=FailureOrigin.USER_CODE,
+    )
+
+
+def _sample_pending_wait() -> PendingWait:
+    return PendingWait(
+        wait_id="wait-1",
+        name="approve_draft",
+        question="Approve this draft?",
+        schema={"type": "boolean"},
+        metadata={"attempt": 1},
+        entered_waiting_at=datetime(2026, 3, 14, 10, 30, tzinfo=UTC),
+    )
+
+
+def _sample_artifact(name: str = "research_context") -> ArtifactRef:
+    return ArtifactRef(
+        artifact_id="artifact-1",
+        name=name,
+        kind="context",
+        save_type="manual",
+        producing_call="research",
+        metadata={"source": "notes"},
+        _client=cast(Any, SimpleNamespace()),
+    )
+
+
+def _sample_checkpoint_attempt() -> CheckpointAttempt:
+    return CheckpointAttempt(
+        attempt_id="attempt-1",
+        status=ExecutionStatus.FAILED,
+        started_at=datetime(2026, 3, 14, 10, 0, tzinfo=UTC),
+        ended_at=datetime(2026, 3, 14, 10, 5, tzinfo=UTC),
+        metadata={"retry": 1},
+        failure=_sample_failure(),
+    )
+
+
+def _sample_checkpoint_call() -> CheckpointCall:
+    return CheckpointCall(
+        call_id="call-1",
+        name="research",
+        status=ExecutionStatus.FAILED,
+        started_at=datetime(2026, 3, 14, 10, 0, tzinfo=UTC),
+        ended_at=datetime(2026, 3, 14, 10, 10, tzinfo=UTC),
+        metadata={"latency_ms": 321},
+        original_call_id="call-0",
+        parent_call_ids=["parent-1"],
+        failure=_sample_failure(),
+        attempts=[_sample_checkpoint_attempt()],
+        artifacts=[_sample_artifact()],
+    )
+
+
+def _sample_execution() -> Execution:
+    return Execution(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.WAITING,
+        started_at=datetime(2026, 3, 14, 9, 55, tzinfo=UTC),
+        ended_at=None,
+        stack_name="prod",
+        metadata={"owner": "alice"},
+        status_reason="Waiting for human input",
+        failure=None,
+        pending_wait=_sample_pending_wait(),
+        frozen_execution_spec=FrozenExecutionSpec(
+            resolved_execution=ResolvedExecutionConfig(
+                stack=None,
+                image=None,
+                cache=False,
+                retries=0,
+            ),
+            flow_defaults=KitaruConfig(
+                image=ImageSettings(dockerfile="Dockerfile"),
+            ),
+            connection=ResolvedConnectionConfig(),
+        ),
+        original_exec_id="kr-100",
+        checkpoints=[_sample_checkpoint_call()],
+        artifacts=[_sample_artifact("final_summary")],
+        _client=cast(Any, SimpleNamespace()),
+    )
+
+
+def _sample_secret(*, private: bool) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        name="openai-credentials",
+        private=private,
+        values={"API_KEY": object(), "REGION": object()},
+        has_missing_values=True,
+        secret_values={"API_KEY": "secret-value"},
+    )
+
+
+def test_to_jsonable_converts_supported_values() -> None:
+    payload = {
+        1: "one",
+        "timestamp": datetime(2026, 3, 14, 12, 0, tzinfo=UTC),
+        "color": _Color.RED,
+        "path": Path("docs/reference.mdx"),
+        "items": ("a", "b"),
+        "tags": {"beta", "alpha"},
+        "dumped": _ModelDumpable(),
+    }
+
+    assert to_jsonable(payload, fallback_repr=False) == {
+        "1": "one",
+        "timestamp": "2026-03-14T12:00:00+00:00",
+        "color": "red",
+        "path": "docs/reference.mdx",
+        "items": ["a", "b"],
+        "tags": ["alpha", "beta"],
+        "dumped": {
+            "timestamp": "2026-03-14T12:00:00+00:00",
+            "values": [1, 3],
+        },
+    }
+
+
+def test_to_jsonable_recurses_through_dataclasses() -> None:
+    value = _NestedData(
+        label="snapshot",
+        created_at=datetime(2026, 3, 14, 13, 15, tzinfo=UTC),
+        tags=("sdk", "tests"),
+    )
+
+    assert to_jsonable(value, fallback_repr=False) == {
+        "label": "snapshot",
+        "created_at": "2026-03-14T13:15:00+00:00",
+        "tags": ["sdk", "tests"],
+    }
+
+
+def test_to_jsonable_raises_for_uuid_without_fallback_repr() -> None:
+    with pytest.raises(TypeError, match=r"uuid\.UUID"):
+        to_jsonable(uuid4(), fallback_repr=False)
+
+
+def test_to_jsonable_uses_repr_when_requested() -> None:
+    assert to_jsonable(_Unjsonable(), fallback_repr=True) == "<unjsonable>"
+
+
+def test_serialize_failure_contract() -> None:
+    assert serialize_failure(None) is None
+    assert serialize_failure(_sample_failure()) == {
+        "message": "Checkpoint failed",
+        "exception_type": "ValueError",
+        "traceback": "Traceback...\nValueError: boom",
+        "origin": "user_code",
+    }
+
+
+def test_serialize_pending_wait_contract() -> None:
+    assert serialize_pending_wait(None) is None
+    assert serialize_pending_wait(_sample_pending_wait()) == {
+        "wait_id": "wait-1",
+        "name": "approve_draft",
+        "question": "Approve this draft?",
+        "schema": {"type": "boolean"},
+        "metadata": {"attempt": 1},
+        "entered_waiting_at": "2026-03-14T10:30:00+00:00",
+    }
+
+
+def test_serialize_artifact_ref_contract() -> None:
+    assert serialize_artifact_ref(_sample_artifact()) == {
+        "artifact_id": "artifact-1",
+        "name": "research_context",
+        "kind": "context",
+        "save_type": "manual",
+        "producing_call": "research",
+        "metadata": {"source": "notes"},
+    }
+
+
+def test_serialize_checkpoint_attempt_contract() -> None:
+    assert serialize_checkpoint_attempt(_sample_checkpoint_attempt()) == {
+        "attempt_id": "attempt-1",
+        "status": "failed",
+        "started_at": "2026-03-14T10:00:00+00:00",
+        "ended_at": "2026-03-14T10:05:00+00:00",
+        "metadata": {"retry": 1},
+        "failure": {
+            "message": "Checkpoint failed",
+            "exception_type": "ValueError",
+            "traceback": "Traceback...\nValueError: boom",
+            "origin": "user_code",
+        },
+    }
+
+
+def test_serialize_checkpoint_call_contract() -> None:
+    payload = serialize_checkpoint_call(_sample_checkpoint_call())
+
+    assert payload == {
+        "call_id": "call-1",
+        "name": "research",
+        "status": "failed",
+        "started_at": "2026-03-14T10:00:00+00:00",
+        "ended_at": "2026-03-14T10:10:00+00:00",
+        "metadata": {"latency_ms": 321},
+        "original_call_id": "call-0",
+        "parent_call_ids": ["parent-1"],
+        "failure": {
+            "message": "Checkpoint failed",
+            "exception_type": "ValueError",
+            "traceback": "Traceback...\nValueError: boom",
+            "origin": "user_code",
+        },
+        "attempts": [
+            {
+                "attempt_id": "attempt-1",
+                "status": "failed",
+                "started_at": "2026-03-14T10:00:00+00:00",
+                "ended_at": "2026-03-14T10:05:00+00:00",
+                "metadata": {"retry": 1},
+                "failure": {
+                    "message": "Checkpoint failed",
+                    "exception_type": "ValueError",
+                    "traceback": "Traceback...\nValueError: boom",
+                    "origin": "user_code",
+                },
+            }
+        ],
+        "artifacts": [
+            {
+                "artifact_id": "artifact-1",
+                "name": "research_context",
+                "kind": "context",
+                "save_type": "manual",
+                "producing_call": "research",
+                "metadata": {"source": "notes"},
+            }
+        ],
+    }
+
+
+def test_serialize_execution_summary_contract() -> None:
+    payload = serialize_execution_summary(_sample_execution())
+
+    assert payload == {
+        "exec_id": "kr-123",
+        "flow_name": "content_pipeline",
+        "status": "waiting",
+        "started_at": "2026-03-14T09:55:00+00:00",
+        "ended_at": None,
+        "stack_name": "prod",
+        "status_reason": "Waiting for human input",
+        "pending_wait": {
+            "wait_id": "wait-1",
+            "name": "approve_draft",
+            "question": "Approve this draft?",
+            "schema": {"type": "boolean"},
+            "metadata": {"attempt": 1},
+            "entered_waiting_at": "2026-03-14T10:30:00+00:00",
+        },
+        "failure": None,
+        "metadata": {"owner": "alice"},
+        "checkpoint_count": 1,
+        "artifact_count": 1,
+    }
+
+
+def test_serialize_execution_contract() -> None:
+    payload = serialize_execution(_sample_execution())
+
+    assert set(payload) == {
+        "exec_id",
+        "flow_name",
+        "status",
+        "started_at",
+        "ended_at",
+        "stack_name",
+        "status_reason",
+        "pending_wait",
+        "failure",
+        "metadata",
+        "checkpoint_count",
+        "artifact_count",
+        "frozen_execution_spec",
+        "original_exec_id",
+        "checkpoints",
+        "artifacts",
+    }
+    assert payload["frozen_execution_spec"]["flow_defaults"] == {
+        "stack": None,
+        "image": {
+            "base_image": None,
+            "requirements": None,
+            "dockerfile": "Dockerfile",
+            "environment": None,
+            "apt_packages": None,
+            "replicate_local_python_environment": None,
+        },
+        "cache": None,
+        "retries": None,
+        "server_url": None,
+        "auth_token": None,
+        "project": None,
+    }
+    assert payload["original_exec_id"] == "kr-100"
+    assert payload["checkpoints"][0]["name"] == "research"
+    assert payload["artifacts"][0]["name"] == "final_summary"
+    assert payload["pending_wait"]["wait_id"] == "wait-1"
+
+
+def test_serialize_stack_contract() -> None:
+    stack = StackInfo(id="stack-1", name="prod", is_active=True)
+
+    assert serialize_stack(stack) == {
+        "id": "stack-1",
+        "name": "prod",
+        "is_active": True,
+    }
+    assert serialize_stack(stack, is_managed=False) == {
+        "id": "stack-1",
+        "name": "prod",
+        "is_active": True,
+        "is_managed": False,
+    }
+
+
+def test_serialize_stack_create_result_contract() -> None:
+    result = _StackCreateResult(
+        stack=StackInfo(id="stack-1", name="prod", is_active=True),
+        previous_active_stack="default",
+        components_created=("prod (orchestrator)", "prod (artifact_store)"),
+        stack_type="kubernetes",
+        service_connectors_created=("prod-connector",),
+        resources={"cluster": "demo"},
+    )
+
+    assert serialize_stack_create_result(result) == {
+        "id": "stack-1",
+        "name": "prod",
+        "is_active": True,
+        "previous_active_stack": "default",
+        "components_created": ["prod (orchestrator)", "prod (artifact_store)"],
+        "stack_type": "kubernetes",
+        "service_connectors_created": ["prod-connector"],
+        "resources": {"cluster": "demo"},
+    }
+
+
+def test_serialize_stack_create_result_omits_empty_optional_fields() -> None:
+    result = _StackCreateResult(
+        stack=StackInfo(id="stack-2", name="dev", is_active=False),
+        previous_active_stack=None,
+        components_created=("dev (orchestrator)",),
+        stack_type="local",
+    )
+
+    payload = serialize_stack_create_result(result)
+
+    assert payload == {
+        "id": "stack-2",
+        "name": "dev",
+        "is_active": False,
+        "previous_active_stack": None,
+        "components_created": ["dev (orchestrator)"],
+        "stack_type": "local",
+    }
+    assert "service_connectors_created" not in payload
+    assert "resources" not in payload
+
+
+def test_serialize_stack_delete_result_contract() -> None:
+    result = _StackDeleteResult(
+        deleted_stack="prod",
+        components_deleted=("prod (orchestrator)", "prod (artifact_store)"),
+        new_active_stack="default",
+        recursive=True,
+    )
+
+    assert serialize_stack_delete_result(result) == {
+        "deleted_stack": "prod",
+        "components_deleted": ["prod (orchestrator)", "prod (artifact_store)"],
+        "new_active_stack": "default",
+        "recursive": True,
+    }
+
+
+def test_serialize_stack_details_contract() -> None:
+    details = StackDetails(
+        stack=StackInfo(id="stack-1", name="prod", is_active=True),
+        is_managed=True,
+        stack_type="kubernetes",
+        components=(
+            StackComponentDetails(
+                role="runner",
+                name="prod-runner",
+                backend="kubernetes",
+                details=(("cluster", "demo"), ("namespace", "default")),
+            ),
+            StackComponentDetails(
+                role="storage",
+                name="prod-storage",
+                purpose="stores artifacts",
+            ),
+        ),
+    )
+
+    assert serialize_stack_details(details) == {
+        "id": "stack-1",
+        "name": "prod",
+        "is_active": True,
+        "is_managed": True,
+        "stack_type": "kubernetes",
+        "components": [
+            {
+                "role": "runner",
+                "name": "prod-runner",
+                "backend": "kubernetes",
+                "details": {"cluster": "demo", "namespace": "default"},
+            },
+            {
+                "role": "storage",
+                "name": "prod-storage",
+                "purpose": "stores artifacts",
+            },
+        ],
+    }
+
+
+def test_serialize_runtime_snapshot_contract() -> None:
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.1.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        config_directory="/tmp/kitaru-config",
+        server_url="https://example.com",
+        active_user="alice",
+        project_override="demo-project",
+        active_stack="prod",
+        repository_root="/work/repo",
+        server_version="0.42.0",
+        server_database="postgres",
+        server_deployment_type="kubernetes",
+        local_server_status="not started",
+        warning="Careful now",
+        log_store_status="datadog",
+        log_store_warning="not wired yet",
+        environment=[
+            ActiveEnvironmentVariable(
+                name="KITARU_SERVER_URL", value="https://example.com"
+            ),
+            ActiveEnvironmentVariable(name="KITARU_PROJECT", value="demo-project"),
+        ],
+    )
+
+    payload = serialize_runtime_snapshot(snapshot)
+
+    assert set(payload) == {
+        "sdk_version",
+        "connection",
+        "connection_target",
+        "config_directory",
+        "server_url",
+        "active_user",
+        "project_override",
+        "active_stack",
+        "repository_root",
+        "server_version",
+        "server_database",
+        "server_deployment_type",
+        "local_server_status",
+        "warning",
+        "log_store_status",
+        "log_store_warning",
+        "environment",
+    }
+    assert payload["environment"] == [
+        {"name": "KITARU_SERVER_URL", "value": "https://example.com"},
+        {"name": "KITARU_PROJECT", "value": "demo-project"},
+    ]
+    assert payload["warning"] == "Careful now"
+    assert payload["log_store_status"] == "datadog"
+    assert payload["log_store_warning"] == "not wired yet"
+
+
+def test_serialize_runtime_snapshot_preserves_none_fields() -> None:
+    payload = serialize_runtime_snapshot(
+        RuntimeSnapshot(
+            sdk_version="0.1.0",
+            connection="local database",
+            connection_target="local",
+            config_directory="/tmp/kitaru-config",
+        )
+    )
+
+    assert payload["server_url"] is None
+    assert payload["active_user"] is None
+    assert payload["warning"] is None
+    assert payload["environment"] == []
+
+
+def test_serialize_log_entry_contract() -> None:
+    entry = LogEntry(
+        message="Starting flow",
+        level="INFO",
+        timestamp="2026-03-14T10:00:00+00:00",
+        source="runner",
+        checkpoint_name="research",
+        module="kitaru.flow",
+        filename="flow.py",
+        lineno=42,
+    )
+
+    assert serialize_log_entry(entry) == {
+        "message": "Starting flow",
+        "level": "INFO",
+        "timestamp": "2026-03-14T10:00:00+00:00",
+        "source": "runner",
+        "checkpoint_name": "research",
+        "module": "kitaru.flow",
+        "filename": "flow.py",
+        "lineno": 42,
+    }
+
+
+def test_serialize_log_entry_omits_none_fields() -> None:
+    assert serialize_log_entry(LogEntry(message="Only message")) == {
+        "message": "Only message"
+    }
+
+
+def test_serialize_model_alias_contract() -> None:
+    entry = ModelAliasEntry(
+        alias="gpt-4o",
+        model="openai/gpt-4o",
+        secret="openai-key",
+        is_default=True,
+    )
+
+    assert serialize_model_alias(entry) == {
+        "alias": "gpt-4o",
+        "model": "openai/gpt-4o",
+        "secret": "openai-key",
+        "is_default": True,
+    }
+
+
+def test_serialize_secret_summary_contract() -> None:
+    secret = _sample_secret(private=False)
+    payload = serialize_secret_summary(cast(Any, secret))
+
+    assert payload["id"] == str(secret.id)
+    assert payload["name"] == "openai-credentials"
+    assert payload["visibility"] == "public"
+    assert payload["keys"] == ["API_KEY", "REGION"]
+    assert payload["has_missing_values"] is True
+
+
+def test_serialize_secret_detail_contract() -> None:
+    secret = _sample_secret(private=True)
+
+    hidden_payload = serialize_secret_detail(cast(Any, secret), show_values=False)
+    shown_payload = serialize_secret_detail(cast(Any, secret), show_values=True)
+
+    assert hidden_payload["id"] == str(secret.id)
+    assert hidden_payload["visibility"] == "private"
+    assert hidden_payload["values"] is None
+    assert shown_payload["id"] == str(secret.id)
+    assert shown_payload["values"] == {
+        "API_KEY": "secret-value",
+        "REGION": "unavailable",
+    }
+
+
+def test_serialize_resolved_log_store_contract() -> None:
+    payload = serialize_resolved_log_store(
+        ResolvedLogStore(
+            backend="datadog",
+            endpoint="https://logs.example.com",
+            api_key="secret-key",
+            source="environment",
+        ),
+        active_store=ActiveStackLogStore(
+            backend="artifact-store",
+            endpoint=None,
+            stack_name="prod",
+        ),
+        warning="stack backend differs",
+    )
+
+    assert payload == {
+        "backend": "datadog",
+        "endpoint": "https://logs.example.com",
+        "api_key_configured": True,
+        "source": "environment",
+        "active_stack_backend": "artifact-store",
+        "active_stack_name": "prod",
+        "warning": "stack backend differs",
+    }
