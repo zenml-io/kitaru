@@ -23,16 +23,8 @@ from zenml.config.global_config import GlobalConfiguration
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 
 from _kitaru_bootstrap import resolve_installed_version
-from kitaru._flow_loading import (
-    _FlowHandleLike,
-    _FlowTarget,
-)
-from kitaru._flow_loading import (
-    _load_flow_target as _shared_load_flow_target,
-)
-from kitaru._flow_loading import (
-    _load_module_from_python_path as _shared_load_module_from_python_path,
-)
+from kitaru import _flow_loading
+from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
 from kitaru.client import (
     ArtifactRef,
     CheckpointAttempt,
@@ -111,7 +103,7 @@ mcp = _load_fastmcp_class()("kitaru")
 
 def _load_module_from_python_path(module_path: str) -> ModuleType:
     """Load a Python module from a filesystem path."""
-    return _shared_load_module_from_python_path(
+    return _flow_loading._load_module_from_python_path(
         module_path,
         module_name_prefix="_kitaru_mcp_run_target_",
     )
@@ -119,10 +111,9 @@ def _load_module_from_python_path(module_path: str) -> ModuleType:
 
 def _load_flow_target(target: str) -> _FlowTarget:
     """Load `<module_or_file>:<flow_name>` into a runnable flow object."""
-    return _shared_load_flow_target(
+    return _flow_loading._load_flow_target(
         target,
         module_name_prefix="_kitaru_mcp_run_target_",
-        load_module_from_python_path=_load_module_from_python_path,
     )
 
 

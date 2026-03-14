@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol, runtime_checkable
@@ -58,7 +57,6 @@ def _load_flow_target(
     target: str,
     *,
     module_name_prefix: str,
-    load_module_from_python_path: Callable[[str], ModuleType] | None = None,
 ) -> _FlowTarget:
     """Load `<module_or_file>:<flow_name>` into a runnable flow object."""
     module_ref, separator, attr_name = target.partition(":")
@@ -68,18 +66,11 @@ def _load_flow_target(
             f"(received: {target!r})."
         )
 
-    path_loader = load_module_from_python_path
-    if path_loader is None:
-
-        def path_loader(module_path: str) -> ModuleType:
-            return _load_module_from_python_path(
-                module_path,
-                module_name_prefix=module_name_prefix,
-            )
-
     try:
         if module_ref.endswith(".py"):
-            module = path_loader(module_ref)
+            module = _load_module_from_python_path(
+                module_ref, module_name_prefix=module_name_prefix
+            )
         else:
             module = importlib.import_module(module_ref)
     except Exception as exc:
