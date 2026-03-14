@@ -16,6 +16,7 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import RunContext
 from pydantic_ai.usage import RequestUsage
 
+from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
 from kitaru.logging import log
 from kitaru.runtime import _is_inside_checkpoint
@@ -73,20 +74,6 @@ def _error_payload(error: Exception) -> dict[str, str]:
         "type": error.__class__.__name__,
         "message": str(error),
     }
-
-
-def _save_with_fallback(name: str, value: Any, *, artifact_type: str) -> str:
-    """Save an artifact and fall back to a blob repr if serialization fails."""
-    try:
-        save(name, value, type=artifact_type)
-        return artifact_type
-    except Exception:
-        fallback_value = {
-            "repr": repr(value),
-            "python_type": value.__class__.__name__,
-        }
-        save(name, fallback_value, type="blob")
-        return "blob"
 
 
 class KitaruStreamedResponse(StreamedResponse):
@@ -204,10 +191,11 @@ class KitaruModel(WrapperModel):
         prompt_artifact = f"{event_id}_prompt"
         response_artifact = f"{event_id}_response"
 
-        _save_with_fallback(
+        _safe_save(
             prompt_artifact,
             _serialize_messages(messages),
             artifact_type="prompt",
+            save_func=save,
         )
 
         started_at = time.perf_counter()
@@ -238,10 +226,11 @@ class KitaruModel(WrapperModel):
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
-        _save_with_fallback(
+        _safe_save(
             response_artifact,
             _serialize_model_response(response),
             artifact_type="response",
+            save_func=save,
         )
 
         log(
@@ -284,10 +273,11 @@ class KitaruModel(WrapperModel):
         response_artifact = f"{event_id}_response"
         transcript_artifact = f"{event_id}_stream_transcript"
 
-        _save_with_fallback(
+        _safe_save(
             prompt_artifact,
             _serialize_messages(messages),
             artifact_type="prompt",
+            save_func=save,
         )
 
         stream_events: list[dict[str, Any]] = []
@@ -330,13 +320,14 @@ class KitaruModel(WrapperModel):
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
-        _save_with_fallback(
+        _safe_save(
             response_artifact,
             _serialize_model_response(response),
             artifact_type="response",
+            save_func=save,
         )
 
-        _save_with_fallback(
+        _safe_save(
             transcript_artifact,
             {
                 "event_count": len(stream_events),
@@ -345,6 +336,7 @@ class KitaruModel(WrapperModel):
                 "final_response": _serialize_model_response(response),
             },
             artifact_type="context",
+            save_func=save,
         )
 
         log(
