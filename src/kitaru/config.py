@@ -70,6 +70,7 @@ from kitaru._env import (
     KITARU_SERVER_URL_ENV,
     ZENML_STORE_API_KEY_ENV,
     ZENML_STORE_URL_ENV,
+    _normalized_kitaru_env,
 )
 from kitaru.errors import KitaruUsageError
 
@@ -786,15 +787,15 @@ def _read_connection_env_config() -> KitaruConfig:
     """Read connection-related Kitaru config values from environment."""
     values: dict[str, Any] = {}
 
-    raw_server_url = os.environ.get(KITARU_SERVER_URL_ENV)
+    raw_server_url = _normalized_kitaru_env(KITARU_SERVER_URL_ENV)
     if raw_server_url is not None:
         values["server_url"] = raw_server_url
 
-    raw_auth_token = os.environ.get(KITARU_AUTH_TOKEN_ENV)
+    raw_auth_token = _normalized_kitaru_env(KITARU_AUTH_TOKEN_ENV)
     if raw_auth_token is not None:
         values["auth_token"] = raw_auth_token
 
-    raw_project = os.environ.get(KITARU_PROJECT_ENV)
+    raw_project = _normalized_kitaru_env(KITARU_PROJECT_ENV)
     if raw_project is not None:
         values["project"] = raw_project
 
@@ -921,11 +922,10 @@ def _merge_connection_layer(
 
 def _environment_has_remote_server_override() -> bool:
     """Return whether env vars are driving a remote connection."""
-    for env_name in (KITARU_SERVER_URL_ENV, ZENML_STORE_URL_ENV):
-        raw_value = os.environ.get(env_name)
-        if raw_value is not None and raw_value.strip():
-            return True
-    return False
+    if _normalized_kitaru_env(KITARU_SERVER_URL_ENV) is not None:
+        return True
+    raw_zenml = os.environ.get(ZENML_STORE_URL_ENV)
+    return raw_zenml is not None and bool(raw_zenml.strip())
 
 
 def _validate_connection_config_for_use(
