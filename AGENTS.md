@@ -6,7 +6,8 @@ Kitaru is a **mixed Python + web repo** that produces three things: a Python SDK
 
 ```
 src/kitaru/           # Python SDK package (src layout)
-  cli.py              # CLI entry point (cyclopts)
+  cli.py              # CLI facade / console entrypoint (cyclopts)
+  _cli/               # Internal command modules + shared CLI helpers
   adapters/           # Framework adapters (includes PydanticAI)
   mcp/                # MCP server tools (optional `kitaru[mcp]` extra)
 tests/                # pytest tests
@@ -84,7 +85,7 @@ These require Node 22+ and pnpm.
 
 ## CLI
 
-The `kitaru` console script is defined in `pyproject.toml` under `[project.scripts]` and implemented with cyclopts in `src/kitaru/cli.py`. Add subcommands via `@app.command`. When testing CLI commands, always pass an explicit arg list (`app(["--help"])`, not bare `app()`). CLI invocations raise `SystemExit(0)` on success.
+The `kitaru` console script is defined in `pyproject.toml` under `[project.scripts]`. `src/kitaru/cli.py` is the thin facade / entrypoint, while command implementations live in `src/kitaru/_cli/`. Add new subcommands in the appropriate `src/kitaru/_cli/_*.py` module and register them on the shared Cyclopts app there. When testing CLI commands, always pass an explicit arg list (`app(["--help"])`, not bare `app()`). CLI invocations raise `SystemExit(0)` on success.
 
 Agent-facing commands should keep the shared `--output json` / `-o json` contract consistent:
 - single-item commands emit `{command, item}`
@@ -141,7 +142,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 - **ZenML invisibility:** users should never need to know Kitaru is built on ZenML. Use Kitaru terminology (workflow, checkpoint, storage), not ZenML terms (orchestrator, artifact store, pipeline).
 - **Generated vs static docs:** generated CLI reference content, changelog output, and SDK reference pages come from generation scripts and should not be hand-edited. Static hand-written MDX pages under `docs/content/docs/` (for example `getting-started/*.mdx` or `cli/login.mdx`) are tracked and may be edited directly when the feature behavior changes. SDK reference still uses a two-step pipeline: `scripts/generate_sdk_docs.py` (Python → JSON) then `docs/scripts/convert-sdk-docs.mjs` (JSON → MDX via fumadocs-python).
 - **Secret docs accuracy:** only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, label it clearly as the current low-level pattern instead of implying there is already a dedicated Kitaru secret getter.
-- **CLI docs source of truth:** if generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or `src/kitaru/cli.py`, never the generated `docs/content/docs/cli/*` output.
+- **CLI docs source of truth:** if generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), never the generated `docs/content/docs/cli/*` output.
 - **Environment-variable docs:** document `KITARU_*` env vars as the public surface. Mention `ZENML_*` only as a compatibility note when necessary to explain migration or interop.
 - **Frontmatter required:** every `.mdx` page needs `title` and `description`.
 

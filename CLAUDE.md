@@ -14,7 +14,8 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 
 ```
 src/kitaru/           # Python SDK package (src layout)
-  cli.py              # CLI entry point (cyclopts)
+  cli.py              # CLI facade / console entrypoint (cyclopts)
+  _cli/               # Internal command modules + shared CLI helpers
   adapters/           # Framework adapters (includes PydanticAI)
   mcp/                # MCP server tools (optional `kitaru[mcp]` extra)
 tests/                # pytest tests
@@ -96,7 +97,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - Generated reference output should still come from the existing generation scripts rather than manual edits.
 - Agent-facing CLI docs should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.
 - Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
-- If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or `src/kitaru/cli.py`, not the generated `docs/content/docs/cli/*` output.
+- If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), not the generated `docs/content/docs/cli/*` output.
 
 ## Branching strategy
 
@@ -241,9 +242,9 @@ Future work will add richer OpenTelemetry-native tracing and exporter integratio
 
 ## CLI
 
-The CLI uses [cyclopts](https://cyclopts.readthedocs.io/) (`src/kitaru/cli.py`). The `kitaru` console script is registered in `pyproject.toml` under `[project.scripts]`.
+The CLI uses [cyclopts](https://cyclopts.readthedocs.io/). `src/kitaru/cli.py` is the thin facade / console entrypoint, and the actual command implementations live under `src/kitaru/_cli/`. The `kitaru` console script is registered in `pyproject.toml` under `[project.scripts]`.
 
-- Add new subcommands with `@app.command` in `cli.py`
+- Add new subcommands in the appropriate `src/kitaru/_cli/_*.py` module and register them on the shared app there
 - Version is read automatically from package metadata via `importlib.metadata.version()`
 - When testing CLI commands, always pass an explicit arg list: `app(["--help"])`, never bare `app()` (which reads `sys.argv`)
 - CLI commands raise `SystemExit(0)` on success — wrap in `pytest.raises(SystemExit)` in tests
