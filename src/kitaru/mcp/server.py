@@ -8,16 +8,14 @@ for status and stack inspection.
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import os
-import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from zenml.client import Client
@@ -25,6 +23,16 @@ from zenml.config.global_config import GlobalConfiguration
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 
 from _kitaru_bootstrap import resolve_installed_version
+from kitaru._flow_loading import (
+    _FlowHandleLike,
+    _FlowTarget,
+)
+from kitaru._flow_loading import (
+    _load_flow_target as _shared_load_flow_target,
+)
+from kitaru._flow_loading import (
+    _load_module_from_python_path as _shared_load_module_from_python_path,
+)
 from kitaru.client import (
     ArtifactRef,
     CheckpointAttempt,
@@ -60,23 +68,6 @@ from kitaru.inspection import (
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
 )
-
-
-@runtime_checkable
-class _FlowHandleLike(Protocol):
-    """Protocol for flow handles returned by `.run()` / `.deploy()`."""
-
-    @property
-    def exec_id(self) -> str: ...
-
-
-@runtime_checkable
-class _FlowTarget(Protocol):
-    """Protocol for MCP-runnable flow objects."""
-
-    def run(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
-
-    def deploy(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
 
 
 @dataclass
@@ -120,58 +111,19 @@ mcp = _load_fastmcp_class()("kitaru")
 
 def _load_module_from_python_path(module_path: str) -> ModuleType:
     """Load a Python module from a filesystem path."""
-    path = Path(module_path).expanduser().resolve()
-    if not path.exists():
-        raise ValueError(f"Flow module path does not exist: {module_path}")
-    if path.suffix != ".py":
-        raise ValueError(
-            "Flow target file must be a Python file ending in `.py` "
-            f"(received: {module_path})."
-        )
-
-    module_name = f"_kitaru_mcp_run_target_{abs(hash(path))}"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"Unable to load Python module from path: {module_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+    return _shared_load_module_from_python_path(
+        module_path,
+        module_name_prefix="_kitaru_mcp_run_target_",
+    )
 
 
 def _load_flow_target(target: str) -> _FlowTarget:
     """Load `<module_or_file>:<flow_name>` into a runnable flow object."""
-    module_ref, separator, attr_name = target.partition(":")
-    if separator != ":" or not module_ref or not attr_name:
-        raise ValueError(
-            "Flow target must use `<module_or_file>:<flow_name>` format "
-            f"(received: {target!r})."
-        )
-
-    try:
-        if module_ref.endswith(".py"):
-            module = _load_module_from_python_path(module_ref)
-        else:
-            module = importlib.import_module(module_ref)
-    except Exception as exc:
-        raise ValueError(f"Unable to import flow module `{module_ref}`: {exc}") from exc
-
-    try:
-        flow_obj = getattr(module, attr_name)
-    except AttributeError as exc:
-        raise ValueError(
-            f"Flow target `{target}` was not found: module `{module_ref}` "
-            f"has no attribute `{attr_name}`."
-        ) from exc
-
-    if not isinstance(flow_obj, _FlowTarget):
-        raise ValueError(
-            f"Target `{target}` is not a Kitaru flow object. "
-            "Expected an object created by `@flow` with `.run()` support."
-        )
-
-    return flow_obj
+    return _shared_load_flow_target(
+        target,
+        module_name_prefix="_kitaru_mcp_run_target_",
+        load_module_from_python_path=_load_module_from_python_path,
+    )
 
 
 def _qualified_type_name(value: Any) -> str:

@@ -75,6 +75,24 @@ def test_load_flow_target_supports_python_file_paths(tmp_path: Path) -> None:
     assert cast(Any, flow_target).marker == "file"
 
 
+def test_load_flow_target_uses_mcp_module_path_loader_for_python_files() -> None:
+    fake_flow = SimpleNamespace(
+        marker="patched",
+        run=MagicMock(),
+        deploy=MagicMock(),
+    )
+    fake_module = SimpleNamespace(demo_flow=fake_flow)
+
+    with patch(
+        "kitaru.mcp.server._load_module_from_python_path",
+        return_value=fake_module,
+    ) as mock_loader:
+        flow_target = _load_flow_target("/tmp/demo_flow.py:demo_flow")
+
+    mock_loader.assert_called_once_with("/tmp/demo_flow.py")
+    assert flow_target is fake_flow
+
+
 def test_load_flow_target_reports_missing_module() -> None:
     with pytest.raises(ValueError, match="Unable to import flow module") as exc_info:
         _load_flow_target("definitely_missing_mcp_flow_module:demo_flow")
