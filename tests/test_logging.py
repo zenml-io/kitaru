@@ -25,7 +25,9 @@ def _get_logged_resource(client_mock: MagicMock) -> RunMetadataResource:
 def test_parse_scope_uuid_returns_uuid(scope_name: str) -> None:
     execution_id = str(uuid4())
 
-    assert _parse_scope_uuid(execution_id, scope_name=scope_name) == UUID(execution_id)
+    assert _parse_scope_uuid(
+        execution_id, scope_name=scope_name, api_name="log"
+    ) == UUID(execution_id)
 
 
 @pytest.mark.parametrize("scope_name", ["execution", "checkpoint"])
@@ -34,7 +36,7 @@ def test_parse_scope_uuid_rejects_invalid_uuid(scope_name: str) -> None:
         KitaruStateError,
         match=rf"kitaru\.log\(\) found an invalid {scope_name} ID",
     ):
-        _parse_scope_uuid("exec-not-a-uuid", scope_name=scope_name)
+        _parse_scope_uuid("exec-not-a-uuid", scope_name=scope_name, api_name="log")
 
 
 def test_log_raises_outside_flow() -> None:

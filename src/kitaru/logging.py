@@ -53,7 +53,9 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
         checkpoint_id = _get_current_checkpoint_id()
         if checkpoint_id is None:
             raise KitaruStateError(_LOG_MISSING_CHECKPOINT_ID_ERROR)
-        checkpoint_uuid = _parse_scope_uuid(checkpoint_id, scope_name="checkpoint")
+        checkpoint_uuid = _parse_scope_uuid(
+            checkpoint_id, scope_name="checkpoint", api_name="log"
+        )
         return (
             RunMetadataResource(
                 id=checkpoint_uuid,
@@ -66,7 +68,9 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
         execution_id = _get_current_execution_id()
         if execution_id is None:
             raise KitaruStateError(_LOG_MISSING_EXECUTION_ID_ERROR)
-        execution_uuid = _parse_scope_uuid(execution_id, scope_name="execution")
+        execution_uuid = _parse_scope_uuid(
+            execution_id, scope_name="execution", api_name="log"
+        )
         return (
             RunMetadataResource(
                 id=execution_uuid,

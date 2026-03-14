@@ -11,7 +11,7 @@ def _parse_scope_uuid(
     scope_id: str,
     *,
     scope_name: str,
-    api_name: str = "log",
+    api_name: str,
 ) -> UUID:
     """Parse a runtime scope identifier as a UUID.
 
