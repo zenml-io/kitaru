@@ -9,22 +9,18 @@ from __future__ import annotations
 
 import importlib
 import os
-from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field, is_dataclass
-from datetime import datetime
-from enum import Enum
-from pathlib import Path
+from dataclasses import dataclass, field
 from types import ModuleType
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 
-from _kitaru_bootstrap import resolve_installed_version
-from kitaru import _flow_loading
+from kitaru import _flow_loading, inspection
 from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
+from kitaru._version import resolve_installed_version
 from kitaru.client import (
     ArtifactRef,
     CheckpointAttempt,
@@ -117,188 +113,54 @@ def _load_flow_target(target: str) -> _FlowTarget:
     )
 
 
-def _qualified_type_name(value: Any) -> str:
-    """Return the fully qualified runtime type name for a value."""
-    value_type = type(value)
-    return f"{value_type.__module__}.{value_type.__qualname__}"
-
-
 def _to_jsonable(value: Any, *, fallback_repr: bool) -> Any:
     """Convert a value into a JSON-serializable representation."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-
-    if isinstance(value, datetime):
-        return value.isoformat()
-
-    if isinstance(value, Enum):
-        return value.value
-
-    if isinstance(value, Path):
-        return str(value)
-
-    if isinstance(value, Mapping):
-        return {
-            str(key): _to_jsonable(item, fallback_repr=fallback_repr)
-            for key, item in value.items()
-        }
-
-    if isinstance(value, (set, frozenset)):
-        return [
-            _to_jsonable(item, fallback_repr=fallback_repr)
-            for item in sorted(value, key=repr)
-        ]
-
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_to_jsonable(item, fallback_repr=fallback_repr) for item in value]
-
-    if is_dataclass(value) and not isinstance(value, type):
-        return _to_jsonable(asdict(value), fallback_repr=fallback_repr)
-
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        return _to_jsonable(model_dump(mode="python"), fallback_repr=fallback_repr)
-
-    if fallback_repr:
-        return repr(value)
-
-    raise TypeError(
-        "Value cannot be serialized to JSON-compatible data: "
-        f"{_qualified_type_name(value)}"
-    )
+    return inspection.to_jsonable(value, fallback_repr=fallback_repr)
 
 
 def _serialize_failure(failure: FailureInfo | None) -> dict[str, Any] | None:
     """Serialize optional failure details."""
-    if failure is None:
-        return None
-
-    return {
-        "message": failure.message,
-        "exception_type": failure.exception_type,
-        "traceback": failure.traceback,
-        "origin": _to_jsonable(failure.origin, fallback_repr=True),
-    }
+    return inspection.serialize_failure(failure)
 
 
 def _serialize_pending_wait(wait: PendingWait | None) -> dict[str, Any] | None:
     """Serialize optional pending wait details."""
-    if wait is None:
-        return None
-
-    return {
-        "wait_id": wait.wait_id,
-        "name": wait.name,
-        "question": wait.question,
-        "schema": _to_jsonable(wait.schema, fallback_repr=True),
-        "metadata": _to_jsonable(wait.metadata, fallback_repr=True),
-        "entered_waiting_at": _to_jsonable(wait.entered_waiting_at, fallback_repr=True),
-    }
+    return inspection.serialize_pending_wait(wait)
 
 
 def _serialize_artifact_ref(artifact: ArtifactRef) -> dict[str, Any]:
     """Serialize artifact metadata."""
-    return {
-        "artifact_id": artifact.artifact_id,
-        "name": artifact.name,
-        "kind": artifact.kind,
-        "save_type": artifact.save_type,
-        "producing_call": artifact.producing_call,
-        "metadata": _to_jsonable(artifact.metadata, fallback_repr=True),
-    }
+    return inspection.serialize_artifact_ref(artifact)
 
 
 def _serialize_checkpoint_attempt(attempt: CheckpointAttempt) -> dict[str, Any]:
     """Serialize checkpoint-attempt details."""
-    return {
-        "attempt_id": attempt.attempt_id,
-        "status": attempt.status.value,
-        "started_at": _to_jsonable(attempt.started_at, fallback_repr=True),
-        "ended_at": _to_jsonable(attempt.ended_at, fallback_repr=True),
-        "metadata": _to_jsonable(attempt.metadata, fallback_repr=True),
-        "failure": _serialize_failure(attempt.failure),
-    }
+    return inspection.serialize_checkpoint_attempt(attempt)
 
 
 def _serialize_checkpoint_call(checkpoint: CheckpointCall) -> dict[str, Any]:
     """Serialize checkpoint-call details."""
-    return {
-        "call_id": checkpoint.call_id,
-        "name": checkpoint.name,
-        "status": checkpoint.status.value,
-        "started_at": _to_jsonable(checkpoint.started_at, fallback_repr=True),
-        "ended_at": _to_jsonable(checkpoint.ended_at, fallback_repr=True),
-        "metadata": _to_jsonable(checkpoint.metadata, fallback_repr=True),
-        "original_call_id": checkpoint.original_call_id,
-        "parent_call_ids": checkpoint.parent_call_ids,
-        "failure": _serialize_failure(checkpoint.failure),
-        "attempts": [
-            _serialize_checkpoint_attempt(attempt) for attempt in checkpoint.attempts
-        ],
-        "artifacts": [
-            _serialize_artifact_ref(artifact) for artifact in checkpoint.artifacts
-        ],
-    }
+    return inspection.serialize_checkpoint_call(checkpoint)
 
 
 def _serialize_execution_summary(execution: Execution) -> dict[str, Any]:
     """Serialize execution list-item details."""
-    return {
-        "exec_id": execution.exec_id,
-        "flow_name": execution.flow_name,
-        "status": execution.status.value,
-        "started_at": _to_jsonable(execution.started_at, fallback_repr=True),
-        "ended_at": _to_jsonable(execution.ended_at, fallback_repr=True),
-        "stack_name": execution.stack_name,
-        "status_reason": execution.status_reason,
-        "pending_wait": _serialize_pending_wait(execution.pending_wait),
-        "failure": _serialize_failure(execution.failure),
-        "metadata": _to_jsonable(execution.metadata, fallback_repr=True),
-        "checkpoint_count": len(execution.checkpoints),
-        "artifact_count": len(execution.artifacts),
-    }
+    return inspection.serialize_execution_summary(execution)
 
 
 def _serialize_execution(execution: Execution) -> dict[str, Any]:
     """Serialize full execution details."""
-    return {
-        **_serialize_execution_summary(execution),
-        "frozen_execution_spec": _to_jsonable(
-            execution.frozen_execution_spec,
-            fallback_repr=True,
-        ),
-        "original_exec_id": execution.original_exec_id,
-        "checkpoints": [
-            _serialize_checkpoint_call(checkpoint)
-            for checkpoint in execution.checkpoints
-        ],
-        "artifacts": [
-            _serialize_artifact_ref(artifact) for artifact in execution.artifacts
-        ],
-    }
+    return inspection.serialize_execution(execution)
 
 
 def _serialize_artifact_value(value: Any) -> dict[str, Any]:
     """Serialize an artifact payload value for MCP transport."""
-    value_type = _qualified_type_name(value)
-    try:
-        serialized_value = _to_jsonable(value, fallback_repr=False)
-        return {
-            "value": serialized_value,
-            "value_format": "json",
-            "value_type": value_type,
-        }
-    except TypeError:
-        return {
-            "value": repr(value),
-            "value_format": "repr",
-            "value_type": value_type,
-        }
+    return inspection.serialize_artifact_value(value)
 
 
 def _serialize_runtime_snapshot(snapshot: RuntimeSnapshot) -> dict[str, Any]:
     """Serialize runtime status details for MCP output."""
-    return _to_jsonable(snapshot, fallback_repr=True)
+    return inspection.serialize_runtime_snapshot(cast(Any, snapshot))
 
 
 def _log_store_mismatch_details(

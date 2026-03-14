@@ -42,6 +42,7 @@ from kitaru.errors import FailureOrigin
 from kitaru.inspection import (
     RuntimeSnapshot,
     serialize_artifact_ref,
+    serialize_artifact_value,
     serialize_checkpoint_attempt,
     serialize_checkpoint_call,
     serialize_execution,
@@ -266,6 +267,34 @@ def test_serialize_artifact_ref_contract() -> None:
         "save_type": "manual",
         "producing_call": "research",
         "metadata": {"source": "notes"},
+    }
+
+
+def test_serialize_artifact_value_json_contract() -> None:
+    payload = serialize_artifact_value(
+        {
+            "timestamp": datetime(2026, 3, 14, 14, 0, tzinfo=UTC),
+            "tags": {"beta", "alpha"},
+        }
+    )
+
+    assert payload == {
+        "value": {
+            "timestamp": "2026-03-14T14:00:00+00:00",
+            "tags": ["alpha", "beta"],
+        },
+        "value_format": "json",
+        "value_type": "builtins.dict",
+    }
+
+
+def test_serialize_artifact_value_repr_fallback_contract() -> None:
+    payload = serialize_artifact_value(_Unjsonable())
+
+    assert payload == {
+        "value": "<unjsonable>",
+        "value_format": "repr",
+        "value_type": "tests.test_inspection._Unjsonable",
     }
 
 

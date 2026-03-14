@@ -145,6 +145,25 @@ def test_executions_list_calls_client_and_serializes(
     assert payload[0]["pending_wait"]["name"] == "approve_draft"
 
 
+def test_executions_list_delegates_to_inspection_serializer(
+    mock_kitaru_client: MagicMock,
+    sample_execution,
+) -> None:
+    mock_kitaru_client.executions.list.return_value = [sample_execution]
+
+    with (
+        patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_execution_summary",
+            return_value={"exec_id": "delegated", "source": "inspection"},
+        ) as mock_serialize,
+    ):
+        payload = kitaru_executions_list(limit=1)
+
+    mock_serialize.assert_called_once_with(sample_execution)
+    assert payload == [{"exec_id": "delegated", "source": "inspection"}]
+
+
 def test_executions_list_stack_filter_happens_after_fetch(
     mock_kitaru_client: MagicMock,
     sample_execution,
@@ -402,6 +421,40 @@ def test_artifact_tools_call_client_and_serialize(
     assert loaded["value_format"] == "repr"
 
 
+def test_artifact_get_delegates_value_serialization_to_inspection(
+    mock_kitaru_client: MagicMock,
+    sample_artifact,
+) -> None:
+    artifact_with_value = MagicMock()
+    artifact_with_value.artifact_id = sample_artifact.artifact_id
+    artifact_with_value.name = sample_artifact.name
+    artifact_with_value.kind = sample_artifact.kind
+    artifact_with_value.save_type = sample_artifact.save_type
+    artifact_with_value.producing_call = sample_artifact.producing_call
+    artifact_with_value.metadata = sample_artifact.metadata
+    loaded_value = object()
+    artifact_with_value.load.return_value = loaded_value
+
+    mock_kitaru_client.artifacts.get.return_value = artifact_with_value
+
+    with (
+        patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru.inspection.serialize_artifact_value",
+            return_value={
+                "value": "delegated",
+                "value_format": "json",
+                "value_type": "custom.Type",
+            },
+        ) as mock_serialize,
+    ):
+        payload = kitaru_artifacts_get(sample_artifact.artifact_id)
+
+    mock_serialize.assert_called_once_with(loaded_value)
+    assert payload["value"] == "delegated"
+    assert payload["value_type"] == "custom.Type"
+
+
 def test_status_and_stack_tools_return_structured_payloads() -> None:
     """Status and stack tools should expose query-friendly JSON objects."""
     snapshot = RuntimeSnapshot(
@@ -462,6 +515,27 @@ def test_status_and_stack_tools_return_structured_payloads() -> None:
     assert status_payload["environment"][1]["value"] == "token-12***"
     assert [stack["name"] for stack in stack_payload] == ["prod", "dev"]
     assert [stack["is_managed"] for stack in stack_payload] == [True, False]
+
+
+def test_status_delegates_snapshot_serialization_to_inspection() -> None:
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.1.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        config_directory="/tmp/kitaru-config",
+    )
+
+    with (
+        patch("kitaru.mcp.server._build_runtime_snapshot", return_value=snapshot),
+        patch(
+            "kitaru.inspection.serialize_runtime_snapshot",
+            return_value={"connection": "delegated", "source": "inspection"},
+        ) as mock_serialize,
+    ):
+        payload = kitaru_status()
+
+    mock_serialize.assert_called_once_with(snapshot)
+    assert payload == {"connection": "delegated", "source": "inspection"}
 
 
 def test_manage_stack_create_returns_structured_result() -> None:
