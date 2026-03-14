@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import warnings
 from collections.abc import Iterator
@@ -18,7 +19,8 @@ from zenml.enums import StackComponentType
 from zenml.exceptions import EntityExistsError
 from zenml.utils import io_utils, yaml_utils
 
-from _kitaru_env import apply_env_translations
+import kitaru.config as config_module
+from kitaru._env import apply_env_translations
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
     KITARU_CACHE_ENV,
@@ -2463,6 +2465,135 @@ def test_connection_validation_does_not_require_project_for_global_connection() 
 
     assert resolved.server_url == "https://global.example.com"
     assert resolved.project is None
+
+
+def test_suppress_zenml_cli_messages_silences_cli_helpers_and_restores_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI suppression should silence ZenML helpers and restore prior state."""
+    original_disable = logging.root.manager.disable
+    helper_calls: list[str] = []
+
+    def declare_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        helper_calls.append("declare")
+
+    def success_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        helper_calls.append("success")
+
+    monkeypatch.setattr(config_module.zenml_cli_utils, "declare", declare_spy)
+    monkeypatch.setattr(config_module.zenml_cli_utils, "success", success_spy)
+
+    try:
+        with config_module._suppress_zenml_cli_messages():
+            config_module.zenml_cli_utils.declare("hello")
+            config_module.zenml_cli_utils.success("world")
+
+            assert helper_calls == []
+            assert logging.root.manager.disable == logging.CRITICAL
+
+        assert config_module.zenml_cli_utils.declare is declare_spy
+        assert config_module.zenml_cli_utils.success is success_spy
+        assert logging.root.manager.disable == original_disable
+    finally:
+        logging.disable(original_disable)
+
+
+class _SuppressionSentinelError(RuntimeError):
+    """Sentinel error used to verify suppression cleanup on failure."""
+
+
+def test_suppress_zenml_cli_messages_restores_state_after_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI suppression should restore helpers and logging after exceptions."""
+    original_disable = logging.root.manager.disable
+    logging.disable(logging.ERROR)
+
+    def declare_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
+    def success_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
+    monkeypatch.setattr(config_module.zenml_cli_utils, "declare", declare_spy)
+    monkeypatch.setattr(config_module.zenml_cli_utils, "success", success_spy)
+
+    try:
+        with (
+            pytest.raises(_SuppressionSentinelError, match="boom"),
+            config_module._suppress_zenml_cli_messages(),
+        ):
+            assert logging.root.manager.disable == logging.CRITICAL
+            raise _SuppressionSentinelError("boom")
+
+        assert config_module.zenml_cli_utils.declare is declare_spy
+        assert config_module.zenml_cli_utils.success is success_spy
+        assert logging.root.manager.disable == logging.ERROR
+    finally:
+        logging.disable(original_disable)
+
+
+def test_login_to_server_target_direct_server_path_runs_under_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct server login should run with ZenML CLI chatter suppressed."""
+    original_disable = logging.root.manager.disable
+    helper_calls: list[str] = []
+
+    def declare_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        helper_calls.append("declare")
+
+    def success_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        helper_calls.append("success")
+
+    def fake_connect_to_server(**kwargs: Any) -> None:
+        assert logging.root.manager.disable == logging.CRITICAL
+        config_module.zenml_cli_utils.declare("connecting")
+        config_module.zenml_cli_utils.success("connected")
+        assert kwargs == {
+            "url": "https://example.com",
+            "api_key": "secret-key",
+            "verify_ssl": False,
+            "refresh": True,
+            "project": "demo-project",
+        }
+
+    monkeypatch.setattr(config_module.zenml_cli_utils, "declare", declare_spy)
+    monkeypatch.setattr(config_module.zenml_cli_utils, "success", success_spy)
+
+    try:
+        with (
+            patch("kitaru.config._zenml_is_pro_server", return_value=(False, None)),
+            patch(
+                "kitaru.config._zenml_connect_to_server",
+                side_effect=fake_connect_to_server,
+            ) as mock_connect_to_server,
+        ):
+            config_module._login_to_server_target(
+                "https://example.com/",
+                api_key="secret-key",
+                refresh=True,
+                project="demo-project",
+                verify_ssl=False,
+            )
+
+        mock_connect_to_server.assert_called_once_with(
+            url="https://example.com",
+            api_key="secret-key",
+            verify_ssl=False,
+            refresh=True,
+            project="demo-project",
+        )
+        assert helper_calls == []
+        assert config_module.zenml_cli_utils.declare is declare_spy
+        assert config_module.zenml_cli_utils.success is success_spy
+        assert logging.root.manager.disable == original_disable
+    finally:
+        logging.disable(original_disable)
 
 
 def test_build_and_persist_frozen_execution_spec() -> None:

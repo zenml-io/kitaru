@@ -21,8 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
-from unittest.mock import patch
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -63,6 +62,15 @@ from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.utils import io_utils, yaml_utils
 
+from kitaru._env import (
+    KITARU_ANALYTICS_OPT_IN_ENV,
+    KITARU_AUTH_TOKEN_ENV,
+    KITARU_DEBUG_ENV,
+    KITARU_PROJECT_ENV,
+    KITARU_SERVER_URL_ENV,
+    ZENML_STORE_API_KEY_ENV,
+    ZENML_STORE_URL_ENV,
+)
 from kitaru.errors import KitaruUsageError
 
 zenml_cli_utils = importlib.import_module("zenml.cli.utils")
@@ -85,16 +93,8 @@ KITARU_STACK_ENV = "KITARU_STACK"
 KITARU_CACHE_ENV = "KITARU_CACHE"
 KITARU_RETRIES_ENV = "KITARU_RETRIES"
 KITARU_IMAGE_ENV = "KITARU_IMAGE"
-KITARU_SERVER_URL_ENV = "KITARU_SERVER_URL"
-KITARU_AUTH_TOKEN_ENV = "KITARU_AUTH_TOKEN"
-KITARU_PROJECT_ENV = "KITARU_PROJECT"
 KITARU_DEFAULT_MODEL_ENV = "KITARU_DEFAULT_MODEL"
 KITARU_CONFIG_PATH_ENV = "KITARU_CONFIG_PATH"
-KITARU_DEBUG_ENV = "KITARU_DEBUG"
-KITARU_ANALYTICS_OPT_IN_ENV = "KITARU_ANALYTICS_OPT_IN"
-
-ZENML_STORE_URL_ENV = "ZENML_STORE_URL"
-ZENML_STORE_API_KEY_ENV = "ZENML_STORE_API_KEY"
 
 FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
 
@@ -1179,6 +1179,11 @@ def _looks_like_server_address_without_scheme(target: str) -> bool:
     )
 
 
+def _noop_zenml_cli_message(*args: Any, **kwargs: Any) -> None:
+    """Discard ZenML CLI progress/success messages while Kitaru owns UX."""
+    del args, kwargs
+
+
 @contextmanager
 def _suppress_zenml_cli_messages() -> Iterator[None]:
     """Silence ZenML success/progress chatter while Kitaru reuses its helpers.
@@ -1186,15 +1191,18 @@ def _suppress_zenml_cli_messages() -> Iterator[None]:
     This keeps the user-facing CLI output in Kitaru terms while still using
     ZenML's connection/authentication machinery underneath.
     """
+    cli_utils = cast(Any, zenml_cli_utils)
+    original_declare = cli_utils.declare
+    original_success = cli_utils.success
     previous_disable_level = logging.root.manager.disable
-    logging.disable(logging.CRITICAL)
     try:
-        with (
-            patch.object(zenml_cli_utils, "declare", return_value=None),
-            patch.object(zenml_cli_utils, "success", return_value=None),
-        ):
-            yield
+        logging.disable(logging.CRITICAL)
+        cli_utils.declare = _noop_zenml_cli_message
+        cli_utils.success = _noop_zenml_cli_message
+        yield
     finally:
+        cli_utils.declare = original_declare
+        cli_utils.success = original_success
         logging.disable(previous_disable_level)
 
 
