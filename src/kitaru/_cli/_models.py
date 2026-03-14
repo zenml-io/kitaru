@@ -6,6 +6,7 @@ from typing import Annotated
 
 from cyclopts import Parameter
 
+from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.config import ModelAliasEntry
 from kitaru.inspection import serialize_model_alias
@@ -63,17 +64,18 @@ def register(
     command = "model.register"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
-    try:
+
+    def _register_alias() -> ModelAliasEntry:
         if secret is not None:
             facade._resolve_secret_exact(facade.Client(), secret)
-        alias_entry = facade.register_model_alias(alias, model=model, secret=secret)
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        return facade.register_model_alias(alias, model=model, secret=secret)
+
+    alias_entry = run_with_cli_error_boundary(
+        _register_alias,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
@@ -100,15 +102,12 @@ def list___(output: OutputFormatOption = "text") -> None:
     """List local model aliases used by `kitaru.llm()`."""
     command = "model.list"
     output_format = _resolve_output_format(output)
-    try:
-        aliases = _facade_module().list_model_aliases()
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    aliases = run_with_cli_error_boundary(
+        _facade_module().list_model_aliases,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(

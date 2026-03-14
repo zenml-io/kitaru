@@ -11,6 +11,7 @@ from cyclopts import Parameter
 
 from kitaru import _flow_loading
 from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
+from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.client import Execution, ExecutionStatus, LogEntry
 from kitaru.inspection import (
@@ -509,7 +510,8 @@ def run(
     )
 
     facade = _facade_module()
-    try:
+
+    def _start_execution() -> _FlowHandleLike:
         flow_target = facade._load_flow_target(target)
         flow_inputs = _parse_json_object(args, option_name="--args")
 
@@ -528,13 +530,14 @@ def run(
             raise ValueError(
                 "Flow execution did not return a valid handle with an `exec_id`."
             )
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        return handle
+
+    handle = run_with_cli_error_boundary(
+        _start_execution,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if use_live:
         return
@@ -562,15 +565,12 @@ def get_(
     """Show detailed information for one execution."""
     command = "executions.get"
     output_format = _resolve_output_format(output)
-    try:
-        execution = _facade_module().KitaruClient().executions.get(exec_id)
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    execution = run_with_cli_error_boundary(
+        lambda: _facade_module().KitaruClient().executions.get(exec_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_execution(execution), output=output_format)
@@ -601,8 +601,8 @@ def list____(
     """List executions with optional filters."""
     command = "executions.list"
     output_format = _resolve_output_format(output)
-    try:
-        executions = (
+    executions = run_with_cli_error_boundary(
+        lambda: (
             _facade_module()
             .KitaruClient()
             .executions.list(
@@ -610,14 +610,11 @@ def list____(
                 flow=flow,
                 limit=limit,
             )
-        )
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(
@@ -705,16 +702,21 @@ def logs_(
 
     if follow:
         try:
-            exit_code = _follow_execution_logs(
-                client=client,
-                exec_id=exec_id,
-                checkpoint=checkpoint,
-                source=source,
-                limit=limit,
+            exit_code = run_with_cli_error_boundary(
+                lambda: _follow_execution_logs(
+                    client=client,
+                    exec_id=exec_id,
+                    checkpoint=checkpoint,
+                    source=source,
+                    limit=limit,
+                    output=output_format,
+                    grouped=grouped,
+                    verbosity=verbosity,
+                    interval=interval,
+                ),
+                command=command,
                 output=output_format,
-                grouped=grouped,
-                verbosity=verbosity,
-                interval=interval,
+                exit_with_error=_exit_with_error,
             )
         except KeyboardInterrupt:
             if output_format == CLIOutputFormat.JSON:
@@ -725,30 +727,20 @@ def logs_(
             else:
                 _emit_control_message("[Log follow interrupted]", output=output_format)
             raise SystemExit(1) from None
-        except Exception as exc:
-            _exit_with_error(
-                command,
-                str(exc),
-                output=output_format,
-                error_type=type(exc).__name__,
-            )
 
         raise SystemExit(exit_code)
 
-    try:
-        entries = client.executions.logs(
+    entries = run_with_cli_error_boundary(
+        lambda: client.executions.logs(
             exec_id,
             checkpoint=checkpoint,
             source=source,
             limit=limit,
-        )
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(
@@ -795,9 +787,10 @@ def input_(
     """Resolve pending wait input for an execution."""
     command = "executions.input"
     output_format = _resolve_output_format(output)
-    try:
+
+    def _resolve_input() -> Execution:
         parsed_value = _parse_json_value(value, option_name="--value")
-        execution = (
+        return (
             _facade_module()
             .KitaruClient()
             .executions.input(
@@ -806,13 +799,13 @@ def input_(
                 value=parsed_value,
             )
         )
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+
+    execution = run_with_cli_error_boundary(
+        _resolve_input,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_execution(execution), output=output_format)
@@ -856,10 +849,11 @@ def replay_(
     """Replay an execution from a checkpoint boundary."""
     command = "executions.replay"
     output_format = _resolve_output_format(output)
-    try:
+
+    def _replay_execution() -> Execution:
         flow_inputs = _parse_json_object(args, option_name="--args")
         parsed_overrides = _parse_json_object(overrides, option_name="--overrides")
-        execution = (
+        return (
             _facade_module()
             .KitaruClient()
             .executions.replay(
@@ -869,13 +863,13 @@ def replay_(
                 **flow_inputs,
             )
         )
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+
+    execution = run_with_cli_error_boundary(
+        _replay_execution,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_execution(execution), output=output_format)
@@ -898,15 +892,12 @@ def retry_(
     """Retry a failed execution as same-execution recovery."""
     command = "executions.retry"
     output_format = _resolve_output_format(output)
-    try:
-        execution = _facade_module().KitaruClient().executions.retry(exec_id)
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    execution = run_with_cli_error_boundary(
+        lambda: _facade_module().KitaruClient().executions.retry(exec_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_execution(execution), output=output_format)
@@ -929,15 +920,12 @@ def resume_(
     """Resume a paused execution after wait input is resolved."""
     command = "executions.resume"
     output_format = _resolve_output_format(output)
-    try:
-        execution = _facade_module().KitaruClient().executions.resume(exec_id)
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    execution = run_with_cli_error_boundary(
+        lambda: _facade_module().KitaruClient().executions.resume(exec_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_execution(execution), output=output_format)
@@ -960,15 +948,12 @@ def cancel_(
     """Cancel a running execution."""
     command = "executions.cancel"
     output_format = _resolve_output_format(output)
-    try:
-        execution = _facade_module().KitaruClient().executions.cancel(exec_id)
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    execution = run_with_cli_error_boundary(
+        lambda: _facade_module().KitaruClient().executions.cancel(exec_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_execution(execution), output=output_format)

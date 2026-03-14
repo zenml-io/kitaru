@@ -9,6 +9,7 @@ from cyclopts import Parameter
 from zenml.exceptions import EntityExistsError, ZenKeyError
 from zenml.models import SecretResponse
 
+from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.inspection import serialize_secret_detail, serialize_secret_summary
 
@@ -178,7 +179,8 @@ def set_(
     command = "secrets.set"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
-    try:
+
+    def _set_secret() -> tuple[SecretResponse, str]:
         parsed_assignments = _parse_secret_assignments(assignments)
         client = facade.Client()
 
@@ -196,13 +198,14 @@ def set_(
                 add_or_update_values=parsed_assignments,
             )
             action = "Updated"
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        return secret, action
+
+    secret, action = run_with_cli_error_boundary(
+        _set_secret,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         payload = serialize_secret_summary(secret)
@@ -232,15 +235,12 @@ def show_(
     command = "secrets.show"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
-    try:
-        secret = facade._resolve_secret_exact(facade.Client(), name_or_id)
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    secret = run_with_cli_error_boundary(
+        lambda: facade._resolve_secret_exact(facade.Client(), name_or_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
@@ -261,15 +261,12 @@ def list__(output: OutputFormatOption = "text") -> None:
     """List all secrets visible to the current user context."""
     command = "secrets.list"
     output_format = _resolve_output_format(output)
-    try:
-        secrets = _list_accessible_secrets(_facade_module().Client())
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    secrets = run_with_cli_error_boundary(
+        lambda: _list_accessible_secrets(_facade_module().Client()),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         ordered = sorted(
@@ -297,17 +294,19 @@ def delete_(
     command = "secrets.delete"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
-    try:
+
+    def _delete_secret() -> SecretResponse:
         client = facade.Client()
         secret = facade._resolve_secret_exact(client, name_or_id)
         client.delete_secret(name_id_or_prefix=str(secret.id))
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        return secret
+
+    secret = run_with_cli_error_boundary(
+        _delete_secret,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         payload = serialize_secret_summary(secret)

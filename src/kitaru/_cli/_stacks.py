@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import builtins
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -10,6 +9,7 @@ from typing import Annotated, Any
 from cyclopts import Parameter
 from zenml.utils import yaml_utils
 
+from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.config import CloudProvider, KubernetesStackSpec, StackInfo, StackType
 from kitaru.inspection import (
@@ -427,21 +427,25 @@ def list_(output: OutputFormatOption = "text") -> None:
     command = "stack.list"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
-    try:
+
+    def _list_stacks() -> tuple[list[StackInfo], list[Any] | None]:
         if output_format == CLIOutputFormat.JSON:
             stack_entries = facade._list_stack_entries()
             stacks = [entry.stack for entry in stack_entries]
         else:
             stacks = facade.get_available_stacks()
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+            stack_entries = None
+        return stacks, stack_entries
+
+    stacks, stack_entries = run_with_cli_error_boundary(
+        _list_stacks,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
+        assert stack_entries is not None
         _emit_json_items(
             command,
             [
@@ -460,15 +464,12 @@ def current(output: OutputFormatOption = "text") -> None:
     """Show the currently active stack."""
     command = "stack.current"
     output_format = _resolve_output_format(output)
-    try:
-        stack = _facade_module().get_current_stack()
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    stack = run_with_cli_error_boundary(
+        _facade_module().get_current_stack,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_stack(stack), output=output_format)
@@ -488,15 +489,12 @@ def show(
     """Show translated details for a stack by name or ID."""
     command = "stack.show"
     output_format = _resolve_output_format(output)
-    try:
-        details = _facade_module()._show_stack_operation(name_or_id)
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    details = run_with_cli_error_boundary(
+        lambda: _facade_module()._show_stack_operation(name_or_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
@@ -520,15 +518,12 @@ def use(
     """Use a stack as the active default by name or ID."""
     command = "stack.use"
     output_format = _resolve_output_format(output)
-    try:
-        selected_stack = _facade_module().set_active_stack(stack)
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    selected_stack = run_with_cli_error_boundary(
+        lambda: _facade_module().set_active_stack(stack),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, serialize_stack(selected_stack), output=output_format)
@@ -596,7 +591,8 @@ def create(
     """Create a local or Kubernetes-backed stack."""
     command = "stack.create"
     output_format = _resolve_output_format(output)
-    try:
+
+    def _create_stack() -> Any:
         file_inputs = _load_stack_create_file(file) if file is not None else None
         merged_inputs = _merge_stack_create_inputs(
             cli_inputs=_StackCreateInputs(
@@ -635,7 +631,7 @@ def create(
                 merged_inputs.verify if merged_inputs.verify is not None else True
             ),
         )
-        result = _facade_module()._create_stack_operation(
+        return _facade_module()._create_stack_operation(
             normalized_name,
             stack_type=stack_type,
             activate=merged_inputs.activate
@@ -643,13 +639,13 @@ def create(
             else True,
             kubernetes=kubernetes_spec,
         )
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=builtins.type(exc).__name__,
-        )
+
+    result = run_with_cli_error_boundary(
+        _create_stack,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
@@ -695,19 +691,16 @@ def delete(
     """Delete a stack by name or ID."""
     command = "stack.delete"
     output_format = _resolve_output_format(output)
-    try:
-        result = _facade_module()._delete_stack_operation(
+    result = run_with_cli_error_boundary(
+        lambda: _facade_module()._delete_stack_operation(
             stack,
             recursive=recursive,
             force=force,
-        )
-    except Exception as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(

@@ -8,6 +8,7 @@ from typing import Annotated, Any
 
 from cyclopts import Parameter
 
+from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.config import (
     KITARU_AUTH_TOKEN_ENV,
@@ -333,8 +334,8 @@ def login(
     _ensure_no_auth_environment_overrides(command=command, output=output_format)
 
     facade = _facade_module()
-    try:
-        facade.login_to_server(
+    run_with_cli_error_boundary(
+        lambda: facade.login_to_server(
             server,
             api_key=api_key,
             refresh=refresh,
@@ -342,14 +343,12 @@ def login(
             no_verify_ssl=no_verify_ssl,
             ssl_ca_cert=ssl_ca_cert,
             cloud_api_url=cloud_api_url,
-        )
-    except (RuntimeError, ValueError) as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+        handled_exceptions=(RuntimeError, ValueError),
+    )
 
     connected_server_url = facade._get_connected_server_url() or server.rstrip("/")
     if output_format == CLIOutputFormat.JSON:
@@ -403,19 +402,17 @@ def set(
     """Set the global runtime log-store backend override."""
     command = "log-store.set"
     output_format = _resolve_output_format(output)
-    try:
-        snapshot = _facade_module().set_global_log_store(
+    snapshot = run_with_cli_error_boundary(
+        lambda: _facade_module().set_global_log_store(
             backend,
             endpoint=endpoint,
             api_key=api_key,
-        )
-    except ValueError as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+        handled_exceptions=(ValueError,),
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
@@ -433,15 +430,13 @@ def show__(output: OutputFormatOption = "text") -> None:
     command = "log-store.show"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
-    try:
-        snapshot = facade.resolve_log_store()
-    except ValueError as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    snapshot = run_with_cli_error_boundary(
+        facade.resolve_log_store,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+        handled_exceptions=(ValueError,),
+    )
 
     _, mismatch_warning = facade._log_store_mismatch_details(snapshot)
     if output_format == CLIOutputFormat.JSON:
@@ -455,15 +450,13 @@ def reset(output: OutputFormatOption = "text") -> None:
     """Clear the persisted global runtime log-store override."""
     command = "log-store.reset"
     output_format = _resolve_output_format(output)
-    try:
-        snapshot = _facade_module().reset_global_log_store()
-    except ValueError as exc:
-        _exit_with_error(
-            command,
-            str(exc),
-            output=output_format,
-            error_type=type(exc).__name__,
-        )
+    snapshot = run_with_cli_error_boundary(
+        _facade_module().reset_global_log_store,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+        handled_exceptions=(ValueError,),
+    )
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
