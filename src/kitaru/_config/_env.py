@@ -55,7 +55,7 @@ def _parse_bool_env(name: str, value: str) -> bool:
         return True
     if normalized_value in _FALSY_VALUES:
         return False
-    raise ValueError(
+    raise KitaruUsageError(
         f"Invalid value for {name}: {value!r}. Use one of true/false/1/0/yes/no/on/off."
     )
 
@@ -84,17 +84,19 @@ def _read_project_config(start_dir: Path | None = None) -> KitaruConfig:
 
     tool_config = pyproject_data.get("tool", {})
     if not isinstance(tool_config, dict):
-        raise ValueError(f"Invalid {pyproject_path}: expected [tool] to be a table.")
+        raise KitaruUsageError(
+            f"Invalid {pyproject_path}: expected [tool] to be a table."
+        )
 
     kitaru_config = tool_config.get("kitaru")
     if kitaru_config is None:
         return KitaruConfig()
     if not isinstance(kitaru_config, dict):
-        raise ValueError(
+        raise KitaruUsageError(
             f"Invalid {pyproject_path}: expected [tool.kitaru] to be a table."
         )
     if "runner" in kitaru_config:
-        raise ValueError(
+        raise KitaruUsageError(
             f"Invalid {pyproject_path}: `[tool.kitaru].runner` was renamed to "
             "`[tool.kitaru].stack`."
         )
@@ -108,7 +110,7 @@ def _read_execution_env_config() -> KitaruConfig:
 
     raw_legacy_runner = os.environ.get("KITARU_RUNNER")
     if raw_legacy_runner is not None:
-        raise ValueError(
+        raise KitaruUsageError(
             "`KITARU_RUNNER` was renamed to `KITARU_STACK`; use the new name."
         )
 
@@ -125,7 +127,7 @@ def _read_execution_env_config() -> KitaruConfig:
         try:
             values["retries"] = int(raw_retries.strip())
         except ValueError as exc:
-            raise ValueError(
+            raise KitaruUsageError(
                 f"Invalid value for {KITARU_RETRIES_ENV}: {raw_retries!r}. "
                 "Expected an integer."
             ) from exc
@@ -134,7 +136,7 @@ def _read_execution_env_config() -> KitaruConfig:
     if raw_image is not None:
         stripped_image = raw_image.strip()
         if not stripped_image:
-            raise ValueError(f"{KITARU_IMAGE_ENV} cannot be empty.")
+            raise KitaruUsageError(f"{KITARU_IMAGE_ENV} cannot be empty.")
         try:
             parsed_image = json.loads(stripped_image)
         except json.JSONDecodeError:

@@ -393,8 +393,10 @@ def llm(
         The model response text.
 
     Raises:
-        RuntimeError: If called outside a flow.
-        ValueError: If prompt or model input is invalid.
+        KitaruContextError: If called outside a flow.
+        KitaruUsageError: If prompt or model input is invalid.
+        KitaruRuntimeError: If credentials or LiteLLM response content are invalid.
+        KitaruBackendError: If secret retrieval fails.
     """
     if not _is_inside_flow():
         raise KitaruContextError(_LLM_OUTSIDE_FLOW_ERROR)

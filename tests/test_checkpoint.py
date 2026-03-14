@@ -13,6 +13,7 @@ import pytest
 from zenml.config.retry_config import StepRetryConfig
 
 from kitaru.checkpoint import checkpoint
+from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.runtime import (
     _flow_scope,
     _get_current_checkpoint,
@@ -154,7 +155,7 @@ def test_checkpoint_registers_source_alias_for_step_reload() -> None:
 
 
 def test_checkpoint_rejects_negative_retries() -> None:
-    with pytest.raises(ValueError, match="Checkpoint retries must be >= 0"):
+    with pytest.raises(KitaruUsageError, match="Checkpoint retries must be >= 0"):
         checkpoint(retries=-1)(lambda: None)
 
 
@@ -167,7 +168,7 @@ def test_checkpoint_rejects_call_outside_flow_context() -> None:
             step_active=False,
             dynamic_run_active=False,
         ),
-        pytest.raises(RuntimeError, match=r"inside a @flow"),
+        pytest.raises(KitaruContextError, match=r"inside a @flow"),
     ):
         wrapped()
 
@@ -179,7 +180,7 @@ def test_checkpoint_rejects_call_in_non_kitaru_compilation_context() -> None:
 
     with (
         _zenml_contexts(compilation_active=True, flow_active=False),
-        pytest.raises(RuntimeError, match=r"inside a @flow"),
+        pytest.raises(KitaruContextError, match=r"inside a @flow"),
     ):
         wrapped(41)
 
@@ -189,7 +190,7 @@ def test_checkpoint_rejects_call_in_non_kitaru_dynamic_context() -> None:
 
     with (
         _zenml_contexts(dynamic_run_active=True, flow_active=False),
-        pytest.raises(RuntimeError, match=r"inside a @flow"),
+        pytest.raises(KitaruContextError, match=r"inside a @flow"),
     ):
         wrapped(41)
 
@@ -214,7 +215,7 @@ def test_checkpoint_rejects_nested_checkpoint_calls() -> None:
             dynamic_run_active=True,
             flow_active=True,
         ),
-        pytest.raises(RuntimeError, match="Nested checkpoint calls"),
+        pytest.raises(KitaruContextError, match="Nested checkpoint calls"),
     ):
         wrapped()
 
@@ -224,7 +225,7 @@ def test_submit_requires_running_flow_context() -> None:
 
     with (
         _zenml_contexts(step_active=False, dynamic_run_active=False),
-        pytest.raises(RuntimeError, match="Concurrent checkpoint execution"),
+        pytest.raises(KitaruContextError, match="Concurrent checkpoint execution"),
     ):
         wrapped.submit("payload")
 
@@ -240,7 +241,7 @@ def test_submit_rejects_nested_checkpoint_calls() -> None:
             dynamic_run_active=True,
             flow_active=True,
         ),
-        pytest.raises(RuntimeError, match="Nested checkpoint calls"),
+        pytest.raises(KitaruContextError, match="Nested checkpoint calls"),
     ):
         wrapped.submit("payload")
 

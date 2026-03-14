@@ -23,6 +23,7 @@ from kitaru._env import (
     KITARU_PROJECT_ENV,
     KITARU_SERVER_URL_ENV,
 )
+from kitaru.errors import KitaruUsageError
 
 _DEFAULT_LOG_STORE_BACKEND = "artifact-store"
 _LOG_STORE_SOURCE_DEFAULT = "default"
@@ -56,10 +57,10 @@ class LogStoreOverride(BaseModel):
     def _validate_backend(cls, value: str) -> str:
         normalized_value = value.strip().lower()
         if not normalized_value:
-            raise ValueError("Log-store backend cannot be empty.")
+            raise KitaruUsageError("Log-store backend cannot be empty.")
 
         if not _LOG_STORE_BACKEND_PATTERN.fullmatch(normalized_value):
-            raise ValueError(
+            raise KitaruUsageError(
                 "Invalid log-store backend. Use lowercase letters, numbers, "
                 "dots, underscores, or hyphens."
             )
@@ -71,11 +72,11 @@ class LogStoreOverride(BaseModel):
     def _validate_endpoint(cls, value: str) -> str:
         normalized_value = value.strip().rstrip("/")
         if not normalized_value:
-            raise ValueError("Log-store endpoint cannot be empty.")
+            raise KitaruUsageError("Log-store endpoint cannot be empty.")
 
         parsed = urlparse(normalized_value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError(
+            raise KitaruUsageError(
                 "Invalid log-store endpoint. Please use an http:// or https:// URL."
             )
 
@@ -89,7 +90,7 @@ class LogStoreOverride(BaseModel):
 
         normalized_value = value.strip()
         if not normalized_value:
-            raise ValueError("Log-store API key cannot be empty.")
+            raise KitaruUsageError("Log-store API key cannot be empty.")
 
         return normalized_value
 
@@ -213,7 +214,7 @@ def _read_log_store_env_override(
         return None
 
     if raw_backend is None:
-        raise ValueError(
+        raise KitaruUsageError(
             f"{KITARU_LOG_STORE_BACKEND_ENV} must be set when defining a log-store "
             "environment override."
         )
@@ -221,12 +222,12 @@ def _read_log_store_env_override(
     normalized_backend = raw_backend.strip().lower()
     if normalized_backend == _DEFAULT_LOG_STORE_BACKEND:
         if raw_endpoint not in (None, ""):
-            raise ValueError(
+            raise KitaruUsageError(
                 f"{KITARU_LOG_STORE_ENDPOINT_ENV} must be unset when "
                 f"{KITARU_LOG_STORE_BACKEND_ENV}=artifact-store."
             )
         if raw_api_key not in (None, ""):
-            raise ValueError(
+            raise KitaruUsageError(
                 f"{KITARU_LOG_STORE_API_KEY_ENV} must be unset when "
                 f"{KITARU_LOG_STORE_BACKEND_ENV}=artifact-store."
             )
@@ -239,7 +240,7 @@ def _read_log_store_env_override(
         )
 
     if raw_endpoint is None:
-        raise ValueError(
+        raise KitaruUsageError(
             f"{KITARU_LOG_STORE_ENDPOINT_ENV} must be set when "
             f"{KITARU_LOG_STORE_BACKEND_ENV} is configured."
         )
@@ -361,7 +362,7 @@ def set_global_log_store(
 ) -> ResolvedLogStore:
     """Persist a global log-store override backend."""
     if backend.strip().lower() == _DEFAULT_LOG_STORE_BACKEND:
-        raise ValueError(
+        raise KitaruUsageError(
             "The artifact-store backend is already the default. Use "
             "`kitaru log-store reset` to return to defaults."
         )

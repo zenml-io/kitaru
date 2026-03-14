@@ -135,7 +135,7 @@ def _normalize_retries(retries: int) -> int:
         retries: Retry count.
 
     Raises:
-        ValueError: If retries is negative.
+        KitaruUsageError: If retries is negative.
 
     Returns:
         The normalized retry count.
@@ -282,7 +282,7 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
         run: The pipeline run.
 
     Raises:
-        RuntimeError: If run output metadata is missing.
+        KitaruRuntimeError: If run output metadata is missing or ambiguous.
 
     Returns:
         The flow result (`None`, a single value, or a tuple of values).
@@ -357,7 +357,8 @@ class FlowHandle:
         """Block until execution finishes and return its result.
 
         Raises:
-            RuntimeError: If the run finishes unsuccessfully.
+            KitaruExecutionError: If the run finishes unsuccessfully.
+            KitaruRuntimeError: If result extraction fails after completion.
 
         Returns:
             The flow return value.
@@ -374,7 +375,9 @@ class FlowHandle:
         """Get the flow result without waiting.
 
         Raises:
-            RuntimeError: If the run is unfinished or unsuccessful.
+            KitaruStateError: If the run is still unfinished.
+            KitaruExecutionError: If the run finished unsuccessfully.
+            KitaruRuntimeError: If result extraction fails after completion.
 
         Returns:
             The flow return value.

@@ -28,6 +28,8 @@ from zenml.integrations.gcp import (
 from zenml.models.v2.core.stack import StackRequest
 from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
 
+from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
+
 _STACK_MANAGED_LABEL_KEY = "kitaru.managed"
 _STACK_MANAGED_LABEL_VALUE = "true"
 
@@ -159,7 +161,7 @@ def _infer_gcp_project_id_from_container_registry(container_registry: str) -> st
     """Infer the GCP project ID from a GAR or GCR container registry URI."""
     normalized_registry = container_registry.strip()
     if not normalized_registry:
-        raise ValueError("Container registry URI cannot be empty.")
+        raise KitaruUsageError("Container registry URI cannot be empty.")
 
     normalized_registry = re.sub(r"^[a-z]+://", "", normalized_registry)
     normalized_registry = normalized_registry.rstrip("/")
@@ -173,7 +175,7 @@ def _infer_gcp_project_id_from_container_registry(container_registry: str) -> st
     ) and path_parts:
         return path_parts[0]
 
-    raise ValueError(
+    raise KitaruUsageError(
         "Cannot infer GCP project ID from container registry URI "
         f"'{container_registry}'. Use an Artifact Registry or GCR URI that "
         "includes the project segment."
@@ -190,7 +192,7 @@ def _artifact_store_resource_id(
         return f"s3://{parsed.netloc}"
     if provider == CloudProvider.GCP and parsed.scheme == "gs" and parsed.netloc:
         return f"gs://{parsed.netloc}"
-    raise ValueError(
+    raise KitaruUsageError(
         f"Unsupported artifact store URI '{artifact_store_uri}' for provider "
         f"'{provider.value}'."
     )
@@ -204,7 +206,7 @@ def _container_registry_resource_id(
     normalized_registry = re.sub(r"^[a-z]+://", "", container_registry.strip())
     normalized_registry = normalized_registry.rstrip("/")
     if not normalized_registry:
-        raise ValueError("Container registry URI cannot be empty.")
+        raise KitaruUsageError("Container registry URI cannot be empty.")
 
     if provider == CloudProvider.AWS:
         return normalized_registry.split("/", 1)[0]
@@ -224,7 +226,7 @@ def _resolve_kubernetes_connector_spec(
         if normalized_credentials:
             method, separator, raw_value = normalized_credentials.partition(":")
             if not separator:
-                raise ValueError(
+                raise KitaruUsageError(
                     "Invalid AWS credentials format. Use one of: "
                     "aws-profile:PROFILE, aws-access-keys:KEY:SECRET, "
                     "aws-session-token:KEY:SECRET:TOKEN."
@@ -234,7 +236,7 @@ def _resolve_kubernetes_connector_spec(
             credential_value = raw_value.strip()
             if normalized_method == "aws-profile":
                 if not credential_value:
-                    raise ValueError("AWS profile name cannot be empty.")
+                    raise KitaruUsageError("AWS profile name cannot be empty.")
                 configuration["profile_name"] = credential_value
             elif normalized_method in {"aws-access-key", "aws-access-keys"}:
                 access_key_id, middle, secret_access_key = credential_value.partition(
@@ -245,7 +247,7 @@ def _resolve_kubernetes_connector_spec(
                     or not access_key_id.strip()
                     or not secret_access_key.strip()
                 ):
-                    raise ValueError(
+                    raise KitaruUsageError(
                         "aws-access-keys credentials must be in the format "
                         "aws-access-keys:ACCESS_KEY_ID:SECRET_ACCESS_KEY."
                     )
@@ -266,7 +268,7 @@ def _resolve_kubernetes_connector_spec(
                     or not secret_access_key.strip()
                     or not session_token.strip()
                 ):
-                    raise ValueError(
+                    raise KitaruUsageError(
                         "aws-session-token credentials must be in the format "
                         "aws-session-token:ACCESS_KEY_ID:SECRET_ACCESS_KEY:SESSION_TOKEN."
                     )
@@ -279,7 +281,7 @@ def _resolve_kubernetes_connector_spec(
                     }
                 )
             else:
-                raise ValueError(
+                raise KitaruUsageError(
                     "Unsupported AWS credentials method. Use one of: "
                     "aws-profile, aws-access-keys, aws-session-token."
                 )
@@ -305,24 +307,24 @@ def _resolve_kubernetes_connector_spec(
         if normalized_credentials:
             method, separator, raw_value = normalized_credentials.partition(":")
             if not separator:
-                raise ValueError(
+                raise KitaruUsageError(
                     "Invalid GCP credentials format. Use "
                     "gcp-service-account:/path/to/key.json."
                 )
             normalized_method = method.strip().lower()
             if normalized_method != "gcp-service-account":
-                raise ValueError(
+                raise KitaruUsageError(
                     "Unsupported GCP credentials method. Use: gcp-service-account."
                 )
 
             credential_path_raw = raw_value.strip()
             if not credential_path_raw:
-                raise ValueError("GCP service account file path cannot be empty.")
+                raise KitaruUsageError("GCP service account file path cannot be empty.")
             credential_path = Path(credential_path_raw).expanduser()
             try:
                 service_account_json = credential_path.read_text(encoding="utf-8")
             except OSError as exc:
-                raise ValueError(
+                raise KitaruUsageError(
                     "Unable to read GCP service account file "
                     f"'{credential_path}': {exc}"
                 ) from exc
@@ -341,7 +343,7 @@ def _resolve_kubernetes_connector_spec(
             verify_configuration=dict(configuration),
         )
 
-    raise ValueError(f"Unsupported cloud provider: {spec.provider}")
+    raise KitaruUsageError(f"Unsupported cloud provider: {spec.provider}")
 
 
 def _build_kubernetes_stack_request(
@@ -419,13 +421,13 @@ def _get_required_stack_component(
     """Return the single component of a required stack type from a stack model."""
     raw_components = getattr(stack_model, "components", None)
     if not isinstance(raw_components, Mapping):
-        raise RuntimeError(
+        raise KitaruStateError(
             "Unable to inspect components from the created Kubernetes stack."
         )
 
     components = raw_components.get(component_type, [])
     if len(components) != 1:
-        raise RuntimeError(
+        raise KitaruStateError(
             "Created Kubernetes stack is missing the expected "
             f"{component_type.value} component."
         )
@@ -450,7 +452,7 @@ def _extract_kubernetes_stack_components(
         component = _get_required_stack_component(stack_model, component_type)
         component_name = str(getattr(component, "name", "")).strip()
         if not component_name:
-            raise RuntimeError(
+            raise KitaruStateError(
                 "Unable to inspect components from the created Kubernetes stack."
             )
         component_labels.append(_format_stack_component_label(component_name, kind))
@@ -474,7 +476,7 @@ def _normalize_stack_selector(name_or_id: str) -> str:
     """Validate and normalize a stack selector provided by a user."""
     normalized_selector = name_or_id.strip()
     if not normalized_selector:
-        raise ValueError("Stack name or ID cannot be empty.")
+        raise KitaruUsageError("Stack name or ID cannot be empty.")
 
     return normalized_selector
 
@@ -536,7 +538,7 @@ def _delete_stack_components_best_effort(
         try:
             component_type = component_types[component.kind]
         except KeyError as exc:  # pragma: no cover - defensive type guard
-            raise ValueError(
+            raise KitaruStateError(
                 f"Unsupported stack component kind: {component.kind}"
             ) from exc
         try:
@@ -650,10 +652,19 @@ def _recursive_delete_component_labels(
             if component_name is None:
                 continue
 
-            stacks = client.list_stacks(component_id=component_id, size=2, page=1)
-            if len(stacks) == 1 and str(getattr(stacks[0], "id", "")) == str(
-                getattr(stack_model, "id", "")
-            ):
+            try:
+                stacks = client.list_stacks(component_id=component_id, size=2, page=1)
+            except Exception:
+                continue
+
+            if isinstance(stacks, Iterable) and not isinstance(stacks, (str, bytes)):
+                matching_stacks = tuple(stacks)
+            else:
+                continue
+
+            if len(matching_stacks) == 1 and str(
+                getattr(matching_stacks[0], "id", "")
+            ) == str(getattr(stack_model, "id", "")):
                 deletable_components.append(
                     _format_stack_component_label(component_name, component_kind)
                 )
@@ -805,7 +816,7 @@ def _resolve_stack_for_show(client: Client, selector: str) -> Any:
 
     resolved_stack = id_match or name_match
     if resolved_stack is None:
-        raise ValueError(f"Stack '{selector}' not found.")
+        raise KitaruStateError(f"Stack '{selector}' not found.")
     return resolved_stack
 
 
@@ -952,7 +963,9 @@ def _show_stack_operation(
     try:
         hydrated_stack = client.get_stack(resolved_stack.id, hydrate=True)
     except Exception as exc:
-        raise RuntimeError(f"Unable to inspect stack '{selector}': {exc}") from exc
+        raise KitaruBackendError(
+            f"Unable to inspect stack '{selector}': {exc}"
+        ) from exc
 
     active_stack_id = str(client.active_stack_model.id)
     stack = _stack_info_from_model(hydrated_stack, active_stack_id=active_stack_id)
@@ -960,11 +973,8 @@ def _show_stack_operation(
 
     raw_components = getattr(hydrated_stack, "components", None)
     if not isinstance(raw_components, Mapping):
-        return StackDetails(
-            stack=stack,
-            is_managed=is_managed,
-            stack_type="custom",
-            components=(),
+        raise KitaruStateError(
+            f"Stack '{selector}' returned malformed component metadata."
         )
 
     normalized_components: dict[StackComponentType, list[Any]] = {}
@@ -1046,21 +1056,26 @@ def _create_kubernetes_stack_operation(
     if any(
         stack_model.name == selector for stack_model in _iter_available_stacks(client)
     ):
-        raise ValueError(_stack_name_collision_message(selector))
+        raise KitaruStateError(_stack_name_collision_message(selector))
 
     previous_active_stack = str(client.active_stack_model.name) if activate else None
     connector_spec = _resolve_kubernetes_connector_spec(spec)
 
-    client.create_service_connector(
-        name=selector,
-        connector_type=connector_spec.verify_connector_type,
-        resource_type=connector_spec.verify_resource_type,
-        auth_method=connector_spec.connector_info.auth_method,
-        configuration=connector_spec.verify_configuration,
-        verify=spec.verify,
-        list_resources=False,
-        register=False,
-    )
+    try:
+        client.create_service_connector(
+            name=selector,
+            connector_type=connector_spec.verify_connector_type,
+            resource_type=connector_spec.verify_resource_type,
+            auth_method=connector_spec.connector_info.auth_method,
+            configuration=connector_spec.verify_configuration,
+            verify=spec.verify,
+            list_resources=False,
+            register=False,
+        )
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to prepare Kubernetes stack '{selector}': {exc}"
+        ) from exc
 
     stack_request = _build_kubernetes_stack_request(
         selector,
@@ -1068,12 +1083,17 @@ def _create_kubernetes_stack_operation(
         connector_spec=connector_spec,
         labels=labels,
     )
-    client._validate_stack_configuration(stack_request)
+    try:
+        client._validate_stack_configuration(stack_request)
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to validate Kubernetes stack '{selector}': {exc}"
+        ) from exc
 
     try:
         created_stack = client.zen_store.create_stack(stack=stack_request)
     except Exception as exc:
-        raise RuntimeError(
+        raise KitaruBackendError(
             f"Failed to create Kubernetes stack '{selector}'. ZenML rolled back "
             "any partially created components and service connectors. Original "
             f"error: {exc}"
@@ -1096,7 +1116,7 @@ def _create_kubernetes_stack_operation(
         try:
             client.activate_stack(created_stack.id)
         except Exception as exc:
-            raise RuntimeError(
+            raise KitaruBackendError(
                 f"Created Kubernetes stack '{selector}' but failed to activate "
                 "it. The stack was created successfully and remains available; "
                 f"run 'kitaru stack use {selector}' to activate it manually. "
@@ -1148,7 +1168,7 @@ def _create_stack_operation(
 
     if stack_type == StackType.KUBERNETES:
         if kubernetes is None:
-            raise ValueError("Kubernetes spec required for --type kubernetes.")
+            raise KitaruUsageError("Kubernetes spec required for --type kubernetes.")
         return kubernetes_operation(
             name,
             spec=kubernetes,
@@ -1156,7 +1176,7 @@ def _create_stack_operation(
             labels=labels,
         )
 
-    raise ValueError(f"Unsupported stack type: {stack_type}")
+    raise KitaruUsageError(f"Unsupported stack type: {stack_type}")
 
 
 def _create_local_stack_operation(
@@ -1174,7 +1194,7 @@ def _create_local_stack_operation(
     if any(
         stack_model.name == selector for stack_model in _iter_available_stacks(client)
     ):
-        raise ValueError(_stack_name_collision_message(selector))
+        raise KitaruStateError(_stack_name_collision_message(selector))
 
     previous_active_stack = str(client.active_stack_model.name) if activate else None
     merged_labels = dict(labels or {})
@@ -1201,7 +1221,7 @@ def _create_local_stack_operation(
             )
         )
     except EntityExistsError as exc:
-        raise ValueError(
+        raise KitaruStateError(
             _component_collision_message(selector, StackComponentType.ORCHESTRATOR)
         ) from exc
 
@@ -1230,15 +1250,16 @@ def _create_local_stack_operation(
         )
         if cleanup_warning:
             message = f"{message} {cleanup_warning}"
-        raise ValueError(message) from exc
+        raise KitaruStateError(message) from exc
     except Exception as exc:
         cleanup_warning = _delete_stack_components_best_effort(
             client,
             created_components,
         )
+        message = str(exc)
         if cleanup_warning:
-            raise RuntimeError(f"{exc} {cleanup_warning}") from exc
-        raise
+            message = f"{message} {cleanup_warning}"
+        raise KitaruBackendError(message) from exc
 
     try:
         stack_model = client.create_stack(
@@ -1257,7 +1278,7 @@ def _create_local_stack_operation(
         message = _stack_name_collision_message(selector)
         if cleanup_warning:
             message = f"{message} {cleanup_warning}"
-        raise ValueError(message) from exc
+        raise KitaruStateError(message) from exc
     except Exception as exc:
         cleanup_warning = _delete_stack_components_best_effort(
             client,
@@ -1266,10 +1287,18 @@ def _create_local_stack_operation(
         message = str(exc)
         if cleanup_warning:
             message = f"{message} {cleanup_warning}"
-        raise RuntimeError(message) from exc
+        raise KitaruBackendError(message) from exc
 
     if activate:
-        client.activate_stack(selector)
+        try:
+            client.activate_stack(selector)
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Created stack '{selector}' but failed to activate it. The stack "
+                "was created successfully and remains available; run "
+                f"'kitaru stack use {selector}' to activate it manually. Original "
+                f"error: {exc}"
+            ) from exc
         active_stack_getter = (
             current_stack if current_stack_getter is None else current_stack_getter
         )
@@ -1299,15 +1328,35 @@ def _delete_stack_operation(
     """Delete a stack and return structured operation details."""
     selector = _normalize_stack_selector(name_or_id)
     client = client_factory()
-    target_stack = client.get_stack(
-        selector,
-        allow_name_prefix_match=False,
-    )
+    try:
+        target_stack = client.get_stack(
+            selector,
+            allow_name_prefix_match=False,
+        )
+    except Exception as exc:
+        try:
+            resolved_stack = _resolve_stack_for_show(client, selector)
+        except KitaruStateError:
+            raise
+        except Exception as resolve_exc:
+            raise KitaruBackendError(
+                f"Unable to inspect stack '{selector}' before deletion: {resolve_exc}"
+            ) from exc
+
+        try:
+            target_stack = client.get_stack(
+                resolved_stack.id,
+                allow_name_prefix_match=False,
+            )
+        except Exception as hydrate_exc:
+            raise KitaruBackendError(
+                f"Unable to inspect stack '{selector}' before deletion: {hydrate_exc}"
+            ) from hydrate_exc
     active_stack = client.active_stack_model
     is_active = str(target_stack.id) == str(active_stack.id)
 
     if is_active and not force:
-        raise ValueError(
+        raise KitaruStateError(
             "Cannot delete the active stack. Use '--force' to delete and fall "
             "back to the default stack, or switch first with 'kitaru stack use "
             "<other>'."
@@ -1324,13 +1373,22 @@ def _delete_stack_operation(
 
     new_active_stack: str | None = None
     if is_active and force:
-        client.activate_stack("default")
+        try:
+            client.activate_stack("default")
+        except Exception as exc:
+            raise KitaruBackendError(
+                "Failed to activate the default stack before deleting the active "
+                f"stack '{selector}': {exc}"
+            ) from exc
         active_stack_getter = (
             current_stack if current_stack_getter is None else current_stack_getter
         )
         new_active_stack = active_stack_getter().name
 
-    client.delete_stack(target_stack.id, recursive=recursive)
+    try:
+        client.delete_stack(target_stack.id, recursive=recursive)
+    except Exception as exc:
+        raise KitaruBackendError(f"Failed to delete stack '{selector}': {exc}") from exc
     if managed_recursive_delete:
         _delete_unshared_service_connectors_best_effort(client, connector_selectors)
 
@@ -1349,12 +1407,19 @@ def _stack_info_from_model(
 ) -> StackInfo:
     """Convert a runtime stack model to Kitaru's public stack shape."""
     try:
-        stack_id = str(stack_model.id)
-        stack_name = str(stack_model.name)
+        stack_id_raw = stack_model.id
+        stack_name_raw = stack_model.name
     except AttributeError as exc:
-        raise RuntimeError(
+        raise KitaruStateError(
             "Unable to read stack information from the configured runtime."
         ) from exc
+
+    stack_id = str(stack_id_raw).strip()
+    stack_name = str(stack_name_raw).strip()
+    if not stack_id or stack_id == "None" or not stack_name or stack_name == "None":
+        raise KitaruStateError(
+            "Unable to read stack information from the configured runtime."
+        )
 
     return StackInfo(
         id=stack_id,
@@ -1367,7 +1432,7 @@ def _iter_available_stacks(client: Client) -> Iterable[Any]:
     """Return all available stacks from the runtime, including later pages."""
     first_page = client.list_stacks()
     if not isinstance(first_page, Iterable) or isinstance(first_page, (str, bytes)):
-        raise RuntimeError(
+        raise KitaruStateError(
             "Unexpected stack list response from the configured runtime."
         )
 
@@ -1391,7 +1456,7 @@ def _iter_available_stacks(client: Client) -> Iterable[Any]:
             page_result,
             (str, bytes),
         ):
-            raise RuntimeError(
+            raise KitaruStateError(
                 "Unexpected stack list response from the configured runtime."
             )
         stack_models.extend(page_result)
@@ -1472,7 +1537,13 @@ def use_stack(
     """Set the active stack and return the resulting active stack info."""
     selector = _normalize_stack_selector(name_or_id)
     client = client_factory()
-    client.activate_stack(selector)
+    resolved_stack = _resolve_stack_for_show(client, selector)
+    try:
+        client.activate_stack(resolved_stack.id)
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to activate stack '{selector}': {exc}"
+        ) from exc
     active_stack_getter = (
         current_stack if current_stack_getter is None else current_stack_getter
     )

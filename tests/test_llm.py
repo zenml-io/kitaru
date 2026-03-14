@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from kitaru.config import ResolvedModelSelection
+from kitaru.errors import KitaruContextError, KitaruRuntimeError
 from kitaru.llm import _resolve_credential_overlay, llm
 from kitaru.runtime import _checkpoint_scope, _flow_scope
 
@@ -20,7 +21,7 @@ def _flow_checkpoint_scope() -> tuple[str, str]:
 
 def test_llm_raises_outside_flow() -> None:
     """`kitaru.llm()` should reject calls outside an active flow."""
-    with pytest.raises(RuntimeError, match=r"inside a @flow"):
+    with pytest.raises(KitaruContextError, match=r"inside a @flow"):
         llm("hello")
 
 
@@ -348,7 +349,7 @@ def test_resolve_credential_overlay_errors_without_known_credentials(
     """Known providers should fail with guidance if env and secret are absent."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    with pytest.raises(RuntimeError, match="No provider credentials found"):
+    with pytest.raises(KitaruRuntimeError, match="No provider credentials found"):
         _resolve_credential_overlay(
             ResolvedModelSelection(
                 requested_model="openai/gpt-4o-mini",

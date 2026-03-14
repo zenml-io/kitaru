@@ -288,7 +288,7 @@ def _read_kitaru_global_config() -> _KitaruGlobalConfig:
         Parsed Kitaru global config.
 
     Raises:
-        ValueError: If the config file exists but is malformed.
+        KitaruUsageError: If the config file exists but is malformed.
     """
     return _config_core._read_kitaru_global_config_impl(
         config_path_getter=_kitaru_global_config_path,
@@ -564,7 +564,9 @@ def use_stack(name_or_id: str) -> StackInfo:
         Information about the newly active stack.
 
     Raises:
-        ValueError: If the selector is empty.
+        KitaruUsageError: If the selector is empty.
+        KitaruStateError: If the requested stack cannot be activated due to
+            current runtime state.
     """
     return _config_stacks.use_stack(
         name_or_id,
@@ -608,8 +610,8 @@ def _login_to_server_target(
             custom control planes.
 
     Raises:
-        RuntimeError: If the underlying ZenML login flow fails.
-        ValueError: If the login target is malformed.
+        KitaruBackendError: If the underlying ZenML login flow fails.
+        KitaruUsageError: If the login target is malformed.
     """
     _config_connection._login_to_server_target_impl(
         server,
@@ -687,8 +689,8 @@ def connect(
             points at a managed Kitaru deployment or staging environment.
 
     Raises:
-        ValueError: If the server URL is invalid.
-        RuntimeError: If the underlying ZenML connection flow fails.
+        KitaruUsageError: If the server URL is invalid.
+        KitaruBackendError: If the underlying ZenML connection flow fails.
     """
     normalized_url = _normalize_server_url(server_url)
     verify_ssl: bool | str = (

@@ -231,7 +231,7 @@ class TestImplementedConnectionPrimitive:
         )
 
     def test_connect_rejects_invalid_urls(self) -> None:
-        with pytest.raises(ValueError, match="Invalid Kitaru server URL"):
+        with pytest.raises(kitaru.KitaruUsageError, match="Invalid Kitaru server URL"):
             kitaru.connect("example.com")
 
     def test_current_stack_returns_stack_info(self) -> None:
@@ -312,19 +312,19 @@ class TestPlaceholderBehavior:
         )
 
     def test_llm_requires_flow_context(self) -> None:
-        with pytest.raises(RuntimeError, match=r"inside a @flow"):
+        with pytest.raises(kitaru.KitaruContextError, match=r"inside a @flow"):
             kitaru.llm("hello")
 
     def test_save_requires_checkpoint_context(self) -> None:
-        with pytest.raises(RuntimeError, match=r"inside a @checkpoint"):
+        with pytest.raises(kitaru.KitaruContextError, match=r"inside a @checkpoint"):
             kitaru.save("name", "value")
 
     def test_load_requires_checkpoint_context(self) -> None:
-        with pytest.raises(RuntimeError, match=r"inside a @checkpoint"):
+        with pytest.raises(kitaru.KitaruContextError, match=r"inside a @checkpoint"):
             kitaru.load("exec-123", "name")
 
     def test_log_requires_flow_context(self) -> None:
-        with pytest.raises(RuntimeError, match=r"inside a @flow"):
+        with pytest.raises(kitaru.KitaruContextError, match=r"inside a @flow"):
             kitaru.log(cost=0.01)
 
     def test_configure_sets_runtime_defaults(self) -> None:

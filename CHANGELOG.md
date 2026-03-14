@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Config and stack helpers now raise Kitaru-specific exception subclasses instead of raw `ValueError` / `RuntimeError`, while preserving compatibility through inheritance
 - `kitaru stack list --output json` and MCP `kitaru_stacks_list` now include `is_managed`, derived from the stack's `kitaru.managed` label
 - `kitaru stack create --type kubernetes` and MCP `manage_stack(action="create", stack_type="kubernetes", ...)` are now backed by ZenML's one-shot stack provisioning flow: Kitaru validates provider-specific credentials, preflights the connector config, creates the cloud connector plus Kubernetes/orchestrator, artifact-store, and container-registry components transactionally, and returns the richer stack-create metadata (including service connectors and cloud resources) through both surfaces
 - `kitaru stack create` now accepts `--file/-f` YAML input, letting stack definitions come from a config file while keeping explicit CLI flags authoritative when both are provided

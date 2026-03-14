@@ -10,7 +10,12 @@ import pytest
 from zenml.enums import ArtifactSaveType, ArtifactType
 
 from kitaru.artifacts import _parse_scope_uuid, load, save
-from kitaru.errors import KitaruStateError
+from kitaru.errors import (
+    KitaruContextError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 from kitaru.runtime import _checkpoint_scope, _flow_scope
 
 
@@ -89,7 +94,7 @@ def test_parse_scope_uuid_rejects_invalid_uuid(
 
 
 def test_save_raises_outside_checkpoint() -> None:
-    with pytest.raises(RuntimeError, match=r"inside a @checkpoint"):
+    with pytest.raises(KitaruContextError, match=r"inside a @checkpoint"):
         save("artifact", 123)
 
 
@@ -103,7 +108,7 @@ def test_save_requires_execution_id_inside_checkpoint() -> None:
             execution_id=None,
             checkpoint_id=checkpoint_id,
         ),
-        pytest.raises(RuntimeError, match="active execution ID"),
+        pytest.raises(KitaruStateError, match="active execution ID"),
     ):
         save("artifact", 123)
 
@@ -118,7 +123,7 @@ def test_save_requires_checkpoint_id_inside_checkpoint() -> None:
             execution_id=execution_id,
             checkpoint_id=None,
         ),
-        pytest.raises(RuntimeError, match="active checkpoint ID"),
+        pytest.raises(KitaruStateError, match="active checkpoint ID"),
     ):
         save("artifact", 123)
 
@@ -133,7 +138,7 @@ def test_save_rejects_invalid_execution_uuid_in_scope() -> None:
             execution_id="bad-execution-id",
             checkpoint_id=checkpoint_id,
         ),
-        pytest.raises(RuntimeError, match="invalid execution ID"),
+        pytest.raises(KitaruStateError, match="invalid execution ID"),
     ):
         save("artifact", 123)
 
@@ -148,7 +153,7 @@ def test_save_rejects_invalid_checkpoint_uuid_in_scope() -> None:
             execution_id=execution_id,
             checkpoint_id="bad-checkpoint-id",
         ),
-        pytest.raises(RuntimeError, match="invalid checkpoint ID"),
+        pytest.raises(KitaruStateError, match="invalid checkpoint ID"),
     ):
         save("artifact", 123)
 
@@ -164,7 +169,7 @@ def test_save_rejects_unsupported_artifact_type() -> None:
             execution_id=execution_id,
             checkpoint_id=checkpoint_id,
         ),
-        pytest.raises(ValueError, match="Unsupported Kitaru artifact type"),
+        pytest.raises(KitaruUsageError, match="Unsupported Kitaru artifact type"),
     ):
         save("artifact", 123, type="weird")
 
@@ -195,7 +200,7 @@ def test_save_delegates_to_zenml_manual_artifact_publisher() -> None:
 
 
 def test_load_raises_outside_checkpoint() -> None:
-    with pytest.raises(RuntimeError, match=r"inside a @checkpoint"):
+    with pytest.raises(KitaruContextError, match=r"inside a @checkpoint"):
         load(str(uuid4()), "research")
 
 
@@ -210,7 +215,7 @@ def test_load_rejects_invalid_target_execution_id() -> None:
             execution_id=execution_id,
             checkpoint_id=checkpoint_id,
         ),
-        pytest.raises(ValueError, match="expected `exec_id` to be a UUID"),
+        pytest.raises(KitaruUsageError, match="expected `exec_id` to be a UUID"),
     ):
         load("not-a-uuid", "research")
 
@@ -379,7 +384,7 @@ def test_load_raises_when_name_is_not_found() -> None:
             checkpoint_id=checkpoint_id,
         ),
         patch("kitaru.artifacts.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="No artifact named"),
+        pytest.raises(KitaruRuntimeError, match="No artifact named"),
     ):
         load(str(uuid4()), "research_context")
 
@@ -424,6 +429,6 @@ def test_load_raises_on_ambiguous_matches() -> None:
             checkpoint_id=checkpoint_id,
         ),
         patch("kitaru.artifacts.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="Multiple artifacts named"),
+        pytest.raises(KitaruRuntimeError, match="Multiple artifacts named"),
     ):
         load(str(uuid4()), duplicate_name)

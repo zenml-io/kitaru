@@ -11,16 +11,18 @@ from urllib.parse import urlparse
 import click
 from zenml.exceptions import AuthorizationException
 
+from kitaru.errors import KitaruBackendError, KitaruUsageError
+
 
 def _normalize_server_url(server_url: str) -> str:
     """Validate and normalize a Kitaru server URL."""
     normalized_url = server_url.strip().rstrip("/")
     if not normalized_url:
-        raise ValueError("Kitaru server URL cannot be empty.")
+        raise KitaruUsageError("Kitaru server URL cannot be empty.")
 
     parsed = urlparse(normalized_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError(
+        raise KitaruUsageError(
             "Invalid Kitaru server URL. Please use an http:// or https:// URL."
         )
 
@@ -31,13 +33,13 @@ def _normalize_login_target(server: str) -> str:
     """Normalize a CLI login target while preserving workspace names/IDs."""
     normalized_target = server.strip().rstrip("/")
     if not normalized_target:
-        raise ValueError("Kitaru server target cannot be empty.")
+        raise KitaruUsageError("Kitaru server target cannot be empty.")
 
     if normalized_target.startswith(("http:", "https:")):
         return _normalize_server_url(normalized_target)
 
     if _looks_like_server_address_without_scheme(normalized_target):
-        raise ValueError(
+        raise KitaruUsageError(
             "Invalid Kitaru server URL. Please use an http:// or https:// URL, "
             "or pass a managed workspace name or ID."
         )
@@ -152,8 +154,8 @@ def _login_to_server_target_impl(
                 project=project,
             )
     except click.ClickException as exc:
-        raise RuntimeError(exc.format_message()) from exc
+        raise KitaruBackendError(exc.format_message()) from exc
     except AuthorizationException as exc:
-        raise RuntimeError(str(exc)) from exc
+        raise KitaruBackendError(str(exc)) from exc
     except Exception as exc:
-        raise RuntimeError(str(exc)) from exc
+        raise KitaruBackendError(str(exc)) from exc

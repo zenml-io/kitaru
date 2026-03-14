@@ -23,6 +23,7 @@ from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.utils import io_utils, yaml_utils
 
 from kitaru._config._connection import _normalize_server_url
+from kitaru.errors import KitaruUsageError
 
 _KITARU_GLOBAL_CONFIG_FILENAME = "config.yaml"
 FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
@@ -47,7 +48,7 @@ class ImageSettings(BaseModel):
             return None
         normalized_value = value.strip()
         if not normalized_value:
-            raise ValueError("Image string values cannot be empty.")
+            raise KitaruUsageError("Image string values cannot be empty.")
         return normalized_value
 
     @field_validator("requirements")
@@ -59,7 +60,9 @@ class ImageSettings(BaseModel):
         for requirement in value:
             normalized_requirement = requirement.strip()
             if not normalized_requirement:
-                raise ValueError("Image requirements cannot contain empty strings.")
+                raise KitaruUsageError(
+                    "Image requirements cannot contain empty strings."
+                )
             normalized_requirements.append(normalized_requirement)
         return normalized_requirements
 
@@ -75,7 +78,7 @@ class ImageSettings(BaseModel):
         for key, environment_value in value.items():
             normalized_key = key.strip()
             if not normalized_key:
-                raise ValueError("Image environment keys cannot be empty.")
+                raise KitaruUsageError("Image environment keys cannot be empty.")
             normalized_environment[normalized_key] = str(environment_value)
         return normalized_environment
 
@@ -114,7 +117,7 @@ class KitaruConfig(BaseModel):
             return None
         normalized_value = value.strip()
         if not normalized_value:
-            raise ValueError("Configuration string values cannot be empty.")
+            raise KitaruUsageError("Configuration string values cannot be empty.")
         return normalized_value
 
     @field_validator("server_url")
@@ -130,7 +133,7 @@ class KitaruConfig(BaseModel):
         if value is None:
             return None
         if value < 0:
-            raise ValueError("Flow retries must be >= 0.")
+            raise KitaruUsageError("Flow retries must be >= 0.")
         return value
 
     @field_validator("image", mode="before")
@@ -154,14 +157,14 @@ class ResolvedExecutionConfig(BaseModel):
             return None
         normalized_value = value.strip()
         if not normalized_value:
-            raise ValueError("Stack cannot be empty.")
+            raise KitaruUsageError("Stack cannot be empty.")
         return normalized_value
 
     @field_validator("retries")
     @classmethod
     def _validate_retries(cls, value: int) -> int:
         if value < 0:
-            raise ValueError("Flow retries must be >= 0.")
+            raise KitaruUsageError("Flow retries must be >= 0.")
         return value
 
 
@@ -241,7 +244,7 @@ def _coerce_image_input(value: Any) -> ImageSettings | None:
     if isinstance(value, str):
         normalized_image = value.strip()
         if not normalized_image:
-            raise ValueError("Image string values cannot be empty.")
+            raise KitaruUsageError("Image string values cannot be empty.")
         return ImageSettings(base_image=normalized_image)
     if isinstance(value, Mapping):
         normalized_payload = dict(value)
@@ -394,7 +397,7 @@ def _parse_run_uuid(run_id: UUID | str) -> UUID:
     try:
         return UUID(str(run_id))
     except ValueError as exc:
-        raise RuntimeError(
+        raise KitaruUsageError(
             "Frozen execution spec persistence expected a UUID pipeline run ID, "
             f"got {run_id!r}."
         ) from exc
@@ -465,7 +468,7 @@ def _parse_kitaru_config_file(
         return None
 
     if not isinstance(config_values, dict):
-        raise ValueError(
+        raise KitaruUsageError(
             "The Kitaru global config file is invalid. Expected a YAML mapping at "
             f"{config_path}."
         )
@@ -473,7 +476,7 @@ def _parse_kitaru_config_file(
     try:
         return global_config_model.model_validate(config_values)
     except ValidationError as exc:
-        raise ValueError(
+        raise KitaruUsageError(
             "The Kitaru global config file is invalid. Fix or delete "
             f"{config_path} and try again."
         ) from exc

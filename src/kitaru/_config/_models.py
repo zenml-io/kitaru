@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from kitaru._config._env import KITARU_DEFAULT_MODEL_ENV
+from kitaru.errors import KitaruUsageError
 
 _MODEL_ALIAS_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
@@ -18,10 +19,10 @@ def _normalize_model_alias(alias: str) -> str:
     """Normalize and validate a local model alias name."""
     normalized_alias = alias.strip().lower()
     if not normalized_alias:
-        raise ValueError("Model alias cannot be empty.")
+        raise KitaruUsageError("Model alias cannot be empty.")
 
     if not _MODEL_ALIAS_PATTERN.fullmatch(normalized_alias):
-        raise ValueError(
+        raise KitaruUsageError(
             "Invalid model alias. Use lowercase letters, numbers, underscores, "
             "or hyphens, and start with a letter or number."
         )
@@ -40,7 +41,7 @@ class ModelAliasConfig(BaseModel):
     def _validate_model(cls, value: str) -> str:
         normalized_value = value.strip()
         if not normalized_value:
-            raise ValueError("Model identifier cannot be empty.")
+            raise KitaruUsageError("Model identifier cannot be empty.")
         return normalized_value
 
     @field_validator("secret")
@@ -51,7 +52,7 @@ class ModelAliasConfig(BaseModel):
 
         normalized_value = value.strip()
         if not normalized_value:
-            raise ValueError("Secret reference cannot be empty.")
+            raise KitaruUsageError("Secret reference cannot be empty.")
 
         return normalized_value
 
@@ -88,7 +89,7 @@ class ModelRegistryConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_default_exists(self) -> ModelRegistryConfig:
         if self.default is not None and self.default not in self.aliases:
-            raise ValueError(
+            raise KitaruUsageError(
                 "Model registry default alias must reference a configured alias."
             )
         return self
@@ -193,7 +194,7 @@ def resolve_model_selection(
 
     def _resolve_requested_model(requested_model: str) -> ResolvedModelSelection:
         if not requested_model:
-            raise ValueError("Model identifier cannot be empty.")
+            raise KitaruUsageError("Model identifier cannot be empty.")
 
         alias_candidate: str | None
         try:
@@ -224,11 +225,11 @@ def resolve_model_selection(
     if env_default_model is not None:
         stripped_env_default_model = env_default_model.strip()
         if not stripped_env_default_model:
-            raise ValueError(f"`{default_model_env_name}` is set but empty.")
+            raise KitaruUsageError(f"`{default_model_env_name}` is set but empty.")
         return _resolve_requested_model(stripped_env_default_model)
 
     if not registry.aliases:
-        raise ValueError(
+        raise KitaruUsageError(
             "No model alias is configured. Run `kitaru model register <alias> --model "
             f"<provider/model>` first, set {default_model_env_name}, or pass a "
             "concrete model to kitaru.llm(...)."
@@ -239,13 +240,13 @@ def resolve_model_selection(
         if len(registry.aliases) == 1:
             default_alias = next(iter(registry.aliases))
         else:
-            raise ValueError(
+            raise KitaruUsageError(
                 "Multiple model aliases are configured but no default alias is set. "
                 "Re-register one alias to restore a default."
             )
 
     if default_alias not in registry.aliases:
-        raise ValueError(
+        raise KitaruUsageError(
             "The configured default model alias is missing. Re-register an alias with "
             "`kitaru model register ...` to repair local config."
         )
