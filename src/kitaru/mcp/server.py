@@ -8,37 +8,22 @@ for status and stack inspection.
 from __future__ import annotations
 
 import importlib
-import os
-from dataclasses import dataclass, field
 from types import ModuleType
-from typing import Any, Literal, cast
-from urllib.parse import urlparse
-
-from zenml.client import Client
-from zenml.config.global_config import GlobalConfiguration
-from zenml.utils.server_utils import connected_to_local_server, get_local_server
+from typing import Any, Literal
 
 from kitaru import _flow_loading
 from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
-from kitaru._version import resolve_installed_version
 from kitaru.client import Execution, KitaruClient, LogEntry
 from kitaru.config import (
-    KITARU_PROJECT_ENV,
-    ActiveEnvironmentVariable,
     CloudProvider,
     KubernetesStackSpec,
-    ResolvedLogStore,
     StackType,
     _create_stack_operation,
     _delete_stack_operation,
-    _kitaru_config_dir,
     _list_stack_entries,
-    _read_runtime_connection_config,
-    active_stack_log_store,
-    list_active_kitaru_environment_variables,
-    resolve_log_store,
 )
 from kitaru.inspection import (
+    RuntimeSnapshot,
     serialize_artifact_ref,
     serialize_artifact_value,
     serialize_execution,
@@ -48,33 +33,13 @@ from kitaru.inspection import (
     serialize_stack_create_result,
     serialize_stack_delete_result,
 )
+from kitaru.inspection import (
+    build_runtime_snapshot as _build_runtime_snapshot,
+)
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
 )
-
-
-@dataclass
-class RuntimeSnapshot:
-    """Resolved runtime information for status-style MCP responses."""
-
-    sdk_version: str
-    connection: str
-    connection_target: str
-    config_directory: str
-    server_url: str | None = None
-    active_user: str | None = None
-    project_override: str | None = None
-    active_stack: str | None = None
-    repository_root: str | None = None
-    server_version: str | None = None
-    server_database: str | None = None
-    server_deployment_type: str | None = None
-    local_server_status: str | None = None
-    warning: str | None = None
-    log_store_status: str | None = None
-    log_store_warning: str | None = None
-    environment: list[ActiveEnvironmentVariable] = field(default_factory=list)
 
 
 def _load_fastmcp_class() -> type[Any]:
@@ -109,45 +74,6 @@ def _load_flow_target(target: str) -> _FlowTarget:
     )
 
 
-def _log_store_mismatch_details(
-    preferred: ResolvedLogStore,
-) -> tuple[str | None, str | None]:
-    """Return status-row + warning text when preferred and active backends differ."""
-    if preferred.source == "default":
-        return None, None
-
-    active_store = active_stack_log_store()
-    if active_store is None:
-        return None, None
-
-    if active_store.backend == preferred.backend:
-        return None, None
-
-    status_row = f"{preferred.backend} (preferred) ⚠ stack uses {active_store.backend}"
-
-    active_label = active_store.backend
-    if active_store.stack_name:
-        active_label = f"{active_store.backend} (stack: {active_store.stack_name})"
-
-    warning = "\n".join(
-        [
-            f"Active stack uses: {active_label}",
-            "The Kitaru log-store preference is not wired into stack selection yet.",
-            "Actual runtime logs go to the active stack's ZenML stack log "
-            "store, not this preference.",
-        ]
-    )
-    return status_row, warning
-
-
-def _combine_warnings(*warnings: str | None) -> str | None:
-    """Combine non-empty warning messages into one multiline block."""
-    rendered = [warning for warning in warnings if warning]
-    if not rendered:
-        return None
-    return "\n".join(rendered)
-
-
 def _format_log_entry(entry: LogEntry) -> str:
     """Render a readable one-line text representation for MCP log output."""
     parts: list[str] = []
@@ -168,144 +94,6 @@ def _format_execution_logs(entries: list[LogEntry]) -> str:
     if not entries:
         return "No log entries found."
     return "\n".join(_format_log_entry(entry) for entry in entries)
-
-
-def _describe_local_server() -> str:
-    """Summarize the state of the local Kitaru-compatible server, if any."""
-    try:
-        local_server = get_local_server()
-    except ImportError:
-        return "unavailable (local runtime support not installed)"
-    if local_server is None:
-        return "not started"
-
-    provider = local_server.config.provider.value
-    if local_server.status and local_server.status.url:
-        return f"running at {local_server.status.url} ({provider})"
-
-    if local_server.status and local_server.status.status_message:
-        return (
-            f"registered but unavailable ({provider}: "
-            f"{local_server.status.status_message})"
-        )
-
-    return f"registered but unavailable ({provider})"
-
-
-def _connected_to_local_server() -> bool:
-    """Safely check whether the current client is bound to a local server."""
-    try:
-        return connected_to_local_server()
-    except ImportError:
-        return False
-
-
-def _build_snapshot_without_local_store(
-    gc: GlobalConfiguration,
-) -> RuntimeSnapshot:
-    """Build a degraded snapshot when local runtime support is unavailable."""
-    return RuntimeSnapshot(
-        sdk_version=resolve_installed_version(),
-        connection="local mode (unavailable)",
-        connection_target="unavailable",
-        config_directory=str(_kitaru_config_dir()),
-        local_server_status=_describe_local_server(),
-        warning=(
-            "Local Kitaru runtime support is unavailable in this environment. "
-            "Connect to a Kitaru server to keep working, or install the local "
-            "runtime dependencies if you want the built-in local stack."
-        ),
-        environment=list_active_kitaru_environment_variables(),
-    )
-
-
-def _uses_stale_local_server_url(
-    server_url: str | None,
-    local_server_status: str | None,
-) -> bool:
-    """Check for a localhost URL that points at a stopped local server."""
-    if not server_url or not local_server_status:
-        return False
-
-    hostname = urlparse(server_url).hostname
-    return hostname in {"127.0.0.1", "localhost", "::1"} and (
-        "unavailable" in local_server_status
-    )
-
-
-def _build_runtime_snapshot() -> RuntimeSnapshot:
-    """Resolve the current Kitaru runtime state."""
-    gc = GlobalConfiguration()
-    try:
-        store_cfg = gc.store_configuration
-        uses_local_store = gc.uses_local_store
-    except ImportError:
-        return _build_snapshot_without_local_store(gc)
-
-    connection_target = str(store_cfg.url)
-    if uses_local_store:
-        connection = "local database"
-        server_url = None
-    elif _connected_to_local_server():
-        connection = "local Kitaru server"
-        server_url = connection_target
-    else:
-        connection = "remote Kitaru server"
-        server_url = connection_target
-
-    snapshot = RuntimeSnapshot(
-        sdk_version=resolve_installed_version(),
-        connection=connection,
-        connection_target=connection_target,
-        server_url=server_url,
-        config_directory=str(_kitaru_config_dir()),
-        local_server_status=_describe_local_server(),
-        environment=list_active_kitaru_environment_variables(),
-    )
-
-    if _uses_stale_local_server_url(server_url, snapshot.local_server_status):
-        snapshot.warning = (
-            "The configured Kitaru server points to a stopped local server. "
-            "Start it again or run `kitaru logout` to clear the stale "
-            "connection."
-        )
-        return snapshot
-
-    # Detect explicit project override (env var or runtime configure())
-    project_env = os.environ.get(KITARU_PROJECT_ENV)
-    runtime_conn = _read_runtime_connection_config()
-    if project_env:
-        snapshot.project_override = project_env
-    elif runtime_conn.project:
-        snapshot.project_override = runtime_conn.project
-
-    try:
-        client = Client()
-        store_info = client.zen_store.get_store_info()
-        snapshot.active_user = client.active_user.name
-        snapshot.active_stack = client.active_stack_model.name
-        snapshot.repository_root = str(client.root) if client.root else None
-        snapshot.server_version = str(store_info.version)
-        snapshot.server_database = str(store_info.database_type)
-        snapshot.server_deployment_type = str(store_info.deployment_type)
-    except Exception as exc:  # pragma: no cover - backend-dependent runtime path
-        snapshot.warning = f"Unable to query the configured store: {exc}"
-
-    try:
-        preferred_log_store = resolve_log_store()
-    except ValueError as exc:
-        snapshot.log_store_warning = (
-            f"Unable to resolve Kitaru log-store preference: {exc}"
-        )
-        return snapshot
-
-    log_store_status, log_store_warning = _log_store_mismatch_details(
-        preferred_log_store
-    )
-    snapshot.log_store_status = log_store_status
-    snapshot.log_store_warning = log_store_warning
-
-    return snapshot
 
 
 def _list_executions_filtered(
@@ -594,8 +382,8 @@ def kitaru_artifacts_get(artifact_id: str) -> dict[str, Any]:
 @mcp.tool()
 def kitaru_status() -> dict[str, Any]:
     """Return structured status details for the current Kitaru connection."""
-    snapshot = _build_runtime_snapshot()
-    return serialize_runtime_snapshot(cast(Any, snapshot))
+    snapshot: RuntimeSnapshot = _build_runtime_snapshot()
+    return serialize_runtime_snapshot(snapshot)
 
 
 @mcp.tool()

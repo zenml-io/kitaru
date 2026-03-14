@@ -18,8 +18,15 @@ from kitaru.config import (
     StackInfo,
     StackType,
 )
+from kitaru.inspection import (
+    RuntimeSnapshot as InspectionRuntimeSnapshot,
+)
+from kitaru.inspection import (
+    build_runtime_snapshot as build_inspection_runtime_snapshot,
+)
 from kitaru.mcp.server import (
     RuntimeSnapshot,
+    _build_runtime_snapshot,
     _load_flow_target,
     get_execution_logs,
     kitaru_artifacts_get,
@@ -120,6 +127,11 @@ def test_load_flow_target_rejects_invalid_target_format() -> None:
         ValueError, match="must use `<module_or_file>:<flow_name>` format"
     ):
         _load_flow_target("content_pipeline")
+
+
+def test_snapshot_exports_alias_the_canonical_inspection_symbols() -> None:
+    assert RuntimeSnapshot is InspectionRuntimeSnapshot
+    assert _build_runtime_snapshot is build_inspection_runtime_snapshot
 
 
 def test_executions_list_calls_client_and_serializes(

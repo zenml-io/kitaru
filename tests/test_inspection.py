@@ -8,6 +8,7 @@ from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -41,6 +42,7 @@ from kitaru.config import (
 from kitaru.errors import FailureOrigin
 from kitaru.inspection import (
     RuntimeSnapshot,
+    build_runtime_snapshot,
     serialize_artifact_ref,
     serialize_artifact_value,
     serialize_checkpoint_attempt,
@@ -86,6 +88,16 @@ class _ModelDumpable:
 class _Unjsonable:
     def __repr__(self) -> str:
         return "<unjsonable>"
+
+
+class _BrokenGlobalConfig:
+    @property
+    def store_configuration(self) -> Any:
+        raise ImportError("missing local runtime support")
+
+    @property
+    def uses_local_store(self) -> bool:
+        raise ImportError("missing local runtime support")
 
 
 def _sample_failure() -> FailureInfo:
@@ -625,6 +637,166 @@ def test_serialize_runtime_snapshot_preserves_none_fields() -> None:
     assert payload["active_user"] is None
     assert payload["warning"] is None
     assert payload["environment"] == []
+
+
+def test_build_runtime_snapshot_appends_legacy_warning_when_local_store_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_RUNNER", "legacy-runner")
+
+    with (
+        patch(
+            "kitaru.inspection.GlobalConfiguration",
+            return_value=_BrokenGlobalConfig(),
+        ),
+        patch("kitaru.inspection.get_local_server", side_effect=ImportError("missing")),
+        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+    ):
+        snapshot = build_runtime_snapshot()
+
+    assert snapshot.connection == "local mode (unavailable)"
+    assert snapshot.warning is not None
+    assert "Local Kitaru runtime support is unavailable" in snapshot.warning
+    assert "`KITARU_RUNNER` was renamed to `KITARU_STACK`" in snapshot.warning
+
+
+def test_build_runtime_snapshot_appends_legacy_warning_for_stale_local_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_RUNNER", "legacy-runner")
+    fake_gc = SimpleNamespace(
+        uses_local_store=False,
+        store_configuration=SimpleNamespace(url="http://127.0.0.1:8237"),
+    )
+
+    with (
+        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch(
+            "kitaru.inspection.describe_local_server",
+            return_value="registered but unavailable (daemon: stopped)",
+        ),
+        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+        patch(
+            "kitaru.inspection.Client",
+            side_effect=AssertionError("Client should not be queried"),
+        ),
+    ):
+        snapshot = build_runtime_snapshot()
+
+    assert snapshot.warning is not None
+    assert "stopped local server" in snapshot.warning
+    assert "`KITARU_RUNNER` was renamed to `KITARU_STACK`" in snapshot.warning
+
+
+def test_build_runtime_snapshot_populates_log_store_mismatch_details() -> None:
+    fake_gc = SimpleNamespace(
+        uses_local_store=False,
+        store_configuration=SimpleNamespace(url="https://example.com"),
+    )
+    fake_client = SimpleNamespace(
+        active_user=SimpleNamespace(name="alice"),
+        active_stack_model=SimpleNamespace(name="prod"),
+        root=Path("/tmp/worktree"),
+        zen_store=SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.42.0",
+                database_type="postgres",
+                deployment_type="kubernetes",
+            )
+        ),
+    )
+
+    with (
+        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch("kitaru.inspection.describe_local_server", return_value="not started"),
+        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+        patch(
+            "kitaru.inspection._read_runtime_connection_config",
+            return_value=SimpleNamespace(project=None),
+        ),
+        patch("kitaru.inspection.Client", return_value=fake_client),
+        patch(
+            "kitaru.inspection.resolve_log_store",
+            return_value=ResolvedLogStore(
+                backend="datadog",
+                endpoint="https://logs.example.com",
+                api_key=None,
+                source="environment",
+            ),
+        ),
+        patch(
+            "kitaru.inspection.active_stack_log_store",
+            return_value=ActiveStackLogStore(
+                backend="artifact-store",
+                endpoint=None,
+                stack_name="prod",
+            ),
+        ),
+    ):
+        snapshot = build_runtime_snapshot()
+
+    assert (
+        snapshot.log_store_status == "datadog (preferred) ⚠ stack uses artifact-store"
+    )
+    assert snapshot.log_store_warning is not None
+    assert (
+        "Active stack uses: artifact-store (stack: prod)" in snapshot.log_store_warning
+    )
+    assert "not wired into stack selection yet" in snapshot.log_store_warning
+
+
+def test_build_runtime_snapshot_returns_early_when_log_store_resolution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_RUNNER", "legacy-runner")
+    fake_gc = SimpleNamespace(
+        uses_local_store=False,
+        store_configuration=SimpleNamespace(url="https://example.com"),
+    )
+
+    with (
+        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch("kitaru.inspection.describe_local_server", return_value="not started"),
+        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+        patch(
+            "kitaru.inspection._read_runtime_connection_config",
+            return_value=SimpleNamespace(project=None),
+        ),
+        patch(
+            "kitaru.inspection.Client",
+            side_effect=RuntimeError("store offline"),
+        ),
+        patch(
+            "kitaru.inspection.resolve_log_store",
+            side_effect=ValueError("bad config"),
+        ),
+    ):
+        snapshot = build_runtime_snapshot()
+
+    assert snapshot.warning == "Unable to query the configured store: store offline"
+    assert snapshot.log_store_warning == (
+        "Unable to resolve Kitaru log-store preference: bad config"
+    )
+    assert "`KITARU_RUNNER` was renamed to `KITARU_STACK`" not in snapshot.warning
 
 
 def test_serialize_log_entry_contract() -> None:
