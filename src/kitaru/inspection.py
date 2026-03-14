@@ -16,8 +16,7 @@ from zenml.config.global_config import GlobalConfiguration
 from zenml.models import SecretResponse
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 
-from kitaru._version import resolve_installed_version
-from kitaru.client import (
+from kitaru._client._models import (
     ArtifactRef,
     CheckpointAttempt,
     CheckpointCall,
@@ -26,6 +25,7 @@ from kitaru.client import (
     LogEntry,
     PendingWait,
 )
+from kitaru._version import resolve_installed_version
 from kitaru.config import (
     KITARU_PROJECT_ENV,
     ActiveEnvironmentVariable,
