@@ -12,9 +12,7 @@ from types import ModuleType
 from typing import Any, Literal
 
 from kitaru import _flow_loading
-from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
-from kitaru.client import Execution, KitaruClient, LogEntry
-from kitaru.config import (
+from kitaru._config._stacks import (
     CloudProvider,
     KubernetesStackSpec,
     StackType,
@@ -22,6 +20,8 @@ from kitaru.config import (
     _delete_stack_operation,
     _list_stack_entries,
 )
+from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
+from kitaru.client import Execution, KitaruClient, LogEntry
 from kitaru.inspection import (
     RuntimeSnapshot,
     serialize_artifact_ref,

@@ -13,75 +13,50 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-import re
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
-from urllib.parse import urlparse
+from typing import Literal
 from uuid import UUID
 
 import click
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    field_validator,
-    model_validator,
-)
 from zenml.cli.login import connect_to_pro_server as _zenml_connect_to_pro_server
 from zenml.cli.login import connect_to_server as _zenml_connect_to_server
 from zenml.cli.login import is_pro_server as _zenml_is_pro_server
 from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
-from zenml.enums import (
-    ContainerRegistryFlavor,
-    StackComponentType,
-)
-from zenml.exceptions import EntityExistsError
-from zenml.integrations.aws import (
-    AWS_CONNECTOR_TYPE,
-    AWS_CONTAINER_REGISTRY_FLAVOR,
-    AWS_RESOURCE_TYPE,
-)
-from zenml.integrations.gcp import (
-    GCP_ARTIFACT_STORE_FLAVOR,
-    GCP_CONNECTOR_TYPE,
-    GCP_RESOURCE_TYPE,
-)
-from zenml.models.v2.core.stack import StackRequest
-from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
 
+from kitaru import _env as _kitaru_env
 from kitaru._config import _connection as _config_connection
 from kitaru._config import _core as _config_core
 from kitaru._config import _env as _config_env
-from kitaru._env import (
-    KITARU_ANALYTICS_OPT_IN_ENV,
-    KITARU_AUTH_TOKEN_ENV,
-    KITARU_DEBUG_ENV,
-    KITARU_PROJECT_ENV,
-    KITARU_SERVER_URL_ENV,
-)
-from kitaru._env import (
-    ZENML_STORE_API_KEY_ENV as _ZENML_STORE_API_KEY_ENV,
-)
-from kitaru._env import (
-    ZENML_STORE_URL_ENV as _ZENML_STORE_URL_ENV,
-)
+from kitaru._config import _execution_spec as _config_execution_spec
+from kitaru._config import _images as _config_images
+from kitaru._config import _log_store as _config_log_store
+from kitaru._config import _models as _config_models
+from kitaru._config import _stacks as _config_stacks
+from kitaru._env import ZENML_STORE_API_KEY_ENV as _ZENML_STORE_API_KEY_ENV
+from kitaru._env import ZENML_STORE_URL_ENV as _ZENML_STORE_URL_ENV
 
 zenml_cli_utils = importlib.import_module("zenml.cli.utils")
 
-_DEFAULT_LOG_STORE_BACKEND = "artifact-store"
-_KITARU_GLOBAL_CONFIG_FILENAME = _config_core._KITARU_GLOBAL_CONFIG_FILENAME
-_LOG_STORE_SOURCE_DEFAULT = "default"
-_LOG_STORE_SOURCE_ENVIRONMENT = "environment"
-_LOG_STORE_SOURCE_GLOBAL_USER_CONFIG = "global user config"
-_LOG_STORE_BACKEND_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
-_MODEL_ALIAS_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-_STACK_MANAGED_LABEL_KEY = "kitaru.managed"
-_STACK_MANAGED_LABEL_VALUE = "true"
+_DEFAULT_LOG_STORE_BACKEND = _config_log_store._DEFAULT_LOG_STORE_BACKEND
+_KITARU_GLOBAL_CONFIG_FILENAME = _config_log_store._KITARU_GLOBAL_CONFIG_FILENAME
+_LOG_STORE_SOURCE_DEFAULT = _config_log_store._LOG_STORE_SOURCE_DEFAULT
+_LOG_STORE_SOURCE_ENVIRONMENT = _config_log_store._LOG_STORE_SOURCE_ENVIRONMENT
+_LOG_STORE_SOURCE_GLOBAL_USER_CONFIG = (
+    _config_log_store._LOG_STORE_SOURCE_GLOBAL_USER_CONFIG
+)
+_LOG_STORE_BACKEND_PATTERN = _config_log_store._LOG_STORE_BACKEND_PATTERN
+_MODEL_ALIAS_PATTERN = _config_models._MODEL_ALIAS_PATTERN
+_STACK_MANAGED_LABEL_KEY = _config_stacks._STACK_MANAGED_LABEL_KEY
+_STACK_MANAGED_LABEL_VALUE = _config_stacks._STACK_MANAGED_LABEL_VALUE
+
+KITARU_ANALYTICS_OPT_IN_ENV = _kitaru_env.KITARU_ANALYTICS_OPT_IN_ENV
+KITARU_AUTH_TOKEN_ENV = _kitaru_env.KITARU_AUTH_TOKEN_ENV
+KITARU_DEBUG_ENV = _kitaru_env.KITARU_DEBUG_ENV
+KITARU_PROJECT_ENV = _kitaru_env.KITARU_PROJECT_ENV
+KITARU_SERVER_URL_ENV = _kitaru_env.KITARU_SERVER_URL_ENV
 
 KITARU_LOG_STORE_BACKEND_ENV = _config_env.KITARU_LOG_STORE_BACKEND_ENV
 KITARU_LOG_STORE_ENDPOINT_ENV = _config_env.KITARU_LOG_STORE_ENDPOINT_ENV
@@ -96,322 +71,46 @@ KITARU_CONFIG_PATH_ENV = _config_env.KITARU_CONFIG_PATH_ENV
 ZENML_STORE_API_KEY_ENV = _ZENML_STORE_API_KEY_ENV
 ZENML_STORE_URL_ENV = _ZENML_STORE_URL_ENV
 
-FROZEN_EXECUTION_SPEC_METADATA_KEY = _config_core.FROZEN_EXECUTION_SPEC_METADATA_KEY
+FROZEN_EXECUTION_SPEC_METADATA_KEY = (
+    _config_execution_spec.FROZEN_EXECUTION_SPEC_METADATA_KEY
+)
 _TRUTHY_VALUES = _config_env._TRUTHY_VALUES
 _FALSY_VALUES = _config_env._FALSY_VALUES
 _UNSET = object()
 
-
-def _normalize_model_alias(alias: str) -> str:
-    """Normalize and validate a local model alias name."""
-    normalized_alias = alias.strip().lower()
-    if not normalized_alias:
-        raise ValueError("Model alias cannot be empty.")
-
-    if not _MODEL_ALIAS_PATTERN.fullmatch(normalized_alias):
-        raise ValueError(
-            "Invalid model alias. Use lowercase letters, numbers, underscores, "
-            "or hyphens, and start with a letter or number."
-        )
-
-    return normalized_alias
-
-
-class LogStoreOverride(BaseModel):
-    """Global log-store override values for non-default backends."""
-
-    backend: str
-    endpoint: str
-    api_key: str | None = None
-
-    @field_validator("backend")
-    @classmethod
-    def _validate_backend(cls, value: str) -> str:
-        normalized_value = value.strip().lower()
-        if not normalized_value:
-            raise ValueError("Log-store backend cannot be empty.")
-
-        if not _LOG_STORE_BACKEND_PATTERN.fullmatch(normalized_value):
-            raise ValueError(
-                "Invalid log-store backend. Use lowercase letters, numbers, "
-                "dots, underscores, or hyphens."
-            )
-
-        return normalized_value
-
-    @field_validator("endpoint")
-    @classmethod
-    def _validate_endpoint(cls, value: str) -> str:
-        normalized_value = value.strip().rstrip("/")
-        if not normalized_value:
-            raise ValueError("Log-store endpoint cannot be empty.")
-
-        parsed = urlparse(normalized_value)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError(
-                "Invalid log-store endpoint. Please use an http:// or https:// URL."
-            )
-
-        return normalized_value
-
-    @field_validator("api_key")
-    @classmethod
-    def _validate_api_key(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        normalized_value = value.strip()
-        if not normalized_value:
-            raise ValueError("Log-store API key cannot be empty.")
-
-        return normalized_value
-
-
-class ResolvedLogStore(BaseModel):
-    """Effective log-store configuration after applying precedence rules."""
-
-    backend: str
-    endpoint: str | None = None
-    api_key: str | None = None
-    source: Literal[
-        "default",
-        "environment",
-        "global user config",
-    ]
-
-
-class ActiveStackLogStore(BaseModel):
-    """Active stack log-store backend resolved from the current ZenML stack."""
-
-    backend: str
-    endpoint: str | None = None
-    stack_name: str | None = None
-
-
-class ModelAliasConfig(BaseModel):
-    """Local model alias settings used by `kitaru.llm()`."""
-
-    model: str
-    secret: str | None = None
-
-    @field_validator("model")
-    @classmethod
-    def _validate_model(cls, value: str) -> str:
-        normalized_value = value.strip()
-        if not normalized_value:
-            raise ValueError("Model identifier cannot be empty.")
-        return normalized_value
-
-    @field_validator("secret")
-    @classmethod
-    def _validate_secret(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        normalized_value = value.strip()
-        if not normalized_value:
-            raise ValueError("Secret reference cannot be empty.")
-
-        return normalized_value
-
-
-class ModelRegistryConfig(BaseModel):
-    """Persisted model alias registry for `kitaru.llm()`."""
-
-    aliases: dict[str, ModelAliasConfig] = Field(default_factory=dict)
-    default: str | None = None
-
-    @field_validator("aliases", mode="before")
-    @classmethod
-    def _validate_aliases(
-        cls,
-        value: dict[str, ModelAliasConfig] | None,
-    ) -> dict[str, ModelAliasConfig]:
-        if value is None:
-            return {}
-
-        normalized_aliases: dict[str, ModelAliasConfig] = {}
-        for alias, alias_config in value.items():
-            normalized_alias = _normalize_model_alias(alias)
-            normalized_aliases[normalized_alias] = alias_config
-
-        return normalized_aliases
-
-    @field_validator("default")
-    @classmethod
-    def _validate_default(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _normalize_model_alias(value)
-
-    @model_validator(mode="after")
-    def _validate_default_exists(self) -> ModelRegistryConfig:
-        if self.default is not None and self.default not in self.aliases:
-            raise ValueError(
-                "Model registry default alias must reference a configured alias."
-            )
-        return self
-
-
-class ModelAliasEntry(BaseModel):
-    """Public local model alias shape used by CLI/SDK helpers."""
-
-    alias: str
-    model: str
-    secret: str | None = None
-    is_default: bool = False
-
-
-class ResolvedModelSelection(BaseModel):
-    """Model resolution result used by `kitaru.llm()`."""
-
-    requested_model: str | None
-    alias: str | None
-    resolved_model: str
-    secret: str | None = None
-
-
-class _KitaruGlobalConfig(BaseModel):
-    """Persisted Kitaru global configuration."""
-
-    version: int = 1
-    log_store: LogStoreOverride | None = None
-    model_registry: ModelRegistryConfig | None = None
-
-
-class StackInfo(BaseModel):
-    """Public stack information exposed by Kitaru SDK helpers."""
-
-    id: str
-    name: str
-    is_active: bool
-
-
-class StackType(StrEnum):
-    """Supported internal stack creation modes."""
-
-    LOCAL = "local"
-    KUBERNETES = "kubernetes"
-
-
-class CloudProvider(StrEnum):
-    """Supported cloud providers for Kubernetes-backed stacks."""
-
-    AWS = "aws"
-    GCP = "gcp"
-
-
-class KubernetesStackSpec(BaseModel):
-    """Internal request model for future Kubernetes stack creation."""
-
-    provider: CloudProvider
-    artifact_store: str
-    container_registry: str
-    cluster: str
-    region: str
-    namespace: str = "default"
-    credentials: str | None = None
-    verify: bool = True
-
-    model_config = ConfigDict(extra="forbid")
-
-
-@dataclass(frozen=True)
-class _ResolvedKubernetesConnectorSpec:
-    """Resolved ZenML connector information for Kubernetes stack creation."""
-
-    connector_info: ServiceConnectorInfo
-    verify_connector_type: str
-    verify_resource_type: str
-    verify_configuration: dict[str, Any]
-
-
-_StackComponentKind = Literal[
-    "orchestrator",
-    "artifact_store",
-    "container_registry",
-]
-
-
-@dataclass(frozen=True)
-class _StackComponent:
-    """Internal reference to a stack-owned stack component."""
-
-    component_id: str
-    name: str
-    kind: _StackComponentKind
-
-
-@dataclass(frozen=True)
-class _StackListEntry:
-    """Internal structured stack list item with managed-state metadata."""
-
-    stack: StackInfo
-    is_managed: bool
-
-
-@dataclass(frozen=True)
-class _StackCreateResult:
-    """Structured result for stack creation operations."""
-
-    stack: StackInfo
-    previous_active_stack: str | None
-    components_created: tuple[str, ...]
-    stack_type: str = StackType.LOCAL.value
-    service_connectors_created: tuple[str, ...] = ()
-    resources: dict[str, str] | None = None
-
-
-@dataclass(frozen=True)
-class _StackDeleteResult:
-    """Structured result for stack deletion operations."""
-
-    deleted_stack: str
-    components_deleted: tuple[str, ...]
-    new_active_stack: str | None
-    recursive: bool
-
-
-_StackShowType = Literal["local", "kubernetes", "custom"]
-_StackComponentRole = Literal[
-    "runner",
-    "storage",
-    "image_registry",
-    "additional_component",
-]
-
-
-@dataclass(frozen=True)
-class StackComponentDetails:
-    """Translated stack-component metadata for stack inspection surfaces."""
-
-    role: _StackComponentRole
-    name: str
-    backend: str | None = None
-    details: tuple[tuple[str, str], ...] = ()
-    purpose: str | None = None
-
-
-@dataclass(frozen=True)
-class StackDetails:
-    """Structured stack inspection result for `stack show` style commands."""
-
-    stack: StackInfo
-    is_managed: bool
-    stack_type: _StackShowType
-    components: tuple[StackComponentDetails, ...]
-
-
-ImageSettings = _config_core.ImageSettings
-ImageInput = _config_core.ImageInput
+ImageSettings = _config_images.ImageSettings
+ImageInput = _config_images.ImageInput
 KitaruConfig = _config_core.KitaruConfig
 ResolvedExecutionConfig = _config_core.ResolvedExecutionConfig
 ResolvedConnectionConfig = _config_core.ResolvedConnectionConfig
 ActiveEnvironmentVariable = _config_core.ActiveEnvironmentVariable
-FrozenExecutionSpec = _config_core.FrozenExecutionSpec
+FrozenExecutionSpec = _config_execution_spec.FrozenExecutionSpec
 
-_coerce_image_input = _config_core._coerce_image_input
-_merge_image_settings = _config_core._merge_image_settings
+LogStoreOverride = _config_log_store.LogStoreOverride
+ResolvedLogStore = _config_log_store.ResolvedLogStore
+ActiveStackLogStore = _config_log_store.ActiveStackLogStore
+_KitaruGlobalConfig = _config_log_store._KitaruGlobalConfig
+
+ModelAliasConfig = _config_models.ModelAliasConfig
+ModelRegistryConfig = _config_models.ModelRegistryConfig
+ModelAliasEntry = _config_models.ModelAliasEntry
+ResolvedModelSelection = _config_models.ResolvedModelSelection
+
+StackInfo = _config_stacks.StackInfo
+StackType = _config_stacks.StackType
+CloudProvider = _config_stacks.CloudProvider
+KubernetesStackSpec = _config_stacks.KubernetesStackSpec
+_ResolvedKubernetesConnectorSpec = _config_stacks._ResolvedKubernetesConnectorSpec
+_StackComponent = _config_stacks._StackComponent
+_StackListEntry = _config_stacks._StackListEntry
+_StackCreateResult = _config_stacks._StackCreateResult
+_StackDeleteResult = _config_stacks._StackDeleteResult
+StackComponentDetails = _config_stacks.StackComponentDetails
+StackDetails = _config_stacks.StackDetails
+_RECURSIVE_DELETE_COMPONENT_TYPES = _config_stacks._RECURSIVE_DELETE_COMPONENT_TYPES
+
+_coerce_image_input = _config_images._coerce_image_input
+_merge_image_settings = _config_images._merge_image_settings
 _parse_bool_env = _config_env._parse_bool_env
 _find_pyproject = _config_env._find_pyproject
 _read_project_config = _config_env._read_project_config
@@ -427,10 +126,10 @@ _environment_has_remote_server_override = (
     _config_env._environment_has_remote_server_override
 )
 _validate_connection_config_for_use = _config_env._validate_connection_config_for_use
-_requirements_include_kitaru = _config_core._requirements_include_kitaru
-image_settings_to_docker_settings = _config_core.image_settings_to_docker_settings
-build_frozen_execution_spec = _config_core.build_frozen_execution_spec
-_parse_run_uuid = _config_core._parse_run_uuid
+_requirements_include_kitaru = _config_images._requirements_include_kitaru
+image_settings_to_docker_settings = _config_images.image_settings_to_docker_settings
+build_frozen_execution_spec = _config_execution_spec.build_frozen_execution_spec
+_parse_run_uuid = _config_execution_spec._parse_run_uuid
 _reset_runtime_configuration = _config_core._reset_runtime_configuration
 _normalize_server_url = _config_connection._normalize_server_url
 _normalize_login_target = _config_connection._normalize_login_target
@@ -440,11 +139,54 @@ _looks_like_server_address_without_scheme = (
 )
 _noop_zenml_cli_message = _config_connection._noop_zenml_cli_message
 
+_normalize_model_alias = _config_models._normalize_model_alias
+_normalize_log_store_backend_name = _config_log_store._normalize_log_store_backend_name
+_extract_log_store_endpoint = _config_log_store._extract_log_store_endpoint
+_mask_environment_value = _config_log_store._mask_environment_value
+
+_infer_gcp_project_id_from_container_registry = (
+    _config_stacks._infer_gcp_project_id_from_container_registry
+)
+_artifact_store_resource_id = _config_stacks._artifact_store_resource_id
+_container_registry_resource_id = _config_stacks._container_registry_resource_id
+_resolve_kubernetes_connector_spec = _config_stacks._resolve_kubernetes_connector_spec
+_build_kubernetes_stack_request = _config_stacks._build_kubernetes_stack_request
+_get_required_stack_component = _config_stacks._get_required_stack_component
+_extract_kubernetes_stack_components = (
+    _config_stacks._extract_kubernetes_stack_components
+)
+_normalize_stack_selector = _config_stacks._normalize_stack_selector
+_stack_name_collision_message = _config_stacks._stack_name_collision_message
+_component_collision_message = _config_stacks._component_collision_message
+_stack_is_managed = _config_stacks._stack_is_managed
+_format_stack_component_label = _config_stacks._format_stack_component_label
+_delete_stack_components_best_effort = (
+    _config_stacks._delete_stack_components_best_effort
+)
+_normalize_stack_detail_value = _config_stacks._normalize_stack_detail_value
+_stack_component_models_for_type = _config_stacks._stack_component_models_for_type
+_iter_stack_component_models = _config_stacks._iter_stack_component_models
+_recursive_delete_component_labels = _config_stacks._recursive_delete_component_labels
+_linked_service_connector_selectors_for_stack = (
+    _config_stacks._linked_service_connector_selectors_for_stack
+)
+_resolve_service_connector_selectors = (
+    _config_stacks._resolve_service_connector_selectors
+)
+_delete_unshared_service_connectors_best_effort = (
+    _config_stacks._delete_unshared_service_connectors_best_effort
+)
+_resolve_stack_for_show = _config_stacks._resolve_stack_for_show
+_stack_component_details_from_model = _config_stacks._stack_component_details_from_model
+_infer_stack_details_type = _config_stacks._infer_stack_details_type
+_stack_info_from_model = _config_stacks._stack_info_from_model
+_iter_available_stacks = _config_stacks._iter_available_stacks
+
 
 def _read_global_execution_config() -> KitaruConfig:
     """Read execution defaults from global user config/runtime state."""
     return _config_env._read_global_execution_config_impl(
-        current_stack_getter=current_stack
+        current_stack_getter=current_stack,
     )
 
 
@@ -582,171 +324,36 @@ def _update_kitaru_global_config(
 
 
 def _read_log_store_env_override() -> ResolvedLogStore | None:
-    """Parse an optional log-store override from environment variables.
-
-    Returns:
-        A resolved override if configured via environment variables, otherwise
-        ``None``.
-
-    Raises:
-        ValueError: If the environment variables are set incompletely or with
-            invalid values.
-    """
-    raw_backend = os.environ.get(KITARU_LOG_STORE_BACKEND_ENV)
-    raw_endpoint = os.environ.get(KITARU_LOG_STORE_ENDPOINT_ENV)
-    raw_api_key = os.environ.get(KITARU_LOG_STORE_API_KEY_ENV)
-
-    if raw_backend is None and raw_endpoint is None and raw_api_key is None:
-        return None
-
-    if raw_backend is None:
-        raise ValueError(
-            f"{KITARU_LOG_STORE_BACKEND_ENV} must be set when defining a log-store "
-            "environment override."
-        )
-
-    normalized_backend = raw_backend.strip().lower()
-    if normalized_backend == _DEFAULT_LOG_STORE_BACKEND:
-        if raw_endpoint not in (None, ""):
-            raise ValueError(
-                f"{KITARU_LOG_STORE_ENDPOINT_ENV} must be unset when "
-                f"{KITARU_LOG_STORE_BACKEND_ENV}=artifact-store."
-            )
-        if raw_api_key not in (None, ""):
-            raise ValueError(
-                f"{KITARU_LOG_STORE_API_KEY_ENV} must be unset when "
-                f"{KITARU_LOG_STORE_BACKEND_ENV}=artifact-store."
-            )
-
-        return ResolvedLogStore(
-            backend=_DEFAULT_LOG_STORE_BACKEND,
-            endpoint=None,
-            api_key=None,
-            source=_LOG_STORE_SOURCE_ENVIRONMENT,
-        )
-
-    if raw_endpoint is None:
-        raise ValueError(
-            f"{KITARU_LOG_STORE_ENDPOINT_ENV} must be set when "
-            f"{KITARU_LOG_STORE_BACKEND_ENV} is configured."
-        )
-
-    override = LogStoreOverride(
-        backend=normalized_backend,
-        endpoint=raw_endpoint,
-        api_key=raw_api_key,
-    )
-    return _resolved_log_store_from_override(
-        override,
-        source=_LOG_STORE_SOURCE_ENVIRONMENT,
-    )
+    """Parse an optional log-store override from environment variables."""
+    return _config_log_store._read_log_store_env_override()
 
 
 def _resolved_log_store_from_override(
     override: LogStoreOverride,
     *,
-    source: Literal[
-        "environment",
-        "global user config",
-    ],
+    source: Literal["environment", "global user config"],
 ) -> ResolvedLogStore:
     """Convert a persisted/env override into a resolved log-store view."""
-    return ResolvedLogStore(
-        backend=override.backend,
-        endpoint=override.endpoint,
-        api_key=override.api_key,
+    return _config_log_store._resolved_log_store_from_override(
+        override,
         source=source,
     )
 
 
 def resolve_log_store() -> ResolvedLogStore:
-    """Resolve the effective runtime log-store backend.
-
-    Resolution order (highest to lowest):
-    1. Environment variables
-    2. Kitaru global user config
-    3. Built-in default (artifact store)
-
-    Returns:
-        The effective log-store configuration.
-
-    Raises:
-        ValueError: If persisted or environment config is malformed.
-    """
-    env_override = _read_log_store_env_override()
-    if env_override is not None:
-        return env_override
-
-    global_config = _read_kitaru_global_config()
-    if global_config.log_store is not None:
-        return _resolved_log_store_from_override(
-            global_config.log_store,
-            source=_LOG_STORE_SOURCE_GLOBAL_USER_CONFIG,
-        )
-
-    return ResolvedLogStore(
-        backend=_DEFAULT_LOG_STORE_BACKEND,
-        endpoint=None,
-        api_key=None,
-        source=_LOG_STORE_SOURCE_DEFAULT,
+    """Resolve the effective runtime log-store backend."""
+    return _config_log_store.resolve_log_store(
+        read_log_store_env_override=_read_log_store_env_override,
+        read_global_config=_read_kitaru_global_config,
     )
-
-
-def _normalize_log_store_backend_name(raw_backend: str | None) -> str:
-    """Normalize backend identifiers for user-facing comparisons."""
-    if raw_backend is None:
-        return "unknown"
-
-    normalized = raw_backend.strip().lower().replace("_", "-")
-    if not normalized:
-        return "unknown"
-
-    if normalized in {"artifact", "artifact-store", "artifactstore"}:
-        return "artifact-store"
-    if normalized in {"datadog"}:
-        return "datadog"
-    if normalized in {"otel", "otlp", "open-telemetry", "open telemetry"}:
-        return "otel"
-    return normalized
-
-
-def _extract_log_store_endpoint(log_store: Any) -> str | None:
-    """Best-effort extraction of an endpoint from a log-store component."""
-    config = getattr(log_store, "config", None)
-    if config is None:
-        return None
-
-    endpoint = getattr(config, "endpoint", None)
-    if not isinstance(endpoint, str):
-        return None
-
-    normalized = endpoint.strip().rstrip("/")
-    if not normalized:
-        return None
-    return normalized
 
 
 def active_stack_log_store() -> ActiveStackLogStore | None:
     """Return the runtime log-store backend from the active stack."""
-    try:
-        client = Client()
-        active_stack = client.active_stack
-        active_stack_model = client.active_stack_model
-        log_store = active_stack.log_store
-    except Exception:
-        return None
-
-    flavor = getattr(log_store, "flavor", None)
-    raw_backend = flavor if isinstance(flavor, str) else log_store.__class__.__name__
-
-    stack_name = getattr(active_stack_model, "name", None)
-    if not isinstance(stack_name, str):
-        stack_name = None
-
-    return ActiveStackLogStore(
-        backend=_normalize_log_store_backend_name(raw_backend),
-        endpoint=_extract_log_store_endpoint(log_store),
-        stack_name=stack_name,
+    return _config_log_store.active_stack_log_store(
+        client_factory=Client,
+        normalize_log_store_backend_name=_normalize_log_store_backend_name,
+        extract_log_store_endpoint=_extract_log_store_endpoint,
     )
 
 
@@ -756,61 +363,29 @@ def set_global_log_store(
     endpoint: str,
     api_key: str | None = None,
 ) -> ResolvedLogStore:
-    """Persist a global log-store override backend.
-
-    Args:
-        backend: External runtime log backend name (for example ``datadog``).
-        endpoint: HTTP(S) endpoint for the log backend.
-        api_key: Optional API key or secret placeholder.
-
-    Returns:
-        The effective resolved log-store configuration after persisting.
-
-    Raises:
-        ValueError: If validation fails.
-    """
-    if backend.strip().lower() == _DEFAULT_LOG_STORE_BACKEND:
-        raise ValueError(
-            "The artifact-store backend is already the default. Use "
-            "`kitaru log-store reset` to return to defaults."
-        )
-
-    def _mutate(global_config: _KitaruGlobalConfig) -> None:
-        global_config.log_store = LogStoreOverride(
-            backend=backend,
-            endpoint=endpoint,
-            api_key=api_key,
-        )
-
-    _update_kitaru_global_config(_mutate)
-
-    return resolve_log_store()
+    """Persist a global log-store override backend."""
+    return _config_log_store.set_global_log_store(
+        backend,
+        endpoint=endpoint,
+        api_key=api_key,
+        update_global_config=_update_kitaru_global_config,
+        resolve_log_store_fn=resolve_log_store,
+    )
 
 
 def reset_global_log_store() -> ResolvedLogStore:
-    """Clear the persisted global log-store override.
-
-    Returns:
-        The effective resolved log-store configuration after clearing.
-
-    Raises:
-        ValueError: If persisted or environment config is malformed.
-    """
-
-    def _mutate(global_config: _KitaruGlobalConfig) -> None:
-        global_config.log_store = None
-
-    _update_kitaru_global_config(_mutate)
-
-    return resolve_log_store()
+    """Clear the persisted global log-store override."""
+    return _config_log_store.reset_global_log_store(
+        update_global_config=_update_kitaru_global_config,
+        resolve_log_store_fn=resolve_log_store,
+    )
 
 
 def _read_model_registry_config() -> ModelRegistryConfig:
     """Read the local model registry from global config."""
-    global_config = _read_kitaru_global_config()
-    if global_config.model_registry is None:
-        return ModelRegistryConfig()
-    return global_config.model_registry
+    return _config_models._read_model_registry_config(
+        read_global_config=_read_kitaru_global_config,
+    )
 
 
 def register_model_alias(
@@ -820,1027 +395,60 @@ def register_model_alias(
     secret: str | None = None,
 ) -> ModelAliasEntry:
     """Register or update a local model alias for `kitaru.llm()`."""
-    normalized_alias = _normalize_model_alias(alias)
-
-    def _mutate(global_config: _KitaruGlobalConfig) -> None:
-        registry = (
-            global_config.model_registry.model_copy(deep=True)
-            if global_config.model_registry is not None
-            else ModelRegistryConfig()
-        )
-        registry.aliases[normalized_alias] = ModelAliasConfig(
-            model=model, secret=secret
-        )
-        if registry.default is None:
-            registry.default = normalized_alias
-        global_config.model_registry = registry
-
-    updated_global_config = _update_kitaru_global_config(_mutate)
-    registry = updated_global_config.model_registry or ModelRegistryConfig()
-    alias_config = registry.aliases[normalized_alias]
-    return ModelAliasEntry(
-        alias=normalized_alias,
-        model=alias_config.model,
-        secret=alias_config.secret,
-        is_default=registry.default == normalized_alias,
+    return _config_models.register_model_alias(
+        alias,
+        model=model,
+        secret=secret,
+        update_global_config=_update_kitaru_global_config,
+        normalize_model_alias=_normalize_model_alias,
     )
 
 
 def list_model_aliases() -> list[ModelAliasEntry]:
     """List local model aliases in stable order for CLI rendering."""
-    registry = _read_model_registry_config()
-    aliases: list[ModelAliasEntry] = []
-    for alias in sorted(registry.aliases):
-        alias_config = registry.aliases[alias]
-        aliases.append(
-            ModelAliasEntry(
-                alias=alias,
-                model=alias_config.model,
-                secret=alias_config.secret,
-                is_default=registry.default == alias,
-            )
-        )
-    return aliases
+    return _config_models.list_model_aliases(
+        read_global_config=_read_kitaru_global_config,
+    )
 
 
 def resolve_model_selection(model: str | None) -> ResolvedModelSelection:
     """Resolve an explicit/default model input to a concrete LiteLLM model."""
-    registry = _read_model_registry_config()
-
-    def _resolve_requested_model(requested_model: str) -> ResolvedModelSelection:
-        if not requested_model:
-            raise ValueError("Model identifier cannot be empty.")
-
-        alias_candidate: str | None
-        try:
-            alias_candidate = _normalize_model_alias(requested_model)
-        except ValueError:
-            alias_candidate = None
-
-        if alias_candidate is not None and alias_candidate in registry.aliases:
-            alias_config = registry.aliases[alias_candidate]
-            return ResolvedModelSelection(
-                requested_model=requested_model,
-                alias=alias_candidate,
-                resolved_model=alias_config.model,
-                secret=alias_config.secret,
-            )
-
-        return ResolvedModelSelection(
-            requested_model=requested_model,
-            alias=None,
-            resolved_model=requested_model,
-            secret=None,
-        )
-
-    if model is not None:
-        return _resolve_requested_model(model.strip())
-
-    env_default_model = os.environ.get(KITARU_DEFAULT_MODEL_ENV)
-    if env_default_model is not None:
-        stripped_env_default_model = env_default_model.strip()
-        if not stripped_env_default_model:
-            raise ValueError(f"`{KITARU_DEFAULT_MODEL_ENV}` is set but empty.")
-        return _resolve_requested_model(stripped_env_default_model)
-
-    if not registry.aliases:
-        raise ValueError(
-            "No model alias is configured. Run `kitaru model register <alias> --model "
-            f"<provider/model>` first, set {KITARU_DEFAULT_MODEL_ENV}, or pass a "
-            "concrete model to kitaru.llm(...)."
-        )
-
-    default_alias = registry.default
-    if default_alias is None:
-        if len(registry.aliases) == 1:
-            default_alias = next(iter(registry.aliases))
-        else:
-            raise ValueError(
-                "Multiple model aliases are configured but no default alias is set. "
-                "Re-register one alias to restore a default."
-            )
-
-    if default_alias not in registry.aliases:
-        raise ValueError(
-            "The configured default model alias is missing. Re-register an alias with "
-            "`kitaru model register ...` to repair local config."
-        )
-
-    alias_config = registry.aliases[default_alias]
-    return ResolvedModelSelection(
-        requested_model=None,
-        alias=default_alias,
-        resolved_model=alias_config.model,
-        secret=alias_config.secret,
+    return _config_models.resolve_model_selection(
+        model,
+        read_global_config=_read_kitaru_global_config,
+        environ=os.environ,
+        default_model_env_name=KITARU_DEFAULT_MODEL_ENV,
+        normalize_model_alias=_normalize_model_alias,
     )
-
-
-def _mask_environment_value(name: str, value: str) -> str:
-    """Mask secret-like environment values for status surfaces."""
-    if name not in {KITARU_AUTH_TOKEN_ENV, KITARU_LOG_STORE_API_KEY_ENV}:
-        return value
-
-    if len(value) >= 8:
-        return f"{value[:8]}***"
-    if len(value) >= 6:
-        return f"{value[:6]}***"
-    return "***"
 
 
 def list_active_kitaru_environment_variables() -> list[ActiveEnvironmentVariable]:
     """Return the active public Kitaru environment variables in stable order."""
-    ordered_env_vars = (
-        KITARU_SERVER_URL_ENV,
-        KITARU_AUTH_TOKEN_ENV,
-        KITARU_PROJECT_ENV,
-        "KITARU_RUNNER",
-        KITARU_STACK_ENV,
-        KITARU_CACHE_ENV,
-        KITARU_RETRIES_ENV,
-        KITARU_IMAGE_ENV,
-        KITARU_LOG_STORE_BACKEND_ENV,
-        KITARU_LOG_STORE_ENDPOINT_ENV,
-        KITARU_LOG_STORE_API_KEY_ENV,
-        KITARU_DEFAULT_MODEL_ENV,
-        KITARU_CONFIG_PATH_ENV,
-        KITARU_DEBUG_ENV,
-        KITARU_ANALYTICS_OPT_IN_ENV,
-    )
-
-    active: list[ActiveEnvironmentVariable] = []
-    for env_name in ordered_env_vars:
-        raw_value = os.environ.get(env_name)
-        if raw_value is None:
-            continue
-        active.append(
-            ActiveEnvironmentVariable(
-                name=env_name,
-                value=_mask_environment_value(env_name, raw_value),
-            )
-        )
-    return active
-
-
-def _infer_gcp_project_id_from_container_registry(container_registry: str) -> str:
-    """Infer the GCP project ID from a GAR or GCR container registry URI."""
-    normalized_registry = container_registry.strip()
-    if not normalized_registry:
-        raise ValueError("Container registry URI cannot be empty.")
-
-    normalized_registry = re.sub(r"^[a-z]+://", "", normalized_registry)
-    normalized_registry = normalized_registry.rstrip("/")
-    host, _, raw_path = normalized_registry.partition("/")
-    path_parts = [part for part in raw_path.split("/") if part]
-
-    gar_hosts = {"docker.pkg.dev"}
-    gcr_hosts = {"gcr.io", "us.gcr.io", "eu.gcr.io", "asia.gcr.io"}
-    if (
-        host in gar_hosts or host.endswith("-docker.pkg.dev") or host in gcr_hosts
-    ) and path_parts:
-        return path_parts[0]
-
-    raise ValueError(
-        "Cannot infer GCP project ID from container registry URI "
-        f"'{container_registry}'. Use an Artifact Registry or GCR URI that "
-        "includes the project segment."
+    return _config_log_store.list_active_kitaru_environment_variables(
+        environ=os.environ,
+        mask_environment_value=_mask_environment_value,
     )
 
 
-def _artifact_store_resource_id(
-    artifact_store_uri: str,
-    provider: CloudProvider,
-) -> str:
-    """Return the canonical connector resource ID for an artifact store URI."""
-    parsed = urlparse(artifact_store_uri)
-    if provider == CloudProvider.AWS and parsed.scheme == "s3" and parsed.netloc:
-        return f"s3://{parsed.netloc}"
-    if provider == CloudProvider.GCP and parsed.scheme == "gs" and parsed.netloc:
-        return f"gs://{parsed.netloc}"
-    raise ValueError(
-        f"Unsupported artifact store URI '{artifact_store_uri}' for provider "
-        f"'{provider.value}'."
-    )
+def current_stack() -> StackInfo:
+    """Return the currently active stack.
 
-
-def _container_registry_resource_id(
-    container_registry: str,
-    provider: CloudProvider,
-) -> str:
-    """Return the connector resource ID for a container registry URI."""
-    normalized_registry = re.sub(r"^[a-z]+://", "", container_registry.strip())
-    normalized_registry = normalized_registry.rstrip("/")
-    if not normalized_registry:
-        raise ValueError("Container registry URI cannot be empty.")
-
-    if provider == CloudProvider.AWS:
-        return normalized_registry.split("/", 1)[0]
-    return normalized_registry
-
-
-def _resolve_kubernetes_connector_spec(
-    spec: KubernetesStackSpec,
-) -> _ResolvedKubernetesConnectorSpec:
-    """Translate Kitaru's Kubernetes credentials into ZenML connector info."""
-    normalized_credentials = spec.credentials.strip() if spec.credentials else None
-
-    if spec.provider == CloudProvider.AWS:
-        auth_method = "implicit"
-        configuration: dict[str, Any] = {"region": spec.region}
-
-        if normalized_credentials:
-            method, separator, raw_value = normalized_credentials.partition(":")
-            if not separator:
-                raise ValueError(
-                    "Invalid AWS credentials format. Use one of: "
-                    "aws-profile:PROFILE, aws-access-keys:KEY:SECRET, "
-                    "aws-session-token:KEY:SECRET:TOKEN."
-                )
-
-            normalized_method = method.strip().lower()
-            credential_value = raw_value.strip()
-            if normalized_method == "aws-profile":
-                if not credential_value:
-                    raise ValueError("AWS profile name cannot be empty.")
-                configuration["profile_name"] = credential_value
-            elif normalized_method in {"aws-access-key", "aws-access-keys"}:
-                access_key_id, middle, secret_access_key = credential_value.partition(
-                    ":"
-                )
-                if (
-                    not middle
-                    or not access_key_id.strip()
-                    or not secret_access_key.strip()
-                ):
-                    raise ValueError(
-                        "aws-access-keys credentials must be in the format "
-                        "aws-access-keys:ACCESS_KEY_ID:SECRET_ACCESS_KEY."
-                    )
-                auth_method = "secret-key"
-                configuration.update(
-                    {
-                        "aws_access_key_id": access_key_id.strip(),
-                        "aws_secret_access_key": secret_access_key.strip(),
-                    }
-                )
-            elif normalized_method == "aws-session-token":
-                access_key_id, first_sep, remainder = credential_value.partition(":")
-                secret_access_key, second_sep, session_token = remainder.partition(":")
-                if (
-                    not first_sep
-                    or not second_sep
-                    or not access_key_id.strip()
-                    or not secret_access_key.strip()
-                    or not session_token.strip()
-                ):
-                    raise ValueError(
-                        "aws-session-token credentials must be in the format "
-                        "aws-session-token:ACCESS_KEY_ID:SECRET_ACCESS_KEY:SESSION_TOKEN."
-                    )
-                auth_method = "sts-token"
-                configuration.update(
-                    {
-                        "aws_access_key_id": access_key_id.strip(),
-                        "aws_secret_access_key": secret_access_key.strip(),
-                        "aws_session_token": session_token.strip(),
-                    }
-                )
-            else:
-                raise ValueError(
-                    "Unsupported AWS credentials method. Use one of: "
-                    "aws-profile, aws-access-keys, aws-session-token."
-                )
-
-        return _ResolvedKubernetesConnectorSpec(
-            connector_info=ServiceConnectorInfo(
-                type=AWS_CONNECTOR_TYPE,
-                auth_method=auth_method,
-                configuration=dict(configuration),
-            ),
-            verify_connector_type=AWS_CONNECTOR_TYPE,
-            verify_resource_type=AWS_RESOURCE_TYPE,
-            verify_configuration=dict(configuration),
-        )
-
-    if spec.provider == CloudProvider.GCP:
-        project_id = _infer_gcp_project_id_from_container_registry(
-            spec.container_registry
-        )
-        auth_method = "implicit"
-        configuration = {"project_id": project_id}
-
-        if normalized_credentials:
-            method, separator, raw_value = normalized_credentials.partition(":")
-            if not separator:
-                raise ValueError(
-                    "Invalid GCP credentials format. Use "
-                    "gcp-service-account:/path/to/key.json."
-                )
-            normalized_method = method.strip().lower()
-            if normalized_method != "gcp-service-account":
-                raise ValueError(
-                    "Unsupported GCP credentials method. Use: gcp-service-account."
-                )
-
-            credential_path_raw = raw_value.strip()
-            if not credential_path_raw:
-                raise ValueError("GCP service account file path cannot be empty.")
-            credential_path = Path(credential_path_raw).expanduser()
-            try:
-                service_account_json = credential_path.read_text(encoding="utf-8")
-            except OSError as exc:
-                raise ValueError(
-                    "Unable to read GCP service account file "
-                    f"'{credential_path}': {exc}"
-                ) from exc
-
-            auth_method = "service-account"
-            configuration.update({"service_account_json": service_account_json})
-
-        return _ResolvedKubernetesConnectorSpec(
-            connector_info=ServiceConnectorInfo(
-                type=GCP_CONNECTOR_TYPE,
-                auth_method=auth_method,
-                configuration=dict(configuration),
-            ),
-            verify_connector_type=GCP_CONNECTOR_TYPE,
-            verify_resource_type=GCP_RESOURCE_TYPE,
-            verify_configuration=dict(configuration),
-        )
-
-    raise ValueError(f"Unsupported cloud provider: {spec.provider}")
-
-
-def _build_kubernetes_stack_request(
-    name: str,
-    *,
-    spec: KubernetesStackSpec,
-    connector_spec: _ResolvedKubernetesConnectorSpec,
-    labels: dict[str, str] | None,
-) -> StackRequest:
-    """Build the one-shot ZenML stack request for a Kubernetes stack."""
-    merged_labels = dict(labels or {})
-    merged_labels[_STACK_MANAGED_LABEL_KEY] = _STACK_MANAGED_LABEL_VALUE
-
-    artifact_store_flavor = (
-        "s3" if spec.provider == CloudProvider.AWS else GCP_ARTIFACT_STORE_FLAVOR
-    )
-    container_registry_flavor = (
-        AWS_CONTAINER_REGISTRY_FLAVOR
-        if spec.provider == CloudProvider.AWS
-        else ContainerRegistryFlavor.GCP.value
-    )
-
-    return StackRequest(
-        name=name,
-        labels=merged_labels,
-        components={
-            StackComponentType.ORCHESTRATOR: [
-                ComponentInfo(
-                    flavor="kubernetes",
-                    service_connector_index=0,
-                    service_connector_resource_id=spec.cluster,
-                    configuration={
-                        "kubernetes_namespace": spec.namespace,
-                        "region": spec.region,
-                    },
-                )
-            ],
-            StackComponentType.ARTIFACT_STORE: [
-                ComponentInfo(
-                    flavor=artifact_store_flavor,
-                    service_connector_index=0,
-                    service_connector_resource_id=_artifact_store_resource_id(
-                        spec.artifact_store, spec.provider
-                    ),
-                    configuration={"path": spec.artifact_store},
-                )
-            ],
-            StackComponentType.CONTAINER_REGISTRY: [
-                ComponentInfo(
-                    flavor=container_registry_flavor,
-                    service_connector_index=0,
-                    service_connector_resource_id=_container_registry_resource_id(
-                        spec.container_registry, spec.provider
-                    ),
-                    configuration={"uri": spec.container_registry},
-                )
-            ],
-        },
-        service_connectors=[
-            ServiceConnectorInfo(
-                type=connector_spec.connector_info.type,
-                auth_method=connector_spec.connector_info.auth_method,
-                configuration=dict(connector_spec.connector_info.configuration),
-            )
-        ],
-    )
-
-
-def _get_required_stack_component(
-    stack_model: Any,
-    component_type: StackComponentType,
-) -> Any:
-    """Return the single component of a required stack type from a stack model."""
-    raw_components = getattr(stack_model, "components", None)
-    if not isinstance(raw_components, Mapping):
-        raise RuntimeError(
-            "Unable to inspect components from the created Kubernetes stack."
-        )
-
-    components = raw_components.get(component_type, [])
-    if len(components) != 1:
-        raise RuntimeError(
-            "Created Kubernetes stack is missing the expected "
-            f"{component_type.value} component."
-        )
-    return components[0]
-
-
-def _extract_kubernetes_stack_components(
-    stack_model: Any,
-) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
-    """Extract created component and connector names from a hydrated stack."""
-    ordered_components = (
-        (StackComponentType.ORCHESTRATOR, "orchestrator"),
-        (StackComponentType.ARTIFACT_STORE, "artifact_store"),
-        (StackComponentType.CONTAINER_REGISTRY, "container_registry"),
-    )
-    component_labels: list[str] = []
-    connector_names: list[str] = []
-    seen_connector_names: set[str] = set()
-    missing_connector_metadata = False
-
-    for component_type, kind in ordered_components:
-        component = _get_required_stack_component(stack_model, component_type)
-        component_name = str(getattr(component, "name", "")).strip()
-        if not component_name:
-            raise RuntimeError(
-                "Unable to inspect components from the created Kubernetes stack."
-            )
-        component_labels.append(_format_stack_component_label(component_name, kind))
-
-        connector = getattr(component, "connector", None)
-        if connector is None:
-            missing_connector_metadata = True
-            continue
-        connector_name = str(getattr(connector, "name", "")).strip()
-        if not connector_name:
-            missing_connector_metadata = True
-            continue
-        if connector_name not in seen_connector_names:
-            seen_connector_names.add(connector_name)
-            connector_names.append(connector_name)
-
-    return tuple(component_labels), tuple(connector_names), missing_connector_metadata
-
-
-def _normalize_stack_selector(name_or_id: str) -> str:
-    """Validate and normalize a stack selector provided by a user."""
-    normalized_selector = name_or_id.strip()
-    if not normalized_selector:
-        raise ValueError("Stack name or ID cannot be empty.")
-
-    return normalized_selector
-
-
-def _stack_name_collision_message(name: str) -> str:
-    """Return the user-facing message for stack-name collisions."""
-    return (
-        f'A stack named "{name}" already exists. To activate it, run '
-        f"'kitaru stack use {name}'."
-    )
-
-
-def _component_collision_message(
-    name: str,
-    component_type: StackComponentType,
-) -> str:
-    """Return the user-facing message for stack component collisions."""
-    return (
-        f"Cannot create stack '{name}' because a {component_type.value} named "
-        f"'{name}' already exists. Kitaru always creates fresh stack "
-        "components and never reuses existing ones."
-    )
-
-
-def _stack_is_managed(stack_model: Any) -> bool:
-    """Return whether a stack carries Kitaru's managed-stack label."""
-    raw_labels = getattr(stack_model, "labels", None)
-    if not isinstance(raw_labels, Mapping):
-        return False
-
-    raw_value = raw_labels.get(_STACK_MANAGED_LABEL_KEY)
-    if raw_value is None:
-        return False
-
-    return str(raw_value).strip().lower() == _STACK_MANAGED_LABEL_VALUE
-
-
-def _format_stack_component_label(
-    name: str,
-    kind: _StackComponentKind,
-) -> str:
-    """Format one stack component for user-facing structured output."""
-    return f"{name} ({kind})"
-
-
-def _delete_stack_components_best_effort(
-    client: Client,
-    components: list[_StackComponent],
-) -> str | None:
-    """Best-effort cleanup for stack components created during a failed create."""
-    cleanup_errors: list[str] = []
-    component_types: dict[_StackComponentKind, StackComponentType] = {
-        "orchestrator": StackComponentType.ORCHESTRATOR,
-        "artifact_store": StackComponentType.ARTIFACT_STORE,
-        "container_registry": StackComponentType.CONTAINER_REGISTRY,
-    }
-
-    for component in reversed(components):
-        try:
-            component_type = component_types[component.kind]
-        except KeyError as exc:  # pragma: no cover - defensive type guard
-            raise ValueError(
-                f"Unsupported stack component kind: {component.kind}"
-            ) from exc
-        try:
-            client.delete_stack_component(component.component_id, component_type)
-        except Exception as exc:  # pragma: no cover - cleanup failure path
-            cleanup_errors.append(
-                f"{_format_stack_component_label(component.name, component.kind)}: "
-                f"{exc}"
-            )
-
-    if not cleanup_errors:
-        return None
-
-    return "Cleanup also failed for: " + "; ".join(cleanup_errors)
+    The active stack is managed by the underlying runtime and persisted in the
+    runtime's global user configuration.
+    """
+    return _config_stacks.current_stack(client_factory=Client)
 
 
 def _list_stack_entries() -> list[_StackListEntry]:
     """List stacks with active + managed metadata for structured output."""
-    client = Client()
-    active_stack_id = str(client.active_stack_model.id)
-
-    return [
-        _StackListEntry(
-            stack=_stack_info_from_model(
-                stack_model,
-                active_stack_id=active_stack_id,
-            ),
-            is_managed=_stack_is_managed(stack_model),
-        )
-        for stack_model in _iter_available_stacks(client)
-    ]
-
-
-def _normalize_stack_detail_value(value: Any) -> str | None:
-    """Normalize optional component metadata values for stack inspection."""
-    if value is None:
-        return None
-    normalized_value = str(value).strip()
-    return normalized_value or None
-
-
-_RECURSIVE_DELETE_COMPONENT_TYPES: tuple[
-    tuple[StackComponentType, _StackComponentKind], ...
-] = (
-    (StackComponentType.ORCHESTRATOR, "orchestrator"),
-    (StackComponentType.ARTIFACT_STORE, "artifact_store"),
-    (StackComponentType.CONTAINER_REGISTRY, "container_registry"),
-)
-
-
-def _stack_component_models_for_type(
-    stack_model: Any,
-    component_type: StackComponentType,
-) -> tuple[Any, ...]:
-    """Return normalized component models for one stack-component type."""
-    raw_components = getattr(stack_model, "components", None)
-    if not isinstance(raw_components, Mapping):
-        return ()
-
-    component_models = raw_components.get(component_type, ())
-    if component_models is None:
-        return ()
-    if isinstance(component_models, Iterable) and not isinstance(
-        component_models, (str, bytes)
-    ):
-        return tuple(component_models)
-    return (component_models,)
-
-
-def _iter_stack_component_models(stack_model: Any) -> Iterator[Any]:
-    """Iterate all component models attached to a stack."""
-    raw_components = getattr(stack_model, "components", None)
-    if not isinstance(raw_components, Mapping):
-        return
-
-    for component_models in raw_components.values():
-        if component_models is None:
-            continue
-        if isinstance(component_models, Iterable) and not isinstance(
-            component_models, (str, bytes)
-        ):
-            yield from component_models
-            continue
-        yield component_models
-
-
-def _recursive_delete_component_labels(
-    client: Client,
-    stack_model: Any,
-) -> tuple[str, ...]:
-    """Return labels for recursively deleted unshared managed components."""
-    deletable_components: list[str] = []
-
-    for component_type, component_kind in _RECURSIVE_DELETE_COMPONENT_TYPES:
-        for component_model in _stack_component_models_for_type(
-            stack_model, component_type
-        ):
-            component_id = getattr(component_model, "id", None)
-            if component_id is None:
-                continue
-
-            component_name = _normalize_stack_detail_value(
-                getattr(component_model, "name", None)
-            )
-            if component_name is None:
-                continue
-
-            stacks = client.list_stacks(component_id=component_id, size=2, page=1)
-            if len(stacks) == 1 and str(getattr(stacks[0], "id", "")) == str(
-                getattr(stack_model, "id", "")
-            ):
-                deletable_components.append(
-                    _format_stack_component_label(component_name, component_kind)
-                )
-
-    return tuple(deletable_components)
-
-
-def _linked_service_connector_selectors_for_stack(
-    stack_model: Any,
-    *,
-    require_complete_metadata: bool = False,
-) -> tuple[str, ...] | None:
-    """Extract linked service connector selectors from a hydrated stack."""
-    selectors: list[str] = []
-    seen_selectors: set[str] = set()
-
-    for component_model in _iter_stack_component_models(stack_model):
-        connector = getattr(component_model, "connector", None)
-        if connector is None:
-            continue
-
-        for raw_selector in (
-            getattr(connector, "id", None),
-            getattr(connector, "name", None),
-        ):
-            selector = _normalize_stack_detail_value(raw_selector)
-            if selector is None or selector in seen_selectors:
-                continue
-            seen_selectors.add(selector)
-            selectors.append(selector)
-            break
-        else:
-            if require_complete_metadata:
-                return None
-
-    return tuple(selectors)
-
-
-def _resolve_service_connector_selectors(
-    client: Client,
-    connector_selectors: tuple[str, ...],
-) -> tuple[str, ...]:
-    """Resolve connector selectors to canonical delete selectors when possible."""
-    resolved_selectors: list[str] = []
-    seen_selectors: set[str] = set()
-
-    for selector in connector_selectors:
-        try:
-            UUID(selector)
-        except (TypeError, ValueError, AttributeError):
-            connector_models = client.list_service_connectors(
-                name=selector,
-                page=1,
-                size=2,
-                hydrate=True,
-            )
-        else:
-            connector_models = client.list_service_connectors(
-                id=selector,
-                page=1,
-                size=2,
-                hydrate=True,
-            )
-
-        if isinstance(connector_models, Iterable) and not isinstance(
-            connector_models, (str, bytes)
-        ):
-            matching_connectors = tuple(connector_models)
-        else:
-            matching_connectors = ()
-
-        if not matching_connectors:
-            if selector not in seen_selectors:
-                seen_selectors.add(selector)
-                resolved_selectors.append(selector)
-            continue
-
-        for connector_model in matching_connectors:
-            resolved_selector = _normalize_stack_detail_value(
-                getattr(connector_model, "id", None)
-            ) or _normalize_stack_detail_value(getattr(connector_model, "name", None))
-            if resolved_selector is None or resolved_selector in seen_selectors:
-                continue
-            seen_selectors.add(resolved_selector)
-            resolved_selectors.append(resolved_selector)
-
-    return tuple(resolved_selectors)
-
-
-def _delete_unshared_service_connectors_best_effort(
-    client: Client,
-    connector_selectors: tuple[str, ...],
-) -> None:
-    """Delete unshared service connectors after a successful stack delete."""
-    if not connector_selectors:
-        return
-
-    try:
-        resolved_selectors = _resolve_service_connector_selectors(
-            client, connector_selectors
-        )
-        if not resolved_selectors:
-            return
-
-        remaining_connector_selectors: set[str] = set()
-        for stack_model in _iter_available_stacks(client):
-            remaining_stack = client.get_stack(
-                getattr(stack_model, "id", None),
-                allow_name_prefix_match=False,
-                hydrate=True,
-            )
-            remaining_stack_selectors = _linked_service_connector_selectors_for_stack(
-                remaining_stack,
-                require_complete_metadata=True,
-            )
-            if remaining_stack_selectors is None:
-                return
-
-            remaining_connector_selectors.update(
-                _resolve_service_connector_selectors(
-                    client,
-                    remaining_stack_selectors,
-                )
-            )
-    except Exception:
-        return
-
-    for selector in resolved_selectors:
-        if selector in remaining_connector_selectors:
-            continue
-        try:
-            client.delete_service_connector(selector)
-        except Exception:
-            continue
-
-
-def _resolve_stack_for_show(client: Client, selector: str) -> Any:
-    """Resolve a stack selector for `stack show`, preferring exact ID matches."""
-    id_match: Any | None = None
-    name_match: Any | None = None
-
-    for stack_model in _iter_available_stacks(client):
-        if str(getattr(stack_model, "id", "")).strip() == selector:
-            id_match = stack_model
-        if str(getattr(stack_model, "name", "")).strip() == selector:
-            name_match = stack_model
-
-    resolved_stack = id_match or name_match
-    if resolved_stack is None:
-        raise ValueError(f"Stack '{selector}' not found.")
-    return resolved_stack
-
-
-def _stack_component_details_from_model(
-    component_type: StackComponentType | None,
-    component: Any,
-    *,
-    purpose: str | None = None,
-) -> StackComponentDetails:
-    """Translate one hydrated ZenML stack component into Kitaru vocabulary."""
-    component_name = (
-        _normalize_stack_detail_value(getattr(component, "name", None)) or "<unnamed>"
-    )
-    backend = _normalize_stack_detail_value(getattr(component, "flavor", None))
-    configuration = getattr(component, "configuration", None)
-    component_configuration = (
-        configuration if isinstance(configuration, Mapping) else {}
-    )
-    connector = getattr(component, "connector", None)
-    connector_configuration_raw = getattr(connector, "configuration", None)
-    connector_configuration = (
-        connector_configuration_raw
-        if isinstance(connector_configuration_raw, Mapping)
-        else {}
-    )
-
-    if component_type == StackComponentType.ORCHESTRATOR:
-        details: list[tuple[str, str]] = []
-        cluster = next(
-            (
-                value
-                for value in (
-                    _normalize_stack_detail_value(
-                        getattr(component, "service_connector_resource_id", None)
-                    ),
-                    _normalize_stack_detail_value(
-                        getattr(component, "connector_resource_id", None)
-                    ),
-                    _normalize_stack_detail_value(
-                        getattr(component, "resource_id", None)
-                    ),
-                )
-                if value is not None
-            ),
-            None,
-        )
-        if cluster is not None:
-            details.append(("cluster", cluster))
-
-        region = _normalize_stack_detail_value(connector_configuration.get("region"))
-        if region is None:
-            region = _normalize_stack_detail_value(
-                component_configuration.get("region")
-            )
-        if region is not None:
-            details.append(("region", region))
-
-        namespace = _normalize_stack_detail_value(
-            component_configuration.get("kubernetes_namespace")
-        )
-        if namespace is not None:
-            details.append(("namespace", namespace))
-
-        return StackComponentDetails(
-            role="runner",
-            name=component_name,
-            backend=backend,
-            details=tuple(details),
-        )
-
-    if component_type == StackComponentType.ARTIFACT_STORE:
-        details: list[tuple[str, str]] = []
-        location = _normalize_stack_detail_value(component_configuration.get("path"))
-        if location is not None:
-            details.append(("location", location))
-
-        return StackComponentDetails(
-            role="storage",
-            name=component_name,
-            backend=backend,
-            details=tuple(details),
-        )
-
-    if component_type == StackComponentType.CONTAINER_REGISTRY:
-        details: list[tuple[str, str]] = []
-        location = _normalize_stack_detail_value(component_configuration.get("uri"))
-        if location is not None:
-            details.append(("location", location))
-
-        return StackComponentDetails(
-            role="image_registry",
-            name=component_name,
-            backend=backend,
-            details=tuple(details),
-        )
-
-    normalized_purpose = _normalize_stack_detail_value(
-        purpose
-        if purpose is not None
-        else (component_type.value if component_type is not None else None)
-    )
-    return StackComponentDetails(
-        role="additional_component",
-        name=component_name,
-        backend=backend,
-        purpose=normalized_purpose,
-    )
-
-
-def _infer_stack_details_type(
-    components: tuple[StackComponentDetails, ...],
-) -> _StackShowType:
-    """Infer a user-facing stack type from translated stack components."""
-    if any(
-        component.role == "runner" and component.backend == "kubernetes"
-        for component in components
-    ):
-        return "kubernetes"
-
-    if components and all(
-        component.role in {"runner", "storage"} for component in components
-    ):
-        backends = {
-            component.backend
-            for component in components
-            if component.backend is not None
-        }
-        if backends.issubset({"local"}):
-            return "local"
-
-    return "custom"
+    return _config_stacks._list_stack_entries(client_factory=Client)
 
 
 def _show_stack_operation(name_or_id: str) -> StackDetails:
     """Inspect one stack and translate its component metadata for CLI display."""
-    selector = _normalize_stack_selector(name_or_id)
-    client = Client()
-    resolved_stack = _resolve_stack_for_show(client, selector)
-
-    try:
-        hydrated_stack = client.get_stack(resolved_stack.id, hydrate=True)
-    except Exception as exc:
-        raise RuntimeError(f"Unable to inspect stack '{selector}': {exc}") from exc
-
-    active_stack_id = str(client.active_stack_model.id)
-    stack = _stack_info_from_model(hydrated_stack, active_stack_id=active_stack_id)
-    is_managed = _stack_is_managed(hydrated_stack)
-
-    raw_components = getattr(hydrated_stack, "components", None)
-    if not isinstance(raw_components, Mapping):
-        return StackDetails(
-            stack=stack,
-            is_managed=is_managed,
-            stack_type="custom",
-            components=(),
-        )
-
-    normalized_components: dict[StackComponentType, list[Any]] = {}
-    ordered_components: list[StackComponentDetails] = []
-    for raw_component_type, raw_component_models in raw_components.items():
-        purpose = _normalize_stack_detail_value(
-            getattr(raw_component_type, "value", raw_component_type)
-        )
-        try:
-            component_type = (
-                raw_component_type
-                if isinstance(raw_component_type, StackComponentType)
-                else StackComponentType(str(raw_component_type))
-            )
-        except ValueError:
-            component_type = None
-
-        if isinstance(raw_component_models, Iterable) and not isinstance(
-            raw_component_models, (str, bytes, Mapping)
-        ):
-            component_models = list(raw_component_models)
-        else:
-            component_models = [raw_component_models]
-
-        if component_type is None:
-            for component_model in component_models:
-                ordered_components.append(
-                    _stack_component_details_from_model(
-                        None,
-                        component_model,
-                        purpose=purpose,
-                    )
-                )
-            continue
-
-        normalized_components.setdefault(component_type, []).extend(component_models)
-
-    for core_component_type in (
-        StackComponentType.ORCHESTRATOR,
-        StackComponentType.ARTIFACT_STORE,
-        StackComponentType.CONTAINER_REGISTRY,
-    ):
-        for component_model in normalized_components.pop(core_component_type, []):
-            ordered_components.append(
-                _stack_component_details_from_model(
-                    core_component_type, component_model
-                )
-            )
-
-    for component_type in sorted(
-        normalized_components,
-        key=lambda item: item.value,
-    ):
-        for component_model in normalized_components[component_type]:
-            ordered_components.append(
-                _stack_component_details_from_model(component_type, component_model)
-            )
-
-    component_details = tuple(ordered_components)
-    return StackDetails(
-        stack=stack,
-        is_managed=is_managed,
-        stack_type=_infer_stack_details_type(component_details),
-        components=component_details,
+    return _config_stacks._show_stack_operation(
+        name_or_id,
+        client_factory=Client,
     )
 
 
@@ -1852,86 +460,12 @@ def _create_kubernetes_stack_operation(
     labels: dict[str, str] | None = None,
 ) -> _StackCreateResult:
     """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
-    selector = _normalize_stack_selector(name)
-    client = Client()
-
-    if any(
-        stack_model.name == selector for stack_model in _iter_available_stacks(client)
-    ):
-        raise ValueError(_stack_name_collision_message(selector))
-
-    previous_active_stack = str(client.active_stack_model.name) if activate else None
-    connector_spec = _resolve_kubernetes_connector_spec(spec)
-
-    client.create_service_connector(
-        name=selector,
-        connector_type=connector_spec.verify_connector_type,
-        resource_type=connector_spec.verify_resource_type,
-        auth_method=connector_spec.connector_info.auth_method,
-        configuration=connector_spec.verify_configuration,
-        verify=spec.verify,
-        list_resources=False,
-        register=False,
-    )
-
-    stack_request = _build_kubernetes_stack_request(
-        selector,
+    return _config_stacks._create_kubernetes_stack_operation(
+        name,
         spec=spec,
-        connector_spec=connector_spec,
+        activate=activate,
         labels=labels,
-    )
-    client._validate_stack_configuration(stack_request)
-
-    try:
-        created_stack = client.zen_store.create_stack(stack=stack_request)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to create Kubernetes stack '{selector}'. ZenML rolled back "
-            "any partially created components and service connectors. Original "
-            f"error: {exc}"
-        ) from exc
-
-    components_created, service_connectors_created, missing_connector_metadata = (
-        _extract_kubernetes_stack_components(created_stack)
-    )
-    if missing_connector_metadata:
-        try:
-            refreshed_stack = client.get_stack(created_stack.id, hydrate=True)
-        except Exception:
-            refreshed_stack = None
-        if refreshed_stack is not None:
-            components_created, service_connectors_created, _ = (
-                _extract_kubernetes_stack_components(refreshed_stack)
-            )
-
-    if activate:
-        try:
-            client.activate_stack(created_stack.id)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Created Kubernetes stack '{selector}' but failed to activate "
-                "it. The stack was created successfully and remains available; "
-                f"run 'kitaru stack use {selector}' to activate it manually. "
-                f"Original error: {exc}"
-            ) from exc
-        active_stack_id = str(created_stack.id)
-    else:
-        active_stack_id = str(client.active_stack_model.id)
-
-    return _StackCreateResult(
-        stack=_stack_info_from_model(created_stack, active_stack_id=active_stack_id),
-        previous_active_stack=previous_active_stack,
-        components_created=components_created,
-        stack_type=StackType.KUBERNETES.value,
-        service_connectors_created=service_connectors_created,
-        resources={
-            "provider": spec.provider.value,
-            "cluster": spec.cluster,
-            "region": spec.region,
-            "namespace": spec.namespace,
-            "artifact_store": spec.artifact_store,
-            "container_registry": spec.container_registry,
-        },
+        client_factory=Client,
     )
 
 
@@ -1944,24 +478,15 @@ def _create_stack_operation(
     kubernetes: KubernetesStackSpec | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
-    if stack_type == StackType.LOCAL:
-        return _create_local_stack_operation(
-            name,
-            activate=activate,
-            labels=labels,
-        )
-
-    if stack_type == StackType.KUBERNETES:
-        if kubernetes is None:
-            raise ValueError("Kubernetes spec required for --type kubernetes.")
-        return _create_kubernetes_stack_operation(
-            name,
-            spec=kubernetes,
-            activate=activate,
-            labels=labels,
-        )
-
-    raise ValueError(f"Unsupported stack type: {stack_type}")
+    return _config_stacks._create_stack_operation(
+        name,
+        stack_type=stack_type,
+        activate=activate,
+        labels=labels,
+        kubernetes=kubernetes,
+        create_local_stack_operation=_create_local_stack_operation,
+        create_kubernetes_stack_operation=_create_kubernetes_stack_operation,
+    )
 
 
 def _create_local_stack_operation(
@@ -1971,115 +496,12 @@ def _create_local_stack_operation(
     labels: dict[str, str] | None = None,
 ) -> _StackCreateResult:
     """Create a new local stack and return structured operation details."""
-    selector = _normalize_stack_selector(name)
-    client = Client()
-
-    if any(
-        stack_model.name == selector for stack_model in _iter_available_stacks(client)
-    ):
-        raise ValueError(_stack_name_collision_message(selector))
-
-    previous_active_stack = str(client.active_stack_model.name) if activate else None
-    merged_labels = dict(labels or {})
-    merged_labels[_STACK_MANAGED_LABEL_KEY] = _STACK_MANAGED_LABEL_VALUE
-
-    created_components: list[_StackComponent] = []
-    components_created = (
-        _format_stack_component_label(selector, "orchestrator"),
-        _format_stack_component_label(selector, "artifact_store"),
-    )
-
-    try:
-        orchestrator = client.create_stack_component(
-            name=selector,
-            flavor="local",
-            component_type=StackComponentType.ORCHESTRATOR,
-            configuration={},
-        )
-        created_components.append(
-            _StackComponent(
-                component_id=str(orchestrator.id),
-                name=selector,
-                kind="orchestrator",
-            )
-        )
-    except EntityExistsError as exc:
-        raise ValueError(
-            _component_collision_message(selector, StackComponentType.ORCHESTRATOR)
-        ) from exc
-
-    try:
-        artifact_store = client.create_stack_component(
-            name=selector,
-            flavor="local",
-            component_type=StackComponentType.ARTIFACT_STORE,
-            configuration={},
-        )
-        created_components.append(
-            _StackComponent(
-                component_id=str(artifact_store.id),
-                name=selector,
-                kind="artifact_store",
-            )
-        )
-    except EntityExistsError as exc:
-        cleanup_warning = _delete_stack_components_best_effort(
-            client, created_components
-        )
-        message = _component_collision_message(
-            selector, StackComponentType.ARTIFACT_STORE
-        )
-        if cleanup_warning:
-            message = f"{message} {cleanup_warning}"
-        raise ValueError(message) from exc
-    except Exception as exc:
-        cleanup_warning = _delete_stack_components_best_effort(
-            client, created_components
-        )
-        if cleanup_warning:
-            raise RuntimeError(f"{exc} {cleanup_warning}") from exc
-        raise
-
-    try:
-        stack_model = client.create_stack(
-            name=selector,
-            components={
-                StackComponentType.ORCHESTRATOR: selector,
-                StackComponentType.ARTIFACT_STORE: selector,
-            },
-            labels=merged_labels,
-        )
-    except EntityExistsError as exc:
-        cleanup_warning = _delete_stack_components_best_effort(
-            client, created_components
-        )
-        message = _stack_name_collision_message(selector)
-        if cleanup_warning:
-            message = f"{message} {cleanup_warning}"
-        raise ValueError(message) from exc
-    except Exception as exc:
-        cleanup_warning = _delete_stack_components_best_effort(
-            client, created_components
-        )
-        message = str(exc)
-        if cleanup_warning:
-            message = f"{message} {cleanup_warning}"
-        raise RuntimeError(message) from exc
-
-    if activate:
-        client.activate_stack(selector)
-        stack = current_stack()
-    else:
-        stack = _stack_info_from_model(
-            stack_model,
-            active_stack_id=str(client.active_stack_model.id),
-        )
-
-    return _StackCreateResult(
-        stack=stack,
-        previous_active_stack=previous_active_stack,
-        components_created=components_created,
-        stack_type=StackType.LOCAL.value,
+    return _config_stacks._create_local_stack_operation(
+        name,
+        activate=activate,
+        labels=labels,
+        client_factory=Client,
+        current_stack_getter=current_stack,
     )
 
 
@@ -2090,115 +512,12 @@ def _delete_stack_operation(
     force: bool = False,
 ) -> _StackDeleteResult:
     """Delete a stack and return structured operation details."""
-    selector = _normalize_stack_selector(name_or_id)
-    client = Client()
-    target_stack = client.get_stack(
-        selector,
-        allow_name_prefix_match=False,
-    )
-    active_stack = client.active_stack_model
-    is_active = str(target_stack.id) == str(active_stack.id)
-
-    if is_active and not force:
-        raise ValueError(
-            "Cannot delete the active stack. Use '--force' to delete and fall "
-            "back to the default stack, or switch first with 'kitaru stack use "
-            "<other>'."
-        )
-
-    managed_recursive_delete = recursive and _stack_is_managed(target_stack)
-    components_deleted: tuple[str, ...] = ()
-    connector_selectors: tuple[str, ...] = ()
-    if managed_recursive_delete:
-        components_deleted = _recursive_delete_component_labels(client, target_stack)
-        connector_selectors = (
-            _linked_service_connector_selectors_for_stack(target_stack) or ()
-        )
-
-    new_active_stack: str | None = None
-    if is_active and force:
-        client.activate_stack("default")
-        new_active_stack = current_stack().name
-
-    client.delete_stack(target_stack.id, recursive=recursive)
-    if managed_recursive_delete:
-        _delete_unshared_service_connectors_best_effort(client, connector_selectors)
-
-    return _StackDeleteResult(
-        deleted_stack=str(target_stack.name),
-        components_deleted=components_deleted,
-        new_active_stack=new_active_stack,
+    return _config_stacks._delete_stack_operation(
+        name_or_id,
         recursive=recursive,
-    )
-
-
-def _stack_info_from_model(
-    stack_model: Any,
-    *,
-    active_stack_id: str | None,
-) -> StackInfo:
-    """Convert a runtime stack model to Kitaru's public stack shape."""
-    try:
-        stack_id = str(stack_model.id)
-        stack_name = str(stack_model.name)
-    except AttributeError as exc:
-        raise RuntimeError(
-            "Unable to read stack information from the configured runtime."
-        ) from exc
-
-    return StackInfo(
-        id=stack_id,
-        name=stack_name,
-        is_active=stack_id == active_stack_id,
-    )
-
-
-def _iter_available_stacks(client: Client) -> Iterable[Any]:
-    """Return all available stacks from the runtime, including later pages."""
-    first_page = client.list_stacks()
-    if not isinstance(first_page, Iterable) or isinstance(first_page, (str, bytes)):
-        raise RuntimeError(
-            "Unexpected stack list response from the configured runtime."
-        )
-
-    stack_models = list(first_page)
-
-    total_pages_raw = getattr(first_page, "total_pages", 1)
-    page_size_raw = getattr(first_page, "max_size", 1)
-    try:
-        total_pages = int(total_pages_raw)
-    except (TypeError, ValueError):
-        total_pages = 1
-
-    try:
-        page_size = int(page_size_raw)
-    except (TypeError, ValueError):
-        page_size = 1
-
-    for page_number in range(2, total_pages + 1):
-        page_result = client.list_stacks(page=page_number, size=page_size)
-        if not isinstance(page_result, Iterable) or isinstance(
-            page_result, (str, bytes)
-        ):
-            raise RuntimeError(
-                "Unexpected stack list response from the configured runtime."
-            )
-        stack_models.extend(page_result)
-
-    return stack_models
-
-
-def current_stack() -> StackInfo:
-    """Return the currently active stack.
-
-    The active stack is managed by the underlying runtime and persisted in the
-    runtime's global user configuration.
-    """
-    active_stack_model = Client().active_stack_model
-    active_stack_id = str(active_stack_model.id)
-    return _stack_info_from_model(
-        active_stack_model,
-        active_stack_id=active_stack_id,
+        force=force,
+        client_factory=Client,
+        current_stack_getter=current_stack,
     )
 
 
@@ -2247,10 +566,11 @@ def use_stack(name_or_id: str) -> StackInfo:
     Raises:
         ValueError: If the selector is empty.
     """
-    selector = _normalize_stack_selector(name_or_id)
-    client = Client()
-    client.activate_stack(selector)
-    return current_stack()
+    return _config_stacks.use_stack(
+        name_or_id,
+        client_factory=Client,
+        current_stack_getter=current_stack,
+    )
 
 
 @contextmanager
@@ -2316,7 +636,7 @@ def configure(
     """Set process-local runtime defaults.
 
     Execution-level fields (``stack``, ``image``, ``cache``, ``retries``)
-    update the execution precedence chain.  The ``project`` field updates
+    update the execution precedence chain. The ``project`` field updates
     the connection precedence chain and is intended as an internal /
     testing escape hatch — it is not a normal user-facing setting.
 
