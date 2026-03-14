@@ -27,9 +27,9 @@ from zenml.models import SecretResponse
 from zenml.utils import yaml_utils
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
-from _kitaru_bootstrap import resolve_installed_version
 from kitaru import _flow_loading
 from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
+from kitaru._version import resolve_installed_version
 from kitaru.cli_output import (
     CLIOutputFormat,
     CommandEnvelope,

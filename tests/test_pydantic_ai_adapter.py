@@ -284,8 +284,8 @@ def test_safe_save_uses_blob_when_primary_save_fails() -> None:
     attempts: list[tuple[str, str, Any]] = []
     value = object()
 
-    def fake_save(name: str, saved_value: Any, *, type: str = "output") -> None:
-        attempts.append((name, type, saved_value))
+    def fake_save(name: str, value: Any, *, type: str = "output") -> None:
+        attempts.append((name, type, value))
         if type != "blob":
             raise TypeError("cannot serialize")
 

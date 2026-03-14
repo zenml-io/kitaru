@@ -18,19 +18,10 @@ from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 
-from kitaru import _flow_loading, inspection
+from kitaru import _flow_loading
 from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
 from kitaru._version import resolve_installed_version
-from kitaru.client import (
-    ArtifactRef,
-    CheckpointAttempt,
-    CheckpointCall,
-    Execution,
-    FailureInfo,
-    KitaruClient,
-    LogEntry,
-    PendingWait,
-)
+from kitaru.client import Execution, KitaruClient, LogEntry
 from kitaru.config import (
     KITARU_PROJECT_ENV,
     ActiveEnvironmentVariable,
@@ -48,6 +39,11 @@ from kitaru.config import (
     resolve_log_store,
 )
 from kitaru.inspection import (
+    serialize_artifact_ref,
+    serialize_artifact_value,
+    serialize_execution,
+    serialize_execution_summary,
+    serialize_runtime_snapshot,
     serialize_stack,
     serialize_stack_create_result,
     serialize_stack_delete_result,
@@ -111,56 +107,6 @@ def _load_flow_target(target: str) -> _FlowTarget:
         target,
         module_name_prefix="_kitaru_mcp_run_target_",
     )
-
-
-def _to_jsonable(value: Any, *, fallback_repr: bool) -> Any:
-    """Convert a value into a JSON-serializable representation."""
-    return inspection.to_jsonable(value, fallback_repr=fallback_repr)
-
-
-def _serialize_failure(failure: FailureInfo | None) -> dict[str, Any] | None:
-    """Serialize optional failure details."""
-    return inspection.serialize_failure(failure)
-
-
-def _serialize_pending_wait(wait: PendingWait | None) -> dict[str, Any] | None:
-    """Serialize optional pending wait details."""
-    return inspection.serialize_pending_wait(wait)
-
-
-def _serialize_artifact_ref(artifact: ArtifactRef) -> dict[str, Any]:
-    """Serialize artifact metadata."""
-    return inspection.serialize_artifact_ref(artifact)
-
-
-def _serialize_checkpoint_attempt(attempt: CheckpointAttempt) -> dict[str, Any]:
-    """Serialize checkpoint-attempt details."""
-    return inspection.serialize_checkpoint_attempt(attempt)
-
-
-def _serialize_checkpoint_call(checkpoint: CheckpointCall) -> dict[str, Any]:
-    """Serialize checkpoint-call details."""
-    return inspection.serialize_checkpoint_call(checkpoint)
-
-
-def _serialize_execution_summary(execution: Execution) -> dict[str, Any]:
-    """Serialize execution list-item details."""
-    return inspection.serialize_execution_summary(execution)
-
-
-def _serialize_execution(execution: Execution) -> dict[str, Any]:
-    """Serialize full execution details."""
-    return inspection.serialize_execution(execution)
-
-
-def _serialize_artifact_value(value: Any) -> dict[str, Any]:
-    """Serialize an artifact payload value for MCP transport."""
-    return inspection.serialize_artifact_value(value)
-
-
-def _serialize_runtime_snapshot(snapshot: RuntimeSnapshot) -> dict[str, Any]:
-    """Serialize runtime status details for MCP output."""
-    return inspection.serialize_runtime_snapshot(cast(Any, snapshot))
 
 
 def _log_store_mismatch_details(
@@ -469,14 +415,14 @@ def kitaru_executions_list(
         stack=stack,
         limit=limit,
     )
-    return [_serialize_execution_summary(execution) for execution in executions]
+    return [serialize_execution_summary(execution) for execution in executions]
 
 
 @mcp.tool()
 def kitaru_executions_get(exec_id: str) -> dict[str, Any]:
     """Get detailed information for one execution."""
     execution = KitaruClient().executions.get(exec_id)
-    return _serialize_execution(execution)
+    return serialize_execution(execution)
 
 
 @mcp.tool()
@@ -493,7 +439,7 @@ def kitaru_executions_latest(
         status=status,
         stack=stack,
     )
-    return _serialize_execution(execution)
+    return serialize_execution(execution)
 
 
 @mcp.tool()
@@ -557,7 +503,7 @@ def kitaru_executions_run(
         )
         return payload
 
-    payload["execution"] = _serialize_execution(execution)
+    payload["execution"] = serialize_execution(execution)
     return payload
 
 
@@ -565,7 +511,7 @@ def kitaru_executions_run(
 def kitaru_executions_cancel(exec_id: str) -> dict[str, Any]:
     """Cancel one execution and return updated details."""
     execution = KitaruClient().executions.cancel(exec_id)
-    return _serialize_execution(execution)
+    return serialize_execution(execution)
 
 
 @mcp.tool()
@@ -579,14 +525,14 @@ def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, An
         _validate_wait_input_schema(wait_schema=pending_wait.schema, value=value)
 
     updated_execution = client.executions.input(exec_id, wait=wait, value=value)
-    return _serialize_execution(updated_execution)
+    return serialize_execution(updated_execution)
 
 
 @mcp.tool()
 def kitaru_executions_retry(exec_id: str) -> dict[str, Any]:
     """Retry one failed execution and return updated details."""
     execution = KitaruClient().executions.retry(exec_id)
-    return _serialize_execution(execution)
+    return serialize_execution(execution)
 
 
 @mcp.tool()
@@ -611,7 +557,7 @@ def kitaru_executions_replay(
     return {
         "available": True,
         "operation": "replay",
-        "execution": _serialize_execution(execution),
+        "execution": serialize_execution(execution),
     }
 
 
@@ -631,7 +577,7 @@ def kitaru_artifacts_list(
         producing_call=producing_call,
         limit=limit,
     )
-    return [_serialize_artifact_ref(artifact) for artifact in artifacts]
+    return [serialize_artifact_ref(artifact) for artifact in artifacts]
 
 
 @mcp.tool()
@@ -640,8 +586,8 @@ def kitaru_artifacts_get(artifact_id: str) -> dict[str, Any]:
     artifact = KitaruClient().artifacts.get(artifact_id)
     loaded = artifact.load()
 
-    payload = _serialize_artifact_ref(artifact)
-    payload.update(_serialize_artifact_value(loaded))
+    payload = serialize_artifact_ref(artifact)
+    payload.update(serialize_artifact_value(loaded))
     return payload
 
 
@@ -649,7 +595,7 @@ def kitaru_artifacts_get(artifact_id: str) -> dict[str, Any]:
 def kitaru_status() -> dict[str, Any]:
     """Return structured status details for the current Kitaru connection."""
     snapshot = _build_runtime_snapshot()
-    return _serialize_runtime_snapshot(snapshot)
+    return serialize_runtime_snapshot(cast(Any, snapshot))
 
 
 @mcp.tool()

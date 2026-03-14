@@ -159,7 +159,7 @@ def test_importing_cli_does_not_resolve_version_metadata() -> None:
     import kitaru.cli as cli_module
 
     with patch(
-        "_kitaru_bootstrap.resolve_installed_version",
+        "kitaru._version.resolve_installed_version",
         side_effect=AssertionError("should not resolve version at import time"),
     ):
         reloaded = importlib.reload(cli_module)

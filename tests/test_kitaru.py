@@ -16,7 +16,7 @@ def test_package_imports() -> None:
 
 def test_package_reload_applies_env_translations() -> None:
     """Reloading the package should re-run env translation at import time."""
-    with patch("_kitaru_env.apply_env_translations") as apply_translations:
+    with patch("kitaru._env.apply_env_translations") as apply_translations:
         importlib.reload(kitaru)
 
     apply_translations.assert_called_once_with()

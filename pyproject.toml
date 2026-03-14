@@ -40,8 +40,8 @@ mcp = [
 ]
 
 [project.scripts]
-kitaru = "_kitaru_bootstrap:cli_main"
-kitaru-mcp = "_kitaru_bootstrap:mcp_main"
+kitaru = "kitaru.cli:cli"
+kitaru-mcp = "kitaru.mcp:main"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
@@ -57,10 +57,6 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kitaru"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/_kitaru_bootstrap.py" = "_kitaru_bootstrap.py"
-"src/_kitaru_env.py" = "_kitaru_env.py"
 
 [dependency-groups]
 dev = [

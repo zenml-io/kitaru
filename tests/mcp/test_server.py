@@ -154,7 +154,7 @@ def test_executions_list_delegates_to_inspection_serializer(
     with (
         patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client),
         patch(
-            "kitaru.inspection.serialize_execution_summary",
+            "kitaru.mcp.server.serialize_execution_summary",
             return_value={"exec_id": "delegated", "source": "inspection"},
         ) as mock_serialize,
     ):
@@ -440,7 +440,7 @@ def test_artifact_get_delegates_value_serialization_to_inspection(
     with (
         patch("kitaru.mcp.server.KitaruClient", return_value=mock_kitaru_client),
         patch(
-            "kitaru.inspection.serialize_artifact_value",
+            "kitaru.mcp.server.serialize_artifact_value",
             return_value={
                 "value": "delegated",
                 "value_format": "json",
@@ -528,7 +528,7 @@ def test_status_delegates_snapshot_serialization_to_inspection() -> None:
     with (
         patch("kitaru.mcp.server._build_runtime_snapshot", return_value=snapshot),
         patch(
-            "kitaru.inspection.serialize_runtime_snapshot",
+            "kitaru.mcp.server.serialize_runtime_snapshot",
             return_value={"connection": "delegated", "source": "inspection"},
         ) as mock_serialize,
     ):

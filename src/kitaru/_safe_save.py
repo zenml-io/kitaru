@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
+
+
+class _SaveFn(Protocol):
+    """Callable signature expected by `_safe_save`."""
+
+    def __call__(
+        self,
+        name: str,
+        value: Any,
+        *,
+        type: str = "output",
+    ) -> None: ...
 
 
 def _safe_save(
@@ -11,7 +22,7 @@ def _safe_save(
     value: Any,
     *,
     artifact_type: str,
-    save_func: Callable[..., None],
+    save_func: _SaveFn,
 ) -> str:
     """Save an artifact and fall back to a blob repr if serialization fails."""
     try:

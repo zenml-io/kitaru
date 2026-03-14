@@ -97,7 +97,7 @@ class TestBuildCommandTree:
     def test_building_tree_does_not_resolve_version_metadata(self) -> None:
         """CLI docs introspection should not trigger version metadata lookup."""
         with patch(
-            "_kitaru_bootstrap.resolve_installed_version",
+            "kitaru._version.resolve_installed_version",
             side_effect=AssertionError("should not resolve version"),
         ):
             import kitaru.cli as cli_module

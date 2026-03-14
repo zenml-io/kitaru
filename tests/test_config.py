@@ -321,6 +321,21 @@ def test_apply_env_translations_accepts_cross_namespace_auth_fallback(
     assert os.environ["ZENML_STORE_URL"] == "https://server.example.com"
 
 
+def test_apply_env_translations_ignores_empty_kitaru_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Blank KITARU env vars should not clobber an otherwise valid ZenML setup."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "   ")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "")
+    monkeypatch.setenv("ZENML_STORE_URL", "https://zenml.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "zenml-token")
+
+    apply_env_translations()
+
+    assert os.environ["ZENML_STORE_URL"] == "https://zenml.example.com"
+    assert os.environ["ZENML_STORE_API_KEY"] == "zenml-token"
+
+
 def test_apply_env_translations_rejects_partial_token_only_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
