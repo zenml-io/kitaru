@@ -11,17 +11,15 @@ This module contains:
 from __future__ import annotations
 
 import importlib
-import json
 import logging
 import os
 import re
-import tomllib
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -30,7 +28,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    ValidationError,
     field_validator,
     model_validator,
 )
@@ -38,15 +35,12 @@ from zenml.cli.login import connect_to_pro_server as _zenml_connect_to_pro_serve
 from zenml.cli.login import connect_to_server as _zenml_connect_to_server
 from zenml.cli.login import is_pro_server as _zenml_is_pro_server
 from zenml.client import Client
-from zenml.config.docker_settings import DockerSettings
 from zenml.config.global_config import GlobalConfiguration
-from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
 from zenml.enums import (
     ContainerRegistryFlavor,
-    MetadataResourceTypes,
     StackComponentType,
 )
-from zenml.exceptions import AuthorizationException, EntityExistsError
+from zenml.exceptions import EntityExistsError
 from zenml.integrations.aws import (
     AWS_CONNECTOR_TYPE,
     AWS_CONTAINER_REGISTRY_FLAVOR,
@@ -59,25 +53,28 @@ from zenml.integrations.gcp import (
 )
 from zenml.models.v2.core.stack import StackRequest
 from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
-from zenml.models.v2.misc.run_metadata import RunMetadataResource
-from zenml.utils import io_utils, yaml_utils
 
+from kitaru._config import _connection as _config_connection
+from kitaru._config import _core as _config_core
+from kitaru._config import _env as _config_env
 from kitaru._env import (
     KITARU_ANALYTICS_OPT_IN_ENV,
     KITARU_AUTH_TOKEN_ENV,
     KITARU_DEBUG_ENV,
     KITARU_PROJECT_ENV,
     KITARU_SERVER_URL_ENV,
-    ZENML_STORE_API_KEY_ENV,
-    ZENML_STORE_URL_ENV,
-    _normalized_kitaru_env,
 )
-from kitaru.errors import KitaruUsageError
+from kitaru._env import (
+    ZENML_STORE_API_KEY_ENV as _ZENML_STORE_API_KEY_ENV,
+)
+from kitaru._env import (
+    ZENML_STORE_URL_ENV as _ZENML_STORE_URL_ENV,
+)
 
 zenml_cli_utils = importlib.import_module("zenml.cli.utils")
 
 _DEFAULT_LOG_STORE_BACKEND = "artifact-store"
-_KITARU_GLOBAL_CONFIG_FILENAME = "config.yaml"
+_KITARU_GLOBAL_CONFIG_FILENAME = _config_core._KITARU_GLOBAL_CONFIG_FILENAME
 _LOG_STORE_SOURCE_DEFAULT = "default"
 _LOG_STORE_SOURCE_ENVIRONMENT = "environment"
 _LOG_STORE_SOURCE_GLOBAL_USER_CONFIG = "global user config"
@@ -86,21 +83,22 @@ _MODEL_ALIAS_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _STACK_MANAGED_LABEL_KEY = "kitaru.managed"
 _STACK_MANAGED_LABEL_VALUE = "true"
 
-KITARU_LOG_STORE_BACKEND_ENV = "KITARU_LOG_STORE_BACKEND"
-KITARU_LOG_STORE_ENDPOINT_ENV = "KITARU_LOG_STORE_ENDPOINT"
-KITARU_LOG_STORE_API_KEY_ENV = "KITARU_LOG_STORE_API_KEY"
+KITARU_LOG_STORE_BACKEND_ENV = _config_env.KITARU_LOG_STORE_BACKEND_ENV
+KITARU_LOG_STORE_ENDPOINT_ENV = _config_env.KITARU_LOG_STORE_ENDPOINT_ENV
+KITARU_LOG_STORE_API_KEY_ENV = _config_env.KITARU_LOG_STORE_API_KEY_ENV
 
-KITARU_STACK_ENV = "KITARU_STACK"
-KITARU_CACHE_ENV = "KITARU_CACHE"
-KITARU_RETRIES_ENV = "KITARU_RETRIES"
-KITARU_IMAGE_ENV = "KITARU_IMAGE"
-KITARU_DEFAULT_MODEL_ENV = "KITARU_DEFAULT_MODEL"
-KITARU_CONFIG_PATH_ENV = "KITARU_CONFIG_PATH"
+KITARU_STACK_ENV = _config_env.KITARU_STACK_ENV
+KITARU_CACHE_ENV = _config_env.KITARU_CACHE_ENV
+KITARU_RETRIES_ENV = _config_env.KITARU_RETRIES_ENV
+KITARU_IMAGE_ENV = _config_env.KITARU_IMAGE_ENV
+KITARU_DEFAULT_MODEL_ENV = _config_env.KITARU_DEFAULT_MODEL_ENV
+KITARU_CONFIG_PATH_ENV = _config_env.KITARU_CONFIG_PATH_ENV
+ZENML_STORE_API_KEY_ENV = _ZENML_STORE_API_KEY_ENV
+ZENML_STORE_URL_ENV = _ZENML_STORE_URL_ENV
 
-FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
-
-_TRUTHY_VALUES = {"1", "true", "t", "yes", "y", "on"}
-_FALSY_VALUES = {"0", "false", "f", "no", "n", "off"}
+FROZEN_EXECUTION_SPEC_METADATA_KEY = _config_core.FROZEN_EXECUTION_SPEC_METADATA_KEY
+_TRUTHY_VALUES = _config_env._TRUTHY_VALUES
+_FALSY_VALUES = _config_env._FALSY_VALUES
 _UNSET = object()
 
 
@@ -404,449 +402,50 @@ class StackDetails:
     components: tuple[StackComponentDetails, ...]
 
 
-class ImageSettings(BaseModel):
-    """Image and runtime environment settings for a flow execution."""
-
-    base_image: str | None = None
-    requirements: list[str] | None = None
-    dockerfile: str | None = None
-    environment: dict[str, str] | None = None
-    apt_packages: list[str] | None = None
-    replicate_local_python_environment: bool | None = None
-
-    model_config = ConfigDict(extra="forbid")
-
-    @field_validator("base_image", "dockerfile")
-    @classmethod
-    def _validate_optional_strings(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized_value = value.strip()
-        if not normalized_value:
-            raise ValueError("Image string values cannot be empty.")
-        return normalized_value
-
-    @field_validator("requirements")
-    @classmethod
-    def _validate_requirements(cls, value: list[str] | None) -> list[str] | None:
-        if value is None:
-            return None
-        normalized_requirements: list[str] = []
-        for requirement in value:
-            normalized_requirement = requirement.strip()
-            if not normalized_requirement:
-                raise ValueError("Image requirements cannot contain empty strings.")
-            normalized_requirements.append(normalized_requirement)
-        return normalized_requirements
-
-    @field_validator("environment")
-    @classmethod
-    def _validate_environment(
-        cls,
-        value: dict[str, str] | None,
-    ) -> dict[str, str] | None:
-        if value is None:
-            return None
-        normalized_environment: dict[str, str] = {}
-        for key, environment_value in value.items():
-            normalized_key = key.strip()
-            if not normalized_key:
-                raise ValueError("Image environment keys cannot be empty.")
-            normalized_environment[normalized_key] = str(environment_value)
-        return normalized_environment
-
-    def is_empty(self) -> bool:
-        """Return whether this object carries any configured values."""
-        return (
-            self.base_image is None
-            and self.requirements is None
-            and self.dockerfile is None
-            and self.environment is None
-            and self.apt_packages is None
-            and self.replicate_local_python_environment is None
-        )
-
-
-ImageInput = str | DockerSettings | Mapping[str, Any] | ImageSettings
-
-
-class KitaruConfig(BaseModel):
-    """Unified Kitaru configuration model."""
-
-    stack: str | None = None
-    image: ImageSettings | None = None
-    cache: bool | None = None
-    retries: int | None = None
-    server_url: str | None = None
-    auth_token: str | None = None
-    project: str | None = None
-
-    model_config = ConfigDict(extra="ignore")
-
-    @field_validator("stack", "auth_token", "project")
-    @classmethod
-    def _normalize_optional_non_empty(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized_value = value.strip()
-        if not normalized_value:
-            raise ValueError("Configuration string values cannot be empty.")
-        return normalized_value
-
-    @field_validator("server_url")
-    @classmethod
-    def _normalize_optional_server_url(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _normalize_server_url(value)
-
-    @field_validator("retries")
-    @classmethod
-    def _validate_retries(cls, value: int | None) -> int | None:
-        if value is None:
-            return None
-        if value < 0:
-            raise ValueError("Flow retries must be >= 0.")
-        return value
-
-    @field_validator("image", mode="before")
-    @classmethod
-    def _coerce_image_input(cls, value: Any) -> Any:
-        return _coerce_image_input(value)
-
-
-class ResolvedExecutionConfig(BaseModel):
-    """Fully resolved execution settings for a flow run."""
-
-    stack: str | None = None
-    image: ImageSettings | None = None
-    cache: bool
-    retries: int
-
-    @field_validator("stack")
-    @classmethod
-    def _validate_stack(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized_value = value.strip()
-        if not normalized_value:
-            raise ValueError("Stack cannot be empty.")
-        return normalized_value
-
-    @field_validator("retries")
-    @classmethod
-    def _validate_retries(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError("Flow retries must be >= 0.")
-        return value
-
-
-class ResolvedConnectionConfig(BaseModel):
-    """Connection settings resolved for the current process context."""
-
-    server_url: str | None = None
-    auth_token: str | None = None
-    project: str | None = None
-
-
-@dataclass(frozen=True)
-class ActiveEnvironmentVariable:
-    """Public status view for one active Kitaru environment variable."""
-
-    name: str
-    value: str
-
-
-class FrozenExecutionSpec(BaseModel):
-    """Versioned execution-spec snapshot persisted with each run."""
-
-    version: int = 1
-    resolved_execution: ResolvedExecutionConfig
-    flow_defaults: KitaruConfig
-    connection: ResolvedConnectionConfig
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_legacy_stack_fields(
-        cls,
-        value: Any,
-    ) -> Any:
-        if not isinstance(value, Mapping):
-            return value
-
-        normalized = dict(value)
-        for field_name in ("resolved_execution", "flow_defaults"):
-            field_value = normalized.get(field_name)
-            if not isinstance(field_value, Mapping):
-                continue
-            if "stack" in field_value or "runner" not in field_value:
-                continue
-            normalized[field_name] = {
-                **field_value,
-                "stack": field_value["runner"],
-            }
-
-        return normalized
-
-
-_RUNTIME_EXECUTION_OVERRIDES: dict[str, Any] = {}
-_RUNTIME_CONNECTION_OVERRIDES: dict[str, Any] = {}
-
-
-def _coerce_image_input(value: Any) -> ImageSettings | None:
-    """Coerce supported image inputs into :class:`ImageSettings`.
-
-    Args:
-        value: Image input as ``ImageSettings``, ``DockerSettings``, string,
-            mapping, or ``None``.
-
-    Returns:
-        Parsed image settings, or ``None`` when no image is configured.
-
-    Raises:
-        TypeError: If the input type is unsupported.
-        ValueError: If the image payload is malformed.
-    """
-    if value is None:
-        return None
-    if isinstance(value, ImageSettings):
-        return value
-    if isinstance(value, DockerSettings):
-        replicate = value.replicate_local_python_environment
-        return ImageSettings(
-            base_image=value.parent_image,
-            requirements=value.requirements,
-            dockerfile=value.dockerfile,
-            environment=value.environment,
-            apt_packages=value.apt_packages or None,
-            replicate_local_python_environment=(
-                replicate if isinstance(replicate, bool) else None
-            ),
-        )
-    if isinstance(value, str):
-        normalized_image = value.strip()
-        if not normalized_image:
-            raise ValueError("Image string values cannot be empty.")
-        return ImageSettings(base_image=normalized_image)
-    if isinstance(value, Mapping):
-        normalized_payload = dict(value)
-        if (
-            "parent_image" in normalized_payload
-            and "base_image" not in normalized_payload
-        ):
-            normalized_payload["base_image"] = normalized_payload.pop("parent_image")
-        return ImageSettings.model_validate(normalized_payload)
-
-    raise TypeError(
-        "Unsupported image configuration type. Expected str, dict, "
-        "ImageSettings, DockerSettings, or None."
-    )
-
-
-def _merge_image_settings(
-    *,
-    base: ImageSettings | None,
-    override: ImageSettings,
-) -> ImageSettings:
-    """Merge image settings with higher-precedence override values."""
-    if base is None:
-        return override
-
-    merged_environment: dict[str, str] | None
-    if override.environment is None:
-        merged_environment = base.environment
-    else:
-        merged_environment = {
-            **(base.environment or {}),
-            **override.environment,
-        }
-
-    return ImageSettings(
-        base_image=(
-            override.base_image if override.base_image is not None else base.base_image
-        ),
-        requirements=(
-            override.requirements
-            if override.requirements is not None
-            else base.requirements
-        ),
-        dockerfile=(
-            override.dockerfile if override.dockerfile is not None else base.dockerfile
-        ),
-        environment=merged_environment,
-        apt_packages=(
-            override.apt_packages
-            if override.apt_packages is not None
-            else base.apt_packages
-        ),
-        replicate_local_python_environment=(
-            override.replicate_local_python_environment
-            if override.replicate_local_python_environment is not None
-            else base.replicate_local_python_environment
-        ),
-    )
-
-
-def _parse_bool_env(name: str, value: str) -> bool:
-    """Parse a boolean Kitaru environment variable value."""
-    normalized_value = value.strip().lower()
-    if normalized_value in _TRUTHY_VALUES:
-        return True
-    if normalized_value in _FALSY_VALUES:
-        return False
-    raise ValueError(
-        f"Invalid value for {name}: {value!r}. Use one of true/false/1/0/yes/no/on/off."
-    )
-
-
-def _find_pyproject(start_dir: Path | None = None) -> Path | None:
-    """Locate the nearest ``pyproject.toml`` by walking parent directories."""
-    candidate_dir = start_dir or Path.cwd()
-    if candidate_dir.is_file():
-        candidate_dir = candidate_dir.parent
-
-    for directory in [candidate_dir, *candidate_dir.parents]:
-        pyproject_path = directory / "pyproject.toml"
-        if pyproject_path.exists():
-            return pyproject_path
-    return None
-
-
-def _read_project_config(start_dir: Path | None = None) -> KitaruConfig:
-    """Read ``[tool.kitaru]`` config from ``pyproject.toml`` if available."""
-    pyproject_path = _find_pyproject(start_dir)
-    if pyproject_path is None:
-        return KitaruConfig()
-
-    with pyproject_path.open("rb") as pyproject_file:
-        pyproject_data = tomllib.load(pyproject_file)
-
-    tool_config = pyproject_data.get("tool", {})
-    if not isinstance(tool_config, dict):
-        raise ValueError(f"Invalid {pyproject_path}: expected [tool] to be a table.")
-
-    kitaru_config = tool_config.get("kitaru")
-    if kitaru_config is None:
-        return KitaruConfig()
-    if not isinstance(kitaru_config, dict):
-        raise ValueError(
-            f"Invalid {pyproject_path}: expected [tool.kitaru] to be a table."
-        )
-    if "runner" in kitaru_config:
-        raise ValueError(
-            f"Invalid {pyproject_path}: `[tool.kitaru].runner` was renamed to "
-            "`[tool.kitaru].stack`."
-        )
-
-    return KitaruConfig.model_validate(kitaru_config)
-
-
-def _read_execution_env_config() -> KitaruConfig:
-    """Read execution-related Kitaru config values from environment."""
-    values: dict[str, Any] = {}
-
-    raw_legacy_runner = os.environ.get("KITARU_RUNNER")
-    if raw_legacy_runner is not None:
-        raise ValueError(
-            "`KITARU_RUNNER` was renamed to `KITARU_STACK`; use the new name."
-        )
-
-    raw_stack = os.environ.get(KITARU_STACK_ENV)
-    if raw_stack is not None:
-        values["stack"] = raw_stack
-
-    raw_cache = os.environ.get(KITARU_CACHE_ENV)
-    if raw_cache is not None:
-        values["cache"] = _parse_bool_env(KITARU_CACHE_ENV, raw_cache)
-
-    raw_retries = os.environ.get(KITARU_RETRIES_ENV)
-    if raw_retries is not None:
-        try:
-            values["retries"] = int(raw_retries.strip())
-        except ValueError as exc:
-            raise ValueError(
-                f"Invalid value for {KITARU_RETRIES_ENV}: {raw_retries!r}. "
-                "Expected an integer."
-            ) from exc
-
-    raw_image = os.environ.get(KITARU_IMAGE_ENV)
-    if raw_image is not None:
-        stripped_image = raw_image.strip()
-        if not stripped_image:
-            raise ValueError(f"{KITARU_IMAGE_ENV} cannot be empty.")
-        try:
-            parsed_image = json.loads(stripped_image)
-        except json.JSONDecodeError:
-            parsed_image = stripped_image
-        values["image"] = parsed_image
-
-    return KitaruConfig.model_validate(values)
-
-
-def _read_connection_env_config() -> KitaruConfig:
-    """Read connection-related Kitaru config values from environment."""
-    values: dict[str, Any] = {}
-
-    raw_server_url = _normalized_kitaru_env(KITARU_SERVER_URL_ENV)
-    if raw_server_url is not None:
-        values["server_url"] = raw_server_url
-
-    raw_auth_token = _normalized_kitaru_env(KITARU_AUTH_TOKEN_ENV)
-    if raw_auth_token is not None:
-        values["auth_token"] = raw_auth_token
-
-    raw_project = _normalized_kitaru_env(KITARU_PROJECT_ENV)
-    if raw_project is not None:
-        values["project"] = raw_project
-
-    return KitaruConfig.model_validate(values)
-
-
-def _read_zenml_connection_env_config() -> KitaruConfig:
-    """Read direct ZenML connection env vars for compatibility."""
-    values: dict[str, Any] = {}
-
-    raw_server_url = os.environ.get(ZENML_STORE_URL_ENV)
-    if raw_server_url is not None:
-        values["server_url"] = raw_server_url
-
-    raw_auth_token = os.environ.get(ZENML_STORE_API_KEY_ENV)
-    if raw_auth_token is not None:
-        values["auth_token"] = raw_auth_token
-
-    raw_project = os.environ.get(ENV_ZENML_ACTIVE_PROJECT_ID)
-    if raw_project is not None:
-        values["project"] = raw_project
-
-    return KitaruConfig.model_validate(values)
+ImageSettings = _config_core.ImageSettings
+ImageInput = _config_core.ImageInput
+KitaruConfig = _config_core.KitaruConfig
+ResolvedExecutionConfig = _config_core.ResolvedExecutionConfig
+ResolvedConnectionConfig = _config_core.ResolvedConnectionConfig
+ActiveEnvironmentVariable = _config_core.ActiveEnvironmentVariable
+FrozenExecutionSpec = _config_core.FrozenExecutionSpec
+
+_coerce_image_input = _config_core._coerce_image_input
+_merge_image_settings = _config_core._merge_image_settings
+_parse_bool_env = _config_env._parse_bool_env
+_find_pyproject = _config_env._find_pyproject
+_read_project_config = _config_env._read_project_config
+_read_execution_env_config = _config_env._read_execution_env_config
+_read_connection_env_config = _config_env._read_connection_env_config
+_read_zenml_connection_env_config = _config_env._read_zenml_connection_env_config
+_extract_store_token = _config_core._extract_store_token
+_read_runtime_execution_config = _config_core._read_runtime_execution_config
+_read_runtime_connection_config = _config_core._read_runtime_connection_config
+_merge_execution_layer = _config_env._merge_execution_layer
+_merge_connection_layer = _config_env._merge_connection_layer
+_environment_has_remote_server_override = (
+    _config_env._environment_has_remote_server_override
+)
+_validate_connection_config_for_use = _config_env._validate_connection_config_for_use
+_requirements_include_kitaru = _config_core._requirements_include_kitaru
+image_settings_to_docker_settings = _config_core.image_settings_to_docker_settings
+build_frozen_execution_spec = _config_core.build_frozen_execution_spec
+_parse_run_uuid = _config_core._parse_run_uuid
+_reset_runtime_configuration = _config_core._reset_runtime_configuration
+_normalize_server_url = _config_connection._normalize_server_url
+_normalize_login_target = _config_connection._normalize_login_target
+_is_server_url = _config_connection._is_server_url
+_looks_like_server_address_without_scheme = (
+    _config_connection._looks_like_server_address_without_scheme
+)
+_noop_zenml_cli_message = _config_connection._noop_zenml_cli_message
 
 
 def _read_global_execution_config() -> KitaruConfig:
     """Read execution defaults from global user config/runtime state."""
-    try:
-        active_stack_name = current_stack().name
-    except Exception:
-        active_stack_name = None
-
-    return KitaruConfig(stack=active_stack_name)
-
-
-def _extract_store_token(store: Any) -> str | None:
-    """Best-effort extraction of auth token-like fields from ZenML store config."""
-    token_attribute_names = ("api_key", "auth_token", "token")
-    for attribute_name in token_attribute_names:
-        attribute_value = getattr(store, attribute_name, None)
-        if isinstance(attribute_value, str) and attribute_value.strip():
-            return attribute_value.strip()
-
-    if hasattr(store, "model_dump"):
-        dumped_store = store.model_dump(mode="python")
-        for attribute_name in token_attribute_names:
-            dumped_value = dumped_store.get(attribute_name)
-            if isinstance(dumped_value, str) and dumped_value.strip():
-                return dumped_value.strip()
-
-    return None
+    return _config_env._read_global_execution_config_impl(
+        current_stack_getter=current_stack
+    )
 
 
 def _read_global_connection_config() -> KitaruConfig:
@@ -856,88 +455,9 @@ def _read_global_connection_config() -> KitaruConfig:
     store configuration. Project is intentionally omitted here — it is
     only populated by explicit overrides (env var or runtime configure).
     """
-    server_url: str | None = None
-    auth_token: str | None = None
-
-    global_config = GlobalConfiguration()
-    store = global_config.store
-    if store is not None:
-        raw_store_url = getattr(store, "url", None)
-        if isinstance(raw_store_url, str):
-            stripped_store_url = raw_store_url.strip()
-            if stripped_store_url.startswith(("http://", "https://")):
-                server_url = _normalize_server_url(stripped_store_url)
-        auth_token = _extract_store_token(store)
-
-    return KitaruConfig(
-        server_url=server_url,
-        auth_token=auth_token,
+    return _config_core._read_global_connection_config_impl(
+        global_configuration_factory=GlobalConfiguration,
     )
-
-
-def _read_runtime_execution_config() -> KitaruConfig:
-    """Read in-memory execution overrides set by ``kitaru.configure()``."""
-    return KitaruConfig.model_validate(dict(_RUNTIME_EXECUTION_OVERRIDES))
-
-
-def _read_runtime_connection_config() -> KitaruConfig:
-    """Read in-memory connection overrides set by ``kitaru.configure()``."""
-    return KitaruConfig.model_validate(dict(_RUNTIME_CONNECTION_OVERRIDES))
-
-
-def _merge_execution_layer(
-    resolved: ResolvedExecutionConfig,
-    layer: KitaruConfig,
-) -> ResolvedExecutionConfig:
-    """Apply one execution config layer onto an already-resolved result."""
-    merged_image = resolved.image
-    if layer.image is not None:
-        merged_image = _merge_image_settings(base=merged_image, override=layer.image)
-        if merged_image.is_empty():
-            merged_image = None
-
-    return ResolvedExecutionConfig(
-        stack=layer.stack if layer.stack is not None else resolved.stack,
-        image=merged_image,
-        cache=layer.cache if layer.cache is not None else resolved.cache,
-        retries=layer.retries if layer.retries is not None else resolved.retries,
-    )
-
-
-def _merge_connection_layer(
-    resolved: ResolvedConnectionConfig,
-    layer: KitaruConfig,
-) -> ResolvedConnectionConfig:
-    """Apply one connection config layer onto an already-resolved result."""
-    return ResolvedConnectionConfig(
-        server_url=(
-            layer.server_url if layer.server_url is not None else resolved.server_url
-        ),
-        auth_token=(
-            layer.auth_token if layer.auth_token is not None else resolved.auth_token
-        ),
-        project=layer.project if layer.project is not None else resolved.project,
-    )
-
-
-def _environment_has_remote_server_override() -> bool:
-    """Return whether env vars are driving a remote connection."""
-    if _normalized_kitaru_env(KITARU_SERVER_URL_ENV) is not None:
-        return True
-    raw_zenml = os.environ.get(ZENML_STORE_URL_ENV)
-    return raw_zenml is not None and bool(raw_zenml.strip())
-
-
-def _validate_connection_config_for_use(
-    resolved: ResolvedConnectionConfig,
-) -> None:
-    """Validate connection config at first use."""
-    if _environment_has_remote_server_override() and not resolved.project:
-        raise KitaruUsageError(
-            "A remote Kitaru server is configured via environment variables, but "
-            "no project is active. Set KITARU_PROJECT (preferred) or "
-            "ZENML_ACTIVE_PROJECT_ID before using the SDK."
-        )
 
 
 def resolve_execution_config(
@@ -947,23 +467,15 @@ def resolve_execution_config(
     start_dir: Path | None = None,
 ) -> ResolvedExecutionConfig:
     """Resolve execution configuration according to Phase 10 precedence."""
-    resolved = ResolvedExecutionConfig(
-        stack=None,
-        image=None,
-        cache=True,
-        retries=0,
+    return _config_env.resolve_execution_config_impl(
+        decorator_overrides=decorator_overrides,
+        invocation_overrides=invocation_overrides,
+        start_dir=start_dir,
+        read_global_execution_config=_read_global_execution_config,
+        read_project_config=_read_project_config,
+        read_execution_env_config=_read_execution_env_config,
+        read_runtime_execution_config=_read_runtime_execution_config,
     )
-    for layer in (
-        _read_global_execution_config(),
-        _read_project_config(start_dir),
-        _read_execution_env_config(),
-        _read_runtime_execution_config(),
-        decorator_overrides or KitaruConfig(),
-        invocation_overrides or KitaruConfig(),
-    ):
-        resolved = _merge_execution_layer(resolved, layer)
-
-    return resolved
 
 
 def resolve_connection_config(
@@ -979,101 +491,15 @@ def resolve_connection_config(
     3. Runtime overrides from ``kitaru.configure(project=...)``
     4. Explicit argument passed by the caller
     """
-    resolved = ResolvedConnectionConfig()
-    for layer in (
-        _read_global_connection_config(),
-        _read_zenml_connection_env_config(),
-        _read_connection_env_config(),
-        _read_runtime_connection_config(),
-        explicit or KitaruConfig(),
-    ):
-        resolved = _merge_connection_layer(resolved, layer)
-
-    if validate_for_use:
-        _validate_connection_config_for_use(resolved)
-
-    return resolved
-
-
-_KITARU_PKG_SPECIFIER_RE = re.compile(r"[\[><=!~;@\s]")
-
-
-def _requirements_include_kitaru(requirements: list[str]) -> bool:
-    """Check whether a requirements list already contains the kitaru package."""
-    return any(
-        _KITARU_PKG_SPECIFIER_RE.split(req, maxsplit=1)[0].lower() == "kitaru"
-        for req in requirements
+    return _config_env.resolve_connection_config_impl(
+        explicit=explicit,
+        validate_for_use=validate_for_use,
+        read_global_connection_config=_read_global_connection_config,
+        read_zenml_connection_env_config=_read_zenml_connection_env_config,
+        read_connection_env_config=_read_connection_env_config,
+        read_runtime_connection_config=_read_runtime_connection_config,
+        validate_connection_config_for_use=_validate_connection_config_for_use,
     )
-
-
-def image_settings_to_docker_settings(
-    image_settings: ImageSettings | None,
-) -> DockerSettings:
-    """Convert resolved image settings into ZenML Docker settings.
-
-    Kitaru is auto-injected into the requirements list so that remote
-    containers have the SDK available at runtime — unless a custom
-    ``base_image`` or ``dockerfile`` is set, in which case the user
-    controls the image content.
-    """
-    if image_settings is None or image_settings.is_empty():
-        return DockerSettings(requirements=["kitaru"])
-
-    # When the user provides a custom base image or Dockerfile, they own
-    # the image content — don't inject kitaru automatically.
-    user_controls_image = (
-        image_settings.base_image is not None or image_settings.dockerfile is not None
-    )
-
-    docker_settings_kwargs: dict[str, Any] = {}
-    if image_settings.base_image is not None:
-        docker_settings_kwargs["parent_image"] = image_settings.base_image
-
-    requirements = list(image_settings.requirements or [])
-    if not user_controls_image and not _requirements_include_kitaru(requirements):
-        requirements.append("kitaru")
-    if requirements:
-        docker_settings_kwargs["requirements"] = requirements
-
-    if image_settings.dockerfile is not None:
-        docker_settings_kwargs["dockerfile"] = image_settings.dockerfile
-    if image_settings.environment is not None:
-        docker_settings_kwargs["environment"] = image_settings.environment
-    if image_settings.apt_packages is not None:
-        docker_settings_kwargs["apt_packages"] = image_settings.apt_packages
-    if image_settings.replicate_local_python_environment is not None:
-        docker_settings_kwargs["replicate_local_python_environment"] = (
-            image_settings.replicate_local_python_environment
-        )
-
-    return DockerSettings(**docker_settings_kwargs)
-
-
-def build_frozen_execution_spec(
-    *,
-    resolved_execution: ResolvedExecutionConfig,
-    flow_defaults: KitaruConfig,
-    connection: ResolvedConnectionConfig,
-) -> FrozenExecutionSpec:
-    """Create a frozen execution-spec payload persisted with each run."""
-    return FrozenExecutionSpec(
-        resolved_execution=resolved_execution,
-        flow_defaults=flow_defaults,
-        connection=connection,
-    )
-
-
-def _parse_run_uuid(run_id: UUID | str) -> UUID:
-    """Parse a run identifier as UUID."""
-    if isinstance(run_id, UUID):
-        return run_id
-    try:
-        return UUID(str(run_id))
-    except ValueError as exc:
-        raise RuntimeError(
-            "Frozen execution spec persistence expected a UUID pipeline run ID, "
-            f"got {run_id!r}."
-        ) from exc
 
 
 def persist_frozen_execution_spec(
@@ -1082,165 +508,35 @@ def persist_frozen_execution_spec(
     frozen_execution_spec: FrozenExecutionSpec,
 ) -> None:
     """Persist a frozen execution spec as pipeline-run metadata."""
-    run_uuid = _parse_run_uuid(run_id)
-    Client().create_run_metadata(
-        metadata={
-            FROZEN_EXECUTION_SPEC_METADATA_KEY: frozen_execution_spec.model_dump(
-                mode="json",
-                exclude_none=True,
-            )
-        },
-        resources=[
-            RunMetadataResource(
-                id=run_uuid,
-                type=MetadataResourceTypes.PIPELINE_RUN,
-            )
-        ],
+    _config_core.persist_frozen_execution_spec_impl(
+        run_id=run_id,
+        frozen_execution_spec=frozen_execution_spec,
+        client_factory=Client,
     )
-
-
-def _reset_runtime_configuration() -> None:
-    """Reset in-memory runtime config overrides.
-
-    This helper is intended for tests.
-    """
-    _RUNTIME_EXECUTION_OVERRIDES.clear()
-    _RUNTIME_CONNECTION_OVERRIDES.clear()
-
-
-def _normalize_server_url(server_url: str) -> str:
-    """Validate and normalize a Kitaru server URL.
-
-    Args:
-        server_url: Candidate Kitaru server URL.
-
-    Returns:
-        The normalized server URL without a trailing slash.
-
-    Raises:
-        ValueError: If the URL is empty or is not an HTTP(S) URL.
-    """
-    normalized_url = server_url.strip().rstrip("/")
-    if not normalized_url:
-        raise ValueError("Kitaru server URL cannot be empty.")
-
-    parsed = urlparse(normalized_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError(
-            "Invalid Kitaru server URL. Please use an http:// or https:// URL."
-        )
-
-    return normalized_url
-
-
-def _normalize_login_target(server: str) -> str:
-    """Normalize a CLI login target while preserving workspace names/IDs.
-
-    Args:
-        server: Kitaru server URL, workspace name, or workspace ID.
-
-    Returns:
-        The normalized target value.
-
-    Raises:
-        ValueError: If the target is empty or looks like an invalid URL.
-    """
-    normalized_target = server.strip().rstrip("/")
-    if not normalized_target:
-        raise ValueError("Kitaru server target cannot be empty.")
-
-    if normalized_target.startswith(("http:", "https:")):
-        return _normalize_server_url(normalized_target)
-
-    if _looks_like_server_address_without_scheme(normalized_target):
-        raise ValueError(
-            "Invalid Kitaru server URL. Please use an http:// or https:// URL, "
-            "or pass a managed workspace name or ID."
-        )
-
-    return normalized_target
-
-
-def _is_server_url(server: str) -> bool:
-    """Return whether a normalized login target is an HTTP(S) server URL."""
-    parsed = urlparse(server)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
-def _looks_like_server_address_without_scheme(target: str) -> bool:
-    """Return whether a target resembles a host/URL but lacks http(s)://."""
-    localhost_names = {"localhost", "127.0.0.1", "::1"}
-    return (
-        target in localhost_names
-        or any(target.startswith(f"{name}:") for name in localhost_names)
-        or "." in target
-        or ":" in target
-        or "/" in target
-    )
-
-
-def _noop_zenml_cli_message(*args: Any, **kwargs: Any) -> None:
-    """Discard ZenML CLI progress/success messages while Kitaru owns UX."""
-    del args, kwargs
-
-
-@contextmanager
-def _suppress_zenml_cli_messages() -> Iterator[None]:
-    """Silence ZenML success/progress chatter while Kitaru reuses its helpers.
-
-    This keeps the user-facing CLI output in Kitaru terms while still using
-    ZenML's connection/authentication machinery underneath.
-    """
-    cli_utils = cast(Any, zenml_cli_utils)
-    original_declare = cli_utils.declare
-    original_success = cli_utils.success
-    previous_disable_level = logging.root.manager.disable
-    try:
-        logging.disable(logging.CRITICAL)
-        cli_utils.declare = _noop_zenml_cli_message
-        cli_utils.success = _noop_zenml_cli_message
-        yield
-    finally:
-        cli_utils.declare = original_declare
-        cli_utils.success = original_success
-        logging.disable(previous_disable_level)
 
 
 def _kitaru_config_dir() -> Path:
     """Return the Kitaru-owned global config directory."""
-    custom_dir = os.environ.get(KITARU_CONFIG_PATH_ENV)
-    if custom_dir:
-        return Path(custom_dir)
-    return Path(click.get_app_dir("kitaru"))
+    return _config_core._kitaru_config_dir_impl(
+        config_path_env_name=KITARU_CONFIG_PATH_ENV,
+        app_dir_getter=click.get_app_dir,
+    )
 
 
 def _kitaru_global_config_path() -> Path:
     """Return the path to Kitaru's global config file."""
-    return _kitaru_config_dir() / _KITARU_GLOBAL_CONFIG_FILENAME
+    return _config_core._kitaru_global_config_path_impl(
+        config_dir_getter=_kitaru_config_dir,
+        filename=_KITARU_GLOBAL_CONFIG_FILENAME,
+    )
 
 
 def _parse_kitaru_config_file(config_path: Path) -> _KitaruGlobalConfig | None:
     """Parse a Kitaru global config file, returning ``None`` if absent."""
-    if not config_path.exists():
-        return None
-
-    config_values = yaml_utils.read_yaml(str(config_path))
-    if config_values is None:
-        return None
-
-    if not isinstance(config_values, dict):
-        raise ValueError(
-            "The Kitaru global config file is invalid. Expected a YAML mapping at "
-            f"{config_path}."
-        )
-
-    try:
-        return _KitaruGlobalConfig.model_validate(config_values)
-    except ValidationError as exc:
-        raise ValueError(
-            "The Kitaru global config file is invalid. Fix or delete "
-            f"{config_path} and try again."
-        ) from exc
+    return _config_core._parse_kitaru_config_file(
+        config_path,
+        global_config_model=_KitaruGlobalConfig,
+    )
 
 
 def _read_kitaru_global_config() -> _KitaruGlobalConfig:
@@ -1252,39 +548,37 @@ def _read_kitaru_global_config() -> _KitaruGlobalConfig:
     Raises:
         ValueError: If the config file exists but is malformed.
     """
-    config_path = _kitaru_global_config_path()
-    parsed = _parse_kitaru_config_file(config_path)
-    if parsed is not None:
-        return parsed
-
-    return _KitaruGlobalConfig()
+    return _config_core._read_kitaru_global_config_impl(
+        config_path_getter=_kitaru_global_config_path,
+        global_config_model=_KitaruGlobalConfig,
+    )
 
 
 def _write_kitaru_global_config(config: _KitaruGlobalConfig) -> None:
     """Write Kitaru global config to disk."""
-    config_path = _kitaru_global_config_path()
-    io_utils.create_dir_recursive_if_not_exists(str(config_path.parent))
-    yaml_utils.write_yaml(
-        str(config_path), config.model_dump(mode="json", exclude_none=True)
+    _config_core._write_kitaru_global_config_impl(
+        config,
+        config_path_getter=_kitaru_global_config_path,
     )
 
 
 def _read_kitaru_global_config_for_update() -> _KitaruGlobalConfig:
     """Read global config for mutation, recovering from malformed files."""
-    try:
-        return _read_kitaru_global_config()
-    except ValueError:
-        return _KitaruGlobalConfig()
+    return _config_core._read_kitaru_global_config_for_update_impl(
+        reader=_read_kitaru_global_config,
+        global_config_model=_KitaruGlobalConfig,
+    )
 
 
 def _update_kitaru_global_config(
     mutator: Callable[[_KitaruGlobalConfig], None],
 ) -> _KitaruGlobalConfig:
     """Apply an in-place mutation and persist the resulting global config."""
-    global_config = _read_kitaru_global_config_for_update()
-    mutator(global_config)
-    _write_kitaru_global_config(global_config)
-    return global_config
+    return _config_core._update_kitaru_global_config_impl(
+        mutator,
+        read_for_update=_read_kitaru_global_config_for_update,
+        write=_write_kitaru_global_config,
+    )
 
 
 def _read_log_store_env_override() -> ResolvedLogStore | None:
@@ -2959,6 +2253,20 @@ def use_stack(name_or_id: str) -> StackInfo:
     return current_stack()
 
 
+@contextmanager
+def _suppress_zenml_cli_messages() -> Iterator[None]:
+    """Silence ZenML success/progress chatter while Kitaru reuses its helpers.
+
+    This keeps the user-facing CLI output in Kitaru terms while still using
+    ZenML's connection/authentication machinery underneath.
+    """
+    with _config_connection._suppress_zenml_cli_messages_impl(
+        zenml_cli_utils_module=zenml_cli_utils,
+        logging_module=logging,
+    ):
+        yield
+
+
 def _login_to_server_target(
     server: str,
     *,
@@ -2983,59 +2291,18 @@ def _login_to_server_target(
         RuntimeError: If the underlying ZenML login flow fails.
         ValueError: If the login target is malformed.
     """
-    normalized_target = _normalize_login_target(server)
-
-    try:
-        with _suppress_zenml_cli_messages():
-            if _is_server_url(normalized_target):
-                if cloud_api_url:
-                    _zenml_connect_to_pro_server(
-                        pro_server=normalized_target,
-                        api_key=api_key,
-                        refresh=refresh,
-                        pro_api_url=cloud_api_url,
-                        verify_ssl=verify_ssl,
-                        project=project,
-                    )
-                    return
-
-                server_is_pro, detected_cloud_api_url = _zenml_is_pro_server(
-                    normalized_target
-                )
-                if server_is_pro:
-                    _zenml_connect_to_pro_server(
-                        pro_server=normalized_target,
-                        api_key=api_key,
-                        refresh=refresh,
-                        pro_api_url=detected_cloud_api_url,
-                        verify_ssl=verify_ssl,
-                        project=project,
-                    )
-                    return
-
-                _zenml_connect_to_server(
-                    url=normalized_target,
-                    api_key=api_key,
-                    verify_ssl=verify_ssl,
-                    refresh=refresh,
-                    project=project,
-                )
-                return
-
-            _zenml_connect_to_pro_server(
-                pro_server=normalized_target,
-                api_key=api_key,
-                refresh=refresh,
-                pro_api_url=cloud_api_url,
-                verify_ssl=verify_ssl,
-                project=project,
-            )
-    except click.ClickException as exc:
-        raise RuntimeError(exc.format_message()) from exc
-    except AuthorizationException as exc:
-        raise RuntimeError(str(exc)) from exc
-    except Exception as exc:
-        raise RuntimeError(str(exc)) from exc
+    _config_connection._login_to_server_target_impl(
+        server,
+        api_key=api_key,
+        refresh=refresh,
+        project=project,
+        verify_ssl=verify_ssl,
+        cloud_api_url=cloud_api_url,
+        suppress_zenml_cli_messages=_suppress_zenml_cli_messages,
+        zenml_connect_to_server=_zenml_connect_to_server,
+        zenml_connect_to_pro_server=_zenml_connect_to_pro_server,
+        zenml_is_pro_server=_zenml_is_pro_server,
+    )
 
 
 def configure(
@@ -3064,51 +2331,14 @@ def configure(
     Returns:
         The current runtime override layer after applying updates.
     """
-    candidate_execution = dict(_RUNTIME_EXECUTION_OVERRIDES)
-
-    if stack is not _UNSET:
-        if stack is None:
-            candidate_execution.pop("stack", None)
-        else:
-            candidate_execution["stack"] = stack
-
-    if image is not _UNSET:
-        if image is None:
-            candidate_execution.pop("image", None)
-        else:
-            candidate_execution["image"] = _coerce_image_input(image)
-
-    if cache is not _UNSET:
-        if cache is None:
-            candidate_execution.pop("cache", None)
-        else:
-            candidate_execution["cache"] = cache
-
-    if retries is not _UNSET:
-        if retries is None:
-            candidate_execution.pop("retries", None)
-        else:
-            candidate_execution["retries"] = retries
-
-    validated_execution = KitaruConfig.model_validate(candidate_execution)
-    _RUNTIME_EXECUTION_OVERRIDES.clear()
-    _RUNTIME_EXECUTION_OVERRIDES.update(
-        validated_execution.model_dump(mode="python", exclude_none=True)
+    return _config_core.configure_impl(
+        stack=stack,
+        image=image,
+        cache=cache,
+        retries=retries,
+        project=project,
+        unset_sentinel=_UNSET,
     )
-
-    if project is not _UNSET:
-        candidate_connection = dict(_RUNTIME_CONNECTION_OVERRIDES)
-        if project is None:
-            candidate_connection.pop("project", None)
-        else:
-            candidate_connection["project"] = project
-        validated_connection = KitaruConfig.model_validate(candidate_connection)
-        _RUNTIME_CONNECTION_OVERRIDES.clear()
-        _RUNTIME_CONNECTION_OVERRIDES.update(
-            validated_connection.model_dump(mode="python", exclude_none=True)
-        )
-
-    return validated_execution
 
 
 def connect(
