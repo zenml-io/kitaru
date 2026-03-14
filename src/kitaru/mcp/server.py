@@ -1,42 +1,21 @@
 """Kitaru MCP server tools.
 
 This module exposes structured MCP tools for querying and managing Kitaru
-executions. The server reuses `KitaruClient` and selected CLI-equivalent logic
-for status and stack inspection.
+executions. The server is intentionally thin: it owns FastMCP wiring,
+transport-specific validation, and delegation into shared interface helpers.
 """
 
 from __future__ import annotations
 
 import importlib
-from types import ModuleType
 from typing import Any, Literal
 
-from kitaru import _flow_loading
-from kitaru._config._stacks import (
-    CloudProvider,
-    KubernetesStackSpec,
-    StackType,
-    _create_stack_operation,
-    _delete_stack_operation,
-    _list_stack_entries,
-)
-from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
+import kitaru._interface_executions as execution_interface
+import kitaru._interface_stacks as stack_interface
+import kitaru.client as client_api
+import kitaru.inspection as inspection
+from kitaru._config import _stacks as stack_ops
 from kitaru._interface_errors import run_with_mcp_error_boundary
-from kitaru.client import Execution, KitaruClient, LogEntry
-from kitaru.inspection import (
-    RuntimeSnapshot,
-    serialize_artifact_ref,
-    serialize_artifact_value,
-    serialize_execution,
-    serialize_execution_summary,
-    serialize_runtime_snapshot,
-    serialize_stack,
-    serialize_stack_create_result,
-    serialize_stack_delete_result,
-)
-from kitaru.inspection import (
-    build_runtime_snapshot as _build_runtime_snapshot,
-)
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
@@ -59,135 +38,6 @@ def _load_fastmcp_class() -> type[Any]:
 mcp = _load_fastmcp_class()("kitaru")
 
 
-def _load_module_from_python_path(module_path: str) -> ModuleType:
-    """Load a Python module from a filesystem path."""
-    return _flow_loading._load_module_from_python_path(
-        module_path,
-        module_name_prefix="_kitaru_mcp_run_target_",
-    )
-
-
-def _load_flow_target(target: str) -> _FlowTarget:
-    """Load `<module_or_file>:<flow_name>` into a runnable flow object."""
-    return _flow_loading._load_flow_target(
-        target,
-        module_name_prefix="_kitaru_mcp_run_target_",
-    )
-
-
-def _format_log_entry(entry: LogEntry) -> str:
-    """Render a readable one-line text representation for MCP log output."""
-    parts: list[str] = []
-    if entry.timestamp:
-        parts.append(entry.timestamp)
-    if entry.level:
-        parts.append(str(entry.level).upper())
-    if entry.checkpoint_name:
-        parts.append(f"[{entry.checkpoint_name}]")
-
-    if parts:
-        return f"{' '.join(parts)} {entry.message}"
-    return entry.message
-
-
-def _format_execution_logs(entries: list[LogEntry]) -> str:
-    """Render execution logs as plain text for MCP agent readability."""
-    if not entries:
-        return "No log entries found."
-    return "\n".join(_format_log_entry(entry) for entry in entries)
-
-
-def _list_executions_filtered(
-    client: KitaruClient,
-    *,
-    flow: str | None,
-    status: str | None,
-    stack: str | None,
-    limit: int | None,
-) -> list[Execution]:
-    """List executions with optional post-filtering for stack."""
-    if limit is not None and limit < 1:
-        raise ValueError("`limit` must be >= 1 when provided.")
-
-    if stack is None:
-        return client.executions.list(flow=flow, status=status, limit=limit)
-
-    executions = client.executions.list(flow=flow, status=status, limit=None)
-    filtered = [execution for execution in executions if execution.stack_name == stack]
-    if limit is not None:
-        return filtered[:limit]
-    return filtered
-
-
-def _latest_execution_filtered(
-    client: KitaruClient,
-    *,
-    flow: str | None,
-    status: str | None,
-    stack: str | None,
-) -> Execution:
-    """Resolve the latest execution with optional stack filtering."""
-    if stack is None:
-        return client.executions.latest(flow=flow, status=status)
-
-    executions = _list_executions_filtered(
-        client,
-        flow=flow,
-        status=status,
-        stack=stack,
-        limit=1,
-    )
-    if executions:
-        return executions[0]
-
-    filters: list[str] = []
-    if flow is not None:
-        filters.append(f"flow={flow!r}")
-    if status is not None:
-        filters.append(f"status={status!r}")
-    filters.append(f"stack={stack!r}")
-    raise LookupError(f"No executions found for {' and '.join(filters)}.")
-
-
-def _validate_schema_type(value: Any, schema_type: str) -> bool:
-    """Validate one value against a simple JSON-schema `type` label."""
-    if schema_type == "null":
-        return value is None
-    if schema_type == "boolean":
-        return isinstance(value, bool)
-    if schema_type == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if schema_type == "number":
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
-    if schema_type == "string":
-        return isinstance(value, str)
-    if schema_type == "array":
-        return isinstance(value, list)
-    if schema_type == "object":
-        return isinstance(value, dict)
-    return True
-
-
-def _validate_wait_input_schema(
-    *, wait_schema: dict[str, Any] | None, value: Any
-) -> None:
-    """Run lightweight type validation against wait schema when available."""
-    if wait_schema is None:
-        return
-
-    schema_type = wait_schema.get("type")
-    if schema_type is None:
-        return
-
-    schema_types = [schema_type] if isinstance(schema_type, str) else list(schema_type)
-    if any(_validate_schema_type(value, item) for item in schema_types):
-        return
-
-    raise ValueError(
-        f"Wait input does not match the pending wait schema type ({schema_types!r})."
-    )
-
-
 @mcp.tool()
 def kitaru_executions_list(
     status: str | None = None,
@@ -198,15 +48,18 @@ def kitaru_executions_list(
     """List executions with optional status/flow/stack filters."""
 
     def _list_executions() -> list[dict[str, Any]]:
-        client = KitaruClient()
-        executions = _list_executions_filtered(
+        client = client_api.KitaruClient()
+        executions = execution_interface.list_executions_filtered(
             client,
             flow=flow,
             status=status,
             stack=stack,
             limit=limit,
         )
-        return [serialize_execution_summary(execution) for execution in executions]
+        return [
+            inspection.serialize_execution_summary(execution)
+            for execution in executions
+        ]
 
     return run_with_mcp_error_boundary(_list_executions)
 
@@ -215,7 +68,9 @@ def kitaru_executions_list(
 def kitaru_executions_get(exec_id: str) -> dict[str, Any]:
     """Get detailed information for one execution."""
     return run_with_mcp_error_boundary(
-        lambda: serialize_execution(KitaruClient().executions.get(exec_id))
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.get(exec_id)
+        )
     )
 
 
@@ -228,14 +83,14 @@ def kitaru_executions_latest(
     """Get the most recent execution matching the provided filters."""
 
     def _latest_execution() -> dict[str, Any]:
-        client = KitaruClient()
-        execution = _latest_execution_filtered(
+        client = client_api.KitaruClient()
+        execution = execution_interface.latest_execution_filtered(
             client,
             flow=flow,
             status=status,
             stack=stack,
         )
-        return serialize_execution(execution)
+        return inspection.serialize_execution(execution)
 
     return run_with_mcp_error_boundary(_latest_execution)
 
@@ -253,13 +108,13 @@ def get_execution_logs(
         if limit < 1:
             raise ValueError("`limit` must be >= 1.")
 
-        entries = KitaruClient().executions.logs(
+        entries = client_api.KitaruClient().executions.logs(
             exec_id,
             checkpoint=checkpoint,
             source=source,
             limit=limit,
         )
-        return _format_execution_logs(entries)
+        return execution_interface.format_mcp_execution_logs(entries)
 
     return run_with_mcp_error_boundary(_get_logs)
 
@@ -272,53 +127,34 @@ def kitaru_executions_run(
 ) -> dict[str, Any]:
     """Start or deploy a flow from `<module_or_file>:<flow_name>` target."""
 
-    def _start_execution() -> tuple[_FlowHandleLike, str]:
-        if args is not None and not isinstance(args, dict):
-            raise ValueError("`args` must be an object when provided.")
-
-        flow_target = _load_flow_target(target)
-        flow_inputs = args or {}
-
-        if stack:
-            handle = flow_target.deploy(stack=stack, **flow_inputs)
-            invocation = "deploy"
-        else:
-            handle = flow_target.run(**flow_inputs)
-            invocation = "run"
-
-        if not isinstance(handle, _FlowHandleLike):
-            raise ValueError(
-                "Flow execution did not return a valid handle with an `exec_id`."
-            )
-        return handle, invocation
-
-    handle, invocation = run_with_mcp_error_boundary(_start_execution)
-
-    payload: dict[str, Any] = {
-        "exec_id": handle.exec_id,
-        "invocation": invocation,
-        "target": target,
-        "execution": None,
-        "warning": None,
-    }
-
-    try:
-        execution = KitaruClient().executions.get(handle.exec_id)
-    except Exception as exc:
-        payload["warning"] = (
-            f"Execution started successfully, but details are not available yet: {exc}"
+    def _start_execution() -> dict[str, Any]:
+        client = client_api.KitaruClient()
+        result = execution_interface.invoke_flow_target(
+            target=target,
+            args=args,
+            stack=stack,
+            module_name_prefix="_kitaru_mcp_run_target_",
         )
-        return payload
+        details = execution_interface.resolve_started_execution_details(
+            exec_id=result.handle.exec_id,
+            client=client,
+        )
+        return execution_interface.build_started_execution_payload(
+            target=target,
+            invocation=result.invocation,
+            details=details,
+        )
 
-    payload["execution"] = serialize_execution(execution)
-    return payload
+    return run_with_mcp_error_boundary(_start_execution)
 
 
 @mcp.tool()
 def kitaru_executions_cancel(exec_id: str) -> dict[str, Any]:
     """Cancel one execution and return updated details."""
     return run_with_mcp_error_boundary(
-        lambda: serialize_execution(KitaruClient().executions.cancel(exec_id))
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.cancel(exec_id)
+        )
     )
 
 
@@ -327,18 +163,16 @@ def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, An
     """Provide input to a waiting execution and return updated details."""
 
     def _provide_input() -> dict[str, Any]:
-        client = KitaruClient()
-
+        client = client_api.KitaruClient()
         current_execution = client.executions.get(exec_id)
-        pending_wait = current_execution.pending_wait
-        if pending_wait is not None and wait in {
-            pending_wait.name,
-            pending_wait.wait_id,
-        }:
-            _validate_wait_input_schema(wait_schema=pending_wait.schema, value=value)
+        execution_interface.validate_pending_wait_input(
+            execution=current_execution,
+            wait=wait,
+            value=value,
+        )
 
         updated_execution = client.executions.input(exec_id, wait=wait, value=value)
-        return serialize_execution(updated_execution)
+        return inspection.serialize_execution(updated_execution)
 
     return run_with_mcp_error_boundary(_provide_input)
 
@@ -347,7 +181,9 @@ def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, An
 def kitaru_executions_retry(exec_id: str) -> dict[str, Any]:
     """Retry one failed execution and return updated details."""
     return run_with_mcp_error_boundary(
-        lambda: serialize_execution(KitaruClient().executions.retry(exec_id))
+        lambda: inspection.serialize_execution(
+            client_api.KitaruClient().executions.retry(exec_id)
+        )
     )
 
 
@@ -365,7 +201,7 @@ def kitaru_executions_replay(
             raise ValueError("`flow_inputs` must be an object when provided.")
 
         replay_inputs = flow_inputs or {}
-        execution = KitaruClient().executions.replay(
+        execution = client_api.KitaruClient().executions.replay(
             exec_id,
             from_=from_,
             overrides=overrides,
@@ -375,7 +211,7 @@ def kitaru_executions_replay(
         return {
             "available": True,
             "operation": "replay",
-            "execution": serialize_execution(execution),
+            "execution": inspection.serialize_execution(execution),
         }
 
     return run_with_mcp_error_boundary(_replay_execution)
@@ -392,8 +228,8 @@ def kitaru_artifacts_list(
     """List artifact metadata for one execution."""
     return run_with_mcp_error_boundary(
         lambda: [
-            serialize_artifact_ref(artifact)
-            for artifact in KitaruClient().artifacts.list(
+            inspection.serialize_artifact_ref(artifact)
+            for artifact in client_api.KitaruClient().artifacts.list(
                 exec_id,
                 name=name,
                 kind=kind,
@@ -409,11 +245,11 @@ def kitaru_artifacts_get(artifact_id: str) -> dict[str, Any]:
     """Get one artifact's metadata and loaded value."""
 
     def _get_artifact() -> dict[str, Any]:
-        artifact = KitaruClient().artifacts.get(artifact_id)
+        artifact = client_api.KitaruClient().artifacts.get(artifact_id)
         loaded = artifact.load()
 
-        payload = serialize_artifact_ref(artifact)
-        payload.update(serialize_artifact_value(loaded))
+        payload = inspection.serialize_artifact_ref(artifact)
+        payload.update(inspection.serialize_artifact_value(loaded))
         return payload
 
     return run_with_mcp_error_boundary(_get_artifact)
@@ -424,8 +260,8 @@ def kitaru_status() -> dict[str, Any]:
     """Return structured status details for the current Kitaru connection."""
 
     def _status() -> dict[str, Any]:
-        snapshot: RuntimeSnapshot = _build_runtime_snapshot()
-        return serialize_runtime_snapshot(snapshot)
+        snapshot = inspection.build_runtime_snapshot()
+        return inspection.serialize_runtime_snapshot(snapshot)
 
     return run_with_mcp_error_boundary(_status)
 
@@ -435,120 +271,9 @@ def kitaru_stacks_list() -> list[dict[str, Any]]:
     """List available stacks from the active connection context."""
     return run_with_mcp_error_boundary(
         lambda: [
-            serialize_stack(entry.stack, is_managed=entry.is_managed)
-            for entry in _list_stack_entries()
+            inspection.serialize_stack(entry.stack, is_managed=entry.is_managed)
+            for entry in stack_ops._list_stack_entries()
         ]
-    )
-
-
-def _normalize_optional_manage_stack_string(value: str | None) -> str | None:
-    """Normalize an optional manage_stack string, treating blanks as omitted."""
-    if value is None:
-        return None
-    normalized_value = value.strip()
-    return normalized_value or None
-
-
-def _normalize_manage_stack_type(raw_stack_type: str) -> StackType:
-    """Normalize an MCP stack-type argument into the internal enum."""
-    normalized_type = raw_stack_type.strip().lower()
-    try:
-        return StackType(normalized_type)
-    except ValueError as exc:
-        raise ValueError(
-            f"Unsupported stack type: {raw_stack_type}. Use 'local' or 'kubernetes'."
-        ) from exc
-
-
-def _infer_manage_stack_cloud_provider(artifact_store_uri: str) -> CloudProvider:
-    """Infer the cloud provider from a Kubernetes artifact-store URI."""
-    if artifact_store_uri.startswith("s3://"):
-        return CloudProvider.AWS
-    if artifact_store_uri.startswith("gs://"):
-        return CloudProvider.GCP
-    raise ValueError(
-        f"Cannot infer cloud provider from '{artifact_store_uri}'. "
-        "Use an s3:// or gs:// URI."
-    )
-
-
-def _build_manage_stack_kubernetes_spec(
-    *,
-    stack_type: StackType,
-    artifact_store: str | None,
-    container_registry: str | None,
-    cluster: str | None,
-    region: str | None,
-    namespace: str | None,
-    credentials: str | None,
-    verify: bool,
-) -> KubernetesStackSpec | None:
-    """Validate manage_stack inputs and build a Kubernetes spec when needed."""
-    normalized_artifact_store = _normalize_optional_manage_stack_string(artifact_store)
-    normalized_container_registry = _normalize_optional_manage_stack_string(
-        container_registry
-    )
-    normalized_cluster = _normalize_optional_manage_stack_string(cluster)
-    normalized_region = _normalize_optional_manage_stack_string(region)
-    normalized_namespace = _normalize_optional_manage_stack_string(namespace)
-    normalized_credentials = _normalize_optional_manage_stack_string(credentials)
-
-    kubernetes_option_fields = [
-        ("artifact_store", artifact_store is not None),
-        ("container_registry", container_registry is not None),
-        ("cluster", cluster is not None),
-        ("region", region is not None),
-        ("namespace", namespace is not None),
-        ("credentials", credentials is not None),
-        ("verify", not verify),
-    ]
-
-    if stack_type == StackType.LOCAL:
-        provided_kubernetes_fields = [
-            field_name
-            for field_name, is_provided in kubernetes_option_fields
-            if is_provided
-        ]
-        if provided_kubernetes_fields:
-            rendered_fields = ", ".join(
-                f"`{field_name}`" for field_name in provided_kubernetes_fields
-            )
-            raise ValueError(
-                'Kubernetes-only options require `stack_type="kubernetes"`: '
-                + rendered_fields
-            )
-        return None
-
-    missing_required_fields = [
-        field_name
-        for field_name, value in (
-            ("artifact_store", normalized_artifact_store),
-            ("container_registry", normalized_container_registry),
-            ("cluster", normalized_cluster),
-            ("region", normalized_region),
-        )
-        if value is None
-    ]
-    if missing_required_fields:
-        rendered_fields = ", ".join(
-            f"`{field_name}`" for field_name in missing_required_fields
-        )
-        raise ValueError('`stack_type="kubernetes"` requires: ' + rendered_fields + ".")
-
-    assert normalized_artifact_store is not None
-    assert normalized_container_registry is not None
-    assert normalized_cluster is not None
-    assert normalized_region is not None
-
-    return KubernetesStackSpec(
-        provider=_infer_manage_stack_cloud_provider(normalized_artifact_store),
-        artifact_store=normalized_artifact_store,
-        container_registry=normalized_container_registry,
-        cluster=normalized_cluster,
-        region=normalized_region,
-        namespace=normalized_namespace or "default",
-        credentials=normalized_credentials,
-        verify=verify,
     )
 
 
@@ -571,71 +296,38 @@ def manage_stack(
     """Create or delete a local or Kubernetes-backed stack."""
 
     def _manage_stack() -> dict[str, Any]:
-        if action == "create":
-            if recursive or force:
-                raise ValueError(
-                    '`recursive` and `force` are only valid when action="delete".'
-                )
-            normalized_stack_type = _normalize_manage_stack_type(stack_type)
-            kubernetes_spec = _build_manage_stack_kubernetes_spec(
-                stack_type=normalized_stack_type,
-                artifact_store=artifact_store,
-                container_registry=container_registry,
-                cluster=cluster,
-                region=region,
-                namespace=namespace,
-                credentials=credentials,
-                verify=verify,
-            )
-            if normalized_stack_type == StackType.LOCAL:
-                return serialize_stack_create_result(
-                    _create_stack_operation(name, activate=activate)
-                )
+        request = stack_interface.build_manage_stack_request(
+            action=action,
+            name=name,
+            activate=activate,
+            recursive=recursive,
+            force=force,
+            stack_type=stack_type,
+            artifact_store=artifact_store,
+            container_registry=container_registry,
+            cluster=cluster,
+            region=region,
+            namespace=namespace,
+            credentials=credentials,
+            verify=verify,
+        )
 
-            return serialize_stack_create_result(
-                _create_stack_operation(
-                    name,
-                    stack_type=normalized_stack_type,
-                    activate=activate,
-                    kubernetes=kubernetes_spec,
-                )
+        if isinstance(request, stack_interface.ManageStackCreateRequest):
+            result = stack_ops._create_stack_operation(
+                request.name,
+                activate=request.activate,
+                stack_type=request.stack_type,
+                kubernetes=request.kubernetes,
             )
+            return inspection.serialize_stack_create_result(result)
 
-        if action == "delete":
-            if not activate:
-                raise ValueError('`activate` is only valid when action="create".')
-            normalized_stack_type = _normalize_manage_stack_type(stack_type)
-            kubernetes_create_only_fields = [
-                field_name
-                for field_name, is_provided in (
-                    ("stack_type", normalized_stack_type != StackType.LOCAL),
-                    ("artifact_store", artifact_store is not None),
-                    ("container_registry", container_registry is not None),
-                    ("cluster", cluster is not None),
-                    ("region", region is not None),
-                    ("namespace", namespace is not None),
-                    ("credentials", credentials is not None),
-                    ("verify", not verify),
-                )
-                if is_provided
-            ]
-            if kubernetes_create_only_fields:
-                rendered_fields = ", ".join(
-                    f"`{field_name}`" for field_name in kubernetes_create_only_fields
-                )
-                raise ValueError(
-                    'Kubernetes create options are only valid when action="create": '
-                    + rendered_fields
-                )
-            return serialize_stack_delete_result(
-                _delete_stack_operation(
-                    name,
-                    recursive=recursive,
-                    force=force,
-                )
-            )
-
-        raise ValueError('`action` must be "create" or "delete".')
+        assert isinstance(request, stack_interface.ManageStackDeleteRequest)
+        result = stack_ops._delete_stack_operation(
+            request.name,
+            recursive=request.recursive,
+            force=request.force,
+        )
+        return inspection.serialize_stack_delete_result(result)
 
     return run_with_mcp_error_boundary(_manage_stack)
 
