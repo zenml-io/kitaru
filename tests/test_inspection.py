@@ -378,7 +378,14 @@ def test_serialize_execution_contract() -> None:
         "checkpoints",
         "artifacts",
     }
-    assert payload["frozen_execution_spec"]["flow_defaults"] == {
+    spec = payload["frozen_execution_spec"]
+    assert spec["resolved_execution"] == {
+        "stack": None,
+        "image": None,
+        "cache": False,
+        "retries": 0,
+    }
+    assert spec["flow_defaults"] == {
         "stack": None,
         "image": {
             "base_image": None,
@@ -390,6 +397,11 @@ def test_serialize_execution_contract() -> None:
         },
         "cache": None,
         "retries": None,
+        "server_url": None,
+        "auth_token": None,
+        "project": None,
+    }
+    assert spec["connection"] == {
         "server_url": None,
         "auth_token": None,
         "project": None,
@@ -546,32 +558,28 @@ def test_serialize_runtime_snapshot_contract() -> None:
 
     payload = serialize_runtime_snapshot(snapshot)
 
-    assert set(payload) == {
-        "sdk_version",
-        "connection",
-        "connection_target",
-        "config_directory",
-        "server_url",
-        "active_user",
-        "project_override",
-        "active_stack",
-        "repository_root",
-        "server_version",
-        "server_database",
-        "server_deployment_type",
-        "local_server_status",
-        "warning",
-        "log_store_status",
-        "log_store_warning",
-        "environment",
+    assert payload == {
+        "sdk_version": "0.1.0",
+        "connection": "remote Kitaru server",
+        "connection_target": "https://example.com",
+        "config_directory": "/tmp/kitaru-config",
+        "server_url": "https://example.com",
+        "active_user": "alice",
+        "project_override": "demo-project",
+        "active_stack": "prod",
+        "repository_root": "/work/repo",
+        "server_version": "0.42.0",
+        "server_database": "postgres",
+        "server_deployment_type": "kubernetes",
+        "local_server_status": "not started",
+        "warning": "Careful now",
+        "log_store_status": "datadog",
+        "log_store_warning": "not wired yet",
+        "environment": [
+            {"name": "KITARU_SERVER_URL", "value": "https://example.com"},
+            {"name": "KITARU_PROJECT", "value": "demo-project"},
+        ],
     }
-    assert payload["environment"] == [
-        {"name": "KITARU_SERVER_URL", "value": "https://example.com"},
-        {"name": "KITARU_PROJECT", "value": "demo-project"},
-    ]
-    assert payload["warning"] == "Careful now"
-    assert payload["log_store_status"] == "datadog"
-    assert payload["log_store_warning"] == "not wired yet"
 
 
 def test_serialize_runtime_snapshot_preserves_none_fields() -> None:
