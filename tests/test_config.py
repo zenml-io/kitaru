@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import warnings
 from collections.abc import Iterator
@@ -11,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock, call, patch
 
+import click
 import pytest
 from zenml.config.docker_settings import DockerSettings
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
@@ -18,7 +20,8 @@ from zenml.enums import StackComponentType
 from zenml.exceptions import EntityExistsError
 from zenml.utils import io_utils, yaml_utils
 
-from _kitaru_env import apply_env_translations
+import kitaru.config as config_module
+from kitaru._env import apply_env_translations
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
     KITARU_CACHE_ENV,
@@ -65,7 +68,7 @@ from kitaru.config import (
     set_global_log_store,
     use_stack,
 )
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
 
 
 class _FakeStackPage:
@@ -319,6 +322,21 @@ def test_apply_env_translations_accepts_cross_namespace_auth_fallback(
     assert os.environ["ZENML_STORE_URL"] == "https://server.example.com"
 
 
+def test_apply_env_translations_ignores_empty_kitaru_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Blank KITARU env vars should not clobber an otherwise valid ZenML setup."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "   ")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "")
+    monkeypatch.setenv("ZENML_STORE_URL", "https://zenml.example.com")
+    monkeypatch.setenv("ZENML_STORE_API_KEY", "zenml-token")
+
+    apply_env_translations()
+
+    assert os.environ["ZENML_STORE_URL"] == "https://zenml.example.com"
+    assert os.environ["ZENML_STORE_API_KEY"] == "zenml-token"
+
+
 def test_apply_env_translations_rejects_partial_token_only_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -434,7 +452,7 @@ def test_environment_artifact_store_rejects_extra_fields(
     monkeypatch.setenv(KITARU_LOG_STORE_BACKEND_ENV, "artifact-store")
     monkeypatch.setenv(KITARU_LOG_STORE_ENDPOINT_ENV, "https://should-not-be-used")
 
-    with pytest.raises(ValueError, match=KITARU_LOG_STORE_ENDPOINT_ENV):
+    with pytest.raises(KitaruUsageError, match=KITARU_LOG_STORE_ENDPOINT_ENV):
         resolve_log_store()
 
 
@@ -473,13 +491,13 @@ def test_partial_env_override_raises_helpful_error(
     """A backend-only environment override should fail with clear guidance."""
     monkeypatch.setenv(KITARU_LOG_STORE_BACKEND_ENV, "datadog")
 
-    with pytest.raises(ValueError, match=KITARU_LOG_STORE_ENDPOINT_ENV):
+    with pytest.raises(KitaruUsageError, match=KITARU_LOG_STORE_ENDPOINT_ENV):
         resolve_log_store()
 
 
 def test_set_rejects_artifact_store_override() -> None:
     """artifact-store should stay an implicit default, not an override target."""
-    with pytest.raises(ValueError, match="already the default"):
+    with pytest.raises(KitaruUsageError, match="already the default"):
         set_global_log_store(
             "artifact-store",
             endpoint="https://unused.example.com",
@@ -487,10 +505,10 @@ def test_set_rejects_artifact_store_override() -> None:
 
 
 def test_invalid_persisted_config_raises_error() -> None:
-    """Malformed persisted config should raise a clear ValueError."""
+    """Malformed persisted config should raise a clear KitaruUsageError."""
     yaml_utils.write_yaml(str(_kitaru_config_path()), ["invalid"])
 
-    with pytest.raises(ValueError, match="global config file is invalid"):
+    with pytest.raises(KitaruUsageError, match="global config file is invalid"):
         resolve_log_store()
 
 
@@ -611,13 +629,13 @@ def test_empty_env_default_model_raises_clear_error(
     """An empty KITARU_DEFAULT_MODEL should fail with env-specific guidance."""
     monkeypatch.setenv(KITARU_DEFAULT_MODEL_ENV, "   ")
 
-    with pytest.raises(ValueError, match=KITARU_DEFAULT_MODEL_ENV):
+    with pytest.raises(KitaruUsageError, match=KITARU_DEFAULT_MODEL_ENV):
         resolve_model_selection(None)
 
 
 def test_resolve_model_selection_requires_default_or_explicit_model() -> None:
     """`kitaru.llm(model=None)` should fail without a configured default alias."""
-    with pytest.raises(ValueError, match="No model alias is configured"):
+    with pytest.raises(KitaruUsageError, match="No model alias is configured"):
         resolve_model_selection(None)
 
 
@@ -868,7 +886,7 @@ def test_show_stack_operation_raises_when_stack_is_missing() -> None:
 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
-        pytest.raises(ValueError, match=r"Stack 'ghost' not found\."),
+        pytest.raises(KitaruStateError, match=r"Stack 'ghost' not found\."),
     ):
         _show_stack_operation("ghost")
 
@@ -884,8 +902,32 @@ def test_show_stack_operation_wraps_hydration_failures() -> None:
     with (
         patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(
-            RuntimeError,
+            KitaruBackendError,
             match="Unable to inspect stack 'dev': backend unavailable",
+        ),
+    ):
+        _show_stack_operation("dev")
+
+
+def test_show_stack_operation_rejects_malformed_component_metadata() -> None:
+    """stack show should fail if the runtime returns malformed component data."""
+    stack_summary = _stack_model(stack_id="stack-dev-id", name="dev")
+    hydrated_stack = SimpleNamespace(
+        id="stack-dev-id",
+        name="dev",
+        labels={},
+        components=None,
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = stack_summary
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruStateError,
+            match=r"Stack 'dev' returned malformed component metadata\.",
         ),
     ):
         _show_stack_operation("dev")
@@ -1031,7 +1073,7 @@ def test_create_stack_dispatcher_rejects_unsupported_stack_type() -> None:
     """Dispatcher should reject unknown stack types instead of guessing."""
     with (
         patch("kitaru.config.Client") as mock_client,
-        pytest.raises(ValueError, match="Unsupported stack type: weird"),
+        pytest.raises(KitaruUsageError, match="Unsupported stack type: weird"),
     ):
         _create_stack_operation(
             "dev",
@@ -1118,7 +1160,6 @@ def test_create_kubernetes_stack_operation_creates_aws_stack_and_activates() -> 
     assert orchestrator.flavor == "kubernetes"
     assert orchestrator.configuration == {
         "kubernetes_namespace": "ml",
-        "region": "eu-west-1",
     }
     assert orchestrator.service_connector_index == 0
     assert orchestrator.service_connector_resource_id == "demo-cluster"
@@ -1236,7 +1277,6 @@ def test_create_kubernetes_stack_operation_creates_gcp_stack_without_verificatio
     orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
     assert orchestrator.configuration == {
         "kubernetes_namespace": "default",
-        "region": "europe-west4",
     }
     artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
     assert artifact_store.flavor == "gcp"
@@ -1327,7 +1367,7 @@ def test_create_kubernetes_stack_operation_rejects_invalid_aws_credentials() -> 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(
-            ValueError,
+            KitaruUsageError,
             match=r"aws-access-keys credentials must be in the format",
         ),
     ):
@@ -1361,7 +1401,7 @@ def test_create_kubernetes_stack_operation_rejects_empty_gcp_service_account_pat
     with (
         patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(
-            ValueError,
+            KitaruUsageError,
             match=r"GCP service account file path cannot be empty\.",
         ),
     ):
@@ -1391,7 +1431,7 @@ def test_create_kubernetes_stack_operation_rejects_unparsable_gcp_registry() -> 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(
-            ValueError,
+            KitaruUsageError,
             match=r"Cannot infer GCP project ID from container registry URI",
         ),
     ):
@@ -1424,7 +1464,7 @@ def test_create_kubernetes_stack_operation_wraps_store_create_failure() -> None:
     with (
         patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(
-            RuntimeError,
+            KitaruBackendError,
             match=(
                 r"ZenML rolled back any partially created components and "
                 r"service connectors"
@@ -1467,7 +1507,7 @@ def test_create_kubernetes_stack_operation_reports_activation_failure() -> None:
     with (
         patch("kitaru.config.Client", return_value=client_mock),
         pytest.raises(
-            RuntimeError,
+            KitaruBackendError,
             match=r"Created Kubernetes stack 'dev' but failed to activate it",
         ),
     ):
@@ -1525,7 +1565,7 @@ def test_create_stack_rejects_existing_stack_name() -> None:
 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
-        pytest.raises(ValueError, match='A stack named "dev" already exists'),
+        pytest.raises(KitaruStateError, match='A stack named "dev" already exists'),
     ):
         create_stack("dev")
 
@@ -1544,7 +1584,7 @@ def test_create_stack_component_collision_reports_fresh_component_policy() -> No
 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
-        pytest.raises(ValueError, match="never reuses existing ones"),
+        pytest.raises(KitaruStateError, match="never reuses existing ones"),
     ):
         create_stack("dev")
 
@@ -1567,7 +1607,7 @@ def test_create_stack_cleans_up_components_if_stack_creation_fails() -> None:
 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="stack create failed"),
+        pytest.raises(KitaruBackendError, match="stack create failed"),
     ):
         create_stack("dev")
 
@@ -1723,7 +1763,7 @@ def test_delete_stack_rejects_active_stack_without_force() -> None:
 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
-        pytest.raises(ValueError, match="Cannot delete the active stack"),
+        pytest.raises(KitaruStateError, match="Cannot delete the active stack"),
     ):
         delete_stack("dev")
 
@@ -1954,7 +1994,9 @@ def test_delete_stack_recursive_kubernetes_skips_cleanup_on_delete_failure() -> 
 
     with (
         patch("kitaru.config.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="delete failed"),
+        pytest.raises(
+            KitaruBackendError, match="Failed to delete stack 'dev': delete failed"
+        ),
     ):
         _delete_stack_operation("dev", recursive=True)
 
@@ -1992,7 +2034,10 @@ def test_use_stack_switches_active_stack() -> None:
     """use_stack should delegate activation and return the new active stack."""
     local_stack = SimpleNamespace(id="stack-local-id", name="local")
     prod_stack = SimpleNamespace(id="stack-prod-id", name="prod")
-    client_mock = SimpleNamespace(active_stack_model=local_stack)
+    client_mock = SimpleNamespace(
+        active_stack_model=local_stack,
+        list_stacks=lambda: [local_stack, prod_stack],
+    )
 
     def _activate_stack(_: str) -> None:
         client_mock.active_stack_model = prod_stack
@@ -2003,7 +2048,7 @@ def test_use_stack_switches_active_stack() -> None:
     with patch("kitaru.config.Client", return_value=client_mock):
         selected = use_stack("prod")
 
-    activate_stack.assert_called_once_with("prod")
+    activate_stack.assert_called_once_with("stack-prod-id")
     assert selected.name == "prod"
     assert selected.id == "stack-prod-id"
     assert selected.is_active is True
@@ -2011,7 +2056,7 @@ def test_use_stack_switches_active_stack() -> None:
 
 def test_use_stack_rejects_empty_selector() -> None:
     """use_stack should fail fast on empty stack names/IDs."""
-    with pytest.raises(ValueError, match="cannot be empty"):
+    with pytest.raises(KitaruUsageError, match="cannot be empty"):
         use_stack("   ")
 
 
@@ -2240,7 +2285,7 @@ def test_resolve_execution_config_rejects_invalid_cache_env(
     """Invalid cache env values should raise clear parse errors."""
     monkeypatch.setenv(KITARU_CACHE_ENV, "not-a-bool")
 
-    with pytest.raises(ValueError, match=KITARU_CACHE_ENV):
+    with pytest.raises(KitaruUsageError, match=KITARU_CACHE_ENV):
         resolve_execution_config()
 
 
@@ -2463,6 +2508,176 @@ def test_connection_validation_does_not_require_project_for_global_connection() 
 
     assert resolved.server_url == "https://global.example.com"
     assert resolved.project is None
+
+
+def test_suppress_zenml_cli_messages_silences_cli_helpers_and_restores_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI suppression should silence ZenML helpers and restore prior state."""
+    original_disable = logging.root.manager.disable
+    helper_calls: list[str] = []
+
+    def declare_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        helper_calls.append("declare")
+
+    def success_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        helper_calls.append("success")
+
+    monkeypatch.setattr(config_module.zenml_cli_utils, "declare", declare_spy)
+    monkeypatch.setattr(config_module.zenml_cli_utils, "success", success_spy)
+
+    try:
+        with config_module._suppress_zenml_cli_messages():
+            config_module.zenml_cli_utils.declare("hello")
+            config_module.zenml_cli_utils.success("world")
+
+            assert helper_calls == []
+            assert logging.root.manager.disable == logging.CRITICAL
+
+        assert config_module.zenml_cli_utils.declare is declare_spy
+        assert config_module.zenml_cli_utils.success is success_spy
+        assert logging.root.manager.disable == original_disable
+    finally:
+        logging.disable(original_disable)
+
+
+class _SuppressionSentinelError(RuntimeError):
+    """Sentinel error used to verify suppression cleanup on failure."""
+
+
+def test_suppress_zenml_cli_messages_restores_state_after_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI suppression should restore helpers and logging after exceptions."""
+    original_disable = logging.root.manager.disable
+    logging.disable(logging.ERROR)
+
+    def declare_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
+    def success_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
+    monkeypatch.setattr(config_module.zenml_cli_utils, "declare", declare_spy)
+    monkeypatch.setattr(config_module.zenml_cli_utils, "success", success_spy)
+
+    try:
+        with (
+            pytest.raises(_SuppressionSentinelError, match="boom"),
+            config_module._suppress_zenml_cli_messages(),
+        ):
+            assert logging.root.manager.disable == logging.CRITICAL
+            raise _SuppressionSentinelError("boom")
+
+        assert config_module.zenml_cli_utils.declare is declare_spy
+        assert config_module.zenml_cli_utils.success is success_spy
+        assert logging.root.manager.disable == logging.ERROR
+    finally:
+        logging.disable(original_disable)
+
+
+def test_login_to_server_target_direct_server_path_runs_under_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct server login should run with ZenML CLI chatter suppressed."""
+    original_disable = logging.root.manager.disable
+    helper_calls: list[str] = []
+
+    def declare_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        helper_calls.append("declare")
+
+    def success_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        helper_calls.append("success")
+
+    def fake_connect_to_server(**kwargs: Any) -> None:
+        assert logging.root.manager.disable == logging.CRITICAL
+        config_module.zenml_cli_utils.declare("connecting")
+        config_module.zenml_cli_utils.success("connected")
+        assert kwargs == {
+            "url": "https://example.com",
+            "api_key": "secret-key",
+            "verify_ssl": False,
+            "refresh": True,
+            "project": "demo-project",
+        }
+
+    monkeypatch.setattr(config_module.zenml_cli_utils, "declare", declare_spy)
+    monkeypatch.setattr(config_module.zenml_cli_utils, "success", success_spy)
+
+    try:
+        with (
+            patch("kitaru.config._zenml_is_pro_server", return_value=(False, None)),
+            patch(
+                "kitaru.config._zenml_connect_to_server",
+                side_effect=fake_connect_to_server,
+            ) as mock_connect_to_server,
+        ):
+            config_module._login_to_server_target(
+                "https://example.com/",
+                api_key="secret-key",
+                refresh=True,
+                project="demo-project",
+                verify_ssl=False,
+            )
+
+        mock_connect_to_server.assert_called_once_with(
+            url="https://example.com",
+            api_key="secret-key",
+            verify_ssl=False,
+            refresh=True,
+            project="demo-project",
+        )
+        assert helper_calls == []
+        assert config_module.zenml_cli_utils.declare is declare_spy
+        assert config_module.zenml_cli_utils.success is success_spy
+        assert logging.root.manager.disable == original_disable
+    finally:
+        logging.disable(original_disable)
+
+
+def test_login_to_server_target_wraps_click_failures() -> None:
+    """Login helpers should translate ZenML CLI failures into backend errors."""
+    with (
+        patch("kitaru.config._zenml_is_pro_server", return_value=(False, None)),
+        patch(
+            "kitaru.config._zenml_connect_to_server",
+            side_effect=click.ClickException("login failed"),
+        ),
+        pytest.raises(KitaruBackendError, match="login failed"),
+    ):
+        config_module._login_to_server_target("https://example.com")
+
+
+def test_persist_frozen_execution_spec_rejects_invalid_run_id() -> None:
+    """Frozen execution spec persistence should require a UUID run ID."""
+    frozen_execution_spec = build_frozen_execution_spec(
+        resolved_execution=ResolvedExecutionConfig(
+            stack="prod",
+            cache=False,
+            retries=2,
+            image=None,
+        ),
+        flow_defaults=KitaruConfig(cache=False),
+        connection=ResolvedConnectionConfig(
+            server_url="https://server.example.com",
+            project="demo",
+        ),
+    )
+
+    with (
+        patch("kitaru.config.Client") as client_cls,
+        pytest.raises(KitaruUsageError, match="expected a UUID pipeline run ID"),
+    ):
+        persist_frozen_execution_spec(
+            run_id="not-a-uuid",
+            frozen_execution_spec=frozen_execution_spec,
+        )
+
+    client_cls.return_value.create_run_metadata.assert_not_called()
 
 
 def test_build_and_persist_frozen_execution_spec() -> None:

@@ -17,6 +17,7 @@ from zenml.models import PipelineRunResponse
 from kitaru.config import ResolvedExecutionConfig
 from kitaru.errors import (
     FailureOrigin,
+    KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
     KitaruUserCodeError,
@@ -708,7 +709,7 @@ def test_flow_handle_get_raises_on_ambiguous_terminal_fallback() -> None:
     handle = FlowHandle(_as_pipeline_run(completed))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="fallback extraction is ambiguous"),
+        pytest.raises(KitaruRuntimeError, match="fallback extraction is ambiguous"),
     ):
         handle.get()
 
@@ -726,7 +727,7 @@ def test_flow_handle_get_raises_when_step_metadata_is_missing() -> None:
     handle = FlowHandle(_as_pipeline_run(completed))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="missing step output metadata"),
+        pytest.raises(KitaruRuntimeError, match="missing step output metadata"),
     ):
         handle.get()
 
@@ -744,7 +745,7 @@ def test_flow_handle_get_raises_when_output_artifact_is_missing() -> None:
     handle = FlowHandle(_as_pipeline_run(completed))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
-        pytest.raises(RuntimeError, match="missing output 'output'"),
+        pytest.raises(KitaruRuntimeError, match="missing output 'output'"),
     ):
         handle.get()
 

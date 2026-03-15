@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -16,6 +17,7 @@ from kitaru.cli import (
     RuntimeSnapshot,
     _build_runtime_snapshot,
     _describe_local_server,
+    _load_flow_target,
     _logout_current_connection,
     _parse_secret_assignments,
     app,
@@ -157,7 +159,7 @@ def test_importing_cli_does_not_resolve_version_metadata() -> None:
     import kitaru.cli as cli_module
 
     with patch(
-        "_kitaru_bootstrap.resolve_installed_version",
+        "kitaru._version.resolve_installed_version",
         side_effect=AssertionError("should not resolve version at import time"),
     ):
         reloaded = importlib.reload(cli_module)
@@ -331,7 +333,15 @@ def test_executions_list_applies_filters(
     )
     output = capsys.readouterr().out
     assert "Kitaru executions" in output
-    assert "kr-200: content_pipeline | waiting | stack=prod" in output
+    header_lines = [line for line in output.splitlines() if line.strip()]
+    assert "ID" in header_lines[1]
+    assert "Flow" in header_lines[1]
+    assert "Status" in header_lines[1]
+    assert "Stack" in header_lines[1]
+    assert "kr-200" in output
+    assert "content_pipeline" in output
+    assert "waiting" in output
+    assert "prod" in output
 
 
 def test_executions_logs_renders_default_output(
@@ -891,6 +901,90 @@ def test_executions_cancel_reports_success(
     output = capsys.readouterr().out
     assert "Cancelled execution: kr-123" in output
     assert "Status: cancelled" in output
+
+
+def _write_flow_target_module(path: Path, *, marker: str) -> None:
+    """Create a minimal flow target module for direct loader tests."""
+    path.write_text(
+        "class _FakeFlow:\n"
+        f"    marker = {marker!r}\n"
+        "    def run(self, *args, **kwargs):\n"
+        "        return None\n"
+        "    def deploy(self, *args, **kwargs):\n"
+        "        return None\n\n"
+        "demo_flow = _FakeFlow()\n",
+        encoding="utf-8",
+    )
+
+
+def test_load_flow_target_supports_module_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_name = f"temp_flow_module_{tmp_path.name.replace('-', '_')}"
+    module_path = tmp_path / f"{module_name}.py"
+    _write_flow_target_module(module_path, marker="module")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    flow_target = _load_flow_target(f"{module_name}:demo_flow")
+
+    assert cast(Any, flow_target).marker == "module"
+
+
+def test_load_flow_target_supports_python_file_paths(tmp_path: Path) -> None:
+    module_path = tmp_path / "demo_flow.py"
+    _write_flow_target_module(module_path, marker="file")
+
+    flow_target = _load_flow_target(f"{module_path}:demo_flow")
+
+    assert cast(Any, flow_target).marker == "file"
+
+
+def test_load_flow_target_delegates_to_shared_module_loader() -> None:
+    fake_flow = SimpleNamespace(
+        marker="patched",
+        run=Mock(),
+        deploy=Mock(),
+    )
+    fake_module = SimpleNamespace(demo_flow=fake_flow)
+
+    with patch(
+        "kitaru._flow_loading._load_module_from_python_path",
+        return_value=fake_module,
+    ) as mock_loader:
+        flow_target = _load_flow_target("/tmp/demo_flow.py:demo_flow")
+
+    mock_loader.assert_called_once_with(
+        "/tmp/demo_flow.py", module_name_prefix="_kitaru_cli_run_target_"
+    )
+    assert flow_target is fake_flow
+
+
+def test_load_flow_target_reports_missing_module() -> None:
+    with pytest.raises(ValueError, match="Unable to import flow module") as exc_info:
+        _load_flow_target("definitely_missing_flow_module:demo_flow")
+
+    assert "definitely_missing_flow_module" in str(exc_info.value)
+
+
+def test_load_flow_target_reports_missing_attribute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_name = f"temp_missing_attr_{tmp_path.name.replace('-', '_')}"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text("other_name = object()\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    with pytest.raises(ValueError, match="has no attribute `demo_flow`"):
+        _load_flow_target(f"{module_name}:demo_flow")
+
+
+def test_load_flow_target_rejects_invalid_target_format() -> None:
+    with pytest.raises(
+        ValueError, match="must use `<module_or_file>:<flow_name>` format"
+    ):
+        _load_flow_target("content_pipeline")
 
 
 def test_run_starts_flow_with_json_args(

@@ -29,6 +29,7 @@ from zenml.client import Client
 from zenml.enums import MetadataResourceTypes
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 
+from kitaru._scope import _parse_scope_uuid
 from kitaru.errors import KitaruContextError, KitaruStateError
 from kitaru.runtime import (
     _get_current_checkpoint_id,
@@ -46,35 +47,15 @@ _LOG_MISSING_CHECKPOINT_ID_ERROR = (
 )
 
 
-def _parse_scope_uuid(scope_id: str, *, scope_name: str) -> UUID:
-    """Parse a runtime scope identifier as a UUID.
-
-    Args:
-        scope_id: Raw scope identifier from runtime context.
-        scope_name: Human-readable scope name for error messages.
-
-    Returns:
-        Parsed UUID.
-
-    Raises:
-        KitaruStateError: If the scope identifier is not a valid UUID.
-    """
-    try:
-        return UUID(scope_id)
-    except ValueError as exc:
-        raise KitaruStateError(
-            f"kitaru.log() found an invalid {scope_name} ID in runtime scope:"
-            f" {scope_id!r}."
-        ) from exc
-
-
 def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
     """Resolve the metadata target resource for `kitaru.log()`."""
     if _is_inside_checkpoint():
         checkpoint_id = _get_current_checkpoint_id()
         if checkpoint_id is None:
             raise KitaruStateError(_LOG_MISSING_CHECKPOINT_ID_ERROR)
-        checkpoint_uuid = _parse_scope_uuid(checkpoint_id, scope_name="checkpoint")
+        checkpoint_uuid = _parse_scope_uuid(
+            checkpoint_id, scope_name="checkpoint", api_name="log"
+        )
         return (
             RunMetadataResource(
                 id=checkpoint_uuid,
@@ -87,7 +68,9 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
         execution_id = _get_current_execution_id()
         if execution_id is None:
             raise KitaruStateError(_LOG_MISSING_EXECUTION_ID_ERROR)
-        execution_uuid = _parse_scope_uuid(execution_id, scope_name="execution")
+        execution_uuid = _parse_scope_uuid(
+            execution_id, scope_name="execution", api_name="log"
+        )
         return (
             RunMetadataResource(
                 id=execution_uuid,

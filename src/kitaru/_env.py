@@ -1,9 +1,4 @@
-"""Bootstrap-safe environment variable helpers for Kitaru.
-
-This module lives outside the ``kitaru`` package so it can be imported by
-console bootstrap code before the package itself (and any ZenML-heavy imports)
-is loaded.
-"""
+"""Environment variable helpers for Kitaru package initialization."""
 
 from __future__ import annotations
 
@@ -31,10 +26,20 @@ _ENV_TRANSLATIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _normalized_kitaru_env(name: str) -> str | None:
+    """Return a Kitaru env value, treating blank strings as unset."""
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    if not value.strip():
+        return None
+    return value
+
+
 def apply_env_translations() -> None:
     """Translate public ``KITARU_*`` env vars into ``ZENML_*`` equivalents."""
     for kitaru_var, zenml_var in _ENV_TRANSLATIONS:
-        kitaru_value = os.environ.get(kitaru_var)
+        kitaru_value = _normalized_kitaru_env(kitaru_var)
         if kitaru_value is None:
             continue
 
@@ -48,8 +53,8 @@ def apply_env_translations() -> None:
 
         os.environ[zenml_var] = kitaru_value
 
-    server_url = os.environ.get(KITARU_SERVER_URL_ENV)
-    auth_token = os.environ.get(KITARU_AUTH_TOKEN_ENV) or os.environ.get(
+    server_url = _normalized_kitaru_env(KITARU_SERVER_URL_ENV)
+    auth_token = _normalized_kitaru_env(KITARU_AUTH_TOKEN_ENV) or os.environ.get(
         ZENML_STORE_API_KEY_ENV
     )
     if server_url and not auth_token:
@@ -58,7 +63,7 @@ def apply_env_translations() -> None:
             "Set KITARU_AUTH_TOKEN (or ZENML_STORE_API_KEY)."
         )
 
-    if os.environ.get(KITARU_AUTH_TOKEN_ENV) and not (
+    if _normalized_kitaru_env(KITARU_AUTH_TOKEN_ENV) and not (
         server_url or os.environ.get(ZENML_STORE_URL_ENV)
     ):
         raise RuntimeError(

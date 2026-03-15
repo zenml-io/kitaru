@@ -16,8 +16,7 @@ from zenml.config.global_config import GlobalConfiguration
 from zenml.models import SecretResponse
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 
-from _kitaru_bootstrap import resolve_installed_version
-from kitaru.client import (
+from kitaru._client._models import (
     ArtifactRef,
     CheckpointAttempt,
     CheckpointCall,
@@ -26,6 +25,7 @@ from kitaru.client import (
     LogEntry,
     PendingWait,
 )
+from kitaru._version import resolve_installed_version
 from kitaru.config import (
     KITARU_PROJECT_ENV,
     ActiveEnvironmentVariable,
@@ -351,6 +351,24 @@ def serialize_artifact_ref(artifact: ArtifactRef) -> dict[str, Any]:
         "producing_call": artifact.producing_call,
         "metadata": to_jsonable(artifact.metadata, fallback_repr=True),
     }
+
+
+def serialize_artifact_value(value: Any) -> dict[str, Any]:
+    """Serialize an artifact payload value for MCP transport."""
+    value_type = _qualified_type_name(value)
+    try:
+        serialized_value = to_jsonable(value, fallback_repr=False)
+        return {
+            "value": serialized_value,
+            "value_format": "json",
+            "value_type": value_type,
+        }
+    except TypeError:
+        return {
+            "value": repr(value),
+            "value_format": "repr",
+            "value_type": value_type,
+        }
 
 
 def serialize_checkpoint_attempt(attempt: CheckpointAttempt) -> dict[str, Any]:

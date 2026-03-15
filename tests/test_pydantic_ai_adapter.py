@@ -24,6 +24,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import AbstractToolset
 from pydantic_ai.usage import RunUsage
 
+from kitaru._safe_save import _safe_save
 from kitaru.adapters import pydantic_ai as kp
 from kitaru.adapters.pydantic_ai import _agent as adapter_agent
 from kitaru.adapters.pydantic_ai import _model as adapter_model
@@ -278,29 +279,31 @@ async def test_capture_config_off_disables_tracking_for_selected_tool(
     assert _collect_logged_dict(logged, "pydantic_ai_events") == {}
 
 
-def test_save_with_fallback_uses_blob_when_serialization_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fallback save should store repr payloads when primary serialization fails."""
-    recorded: list[tuple[str, str, Any]] = []
+def test_safe_save_uses_blob_when_primary_save_fails() -> None:
+    """Shared fallback save should store repr payloads when primary save fails."""
+    attempts: list[tuple[str, str, Any]] = []
+    value = object()
 
     def fake_save(name: str, value: Any, *, type: str = "output") -> None:
+        attempts.append((name, type, value))
         if type != "blob":
             raise TypeError("cannot serialize")
-        recorded.append((name, type, value))
 
-    monkeypatch.setattr(adapter_toolset, "save", fake_save)
-
-    artifact_type = adapter_toolset._save_with_fallback(
+    artifact_type = _safe_save(
         "tool_payload",
-        object(),
+        value,
         artifact_type="input",
+        save_func=fake_save,
     )
 
     assert artifact_type == "blob"
-    assert recorded
-    assert recorded[0][0] == "tool_payload"
-    assert recorded[0][1] == "blob"
+    assert attempts[0] == ("tool_payload", "input", value)
+    assert attempts[1][0] == "tool_payload"
+    assert attempts[1][1] == "blob"
+    assert attempts[1][2] == {
+        "repr": repr(value),
+        "python_type": value.__class__.__name__,
+    }
 
 
 def test_wrap_tracks_model_and_tool_events_with_timing_and_ordering(

@@ -17,6 +17,7 @@ from pydantic_ai import (
 from pydantic_ai.exceptions import ApprovalRequired
 from pydantic_ai.tools import AgentDepsT, RunContext
 
+from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
 from kitaru.errors import KitaruUsageError
 from kitaru.logging import log
@@ -56,20 +57,6 @@ def _error_payload(error: Exception) -> dict[str, str]:
         "type": error.__class__.__name__,
         "message": str(error),
     }
-
-
-def _save_with_fallback(name: str, value: Any, *, artifact_type: str) -> str:
-    """Save an artifact and fall back to a blob repr if serialization fails."""
-    try:
-        save(name, value, type=artifact_type)
-        return artifact_type
-    except Exception:
-        fallback_value = {
-            "repr": repr(value),
-            "python_type": value.__class__.__name__,
-        }
-        save(name, fallback_value, type="blob")
-        return "blob"
 
 
 def _resolve_capture_config(config: CaptureConfig | None) -> ResolvedCaptureConfig:
@@ -236,7 +223,12 @@ class KitaruToolset(KitaruWrapperToolset[AgentDepsT]):
             event_id, event_context = tracker.start_tool_event()
             if capture_config.save_args:
                 args_artifact = f"{event_id}_args"
-                _save_with_fallback(args_artifact, tool_args, artifact_type="input")
+                _safe_save(
+                    args_artifact,
+                    tool_args,
+                    artifact_type="input",
+                    save_func=save,
+                )
 
         hitl_config = hitl_config_from_tool_metadata(tool.tool_def.metadata)
         started_at = time.perf_counter()
@@ -336,7 +328,12 @@ class KitaruToolset(KitaruWrapperToolset[AgentDepsT]):
             and event_id is not None
         ):
             result_artifact = f"{event_id}_result"
-            _save_with_fallback(result_artifact, result, artifact_type="output")
+            _safe_save(
+                result_artifact,
+                result,
+                artifact_type="output",
+                save_func=save,
+            )
 
         if event_id is not None and event_context is not None:
             tracker.complete_tool_event(event_id)

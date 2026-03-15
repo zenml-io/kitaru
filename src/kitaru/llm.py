@@ -14,6 +14,7 @@ from litellm import completion
 from pydantic import BaseModel, ConfigDict
 from zenml.client import Client
 
+from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
 from kitaru.checkpoint import checkpoint
 from kitaru.config import ResolvedModelSelection, resolve_model_selection
@@ -331,8 +332,18 @@ def _execute_llm_call(request: _LLMRequest) -> str:
     response_text = _extract_response_text(raw_response)
     usage = _extract_usage(raw_response)
 
-    save(f"{request.call_name}_prompt", messages, type="prompt")
-    save(f"{request.call_name}_response", response_text, type="response")
+    _safe_save(
+        f"{request.call_name}_prompt",
+        messages,
+        artifact_type="prompt",
+        save_func=save,
+    )
+    _safe_save(
+        f"{request.call_name}_response",
+        response_text,
+        artifact_type="response",
+        save_func=save,
+    )
 
     llm_metadata: dict[str, Any] = {
         "requested_model": model_selection.requested_model,
@@ -382,8 +393,10 @@ def llm(
         The model response text.
 
     Raises:
-        RuntimeError: If called outside a flow.
-        ValueError: If prompt or model input is invalid.
+        KitaruContextError: If called outside a flow.
+        KitaruUsageError: If prompt or model input is invalid.
+        KitaruRuntimeError: If credentials or LiteLLM response content are invalid.
+        KitaruBackendError: If secret retrieval fails.
     """
     if not _is_inside_flow():
         raise KitaruContextError(_LLM_OUTSIDE_FLOW_ERROR)

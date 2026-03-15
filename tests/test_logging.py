@@ -9,7 +9,8 @@ import pytest
 from zenml.enums import MetadataResourceTypes
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 
-from kitaru.logging import log
+from kitaru.errors import KitaruContextError, KitaruStateError
+from kitaru.logging import _parse_scope_uuid, log
 from kitaru.runtime import _checkpoint_scope, _flow_scope
 
 
@@ -20,8 +21,26 @@ def _get_logged_resource(client_mock: MagicMock) -> RunMetadataResource:
     return resources[0]
 
 
+@pytest.mark.parametrize("scope_name", ["execution", "checkpoint"])
+def test_parse_scope_uuid_returns_uuid(scope_name: str) -> None:
+    execution_id = str(uuid4())
+
+    assert _parse_scope_uuid(
+        execution_id, scope_name=scope_name, api_name="log"
+    ) == UUID(execution_id)
+
+
+@pytest.mark.parametrize("scope_name", ["execution", "checkpoint"])
+def test_parse_scope_uuid_rejects_invalid_uuid(scope_name: str) -> None:
+    with pytest.raises(
+        KitaruStateError,
+        match=rf"kitaru\.log\(\) found an invalid {scope_name} ID",
+    ):
+        _parse_scope_uuid("exec-not-a-uuid", scope_name=scope_name, api_name="log")
+
+
 def test_log_raises_outside_flow() -> None:
-    with pytest.raises(RuntimeError, match=r"inside a @flow"):
+    with pytest.raises(KitaruContextError, match=r"inside a @flow"):
         log(cost=0.01)
 
 
@@ -100,7 +119,7 @@ def test_log_requires_execution_id_inside_flow() -> None:
     with (
         _flow_scope(name="my_flow", execution_id=None),
         patch("kitaru.logging.Client") as client_cls,
-        pytest.raises(RuntimeError, match="active execution ID"),
+        pytest.raises(KitaruStateError, match="active execution ID"),
     ):
         log(cost=0.01)
 
@@ -119,7 +138,7 @@ def test_log_requires_checkpoint_id_inside_checkpoint() -> None:
             checkpoint_id=None,
         ),
         patch("kitaru.logging.Client") as client_cls,
-        pytest.raises(RuntimeError, match="active checkpoint ID"),
+        pytest.raises(KitaruStateError, match="active checkpoint ID"),
     ):
         log(cost=0.01)
 
@@ -130,7 +149,7 @@ def test_log_rejects_invalid_execution_uuid() -> None:
     with (
         _flow_scope(name="my_flow", execution_id="exec-not-a-uuid"),
         patch("kitaru.logging.Client") as client_cls,
-        pytest.raises(RuntimeError, match="invalid execution ID"),
+        pytest.raises(KitaruStateError, match="invalid execution ID"),
     ):
         log(cost=0.01)
 
@@ -149,7 +168,7 @@ def test_log_rejects_invalid_checkpoint_uuid() -> None:
             checkpoint_id="checkpoint-not-a-uuid",
         ),
         patch("kitaru.logging.Client") as client_cls,
-        pytest.raises(RuntimeError, match="invalid checkpoint ID"),
+        pytest.raises(KitaruStateError, match="invalid checkpoint ID"),
     ):
         log(cost=0.01)
 
