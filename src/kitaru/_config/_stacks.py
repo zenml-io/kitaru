@@ -829,7 +829,12 @@ def _stack_component_details_from_model(
     component_name = (
         _normalize_stack_detail_value(getattr(component, "name", None)) or "<unnamed>"
     )
-    backend = _normalize_stack_detail_value(getattr(component, "flavor", None))
+    raw_flavor = getattr(component, "flavor", None)
+    # Hydrated ZenML components return a FlavorResponse object for `.flavor`;
+    # extract just the name string to avoid dumping the full response repr.
+    if hasattr(raw_flavor, "name"):
+        raw_flavor = raw_flavor.name
+    backend = _normalize_stack_detail_value(raw_flavor)
     configuration = getattr(component, "configuration", None)
     component_configuration = (
         configuration if isinstance(configuration, Mapping) else {}
