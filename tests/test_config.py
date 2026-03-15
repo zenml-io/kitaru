@@ -1160,7 +1160,6 @@ def test_create_kubernetes_stack_operation_creates_aws_stack_and_activates() -> 
     assert orchestrator.flavor == "kubernetes"
     assert orchestrator.configuration == {
         "kubernetes_namespace": "ml",
-        "region": "eu-west-1",
     }
     assert orchestrator.service_connector_index == 0
     assert orchestrator.service_connector_resource_id == "demo-cluster"
@@ -1278,7 +1277,6 @@ def test_create_kubernetes_stack_operation_creates_gcp_stack_without_verificatio
     orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
     assert orchestrator.configuration == {
         "kubernetes_namespace": "default",
-        "region": "europe-west4",
     }
     artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
     assert artifact_store.flavor == "gcp"

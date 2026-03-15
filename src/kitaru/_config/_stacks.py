@@ -377,7 +377,6 @@ def _build_kubernetes_stack_request(
                     service_connector_resource_id=spec.cluster,
                     configuration={
                         "kubernetes_namespace": spec.namespace,
-                        "region": spec.region,
                     },
                 )
             ],
