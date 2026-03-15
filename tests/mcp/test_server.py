@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -73,7 +73,7 @@ def test_load_flow_target_supports_module_paths(
 
     flow_target = _load_mcp_flow_target(f"{module_name}:demo_flow")
 
-    assert cast(Any, flow_target).marker == "module"
+    assert flow_target.marker == "module"
 
 
 def test_load_flow_target_supports_python_file_paths(tmp_path: Path) -> None:
@@ -82,7 +82,7 @@ def test_load_flow_target_supports_python_file_paths(tmp_path: Path) -> None:
 
     flow_target = _load_mcp_flow_target(f"{module_path}:demo_flow")
 
-    assert cast(Any, flow_target).marker == "file"
+    assert flow_target.marker == "file"
 
 
 def test_load_flow_target_delegates_to_shared_module_loader() -> None:
