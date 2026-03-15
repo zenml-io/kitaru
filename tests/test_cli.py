@@ -333,7 +333,15 @@ def test_executions_list_applies_filters(
     )
     output = capsys.readouterr().out
     assert "Kitaru executions" in output
-    assert "kr-200: content_pipeline | waiting | stack=prod" in output
+    header_lines = [line for line in output.splitlines() if line.strip()]
+    assert "ID" in header_lines[1]
+    assert "Flow" in header_lines[1]
+    assert "Status" in header_lines[1]
+    assert "Stack" in header_lines[1]
+    assert "kr-200" in output
+    assert "content_pipeline" in output
+    assert "waiting" in output
+    assert "prod" in output
 
 
 def test_executions_logs_renders_default_output(

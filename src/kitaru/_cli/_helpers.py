@@ -10,8 +10,10 @@ from types import ModuleType
 from typing import Annotated, Any, NoReturn
 
 from cyclopts import Parameter
+from rich import box
 from rich.console import Console, Group
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
 from kitaru.cli_output import (
@@ -248,6 +250,105 @@ def _emit_snapshot_sections(
         _render_rich_snapshot_sections(title, sections, warning)
     else:
         print(_render_plain_snapshot_sections(title, sections, warning))
+
+
+def _table_cell_style(column: str, value: str, *, column_index: int) -> str:
+    """Choose a Rich style for a table cell."""
+    if column_index == 0:
+        return "dim"
+    if column.lower() == "status":
+        return _value_style(value)
+    return ""
+
+
+def _table_widths(
+    columns: list[str],
+    table_rows: list[list[str]],
+) -> list[int]:
+    """Compute plain-text column widths including headers."""
+    widths = [len(col) for col in columns]
+    for row in table_rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+    return widths
+
+
+def _render_rich_table(
+    title: str,
+    columns: list[str],
+    table_rows: list[list[str]],
+) -> None:
+    """Render a Rich table inside the standard Kitaru panel."""
+    rich_table = Table(
+        box=box.SIMPLE_HEAD,
+        show_header=True,
+        header_style="bold",
+        show_lines=False,
+        pad_edge=False,
+        collapse_padding=False,
+        expand=False,
+        show_edge=False,
+    )
+
+    for col in columns:
+        normalized = col.lower().strip()
+        rich_table.add_column(
+            col,
+            no_wrap=normalized in {"id", "status"},
+            overflow="fold" if normalized in {"flow", "stack"} else "ellipsis",
+        )
+
+    for row in table_rows:
+        rendered: list[str | Text] = []
+        for i, cell in enumerate(row):
+            style = _table_cell_style(columns[i], cell, column_index=i)
+            rendered.append(Text(cell, style=style) if style else cell)
+        rich_table.add_row(*rendered)
+
+    Console().print(
+        Panel(
+            rich_table,
+            title=f"[bold]{title}[/bold]",
+            title_align="left",
+            border_style="dim",
+            expand=False,
+            padding=(0, 1),
+        )
+    )
+
+
+def _render_plain_table(
+    title: str,
+    columns: list[str],
+    table_rows: list[list[str]],
+) -> str:
+    """Render a plain-text table with column headers for non-TTY output."""
+    widths = _table_widths(columns, table_rows)
+    header = "  " + "   ".join(col.ljust(widths[i]) for i, col in enumerate(columns))
+    separator = "  " + "   ".join("-" * w for w in widths)
+    lines = [title, header, separator]
+    for row in table_rows:
+        lines.append(
+            "  " + "   ".join(cell.ljust(widths[i]) for i, cell in enumerate(row))
+        )
+    return "\n".join(lines)
+
+
+def _emit_table(
+    title: str,
+    columns: list[str],
+    table_rows: list[list[str]],
+    empty_message: str = "none found",
+) -> None:
+    """Render aligned columnar output with headers (rich panel or plain text)."""
+    if not table_rows:
+        _emit_snapshot(title, [(title.split()[-1], empty_message)])
+        return
+
+    if _is_interactive():
+        _render_rich_table(title, columns, table_rows)
+    else:
+        print(_render_plain_table(title, columns, table_rows))
 
 
 def _emit_json_item(

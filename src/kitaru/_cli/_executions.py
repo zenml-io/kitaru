@@ -29,6 +29,7 @@ from ._helpers import (
     _emit_json_item,
     _emit_json_items,
     _emit_snapshot,
+    _emit_table,
     _exit_with_error,
     _facade_module,
     _format_timestamp,
@@ -133,20 +134,17 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
     ]
 
 
-def _execution_list_rows(executions: list[Execution]) -> list[tuple[str, str]]:
-    """Build label/value rows for execution list output."""
-    if not executions:
-        return [("Executions", "none found")]
-
-    rows: list[tuple[str, str]] = []
-    for execution in executions:
-        detail = (
-            f"{execution.flow_name or 'unknown flow'} | "
-            f"{execution.status.value} | "
-            f"stack={execution.stack_name or 'not set'}"
-        )
-        rows.append((execution.exec_id, detail))
-    return rows
+def _execution_list_table(executions: list[Execution]) -> list[list[str]]:
+    """Build columnar rows for execution list output."""
+    return [
+        [
+            execution.exec_id,
+            execution.flow_name or "unknown flow",
+            execution.status.value,
+            execution.stack_name or "not set",
+        ]
+        for execution in executions
+    ]
 
 
 def _run_rows(
@@ -624,7 +622,11 @@ def list____(
         )
         return
 
-    _emit_snapshot("Kitaru executions", _execution_list_rows(executions))
+    _emit_table(
+        "Kitaru executions",
+        ["ID", "Flow", "Status", "Stack"],
+        _execution_list_table(executions),
+    )
 
 
 @executions_app.command
