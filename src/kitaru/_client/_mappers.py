@@ -19,6 +19,16 @@ from kitaru._client._models import (
     FailureInfo,
     PendingWait,
 )
+from kitaru._source_aliases import (
+    CHECKPOINT_SOURCE_ALIAS_PREFIX as _CHECKPOINT_SOURCE_ALIAS_PREFIX,
+)
+from kitaru._source_aliases import (
+    PIPELINE_SOURCE_ALIAS_PREFIX as _PIPELINE_SOURCE_ALIAS_PREFIX,
+)
+from kitaru._source_aliases import (
+    normalize_checkpoint_name as _normalize_checkpoint_name,
+)
+from kitaru._source_aliases import normalize_flow_name as _normalize_flow_name
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
     FrozenExecutionSpec,
@@ -37,25 +47,7 @@ from kitaru.errors import (
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
 
-_CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
-_PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
 _WAIT_CONDITION_STATUS_PENDING = "pending"
-
-
-def _normalize_checkpoint_name(step_name: str) -> str:
-    """Normalize internal checkpoint source alias names."""
-    if step_name.startswith(_CHECKPOINT_SOURCE_ALIAS_PREFIX):
-        return step_name.removeprefix(_CHECKPOINT_SOURCE_ALIAS_PREFIX)
-    return step_name
-
-
-def _normalize_flow_name(flow_name: str | None) -> str | None:
-    """Normalize internal flow source alias names."""
-    if flow_name is None:
-        return None
-    if flow_name.startswith(_PIPELINE_SOURCE_ALIAS_PREFIX):
-        return flow_name.removeprefix(_PIPELINE_SOURCE_ALIAS_PREFIX)
-    return flow_name
 
 
 def _to_plain_dict(values: Mapping[str, Any]) -> dict[str, Any]:

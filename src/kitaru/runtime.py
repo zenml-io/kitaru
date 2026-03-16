@@ -15,6 +15,7 @@ from typing import Any, NoReturn
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.steps.step_context import StepContext
 
+from kitaru._source_aliases import normalize_flow_name as _shared_normalize_flow_name
 from kitaru.errors import KitaruFeatureNotAvailableError
 
 
@@ -46,29 +47,12 @@ _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
 )
 _LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", default=0)
 
-_PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
-
 
 def _to_optional_str(value: Any) -> str | None:
     """Convert IDs from ZenML objects into optional strings."""
     if value is None:
         return None
     return str(value)
-
-
-def _normalize_flow_name(value: Any) -> str | None:
-    """Normalize flow names derived from ZenML runtime context."""
-    if value is None:
-        return None
-
-    flow_name = str(value)
-    if not flow_name:
-        return None
-
-    if flow_name.startswith(_PIPELINE_SOURCE_ALIAS_PREFIX):
-        flow_name = flow_name.removeprefix(_PIPELINE_SOURCE_ALIAS_PREFIX)
-
-    return flow_name or None
 
 
 def _get_zenml_execution_id() -> str | None:
@@ -94,11 +78,13 @@ def _get_zenml_flow_name() -> str | None:
     """Resolve the active flow name from ZenML runtime contexts, if available."""
     if step_context := StepContext.get():
         pipeline = getattr(step_context.pipeline_run, "pipeline", None)
-        if flow_name := _normalize_flow_name(getattr(pipeline, "name", None)):
+        if flow_name := _shared_normalize_flow_name(getattr(pipeline, "name", None)):
             return flow_name
 
     if (run_context := DynamicPipelineRunContext.get()) and (
-        flow_name := _normalize_flow_name(getattr(run_context.pipeline, "name", None))
+        flow_name := _shared_normalize_flow_name(
+            getattr(run_context.pipeline, "name", None)
+        )
     ):
         return flow_name
 

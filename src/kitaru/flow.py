@@ -6,7 +6,6 @@ function whose execution becomes durable, replayable, and observable.
 
 from __future__ import annotations
 
-import re
 import sys
 import threading
 import time
@@ -24,6 +23,7 @@ from zenml.models import PipelineRunResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
+from kitaru._source_aliases import build_pipeline_source_alias
 from kitaru.config import (
     ImageInput,
     ImageSettings,
@@ -83,12 +83,7 @@ def _pipeline_source_alias_name(func: Callable[..., Any]) -> str:
         Alias name used to expose the ZenML pipeline object.
     """
     flow_name = getattr(func, "__name__", func.__class__.__name__)
-    normalized_name = re.sub(r"\W", "_", flow_name)
-    if not normalized_name:
-        normalized_name = "flow"
-    if normalized_name[0].isdigit():
-        normalized_name = f"flow_{normalized_name}"
-    return f"__kitaru_pipeline_source_{normalized_name}"
+    return build_pipeline_source_alias(flow_name)
 
 
 def _register_pipeline_source_alias(

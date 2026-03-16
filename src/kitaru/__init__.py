@@ -42,6 +42,15 @@ from ._env import apply_env_translations
 
 apply_env_translations()
 
+# ZenML must be imported explicitly here so that its init_logging() runs
+# (installing console + storage handlers on the root logger) before we swap
+# the console handler with Kitaru's terminal handler.
+import zenml as _zenml  # noqa: F401
+
+from ._terminal_logging import install_terminal_log_intercept
+
+install_terminal_log_intercept()
+
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
 from kitaru.client import KitaruClient

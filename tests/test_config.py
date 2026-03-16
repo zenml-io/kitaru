@@ -347,6 +347,28 @@ def test_apply_env_translations_rejects_partial_token_only_config(
         apply_env_translations()
 
 
+def test_apply_env_translations_defaults_rich_traceback_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rich traceback should be disabled by default for Kitaru."""
+    monkeypatch.delenv("ZENML_ENABLE_RICH_TRACEBACK", raising=False)
+
+    apply_env_translations()
+
+    assert os.environ.get("ZENML_ENABLE_RICH_TRACEBACK") == "0"
+
+
+def test_apply_env_translations_preserves_explicit_rich_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit user opt-in should not be overridden."""
+    monkeypatch.setenv("ZENML_ENABLE_RICH_TRACEBACK", "1")
+
+    apply_env_translations()
+
+    assert os.environ.get("ZENML_ENABLE_RICH_TRACEBACK") == "1"
+
+
 def test_log_store_defaults_to_artifact_store() -> None:
     """Runtime logs should resolve to artifact-store by default."""
     snapshot = resolve_log_store()

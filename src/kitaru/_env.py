@@ -70,3 +70,6 @@ def apply_env_translations() -> None:
             "KITARU_AUTH_TOKEN is set but no server URL is available. "
             "Set KITARU_SERVER_URL (or ZENML_STORE_URL)."
         )
+
+    # Disable ZenML Rich traceback formatting — Kitaru handles its own output.
+    os.environ.setdefault("ZENML_ENABLE_RICH_TRACEBACK", "0")

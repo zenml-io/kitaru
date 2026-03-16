@@ -6,7 +6,6 @@ Successful outputs become artifacts; failures are recorded for retry.
 
 from __future__ import annotations
 
-import re
 import sys
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
@@ -20,6 +19,7 @@ from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
 from zenml.steps.step_decorator import step
 
+from kitaru._source_aliases import build_checkpoint_source_alias
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.runtime import (
     _checkpoint_scope,
@@ -45,12 +45,7 @@ _CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR = (
 def _checkpoint_source_alias_name(func: Callable[..., Any]) -> str:
     """Build a stable module-level alias for ZenML step source loading."""
     checkpoint_name = getattr(func, "__name__", func.__class__.__name__)
-    normalized_name = re.sub(r"\W", "_", checkpoint_name)
-    if not normalized_name:
-        normalized_name = "checkpoint"
-    if normalized_name[0].isdigit():
-        normalized_name = f"checkpoint_{normalized_name}"
-    return f"__kitaru_checkpoint_source_{normalized_name}"
+    return build_checkpoint_source_alias(checkpoint_name)
 
 
 def _register_checkpoint_source_alias(
