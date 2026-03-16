@@ -55,8 +55,16 @@ just test   # Run all tests
 just fix    # Auto-fix formatting and lint issues
 ```
 
-## Commits
+## Commits and PRs
 
 - Imperative mood, concise summary (50 chars or less)
 - Explain *why* in the body, reference issues when applicable
 - Bug fixes should include a regression test
+- Write clear PR titles (no `feat:`/`fix:` prefixes) and describe what the
+  changes do and why
+
+## Reporting Issues
+
+- **Bugs:** use the [bug report template](https://github.com/zenml-io/kitaru/issues/new?template=bug_report.md)
+- **Features:** use the [feature request template](https://github.com/zenml-io/kitaru/issues/new?template=feature_request.md)
+- **Security vulnerabilities:** see [SECURITY.md](SECURITY.md)

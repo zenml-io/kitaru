@@ -19,7 +19,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, local model aliases (`kitaru model register/list`), and env-first secret resolution for known providers
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
 - **Stack lifecycle** — `kitaru.create_stack()` / `kitaru.delete_stack()`, `kitaru stack create/delete/show`, YAML-backed `kitaru stack create -f stack.yaml`, automatic activation for new local stacks, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings. For an end-to-end walkthrough, see the [Kubernetes stacks guide](https://kitaru.ai/docs/getting-started/kubernetes-stacks).
-- **Execution CLI** — `kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
+- **Execution CLI** — `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
 - **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus Claude Code scoping and authoring skills available via the [plugin marketplace](https://github.com/zenml-io/kitaru-skills)
@@ -134,7 +134,6 @@ kitaru logout                 Log out and clear stored auth state
 kitaru status                 Show connection state and active stack
 kitaru info                   Show detailed environment information
 
-kitaru run <target> --args <json> [--stack <name>]
 kitaru executions get <exec_id>
 kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
 kitaru executions input <exec_id> --wait <wait_name_or_id> --value <json>
@@ -237,7 +236,7 @@ Typo checking uses [`typos`](https://github.com/crate-ci/typos) (config in `.typ
 
 ### Contributing
 
-The default branch is `develop` — all PRs should target it. `main` only contains released versions and is updated automatically by the release workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and how to submit changes. The default branch is `develop` — all PRs should target it.
 
 ### Claude Code skills
 
