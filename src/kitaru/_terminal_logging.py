@@ -19,7 +19,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from kitaru._source_aliases import normalize_aliases_in_text
 
@@ -27,7 +27,7 @@ from kitaru._source_aliases import normalize_aliases_in_text
 # Decision types
 # ---------------------------------------------------------------------------
 
-_TerminalKind = str  # "info" | "detail" | "success" | "warning" | "error"
+_TerminalKind = Literal["info", "detail", "success", "warning", "error"]
 
 
 @dataclass(frozen=True)
