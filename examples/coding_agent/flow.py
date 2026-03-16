@@ -1,3 +1,4 @@
+
 import click
 
 import kitaru
@@ -72,9 +73,7 @@ def coding_agent(task: str, cwd: str = ".") -> str:
 @click.option("--task", required=True, help="The coding task to execute")
 @click.option("--cwd", default=".", help="The current working directory")
 def main(task: str, cwd: str) -> None:
-    handle = coding_agent.run(task, cwd)
-    print(f"exec_id: {handle.exec_id}")
-    print(handle.wait())
+    coding_agent.run(task, cwd)
 
 
 if __name__ == "__main__":

@@ -63,8 +63,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       bash \
       ca-certificates \
       curl \
+      gcc \
       git \
       openssl \
+      python3-dev \
       tar \
     && rm -rf /var/lib/apt/lists/*
 

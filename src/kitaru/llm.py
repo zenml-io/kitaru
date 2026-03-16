@@ -370,6 +370,36 @@ def _llm_checkpoint_call(request: _LLMRequest) -> str:
     return _execute_llm_call(request)
 
 
+def resolve_model(model: str | None = None) -> tuple[str, dict[str, str]]:
+    """Resolve a kitaru model alias and return credentials for framework use.
+
+    Use this when integrating kitaru's model registry with external frameworks
+    (PydanticAI, LangChain, etc.) that accept a model identifier and read
+    credentials from environment variables.
+
+    Args:
+        model: A kitaru model alias, a concrete LiteLLM model identifier, or
+            ``None`` to use the default registered model.
+
+    Returns:
+        A ``(model_id, env_overlay)`` tuple. ``model_id`` is the resolved
+        LiteLLM model string. ``env_overlay`` is a dict of environment
+        variables that must be set for the provider SDK to authenticate
+        (empty when credentials are already in the environment).
+
+    Example::
+
+        from kitaru.llm import resolve_model
+
+        model_id, env = resolve_model("fast")
+        os.environ.update(env)
+        agent = Agent(model_id, ...)
+    """
+    selection = resolve_model_selection(model)
+    overlay, _source = _resolve_credential_overlay(selection)
+    return selection.resolved_model, overlay
+
+
 def llm(
     prompt: str | list[dict[str, Any]],
     *,

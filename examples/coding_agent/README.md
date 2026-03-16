@@ -29,8 +29,17 @@ before any files are modified.
 
 ```bash
 uv sync --extra pydantic-ai
-export ANTHROPIC_API_KEY=sk-ant-...
+
+# Register a model alias and store the API key as a kitaru secret
+kitaru secrets set anthropic-creds --ANTHROPIC_API_KEY=sk-ant-...
+kitaru model register coding-agent --model anthropic/claude-sonnet-4-20250514 --secret anthropic-creds
 ```
+
+The agent resolves the `coding-agent` alias via `kitaru.adapters.pydantic_ai.resolve_model()`,
+which pulls credentials from the linked secret and converts the model identifier
+to PydanticAI format automatically. You can also override
+with `CODING_AGENT_MODEL` (any alias or raw LiteLLM model identifier) or skip
+registration entirely by setting `ANTHROPIC_API_KEY` in the environment.
 
 ## Usage
 
@@ -56,10 +65,12 @@ kitaru executions replay <exec-id> --from plan --override 'checkpoint.research=.
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
-| `CODING_AGENT_MODEL` | No | Model override (default: `anthropic:claude-sonnet-4-20250514`) |
+| `CODING_AGENT_MODEL` | No | Model alias or LiteLLM identifier (default: `coding-agent` alias) |
 | `CODING_AGENT_READ_LIMIT` | No | Max lines per `read_file` call (default: `400`) |
 | `CODING_AGENT_MAX_CHARS` | No | Max chars returned per tool output (default: `12000`) |
+
+Credentials are resolved via kitaru's model registry (`kitaru model register ... --secret`).
+If no secret is linked, the agent falls back to provider env vars (e.g. `ANTHROPIC_API_KEY`).
 
 ## Latency notes
 

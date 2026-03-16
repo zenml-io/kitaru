@@ -73,7 +73,7 @@ from kitaru.errors import (
     KitaruWaitValidationError,
 )
 from kitaru.flow import FlowHandle, flow
-from kitaru.llm import llm
+from kitaru.llm import llm, resolve_model
 from kitaru.logging import log
 from kitaru.wait import wait
 
@@ -106,6 +106,7 @@ __all__ = [
     "llm",
     "load",
     "log",
+    "resolve_model",
     "save",
     "use_stack",
     "wait",

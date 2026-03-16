@@ -3,10 +3,12 @@
 import os
 import subprocess
 from pathlib import Path
+from typing import Any, Dict
 
 from pydantic_ai import Agent, RunContext
 
 from kitaru.adapters import pydantic_ai as kp
+from kitaru.adapters.pydantic_ai import resolve_model
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -220,9 +222,14 @@ CODER_PROMPT: str = (
 # Pre-built wrapped agents
 # ---------------------------------------------------------------------------
 
-MODEL: str = os.environ.get("CODING_AGENT_MODEL", "anthropic:claude-sonnet-4-20250514")
+MODEL: Any
+_env_overlay: Dict[str, str]
+MODEL, _env_overlay = resolve_model(
+    os.environ.get("CODING_AGENT_MODEL") or "coding-agent"
+)
+os.environ.update(_env_overlay)
 
-researcher = kp.wrap(
+researcher: Any = kp.wrap(
     Agent(
         MODEL,
         tools=[read_file, list_files, search_files],
@@ -232,7 +239,7 @@ researcher = kp.wrap(
     tool_capture_config={"mode": "metadata_only"},
 )
 
-planner = kp.wrap(
+planner: Any = kp.wrap(
     Agent(
         MODEL,
         system_prompt=PLANNER_PROMPT,
@@ -241,7 +248,7 @@ planner = kp.wrap(
     tool_capture_config={"mode": "metadata_only"},
 )
 
-coder = kp.wrap(
+coder: Any = kp.wrap(
     Agent(
         MODEL,
         tools=[
