@@ -21,7 +21,7 @@ from zenml.models import PipelineRunResponse, StepRunResponse
 
 from kitaru.errors import KitaruRuntimeError, KitaruStateError, KitaruUsageError
 
-_CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
+_CHECKPOINT_SOURCE_ALIAS_SUFFIX = "_checkpoint"
 _CHECKPOINT_OVERRIDE_PREFIX = "checkpoint."
 
 
@@ -47,8 +47,8 @@ class _OrderedCheckpoint:
 
 
 def _normalize_checkpoint_name(step_name: str) -> str:
-    if step_name.startswith(_CHECKPOINT_SOURCE_ALIAS_PREFIX):
-        return step_name.removeprefix(_CHECKPOINT_SOURCE_ALIAS_PREFIX)
+    if step_name.endswith(_CHECKPOINT_SOURCE_ALIAS_SUFFIX):
+        return step_name.removesuffix(_CHECKPOINT_SOURCE_ALIAS_SUFFIX)
     return step_name
 
 

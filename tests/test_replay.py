@@ -54,19 +54,19 @@ def _run(*steps: Any) -> PipelineRunResponse:
 def test_build_replay_plan_skips_steps_before_checkpoint_selector() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     fetch = _step(
-        name="__kitaru_checkpoint_source_fetch",
+        name="fetch_checkpoint",
         invocation_id="fetch",
         started_at=t0,
     )
     write = _step(
-        name="__kitaru_checkpoint_source_write",
+        name="write_checkpoint",
         invocation_id="write",
         started_at=t0 + timedelta(seconds=10),
         upstream_steps=["fetch"],
         inputs_v2={"research": [_input_spec("fetch", "output")]},
     )
     publish = _step(
-        name="__kitaru_checkpoint_source_publish",
+        name="publish_checkpoint",
         invocation_id="publish",
         started_at=t0 + timedelta(seconds=20),
         upstream_steps=["write"],
@@ -87,19 +87,19 @@ def test_checkpoint_override_anchors_frontier_at_source_step() -> None:
     """Checkpoint override frontier should use source.index, not consumer."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     fetch = _step(
-        name="__kitaru_checkpoint_source_fetch",
+        name="fetch_checkpoint",
         invocation_id="fetch",
         started_at=t0,
     )
     write = _step(
-        name="__kitaru_checkpoint_source_write",
+        name="write_checkpoint",
         invocation_id="write",
         started_at=t0 + timedelta(seconds=10),
         upstream_steps=["fetch"],
         inputs_v2={"research": [_input_spec("fetch", "output")]},
     )
     publish = _step(
-        name="__kitaru_checkpoint_source_publish",
+        name="publish_checkpoint",
         invocation_id="publish",
         started_at=t0 + timedelta(seconds=20),
         upstream_steps=["write"],
@@ -122,19 +122,19 @@ def test_skip_override_disjointness_is_enforced() -> None:
     """Steps with input overrides must not appear in steps_to_skip."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     fetch = _step(
-        name="__kitaru_checkpoint_source_fetch",
+        name="fetch_checkpoint",
         invocation_id="fetch",
         started_at=t0,
     )
     transform = _step(
-        name="__kitaru_checkpoint_source_transform",
+        name="transform_checkpoint",
         invocation_id="transform",
         started_at=t0 + timedelta(seconds=5),
         upstream_steps=["fetch"],
         inputs_v2={"data": [_input_spec("fetch", "output")]},
     )
     train = _step(
-        name="__kitaru_checkpoint_source_train",
+        name="train_checkpoint",
         invocation_id="train",
         started_at=t0 + timedelta(seconds=10),
         upstream_steps=["transform"],
@@ -166,12 +166,12 @@ def test_dag_ordering_not_timestamp_ordering() -> None:
 
     # validate starts first in wall clock, but depends on extract
     extract = _step(
-        name="__kitaru_checkpoint_source_extract",
+        name="extract_checkpoint",
         invocation_id="extract",
         started_at=t0 + timedelta(seconds=5),
     )
     validate = _step(
-        name="__kitaru_checkpoint_source_validate",
+        name="validate_checkpoint",
         invocation_id="validate",
         started_at=t0,  # earlier timestamp!
         upstream_steps=["extract"],
@@ -192,17 +192,17 @@ def test_parallel_branches_ordered_deterministically() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
 
     branch_a = _step(
-        name="__kitaru_checkpoint_source_branch_a",
+        name="branch_a_checkpoint",
         invocation_id="branch_a",
         started_at=t0 + timedelta(seconds=10),
     )
     branch_b = _step(
-        name="__kitaru_checkpoint_source_branch_b",
+        name="branch_b_checkpoint",
         invocation_id="branch_b",
         started_at=t0,
     )
     merge = _step(
-        name="__kitaru_checkpoint_source_merge",
+        name="merge_checkpoint",
         invocation_id="merge",
         started_at=t0 + timedelta(seconds=20),
         upstream_steps=["branch_a", "branch_b"],
@@ -224,7 +224,7 @@ def test_parallel_branches_ordered_deterministically() -> None:
 def test_wait_overrides_are_rejected() -> None:
     """Wait overrides should raise a clear error."""
     step = _step(
-        name="__kitaru_checkpoint_source_fetch",
+        name="fetch_checkpoint",
         invocation_id="fetch",
         started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
     )
@@ -239,7 +239,7 @@ def test_wait_overrides_are_rejected() -> None:
 
 def test_build_replay_plan_rejects_invalid_override_prefix() -> None:
     step = _step(
-        name="__kitaru_checkpoint_source_fetch",
+        name="fetch_checkpoint",
         invocation_id="fetch",
         started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
     )
@@ -254,7 +254,7 @@ def test_build_replay_plan_rejects_invalid_override_prefix() -> None:
 
 def test_build_replay_plan_rejects_unknown_selector() -> None:
     step = _step(
-        name="__kitaru_checkpoint_source_fetch",
+        name="fetch_checkpoint",
         invocation_id="fetch",
         started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
     )

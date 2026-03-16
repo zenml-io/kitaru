@@ -50,7 +50,7 @@ def _checkpoint_source_alias_name(func: Callable[..., Any]) -> str:
         normalized_name = "checkpoint"
     if normalized_name[0].isdigit():
         normalized_name = f"checkpoint_{normalized_name}"
-    return f"__kitaru_checkpoint_source_{normalized_name}"
+    return f"{normalized_name}_checkpoint"
 
 
 def _register_checkpoint_source_alias(

@@ -43,7 +43,7 @@ from kitaru._client._logs import (
     _step_log_fetch_order_key,
 )
 from kitaru._client._mappers import (
-    _CHECKPOINT_SOURCE_ALIAS_PREFIX,
+    _CHECKPOINT_SOURCE_ALIAS_SUFFIX,
     _PIPELINE_SOURCE_ALIAS_PREFIX,
     _WAIT_CONDITION_STATUS_PENDING,
     _checkpoint_lineage_key,
@@ -100,7 +100,7 @@ _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 # The direct imports above preserve `kitaru.client.*` patch targets; this tuple
 # simply keeps intentionally re-exported private names alive for linting.
 _CLIENT_FACADE_LINT_ANCHOR = (
-    _CHECKPOINT_SOURCE_ALIAS_PREFIX,
+    _CHECKPOINT_SOURCE_ALIAS_SUFFIX,
     _WAIT_CONDITION_STATUS_PENDING,
     _checkpoint_lineage_key,
     _coerce_log_level,

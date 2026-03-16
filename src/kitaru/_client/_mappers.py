@@ -37,15 +37,15 @@ from kitaru.errors import (
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
 
-_CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
+_CHECKPOINT_SOURCE_ALIAS_SUFFIX = "_checkpoint"
 _PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
 _WAIT_CONDITION_STATUS_PENDING = "pending"
 
 
 def _normalize_checkpoint_name(step_name: str) -> str:
     """Normalize internal checkpoint source alias names."""
-    if step_name.startswith(_CHECKPOINT_SOURCE_ALIAS_PREFIX):
-        return step_name.removeprefix(_CHECKPOINT_SOURCE_ALIAS_PREFIX)
+    if step_name.endswith(_CHECKPOINT_SOURCE_ALIAS_SUFFIX):
+        return step_name.removesuffix(_CHECKPOINT_SOURCE_ALIAS_SUFFIX)
     return step_name
 
 
@@ -573,7 +573,7 @@ def _map_execution(
 
 
 __all__ = [
-    "_CHECKPOINT_SOURCE_ALIAS_PREFIX",
+    "_CHECKPOINT_SOURCE_ALIAS_SUFFIX",
     "_PIPELINE_SOURCE_ALIAS_PREFIX",
     "_WAIT_CONDITION_STATUS_PENDING",
     "_checkpoint_lineage_key",

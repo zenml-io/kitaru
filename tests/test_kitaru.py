@@ -125,6 +125,7 @@ class TestPublicExports:
             "llm",
             "load",
             "log",
+            "resolve_model",
             "save",
             "use_stack",
             "wait",

@@ -55,7 +55,7 @@ _ALLOWED_ARTIFACT_TYPES = {
     "output",
     "blob",
 }
-_CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
+_CHECKPOINT_SOURCE_ALIAS_SUFFIX = "_checkpoint"
 
 
 @dataclass(frozen=True)
@@ -126,8 +126,8 @@ def _normalize_artifact_type(artifact_type: str) -> str:
 
 def _normalize_step_name(step_name: str) -> str:
     """Normalize ZenML step names back to user-facing checkpoint names."""
-    if step_name.startswith(_CHECKPOINT_SOURCE_ALIAS_PREFIX):
-        return step_name.removeprefix(_CHECKPOINT_SOURCE_ALIAS_PREFIX)
+    if step_name.endswith(_CHECKPOINT_SOURCE_ALIAS_SUFFIX):
+        return step_name.removesuffix(_CHECKPOINT_SOURCE_ALIAS_SUFFIX)
     return step_name
 
 

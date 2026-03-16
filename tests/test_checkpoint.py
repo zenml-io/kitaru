@@ -177,7 +177,7 @@ def test_checkpoint_registers_source_alias_for_step_reload() -> None:
 
     wrapped, captured = _build_checkpoint(my_example_checkpoint)
 
-    alias = "__kitaru_checkpoint_source_my_example_checkpoint"
+    alias = "my_example_checkpoint_checkpoint"
     step_obj = captured["step"]
     assert step_obj is not None
 

@@ -322,7 +322,7 @@ def test_load_resolves_checkpoint_output_with_source_alias_step_name() -> None:
     )
     hydrated_run = _hydrated_run(
         step_outputs={
-            "__kitaru_checkpoint_source_research": {
+            "research_checkpoint": {
                 "output": [step_output_artifact],
             }
         }
