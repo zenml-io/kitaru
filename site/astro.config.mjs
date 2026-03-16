@@ -10,6 +10,7 @@ export default defineConfig({
   trailingSlash: 'never',
   redirects: {
     '/banner': { status: 302, destination: '/' },
+    '/onepager': { status: 302, destination: '/' },
   },
   integrations: [sitemap(), mdx()],
   markdown: {
