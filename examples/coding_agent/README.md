@@ -11,13 +11,16 @@ research ──> plan ──> [human approval] ──> implement
    └── cached   └── cached                    └── replay from here
 ```
 
-Three checkpoints at natural phase boundaries:
+Three checkpoints at natural phase boundaries with distinct agent roles:
 
-| Checkpoint | What it does | Tools |
-|---|---|---|
-| `research` | Reads codebase, identifies relevant files and constraints | `read_file`, `list_files`, `search_files`, `run_command` |
-| `plan` | Creates numbered implementation plan | `read_file`, `list_files`, `search_files`, `run_command` |
-| `implement` | Executes the plan, makes code changes, verifies | `read_file`, `write_file`, `edit_file`, `list_files`, `search_files`, `run_command` |
+| Checkpoint | Agent | What it does | Tools |
+|---|---|---|---|
+| `research` | `researcher` | Reads codebase, identifies relevant files and constraints | `read_file`, `list_files`, `search_files` |
+| `plan` | `planner` | Creates numbered implementation plan from research output | *(none — works only from supplied analysis)* |
+| `implement` | `coder` | Executes the plan, makes code changes, verifies | `read_file`, `write_file`, `edit_file`, `list_files`, `search_files`, `run_command`, `git_diff` |
+
+The planner has **no tools** by design. It consumes the research analysis and
+produces a plan without re-reading the codebase, eliminating duplicated I/O.
 
 A `wait()` gate between planning and implementation lets a human review the plan
 before any files are modified.
@@ -29,14 +32,11 @@ uv sync --extra pydantic-ai
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-The `pydantic-ai` extra pins `anthropic<0.80` because pydantic-ai-slim 1.60 is
-incompatible with anthropic 0.80+ (UserLocation was renamed to BetaUserLocationParam).
-
 ## Usage
 
 ```bash
-# Run the agent
-uv run python -m examples.coding-agent.flow --task "Add type hints to utils.py" --cwd /path/to/repo
+# Run the agent (PYTHONPATH=. needed because uv run uses src layout)
+PYTHONPATH=. uv run python -m examples.coding_agent.flow --task "Add type hints to utils.py" --cwd /path/to/repo
 
 # Check execution status
 kitaru executions get <exec-id>
@@ -58,6 +58,31 @@ kitaru executions replay <exec-id> --from plan --override 'checkpoint.research=.
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | Claude API key |
 | `CODING_AGENT_MODEL` | No | Model override (default: `anthropic:claude-sonnet-4-20250514`) |
+| `CODING_AGENT_READ_LIMIT` | No | Max lines per `read_file` call (default: `400`) |
+| `CODING_AGENT_MAX_CHARS` | No | Max chars returned per tool output (default: `12000`) |
+
+## Latency notes
+
+This example is tuned to reduce latency and persistence overhead:
+
+- **Tool capture is `metadata_only`** for all agents. Tool name, timing, and
+  sequence are recorded, but actual file contents and grep results are not
+  persisted as artifacts. Change to `{"mode": "full"}` in `utils.py` if you
+  need full artifact replay.
+
+- **The planner has no tools.** Earlier versions used the same tool-enabled
+  reader agent for both research and planning, which allowed the planner to
+  re-read the entire codebase. The planner now receives research output as
+  text and reasons over it directly.
+
+- **`read_file` defaults to 400 lines** (down from 2000) and tool output is
+  capped at 12,000 chars (down from 30,000). Both are env-configurable.
+
+- **`git_diff` is available to the coder** as a cheaper alternative to
+  re-reading entire files after making edits.
+
+- **Research context is passed to the coder** alongside the plan, reducing
+  the need for the coder to rediscover file locations via search.
 
 ## Future: parallel sub-agents
 

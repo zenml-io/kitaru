@@ -34,6 +34,7 @@ local = [
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=0.2.0",
+    "anthropic<0.80",
 ]
 mcp = [
     "mcp>=1.26.0",
@@ -114,6 +115,12 @@ unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
 include = ["scripts/r2-upload.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+include = ["examples/coding_agent/flow.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
