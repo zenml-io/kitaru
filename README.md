@@ -22,7 +22,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Execution CLI** — `kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
-- **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus Claude Code scoping and authoring skills available via the plugin marketplace
+- **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus Claude Code scoping and authoring skills available via the [plugin marketplace](https://github.com/zenml-io/kitaru-skills)
 
 ### SDK primitives
 

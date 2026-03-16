@@ -48,7 +48,7 @@ The Kitaru skills are published as a Claude Code plugin. Add the marketplace
 and install with two commands:
 
 ```bash
-/plugin marketplace add zenml-io/kitaru
+/plugin marketplace add zenml-io/kitaru-skills
 /plugin install kitaru@kitaru
 ```
 
@@ -62,10 +62,10 @@ If you prefer to copy the skill files directly:
 ```bash
 mkdir -p .claude/skills/kitaru-scoping .claude/skills/kitaru-authoring
 
-curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru/develop/.claude-plugin/skills/kitaru-scoping/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru-skills/main/skills/kitaru-scoping/SKILL.md \
   -o .claude/skills/kitaru-scoping/SKILL.md
 
-curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru/develop/.claude-plugin/skills/kitaru-authoring/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/zenml-io/kitaru-skills/main/skills/kitaru-authoring/SKILL.md \
   -o .claude/skills/kitaru-authoring/SKILL.md
 ```
 

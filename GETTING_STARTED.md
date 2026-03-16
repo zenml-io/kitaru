@@ -201,12 +201,17 @@ This is a great way to explore Kitaru interactively — run a few
 examples first, then ask your AI assistant questions about what
 happened.
 
-### Claude Code skill
+### Claude Code skills
 
-If you use Claude Code, Kitaru ships a `kitaru-authoring` skill in
-`.claude-plugin/skills/` that teaches Claude how to write flows,
-checkpoints, waits, and use the full SDK. Just mention Kitaru
-concepts and Claude Code will pick it up automatically.
+If you use Claude Code, install the Kitaru skills plugin:
+
+```bash
+/plugin marketplace add zenml-io/kitaru-skills
+/plugin install kitaru@kitaru
+```
+
+This adds scoping and authoring skills that teach Claude how to design and
+build durable workflows. See the [Claude Code Skills docs](https://kitaru.ai/docs/agent-integrations/claude-code-skill) for details.
 
 ## Option B: Run the Kitaru server (Docker)
 

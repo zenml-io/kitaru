@@ -32,9 +32,6 @@ scripts/              # Doc generation + site merge scripts
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
-.claude-plugin/       # Claude Code plugin marketplace + skill distribution
-  skills/kitaru-scoping/    # Kitaru scoping skill (SKILL.md)
-  skills/kitaru-authoring/  # Kitaru authoring skill (SKILL.md)
 docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing stack)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
