@@ -1113,8 +1113,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=0.2.0" },
     { name = "rich", specifier = ">=12.0.0" },
-    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=5feda8e164b1f8a24a3e412ae25cf28e6461c22d" },
-    { name = "zenml", extras = ["local"], marker = "extra == 'local'", git = "https://github.com/zenml-io/zenml.git?rev=5feda8e164b1f8a24a3e412ae25cf28e6461c22d" },
+    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=26557e2fd7390946aaf0f4cd21fdc101f33b8031" },
+    { name = "zenml", extras = ["local"], marker = "extra == 'local'", git = "https://github.com/zenml-io/zenml.git?rev=26557e2fd7390946aaf0f4cd21fdc101f33b8031" },
 ]
 provides-extras = ["local", "pydantic-ai", "mcp"]
 
@@ -1130,7 +1130,7 @@ dev = [
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
-    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=5feda8e164b1f8a24a3e412ae25cf28e6461c22d" },
+    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=26557e2fd7390946aaf0f4cd21fdc101f33b8031" },
 ]
 
 [[package]]
@@ -2784,7 +2784,7 @@ wheels = [
 [[package]]
 name = "zenml"
 version = "0.94.0"
-source = { git = "https://github.com/zenml-io/zenml.git?rev=5feda8e164b1f8a24a3e412ae25cf28e6461c22d#5feda8e164b1f8a24a3e412ae25cf28e6461c22d" }
+source = { git = "https://github.com/zenml-io/zenml.git?rev=26557e2fd7390946aaf0f4cd21fdc101f33b8031#26557e2fd7390946aaf0f4cd21fdc101f33b8031" }
 dependencies = [
     { name = "asgiref" },
     { name = "click" },
