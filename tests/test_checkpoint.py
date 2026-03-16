@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 from zenml.config.retry_config import StepRetryConfig
+from zenml.enums import StepType
 
 from kitaru.checkpoint import checkpoint
 from kitaru.errors import KitaruContextError, KitaruUsageError
@@ -70,9 +71,15 @@ def _build_checkpoint(
     """Create a checkpoint with a fake ZenML step decorator."""
     captured: dict[str, Any] = {}
 
-    def _fake_step(*, retry: StepRetryConfig | None, extra: dict[str, Any]) -> Any:
+    def _fake_step(
+        *,
+        retry: StepRetryConfig | None,
+        extra: dict[str, Any],
+        step_type: StepType | None = None,
+    ) -> Any:
         captured["retry"] = retry
         captured["extra"] = extra
+        captured["step_type"] = step_type
 
         def _decorate(step_func: Callable[..., Any]) -> _FakeStep:
             fake_step = _FakeStep(step_func)
@@ -127,12 +134,41 @@ def test_checkpoint_maps_retries_and_type_to_step_config() -> None:
     assert captured["extra"] == {
         "kitaru": {"boundary": "checkpoint", "type": "tool_call"}
     }
+    assert captured["step_type"] == StepType.TOOL_CALL
     assert callable(wrapped)
 
 
 def test_checkpoint_allows_zero_retries_without_retry_config() -> None:
     _, captured = _build_checkpoint(lambda: "ok", retries=0)
     assert captured["retry"] is None
+
+
+def test_well_known_types_map_to_step_type() -> None:
+    _, llm_captured = _build_checkpoint(lambda: "ok", checkpoint_type="llm_call")
+    assert llm_captured["step_type"] == StepType.LLM_CALL
+    assert llm_captured["extra"] == {
+        "kitaru": {"boundary": "checkpoint", "type": "llm_call"}
+    }
+
+    _, tool_captured = _build_checkpoint(lambda: "ok", checkpoint_type="tool_call")
+    assert tool_captured["step_type"] == StepType.TOOL_CALL
+    assert tool_captured["extra"] == {
+        "kitaru": {"boundary": "checkpoint", "type": "tool_call"}
+    }
+
+
+def test_custom_type_stays_in_extra_only() -> None:
+    _, captured = _build_checkpoint(lambda: "ok", checkpoint_type="retrieval")
+    assert captured["step_type"] is None
+    assert captured["extra"] == {
+        "kitaru": {"boundary": "checkpoint", "type": "retrieval"}
+    }
+
+
+def test_none_type_produces_no_step_type() -> None:
+    _, captured = _build_checkpoint(lambda: "ok", checkpoint_type=None)
+    assert captured["step_type"] is None
+    assert "type" not in captured["extra"]["kitaru"]
 
 
 def test_checkpoint_registers_source_alias_for_step_reload() -> None:

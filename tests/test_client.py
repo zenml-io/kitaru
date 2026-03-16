@@ -89,6 +89,7 @@ class _DummyStep:
         self.parent_step_ids: list[UUID] = []
         self.outputs = outputs
         self.spec = spec
+        self.type = None
         self.exception_info = (
             SimpleNamespace(traceback=exception_traceback)
             if exception_traceback is not None

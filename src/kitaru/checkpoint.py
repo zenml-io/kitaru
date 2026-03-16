@@ -14,6 +14,7 @@ from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 
 from zenml.config.retry_config import StepRetryConfig
+from zenml.enums import StepType
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
@@ -87,6 +88,19 @@ def _build_checkpoint_extra(checkpoint_type: str | None) -> dict[str, Any]:
     return {"kitaru": payload}
 
 
+_KNOWN_STEP_TYPES: dict[str, StepType] = {
+    "llm_call": StepType.LLM_CALL,
+    "tool_call": StepType.TOOL_CALL,
+}
+
+
+def _to_step_type(checkpoint_type: str | None) -> StepType | None:
+    """Map well-known checkpoint types to ZenML's StepType enum."""
+    if checkpoint_type is None:
+        return None
+    return _KNOWN_STEP_TYPES.get(checkpoint_type)
+
+
 def _wrap_entrypoint(
     func: Callable[..., Any],
     *,
@@ -151,6 +165,7 @@ class _CheckpointDefinition:
         self._step = step(
             retry=_to_retry_config(self._default_retries),
             extra=_build_checkpoint_extra(checkpoint_type),
+            step_type=_to_step_type(checkpoint_type),
         )(wrapped_entrypoint)
         _register_checkpoint_source_alias(
             func=func,

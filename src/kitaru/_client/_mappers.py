@@ -303,6 +303,8 @@ def _map_checkpoint_call(
     if step.original_step_run_id is not None:
         original_call_id = str(step.original_step_run_id)
 
+    checkpoint_type = step.type.value if step.type else None
+
     return CheckpointCall(
         call_id=str(step.id),
         name=producing_call,
@@ -315,6 +317,7 @@ def _map_checkpoint_call(
         failure=failure,
         attempts=attempts,
         artifacts=artifacts,
+        checkpoint_type=checkpoint_type,
     )
 
 

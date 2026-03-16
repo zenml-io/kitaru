@@ -108,6 +108,7 @@ class CheckpointCall:
     failure: FailureInfo | None
     attempts: list[CheckpointAttempt]
     artifacts: list[ArtifactRef]
+    checkpoint_type: str | None = None
 
 
 @dataclass(frozen=True)
