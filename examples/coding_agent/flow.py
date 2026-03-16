@@ -57,14 +57,11 @@ def coding_agent(task: str, cwd: str = ".") -> str:
     analysis = research(task, cwd)
     implementation_plan = plan(task, analysis, cwd)
 
-    approved = kitaru.wait(
-        schema=bool,
+    kitaru.wait(
         name="approve_plan",
         question=f"Approve this plan?\n\n{implementation_plan}",
         metadata={"task": task},
     )
-    if not approved:
-        return f"Plan rejected for: {task}"
 
     return implement(task, analysis, implementation_plan, cwd)
 
