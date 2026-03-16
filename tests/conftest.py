@@ -131,6 +131,11 @@ def isolated_zenml_global_config(
     GlobalConfiguration._reset_instance()
     Client._reset_instance()
 
+    # Eagerly initialize ZenML's store and active stack so that tests
+    # exercising flows or the client never hit the unsynchronized lazy-init
+    # race in GlobalConfiguration.zen_store / get_active_stack_id().
+    _ = Client().active_stack_model
+
     yield config_dir
 
     Client._reset_instance()
