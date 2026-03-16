@@ -333,7 +333,7 @@ def _map_pending_wait(wait_condition: Any) -> PendingWait:
         name=wait_condition.name,
         question=wait_condition.question,
         schema=schema,
-        metadata=dict(wait_condition.wait_metadata),
+        metadata=dict(wait_condition.run_metadata),
         entered_waiting_at=getattr(wait_condition, "created", None),
     )
 

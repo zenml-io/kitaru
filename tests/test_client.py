@@ -159,7 +159,7 @@ def _dummy_wait_condition(
         name=name,
         question=question,
         data_schema=data_schema,
-        wait_metadata=metadata or {},
+        run_metadata=metadata or {},
         created=None,
     )
 
