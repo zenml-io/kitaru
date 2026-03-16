@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+- `kitaru run` CLI command and its live terminal renderer; flow execution is now started via Python (`my_flow.run(...)` / `my_flow.deploy(...)`) or MCP tools, while the CLI focuses on execution lifecycle management via `kitaru executions ...`
+- `kitaru.terminal` module (run-only Rich Live renderer and helpers)
+- Runtime submission observer plumbing (`_submission_observer`, `_notify_submission_observer`) from `kitaru.runtime` and `kitaru.flow`
+
 ### Changed
 - Moved Claude Code skills (kitaru-scoping, kitaru-authoring) to dedicated repository: [zenml-io/kitaru-skills](https://github.com/zenml-io/kitaru-skills)
 - Config and stack helpers now raise Kitaru-specific exception subclasses instead of raw `ValueError` / `RuntimeError`, while preserving compatibility through inheritance
@@ -36,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Local stack lifecycle support across SDK, CLI, and MCP: `kitaru.create_stack()`, `kitaru.delete_stack()`, `kitaru stack create/delete`, and MCP `manage_stack`
 - New local-stack semantics: `kitaru stack create <name>` auto-activates by default, `--no-activate` leaves the current stack unchanged, and forced active-stack deletion falls back to the default stack
 - `kitaru stack show <name-or-id>` for inspecting one stack in Kitaru vocabulary, including translated runner/storage/image-registry component details in both text and JSON output
-- Kitaru-branded live terminal output: `kitaru run` now shows a Rich Live checkpoint-by-checkpoint progress display during interactive sessions, replacing ZenML's console output with Kitaru-themed visuals
+- Runtime log retrieval with Rich-based checkpoint-by-checkpoint progress display for execution inspection
 - Runtime log retrieval lane: `KitaruClient.executions.logs(...)`, `kitaru executions logs` (with `--follow`, `--grouped`, `-v`/`-vv`, and JSONL output), and MCP `get_execution_logs`
 - Runtime log retrieval docs updates across logging/log-store guides plus a new getting-started page for execution logs
 - Production Docker image (`docker/Dockerfile`): multi-stage server image based on ZenML server architecture with all cloud plugins, published as `zenmldocker/kitaru` during releases
@@ -61,8 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Getting Started docs page for the PydanticAI adapter (`/getting-started/pydantic-ai-adapter`)
 - Typed Kitaru exception hierarchy (`KitaruError`, `KitaruContextError`, `KitaruStateError`, `KitaruExecutionError`, `KitaruUserCodeError`, `KitaruDivergenceError`, `KitaruFeatureNotAvailableError`, and related types)
 - Failure journaling in `KitaruClient`: structured execution-level failure details (`execution.failure`) and per-checkpoint retry attempt history (`checkpoint.attempts`)
-- Phase 14 execution CLI commands: `kitaru run`, `kitaru executions get/list/retry/cancel`
-- `kitaru run` JSON argument parsing for flow input kwargs and optional `--stack` deploy mode
+- Phase 14 execution CLI commands: `kitaru executions get/list/retry/cancel`
 - Getting Started error-handling docs page (`/getting-started/error-handling`)
 - `kitaru.llm()` implementation with LiteLLM backend, context-aware flow/checkpoint behavior, prompt/response artifact capture, and automatic usage/cost/latency metadata logging
 - Local model alias registry persisted in Kitaru's user config file, including default alias behavior and model-resolution helpers for `kitaru.llm()`

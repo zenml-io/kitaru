@@ -35,7 +35,6 @@ Current status:
 The CLI also supports global runtime log-store configuration via
 ``kitaru log-store set/show/reset``, stack lifecycle via
 ``kitaru stack list/current/use/create/delete``, and execution lifecycle commands via
-``kitaru run`` plus
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
 

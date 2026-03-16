@@ -115,10 +115,6 @@ value = context_artifact.load()
 ## Manage executions from the CLI
 
 ```bash
-# Start a flow from a module/file target
-kitaru run agent.py:content_pipeline --args '{"topic":"AI safety"}'
-kitaru run agent.py:content_pipeline --stack prod --args '{"topic":"AI safety"}'
-
 # Inspect and filter executions
 kitaru executions get kr-a8f3c2
 kitaru executions get kr-a8f3c2 --output json

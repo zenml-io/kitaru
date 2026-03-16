@@ -185,7 +185,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | Stack lifecycle (`list_stacks` / `current_stack` / `use_stack` / `create_stack` / `delete_stack`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
 | `KitaruClient` (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifact browsing) | Implemented |
-| Execution CLI (`kitaru run`, `kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |
+| Execution CLI (`kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
 | `KitaruClient.executions.replay()` | Implemented |
 

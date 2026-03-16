@@ -5,7 +5,7 @@ description: Create, inspect, use, and clean up Kubernetes-backed stacks in Kita
 
 This guide shows the practical workflow for Kubernetes-backed stacks in Kitaru: create one, inspect it, decide whether it should become your default, and clean it up safely when you are done.
 
-Use this page for the story and the happy path. For exact flag syntax and every supported option, use the generated CLI reference for [`kitaru stack create`](/cli/stack/create), [`kitaru stack show`](/cli/stack/show), [`kitaru stack delete`](/cli/stack/delete), and [`kitaru run`](/cli/run).
+Use this page for the story and the happy path. For exact flag syntax and every supported option, use the generated CLI reference for [`kitaru stack create`](/cli/stack/create), [`kitaru stack show`](/cli/stack/show), and [`kitaru stack delete`](/cli/stack/delete).
 
 ## Before you start
 
@@ -153,16 +153,16 @@ This changes the stack Kitaru falls back to when no higher-precedence override i
 
 ### Use it only for one execution
 
-```bash
-kitaru run path/to/flow.py:my_flow --stack prod-k8s
+```python
+my_flow.run(stack="prod-k8s")
 ```
 
-This uses `prod-k8s` for that one execution only.
+This uses `prod-k8s` for that one execution only. You can also pass it via `.deploy(stack="prod-k8s")`.
 
 The important distinction is:
 
 - `kitaru stack use ...` changes your persisted fallback stack
-- `kitaru run ... --stack ...` changes only that one execution
+- `.run(stack=...)` / `.deploy(stack=...)` changes only that one execution
 - flow-level and runtime-level stack overrides also remain temporary
 
 So if you do a one-off remote run, `kitaru stack current` should still show the same persisted default afterward.
@@ -171,7 +171,6 @@ If you want the full precedence story, see:
 
 - [Configuration](/getting-started/configuration)
 - [Flows](/concepts/flows)
-- [`kitaru run`](/cli/run)
 - [`kitaru stack use`](/cli/stack/use)
 
 ## Delete safely
@@ -213,4 +212,3 @@ When you need exact command syntax instead of the walkthrough, jump to:
 - [`kitaru stack show`](/cli/stack/show)
 - [`kitaru stack use`](/cli/stack/use)
 - [`kitaru stack delete`](/cli/stack/delete)
-- [`kitaru run`](/cli/run)

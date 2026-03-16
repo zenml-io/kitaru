@@ -58,7 +58,6 @@ class TestBuildCommandTree:
             "login",
             "logout",
             "model",
-            "run",
             "secrets",
             "stack",
             "status",
@@ -147,7 +146,6 @@ class TestBuildCommandTree:
         tree = build_command_tree(app)
 
         login = _find_command(tree, "login")
-        run = _find_command(tree, "run")
         get = _find_command(tree, "executions", "get")
         secrets_set = _find_command(tree, "secrets", "set")
         stack_create = _find_command(tree, "stack", "create")
@@ -155,9 +153,6 @@ class TestBuildCommandTree:
 
         assert login.usage == "kitaru login SERVER [OPTIONS]"
         assert login.parameters[0].names == ["SERVER", "--server-url"]
-
-        assert run.usage == "kitaru run TARGET [OPTIONS]"
-        assert run.parameters[0].names == ["TARGET"]
 
         assert get.usage.startswith("kitaru executions get EXEC_ID")
         assert get.parameters[0].names == ["EXEC_ID"]
@@ -315,7 +310,6 @@ class TestWriteDocsTree:
             "login",
             "logout",
             "model",
-            "run",
             "secrets",
             "stack",
             "status",
@@ -358,7 +352,7 @@ class TestWriteDocsTree:
         tree = build_command_tree(app)
         files = write_docs_tree(tree, output_dir)
 
-        for command in ("info", "login", "logout", "run", "status"):
+        for command in ("info", "login", "logout", "status"):
             assert (output_dir / f"{command}.mdx").exists()
             assert f"{command}.mdx" in files
             # No directory or meta.json for leaf commands
@@ -389,8 +383,8 @@ class TestWriteDocsTree:
         tree = build_command_tree(app)
         files = write_docs_tree(tree, output_dir)
 
-        run_page = (output_dir / "run.mdx").read_text()
-        assert "`--output`, `-o`" in run_page
+        status_page = (output_dir / "status.mdx").read_text()
+        assert "`--output`, `-o`" in status_page
 
         # executions, log-store, model, secrets, and stack have nested subcommands.
         for command in ("executions", "log-store", "model", "secrets", "stack"):
@@ -444,10 +438,6 @@ class TestWriteDocsTree:
         login_content = (output_dir / "login.mdx").read_text()
         assert "kitaru login SERVER [OPTIONS]" in login_content
         assert "| `SERVER`, `--server-url` | `str` | Yes |  |" in login_content
-
-        run_content = (output_dir / "run.mdx").read_text()
-        assert "kitaru run TARGET [OPTIONS]" in run_content
-        assert "| `TARGET` | `str` | Yes |  |" in run_content
 
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content

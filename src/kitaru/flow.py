@@ -45,7 +45,7 @@ from kitaru.errors import (
     traceback_last_line,
 )
 from kitaru.replay import build_replay_plan
-from kitaru.runtime import _flow_scope, _notify_submission_observer
+from kitaru.runtime import _flow_scope
 
 ImageSetting = ImageInput
 _STACK_BINDING_LOCK = threading.RLock()
@@ -121,7 +121,6 @@ def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
 
     @wraps(func)
     def _wrapped(*args: Any, **kwargs: Any) -> Any:
-        _notify_submission_observer()
         with _flow_scope(name=flow_name):
             return func(*args, **kwargs)
 

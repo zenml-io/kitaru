@@ -7,7 +7,6 @@ import json
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -17,7 +16,6 @@ from kitaru.cli import (
     RuntimeSnapshot,
     _build_runtime_snapshot,
     _describe_local_server,
-    _load_flow_target,
     _logout_current_connection,
     _parse_secret_assignments,
     app,
@@ -215,7 +213,6 @@ def test_help_flag_lists_available_commands(
         "secrets",
         "model",
         "executions",
-        "run",
     ):
         assert command in output
 
@@ -901,233 +898,6 @@ def test_executions_cancel_reports_success(
     output = capsys.readouterr().out
     assert "Cancelled execution: kr-123" in output
     assert "Status: cancelled" in output
-
-
-def _write_flow_target_module(path: Path, *, marker: str) -> None:
-    """Create a minimal flow target module for direct loader tests."""
-    path.write_text(
-        "class _FakeFlow:\n"
-        f"    marker = {marker!r}\n"
-        "    def run(self, *args, **kwargs):\n"
-        "        return None\n"
-        "    def deploy(self, *args, **kwargs):\n"
-        "        return None\n\n"
-        "demo_flow = _FakeFlow()\n",
-        encoding="utf-8",
-    )
-
-
-def test_load_flow_target_supports_module_paths(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module_name = f"temp_flow_module_{tmp_path.name.replace('-', '_')}"
-    module_path = tmp_path / f"{module_name}.py"
-    _write_flow_target_module(module_path, marker="module")
-    monkeypatch.syspath_prepend(str(tmp_path))
-
-    flow_target = _load_flow_target(f"{module_name}:demo_flow")
-
-    assert cast(Any, flow_target).marker == "module"
-
-
-def test_load_flow_target_supports_python_file_paths(tmp_path: Path) -> None:
-    module_path = tmp_path / "demo_flow.py"
-    _write_flow_target_module(module_path, marker="file")
-
-    flow_target = _load_flow_target(f"{module_path}:demo_flow")
-
-    assert cast(Any, flow_target).marker == "file"
-
-
-def test_load_flow_target_delegates_to_shared_module_loader() -> None:
-    fake_flow = SimpleNamespace(
-        marker="patched",
-        run=Mock(),
-        deploy=Mock(),
-    )
-    fake_module = SimpleNamespace(demo_flow=fake_flow)
-
-    with patch(
-        "kitaru._flow_loading._load_module_from_python_path",
-        return_value=fake_module,
-    ) as mock_loader:
-        flow_target = _load_flow_target("/tmp/demo_flow.py:demo_flow")
-
-    mock_loader.assert_called_once_with(
-        "/tmp/demo_flow.py", module_name_prefix="_kitaru_cli_run_target_"
-    )
-    assert flow_target is fake_flow
-
-
-def test_load_flow_target_reports_missing_module() -> None:
-    with pytest.raises(ValueError, match="Unable to import flow module") as exc_info:
-        _load_flow_target("definitely_missing_flow_module:demo_flow")
-
-    assert "definitely_missing_flow_module" in str(exc_info.value)
-
-
-def test_load_flow_target_reports_missing_attribute(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module_name = f"temp_missing_attr_{tmp_path.name.replace('-', '_')}"
-    module_path = tmp_path / f"{module_name}.py"
-    module_path.write_text("other_name = object()\n", encoding="utf-8")
-    monkeypatch.syspath_prepend(str(tmp_path))
-
-    with pytest.raises(ValueError, match="has no attribute `demo_flow`"):
-        _load_flow_target(f"{module_name}:demo_flow")
-
-
-def test_load_flow_target_rejects_invalid_target_format() -> None:
-    with pytest.raises(
-        ValueError, match="must use `<module_or_file>:<flow_name>` format"
-    ):
-        _load_flow_target("content_pipeline")
-
-
-def test_run_starts_flow_with_json_args(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`kitaru run` should load a flow and call `.run()` with JSON args."""
-    fake_flow = SimpleNamespace(
-        run=Mock(return_value=SimpleNamespace(exec_id="kr-501")),
-        deploy=Mock(),
-    )
-    fake_client = Mock()
-    fake_client.executions.get.return_value = _execution_stub(
-        exec_id="kr-501",
-        flow_name="content_pipeline",
-        status=ExecutionStatus.RUNNING,
-    )
-
-    with (
-        patch("kitaru.cli._load_flow_target", return_value=fake_flow),
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "run",
-                "agent.py:content_pipeline",
-                "--args",
-                '{"topic": "AI safety"}',
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    fake_flow.run.assert_called_once_with(topic="AI safety")
-    fake_flow.deploy.assert_not_called()
-    fake_client.executions.get.assert_called_once_with("kr-501")
-    output = capsys.readouterr().out
-    assert "Started flow execution: kr-501" in output
-    assert "Kitaru run" in output
-    assert "Target: agent.py:content_pipeline" in output
-    assert "Invocation: run" in output
-
-
-def test_run_reports_exec_id_when_detail_lookup_fails(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`kitaru run` should still succeed if post-launch inspection fails."""
-    fake_flow = SimpleNamespace(
-        run=Mock(return_value=SimpleNamespace(exec_id="kr-777")),
-        deploy=Mock(),
-    )
-    fake_client = Mock()
-    fake_client.executions.get.side_effect = RuntimeError("store unavailable")
-
-    with (
-        patch("kitaru.cli._load_flow_target", return_value=fake_flow),
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "run",
-                "agent.py:content_pipeline",
-                "--args",
-                '{"topic": "AI safety"}',
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    fake_flow.run.assert_called_once_with(topic="AI safety")
-    fake_client.executions.get.assert_called_once_with("kr-777")
-    output = capsys.readouterr().out
-    assert "Started flow execution: kr-777" in output
-    assert "Execution ID: kr-777" in output
-    assert "Warning: Execution started successfully" in output
-
-
-def test_run_uses_deploy_when_stack_is_provided(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`kitaru run --stack` should call `.deploy(...)` on the flow."""
-    fake_flow = SimpleNamespace(
-        run=Mock(),
-        deploy=Mock(return_value=SimpleNamespace(exec_id="kr-601")),
-    )
-    fake_client = Mock()
-    fake_client.executions.get.return_value = _execution_stub(
-        exec_id="kr-601",
-        flow_name="content_pipeline",
-        status=ExecutionStatus.RUNNING,
-        stack_name="prod",
-    )
-
-    with (
-        patch("kitaru.cli._load_flow_target", return_value=fake_flow),
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "run",
-                "agent.py:content_pipeline",
-                "--stack",
-                "prod",
-                "--args",
-                '{"topic": "AI safety"}',
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    fake_flow.run.assert_not_called()
-    fake_flow.deploy.assert_called_once_with(stack="prod", topic="AI safety")
-    output = capsys.readouterr().out
-    assert "Invocation: deploy" in output
-
-
-def test_run_rejects_non_object_json_args(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`kitaru run` should fail when `--args` is valid JSON but not an object."""
-    fake_flow = SimpleNamespace(
-        start=Mock(),
-        deploy=Mock(),
-    )
-
-    with (
-        patch("kitaru.cli._load_flow_target", return_value=fake_flow),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(["run", "agent.py:content_pipeline", "--args", "[]"])
-
-    assert exc_info.value.code == 1
-    assert "must be a JSON object" in capsys.readouterr().err
-
-
-def test_run_rejects_invalid_target_format(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`kitaru run` should fail if target misses the `module:flow` separator."""
-    with pytest.raises(SystemExit) as exc_info:
-        app(["run", "content_pipeline"])
-
-    assert exc_info.value.code == 1
-    assert "must use `<module_or_file>:<flow_name>` format" in capsys.readouterr().err
 
 
 def test_login_delegates_to_connect(
@@ -3217,42 +2987,6 @@ def test_info_shows_project_override_when_set(
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
     assert "Project override: staging-project" in output
-
-
-def test_run_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru run --output json` should emit a structured result."""
-    fake_flow = SimpleNamespace(
-        run=Mock(return_value=SimpleNamespace(exec_id="kr-777"))
-    )
-    fake_client = Mock()
-    fake_client.executions.get.return_value = _execution_stub(
-        exec_id="kr-777",
-        flow_name="content_pipeline",
-        status=ExecutionStatus.RUNNING,
-    )
-
-    with (
-        patch("kitaru.cli._load_flow_target", return_value=fake_flow),
-        patch("kitaru.cli.KitaruClient", return_value=fake_client),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "run",
-                "agent.py:content_pipeline",
-                "--args",
-                '{"topic": "AI safety"}',
-                "--output",
-                "json",
-            ]
-        )
-
-    assert exc_info.value.code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["command"] == "run"
-    assert payload["item"]["exec_id"] == "kr-777"
-    assert payload["item"]["invocation"] == "run"
-    assert payload["item"]["execution"]["status"] == "running"
 
 
 def test_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:

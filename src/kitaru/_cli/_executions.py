@@ -1,16 +1,13 @@
-"""Execution and run CLI commands."""
+"""Execution CLI commands."""
 
 from __future__ import annotations
 
 import json
 from datetime import datetime
-from types import ModuleType
 from typing import Annotated, Any
 
 from cyclopts import Parameter
 
-from kitaru import _flow_loading
-from kitaru._flow_loading import _FlowHandleLike, _FlowTarget
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.client import Execution, ExecutionStatus, LogEntry
@@ -19,11 +16,8 @@ from kitaru.inspection import (
     serialize_execution_summary,
     serialize_log_entry,
 )
-from kitaru.runtime import _submission_observer
-from kitaru.terminal import LiveExecutionRenderer, _suppress_zenml_console
-from kitaru.terminal import is_interactive as is_terminal_interactive
 
-from . import app, executions_app
+from . import executions_app
 from ._helpers import (
     OutputFormatOption,
     _emit_json_item,
@@ -36,22 +30,6 @@ from ._helpers import (
     _print_success,
     _resolve_output_format,
 )
-
-
-def _load_module_from_python_path(module_path: str) -> ModuleType:
-    """Load a Python module from a filesystem path."""
-    return _flow_loading._load_module_from_python_path(
-        module_path,
-        module_name_prefix="_kitaru_cli_run_target_",
-    )
-
-
-def _load_flow_target(target: str) -> _FlowTarget:
-    """Load `<module_or_file>:<flow_name>` into a runnable flow object."""
-    return _flow_loading._load_flow_target(
-        target,
-        module_name_prefix="_kitaru_cli_run_target_",
-    )
 
 
 def _parse_json_value(raw_value: str, *, option_name: str) -> Any:
@@ -145,69 +123,6 @@ def _execution_list_table(executions: list[Execution]) -> list[list[str]]:
         ]
         for execution in executions
     ]
-
-
-def _run_rows(
-    *,
-    target: str,
-    stack: str | None,
-    execution: Execution,
-) -> list[tuple[str, str]]:
-    """Build label/value rows for `kitaru run` output."""
-    invocation = "deploy" if stack else "run"
-    return [
-        ("Target", target),
-        ("Invocation", invocation),
-        *_execution_rows(execution),
-    ]
-
-
-def _emit_run_snapshot(
-    *,
-    target: str,
-    stack: str | None,
-    exec_id: str,
-) -> None:
-    """Emit the post-run snapshot for non-interactive or deploy paths."""
-    facade = _facade_module()
-    try:
-        execution = facade.KitaruClient().executions.get(exec_id)
-    except Exception as exc:
-        _emit_snapshot(
-            "Kitaru run",
-            [
-                ("Target", target),
-                ("Invocation", "deploy" if stack else "run"),
-                ("Execution ID", exec_id),
-            ],
-            warning=(
-                "Execution started successfully, but details are not available yet: "
-                f"{exc}"
-            ),
-        )
-        return
-
-    _emit_snapshot(
-        "Kitaru run",
-        _run_rows(target=target, stack=stack, execution=execution),
-    )
-
-
-def _run_with_live_display(
-    *,
-    flow_target: _FlowTarget,
-    target: str,
-    flow_inputs: dict[str, Any],
-) -> _FlowHandleLike:
-    """Execute a flow with the live terminal renderer active."""
-    renderer = LiveExecutionRenderer(target=target)
-    with (
-        renderer,
-        _suppress_zenml_console(),
-        _submission_observer(renderer.publish_exec_id),
-    ):
-        handle = flow_target.run(**flow_inputs)
-    return handle
 
 
 def _format_log_timestamp(value: str | None) -> str:
@@ -443,113 +358,6 @@ def _follow_execution_logs(
                 last_wait_name = wait_name
 
         _facade_module().time.sleep(interval)
-
-
-def _run_payload(
-    *,
-    target: str,
-    stack: str | None,
-    exec_id: str,
-) -> dict[str, Any]:
-    """Build a structured payload for `kitaru run` JSON output."""
-    payload: dict[str, Any] = {
-        "target": target,
-        "invocation": "deploy" if stack else "run",
-        "exec_id": exec_id,
-        "execution": None,
-        "warning": None,
-    }
-    try:
-        execution = _facade_module().KitaruClient().executions.get(exec_id)
-    except Exception as exc:
-        payload["warning"] = (
-            f"Execution started successfully, but details are not available yet: {exc}"
-        )
-        return payload
-
-    payload["execution"] = serialize_execution(execution)
-    return payload
-
-
-@app.command
-def run(
-    target: Annotated[
-        str,
-        Parameter(
-            help=(
-                "Flow target in `<module_or_file>:<flow_name>` format "
-                "(for example `agent.py:content_pipeline`)."
-            )
-        ),
-    ],
-    *,
-    args: Annotated[
-        str | None,
-        Parameter(
-            help=(
-                "Flow input arguments as a JSON object "
-                '(for example \'{"topic": "AI safety"}\').'
-            )
-        ),
-    ] = None,
-    stack: Annotated[
-        str | None,
-        Parameter(help="Optional stack name/ID for deploy-style execution."),
-    ] = None,
-    output: OutputFormatOption = "text",
-) -> None:
-    """Run a flow from a module/file target."""
-    command = "run"
-    output_format = _resolve_output_format(output)
-    use_live = (
-        is_terminal_interactive()
-        and not stack
-        and output_format == CLIOutputFormat.TEXT
-    )
-
-    facade = _facade_module()
-
-    def _start_execution() -> _FlowHandleLike:
-        flow_target = facade._load_flow_target(target)
-        flow_inputs = _parse_json_object(args, option_name="--args")
-
-        if use_live:
-            handle = _run_with_live_display(
-                flow_target=flow_target,
-                target=target,
-                flow_inputs=flow_inputs,
-            )
-        elif stack:
-            handle = flow_target.deploy(stack=stack, **flow_inputs)
-        else:
-            handle = flow_target.run(**flow_inputs)
-
-        if not isinstance(handle, _FlowHandleLike):
-            raise ValueError(
-                "Flow execution did not return a valid handle with an `exec_id`."
-            )
-        return handle
-
-    handle = run_with_cli_error_boundary(
-        _start_execution,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if use_live:
-        return
-
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command,
-            _run_payload(target=target, stack=stack, exec_id=handle.exec_id),
-            output=output_format,
-        )
-        return
-
-    _print_success(f"Started flow execution: {handle.exec_id}")
-    _emit_run_snapshot(target=target, stack=stack, exec_id=handle.exec_id)
 
 
 @executions_app.command

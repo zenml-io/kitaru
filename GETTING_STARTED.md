@@ -189,7 +189,7 @@ Add this to your Cursor MCP config (`.cursor/mcp.json`):
 
 Once connected, your AI assistant can:
 
-- **List and inspect executions** — "show me my recent kitaru runs"
+- **List and inspect executions** — "show me my recent executions"
 - **Read execution logs** — "what did my last flow print?"
 - **Browse artifacts** — "load the output of the research checkpoint"
 - **Run flows** — "run examples.basic_flow.first_working_flow:my_agent"
