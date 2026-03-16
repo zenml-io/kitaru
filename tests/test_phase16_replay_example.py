@@ -5,7 +5,7 @@ from __future__ import annotations
 from examples.replay.replay_with_overrides import run_workflow
 
 
-def test_phase16_replay_example_runs_end_to_end() -> None:
+def test_phase16_replay_example_runs_end_to_end(primed_zenml) -> None:
     """Verify replay-from-checkpoint with checkpoint override semantics."""
     source_exec_id, replay_exec_id, original_result, replay_output = run_workflow(
         "kitaru"

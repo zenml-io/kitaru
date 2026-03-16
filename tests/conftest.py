@@ -131,13 +131,20 @@ def isolated_zenml_global_config(
     GlobalConfiguration._reset_instance()
     Client._reset_instance()
 
-    # Eagerly initialize ZenML's store and active stack so that tests
-    # exercising flows or the client never hit the unsynchronized lazy-init
-    # race in GlobalConfiguration.zen_store / get_active_stack_id().
-    _ = Client().active_stack_model
-
     yield config_dir
 
     Client._reset_instance()
     GlobalConfiguration._reset_instance()
     _reset_runtime_configuration()
+
+
+@pytest.fixture()
+def primed_zenml() -> None:
+    """Eagerly initialize ZenML's store so flow-running tests avoid lazy-init races.
+
+    Only request this fixture in tests that actually execute flows, use
+    KitaruClient against real state, or spawn threads that touch the ZenML
+    runtime.  Lightweight unit/mock tests should NOT use this fixture —
+    keeping them free of ZenML bootstrap is what makes xdist parallelism fast.
+    """
+    _ = Client().zen_store

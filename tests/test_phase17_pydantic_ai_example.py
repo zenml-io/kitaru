@@ -12,7 +12,7 @@ pytest.importorskip("pydantic_ai")
 from examples.pydantic_ai_agent.pydantic_ai_adapter import run_workflow
 
 
-def test_phase17_pydantic_ai_example_runs_end_to_end() -> None:
+def test_phase17_pydantic_ai_example_runs_end_to_end(primed_zenml) -> None:
     """Verify wrapped-agent runs produce child-event metadata."""
     execution_id, result = run_workflow(topic="kitaru")
 

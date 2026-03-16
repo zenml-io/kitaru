@@ -5,7 +5,7 @@ from __future__ import annotations
 from examples.execution_management.client_execution_management import run_workflow
 
 
-def test_phase11_client_example_runs_end_to_end() -> None:
+def test_phase11_client_example_runs_end_to_end(primed_zenml) -> None:
     """Verify execution browsing and artifact loading via KitaruClient."""
     execution_id, status, result, artifact_names, loaded_context = run_workflow(
         "kitaru"

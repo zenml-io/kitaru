@@ -12,6 +12,7 @@ from kitaru.config import register_model_alias
 
 def test_phase12_llm_example_runs_end_to_end(
     monkeypatch,
+    primed_zenml,
 ) -> None:
     """Verify the LLM example runs with tracked metadata and artifacts."""
     register_model_alias("fast", model="openai/gpt-4o-mini")

@@ -25,7 +25,7 @@ from kitaru.wait import _resolve_zenml_wait
 _WAIT_DISCOVERY_TIMEOUT_SECONDS = 900.0
 
 
-def test_phase15_wait_example_runs_end_to_end() -> None:
+def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
     """Verify wait input resumes the same execution and produces output."""
     try:
         _resolve_zenml_wait()

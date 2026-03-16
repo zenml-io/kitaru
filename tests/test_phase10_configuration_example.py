@@ -8,7 +8,7 @@ from examples.basic_flow.flow_with_configuration import run_workflow
 from zenml.client import Client
 
 
-def test_phase10_configuration_example_runs_end_to_end() -> None:
+def test_phase10_configuration_example_runs_end_to_end(primed_zenml) -> None:
     """Verify configuration precedence and frozen spec persistence."""
     execution_id, result = run_workflow("kitaru")
 

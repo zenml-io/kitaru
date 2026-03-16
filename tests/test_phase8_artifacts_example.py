@@ -23,7 +23,7 @@ def _find_artifact_by_name(
     raise AssertionError(f"No artifact named '{name}' found in step outputs.")
 
 
-def test_phase8_artifacts_example_runs_end_to_end() -> None:
+def test_phase8_artifacts_example_runs_end_to_end(primed_zenml) -> None:
     """Verify save/load works for both checkpoint outputs and manual artifacts."""
     exec_id, first_result, second_result = run_workflow("kitaru")
 

@@ -20,7 +20,7 @@ def _find_step_metadata(
     raise AssertionError(f"No step metadata contained key '{key}'.")
 
 
-def test_phase7_logging_example_runs_end_to_end() -> None:
+def test_phase7_logging_example_runs_end_to_end(primed_zenml) -> None:
     """Verify the logging example executes and persists structured metadata."""
     handle = writing_agent.run("kitaru")
     result = handle.wait()
