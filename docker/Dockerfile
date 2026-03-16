@@ -21,7 +21,7 @@ ARG USERNAME=kitaru
 ARG USER_UID=1000
 ARG USER_GID=1000
 ARG ZENML_REPO_URL=https://github.com/zenml-io/zenml.git
-ARG ZENML_GIT_REF=fc79b592cd3a21ceb486411e2218e4712cfd0132
+ARG ZENML_GIT_REF=36e9c0613ed57a9c2937e5d45fa0021f71be9b19
 ARG ZENML_DASHBOARD_TAG=v0.41.4
 ARG ZENML_SERVER_EXTRAS=server,secrets-aws,secrets-gcp,secrets-azure,secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure,azureml,sagemaker,vertex
 
