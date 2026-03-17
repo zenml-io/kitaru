@@ -1,14 +1,13 @@
-# Basic Coding Agent
+# Basic Coding Agent (No Framework)
 
-A general-purpose interactive agent built with **kitaru primitives + LiteLLM** — no PydanticAI, no LangChain, no agent framework.
+A minimal interactive coding agent built with **only kitaru primitives and LiteLLM** — no PydanticAI, no LangChain, no agent framework.
 
 Demonstrates:
 
-- **LiteLLM tool calling** — manual tool-call loop with typed Pydantic responses
-- **`kitaru.wait()`** — durable human-in-the-loop via `ask_user` and `hand_back` tools
-- **Custom materializers** — dynamic ZenML dashboard visualizations per tool type
-- **Generated file persistence** — HTML/Markdown/CSV files saved as artifacts via `kitaru.save()`
-- **LLM-named checkpoints** — `_display_name` tool parameter for descriptive step names
+- **LiteLLM tool calling** — manual tool-call loop with dispatch
+- **`kitaru.wait()`** — durable human-in-the-loop command loop
+- **Planner + implementer** — two-role separation with different tool sets
+- **Dynamic checkpoint IDs** — `id=f"plan_{i}"` for per-iteration replay targeting
 
 ## Setup
 
@@ -21,22 +20,38 @@ kitaru model register coding-agent --model anthropic/claude-sonnet-4-20250514 --
 
 ## Usage
 
+### Terminal 1: start the agent
+
 ```bash
-# Start the agent with a task
-uv run python -m flow "Create a Plotly population pyramid for South Korea"
+uv run python -m examples.coding_agent_basic.flow --cwd /path/to/repo
 ```
 
-The agent works on the task, then calls `hand_back` with a summary and a question for you. You respond with a follow-up task or cancel the execution to stop.
+### Terminal 2: send commands
 
-### Remote execution
+Each `step_N` wait accepts a free-form command:
 
 ```bash
-# Send follow-up input
-kitaru executions input <eid> --wait follow_up_0 --value '{"message": "Now add a legend"}'
+# Send a task → agent plans
+kitaru executions input <eid> --wait step_0 --value "Add type hints to utils.py"
 kitaru executions resume <eid>
 
-# Cancel to stop
-kitaru executions cancel <eid>
+# Review the plan, then tell it to implement
+kitaru executions input <eid> --wait step_1 --value "implement"
+kitaru executions resume <eid>
+
+# Or send another task to re-plan instead
+kitaru executions input <eid> --wait step_1 --value "Actually, refactor auth.py first"
+kitaru executions resume <eid>
+
+# Done
+kitaru executions input <eid> --wait step_N --value "quit"
+kitaru executions resume <eid>
+```
+
+### Replay
+
+```bash
+kitaru executions replay <eid> --from implement_0
 ```
 
 ## Environment variables
@@ -44,4 +59,4 @@ kitaru executions cancel <eid>
 | Variable | Default | Description |
 |---|---|---|
 | `CODING_AGENT_MODEL` | `coding-agent` | Model alias or LiteLLM identifier |
-| `CODING_AGENT_MAX_TOOL_ROUNDS` | `30` | Max tool-calling rounds per task |
+| `CODING_AGENT_MAX_TOOL_ROUNDS` | `30` | Max tool-calling rounds per checkpoint |
