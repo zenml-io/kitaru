@@ -123,7 +123,8 @@ ENV \
   # ZenML server configuration paths
   ZENML_CONFIG_PATH=/zenml/.zenconfig \
   KITARU_DEBUG=false \
-  KITARU_ANALYTICS_OPT_IN=true
+  KITARU_ANALYTICS_OPT_IN=true \
+  KITARU_DEFAULT_ANALYTICS_SOURCE=kitaru-api
 
 # Set these to configure the server connection without `kitaru login`:
 # KITARU_SERVER_URL=https://...

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 from zenml.client import Client
@@ -172,6 +173,11 @@ def _apply_runtime_version() -> None:
 
 def cli() -> None:
     """Entry point for the `kitaru` console script."""
+    from kitaru.analytics import interface_context, set_source, track
+
+    set_source("cli")
+    interface_context.set("kitaru-cli")
+    track("Kitaru CLI invoked", {"command": " ".join(sys.argv[1:]) or "help"})
     _apply_runtime_version()
     app()
 

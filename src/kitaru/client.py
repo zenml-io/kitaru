@@ -78,6 +78,7 @@ from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
 )
 from kitaru._source_aliases import normalize_flow_name as _normalize_flow_name
+from kitaru.analytics import track
 from kitaru.config import (
     active_stack_log_store,
     resolve_connection_config,
@@ -626,6 +627,7 @@ class _ExecutionsAPI:
                 raise KitaruRuntimeError(
                     "Resolved flow replay call did not return a valid execution handle."
                 )
+            track("Kitaru flow replayed", {"execution_id": str(exec_id)})
             return self.get(str(replay_exec_id))
 
         replay_pipeline = _resolve_pipeline_for_replay(source_run)
@@ -665,6 +667,7 @@ class _ExecutionsAPI:
         if not replayed_exec_id:
             raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
 
+        track("Kitaru flow replayed", {"execution_id": str(exec_id)})
         return self.get(replayed_exec_id)
 
     def get(self, exec_id: str) -> Execution:

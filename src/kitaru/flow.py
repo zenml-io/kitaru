@@ -28,6 +28,7 @@ from kitaru._source_aliases import (
     build_pipeline_source_alias,
     callable_name,
 )
+from kitaru.analytics import track
 from kitaru.config import (
     ImageInput,
     ImageSettings,
@@ -581,6 +582,7 @@ class _FlowDefinition:
             frozen_execution_spec=frozen_execution_spec,
         )
 
+        track("Kitaru flow replayed", {"execution_id": str(replayed_run.id)})
         return FlowHandle(replayed_run)
 
     def _submit(
@@ -651,7 +653,7 @@ class _FlowDefinition:
         Returns:
             A handle for the started execution.
         """
-        return self.run(
+        handle = self.run(
             *args,
             stack=stack,
             image=image,
@@ -659,6 +661,8 @@ class _FlowDefinition:
             retries=retries,
             **kwargs,
         )
+        track("Kitaru flow deployed", {"flow_name": callable_name(self._func)})
+        return handle
 
 
 @overload

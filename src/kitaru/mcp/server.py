@@ -16,6 +16,7 @@ import kitaru.client as client_api
 import kitaru.inspection as inspection
 from kitaru._config import _stacks as stack_ops
 from kitaru._interface_errors import run_with_mcp_error_boundary
+from kitaru.analytics import interface_context, set_source, track
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
@@ -334,4 +335,7 @@ def manage_stack(
 
 def main() -> None:
     """Entry point for the `kitaru-mcp` console script."""
+    set_source("mcp")
+    interface_context.set("kitaru-mcp")
+    track("Kitaru MCP server started")
     mcp.run(transport="stdio")

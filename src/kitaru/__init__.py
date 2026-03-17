@@ -47,6 +47,13 @@ apply_env_translations()
 # the console handler with Kitaru's terminal handler.
 import zenml as _zenml  # noqa: F401
 
+# Stamp all analytics from this process as Kitaru-originated.
+from kitaru.analytics import interface_context as _interface_context
+from kitaru.analytics import set_source as _set_source
+
+_set_source("python")
+_interface_context.set("kitaru-python")
+
 from ._terminal_logging import install_terminal_log_intercept
 
 install_terminal_log_intercept()
