@@ -4,20 +4,6 @@
   "pages": [
     "installation",
     "quickstart",
-    "examples",
-    "configuration",
-    "execution-management",
-    "execution-logs",
-    "replay-and-overrides",
-    "wait-and-resume",
-    "pydantic-ai-adapter",
-    "error-handling",
-    "artifacts",
-    "stack-selection",
-    "kubernetes-stacks",
-    "log-store",
-    "secrets-and-model-registration",
-    "secrets",
-    "llm-calls"
+    "examples"
   ]
 }

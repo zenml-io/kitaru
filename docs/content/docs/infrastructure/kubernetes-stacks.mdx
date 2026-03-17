@@ -5,7 +5,7 @@ description: Create, inspect, use, and clean up Kubernetes-backed stacks in Kita
 
 This guide shows the practical workflow for Kubernetes-backed stacks in Kitaru: create one, inspect it, decide whether it should become your default, and clean it up safely when you are done.
 
-Kubernetes is one shipped remote-stack path. If you want the broader stack story or a managed-runner option without `--cluster`, start with [Manage Stacks](/getting-started/stack-selection), which also covers Vertex, SageMaker, and AzureML.
+Kubernetes is one shipped remote-stack path. If you want the broader stack story or a managed-runner option without `--cluster`, start with [Manage Stacks](/infrastructure/stack-selection), which also covers Vertex, SageMaker, and AzureML.
 
 Use this page for the story and the happy path. For exact flag syntax and every supported option, use the generated CLI reference for [`kitaru stack create`](/cli/stack/create), [`kitaru stack show`](/cli/stack/show), and [`kitaru stack delete`](/cli/stack/delete).
 
@@ -108,6 +108,8 @@ extra:
 ```
 
 If you then add a CLI extra on top, the nested mappings merge instead of the CLI replacing the entire YAML `extra:` block.
+
+For the full list of Kubernetes orchestrator fields available to `--extra`, see the [ZenML Kubernetes orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/kubernetes).
 
 ## Inspect what Kitaru created
 
@@ -212,7 +214,7 @@ So if you do a one-off remote run, `kitaru stack current` should still show the 
 
 If you want the full precedence story, see:
 
-- [Configuration](/getting-started/configuration)
+- [Configuration](/guides/configuration)
 - [Flows](/concepts/flows)
 - [`kitaru stack use`](/cli/stack/use)
 

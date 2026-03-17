@@ -3,7 +3,9 @@
   "pages": [
     "getting-started",
     "concepts",
-    "agent-integrations",
+    "guides",
+    "infrastructure",
+    "agent-native",
     "---Reference---",
     "cli",
     "reference/python",

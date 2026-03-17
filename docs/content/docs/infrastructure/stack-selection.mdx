@@ -7,7 +7,7 @@ This guide shows how to manage stacks in Kitaru.
 
 A stack is the named execution environment Kitaru uses as a persisted fallback target when no higher-precedence stack source is set.
 
-This page covers the general stack story: current stack, switching, local stack creation, remote stack creation, deletion, and precedence. If you want the end-to-end workflow for a Kubernetes-backed stack, use [Kubernetes Stacks](/getting-started/kubernetes-stacks).
+This page covers the general stack story: current stack, switching, local stack creation, remote stack creation, deletion, and precedence. If you want the end-to-end workflow for a Kubernetes-backed stack, use [Kubernetes Stacks](/infrastructure/kubernetes-stacks).
 
 ## Show the current stack
 
@@ -88,6 +88,8 @@ kitaru stack create prod-k8s \
   --region eu-west-1
 ```
 
+For all available orchestrator fields (useful with `--extra`), see the [ZenML Kubernetes orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/kubernetes).
+
 ### Vertex example
 
 ```bash
@@ -98,7 +100,7 @@ kitaru stack create prod-vertex \
   --region us-central1
 ```
 
-Vertex uses a managed runner, so there is no `--cluster` or `--namespace` flag. `kitaru stack show prod-vertex` will report the runner `location` that ZenML stores for the Vertex orchestrator.
+Vertex uses a managed runner, so there is no `--cluster` or `--namespace` flag. `kitaru stack show prod-vertex` will report the runner `location` that ZenML stores for the Vertex orchestrator. For all available orchestrator fields (useful with `--extra`), see the [ZenML Vertex orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/vertex).
 
 ### SageMaker example
 
@@ -111,7 +113,7 @@ kitaru stack create prod-sagemaker \
   --execution-role arn:aws:iam::123456789012:role/SageMakerExecutionRole
 ```
 
-SageMaker is also a managed-runner path, so there is no `--cluster` or `--namespace` flag. `kitaru stack show prod-sagemaker` will report the runner region and execution role.
+SageMaker is also a managed-runner path, so there is no `--cluster` or `--namespace` flag. `kitaru stack show prod-sagemaker` will report the runner region and execution role. For all available orchestrator fields (useful with `--extra`), see the [ZenML SageMaker orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/sagemaker).
 
 ### AzureML example
 
@@ -126,7 +128,7 @@ kitaru stack create prod-azureml \
   --region westeurope
 ```
 
-AzureML is another managed-runner path, so there is no `--cluster`, `--namespace`, or `--execution-role` flag. `kitaru stack show prod-azureml` will report the runner subscription, resource group, workspace, and location that ZenML stores for the AzureML orchestrator.
+AzureML is another managed-runner path, so there is no `--cluster`, `--namespace`, or `--execution-role` flag. `kitaru stack show prod-azureml` will report the runner subscription, resource group, workspace, and location that ZenML stores for the AzureML orchestrator. For all available orchestrator fields (useful with `--extra`), see the [ZenML AzureML orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
 You can also keep the same inputs in a YAML file and create the stack with:
 
@@ -197,7 +199,7 @@ extra:
 
 CLI `--extra` values merge on top of YAML `extra:` values instead of replacing the whole object. In story form: the YAML file is your saved blueprint, and the CLI extras are the sticky notes you add for this one build.
 
-Kitaru does not try to duplicate every underlying field in its own docs. For full field inventories, use the ZenML component reference pages linked from the stack component docs.
+Kitaru does not try to duplicate every underlying field in its own docs. For full field inventories, see the ZenML component reference for your orchestrator type: [Kubernetes](https://docs.zenml.io/stacks/stack-components/orchestrators/kubernetes), [Vertex](https://docs.zenml.io/stacks/stack-components/orchestrators/vertex), [SageMaker](https://docs.zenml.io/stacks/stack-components/orchestrators/sagemaker), [AzureML](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
 ## Switch to another stack
 
@@ -272,6 +274,6 @@ Those higher-precedence overrides do **not** change the active stack you see in 
 
 ## Related pages
 
-- [Kubernetes Stacks](/getting-started/kubernetes-stacks)
+- [Kubernetes Stacks](/infrastructure/kubernetes-stacks)
 - [Flows](/concepts/flows)
 - [CLI stack commands](/cli/stack)
