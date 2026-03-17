@@ -1,9 +1,11 @@
 """Tool implementations and schemas for the basic coding agent."""
 
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 _MAX_CHARS = 12_000
 _READ_LIMIT = 400
@@ -25,7 +27,7 @@ def _resolve(cwd: str, path: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Tool implementations
+# File tools
 # ---------------------------------------------------------------------------
 
 
@@ -121,6 +123,131 @@ def run_command(cwd: str, command: str, timeout: int = 30) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Python execution
+# ---------------------------------------------------------------------------
+
+
+def python_exec(cwd: str, code: str, timeout: int = 60) -> str:
+    """Execute a Python script via ``uv run`` and return stdout + stderr.
+
+    If the script needs third-party packages, include PEP 723 inline
+    metadata at the top::
+
+        # /// script
+        # dependencies = ["plotly", "pandas"]
+        # ///
+
+    ``uv run`` will resolve and install them automatically into a
+    cached ephemeral environment — no manual pip install needed.
+    """
+    base = Path(cwd).resolve()
+    # Write temp file to /tmp (always exists) — cwd may not be writable
+    # or may not exist in containerized environments.
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False
+    ) as f:
+        f.write(code)
+        script_path = f.name
+
+    try:
+        result = subprocess.run(
+            ["uv", "run", script_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(base) if base.is_dir() else None,
+        )
+    except subprocess.TimeoutExpired:
+        return f"Error: script timed out after {timeout}s"
+    except Exception as e:
+        return f"Error executing script: {e}"
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+
+    output = result.stdout + result.stderr
+    return _truncate(f"Exit code: {result.returncode}\n{output}")
+
+
+# ---------------------------------------------------------------------------
+# Web tools
+# ---------------------------------------------------------------------------
+
+_ALLOWED_SCHEMES = {"http", "https"}
+
+
+def web_fetch(cwd: str, url: str, max_chars: int = _MAX_CHARS) -> str:
+    """Fetch a URL and return its text content."""
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        return f"Error: only http/https URLs are supported, got {parsed.scheme!r}"
+
+    try:
+        result = subprocess.run(
+            ["curl", "-sL", "--max-time", "15", "-A", "KitaruAgent/1.0", url],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        return "Error: fetch timed out"
+    except Exception as e:
+        return f"Error fetching URL: {e}"
+
+    if result.returncode != 0:
+        return f"Error: curl exited with code {result.returncode}\n{result.stderr}"
+    return _truncate(result.stdout, max_chars)
+
+
+def web_search(cwd: str, query: str) -> str:
+    """Search the web using a text query (via DuckDuckGo HTML)."""
+    search_url = f"https://html.duckduckgo.com/html/?q={query}"
+    try:
+        result = subprocess.run(
+            [
+                "curl", "-sL", "--max-time", "15",
+                "-A", "KitaruAgent/1.0",
+                search_url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        return "Error: search timed out"
+    except Exception as e:
+        return f"Error searching: {e}"
+
+    if result.returncode != 0:
+        return f"Error: curl exited with code {result.returncode}"
+
+    # Extract result snippets from DuckDuckGo HTML
+    import re
+
+    links = re.findall(
+        r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+        result.stdout,
+    )
+    snippets = re.findall(
+        r'class="result__snippet"[^>]*>(.*?)</(?:td|div)>',
+        result.stdout,
+        re.DOTALL,
+    )
+
+    if not links:
+        return "No search results found."
+
+    results: list[str] = []
+    for i, (href, title) in enumerate(links[:10]):
+        title_clean = re.sub(r"<[^>]+>", "", title).strip()
+        snippet = ""
+        if i < len(snippets):
+            snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
+        results.append(f"{i + 1}. {title_clean}\n   {href}\n   {snippet}")
+
+    return "\n\n".join(results)
+
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -131,6 +258,9 @@ _TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
     "list_files": list_files,
     "search_files": search_files,
     "run_command": run_command,
+    "python_exec": python_exec,
+    "web_fetch": web_fetch,
+    "web_search": web_search,
 }
 
 
@@ -246,6 +376,75 @@ _RUN_COMMAND_SCHEMA: dict[str, Any] = {
     },
 }
 
+_PYTHON_EXEC_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "python_exec",
+        "description": (
+            "Execute a Python script via uv run and return stdout + stderr. "
+            "Use for math, data processing, generating plots "
+            "(save to file with plt.savefig or plotly write_html/write_image), "
+            "or any task best solved with code. "
+            "The script runs in the working directory. "
+            "If the script needs third-party packages, add PEP 723 inline "
+            "metadata at the top of the script:\n"
+            "# /// script\n"
+            "# dependencies = [\"plotly\", \"pandas\"]\n"
+            "# ///\n"
+            "uv will install them automatically."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Python source code to execute"},
+                "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in seconds",
+                    "default": 60,
+                },
+            },
+            "required": ["code"],
+        },
+    },
+}
+
+_WEB_FETCH_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "web_fetch",
+        "description": (
+            "Fetch a URL and return its text content. "
+            "Use for reading web pages, API responses, documentation, etc."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL to fetch (http or https)"},
+            },
+            "required": ["url"],
+        },
+    },
+}
+
+_WEB_SEARCH_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": (
+            "Search the web using a text query. "
+            "Returns titles, URLs, and snippets from top results. "
+            "Use web_fetch to read a specific result page."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 READER_SCHEMAS: list[dict[str, Any]] = [
     _READ_FILE_SCHEMA,
     _LIST_FILES_SCHEMA,
@@ -259,4 +458,7 @@ ALL_SCHEMAS: list[dict[str, Any]] = [
     _LIST_FILES_SCHEMA,
     _SEARCH_FILES_SCHEMA,
     _RUN_COMMAND_SCHEMA,
+    _PYTHON_EXEC_SCHEMA,
+    _WEB_FETCH_SCHEMA,
+    _WEB_SEARCH_SCHEMA,
 ]

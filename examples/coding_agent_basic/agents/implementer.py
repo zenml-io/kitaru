@@ -1,5 +1,7 @@
 """Implementer agent — executes a plan using all available tools."""
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import kitaru
@@ -11,6 +13,8 @@ try:
 except (ImportError, SystemError):
     from tools import ALL_SCHEMAS
     from llm import tool_loop
+
+_WORKSPACE = Path(tempfile.mkdtemp(prefix="implementer_"))
 
 SYSTEM_PROMPT = (
     "You are a code implementation assistant. Follow the provided "
@@ -26,8 +30,9 @@ SYSTEM_PROMPT = (
 
 
 @checkpoint(type="llm_call")
-def implement(task: str, implementation_plan: str, cwd: str) -> str:
+def implement(task: str, implementation_plan: str) -> str:
     """Execute the plan using a tool-calling loop."""
+    cwd = str(_WORKSPACE)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {

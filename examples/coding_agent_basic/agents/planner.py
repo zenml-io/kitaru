@@ -1,5 +1,7 @@
 """Planner agent — explores the codebase and produces a numbered plan."""
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import kitaru
@@ -11,6 +13,8 @@ try:
 except (ImportError, SystemError):
     from tools import READER_SCHEMAS
     from llm import tool_loop
+
+_WORKSPACE = Path(tempfile.mkdtemp(prefix="planner_"))
 
 SYSTEM_PROMPT = (
     "You are a planning assistant. Given a coding task, explore the "
@@ -28,8 +32,9 @@ SYSTEM_PROMPT = (
 
 
 @checkpoint(type="llm_call")
-def plan(task: str, cwd: str) -> str:
+def plan(task: str) -> str:
     """Explore the codebase and produce a numbered plan."""
+    cwd = str(_WORKSPACE)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {

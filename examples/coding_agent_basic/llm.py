@@ -101,6 +101,7 @@ def tool_loop(
 
             logger.info("Tool call: %s(%s)", name, arguments)
             tool_result = dispatch_tool(cwd, name, arguments)
+            logger.info("Tool result [%s]: %s", name, tool_result[:500])
             tool_calls_made += 1
 
             messages.append(
