@@ -20,7 +20,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
 - **Stack lifecycle** — `kitaru.create_stack()` / `kitaru.delete_stack()`, `kitaru stack create/delete/show`, YAML-backed `kitaru stack create -f stack.yaml`, automatic activation for new local stacks, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings. For an end-to-end walkthrough, see the [Kubernetes stacks guide](https://kitaru.ai/docs/getting-started/kubernetes-stacks).
 - **Execution CLI** — `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
-- **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
+- **Durable wait/resume** — `kitaru.wait(...)` suspends a flow until input is provided, either inline via the terminal prompt on local interactive runs or later through `client.executions.input(...)` / `client.executions.resume(...)` for non-interactive contexts
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
 - **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus Claude Code scoping and authoring skills available via the [plugin marketplace](https://github.com/zenml-io/kitaru-skills)
 
@@ -87,7 +87,7 @@ uv sync --extra local --extra mcp           # MCP query tools example
 | Core workflow basics | Artifacts | `uv run -m examples.basic_flow.flow_with_artifacts` | `kitaru.save()` / `kitaru.load()` across executions |
 | Core workflow basics | Configuration | `uv run -m examples.basic_flow.flow_with_configuration` | `kitaru.configure()` defaults, overrides, and frozen execution specs |
 | Execution lifecycle | Execution management | `uv run -m examples.execution_management.client_execution_management` | `KitaruClient` for inspecting runs, artifacts, and execution metadata |
-| Execution lifecycle | Wait and resume | `uv run -m examples.execution_management.wait_and_resume` | `kitaru.wait()` plus manual CLI resume from a second terminal |
+| Execution lifecycle | Wait and resume | `uv run -m examples.execution_management.wait_and_resume` | `kitaru.wait()` with inline local prompt or fallback CLI input/resume |
 | Execution lifecycle | Replay with overrides | `uv run -m examples.replay.replay_with_overrides` | Replay from a checkpoint boundary with targeted `checkpoint.*` overrides |
 | LLMs and integrations | Tracked LLM calls | `uv run -m examples.llm.flow_with_llm` | `kitaru.llm()` with model aliases, prompt/response capture, and usage metadata |
 | LLMs and integrations | PydanticAI adapter | `uv run -m examples.pydantic_ai_agent.pydantic_ai_adapter` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary |

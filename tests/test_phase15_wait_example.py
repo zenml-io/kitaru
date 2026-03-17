@@ -1,8 +1,8 @@
 """Integration test for the wait/resume example workflow.
 
-The example itself is manual (prints CLI commands for a second terminal).
 This test drives the same flow and APIs programmatically so CI can validate
-the full wait → input → resume → result sequence without human interaction.
+the full wait → input → optional resume → result sequence without human
+interaction.
 """
 
 from __future__ import annotations

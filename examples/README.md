@@ -53,7 +53,7 @@ uv run -m examples.<group>.<module_name>
 | Example | Run | Requires | What it demonstrates | Docs | Test |
 |---|---|---|---|---|---|
 | [Execution management](execution_management/client_execution_management.py) | `uv run -m examples.execution_management.client_execution_management` | `uv sync --extra local` | `KitaruClient` for listing runs, reading details, and loading artifacts | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/test_phase11_client_example.py](../tests/test_phase11_client_example.py) |
-| [Wait and resume](execution_management/wait_and_resume.py) | `uv run -m examples.execution_management.wait_and_resume` | `uv sync --extra local` | `kitaru.wait()` plus manual CLI resume from a second terminal | [Wait and Resume](https://kitaru.ai/docs/getting-started/wait-and-resume) | [tests/test_phase15_wait_example.py](../tests/test_phase15_wait_example.py) |
+| [Wait and resume](execution_management/wait_and_resume.py) | `uv run -m examples.execution_management.wait_and_resume` | `uv sync --extra local` | `kitaru.wait()` with inline local prompt or fallback CLI input/resume | [Wait and Resume](https://kitaru.ai/docs/getting-started/wait-and-resume) | [tests/test_phase15_wait_example.py](../tests/test_phase15_wait_example.py) |
 | [Replay with overrides](replay/replay_with_overrides.py) | `uv run -m examples.replay.replay_with_overrides` | `uv sync --extra local` | Replay from a checkpoint boundary while overriding selected inputs | [Replay and Overrides](https://kitaru.ai/docs/getting-started/replay-and-overrides) | [tests/test_phase16_replay_example.py](../tests/test_phase16_replay_example.py) |
 
 ## LLMs and agent integrations
