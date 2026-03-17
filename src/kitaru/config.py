@@ -68,6 +68,7 @@ KITARU_RETRIES_ENV = _config_env.KITARU_RETRIES_ENV
 KITARU_IMAGE_ENV = _config_env.KITARU_IMAGE_ENV
 KITARU_DEFAULT_MODEL_ENV = _config_env.KITARU_DEFAULT_MODEL_ENV
 KITARU_CONFIG_PATH_ENV = _config_env.KITARU_CONFIG_PATH_ENV
+KITARU_MODEL_REGISTRY_ENV = _kitaru_env.KITARU_MODEL_REGISTRY_ENV
 ZENML_STORE_API_KEY_ENV = _ZENML_STORE_API_KEY_ENV
 ZENML_STORE_URL_ENV = _ZENML_STORE_URL_ENV
 
@@ -140,6 +141,7 @@ _looks_like_server_address_without_scheme = (
 _noop_zenml_cli_message = _config_connection._noop_zenml_cli_message
 
 _normalize_model_alias = _config_models._normalize_model_alias
+_read_env_model_registry = _config_models._read_env_model_registry
 _normalize_log_store_backend_name = _config_log_store._normalize_log_store_backend_name
 _extract_log_store_endpoint = _config_log_store._extract_log_store_endpoint
 _mask_environment_value = _config_log_store._mask_environment_value
@@ -405,9 +407,10 @@ def register_model_alias(
 
 
 def list_model_aliases() -> list[ModelAliasEntry]:
-    """List local model aliases in stable order for CLI rendering."""
+    """List model aliases visible in the current process environment."""
     return _config_models.list_model_aliases(
         read_global_config=_read_kitaru_global_config,
+        environ=os.environ,
     )
 
 

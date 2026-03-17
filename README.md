@@ -16,7 +16,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Configuration** — `kitaru.configure(...)`, environment variables, and `[tool.kitaru]` in `pyproject.toml`, with precedence resolved at flow start and persisted per execution, including flow-bound stack defaults via `@flow(stack=...)` and one-off execution overrides via `.run(..., stack=...)`
 - **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`, `logs`), replaying from checkpoint boundaries (`replay`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
-- **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, local model aliases (`kitaru model register/list`), and env-first secret resolution for known providers
+- **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, model aliases (`kitaru model register/list`) that are automatically transported to submitted/replayed remote runs, and env-first secret resolution for known providers
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
 - **Stack lifecycle** — `kitaru.create_stack()` / `kitaru.delete_stack()`, `kitaru stack create/delete/show`, YAML-backed `kitaru stack create -f stack.yaml`, automatic activation for new local stacks, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings. For an end-to-end walkthrough, see the [Kubernetes stacks guide](https://kitaru.ai/docs/getting-started/kubernetes-stacks).
 - **Execution CLI** — `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
@@ -100,7 +100,8 @@ uv run -m examples.<group>.<module_name>
 ```
 
 For the LLM example, the most reusable setup is to store credentials in a
-secret and link that secret to a local model alias:
+secret and link that secret to a model alias. Kitaru stores that alias locally
+and automatically transports it to submitted and replayed runs:
 
 ```bash
 kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
@@ -207,6 +208,7 @@ Two practical details matter here:
 
 - `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` must be set together.
 - When you connect to a remote server via env vars, `KITARU_PROJECT` is also required at first use.
+- `KITARU_MODEL_REGISTRY` is an advanced knob for manually supplying additional aliases or overriding matching transported aliases; most users should rely on automatic transport from `kitaru model register`.
 
 Under the hood, Kitaru translates its public `KITARU_*` connection/debug env
 vars into the ZenML env vars that the runtime already understands, so you do

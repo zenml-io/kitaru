@@ -90,6 +90,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 ## Docs guidance
 
 - Treat `KITARU_*` environment variables as the public configuration surface in docs and examples. Mention `ZENML_*` only as a compatibility note when needed.
+- `kitaru model register` still writes aliases to local config, but submitted/replayed runs automatically receive a transported registry snapshot via `KITARU_MODEL_REGISTRY`. Describe `kitaru model list` as listing aliases available in the current environment, not just aliases stored locally.
 - Static hand-written MDX pages under `docs/content/docs/` are tracked and can be edited directly when behavior changes.
 - Generated reference output should still come from the existing generation scripts rather than manual edits.
 - Agent-facing CLI docs should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.

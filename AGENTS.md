@@ -144,6 +144,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 - **Secret docs accuracy:** only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, label it clearly as the current low-level pattern instead of implying there is already a dedicated Kitaru secret getter.
 - **CLI docs source of truth:** if generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), never the generated `docs/content/docs/cli/*` output.
 - **Environment-variable docs:** document `KITARU_*` env vars as the public surface. Mention `ZENML_*` only as a compatibility note when necessary to explain migration or interop.
+- **Model-registry docs:** `kitaru model register` still writes aliases to local config, but submitted/replayed runs automatically receive a transported registry snapshot via `KITARU_MODEL_REGISTRY`. `kitaru model list` should be described as listing aliases available in the current environment, not just aliases stored locally.
 - **Frontmatter required:** every `.mdx` page needs `title` and `description`.
 
 ## Security & Configuration Notes
