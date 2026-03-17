@@ -5,12 +5,52 @@ from __future__ import annotations
 from kitaru._source_aliases import (
     CHECKPOINT_SOURCE_ALIAS_PREFIX,
     PIPELINE_SOURCE_ALIAS_PREFIX,
+    build_checkpoint_registration_name,
     build_checkpoint_source_alias,
+    build_pipeline_registration_name,
     build_pipeline_source_alias,
     normalize_aliases_in_text,
     normalize_checkpoint_name,
     normalize_flow_name,
 )
+
+
+class TestBuildPipelineRegistrationName:
+    def test_normal_name(self) -> None:
+        assert build_pipeline_registration_name("my_flow") == "my_flow"
+
+    def test_name_with_special_chars(self) -> None:
+        assert build_pipeline_registration_name("my-flow.v2") == "my_flow_v2"
+
+    def test_digit_leading_name(self) -> None:
+        assert build_pipeline_registration_name("3rd_attempt") == "flow_3rd_attempt"
+
+    def test_empty_name_uses_fallback(self) -> None:
+        assert build_pipeline_registration_name("") == "flow"
+
+    def test_no_prefix(self) -> None:
+        result = build_pipeline_registration_name("test")
+        assert not result.startswith(PIPELINE_SOURCE_ALIAS_PREFIX)
+        assert result == "test"
+
+
+class TestBuildCheckpointRegistrationName:
+    def test_normal_name(self) -> None:
+        assert build_checkpoint_registration_name("fetch_data") == "fetch_data"
+
+    def test_name_with_special_chars(self) -> None:
+        assert build_checkpoint_registration_name("fetch-data.v2") == "fetch_data_v2"
+
+    def test_digit_leading_name(self) -> None:
+        assert build_checkpoint_registration_name("1st_step") == "checkpoint_1st_step"
+
+    def test_empty_name_uses_fallback(self) -> None:
+        assert build_checkpoint_registration_name("") == "checkpoint"
+
+    def test_no_prefix(self) -> None:
+        result = build_checkpoint_registration_name("test")
+        assert not result.startswith(CHECKPOINT_SOURCE_ALIAS_PREFIX)
+        assert result == "test"
 
 
 class TestBuildPipelineSourceAlias:
