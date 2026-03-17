@@ -25,6 +25,7 @@ from kitaru.config import (
     ActiveEnvironmentVariable,
     KubernetesStackSpec,
     StackType,
+    VertexStackSpec,
 )
 
 
@@ -2177,28 +2178,28 @@ def test_stack_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
 def test_stack_create_rejects_kubernetes_flags_for_local_stack(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Local stack creation should reject Kubernetes-only flags."""
+    """Local stack creation should reject remote-stack flags."""
     with pytest.raises(SystemExit) as exc_info:
         app(["stack", "create", "dev", "--artifact-store", "s3://bucket/kitaru"])
 
     assert exc_info.value.code == 1
     assert (
-        "Kubernetes-only options require --type kubernetes: --artifact-store"
-        in capsys.readouterr().err
+        "Remote stack options require --type kubernetes or --type vertex: "
+        "--artifact-store" in capsys.readouterr().err
     )
 
 
 def test_stack_create_rejects_blank_kubernetes_flags_for_local_stack(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Blank Kubernetes-only flag values still count as explicit local-stack inputs."""
+    """Blank remote-stack flag values still count as explicit local-stack inputs."""
     with pytest.raises(SystemExit) as exc_info:
         app(["stack", "create", "dev", "--artifact-store", "   "])
 
     assert exc_info.value.code == 1
     assert (
-        "Kubernetes-only options require --type kubernetes: --artifact-store"
-        in capsys.readouterr().err
+        "Remote stack options require --type kubernetes or --type vertex: "
+        "--artifact-store" in capsys.readouterr().err
     )
 
 
@@ -2216,6 +2217,49 @@ def test_stack_create_kubernetes_requires_all_mandatory_flags(
     ) in capsys.readouterr().err
 
 
+def test_stack_create_vertex_requires_all_mandatory_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vertex stack creation should report all missing required flags."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "vertex"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--type vertex requires: --artifact-store, --container-registry, --region."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_vertex_rejects_kubernetes_only_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vertex stack creation should still reject Kubernetes-only inputs."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "vertex-dev",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--cluster",
+                "demo-gke",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert (
+        "Kubernetes-only options require --type kubernetes: --cluster"
+        in capsys.readouterr().err
+    )
+
+
 def test_stack_create_rejects_unsupported_stack_type_json(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -2228,24 +2272,12 @@ def test_stack_create_rejects_unsupported_stack_type_json(
     assert payload == {
         "command": "stack.create",
         "error": {
-            "message": ("Unsupported stack type: modal. Use 'local' or 'kubernetes'."),
+            "message": (
+                "Unsupported stack type: modal. Use 'local', 'kubernetes', or 'vertex'."
+            ),
             "type": "ValueError",
         },
     }
-
-
-def test_stack_create_rejects_known_future_stack_type_for_now(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Phase 1 keeps future stack types hidden from the current CLI surface."""
-    with pytest.raises(SystemExit) as exc_info:
-        app(["stack", "create", "dev", "--type", "vertex"])
-
-    assert exc_info.value.code == 1
-    assert (
-        "Unsupported stack type: vertex. Use 'local' or 'kubernetes'."
-        in capsys.readouterr().err
-    )
 
 
 def test_stack_create_rejects_blank_type_override(
@@ -2269,7 +2301,7 @@ region: us-east-1
 
     assert exc_info.value.code == 1
     assert (
-        "Unsupported stack type: . Use 'local' or 'kubernetes'."
+        "Unsupported stack type: . Use 'local', 'kubernetes', or 'vertex'."
         in capsys.readouterr().err
     )
 
@@ -2415,6 +2447,53 @@ def test_stack_create_kubernetes_builds_gcp_spec_with_credentials_and_no_verify(
     }
 
 
+def test_stack_create_vertex_builds_gcp_spec() -> None:
+    """Vertex stacks should build the shared Vertex spec without Kubernetes fields."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+            resources={
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--credentials",
+                "gcp-service-account:/tmp/key.json",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    vertex_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(vertex_spec, VertexStackSpec)
+    assert vertex_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+        "region": "us-central1",
+        "credentials": "gcp-service-account:/tmp/key.json",
+        "verify": False,
+    }
+
+
 def test_stack_create_kubernetes_text_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -2463,6 +2542,51 @@ def test_stack_create_kubernetes_text_output(
         and "123456789012.dkr.ecr.us-east-1.amazonaws.com" in output
     )
     assert "Active stack: default → my-k8s" in output
+
+
+def test_stack_create_vertex_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vertex stack creation should render GCP resource details without a cluster."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+            resources={
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Created stack: my-vertex (vertex)" in output
+    assert "Provider:" in output and "gcp" in output
+    assert "Region:" in output and "us-central1" in output
+    assert "Artifacts:" in output and "gs://bucket/kitaru" in output
+    assert "Registry:" in output and "us-central1-docker.pkg.dev/demo/repo" in output
+    assert "Cluster:" not in output
+    assert "Active stack: default → my-vertex" in output
 
 
 def test_stack_create_kubernetes_json_output(
@@ -2539,6 +2663,74 @@ def test_stack_create_kubernetes_json_output(
     }
 
 
+def test_stack_create_vertex_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vertex stack creation JSON should expose the new stack type cleanly."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+            components_created=(
+                "my-vertex-orchestrator (orchestrator)",
+                "my-vertex-artifacts (artifact_store)",
+                "my-vertex-registry (container_registry)",
+            ),
+            service_connectors_created=("my-vertex-gcp",),
+            resources={
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "stack.create",
+        "item": {
+            "id": "stack-my-vertex-id",
+            "name": "my-vertex",
+            "is_active": True,
+            "previous_active_stack": "default",
+            "components_created": [
+                "my-vertex-orchestrator (orchestrator)",
+                "my-vertex-artifacts (artifact_store)",
+                "my-vertex-registry (container_registry)",
+            ],
+            "stack_type": "vertex",
+            "service_connectors_created": ["my-vertex-gcp"],
+            "resources": {
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        },
+    }
+
+
 def test_stack_create_from_file_builds_local_stack(tmp_path: Path) -> None:
     """YAML-only local stack creation should use file inputs."""
     stack_file = _write_stack_create_file(
@@ -2609,6 +2801,48 @@ activate: false
         "region": "us-east-1",
         "namespace": "ml",
         "credentials": "aws-profile:demo",
+        "verify": False,
+    }
+
+
+def test_stack_create_from_file_builds_vertex_stack(tmp_path: Path) -> None:
+    """YAML-only Vertex creation should build the same structured spec as flags."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-vertex
+type: vertex
+artifact_store: gs://bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/demo/repo
+region: us-central1
+credentials: gcp-service-account:/tmp/key.json
+verify: false
+activate: false
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-vertex",
+            stack_type="vertex",
+            previous_active_stack=None,
+        )
+        app(["stack", "create", "-f", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.args == ("yaml-vertex",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.VERTEX
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    vertex_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(vertex_spec, VertexStackSpec)
+    assert vertex_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+        "region": "us-central1",
+        "credentials": "gcp-service-account:/tmp/key.json",
         "verify": False,
     }
 

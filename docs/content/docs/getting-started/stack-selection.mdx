@@ -7,7 +7,7 @@ This guide shows how to manage stacks in Kitaru.
 
 A stack is the named execution environment Kitaru uses as a persisted fallback target when no higher-precedence stack source is set.
 
-This page covers the general stack story: current stack, switching, local stack creation, deletion, and precedence. If you want the end-to-end workflow for a Kubernetes-backed stack, use [Kubernetes Stacks](/getting-started/kubernetes-stacks).
+This page covers the general stack story: current stack, switching, local stack creation, remote stack creation, deletion, and precedence. If you want the end-to-end workflow for a Kubernetes-backed stack, use [Kubernetes Stacks](/getting-started/kubernetes-stacks).
 
 ## Show the current stack
 
@@ -65,6 +65,47 @@ If you want to create the stack without switching to it yet:
 kitaru stack create dev --no-activate
 ```
 
+## Create a remote stack
+
+Today, the CLI and MCP server can provision three shipped stack types:
+
+- `local`
+- `kubernetes`
+- `vertex`
+
+In story form: Kitaru can assemble the stack definition and cloud connector for you, but it still expects the bucket, registry, and any cluster you point at to already exist.
+
+### Kubernetes example
+
+```bash
+kitaru stack create prod-k8s \
+  --type kubernetes \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com \
+  --cluster prod-cluster \
+  --region eu-west-1
+```
+
+### Vertex example
+
+```bash
+kitaru stack create prod-vertex \
+  --type vertex \
+  --artifact-store gs://my-bucket/kitaru \
+  --container-registry us-central1-docker.pkg.dev/my-project/my-repo \
+  --region us-central1
+```
+
+Vertex uses a managed runner, so there is no `--cluster` or `--namespace` flag. `kitaru stack show prod-vertex` will report the runner `location` that ZenML stores for the Vertex orchestrator.
+
+You can also keep the same inputs in a YAML file and create the stack with:
+
+```bash
+kitaru stack create -f stack.yaml
+```
+
+CLI flags still override YAML values when both are provided.
+
 ## Switch to another stack
 
 ```bash
@@ -114,6 +155,8 @@ The SDK keeps `StackInfo` intentionally small: `id`, `name`, and `is_active`.
 
 That means `is_managed` is part of structured list output, not part of `StackInfo` itself.
 
+One important scope note: the public Python SDK `kitaru.create_stack(...)` currently provisions local stacks only. Kubernetes and Vertex stack creation are exposed through the CLI and MCP surfaces.
+
 ## Precedence with flow-level stack overrides
 
 The active stack is only one layer in the execution precedence chain. Higher layers can override it:
@@ -132,7 +175,7 @@ In story form:
 - `@flow(stack="gpu-cluster")` binds a default to one specific flow definition
 - `my_flow.run(stack="gpu-cluster")` or `my_flow.deploy(stack="gpu-cluster")` overrides everything else for that one execution
 
-Those higher-precedence overrides do **not** change the active stack you see in `kitaru stack current`; they are temporary execution-time bindings
+Those higher-precedence overrides do **not** change the active stack you see in `kitaru stack current`; they are temporary execution-time bindings.
 
 ## Related pages
 

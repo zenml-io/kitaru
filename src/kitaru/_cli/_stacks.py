@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -143,11 +144,10 @@ def _normalize_stack_create_file_mapping(
 
 def _load_stack_create_file(path: Path) -> _StackCreateInputs:
     """Load stack-create inputs from a YAML file."""
-    if not path.exists() or not path.is_file():
-        raise ValueError(f"Stack config file not found: {path}")
-
     try:
         raw = yaml_utils.read_yaml(str(path))
+    except FileNotFoundError:
+        raise ValueError(f"Stack config file not found: {path}") from None
     except Exception as exc:
         raise ValueError(f"Invalid YAML in stack config file '{path}': {exc}") from exc
 
@@ -168,46 +168,15 @@ def _merge_stack_create_inputs(
 ) -> _StackCreateInputs:
     """Merge CLI and YAML stack-create inputs with CLI precedence."""
     file_inputs = file_inputs or _StackCreateInputs()
-    return _StackCreateInputs(
-        name=cli_inputs.name if cli_inputs.name is not None else file_inputs.name,
-        type=cli_inputs.type if cli_inputs.type is not None else file_inputs.type,
-        activate=(
-            cli_inputs.activate
-            if cli_inputs.activate is not None
-            else file_inputs.activate
-        ),
-        artifact_store=(
-            cli_inputs.artifact_store
-            if cli_inputs.artifact_store is not None
-            else file_inputs.artifact_store
-        ),
-        container_registry=(
-            cli_inputs.container_registry
-            if cli_inputs.container_registry is not None
-            else file_inputs.container_registry
-        ),
-        cluster=(
-            cli_inputs.cluster
-            if cli_inputs.cluster is not None
-            else file_inputs.cluster
-        ),
-        region=(
-            cli_inputs.region if cli_inputs.region is not None else file_inputs.region
-        ),
-        namespace=(
-            cli_inputs.namespace
-            if cli_inputs.namespace is not None
-            else file_inputs.namespace
-        ),
-        credentials=(
-            cli_inputs.credentials
-            if cli_inputs.credentials is not None
-            else file_inputs.credentials
-        ),
-        verify=(
-            cli_inputs.verify if cli_inputs.verify is not None else file_inputs.verify
-        ),
-    )
+    merged = {
+        field.name: (
+            cli_val
+            if (cli_val := getattr(cli_inputs, field.name)) is not None
+            else getattr(file_inputs, field.name)
+        )
+        for field in dataclasses.fields(_StackCreateInputs)
+    }
+    return _StackCreateInputs(**merged)
 
 
 def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
@@ -226,10 +195,8 @@ def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
 
 def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     """Build optional detail rows for stack-create success output."""
-    if (
-        getattr(result, "stack_type", StackType.LOCAL.value)
-        != StackType.KUBERNETES.value
-    ):
+    stack_type = getattr(result, "stack_type", StackType.LOCAL.value)
+    if stack_type not in {StackType.KUBERNETES.value, StackType.VERTEX.value}:
         return []
 
     resources = getattr(result, "resources", None)
@@ -243,11 +210,13 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
 
     cluster = resources.get("cluster")
     region = resources.get("region")
-    if cluster:
+    if stack_type == StackType.KUBERNETES.value and cluster:
         cluster_value = str(cluster)
         if region:
             cluster_value = f"{cluster_value} ({region})"
         rows.append(("Cluster:", cluster_value))
+    elif stack_type == StackType.VERTEX.value and region:
+        rows.append(("Region:", str(region)))
 
     artifact_store = resources.get("artifact_store")
     if artifact_store:
@@ -460,15 +429,20 @@ def create(
     ] = None,
     type: Annotated[
         str | None,
-        Parameter(help="Stack type: local or kubernetes."),
+        Parameter(help="Stack type: local, kubernetes, or vertex."),
     ] = None,
     artifact_store: Annotated[
         str | None,
-        Parameter(help="Artifact store URI for Kubernetes stacks (s3:// or gs://)."),
+        Parameter(
+            help=(
+                "Artifact store URI for remote stacks "
+                "(Kubernetes: s3:// or gs://; Vertex: gs://)."
+            )
+        ),
     ] = None,
     container_registry: Annotated[
         str | None,
-        Parameter(help="Container registry URI for Kubernetes stacks."),
+        Parameter(help="Container registry URI for Kubernetes or Vertex stacks."),
     ] = None,
     cluster: Annotated[
         str | None,
@@ -476,7 +450,7 @@ def create(
     ] = None,
     region: Annotated[
         str | None,
-        Parameter(help="Cloud region."),
+        Parameter(help="Cloud region for Kubernetes or Vertex stacks."),
     ] = None,
     namespace: Annotated[
         str | None,
@@ -484,15 +458,17 @@ def create(
     ] = None,
     credentials: Annotated[
         str | None,
-        Parameter(help="Optional credentials reference for Kubernetes stacks."),
+        Parameter(
+            help="Optional credentials reference for Kubernetes or Vertex stacks."
+        ),
     ] = None,
     no_verify: Annotated[
         bool | None,
-        Parameter(help="Skip credential verification for Kubernetes stacks."),
+        Parameter(help="Skip credential verification for Kubernetes or Vertex stacks."),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a local or Kubernetes-backed stack."""
+    """Create a local, Kubernetes-backed, or Vertex AI stack."""
     command = "stack.create"
     output_format = _resolve_output_format(output)
 
@@ -559,11 +535,9 @@ def create(
         return
 
     created_message = f"Created stack: {result.stack.name}"
-    if (
-        getattr(result, "stack_type", StackType.LOCAL.value)
-        == StackType.KUBERNETES.value
-    ):
-        created_message += " (kubernetes)"
+    result_stack_type = getattr(result, "stack_type", StackType.LOCAL.value)
+    if result_stack_type != StackType.LOCAL.value:
+        created_message += f" ({result_stack_type})"
     _print_success(created_message)
     for label, value in _stack_create_detail_rows(result):
         print(f"{label:<12} {value}")

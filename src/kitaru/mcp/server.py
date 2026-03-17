@@ -293,7 +293,7 @@ def manage_stack(
     credentials: str | None = None,
     verify: bool = True,
 ) -> dict[str, Any]:
-    """Create or delete a local or Kubernetes-backed stack."""
+    """Create or delete a local, Kubernetes-backed, or Vertex AI stack."""
 
     def _manage_stack() -> dict[str, Any]:
         request = stack_interface.build_manage_stack_request(

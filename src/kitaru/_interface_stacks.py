@@ -11,13 +11,47 @@ from kitaru._config._stacks import (
     KubernetesStackSpec,
     RemoteStackSpec,
     StackType,
+    VertexStackSpec,
 )
 
-_DEFAULT_INTERFACE_STACK_TYPES = (
+_CREATE_ALLOWED_STACK_TYPES = (
     StackType.LOCAL,
     StackType.KUBERNETES,
+    StackType.VERTEX,
 )
-
+_DEFAULT_INTERFACE_STACK_TYPES = _CREATE_ALLOWED_STACK_TYPES
+_REMOTE_STACK_TYPES = (StackType.KUBERNETES, StackType.VERTEX)
+_FIELD_ORDER = (
+    "artifact_store",
+    "container_registry",
+    "cluster",
+    "region",
+    "namespace",
+    "credentials",
+    "verify",
+)
+_REQUIRED_FIELDS: dict[StackType, tuple[str, ...]] = {
+    StackType.KUBERNETES: (
+        "artifact_store",
+        "container_registry",
+        "cluster",
+        "region",
+    ),
+    StackType.VERTEX: (
+        "artifact_store",
+        "container_registry",
+        "region",
+    ),
+}
+_FIELD_ALLOWED_STACK_TYPES: dict[str, frozenset[StackType]] = {
+    "artifact_store": frozenset(_REMOTE_STACK_TYPES),
+    "container_registry": frozenset(_REMOTE_STACK_TYPES),
+    "cluster": frozenset({StackType.KUBERNETES}),
+    "region": frozenset(_REMOTE_STACK_TYPES),
+    "namespace": frozenset({StackType.KUBERNETES}),
+    "credentials": frozenset(_REMOTE_STACK_TYPES),
+    "verify": frozenset(_REMOTE_STACK_TYPES),
+}
 _FIXED_PROVIDER_BY_STACK_TYPE = {
     StackType.VERTEX: CloudProvider.GCP,
     StackType.SAGEMAKER: CloudProvider.AWS,
@@ -29,12 +63,16 @@ _FIXED_PROVIDER_BY_STACK_TYPE = {
 class StackOptionLabels:
     """Interface-specific labels used in stack validation errors."""
 
-    kubernetes_requirement: str
+    stack_type_labels: Mapping[StackType, str]
     field_labels: Mapping[str, str]
 
 
 CLI_STACK_OPTION_LABELS = StackOptionLabels(
-    kubernetes_requirement="--type kubernetes",
+    stack_type_labels={
+        StackType.LOCAL: "--type local",
+        StackType.KUBERNETES: "--type kubernetes",
+        StackType.VERTEX: "--type vertex",
+    },
     field_labels={
         "artifact_store": "--artifact-store",
         "container_registry": "--container-registry",
@@ -47,7 +85,11 @@ CLI_STACK_OPTION_LABELS = StackOptionLabels(
 )
 
 MCP_STACK_OPTION_LABELS = StackOptionLabels(
-    kubernetes_requirement='`stack_type="kubernetes"`',
+    stack_type_labels={
+        StackType.LOCAL: '`stack_type="local"`',
+        StackType.KUBERNETES: '`stack_type="kubernetes"`',
+        StackType.VERTEX: '`stack_type="vertex"`',
+    },
     field_labels={
         "artifact_store": "`artifact_store`",
         "container_registry": "`container_registry`",
@@ -141,7 +183,73 @@ def _render_field_labels(field_names: list[str], *, labels: StackOptionLabels) -
     return ", ".join(labels.field_labels[field_name] for field_name in field_names)
 
 
-def build_kubernetes_stack_spec(
+def _render_stack_type_requirement(
+    allowed_stack_types: frozenset[StackType],
+    *,
+    labels: StackOptionLabels,
+) -> str:
+    """Render stack-type requirements for validation messages."""
+    ordered_labels = [
+        labels.stack_type_labels[stack_type]
+        for stack_type in _CREATE_ALLOWED_STACK_TYPES
+        if stack_type in allowed_stack_types and stack_type in labels.stack_type_labels
+    ]
+    if len(ordered_labels) == 1:
+        return ordered_labels[0]
+    if len(ordered_labels) == 2:
+        return f"{ordered_labels[0]} or {ordered_labels[1]}"
+    leading_values = ", ".join(ordered_labels[:-1])
+    return f"{leading_values}, or {ordered_labels[-1]}"
+
+
+def _validate_explicit_field_usage(
+    *,
+    stack_type: StackType,
+    provided_fields: Mapping[str, bool],
+    labels: StackOptionLabels,
+) -> None:
+    """Reject fields that were explicitly provided for the wrong stack type."""
+    invalid_fields_by_allowed_types: dict[frozenset[StackType], list[str]] = {}
+    for field_name in _FIELD_ORDER:
+        if not provided_fields.get(field_name, False):
+            continue
+        allowed_stack_types = _FIELD_ALLOWED_STACK_TYPES[field_name]
+        if stack_type in allowed_stack_types:
+            continue
+        invalid_fields_by_allowed_types.setdefault(allowed_stack_types, []).append(
+            field_name
+        )
+
+    if not invalid_fields_by_allowed_types:
+        return
+
+    ordered_allowed_type_groups = sorted(
+        invalid_fields_by_allowed_types,
+        key=lambda group: (
+            len(group),
+            tuple(item.value for item in _CREATE_ALLOWED_STACK_TYPES if item in group),
+        ),
+    )
+    allowed_stack_types = ordered_allowed_type_groups[0]
+    option_label = (
+        "Remote stack options"
+        if allowed_stack_types == frozenset(_REMOTE_STACK_TYPES)
+        else "Kubernetes-only options"
+    )
+    requirement_label = _render_stack_type_requirement(
+        allowed_stack_types,
+        labels=labels,
+    )
+    raise ValueError(
+        f"{option_label} require {requirement_label}: "
+        + _render_field_labels(
+            invalid_fields_by_allowed_types[allowed_stack_types],
+            labels=labels,
+        )
+    )
+
+
+def build_remote_stack_spec(
     *,
     stack_type: StackType,
     artifact_store: str | None,
@@ -152,8 +260,26 @@ def build_kubernetes_stack_spec(
     credentials: str | None,
     verify: bool,
     labels: StackOptionLabels,
-) -> KubernetesStackSpec | None:
-    """Validate interface inputs and build a Kubernetes spec when needed."""
+) -> RemoteStackSpec | None:
+    """Validate interface inputs and build a remote stack spec when needed."""
+    provided_fields = {
+        "artifact_store": artifact_store is not None,
+        "container_registry": container_registry is not None,
+        "cluster": cluster is not None,
+        "region": region is not None,
+        "namespace": namespace is not None,
+        "credentials": credentials is not None,
+        "verify": not verify,
+    }
+    _validate_explicit_field_usage(
+        stack_type=stack_type,
+        provided_fields=provided_fields,
+        labels=labels,
+    )
+
+    if stack_type == StackType.LOCAL:
+        return None
+
     normalized_artifact_store = normalize_optional_stack_string(artifact_store)
     normalized_container_registry = normalize_optional_stack_string(container_registry)
     normalized_cluster = normalize_optional_stack_string(cluster)
@@ -161,68 +287,69 @@ def build_kubernetes_stack_spec(
     normalized_namespace = normalize_optional_stack_string(namespace)
     normalized_credentials = normalize_optional_stack_string(credentials)
 
-    kubernetes_option_fields = [
-        ("artifact_store", artifact_store is not None),
-        ("container_registry", container_registry is not None),
-        ("cluster", cluster is not None),
-        ("region", region is not None),
-        ("namespace", namespace is not None),
-        ("credentials", credentials is not None),
-        ("verify", not verify),
-    ]
-
-    if stack_type == StackType.LOCAL:
-        provided_kubernetes_fields = [
-            field_name
-            for field_name, is_provided in kubernetes_option_fields
-            if is_provided
-        ]
-        if provided_kubernetes_fields:
-            raise ValueError(
-                f"Kubernetes-only options require {labels.kubernetes_requirement}: "
-                + _render_field_labels(provided_kubernetes_fields, labels=labels)
-            )
-        return None
-
+    normalized_required_values = {
+        "artifact_store": normalized_artifact_store,
+        "container_registry": normalized_container_registry,
+        "cluster": normalized_cluster,
+        "region": normalized_region,
+    }
     missing_required_fields = [
         field_name
-        for field_name, value in (
-            ("artifact_store", normalized_artifact_store),
-            ("container_registry", normalized_container_registry),
-            ("cluster", normalized_cluster),
-            ("region", normalized_region),
-        )
-        if value is None
+        for field_name in _REQUIRED_FIELDS[stack_type]
+        if normalized_required_values[field_name] is None
     ]
     if missing_required_fields:
         raise ValueError(
-            f"{labels.kubernetes_requirement} requires: "
+            f"{labels.stack_type_labels[stack_type]} requires: "
             + _render_field_labels(missing_required_fields, labels=labels)
             + "."
         )
 
     assert normalized_artifact_store is not None
     assert normalized_container_registry is not None
-    assert normalized_cluster is not None
     assert normalized_region is not None
 
     provider = infer_cloud_provider(normalized_artifact_store)
-    if provider not in {CloudProvider.AWS, CloudProvider.GCP}:
+    fixed_provider = _FIXED_PROVIDER_BY_STACK_TYPE.get(stack_type)
+    if fixed_provider is not None and provider != fixed_provider:
+        if stack_type == StackType.VERTEX:
+            raise ValueError(
+                "Vertex stacks require a gs:// artifact store URI. "
+                f"Received: '{normalized_artifact_store}'."
+            )
         raise ValueError(
-            f"Cannot infer cloud provider from '{normalized_artifact_store}'. "
-            "Use an s3:// or gs:// URI."
+            f"{stack_type.value} stacks require a "
+            f"{fixed_provider.value} artifact store."
         )
 
-    return KubernetesStackSpec(
-        provider=provider,
-        artifact_store=normalized_artifact_store,
-        container_registry=normalized_container_registry,
-        cluster=normalized_cluster,
-        region=normalized_region,
-        namespace=normalized_namespace or "default",
-        credentials=normalized_credentials,
-        verify=verify,
-    )
+    if stack_type == StackType.KUBERNETES:
+        if provider not in {CloudProvider.AWS, CloudProvider.GCP}:
+            raise ValueError(
+                f"Cannot infer cloud provider from '{normalized_artifact_store}'. "
+                "Use an s3:// or gs:// URI."
+            )
+        assert normalized_cluster is not None
+        return KubernetesStackSpec(
+            provider=provider,
+            artifact_store=normalized_artifact_store,
+            container_registry=normalized_container_registry,
+            cluster=normalized_cluster,
+            region=normalized_region,
+            namespace=normalized_namespace or "default",
+            credentials=normalized_credentials,
+            verify=verify,
+        )
+
+    if stack_type == StackType.VERTEX:
+        return VertexStackSpec(
+            artifact_store=normalized_artifact_store,
+            container_registry=normalized_container_registry,
+            region=normalized_region,
+            credentials=normalized_credentials,
+            verify=verify,
+        )
+
+    raise ValueError(f"Unsupported stack type: {stack_type.value}")
 
 
 def build_stack_create_request(
@@ -249,7 +376,7 @@ def build_stack_create_request(
         name=name,
         activate=activate,
         stack_type=normalized_stack_type,
-        remote_spec=build_kubernetes_stack_spec(
+        remote_spec=build_remote_stack_spec(
             stack_type=normalized_stack_type,
             artifact_store=artifact_store,
             container_registry=container_registry,
@@ -303,8 +430,11 @@ def build_manage_stack_request(
         if not activate:
             raise ValueError('`activate` is only valid when action="create".')
 
-        normalized_stack_type = normalize_stack_type(stack_type)
-        kubernetes_create_only_fields = [
+        normalized_stack_type = normalize_stack_type(
+            stack_type,
+            allowed_stack_types=_CREATE_ALLOWED_STACK_TYPES,
+        )
+        stack_create_only_fields = [
             field_name
             for field_name, is_provided in (
                 ("stack_type", normalized_stack_type != StackType.LOCAL),
@@ -318,11 +448,11 @@ def build_manage_stack_request(
             )
             if is_provided
         ]
-        if kubernetes_create_only_fields:
+        if stack_create_only_fields:
             raise ValueError(
-                'Kubernetes create options are only valid when action="create": '
+                'Stack create options are only valid when action="create": '
                 + _render_field_labels(
-                    kubernetes_create_only_fields,
+                    stack_create_only_fields,
                     labels=MCP_STACK_OPTION_LABELS,
                 )
             )

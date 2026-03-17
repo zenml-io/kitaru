@@ -20,6 +20,7 @@ from kitaru.config import (
     KubernetesStackSpec,
     StackInfo,
     StackType,
+    VertexStackSpec,
 )
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
@@ -992,28 +993,44 @@ def test_manage_stack_create_kubernetes_requires_required_fields(
     mock_create_stack.assert_not_called()
 
 
+_REMOTE_STACK_TYPE_ERROR = (
+    'Remote stack options require `stack_type="kubernetes"` or `stack_type="vertex"`'
+)
+
+
 @pytest.mark.parametrize(
-    "extra_kwargs",
+    ("extra_kwargs", "expected_message"),
     [
-        {"artifact_store": "s3://my-bucket/kitaru"},
-        {"container_registry": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"},
-        {"cluster": "cluster-1"},
-        {"region": "eu-west-1"},
-        {"namespace": "ml-team"},
-        {"credentials": "implicit"},
-        {"verify": False},
+        ({"artifact_store": "s3://my-bucket/kitaru"}, _REMOTE_STACK_TYPE_ERROR),
+        (
+            {
+                "container_registry": (
+                    "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"
+                )
+            },
+            _REMOTE_STACK_TYPE_ERROR,
+        ),
+        (
+            {"cluster": "cluster-1"},
+            'Kubernetes-only options require `stack_type="kubernetes"`: `cluster`',
+        ),
+        ({"region": "eu-west-1"}, _REMOTE_STACK_TYPE_ERROR),
+        (
+            {"namespace": "ml-team"},
+            'Kubernetes-only options require `stack_type="kubernetes"`: `namespace`',
+        ),
+        ({"credentials": "implicit"}, _REMOTE_STACK_TYPE_ERROR),
+        ({"verify": False}, _REMOTE_STACK_TYPE_ERROR),
     ],
 )
 def test_manage_stack_create_local_rejects_kubernetes_only_options(
     extra_kwargs: dict[str, Any],
+    expected_message: str,
 ) -> None:
-    """Local MCP create should reject Kubernetes-only inputs."""
+    """Local MCP create should reject remote-stack inputs."""
     with (
         patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
-        pytest.raises(
-            ValueError,
-            match='Kubernetes-only options require `stack_type="kubernetes"`',
-        ),
+        pytest.raises(ValueError, match=expected_message),
     ):
         manage_stack("create", "dev", **extra_kwargs)
 
@@ -1065,18 +1082,161 @@ def test_manage_stack_create_kubernetes_normalizes_blank_optional_inputs() -> No
     assert kubernetes_spec.verify is True
 
 
-def test_manage_stack_create_rejects_known_future_stack_type_for_now() -> None:
-    """Phase 1 keeps future stack types hidden from the MCP surface too."""
+def test_manage_stack_create_vertex_dispatches_structured_spec() -> None:
+    """MCP Vertex create should build a shared serialized stack result."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-vertex-id", name="vertex-dev", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "vertex-dev (orchestrator)",
+                "vertex-dev (artifact_store)",
+                "vertex-dev (container_registry)",
+            ),
+            stack_type="vertex",
+            service_connectors_created=("vertex-dev-gcp",),
+            resources={
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://my-bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/my-project/my-repo",
+            },
+        )
+
+        payload = manage_stack(
+            "create",
+            "vertex-dev",
+            stack_type="vertex",
+            activate=False,
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/my-repo",
+            region="us-central1",
+            verify=False,
+        )
+
+    mock_create_stack.assert_called_once()
+    assert mock_create_stack.call_args.args == ("vertex-dev",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.VERTEX
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    vertex_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(vertex_spec, VertexStackSpec)
+    assert vertex_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://my-bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/my-project/my-repo",
+        "region": "us-central1",
+        "credentials": None,
+        "verify": False,
+    }
+
+    assert payload == {
+        "id": "stack-vertex-id",
+        "name": "vertex-dev",
+        "is_active": False,
+        "previous_active_stack": None,
+        "components_created": [
+            "vertex-dev (orchestrator)",
+            "vertex-dev (artifact_store)",
+            "vertex-dev (container_registry)",
+        ],
+        "stack_type": "vertex",
+        "service_connectors_created": ["vertex-dev-gcp"],
+        "resources": {
+            "provider": "gcp",
+            "region": "us-central1",
+            "artifact_store": "gs://my-bucket/kitaru",
+            "container_registry": "us-central1-docker.pkg.dev/my-project/my-repo",
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["artifact_store", "container_registry", "region"],
+)
+def test_manage_stack_create_vertex_requires_required_fields(
+    missing_field: str,
+) -> None:
+    """Vertex MCP create should reject missing required inputs early."""
+    create_kwargs: dict[str, str | None] = {
+        "stack_type": "vertex",
+        "artifact_store": "gs://my-bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/my-project/my-repo",
+        "region": "us-central1",
+    }
+    create_kwargs[missing_field] = None
+
     with (
         patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
         pytest.raises(
             ValueError,
-            match=r"Unsupported stack type: vertex\. Use 'local' or 'kubernetes'\.",
+            match=r'`stack_type="vertex"` requires:',
         ),
     ):
-        manage_stack("create", "vertex-dev", stack_type="vertex")
+        manage_stack("create", "vertex-dev", **create_kwargs)
 
     mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_vertex_rejects_kubernetes_only_options() -> None:
+    """Vertex MCP create should reject Kubernetes-only options."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(
+            ValueError,
+            match=(
+                'Kubernetes-only options require `stack_type="kubernetes"`: `cluster`'
+            ),
+        ),
+    ):
+        manage_stack(
+            "create",
+            "vertex-dev",
+            stack_type="vertex",
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/my-repo",
+            region="us-central1",
+            cluster="cluster-1",
+        )
+
+    mock_create_stack.assert_not_called()
+
+
+def test_manage_stack_create_vertex_normalizes_blank_optional_inputs() -> None:
+    """Blank optional Vertex inputs should normalize cleanly before dispatch."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-vertex-id", name="vertex-dev", is_active=True),
+            previous_active_stack=None,
+            components_created=(
+                "vertex-dev (orchestrator)",
+                "vertex-dev (artifact_store)",
+                "vertex-dev (container_registry)",
+            ),
+            stack_type="vertex",
+            service_connectors_created=(),
+            resources=None,
+        )
+
+        manage_stack(
+            "create",
+            "vertex-dev",
+            stack_type="vertex",
+            artifact_store="  gs://my-bucket/kitaru  ",
+            container_registry="  us-central1-docker.pkg.dev/my-project/my-repo  ",
+            region="  us-central1  ",
+            credentials="   ",
+        )
+
+    vertex_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(vertex_spec, VertexStackSpec)
+    assert vertex_spec.artifact_store == "gs://my-bucket/kitaru"
+    assert (
+        vertex_spec.container_registry
+        == "us-central1-docker.pkg.dev/my-project/my-repo"
+    )
+    assert vertex_spec.region == "us-central1"
+    assert vertex_spec.credentials is None
+    assert vertex_spec.verify is True
 
 
 def test_manage_stack_create_kubernetes_rejects_unknown_provider() -> None:
@@ -1109,12 +1269,12 @@ def test_manage_stack_create_kubernetes_rejects_unknown_provider() -> None:
 def test_manage_stack_delete_rejects_kubernetes_create_options(
     delete_kwargs: dict[str, Any],
 ) -> None:
-    """Delete should reject Kubernetes creation inputs."""
+    """Delete should reject stack-creation inputs."""
     with (
         patch("kitaru._config._stacks._delete_stack_operation") as mock_delete_stack,
         pytest.raises(
             ValueError,
-            match='Kubernetes create options are only valid when action="create"',
+            match='Stack create options are only valid when action="create"',
         ),
     ):
         manage_stack("delete", "dev", **delete_kwargs)

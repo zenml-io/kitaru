@@ -24,6 +24,7 @@ from zenml.integrations.gcp import (
     GCP_ARTIFACT_STORE_FLAVOR,
     GCP_CONNECTOR_TYPE,
     GCP_RESOURCE_TYPE,
+    GCP_VERTEX_ORCHESTRATOR_FLAVOR,
 )
 from zenml.models.v2.core.stack import StackRequest
 from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
@@ -61,7 +62,7 @@ class CloudProvider(StrEnum):
 
 
 class KubernetesStackSpec(BaseModel):
-    """Internal request model for future Kubernetes stack creation."""
+    """Internal request model for Kubernetes stack creation."""
 
     provider: CloudProvider
     artifact_store: str
@@ -76,7 +77,7 @@ class KubernetesStackSpec(BaseModel):
 
 
 class VertexStackSpec(BaseModel):
-    """Request model for future Vertex AI stack creation."""
+    """Request model for Vertex AI stack creation."""
 
     artifact_store: str
     container_registry: str
@@ -176,7 +177,7 @@ class _StackDeleteResult:
     recursive: bool
 
 
-_StackShowType = Literal["local", "kubernetes", "custom"]
+_StackShowType = Literal["local", "kubernetes", "vertex", "custom"]
 _StackComponentRole = Literal[
     "runner",
     "storage",
@@ -260,6 +261,63 @@ def _container_registry_resource_id(
     if provider == CloudProvider.AWS:
         return normalized_registry.split("/", 1)[0]
     return normalized_registry
+
+
+def _merge_managed_labels(labels: dict[str, str] | None) -> dict[str, str]:
+    """Ensure stack labels always include Kitaru's managed marker."""
+    merged_labels = dict(labels or {})
+    merged_labels[_STACK_MANAGED_LABEL_KEY] = _STACK_MANAGED_LABEL_VALUE
+    return merged_labels
+
+
+def _resolve_gcp_connector_spec(
+    *,
+    container_registry: str,
+    credentials: str | None,
+) -> _ResolvedConnectorSpec:
+    """Translate Kitaru GCP credentials into ZenML connector info."""
+    project_id = _infer_gcp_project_id_from_container_registry(container_registry)
+    normalized_credentials = credentials.strip() if credentials else None
+    auth_method = "implicit"
+    configuration: dict[str, Any] = {"project_id": project_id}
+
+    if normalized_credentials:
+        method, separator, raw_value = normalized_credentials.partition(":")
+        if not separator:
+            raise KitaruUsageError(
+                "Invalid GCP credentials format. Use "
+                "gcp-service-account:/path/to/key.json."
+            )
+        normalized_method = method.strip().lower()
+        if normalized_method != "gcp-service-account":
+            raise KitaruUsageError(
+                "Unsupported GCP credentials method. Use: gcp-service-account."
+            )
+
+        credential_path_raw = raw_value.strip()
+        if not credential_path_raw:
+            raise KitaruUsageError("GCP service account file path cannot be empty.")
+        credential_path = Path(credential_path_raw).expanduser()
+        try:
+            service_account_json = credential_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise KitaruUsageError(
+                f"Unable to read GCP service account file '{credential_path}': {exc}"
+            ) from exc
+
+        auth_method = "service-account"
+        configuration.update({"service_account_json": service_account_json})
+
+    return _ResolvedConnectorSpec(
+        connector_info=ServiceConnectorInfo(
+            type=GCP_CONNECTOR_TYPE,
+            auth_method=auth_method,
+            configuration=dict(configuration),
+        ),
+        verify_connector_type=GCP_CONNECTOR_TYPE,
+        verify_resource_type=GCP_RESOURCE_TYPE,
+        verify_configuration=dict(configuration),
+    )
 
 
 def _resolve_kubernetes_connector_spec(
@@ -347,49 +405,9 @@ def _resolve_kubernetes_connector_spec(
         )
 
     if spec.provider == CloudProvider.GCP:
-        project_id = _infer_gcp_project_id_from_container_registry(
-            spec.container_registry
-        )
-        auth_method = "implicit"
-        configuration = {"project_id": project_id}
-
-        if normalized_credentials:
-            method, separator, raw_value = normalized_credentials.partition(":")
-            if not separator:
-                raise KitaruUsageError(
-                    "Invalid GCP credentials format. Use "
-                    "gcp-service-account:/path/to/key.json."
-                )
-            normalized_method = method.strip().lower()
-            if normalized_method != "gcp-service-account":
-                raise KitaruUsageError(
-                    "Unsupported GCP credentials method. Use: gcp-service-account."
-                )
-
-            credential_path_raw = raw_value.strip()
-            if not credential_path_raw:
-                raise KitaruUsageError("GCP service account file path cannot be empty.")
-            credential_path = Path(credential_path_raw).expanduser()
-            try:
-                service_account_json = credential_path.read_text(encoding="utf-8")
-            except OSError as exc:
-                raise KitaruUsageError(
-                    "Unable to read GCP service account file "
-                    f"'{credential_path}': {exc}"
-                ) from exc
-
-            auth_method = "service-account"
-            configuration.update({"service_account_json": service_account_json})
-
-        return _ResolvedConnectorSpec(
-            connector_info=ServiceConnectorInfo(
-                type=GCP_CONNECTOR_TYPE,
-                auth_method=auth_method,
-                configuration=dict(configuration),
-            ),
-            verify_connector_type=GCP_CONNECTOR_TYPE,
-            verify_resource_type=GCP_RESOURCE_TYPE,
-            verify_configuration=dict(configuration),
+        return _resolve_gcp_connector_spec(
+            container_registry=spec.container_registry,
+            credentials=normalized_credentials,
         )
 
     raise KitaruUsageError(f"Unsupported cloud provider: {spec.provider}")
@@ -403,8 +421,7 @@ def _build_kubernetes_stack_request(
     labels: dict[str, str] | None,
 ) -> StackRequest:
     """Build the one-shot ZenML stack request for a Kubernetes stack."""
-    merged_labels = dict(labels or {})
-    merged_labels[_STACK_MANAGED_LABEL_KEY] = _STACK_MANAGED_LABEL_VALUE
+    merged_labels = _merge_managed_labels(labels)
 
     artifact_store_flavor = (
         "s3" if spec.provider == CloudProvider.AWS else GCP_ARTIFACT_STORE_FLAVOR
@@ -447,6 +464,60 @@ def _build_kubernetes_stack_request(
                     service_connector_resource_id=_container_registry_resource_id(
                         spec.container_registry,
                         spec.provider,
+                    ),
+                    configuration={"uri": spec.container_registry},
+                )
+            ],
+        },
+        service_connectors=[
+            ServiceConnectorInfo(
+                type=connector_spec.connector_info.type,
+                auth_method=connector_spec.connector_info.auth_method,
+                configuration=dict(connector_spec.connector_info.configuration),
+            )
+        ],
+    )
+
+
+def _build_vertex_stack_request(
+    name: str,
+    *,
+    spec: VertexStackSpec,
+    connector_spec: _ResolvedConnectorSpec,
+    labels: dict[str, str] | None,
+) -> StackRequest:
+    """Build the one-shot ZenML stack request for a Vertex AI stack."""
+    merged_labels = _merge_managed_labels(labels)
+
+    return StackRequest(
+        name=name,
+        labels=merged_labels,
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                ComponentInfo(
+                    flavor=GCP_VERTEX_ORCHESTRATOR_FLAVOR,
+                    service_connector_index=0,
+                    configuration={"location": spec.region},
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                ComponentInfo(
+                    flavor=GCP_ARTIFACT_STORE_FLAVOR,
+                    service_connector_index=0,
+                    service_connector_resource_id=_artifact_store_resource_id(
+                        spec.artifact_store,
+                        CloudProvider.GCP,
+                    ),
+                    configuration={"path": spec.artifact_store},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                ComponentInfo(
+                    flavor=ContainerRegistryFlavor.GCP.value,
+                    service_connector_index=0,
+                    service_connector_resource_id=_container_registry_resource_id(
+                        spec.container_registry,
+                        CloudProvider.GCP,
                     ),
                     configuration={"uri": spec.container_registry},
                 )
@@ -1000,6 +1071,21 @@ def _stack_component_details_from_model(
     )
 
     if component_type == StackComponentType.ORCHESTRATOR:
+        if backend == GCP_VERTEX_ORCHESTRATOR_FLAVOR:
+            details: list[tuple[str, str]] = []
+            location = _normalize_stack_detail_value(
+                component_configuration.get("location")
+            )
+            if location is not None:
+                details.append(("location", location))
+
+            return StackComponentDetails(
+                role="runner",
+                name=component_name,
+                backend=backend,
+                details=tuple(details),
+            )
+
         details: list[tuple[str, str]] = []
         cluster = next(
             (
@@ -1086,6 +1172,13 @@ def _infer_stack_details_type(
     components: tuple[StackComponentDetails, ...],
 ) -> _StackShowType:
     """Infer a user-facing stack type from translated stack components."""
+    if any(
+        component.role == "runner"
+        and component.backend == GCP_VERTEX_ORCHESTRATOR_FLAVOR
+        for component in components
+    ):
+        return "vertex"
+
     if any(
         component.role == "runner" and component.backend == "kubernetes"
         for component in components
@@ -1241,8 +1334,33 @@ def _create_vertex_stack_operation(
     labels: dict[str, str] | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> _StackCreateResult:
-    """Placeholder Vertex AI stack flow for future implementation phases."""
-    raise KitaruUsageError("Stack type 'vertex' is not implemented yet.")
+    """Create a Vertex AI-backed stack via ZenML's one-shot stack API."""
+    selector = _normalize_stack_selector(name)
+    connector_spec = _resolve_gcp_connector_spec(
+        container_registry=spec.container_registry,
+        credentials=spec.credentials,
+    )
+    stack_request = _build_vertex_stack_request(
+        selector,
+        spec=spec,
+        connector_spec=connector_spec,
+        labels=labels,
+    )
+    return _create_remote_stack_operation(
+        selector,
+        stack_type=StackType.VERTEX,
+        connector_spec=connector_spec,
+        stack_request=stack_request,
+        resource_summary={
+            "provider": CloudProvider.GCP.value,
+            "region": spec.region,
+            "artifact_store": spec.artifact_store,
+            "container_registry": spec.container_registry,
+        },
+        activate=activate,
+        verify=spec.verify,
+        client_factory=client_factory,
+    )
 
 
 def _create_sagemaker_stack_operation(
@@ -1326,8 +1444,7 @@ def _create_local_stack_operation(
         raise KitaruStateError(_stack_name_collision_message(selector))
 
     previous_active_stack = str(client.active_stack_model.name) if activate else None
-    merged_labels = dict(labels or {})
-    merged_labels[_STACK_MANAGED_LABEL_KEY] = _STACK_MANAGED_LABEL_VALUE
+    merged_labels = _merge_managed_labels(labels)
 
     created_components: list[_StackComponent] = []
     components_created = (

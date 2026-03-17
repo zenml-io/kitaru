@@ -47,6 +47,7 @@ from kitaru.config import (
     VertexStackSpec,
     _create_kubernetes_stack_operation,
     _create_stack_operation,
+    _create_vertex_stack_operation,
     _delete_stack_components_best_effort,
     _delete_stack_operation,
     _list_stack_entries,
@@ -223,6 +224,56 @@ def _kubernetes_stack_model(
                     configuration={
                         "uri": "123456789012.dkr.ecr.us-east-1.amazonaws.com"
                     },
+                )
+            ],
+        },
+    )
+
+
+def _vertex_stack_model(
+    *,
+    stack_id: str,
+    name: str,
+    connector_name: str | None = "vertex-connector",
+    connector_id: str | None = None,
+    orchestrator_name: str = "vertex-orchestrator",
+    artifact_store_name: str = "vertex-artifacts",
+    container_registry_name: str = "vertex-registry",
+) -> SimpleNamespace:
+    """Return a minimal hydrated Vertex stack model stub."""
+    return SimpleNamespace(
+        id=stack_id,
+        name=name,
+        labels={"kitaru.managed": "true"},
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _kubernetes_stack_component(
+                    "orc-id",
+                    orchestrator_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="vertex",
+                    configuration={"location": "us-central1"},
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _kubernetes_stack_component(
+                    "art-id",
+                    artifact_store_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="gcp",
+                    configuration={"path": "gs://bucket/kitaru"},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _kubernetes_stack_component(
+                    "reg-id",
+                    container_registry_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="gcp",
+                    configuration={"uri": "us-central1-docker.pkg.dev/demo/repo"},
                 )
             ],
         },
@@ -842,6 +893,33 @@ def test_show_stack_operation_returns_kubernetes_stack_details() -> None:
     )
 
 
+def test_show_stack_operation_returns_vertex_stack_details() -> None:
+    """stack show should classify Vertex stacks and expose the location field."""
+    stack_summary = _stack_model(stack_id="stack-vertex-id", name="my-vertex")
+    hydrated_stack = _vertex_stack_model(stack_id="stack-vertex-id", name="my-vertex")
+    client_mock = Mock()
+    client_mock.active_stack_model = hydrated_stack
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("my-vertex")
+
+    assert details.stack_type == "vertex"
+    assert details.is_managed is True
+    assert [component.role for component in details.components] == [
+        "runner",
+        "storage",
+        "image_registry",
+    ]
+    assert details.components[0].backend == "vertex"
+    assert details.components[0].details == (("location", "us-central1"),)
+    assert details.components[1].details == (("location", "gs://bucket/kitaru"),)
+    assert details.components[2].details == (
+        ("location", "us-central1-docker.pkg.dev/demo/repo"),
+    )
+
+
 def test_show_stack_operation_classifies_custom_stacks_and_additional_components() -> (
     None
 ):
@@ -1094,8 +1172,8 @@ def test_create_stack_dispatcher_routes_kubernetes_requests() -> None:
     assert result is expected_result
 
 
-def test_create_stack_dispatcher_routes_future_vertex_requests() -> None:
-    """Dispatcher should already support the future Vertex handler seam."""
+def test_create_stack_dispatcher_routes_vertex_requests() -> None:
+    """Dispatcher should pass Vertex requests through to the Vertex helper."""
     spec = VertexStackSpec(
         artifact_store="gs://bucket/path",
         container_registry="us-docker.pkg.dev/demo-project/demo-repo",
@@ -1129,15 +1207,6 @@ def test_create_stack_dispatcher_routes_future_vertex_requests() -> None:
 @pytest.mark.parametrize(
     ("stack_type", "remote_spec", "expected_message"),
     [
-        (
-            StackType.VERTEX,
-            VertexStackSpec(
-                artifact_store="gs://bucket/path",
-                container_registry="us-docker.pkg.dev/demo-project/demo-repo",
-                region="us-central1",
-            ),
-            "Stack type 'vertex' is not implemented yet.",
-        ),
         (
             StackType.SAGEMAKER,
             SagemakerStackSpec(
@@ -1403,6 +1472,230 @@ def test_create_kubernetes_stack_operation_creates_gcp_stack_without_verificatio
         "artifact_store": "gs://bucket/path",
         "container_registry": "europe-west4-docker.pkg.dev/demo-project/demo-repo",
     }
+
+
+def test_create_vertex_stack_operation_creates_gcp_stack_and_activates(
+    tmp_path: Path,
+) -> None:
+    """Vertex create should build a one-shot GCP stack request and activate it."""
+    service_account_path = tmp_path / "vertex-service-account.json"
+    service_account_json = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "demo-project",
+            "private_key_id": "key-id",
+            "private_key": (
+                "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n"
+            ),
+            "client_email": "demo@demo-project.iam.gserviceaccount.com",
+        }
+    )
+    service_account_path.write_text(service_account_json, encoding="utf-8")
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+        credentials=f"gcp-service-account:{service_account_path}",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _vertex_stack_model(
+        stack_id="stack-vertex-id",
+        name="vertex-dev",
+        connector_name=None,
+        orchestrator_name="vertex-dev-orchestrator",
+        artifact_store_name="vertex-dev-artifacts",
+        container_registry_name="vertex-dev-registry",
+    )
+    hydrated_stack = _vertex_stack_model(
+        stack_id="stack-vertex-id",
+        name="vertex-dev",
+        connector_name="vertex-dev-gcp",
+        orchestrator_name="vertex-dev-orchestrator",
+        artifact_store_name="vertex-dev-artifacts",
+        container_registry_name="vertex-dev-registry",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_vertex_stack_operation("vertex-dev", spec=spec)
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="vertex-dev",
+        connector_type="gcp",
+        resource_type="gcp-generic",
+        auth_method="service-account",
+        configuration={
+            "project_id": "demo-project",
+            "service_account_json": service_account_json,
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.name == "vertex-dev"
+    assert stack_request.labels == {
+        "kitaru.managed": "true",
+    }
+    connector_info = stack_request.service_connectors[0]
+    assert connector_info.type == "gcp"
+    assert connector_info.auth_method == "service-account"
+    assert connector_info.configuration == {
+        "project_id": "demo-project",
+        "service_account_json": service_account_json,
+    }
+
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.flavor == "vertex"
+    assert orchestrator.configuration == {"location": "us-central1"}
+    assert orchestrator.service_connector_index == 0
+    assert getattr(orchestrator, "service_connector_resource_id", None) is None
+
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "gcp"
+    assert artifact_store.configuration == {"path": "gs://bucket/path"}
+    assert artifact_store.service_connector_index == 0
+    assert artifact_store.service_connector_resource_id == "gs://bucket"
+
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "gcp"
+    assert container_registry.configuration == {
+        "uri": "us-central1-docker.pkg.dev/demo-project/demo-repo"
+    }
+    assert container_registry.service_connector_index == 0
+    assert (
+        container_registry.service_connector_resource_id
+        == "us-central1-docker.pkg.dev/demo-project/demo-repo"
+    )
+
+    client_mock.zen_store.create_stack.assert_called_once_with(stack=stack_request)
+    client_mock.get_stack.assert_called_once_with("stack-vertex-id", hydrate=True)
+    client_mock.activate_stack.assert_called_once_with("stack-vertex-id")
+    assert result.stack.name == "vertex-dev"
+    assert result.stack.is_active is True
+    assert result.previous_active_stack == "default"
+    assert result.components_created == (
+        "vertex-dev-orchestrator (orchestrator)",
+        "vertex-dev-artifacts (artifact_store)",
+        "vertex-dev-registry (container_registry)",
+    )
+    assert result.stack_type == "vertex"
+    assert result.service_connectors_created == ("vertex-dev-gcp",)
+    assert result.resources == {
+        "provider": "gcp",
+        "region": "us-central1",
+        "artifact_store": "gs://bucket/path",
+        "container_registry": "us-central1-docker.pkg.dev/demo-project/demo-repo",
+    }
+
+
+def test_create_vertex_stack_operation_rejects_non_gs_artifact_store() -> None:
+    """Vertex create should fail before backend calls when the bucket URI is wrong."""
+    spec = VertexStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruUsageError,
+            match=(
+                r"Unsupported artifact store URI 's3://bucket/path' "
+                r"for provider 'gcp'\."
+            ),
+        ),
+    ):
+        _create_vertex_stack_operation("vertex-dev", spec=spec)
+
+    client_mock.create_service_connector.assert_not_called()
+    client_mock._validate_stack_configuration.assert_not_called()
+
+
+def test_create_vertex_stack_operation_rejects_unparsable_gcp_registry() -> None:
+    """Vertex create should fail early if the GCP project ID cannot be inferred."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="registry.example.com/demo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruUsageError,
+            match=r"Cannot infer GCP project ID from container registry URI",
+        ),
+    ):
+        _create_vertex_stack_operation("vertex-dev", spec=spec)
+
+    client_mock.create_service_connector.assert_not_called()
+    client_mock._validate_stack_configuration.assert_not_called()
+
+
+def test_create_vertex_stack_operation_reports_activation_failure() -> None:
+    """Activation failures should keep the created Vertex stack and guide recovery."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _vertex_stack_model(
+        stack_id="stack-vertex-id",
+        name="vertex-dev",
+        connector_name="vertex-dev-gcp",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.activate_stack.side_effect = RuntimeError("cannot switch")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruBackendError,
+            match=r"Created Vertex stack 'vertex-dev' but failed to activate it",
+        ),
+    ):
+        _create_vertex_stack_operation("vertex-dev", spec=spec)
+
+    client_mock.zen_store.create_stack.assert_called_once()
 
 
 def test_create_kubernetes_stack_operation_tolerates_refetch_failure() -> None:
