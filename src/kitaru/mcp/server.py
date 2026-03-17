@@ -289,11 +289,18 @@ def manage_stack(
     container_registry: str | None = None,
     cluster: str | None = None,
     region: str | None = None,
+    subscription_id: str | None = None,
+    resource_group: str | None = None,
+    workspace: str | None = None,
+    execution_role: str | None = None,
     namespace: str | None = None,
     credentials: str | None = None,
+    extra: dict[str, Any] | None = None,
+    async_mode: bool = False,
     verify: bool = True,
 ) -> dict[str, Any]:
-    """Create or delete a local or Kubernetes-backed stack."""
+    """Create or delete a local, Kubernetes-backed, Vertex AI, SageMaker,
+    or AzureML stack. `async_mode` is the MCP equivalent of CLI `--async`."""
 
     def _manage_stack() -> dict[str, Any]:
         request = stack_interface.build_manage_stack_request(
@@ -307,18 +314,26 @@ def manage_stack(
             container_registry=container_registry,
             cluster=cluster,
             region=region,
+            subscription_id=subscription_id,
+            resource_group=resource_group,
+            workspace=workspace,
+            execution_role=execution_role,
             namespace=namespace,
             credentials=credentials,
+            extra=extra,
+            async_mode=async_mode,
             verify=verify,
         )
 
         if isinstance(request, stack_interface.ManageStackCreateRequest):
-            result = stack_ops._create_stack_operation(
-                request.name,
-                activate=request.activate,
-                stack_type=request.stack_type,
-                kubernetes=request.kubernetes,
-            )
+            create_kwargs: dict[str, Any] = {
+                "activate": request.activate,
+                "stack_type": request.stack_type,
+                "remote_spec": request.remote_spec,
+            }
+            if not request.component_overrides.is_empty():
+                create_kwargs["component_overrides"] = request.component_overrides
+            result = stack_ops._create_stack_operation(request.name, **create_kwargs)
             return inspection.serialize_stack_create_result(result)
 
         assert isinstance(request, stack_interface.ManageStackDeleteRequest)

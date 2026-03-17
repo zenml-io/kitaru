@@ -35,6 +35,7 @@ from kitaru.config import (
     KITARU_RETRIES_ENV,
     KITARU_SERVER_URL_ENV,
     KITARU_STACK_ENV,
+    AzureMLStackSpec,
     CloudProvider,
     FrozenExecutionSpec,
     ImageSettings,
@@ -44,9 +45,15 @@ from kitaru.config import (
     ModelRegistryConfig,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
+    SagemakerStackSpec,
+    StackComponentConfigOverrides,
     StackType,
+    VertexStackSpec,
+    _create_azureml_stack_operation,
     _create_kubernetes_stack_operation,
+    _create_sagemaker_stack_operation,
     _create_stack_operation,
+    _create_vertex_stack_operation,
     _delete_stack_components_best_effort,
     _delete_stack_operation,
     _list_stack_entries,
@@ -223,6 +230,171 @@ def _kubernetes_stack_model(
                     configuration={
                         "uri": "123456789012.dkr.ecr.us-east-1.amazonaws.com"
                     },
+                )
+            ],
+        },
+    )
+
+
+def _vertex_stack_model(
+    *,
+    stack_id: str,
+    name: str,
+    connector_name: str | None = "vertex-connector",
+    connector_id: str | None = None,
+    orchestrator_name: str = "vertex-orchestrator",
+    artifact_store_name: str = "vertex-artifacts",
+    container_registry_name: str = "vertex-registry",
+) -> SimpleNamespace:
+    """Return a minimal hydrated Vertex stack model stub."""
+    return SimpleNamespace(
+        id=stack_id,
+        name=name,
+        labels={"kitaru.managed": "true"},
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _kubernetes_stack_component(
+                    "orc-id",
+                    orchestrator_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="vertex",
+                    configuration={"location": "us-central1"},
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _kubernetes_stack_component(
+                    "art-id",
+                    artifact_store_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="gcp",
+                    configuration={"path": "gs://bucket/kitaru"},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _kubernetes_stack_component(
+                    "reg-id",
+                    container_registry_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="gcp",
+                    configuration={"uri": "us-central1-docker.pkg.dev/demo/repo"},
+                )
+            ],
+        },
+    )
+
+
+def _sagemaker_stack_model(
+    *,
+    stack_id: str,
+    name: str,
+    connector_name: str | None = "sagemaker-connector",
+    connector_id: str | None = None,
+    orchestrator_name: str = "sagemaker-orchestrator",
+    artifact_store_name: str = "sagemaker-artifacts",
+    container_registry_name: str = "sagemaker-registry",
+) -> SimpleNamespace:
+    """Return a minimal hydrated SageMaker stack model stub."""
+    return SimpleNamespace(
+        id=stack_id,
+        name=name,
+        labels={"kitaru.managed": "true"},
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _kubernetes_stack_component(
+                    "orc-id",
+                    orchestrator_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="sagemaker",
+                    configuration={
+                        "execution_role": (
+                            "arn:aws:iam::123456789012:role/SageMakerRole"
+                        )
+                    },
+                    connector_configuration={"region": "us-east-1"},
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _kubernetes_stack_component(
+                    "art-id",
+                    artifact_store_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="s3",
+                    configuration={"path": "s3://bucket/kitaru"},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _kubernetes_stack_component(
+                    "reg-id",
+                    container_registry_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="aws",
+                    configuration={
+                        "uri": "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+                    },
+                )
+            ],
+        },
+    )
+
+
+def _azureml_stack_model(
+    *,
+    stack_id: str,
+    name: str,
+    connector_name: str | None = "azureml-connector",
+    connector_id: str | None = None,
+    orchestrator_name: str = "azureml-orchestrator",
+    artifact_store_name: str = "azureml-artifacts",
+    container_registry_name: str = "azureml-registry",
+) -> SimpleNamespace:
+    """Return a minimal hydrated AzureML stack model stub."""
+    return SimpleNamespace(
+        id=stack_id,
+        name=name,
+        labels={"kitaru.managed": "true"},
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                _kubernetes_stack_component(
+                    "orc-id",
+                    orchestrator_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="azureml",
+                    configuration={
+                        "subscription_id": "00000000-0000-0000-0000-000000000123",
+                        "resource_group": "rg-demo",
+                        "workspace": "ws-demo",
+                        "location": "westeurope",
+                    },
+                    connector_configuration={
+                        "subscription_id": "00000000-0000-0000-0000-000000000123"
+                    },
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                _kubernetes_stack_component(
+                    "art-id",
+                    artifact_store_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="azure",
+                    configuration={"path": "az://container/kitaru"},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                _kubernetes_stack_component(
+                    "reg-id",
+                    container_registry_name,
+                    connector_name=connector_name,
+                    connector_id=connector_id,
+                    flavor="azure",
+                    configuration={"uri": "demo.azurecr.io/team/image"},
                 )
             ],
         },
@@ -1033,6 +1205,101 @@ def test_show_stack_operation_returns_kubernetes_stack_details() -> None:
     )
 
 
+def test_show_stack_operation_returns_vertex_stack_details() -> None:
+    """stack show should classify Vertex stacks and expose the location field."""
+    stack_summary = _stack_model(stack_id="stack-vertex-id", name="my-vertex")
+    hydrated_stack = _vertex_stack_model(stack_id="stack-vertex-id", name="my-vertex")
+    client_mock = Mock()
+    client_mock.active_stack_model = hydrated_stack
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("my-vertex")
+
+    assert details.stack_type == "vertex"
+    assert details.is_managed is True
+    assert [component.role for component in details.components] == [
+        "runner",
+        "storage",
+        "image_registry",
+    ]
+    assert details.components[0].backend == "vertex"
+    assert details.components[0].details == (("location", "us-central1"),)
+    assert details.components[1].details == (("location", "gs://bucket/kitaru"),)
+    assert details.components[2].details == (
+        ("location", "us-central1-docker.pkg.dev/demo/repo"),
+    )
+
+
+def test_show_stack_operation_returns_sagemaker_stack_details() -> None:
+    """stack show should classify SageMaker stacks and expose role metadata."""
+    stack_summary = _stack_model(stack_id="stack-sm-id", name="my-sagemaker")
+    hydrated_stack = _sagemaker_stack_model(
+        stack_id="stack-sm-id",
+        name="my-sagemaker",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = hydrated_stack
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("my-sagemaker")
+
+    assert details.stack_type == "sagemaker"
+    assert details.is_managed is True
+    assert [component.role for component in details.components] == [
+        "runner",
+        "storage",
+        "image_registry",
+    ]
+    assert details.components[0].backend == "sagemaker"
+    assert details.components[0].details == (
+        ("region", "us-east-1"),
+        ("execution_role", "arn:aws:iam::123456789012:role/SageMakerRole"),
+    )
+    assert details.components[1].details == (("location", "s3://bucket/kitaru"),)
+    assert details.components[2].details == (
+        ("location", "123456789012.dkr.ecr.us-east-1.amazonaws.com"),
+    )
+
+
+def test_show_stack_operation_returns_azureml_stack_details() -> None:
+    """stack show should classify AzureML stacks and expose Azure metadata."""
+    stack_summary = _stack_model(stack_id="stack-azure-id", name="my-azureml")
+    hydrated_stack = _azureml_stack_model(
+        stack_id="stack-azure-id",
+        name="my-azureml",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = hydrated_stack
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        details = _show_stack_operation("my-azureml")
+
+    assert details.stack_type == "azureml"
+    assert details.is_managed is True
+    assert [component.role for component in details.components] == [
+        "runner",
+        "storage",
+        "image_registry",
+    ]
+    assert details.components[0].backend == "azureml"
+    assert details.components[0].details == (
+        ("subscription_id", "00000000-0000-0000-0000-000000000123"),
+        ("resource_group", "rg-demo"),
+        ("workspace", "ws-demo"),
+        ("location", "westeurope"),
+    )
+    assert details.components[1].details == (("location", "az://container/kitaru"),)
+    assert details.components[2].details == (
+        ("location", "demo.azurecr.io/team/image"),
+    )
+
+
 def test_show_stack_operation_classifies_custom_stacks_and_additional_components() -> (
     None
 ):
@@ -1241,7 +1508,7 @@ def test_create_stack_dispatcher_requires_kubernetes_spec() -> None:
     with (
         patch("kitaru.config.Client") as mock_client,
         pytest.raises(
-            ValueError,
+            KitaruUsageError,
             match=r"Kubernetes spec required for --type kubernetes\.",
         ),
     ):
@@ -1271,13 +1538,149 @@ def test_create_stack_dispatcher_routes_kubernetes_requests() -> None:
         result = _create_stack_operation(
             "dev",
             stack_type=StackType.KUBERNETES,
-            kubernetes=spec,
+            remote_spec=spec,
             activate=False,
             labels={"owner": "ml"},
         )
 
     mock_create_kubernetes.assert_called_once_with(
         "dev",
+        spec=spec,
+        activate=False,
+        labels={"owner": "ml"},
+    )
+    assert result is expected_result
+
+
+def test_create_stack_dispatcher_forwards_component_overrides() -> None:
+    """Dispatcher should forward advanced component overrides to stack helpers."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789.dkr.ecr.eu-west-1.amazonaws.com/my-repo",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    overrides = StackComponentConfigOverrides(
+        orchestrator={"synchronous": False},
+        container_registry={"default_repository": "team-ml"},
+    )
+    expected_result = SimpleNamespace(name="kubernetes-result")
+
+    with patch(
+        "kitaru.config._create_kubernetes_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_kubernetes:
+        result = _create_stack_operation(
+            "dev",
+            stack_type=StackType.KUBERNETES,
+            remote_spec=spec,
+            component_overrides=overrides,
+        )
+
+    mock_create_kubernetes.assert_called_once_with(
+        "dev",
+        spec=spec,
+        activate=True,
+        labels=None,
+        component_overrides=overrides,
+    )
+    assert result is expected_result
+
+
+def test_create_stack_dispatcher_routes_vertex_requests() -> None:
+    """Dispatcher should pass Vertex requests through to the Vertex helper."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+        credentials="gcp-service-account:/tmp/demo.json",
+        verify=False,
+    )
+    expected_result = SimpleNamespace(name="vertex-result")
+
+    with patch(
+        "kitaru.config._create_vertex_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_vertex:
+        result = _create_stack_operation(
+            "vertex-dev",
+            stack_type=StackType.VERTEX,
+            remote_spec=spec,
+            activate=False,
+            labels={"owner": "ml"},
+        )
+
+    mock_create_vertex.assert_called_once_with(
+        "vertex-dev",
+        spec=spec,
+        activate=False,
+        labels={"owner": "ml"},
+    )
+    assert result is expected_result
+
+
+def test_create_stack_dispatcher_routes_sagemaker_requests() -> None:
+    """Dispatcher should pass SageMaker requests through to the SageMaker helper."""
+    spec = SagemakerStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        region="us-east-1",
+        execution_role="arn:aws:iam::123456789012:role/SageMakerRole",
+        credentials="aws-profile:team-ml",
+        verify=False,
+    )
+    expected_result = SimpleNamespace(name="sagemaker-result")
+
+    with patch(
+        "kitaru.config._create_sagemaker_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_sagemaker:
+        result = _create_stack_operation(
+            "sagemaker-dev",
+            stack_type=StackType.SAGEMAKER,
+            remote_spec=spec,
+            activate=False,
+            labels={"owner": "ml"},
+        )
+
+    mock_create_sagemaker.assert_called_once_with(
+        "sagemaker-dev",
+        spec=spec,
+        activate=False,
+        labels={"owner": "ml"},
+    )
+    assert result is expected_result
+
+
+def test_create_stack_dispatcher_routes_azureml_requests() -> None:
+    """Dispatcher should pass AzureML requests through to the Azure helper."""
+    spec = AzureMLStackSpec(
+        artifact_store="az://container/path",
+        container_registry="demo.azurecr.io/team/image",
+        subscription_id="00000000-0000-0000-0000-000000000123",
+        resource_group="rg-demo",
+        workspace="ws-demo",
+        region="westeurope",
+        credentials="implicit",
+        verify=False,
+    )
+    expected_result = SimpleNamespace(name="azure-result")
+
+    with patch(
+        "kitaru.config._create_azureml_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_azureml:
+        result = _create_stack_operation(
+            "azure-dev",
+            stack_type=StackType.AZUREML,
+            remote_spec=spec,
+            activate=False,
+            labels={"owner": "ml"},
+        )
+
+    mock_create_azureml.assert_called_once_with(
+        "azure-dev",
         spec=spec,
         activate=False,
         labels={"owner": "ml"},
@@ -1517,6 +1920,673 @@ def test_create_kubernetes_stack_operation_creates_gcp_stack_without_verificatio
         "artifact_store": "gs://bucket/path",
         "container_registry": "europe-west4-docker.pkg.dev/demo-project/demo-repo",
     }
+
+
+def test_create_vertex_stack_operation_creates_gcp_stack_and_activates(
+    tmp_path: Path,
+) -> None:
+    """Vertex create should build a one-shot GCP stack request and activate it."""
+    service_account_path = tmp_path / "vertex-service-account.json"
+    service_account_json = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "demo-project",
+            "private_key_id": "key-id",
+            "private_key": (
+                "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n"
+            ),
+            "client_email": "demo@demo-project.iam.gserviceaccount.com",
+        }
+    )
+    service_account_path.write_text(service_account_json, encoding="utf-8")
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+        credentials=f"gcp-service-account:{service_account_path}",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _vertex_stack_model(
+        stack_id="stack-vertex-id",
+        name="vertex-dev",
+        connector_name=None,
+        orchestrator_name="vertex-dev-orchestrator",
+        artifact_store_name="vertex-dev-artifacts",
+        container_registry_name="vertex-dev-registry",
+    )
+    hydrated_stack = _vertex_stack_model(
+        stack_id="stack-vertex-id",
+        name="vertex-dev",
+        connector_name="vertex-dev-gcp",
+        orchestrator_name="vertex-dev-orchestrator",
+        artifact_store_name="vertex-dev-artifacts",
+        container_registry_name="vertex-dev-registry",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_vertex_stack_operation("vertex-dev", spec=spec)
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="vertex-dev",
+        connector_type="gcp",
+        resource_type="gcp-generic",
+        auth_method="service-account",
+        configuration={
+            "project_id": "demo-project",
+            "service_account_json": service_account_json,
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.name == "vertex-dev"
+    assert stack_request.labels == {
+        "kitaru.managed": "true",
+    }
+    connector_info = stack_request.service_connectors[0]
+    assert connector_info.type == "gcp"
+    assert connector_info.auth_method == "service-account"
+    assert connector_info.configuration == {
+        "project_id": "demo-project",
+        "service_account_json": service_account_json,
+    }
+
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.flavor == "vertex"
+    assert orchestrator.configuration == {"location": "us-central1"}
+    assert orchestrator.service_connector_index == 0
+    assert getattr(orchestrator, "service_connector_resource_id", None) is None
+
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "gcp"
+    assert artifact_store.configuration == {"path": "gs://bucket/path"}
+    assert artifact_store.service_connector_index == 0
+    assert artifact_store.service_connector_resource_id == "gs://bucket"
+
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "gcp"
+    assert container_registry.configuration == {
+        "uri": "us-central1-docker.pkg.dev/demo-project/demo-repo"
+    }
+    assert container_registry.service_connector_index == 0
+    assert (
+        container_registry.service_connector_resource_id
+        == "us-central1-docker.pkg.dev/demo-project/demo-repo"
+    )
+
+    client_mock.zen_store.create_stack.assert_called_once_with(stack=stack_request)
+    client_mock.get_stack.assert_called_once_with("stack-vertex-id", hydrate=True)
+    client_mock.activate_stack.assert_called_once_with("stack-vertex-id")
+    assert result.stack.name == "vertex-dev"
+    assert result.stack.is_active is True
+    assert result.previous_active_stack == "default"
+    assert result.components_created == (
+        "vertex-dev-orchestrator (orchestrator)",
+        "vertex-dev-artifacts (artifact_store)",
+        "vertex-dev-registry (container_registry)",
+    )
+    assert result.stack_type == "vertex"
+    assert result.service_connectors_created == ("vertex-dev-gcp",)
+    assert result.resources == {
+        "provider": "gcp",
+        "region": "us-central1",
+        "artifact_store": "gs://bucket/path",
+        "container_registry": "us-central1-docker.pkg.dev/demo-project/demo-repo",
+    }
+
+
+def test_create_vertex_stack_operation_merges_component_overrides() -> None:
+    """Vertex stack creation should merge advanced component overrides."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _vertex_stack_model(
+        stack_id="stack-vertex-id",
+        name="vertex-dev",
+        connector_name="vertex-dev-gcp",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    overrides = StackComponentConfigOverrides(
+        orchestrator={
+            "synchronous": False,
+            "pipeline_root": "gs://bucket/root",
+        },
+        container_registry={"default_repository": "team-ml"},
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _create_vertex_stack_operation(
+            "vertex-dev",
+            spec=spec,
+            activate=False,
+            component_overrides=overrides,
+        )
+
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.configuration == {
+        "location": "us-central1",
+        "synchronous": False,
+        "pipeline_root": "gs://bucket/root",
+    }
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.configuration == {
+        "uri": "us-central1-docker.pkg.dev/demo-project/demo-repo",
+        "default_repository": "team-ml",
+    }
+
+
+def test_create_vertex_stack_operation_rewrites_invalid_component_option() -> None:
+    """Invalid advanced component options should surface as KitaruUsageError."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    invalid_key = "syn" + "cronous"
+    overrides = StackComponentConfigOverrides(orchestrator={invalid_key: False})
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruUsageError,
+            match=r"Invalid ZenML option for orchestrator",
+        ) as exc_info,
+    ):
+        _create_vertex_stack_operation(
+            "vertex-dev",
+            spec=spec,
+            component_overrides=overrides,
+        )
+
+    assert "Did you mean `synchronous`?" in str(exc_info.value)
+    assert "https://docs.zenml.io/stack-components/orchestrators/vertex" in str(
+        exc_info.value
+    )
+    client_mock.create_service_connector.assert_not_called()
+
+
+def test_create_sagemaker_stack_operation_creates_aws_stack_and_activates() -> None:
+    """SageMaker create should build a one-shot AWS stack request and activate it."""
+    spec = SagemakerStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        region="us-east-1",
+        execution_role="arn:aws:iam::123456789012:role/SageMakerRole",
+        credentials="aws-profile:ml-team",
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _sagemaker_stack_model(
+        stack_id="stack-sm-id",
+        name="sagemaker-dev",
+        connector_name=None,
+        orchestrator_name="sagemaker-dev-orchestrator",
+        artifact_store_name="sagemaker-dev-artifacts",
+        container_registry_name="sagemaker-dev-registry",
+    )
+    hydrated_stack = _sagemaker_stack_model(
+        stack_id="stack-sm-id",
+        name="sagemaker-dev",
+        connector_name="sagemaker-dev-aws",
+        orchestrator_name="sagemaker-dev-orchestrator",
+        artifact_store_name="sagemaker-dev-artifacts",
+        container_registry_name="sagemaker-dev-registry",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_sagemaker_stack_operation("sagemaker-dev", spec=spec)
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="sagemaker-dev",
+        connector_type="aws",
+        resource_type="aws-generic",
+        auth_method="implicit",
+        configuration={
+            "region": "us-east-1",
+            "profile_name": "ml-team",
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.name == "sagemaker-dev"
+    assert stack_request.labels == {"kitaru.managed": "true"}
+    connector_info = stack_request.service_connectors[0]
+    assert connector_info.type == "aws"
+    assert connector_info.auth_method == "implicit"
+    assert connector_info.configuration == {
+        "region": "us-east-1",
+        "profile_name": "ml-team",
+    }
+
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.flavor == "sagemaker"
+    assert orchestrator.configuration == {
+        "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole"
+    }
+    assert orchestrator.service_connector_index == 0
+    assert getattr(orchestrator, "service_connector_resource_id", None) is None
+
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "s3"
+    assert artifact_store.configuration == {"path": "s3://bucket/path"}
+    assert artifact_store.service_connector_index == 0
+    assert artifact_store.service_connector_resource_id == "s3://bucket"
+
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "aws"
+    assert container_registry.configuration == {
+        "uri": "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+    }
+    assert container_registry.service_connector_index == 0
+    assert (
+        container_registry.service_connector_resource_id
+        == "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+    )
+
+    client_mock.zen_store.create_stack.assert_called_once_with(stack=stack_request)
+    client_mock.get_stack.assert_called_once_with("stack-sm-id", hydrate=True)
+    client_mock.activate_stack.assert_called_once_with("stack-sm-id")
+    assert result.stack.name == "sagemaker-dev"
+    assert result.stack.is_active is True
+    assert result.previous_active_stack == "default"
+    assert result.components_created == (
+        "sagemaker-dev-orchestrator (orchestrator)",
+        "sagemaker-dev-artifacts (artifact_store)",
+        "sagemaker-dev-registry (container_registry)",
+    )
+    assert result.stack_type == "sagemaker"
+    assert result.service_connectors_created == ("sagemaker-dev-aws",)
+    assert result.resources == {
+        "provider": "aws",
+        "region": "us-east-1",
+        "artifact_store": "s3://bucket/path",
+        "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole",
+    }
+
+
+def test_create_azureml_stack_operation_creates_stack_and_skips_activation() -> None:
+    """AzureML create should build a one-shot Azure stack request cleanly."""
+    spec = AzureMLStackSpec(
+        artifact_store="abfss://container@demo.dfs.core.windows.net/kitaru/path",
+        container_registry="demo.azurecr.io/team/image",
+        subscription_id="00000000-0000-0000-0000-000000000123",
+        resource_group="rg-demo",
+        workspace="ws-demo",
+        region="westeurope",
+        credentials=(
+            "azure-service-principal:"
+            "11111111-1111-1111-1111-111111111111:"
+            "22222222-2222-2222-2222-222222222222:"
+            "super-secret"
+        ),
+        verify=False,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _azureml_stack_model(
+        stack_id="stack-azure-id",
+        name="azure-dev",
+        connector_name="azure-dev-connector",
+        orchestrator_name="azure-dev-orchestrator",
+        artifact_store_name="azure-dev-artifacts",
+        container_registry_name="azure-dev-registry",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        result = _create_azureml_stack_operation(
+            "azure-dev",
+            spec=spec,
+            activate=False,
+        )
+
+    client_mock.create_service_connector.assert_called_once_with(
+        name="azure-dev",
+        connector_type="azure",
+        resource_type="azure-generic",
+        auth_method="service-principal",
+        configuration={
+            "subscription_id": "00000000-0000-0000-0000-000000000123",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "client_id": "22222222-2222-2222-2222-222222222222",
+            "client_secret": "super-secret",
+        },
+        verify=False,
+        list_resources=False,
+        register=False,
+    )
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.name == "azure-dev"
+    assert stack_request.labels == {"kitaru.managed": "true"}
+    connector_info = stack_request.service_connectors[0]
+    assert connector_info.type == "azure"
+    assert connector_info.auth_method == "service-principal"
+    assert connector_info.configuration == {
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+        "tenant_id": "11111111-1111-1111-1111-111111111111",
+        "client_id": "22222222-2222-2222-2222-222222222222",
+        "client_secret": "super-secret",
+    }
+
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.flavor == "azureml"
+    assert orchestrator.configuration == {
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+        "resource_group": "rg-demo",
+        "workspace": "ws-demo",
+        "location": "westeurope",
+    }
+    assert orchestrator.service_connector_index == 0
+
+    artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
+    assert artifact_store.flavor == "azure"
+    assert artifact_store.configuration == {
+        "path": "abfs://container@demo.dfs.core.windows.net/kitaru/path"
+    }
+    assert artifact_store.service_connector_index == 0
+    assert (
+        artifact_store.service_connector_resource_id
+        == "abfs://container@demo.dfs.core.windows.net"
+    )
+
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.flavor == "azure"
+    assert container_registry.configuration == {"uri": "demo.azurecr.io/team/image"}
+    assert container_registry.service_connector_index == 0
+    assert container_registry.service_connector_resource_id == "demo.azurecr.io"
+
+    client_mock.zen_store.create_stack.assert_called_once_with(stack=stack_request)
+    client_mock.activate_stack.assert_not_called()
+    assert result.stack.name == "azure-dev"
+    assert result.stack.is_active is False
+    assert result.previous_active_stack is None
+    assert result.components_created == (
+        "azure-dev-orchestrator (orchestrator)",
+        "azure-dev-artifacts (artifact_store)",
+        "azure-dev-registry (container_registry)",
+    )
+    assert result.stack_type == "azureml"
+    assert result.service_connectors_created == ("azure-dev-connector",)
+    assert result.resources == {
+        "provider": "azure",
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+        "resource_group": "rg-demo",
+        "workspace": "ws-demo",
+        "artifact_store": "abfss://container@demo.dfs.core.windows.net/kitaru/path",
+        "container_registry": "demo.azurecr.io/team/image",
+        "region": "westeurope",
+    }
+
+
+@pytest.mark.parametrize(
+    ("credentials", "match"),
+    [
+        (
+            "azure-service-principal:tenant:client",
+            r"azure-service-principal credentials must be in the format",
+        ),
+        ("azure-access-token:", r"Azure access token cannot be empty\."),
+        ("azure-something:nope", r"Unsupported Azure credentials method"),
+    ],
+)
+def test_create_azureml_stack_operation_rejects_invalid_credentials(
+    credentials: str, match: str
+) -> None:
+    """AzureML credential parsing should fail before backend connector calls."""
+    spec = AzureMLStackSpec(
+        artifact_store="az://container/path",
+        container_registry="demo.azurecr.io/team/image",
+        subscription_id="00000000-0000-0000-0000-000000000123",
+        resource_group="rg-demo",
+        workspace="ws-demo",
+        credentials=credentials,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError, match=match),
+    ):
+        _create_azureml_stack_operation("azure-dev", spec=spec)
+
+    client_mock.create_service_connector.assert_not_called()
+    client_mock._validate_stack_configuration.assert_not_called()
+
+
+def test_azure_resource_id_helpers_normalize_storage_and_registry_uris() -> None:
+    """Azure resource IDs should normalize to stable connector resource roots."""
+    assert (
+        config_module._artifact_store_resource_id(
+            "az://container/path/to/artifacts",
+            CloudProvider.AZURE,
+        )
+        == "az://container"
+    )
+    assert (
+        config_module._artifact_store_resource_id(
+            "abfs://container@demo.dfs.core.windows.net/path/to/artifacts",
+            CloudProvider.AZURE,
+        )
+        == "abfs://container@demo.dfs.core.windows.net"
+    )
+    assert (
+        config_module._artifact_store_resource_id(
+            "abfss://container@demo.dfs.core.windows.net/path/to/artifacts",
+            CloudProvider.AZURE,
+        )
+        == "abfss://container@demo.dfs.core.windows.net"
+    )
+    assert (
+        config_module._container_registry_resource_id(
+            "demo.azurecr.io/team/image",
+            CloudProvider.AZURE,
+        )
+        == "demo.azurecr.io"
+    )
+
+
+def test_create_vertex_stack_operation_rejects_non_gs_artifact_store() -> None:
+    """Vertex create should fail before backend calls when the bucket URI is wrong."""
+    spec = VertexStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruUsageError,
+            match=(
+                r"Unsupported artifact store URI 's3://bucket/path' "
+                r"for provider 'gcp'\."
+            ),
+        ),
+    ):
+        _create_vertex_stack_operation("vertex-dev", spec=spec)
+
+    client_mock.create_service_connector.assert_not_called()
+    client_mock._validate_stack_configuration.assert_not_called()
+
+
+def test_create_vertex_stack_operation_rejects_unparsable_gcp_registry() -> None:
+    """Vertex create should fail early if the GCP project ID cannot be inferred."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="registry.example.com/demo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruUsageError,
+            match=r"Cannot infer GCP project ID from container registry URI",
+        ),
+    ):
+        _create_vertex_stack_operation("vertex-dev", spec=spec)
+
+    client_mock.create_service_connector.assert_not_called()
+    client_mock._validate_stack_configuration.assert_not_called()
+
+
+def test_create_vertex_stack_operation_reports_activation_failure() -> None:
+    """Activation failures should keep the created Vertex stack and guide recovery."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _vertex_stack_model(
+        stack_id="stack-vertex-id",
+        name="vertex-dev",
+        connector_name="vertex-dev-gcp",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.activate_stack.side_effect = RuntimeError("cannot switch")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruBackendError,
+            match=r"Created Vertex stack 'vertex-dev' but failed to activate it",
+        ),
+    ):
+        _create_vertex_stack_operation("vertex-dev", spec=spec)
+
+    client_mock.zen_store.create_stack.assert_called_once()
+
+
+def test_create_sagemaker_stack_operation_reports_activation_failure() -> None:
+    """Activation failures should keep the stack and guide manual recovery."""
+    spec = SagemakerStackSpec(
+        artifact_store="s3://bucket/path",
+        container_registry="123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        region="us-east-1",
+        execution_role="arn:aws:iam::123456789012:role/SageMakerRole",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _sagemaker_stack_model(
+        stack_id="stack-sm-id",
+        name="sagemaker-dev",
+        connector_name="sagemaker-dev-aws",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.activate_stack.side_effect = RuntimeError("cannot switch")
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruBackendError,
+            match=(
+                r"Created SageMaker stack 'sagemaker-dev' "
+                r"but failed to activate it"
+            ),
+        ),
+    ):
+        _create_sagemaker_stack_operation("sagemaker-dev", spec=spec)
+
+    client_mock.zen_store.create_stack.assert_called_once()
 
 
 def test_create_kubernetes_stack_operation_tolerates_refetch_failure() -> None:
@@ -1768,6 +2838,43 @@ def test_create_stack_without_activation_keeps_previous_active_stack() -> None:
     assert result.stack_type == "local"
     assert result.service_connectors_created == ()
     assert result.resources is None
+
+
+def test_create_local_stack_operation_applies_component_overrides() -> None:
+    """Local stack creation should pass merged orchestrator/store overrides through."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+        orchestrator_id="orc-dev-id",
+        artifact_store_id="art-dev-id",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.create_stack_component.side_effect = [
+        SimpleNamespace(id="orc-dev-id"),
+        SimpleNamespace(id="art-dev-id"),
+    ]
+    client_mock.create_stack.return_value = created_stack
+    overrides = StackComponentConfigOverrides(
+        artifact_store={"path": "/tmp/kitaru-artifacts"},
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _create_stack_operation("dev", activate=False, component_overrides=overrides)
+
+    orchestrator_call = client_mock.create_stack_component.call_args_list[0]
+    assert orchestrator_call.kwargs["configuration"] == {}
+    artifact_store_call = client_mock.create_stack_component.call_args_list[1]
+    assert artifact_store_call.kwargs["configuration"] == {
+        "path": "/tmp/kitaru-artifacts"
+    }
 
 
 def test_create_stack_rejects_existing_stack_name() -> None:

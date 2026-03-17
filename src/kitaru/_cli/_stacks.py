@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -10,8 +11,19 @@ from cyclopts import Parameter
 from zenml.utils import yaml_utils
 
 from kitaru._interface_errors import run_with_cli_error_boundary
+from kitaru._interface_stacks import (
+    CLI_STACK_OPTION_LABELS,
+    StackComponentConfigOverrides,
+    merge_component_overrides,
+    normalize_component_overrides_mapping,
+    normalize_optional_stack_string,
+    parse_cli_component_overrides,
+)
+from kitaru._interface_stacks import (
+    build_stack_create_request as _build_shared_stack_create_request,
+)
 from kitaru.cli_output import CLIOutputFormat
-from kitaru.config import CloudProvider, KubernetesStackSpec, StackInfo, StackType
+from kitaru.config import StackInfo, StackType
 from kitaru.inspection import (
     serialize_stack,
     serialize_stack_create_result,
@@ -43,117 +55,25 @@ class _StackCreateInputs:
     container_registry: str | None = None
     cluster: str | None = None
     region: str | None = None
+    subscription_id: str | None = None
+    resource_group: str | None = None
+    workspace: str | None = None
+    execution_role: str | None = None
     namespace: str | None = None
     credentials: str | None = None
     verify: bool | None = None
-
-
-def _normalize_optional_cli_string(value: str | None) -> str | None:
-    """Normalize an optional CLI string, treating blanks as omitted."""
-    if value is None:
-        return None
-    normalized_value = value.strip()
-    return normalized_value or None
-
-
-def _normalize_stack_type(raw_type: str) -> StackType:
-    """Normalize a stack-type flag into the internal enum."""
-    normalized_type = raw_type.strip().lower()
-    try:
-        return StackType(normalized_type)
-    except ValueError as exc:
-        raise ValueError(
-            f"Unsupported stack type: {raw_type}. Use 'local' or 'kubernetes'."
-        ) from exc
-
-
-def _infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
-    """Infer the cloud provider from an artifact store URI."""
-    if artifact_store_uri.startswith("s3://"):
-        return CloudProvider.AWS
-    if artifact_store_uri.startswith("gs://"):
-        return CloudProvider.GCP
-    raise ValueError(
-        f"Cannot infer cloud provider from '{artifact_store_uri}'. "
-        "Use an s3:// or gs:// URI."
-    )
-
-
-def _build_kubernetes_stack_spec_from_cli(
-    *,
-    stack_type: StackType,
-    artifact_store: str | None,
-    container_registry: str | None,
-    cluster: str | None,
-    region: str | None,
-    namespace: str | None,
-    credentials: str | None,
-    no_verify: bool,
-) -> KubernetesStackSpec | None:
-    """Validate stack-create CLI flags and build a Kubernetes spec."""
-    normalized_artifact_store = _normalize_optional_cli_string(artifact_store)
-    normalized_container_registry = _normalize_optional_cli_string(container_registry)
-    normalized_cluster = _normalize_optional_cli_string(cluster)
-    normalized_region = _normalize_optional_cli_string(region)
-    normalized_namespace = _normalize_optional_cli_string(namespace)
-    normalized_credentials = _normalize_optional_cli_string(credentials)
-
-    kubernetes_option_flags = [
-        ("--artifact-store", artifact_store is not None),
-        ("--container-registry", container_registry is not None),
-        ("--cluster", cluster is not None),
-        ("--region", region is not None),
-        ("--namespace", namespace is not None),
-        ("--credentials", credentials is not None),
-        ("--no-verify", no_verify),
-    ]
-
-    if stack_type == StackType.LOCAL:
-        provided_kubernetes_flags = [
-            flag for flag, is_provided in kubernetes_option_flags if is_provided
-        ]
-        if provided_kubernetes_flags:
-            raise ValueError(
-                "Kubernetes-only options require --type kubernetes: "
-                + ", ".join(provided_kubernetes_flags)
-            )
-        return None
-
-    missing_required_flags = [
-        flag
-        for flag, value in (
-            ("--artifact-store", normalized_artifact_store),
-            ("--container-registry", normalized_container_registry),
-            ("--cluster", normalized_cluster),
-            ("--region", normalized_region),
-        )
-        if value is None
-    ]
-    if missing_required_flags:
-        raise ValueError(
-            "--type kubernetes requires: " + ", ".join(missing_required_flags) + "."
-        )
-
-    assert normalized_artifact_store is not None
-    assert normalized_container_registry is not None
-    assert normalized_cluster is not None
-    assert normalized_region is not None
-
-    return KubernetesStackSpec(
-        provider=_infer_cloud_provider(normalized_artifact_store),
-        artifact_store=normalized_artifact_store,
-        container_registry=normalized_container_registry,
-        cluster=normalized_cluster,
-        region=normalized_region,
-        namespace=normalized_namespace or "default",
-        credentials=normalized_credentials,
-        verify=not no_verify,
-    )
+    component_overrides: StackComponentConfigOverrides | None = None
+    async_mode: bool | None = None
 
 
 _STACK_CREATE_FILE_KEY_ALIASES = {
     "artifact-store": "artifact_store",
     "container-registry": "container_registry",
+    "subscription-id": "subscription_id",
+    "resource-group": "resource_group",
+    "execution-role": "execution_role",
+    "extra": "component_overrides",
+    "async": "async_mode",
 }
 _STACK_CREATE_FILE_SUPPORTED_KEYS = {
     "name",
@@ -165,9 +85,18 @@ _STACK_CREATE_FILE_SUPPORTED_KEYS = {
     "container-registry",
     "cluster",
     "region",
+    "subscription_id",
+    "subscription-id",
+    "resource_group",
+    "resource-group",
+    "workspace",
+    "execution_role",
+    "execution-role",
     "namespace",
     "credentials",
     "verify",
+    "extra",
+    "async",
 }
 _STACK_CREATE_FILE_STRING_KEYS = {
     "name",
@@ -176,12 +105,17 @@ _STACK_CREATE_FILE_STRING_KEYS = {
     "container_registry",
     "cluster",
     "region",
+    "subscription_id",
+    "resource_group",
+    "workspace",
+    "execution_role",
     "namespace",
     "credentials",
 }
 _STACK_CREATE_FILE_BOOLEAN_KEYS = {
     "activate",
     "verify",
+    "async_mode",
 }
 
 
@@ -222,6 +156,16 @@ def _normalize_stack_create_file_mapping(
                 raise ValueError(
                     f"Stack config key '{raw_key}' in '{source}' must be a string."
                 )
+        elif canonical_key == "component_overrides":
+            if value is not None and not isinstance(value, dict):
+                raise ValueError(
+                    f"Stack config key '{raw_key}' in '{source}' must be an object."
+                )
+            if value is not None:
+                value = normalize_component_overrides_mapping(
+                    value,
+                    labels=CLI_STACK_OPTION_LABELS,
+                )
         elif (
             canonical_key in _STACK_CREATE_FILE_BOOLEAN_KEYS
             and value is not None
@@ -239,11 +183,10 @@ def _normalize_stack_create_file_mapping(
 
 def _load_stack_create_file(path: Path) -> _StackCreateInputs:
     """Load stack-create inputs from a YAML file."""
-    if not path.exists() or not path.is_file():
-        raise ValueError(f"Stack config file not found: {path}")
-
     try:
         raw = yaml_utils.read_yaml(str(path))
+    except FileNotFoundError:
+        raise ValueError(f"Stack config file not found: {path}") from None
     except Exception as exc:
         raise ValueError(f"Invalid YAML in stack config file '{path}': {exc}") from exc
 
@@ -264,46 +207,20 @@ def _merge_stack_create_inputs(
 ) -> _StackCreateInputs:
     """Merge CLI and YAML stack-create inputs with CLI precedence."""
     file_inputs = file_inputs or _StackCreateInputs()
-    return _StackCreateInputs(
-        name=cli_inputs.name if cli_inputs.name is not None else file_inputs.name,
-        type=cli_inputs.type if cli_inputs.type is not None else file_inputs.type,
-        activate=(
-            cli_inputs.activate
-            if cli_inputs.activate is not None
-            else file_inputs.activate
-        ),
-        artifact_store=(
-            cli_inputs.artifact_store
-            if cli_inputs.artifact_store is not None
-            else file_inputs.artifact_store
-        ),
-        container_registry=(
-            cli_inputs.container_registry
-            if cli_inputs.container_registry is not None
-            else file_inputs.container_registry
-        ),
-        cluster=(
-            cli_inputs.cluster
-            if cli_inputs.cluster is not None
-            else file_inputs.cluster
-        ),
-        region=(
-            cli_inputs.region if cli_inputs.region is not None else file_inputs.region
-        ),
-        namespace=(
-            cli_inputs.namespace
-            if cli_inputs.namespace is not None
-            else file_inputs.namespace
-        ),
-        credentials=(
-            cli_inputs.credentials
-            if cli_inputs.credentials is not None
-            else file_inputs.credentials
-        ),
-        verify=(
-            cli_inputs.verify if cli_inputs.verify is not None else file_inputs.verify
-        ),
-    )
+    merged: dict[str, Any] = {}
+    for field in dataclasses.fields(_StackCreateInputs):
+        if field.name == "component_overrides":
+            merged[field.name] = merge_component_overrides(
+                file_inputs.component_overrides,
+                cli_inputs.component_overrides,
+            )
+            continue
+
+        cli_value = getattr(cli_inputs, field.name)
+        merged[field.name] = (
+            cli_value if cli_value is not None else getattr(file_inputs, field.name)
+        )
+    return _StackCreateInputs(**merged)
 
 
 def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
@@ -322,10 +239,13 @@ def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
 
 def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     """Build optional detail rows for stack-create success output."""
-    if (
-        getattr(result, "stack_type", StackType.LOCAL.value)
-        != StackType.KUBERNETES.value
-    ):
+    stack_type = getattr(result, "stack_type", StackType.LOCAL.value)
+    if stack_type not in {
+        StackType.KUBERNETES.value,
+        StackType.VERTEX.value,
+        StackType.SAGEMAKER.value,
+        StackType.AZUREML.value,
+    }:
         return []
 
     resources = getattr(result, "resources", None)
@@ -339,11 +259,25 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
 
     cluster = resources.get("cluster")
     region = resources.get("region")
-    if cluster:
+    if stack_type == StackType.KUBERNETES.value and cluster:
         cluster_value = str(cluster)
         if region:
             cluster_value = f"{cluster_value} ({region})"
         rows.append(("Cluster:", cluster_value))
+    elif stack_type in {StackType.VERTEX.value, StackType.SAGEMAKER.value} and region:
+        rows.append(("Region:", str(region)))
+    elif stack_type == StackType.AZUREML.value:
+        subscription_id = resources.get("subscription_id")
+        if subscription_id:
+            rows.append(("Subscription:", str(subscription_id)))
+        resource_group = resources.get("resource_group")
+        if resource_group:
+            rows.append(("Resource group:", str(resource_group)))
+        workspace = resources.get("workspace")
+        if workspace:
+            rows.append(("Workspace:", str(workspace)))
+        if region:
+            rows.append(("Region:", str(region)))
 
     artifact_store = resources.get("artifact_store")
     if artifact_store:
@@ -352,6 +286,10 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     container_registry = resources.get("container_registry")
     if container_registry:
         rows.append(("Registry:", str(container_registry)))
+
+    execution_role = resources.get("execution_role")
+    if stack_type == StackType.SAGEMAKER.value and execution_role:
+        rows.append(("Execution role:", str(execution_role)))
 
     return rows
 
@@ -556,15 +494,26 @@ def create(
     ] = None,
     type: Annotated[
         str | None,
-        Parameter(help="Stack type: local or kubernetes."),
+        Parameter(help="Stack type: local, kubernetes, vertex, sagemaker, or azureml."),
     ] = None,
     artifact_store: Annotated[
         str | None,
-        Parameter(help="Artifact store URI for Kubernetes stacks (s3:// or gs://)."),
+        Parameter(
+            help=(
+                "Artifact store URI for remote stacks "
+                "(Kubernetes: s3:// or gs://; Vertex: gs://; SageMaker: s3://; "
+                "AzureML: az://, abfs://, or abfss://)."
+            )
+        ),
     ] = None,
     container_registry: Annotated[
         str | None,
-        Parameter(help="Container registry URI for Kubernetes stacks."),
+        Parameter(
+            help=(
+                "Container registry URI for Kubernetes, Vertex, SageMaker, or "
+                "AzureML stacks."
+            )
+        ),
     ] = None,
     cluster: Annotated[
         str | None,
@@ -572,7 +521,28 @@ def create(
     ] = None,
     region: Annotated[
         str | None,
-        Parameter(help="Cloud region."),
+        Parameter(
+            help=(
+                "Cloud region for Kubernetes, Vertex, SageMaker, or AzureML "
+                "stacks. Optional for AzureML."
+            )
+        ),
+    ] = None,
+    subscription_id: Annotated[
+        str | None,
+        Parameter(help="Azure subscription ID for AzureML stacks."),
+    ] = None,
+    resource_group: Annotated[
+        str | None,
+        Parameter(help="Azure resource group for AzureML stacks."),
+    ] = None,
+    workspace: Annotated[
+        str | None,
+        Parameter(help="AzureML workspace name for AzureML stacks."),
+    ] = None,
+    execution_role: Annotated[
+        str | None,
+        Parameter(help="SageMaker execution role ARN."),
     ] = None,
     namespace: Annotated[
         str | None,
@@ -580,15 +550,47 @@ def create(
     ] = None,
     credentials: Annotated[
         str | None,
-        Parameter(help="Optional credentials reference for Kubernetes stacks."),
+        Parameter(
+            help=(
+                "Optional credentials reference for Kubernetes, Vertex, "
+                "SageMaker, or AzureML stacks."
+            )
+        ),
+    ] = None,
+    extra: Annotated[
+        list[str] | None,
+        Parameter(
+            name=["--extra"],
+            help=(
+                "Advanced component defaults as TARGET.FIELD=VALUE. "
+                "Valid targets: orchestrator, artifact_store, container_registry. "
+                "VALUE uses YAML parsing, so booleans, numbers, lists, and objects "
+                "are accepted."
+            ),
+        ),
+    ] = None,
+    async_mode: Annotated[
+        bool | None,
+        Parameter(
+            name=["--async"],
+            help=(
+                "Run remote stacks asynchronously by default "
+                "(equivalent to `--extra orchestrator.synchronous=false`)."
+            ),
+        ),
     ] = None,
     no_verify: Annotated[
         bool | None,
-        Parameter(help="Skip credential verification for Kubernetes stacks."),
+        Parameter(
+            help=(
+                "Skip credential verification for Kubernetes, Vertex, "
+                "SageMaker, or AzureML stacks."
+            )
+        ),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a local or Kubernetes-backed stack."""
+    """Create a local, Kubernetes-backed, Vertex AI, SageMaker, or AzureML stack."""
     command = "stack.create"
     output_format = _resolve_output_format(output)
 
@@ -603,42 +605,60 @@ def create(
                 container_registry=container_registry,
                 cluster=cluster,
                 region=region,
+                subscription_id=subscription_id,
+                resource_group=resource_group,
+                workspace=workspace,
+                execution_role=execution_role,
                 namespace=namespace,
                 credentials=credentials,
+                component_overrides=parse_cli_component_overrides(
+                    extra,
+                    labels=CLI_STACK_OPTION_LABELS,
+                )
+                if extra
+                else None,
+                async_mode=async_mode,
                 verify=False if no_verify else None,
             ),
             file_inputs=file_inputs,
         )
-        normalized_name = _normalize_optional_cli_string(merged_inputs.name)
+        normalized_name = normalize_optional_stack_string(merged_inputs.name)
         if normalized_name is None:
             raise ValueError("Stack name or ID cannot be empty.")
 
-        raw_stack_type = (
-            merged_inputs.type
-            if merged_inputs.type is not None
-            else StackType.LOCAL.value
-        )
-        stack_type = _normalize_stack_type(raw_stack_type)
-        kubernetes_spec = _build_kubernetes_stack_spec_from_cli(
-            stack_type=stack_type,
+        request = _build_shared_stack_create_request(
+            name=normalized_name,
+            activate=merged_inputs.activate
+            if merged_inputs.activate is not None
+            else True,
+            stack_type=(
+                merged_inputs.type
+                if merged_inputs.type is not None
+                else StackType.LOCAL.value
+            ),
             artifact_store=merged_inputs.artifact_store,
             container_registry=merged_inputs.container_registry,
             cluster=merged_inputs.cluster,
             region=merged_inputs.region,
+            subscription_id=merged_inputs.subscription_id,
+            resource_group=merged_inputs.resource_group,
+            workspace=merged_inputs.workspace,
+            execution_role=merged_inputs.execution_role,
             namespace=merged_inputs.namespace,
             credentials=merged_inputs.credentials,
-            no_verify=not (
-                merged_inputs.verify if merged_inputs.verify is not None else True
-            ),
+            verify=merged_inputs.verify if merged_inputs.verify is not None else True,
+            component_overrides=merged_inputs.component_overrides,
+            async_enabled=merged_inputs.async_mode is True,
+            labels=CLI_STACK_OPTION_LABELS,
         )
-        return _facade_module()._create_stack_operation(
-            normalized_name,
-            stack_type=stack_type,
-            activate=merged_inputs.activate
-            if merged_inputs.activate is not None
-            else True,
-            kubernetes=kubernetes_spec,
-        )
+        create_kwargs: dict[str, Any] = {
+            "stack_type": request.stack_type,
+            "activate": request.activate,
+            "remote_spec": request.remote_spec,
+        }
+        if not request.component_overrides.is_empty():
+            create_kwargs["component_overrides"] = request.component_overrides
+        return _facade_module()._create_stack_operation(request.name, **create_kwargs)
 
     result = run_with_cli_error_boundary(
         _create_stack,
@@ -656,11 +676,9 @@ def create(
         return
 
     created_message = f"Created stack: {result.stack.name}"
-    if (
-        getattr(result, "stack_type", StackType.LOCAL.value)
-        == StackType.KUBERNETES.value
-    ):
-        created_message += " (kubernetes)"
+    result_stack_type = getattr(result, "stack_type", StackType.LOCAL.value)
+    if result_stack_type != StackType.LOCAL.value:
+        created_message += f" ({result_stack_type})"
     _print_success(created_message)
     for label, value in _stack_create_detail_rows(result):
         print(f"{label:<12} {value}")
