@@ -201,6 +201,16 @@ class TestDecidePipelineLifecycle:
         assert decision.text == "Execution URL: https://example.com/runs/abc"
         assert decision.kind == "detail"
 
+    def test_pipeline_run_finished_with_duration(self) -> None:
+        record = _make_record(
+            "zenml.orchestrators.local.local_orchestrator",
+            "Pipeline run has finished in `1.368s`.",
+        )
+        decision = _decide(record)
+        assert decision is not None
+        assert decision.text == "Execution finished in 1.368s."
+        assert decision.kind == "success"
+
 
 class TestDecideAliasCleanup:
     """Alias names should be stripped from matched capture groups."""
@@ -253,6 +263,28 @@ class TestDecideDropRules:
         record = _make_record(
             "zenml.pipelines",
             "  orchestrator: `default`",
+        )
+        assert _decide(record) is None
+
+    def test_zenml_warning_code_dropped(self) -> None:
+        record = _make_record(
+            "zenml.utils.warnings.controller",
+            "[ZML002](USAGE) - You are specifying docker settings but no "
+            "component in your stack makes use of them.",
+        )
+        assert _decide(record) is None
+
+    def test_uploading_external_artifact_dropped(self) -> None:
+        record = _make_record(
+            "zenml.artifacts.external_artifact",
+            "Uploading external artifact to 'external_artifacts/external_abc'.",
+        )
+        assert _decide(record) is None
+
+    def test_finished_uploading_external_artifact_dropped(self) -> None:
+        record = _make_record(
+            "zenml.artifacts.external_artifact",
+            "Finished uploading external artifact 502ea0bd-2a2b-4a86.",
         )
         assert _decide(record) is None
 

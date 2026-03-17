@@ -157,6 +157,12 @@ _REWRITE_RULES: list[tuple[re.Pattern[str], _TerminalKind | None, str]] = [
         "detail",
         "Execution URL: {0}",
     ),
+    # Pipeline run completion (local/local-docker orchestrators)
+    (
+        re.compile(r"^Pipeline run has finished in `(.+?)`\.$"),
+        "success",
+        "Execution finished in {0}.",
+    ),
 ]
 
 _DROP_PATTERNS: list[re.Pattern[str]] = [
@@ -168,6 +174,9 @@ _DROP_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^Python version \(different"),
     re.compile(r"^Registered new pipeline:"),
     re.compile(r"^\s+\w+: `"),  # component listing ("  orchestrator: `default`")
+    re.compile(r"^\[ZML\d+\]\("),  # structured ZenML warnings ("[ZML002](USAGE) - ...")
+    re.compile(r"^Uploading external artifact to "),
+    re.compile(r"^Finished uploading external artifact "),
 ]
 
 
