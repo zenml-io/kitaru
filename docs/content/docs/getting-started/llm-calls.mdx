@@ -1,6 +1,6 @@
 ---
 title: Tracked LLM Calls
-description: Use kitaru.llm() with local model aliases and optional secret-backed credentials
+description: Use kitaru.llm() with model aliases, transported runtime config, and optional secret-backed credentials
 ---
 
 `kitaru.llm()` lets you make a single tracked model call with automatic:
@@ -21,10 +21,16 @@ When you call `kitaru.llm()`, Kitaru resolves the model in this order:
 
 1. the explicit `model=` argument
 2. `KITARU_DEFAULT_MODEL`
-3. your local default alias
+3. the default alias from the effective model registry in the current environment
 
 If `KITARU_DEFAULT_MODEL` matches a registered alias, Kitaru resolves that
 alias. Otherwise it treats the value as a raw LiteLLM model string.
+
+When you submit or replay a flow, Kitaru automatically transports your local
+model registry into the execution environment. That means remote runs can still
+resolve aliases with `kitaru.llm()` and `kitaru model list`. If
+`KITARU_MODEL_REGISTRY` is already set in the runtime environment, its aliases
+and default alias take precedence over matching local entries.
 
 ## Register a model alias
 
@@ -43,6 +49,13 @@ List aliases with:
 ```bash
 kitaru model list
 ```
+
+<Callout type="info">
+  `kitaru model register` writes aliases to local Kitaru config, but submitted
+  and replayed runs automatically receive that registry as a transported runtime
+  snapshot. `KITARU_MODEL_REGISTRY` is available as an advanced manual override
+  for adding aliases or overriding matching ones.
+</Callout>
 
 ## Credential resolution order
 

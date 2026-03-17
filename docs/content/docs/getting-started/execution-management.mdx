@@ -67,7 +67,10 @@ Runtime log retrieval requires a server-backed connection. For CLI options,
 follow mode, grouped output, and retrieval caveats, see
 [View Execution Runtime Logs](/getting-started/execution-logs).
 
-## Resolve wait input (resume path)
+## Resolve wait input
+
+On local interactive runs, the runtime prompts for input in the same terminal.
+For non-interactive or timed-out executions, resolve the pending wait externally:
 
 ```python
 execution = client.executions.input(
@@ -77,7 +80,8 @@ execution = client.executions.input(
 )
 ```
 
-For manual-resume backends, call `resume(...)` after wait input is resolved:
+If the execution does not continue automatically after input (e.g. the original
+runner already exited), call `resume(...)`:
 
 ```python
 execution = client.executions.resume(exec_id)
@@ -157,9 +161,9 @@ Then use tool calls like:
 - `kitaru_artifacts_get(artifact_id=...)`
 - `kitaru_status()`
 
-If your backend requires an explicit resume step after wait input is resolved,
-use the CLI or SDK `resume(...)` call. MCP does not currently expose a separate
-resume tool.
+If the execution does not continue automatically after wait input is resolved
+(e.g. the original runner already exited), use the CLI or SDK `resume(...)` call.
+MCP does not currently expose a separate resume tool.
 
 See the full setup guide at [MCP Server](/agent-integrations/mcp-server).
 

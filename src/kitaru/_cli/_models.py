@@ -45,7 +45,7 @@ def _model_rows(entries: list[ModelAliasEntry]) -> list[tuple[str, str]]:
 def register(
     alias: Annotated[
         str,
-        Parameter(help="Local alias name (for example `fast`)."),
+        Parameter(help="Model alias name (for example `fast`)."),
     ],
     *,
     model: Annotated[
@@ -60,7 +60,11 @@ def register(
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Register or update a local model alias used by `kitaru.llm()`."""
+    """Register or update a model alias used by `kitaru.llm()`.
+
+    Aliases are stored locally and automatically transported to submitted and
+    replayed executions.
+    """
     command = "model.register"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
@@ -99,7 +103,7 @@ def register(
 
 @model_app.command
 def list___(output: OutputFormatOption = "text") -> None:
-    """List local model aliases used by `kitaru.llm()`."""
+    """List model aliases available to `kitaru.llm()` in this environment."""
     command = "model.list"
     output_format = _resolve_output_format(output)
     aliases = run_with_cli_error_boundary(

@@ -22,9 +22,12 @@ from kitaru.cli import (
 )
 from kitaru.client import ExecutionStatus, LogEntry
 from kitaru.config import (
+    KITARU_MODEL_REGISTRY_ENV,
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
     KubernetesStackSpec,
+    ModelAliasConfig,
+    ModelRegistryConfig,
     SagemakerStackSpec,
     StackComponentConfigOverrides,
     StackType,
@@ -1633,6 +1636,33 @@ def test_model_list_renders_empty_state(capsys: pytest.CaptureFixture[str]) -> N
     output = capsys.readouterr().out
     assert "Kitaru models" in output
     assert "Models: none found" in output
+
+
+def test_model_list_reads_transported_registry(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`kitaru model list` should reflect aliases from KITARU_MODEL_REGISTRY."""
+    monkeypatch.setenv(
+        KITARU_MODEL_REGISTRY_ENV,
+        ModelRegistryConfig(
+            aliases={
+                "fast": ModelAliasConfig(
+                    model="openai/gpt-4o-mini",
+                    secret="openai-creds",
+                )
+            },
+            default="fast",
+        ).model_dump_json(exclude_none=True),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["model", "list"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru models" in output
+    assert "fast: openai/gpt-4o-mini (secret=openai-creds) [default]" in output
 
 
 def test_secrets_set_creates_secret(

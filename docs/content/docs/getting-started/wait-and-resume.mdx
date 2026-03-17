@@ -6,8 +6,13 @@ description: Suspend a flow for external input and continue the same execution
 `kitaru.wait(...)` is the durable suspension primitive for human-in-the-loop
 and external-input workflows.
 
-When your flow reaches `wait(...)`, execution moves to `waiting` and resumes the
-same execution after input is provided.
+When your flow reaches `wait(...)`, what happens next depends on the environment:
+
+- **Local interactive runs** (terminal with stdin/stdout): the runtime prompts
+  for input directly in the same terminal and the flow continues in-process.
+- **Non-interactive runs** (remote orchestrators, CI, piped output, MCP): the
+  execution moves to `waiting` status and input must be supplied later via the
+  client, CLI, or MCP.
 
 ## Basic pattern
 
@@ -28,7 +33,12 @@ def publish_flow(topic: str) -> str:
     return f"PUBLISHED: {topic}"
 ```
 
-## Provide input from Python
+## Resolve input externally (non-interactive runs)
+
+When the flow is running in a non-interactive context (or after the runner has
+timed out and paused), resolve the pending wait from Python or the CLI.
+
+### From Python
 
 ```python
 client = kitaru.KitaruClient()
@@ -39,13 +49,14 @@ execution = client.executions.input(
 )
 ```
 
-If your backend requires an explicit resume step after input resolution:
+If the execution does not continue automatically after input (e.g. the original
+runner already exited), call `resume(...)`:
 
 ```python
 execution = client.executions.resume(exec_id)
 ```
 
-## Provide input from CLI
+### From CLI
 
 ```bash
 kitaru executions input <exec_id> --value true
@@ -65,7 +76,7 @@ To abort a wait instead of continuing:
 kitaru executions input <exec_id> --abort
 ```
 
-Optional explicit resume step:
+Resume is only needed when the execution did not continue automatically:
 
 ```bash
 kitaru executions resume <exec_id>
@@ -80,19 +91,17 @@ Input is validated against the wait schema:
 
 ## Example in this repository
 
-The example script prints exact CLI commands to run from a second terminal once
-the wait condition is reached:
-
 ```bash
 uv sync --extra local
 uv run -m examples.execution_management.wait_and_resume
 ```
 
 1. Run the command above — it starts the flow and blocks.
-2. When the flow reaches `wait()`, the script prints `kitaru executions input ...`
-   and `kitaru executions resume ...` commands.
-3. Open a second terminal and run those commands to approve and resume.
-4. The original terminal continues and prints the final result.
+2. If you are in an interactive terminal, the runtime prompts for input
+   directly. Type your answer and the flow continues.
+3. If the run is non-interactive (or you want to resolve from elsewhere), the
+   script prints fallback `kitaru executions input ...` and
+   `kitaru executions resume ...` commands you can run in a second terminal.
 
 Automated CI coverage for the same flow lives in
 `tests/test_phase15_wait_example.py`.

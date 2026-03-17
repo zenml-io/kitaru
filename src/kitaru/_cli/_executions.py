@@ -783,7 +783,7 @@ def input_(
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Resolve pending wait input for an execution."""
+    """Resolve pending wait input for a non-interactive or timed-out execution."""
     command = "executions.input"
     output_format = _resolve_output_format(output)
 
@@ -992,7 +992,7 @@ def resume_(
     ],
     output: OutputFormatOption = "text",
 ) -> None:
-    """Resume a paused execution after wait input is resolved."""
+    """Resume a paused execution when it did not continue automatically after input."""
     command = "executions.resume"
     output_format = _resolve_output_format(output)
     execution = run_with_cli_error_boundary(

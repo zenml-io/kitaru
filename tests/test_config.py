@@ -30,6 +30,7 @@ from kitaru.config import (
     KITARU_IMAGE_ENV,
     KITARU_LOG_STORE_BACKEND_ENV,
     KITARU_LOG_STORE_ENDPOINT_ENV,
+    KITARU_MODEL_REGISTRY_ENV,
     KITARU_PROJECT_ENV,
     KITARU_RETRIES_ENV,
     KITARU_SERVER_URL_ENV,
@@ -40,6 +41,8 @@ from kitaru.config import (
     ImageSettings,
     KitaruConfig,
     KubernetesStackSpec,
+    ModelAliasConfig,
+    ModelRegistryConfig,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
     SagemakerStackSpec,
@@ -758,6 +761,140 @@ def test_register_model_alias_updates_existing_alias() -> None:
     assert updated.is_default is True
 
 
+def test_read_env_model_registry_reads_valid_json() -> None:
+    """Transported model registry JSON should round-trip through the schema."""
+    transported_registry = ModelRegistryConfig(
+        aliases={
+            "fast": ModelAliasConfig(
+                model="openai/gpt-4o-mini",
+                secret="openai-creds",
+            )
+        },
+        default="fast",
+    )
+
+    registry = config_module._config_models._read_env_model_registry(
+        environ={
+            KITARU_MODEL_REGISTRY_ENV: transported_registry.model_dump_json(
+                exclude_none=True
+            )
+        }
+    )
+
+    assert registry == transported_registry
+
+
+def test_read_env_model_registry_ignores_missing_or_blank_values() -> None:
+    """Unset and blank transport env vars should behave like no registry."""
+    assert config_module._config_models._read_env_model_registry(environ={}) is None
+    assert (
+        config_module._config_models._read_env_model_registry(
+            environ={KITARU_MODEL_REGISTRY_ENV: "   "}
+        )
+        is None
+    )
+
+
+def test_read_env_model_registry_rejects_invalid_payloads() -> None:
+    """Malformed transported registries should fail with env-specific guidance."""
+    with pytest.raises(KitaruUsageError, match=KITARU_MODEL_REGISTRY_ENV):
+        config_module._config_models._read_env_model_registry(
+            environ={KITARU_MODEL_REGISTRY_ENV: "not-json"}
+        )
+
+    with pytest.raises(KitaruUsageError, match="model registry schema"):
+        config_module._config_models._read_env_model_registry(
+            environ={
+                KITARU_MODEL_REGISTRY_ENV: json.dumps(
+                    {"aliases": {}, "default": "missing"}
+                )
+            }
+        )
+
+
+def test_effective_model_registry_merges_local_and_transported_aliases() -> None:
+    """Transported aliases should override same-name local aliases."""
+    local_registry = ModelRegistryConfig(
+        aliases={
+            "fast": ModelAliasConfig(
+                model="openai/gpt-4o-mini",
+                secret="local-secret",
+            ),
+            "smart": ModelAliasConfig(model="anthropic/claude-sonnet-4-20250514"),
+        },
+        default="fast",
+    )
+    transported_registry = ModelRegistryConfig(
+        aliases={
+            "fast": ModelAliasConfig(
+                model="openai/gpt-4.1-mini",
+                secret="remote-secret",
+            ),
+            "code": ModelAliasConfig(model="openai/o4-mini"),
+        },
+        default="code",
+    )
+
+    registry = config_module._config_models._effective_model_registry(
+        read_global_config=lambda: SimpleNamespace(model_registry=local_registry),
+        environ={
+            KITARU_MODEL_REGISTRY_ENV: transported_registry.model_dump_json(
+                exclude_none=True
+            )
+        },
+    )
+
+    assert sorted(registry.aliases) == ["code", "fast", "smart"]
+    assert registry.aliases["fast"].model == "openai/gpt-4.1-mini"
+    assert registry.aliases["fast"].secret == "remote-secret"
+    assert registry.aliases["smart"].model == "anthropic/claude-sonnet-4-20250514"
+    assert registry.default == "code"
+
+
+def test_list_model_aliases_reads_current_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Model listing should include aliases transported into the current env."""
+    register_model_alias("fast", model="openai/gpt-4o-mini")
+    monkeypatch.setenv(
+        KITARU_MODEL_REGISTRY_ENV,
+        ModelRegistryConfig(
+            aliases={
+                "smart": ModelAliasConfig(model="anthropic/claude-sonnet-4-20250514")
+            },
+            default="smart",
+        ).model_dump_json(exclude_none=True),
+    )
+
+    aliases = list_model_aliases()
+
+    assert [entry.alias for entry in aliases] == ["fast", "smart"]
+    assert aliases[0].is_default is False
+    assert aliases[1].is_default is True
+
+
+def test_effective_model_registry_ignores_invalid_local_config_with_transport() -> None:
+    """A valid transported registry should not depend on readable local config."""
+    transported_registry = ModelRegistryConfig(
+        aliases={"fast": ModelAliasConfig(model="openai/gpt-4o-mini")},
+        default="fast",
+    )
+
+    def _broken_global_config() -> Any:
+        raise KitaruUsageError("local config is broken")
+
+    registry = config_module._config_models._effective_model_registry(
+        read_global_config=_broken_global_config,
+        environ={
+            KITARU_MODEL_REGISTRY_ENV: transported_registry.model_dump_json(
+                exclude_none=True
+            )
+        },
+    )
+
+    assert registry == transported_registry
+
+
 def test_resolve_model_selection_prefers_aliases_and_defaults() -> None:
     """Model resolution should honor aliases and default fallback behavior."""
     register_model_alias("fast", model="openai/gpt-4o-mini", secret="openai-creds")
@@ -776,6 +913,63 @@ def test_resolve_model_selection_prefers_aliases_and_defaults() -> None:
 
     assert default_selection.alias == "fast"
     assert default_selection.resolved_model == "openai/gpt-4o-mini"
+
+
+def test_resolve_model_selection_uses_transported_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transported aliases should override the local registry at runtime."""
+    register_model_alias("fast", model="openai/gpt-4o-mini", secret="local-secret")
+    monkeypatch.setenv(
+        KITARU_MODEL_REGISTRY_ENV,
+        ModelRegistryConfig(
+            aliases={
+                "fast": ModelAliasConfig(
+                    model="openai/gpt-4.1-mini",
+                    secret="remote-secret",
+                )
+            },
+            default="fast",
+        ).model_dump_json(exclude_none=True),
+    )
+
+    selection = resolve_model_selection(None)
+
+    assert selection.alias == "fast"
+    assert selection.resolved_model == "openai/gpt-4.1-mini"
+    assert selection.secret == "remote-secret"
+
+
+def test_resolve_model_selection_keeps_explicit_raw_models_with_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit raw models should still bypass alias lookup when unknown."""
+    monkeypatch.setenv(
+        KITARU_MODEL_REGISTRY_ENV,
+        ModelRegistryConfig(
+            aliases={"fast": ModelAliasConfig(model="openai/gpt-4o-mini")},
+            default="fast",
+        ).model_dump_json(exclude_none=True),
+    )
+
+    selection = resolve_model_selection("openai/gpt-4.1-mini")
+
+    assert selection.alias is None
+    assert selection.resolved_model == "openai/gpt-4.1-mini"
+    assert selection.secret is None
+
+
+def test_resolve_model_selection_reports_empty_transported_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty transported registry should produce transport-specific guidance."""
+    monkeypatch.setenv(
+        KITARU_MODEL_REGISTRY_ENV,
+        ModelRegistryConfig().model_dump_json(exclude_none=True),
+    )
+
+    with pytest.raises(KitaruUsageError, match="transported model registry"):
+        resolve_model_selection(None)
 
 
 def test_resolve_model_selection_uses_env_default_alias(
@@ -3811,6 +4005,15 @@ def test_persist_frozen_execution_spec_rejects_invalid_run_id() -> None:
 
 def test_build_and_persist_frozen_execution_spec() -> None:
     """Frozen execution specs should be serializable and persisted as metadata."""
+    model_registry = ModelRegistryConfig(
+        aliases={
+            "fast": ModelAliasConfig(
+                model="openai/gpt-4o-mini",
+                secret="openai-creds",
+            )
+        },
+        default="fast",
+    )
     frozen_execution_spec = build_frozen_execution_spec(
         resolved_execution=ResolvedExecutionConfig(
             stack="prod",
@@ -3826,9 +4029,11 @@ def test_build_and_persist_frozen_execution_spec() -> None:
             server_url="https://server.example.com",
             project="demo",
         ),
+        model_registry=model_registry,
     )
 
     assert isinstance(frozen_execution_spec, FrozenExecutionSpec)
+    assert frozen_execution_spec.model_registry == model_registry
     assert (
         frozen_execution_spec.resolved_execution.image is not None
         and frozen_execution_spec.resolved_execution.image.environment
@@ -3851,3 +4056,12 @@ def test_build_and_persist_frozen_execution_spec() -> None:
         ]
         == "prod"
     )
+    assert metadata_payload[FROZEN_EXECUTION_SPEC_METADATA_KEY]["model_registry"] == {
+        "aliases": {
+            "fast": {
+                "model": "openai/gpt-4o-mini",
+                "secret": "openai-creds",
+            }
+        },
+        "default": "fast",
+    }

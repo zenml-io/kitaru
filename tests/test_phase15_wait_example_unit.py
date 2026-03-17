@@ -8,8 +8,8 @@ from unittest.mock import Mock
 from examples.execution_management import wait_and_resume
 
 
-def test_watch_prints_manual_unblock_commands(monkeypatch, capsys) -> None:
-    """Watcher should emit CLI commands once the pending wait becomes visible."""
+def test_watch_prints_fallback_commands(monkeypatch, capsys) -> None:
+    """Watcher should emit fallback CLI commands once a pending wait appears."""
     stop_event = wait_and_resume.threading.Event()
 
     wait_lookup = Mock(side_effect=[None, "kr-15"])
