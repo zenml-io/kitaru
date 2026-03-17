@@ -16,7 +16,7 @@ import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 import click
@@ -68,6 +68,7 @@ KITARU_RETRIES_ENV = _config_env.KITARU_RETRIES_ENV
 KITARU_IMAGE_ENV = _config_env.KITARU_IMAGE_ENV
 KITARU_DEFAULT_MODEL_ENV = _config_env.KITARU_DEFAULT_MODEL_ENV
 KITARU_CONFIG_PATH_ENV = _config_env.KITARU_CONFIG_PATH_ENV
+KITARU_MODEL_REGISTRY_ENV = _kitaru_env.KITARU_MODEL_REGISTRY_ENV
 ZENML_STORE_API_KEY_ENV = _ZENML_STORE_API_KEY_ENV
 ZENML_STORE_URL_ENV = _ZENML_STORE_URL_ENV
 
@@ -100,7 +101,12 @@ StackInfo = _config_stacks.StackInfo
 StackType = _config_stacks.StackType
 CloudProvider = _config_stacks.CloudProvider
 KubernetesStackSpec = _config_stacks.KubernetesStackSpec
-_ResolvedKubernetesConnectorSpec = _config_stacks._ResolvedKubernetesConnectorSpec
+VertexStackSpec = _config_stacks.VertexStackSpec
+SagemakerStackSpec = _config_stacks.SagemakerStackSpec
+AzureMLStackSpec = _config_stacks.AzureMLStackSpec
+RemoteStackSpec = _config_stacks.RemoteStackSpec
+StackComponentConfigOverrides = _config_stacks.StackComponentConfigOverrides
+_ResolvedConnectorSpec = _config_stacks._ResolvedConnectorSpec
 _StackComponent = _config_stacks._StackComponent
 _StackListEntry = _config_stacks._StackListEntry
 _StackCreateResult = _config_stacks._StackCreateResult
@@ -140,6 +146,7 @@ _looks_like_server_address_without_scheme = (
 _noop_zenml_cli_message = _config_connection._noop_zenml_cli_message
 
 _normalize_model_alias = _config_models._normalize_model_alias
+_read_env_model_registry = _config_models._read_env_model_registry
 _normalize_log_store_backend_name = _config_log_store._normalize_log_store_backend_name
 _extract_log_store_endpoint = _config_log_store._extract_log_store_endpoint
 _mask_environment_value = _config_log_store._mask_environment_value
@@ -152,9 +159,7 @@ _container_registry_resource_id = _config_stacks._container_registry_resource_id
 _resolve_kubernetes_connector_spec = _config_stacks._resolve_kubernetes_connector_spec
 _build_kubernetes_stack_request = _config_stacks._build_kubernetes_stack_request
 _get_required_stack_component = _config_stacks._get_required_stack_component
-_extract_kubernetes_stack_components = (
-    _config_stacks._extract_kubernetes_stack_components
-)
+_extract_remote_stack_components = _config_stacks._extract_remote_stack_components
 _normalize_stack_selector = _config_stacks._normalize_stack_selector
 _stack_name_collision_message = _config_stacks._stack_name_collision_message
 _component_collision_message = _config_stacks._component_collision_message
@@ -405,9 +410,10 @@ def register_model_alias(
 
 
 def list_model_aliases() -> list[ModelAliasEntry]:
-    """List local model aliases in stable order for CLI rendering."""
+    """List model aliases visible in the current process environment."""
     return _config_models.list_model_aliases(
         read_global_config=_read_kitaru_global_config,
+        environ=os.environ,
     )
 
 
@@ -458,6 +464,7 @@ def _create_kubernetes_stack_operation(
     spec: KubernetesStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
     return _config_stacks._create_kubernetes_stack_operation(
@@ -465,6 +472,64 @@ def _create_kubernetes_stack_operation(
         spec=spec,
         activate=activate,
         labels=labels,
+        component_overrides=component_overrides,
+        client_factory=Client,
+    )
+
+
+def _create_vertex_stack_operation(
+    name: str,
+    *,
+    spec: VertexStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+) -> _StackCreateResult:
+    """Create a Vertex AI stack via ZenML's one-shot stack API."""
+    return _config_stacks._create_vertex_stack_operation(
+        name,
+        spec=spec,
+        activate=activate,
+        labels=labels,
+        component_overrides=component_overrides,
+        client_factory=Client,
+    )
+
+
+def _create_sagemaker_stack_operation(
+    name: str,
+    *,
+    spec: SagemakerStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+) -> _StackCreateResult:
+    """Create a SageMaker stack via ZenML's one-shot stack API."""
+    return _config_stacks._create_sagemaker_stack_operation(
+        name,
+        spec=spec,
+        activate=activate,
+        labels=labels,
+        component_overrides=component_overrides,
+        client_factory=Client,
+    )
+
+
+def _create_azureml_stack_operation(
+    name: str,
+    *,
+    spec: AzureMLStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+) -> _StackCreateResult:
+    """Create an AzureML stack via ZenML's one-shot stack API."""
+    return _config_stacks._create_azureml_stack_operation(
+        name,
+        spec=spec,
+        activate=activate,
+        labels=labels,
+        component_overrides=component_overrides,
         client_factory=Client,
     )
 
@@ -475,7 +540,8 @@ def _create_stack_operation(
     stack_type: StackType = StackType.LOCAL,
     activate: bool = True,
     labels: dict[str, str] | None = None,
-    kubernetes: KubernetesStackSpec | None = None,
+    remote_spec: RemoteStackSpec | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
     return _config_stacks._create_stack_operation(
@@ -483,9 +549,18 @@ def _create_stack_operation(
         stack_type=stack_type,
         activate=activate,
         labels=labels,
-        kubernetes=kubernetes,
-        create_local_stack_operation=_create_local_stack_operation,
-        create_kubernetes_stack_operation=_create_kubernetes_stack_operation,
+        remote_spec=remote_spec,
+        component_overrides=component_overrides,
+        operation_overrides=cast(
+            dict[StackType, Callable[..., _StackCreateResult]],
+            {
+                StackType.LOCAL: _create_local_stack_operation,
+                StackType.KUBERNETES: _create_kubernetes_stack_operation,
+                StackType.VERTEX: _create_vertex_stack_operation,
+                StackType.SAGEMAKER: _create_sagemaker_stack_operation,
+                StackType.AZUREML: _create_azureml_stack_operation,
+            },
+        ),
     )
 
 
@@ -494,12 +569,14 @@ def _create_local_stack_operation(
     *,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a new local stack and return structured operation details."""
     return _config_stacks._create_local_stack_operation(
         name,
         activate=activate,
         labels=labels,
+        component_overrides=component_overrides,
         client_factory=Client,
         current_stack_getter=current_stack,
     )

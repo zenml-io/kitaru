@@ -1,7 +1,8 @@
-"""Wait for external input and resume the same execution.
+"""Wait for input and continue the same execution.
 
-Run this example, then open a second terminal and execute the CLI commands
-it prints to approve (or reject) the release note and resume the flow.
+On local interactive runs, the runtime prompts for input directly in the
+terminal.  If the run is non-interactive (or the runner has timed out), the
+watcher thread prints fallback CLI commands you can run in a second terminal.
 """
 
 import argparse
@@ -79,23 +80,23 @@ def _watch_and_print_unblock_commands(
     topic: str,
     stop_event: threading.Event,
 ) -> None:
-    """Watch for a pending wait and print manual CLI unblock commands once."""
-    printed = False
-    while not stop_event.is_set() and not printed:
+    """Watch for a pending wait and print fallback CLI commands once."""
+    while not stop_event.is_set():
         exec_id = _find_pending_wait_for_topic(client=client, topic=topic)
         if exec_id is not None:
-            print("\n⏸️  Flow is waiting for external input.")
-            print("Run these commands in another terminal to continue:\n")
+            print("\n⏸️  Flow is waiting for input.")
+            print("If this terminal is prompting, answer inline.")
+            print("Otherwise, run these fallback commands in another terminal:\n")
             print(f"kitaru executions input {exec_id} --value true")
-            print(f"kitaru executions resume {exec_id}\n")
+            resume_note = "# only if execution did not continue"
+            print(f"kitaru executions resume {exec_id}  {resume_note}\n")
             print("(Use --value false to reject, or --abort to abort.)\n")
-            printed = True
             break
         time.sleep(1.0)
 
 
 def run_workflow(topic: str | None = None) -> str:
-    """Run workflow in main thread and print manual unblock commands."""
+    """Run workflow in main thread and print fallback commands if needed."""
     resolved_topic = topic or f"kitaru-{int(time.time())}"
     client = KitaruClient()
     _prime_zenml_runtime()
@@ -114,7 +115,7 @@ def run_workflow(topic: str | None = None) -> str:
     watcher.start()
 
     print("Starting wait/resume workflow...")
-    print("Keep this terminal open; execute the printed commands in another terminal.")
+    print("If running interactively, you will be prompted for input in this terminal.")
 
     try:
         result = wait_for_approval_flow.run(resolved_topic).wait()
@@ -130,7 +131,9 @@ def run_workflow(topic: str | None = None) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     """Build CLI parser for the wait/resume example."""
     parser = argparse.ArgumentParser(
-        description="Wait/resume workflow example — pauses for manual CLI input.",
+        description=(
+            "Wait/resume workflow example — prompts inline or via fallback CLI."
+        ),
     )
     parser.add_argument(
         "--topic",

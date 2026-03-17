@@ -6,6 +6,7 @@ function whose execution becomes durable, replayable, and observable.
 
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 import time
@@ -30,9 +31,13 @@ from kitaru._source_aliases import (
 )
 from kitaru.analytics import track
 from kitaru.config import (
+    KITARU_MODEL_REGISTRY_ENV,
     ImageInput,
     ImageSettings,
     KitaruConfig,
+    ModelRegistryConfig,
+    _read_env_model_registry,
+    _read_model_registry_config,
     build_frozen_execution_spec,
     image_settings_to_docker_settings,
     persist_frozen_execution_spec,
@@ -54,6 +59,7 @@ from kitaru.runtime import _flow_scope
 
 ImageSetting = ImageInput
 _STACK_BINDING_LOCK = threading.RLock()
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -160,6 +166,68 @@ def _build_settings(
         Pipeline settings dictionary.
     """
     return {DOCKER_SETTINGS_KEY: image_settings_to_docker_settings(image)}
+
+
+def _inject_model_registry_env(
+    image: ImageSettings | None,
+    *,
+    read_local_registry: Callable[[], ModelRegistryConfig],
+) -> tuple[ImageSettings, ModelRegistryConfig, bool]:
+    """Return image settings with a transported model-registry snapshot."""
+    existing_environment = (
+        dict(image.environment) if image and image.environment else {}
+    )
+    existing_registry = _read_env_model_registry(
+        environ=existing_environment,
+        source_label="image environment",
+    )
+    if existing_registry is not None:
+        transport_image = (
+            image.model_copy()
+            if image is not None
+            else ImageSettings(environment=existing_environment)
+        )
+        return transport_image, existing_registry, False
+
+    local_registry = read_local_registry()
+    transport_environment = dict(existing_environment)
+    transport_environment[KITARU_MODEL_REGISTRY_ENV] = local_registry.model_dump_json(
+        exclude_none=True
+    )
+    if image is None:
+        return (
+            ImageSettings(environment=transport_environment),
+            local_registry,
+            True,
+        )
+    return (
+        image.model_copy(update={"environment": transport_environment}),
+        local_registry,
+        True,
+    )
+
+
+def _prepare_model_registry_transport(
+    image: ImageSettings | None,
+) -> tuple[ImageSettings, ModelRegistryConfig]:
+    """Inject the model registry into image env and log the outcome."""
+    transport_image, effective_model_registry, did_inject_registry = (
+        _inject_model_registry_env(
+            image,
+            read_local_registry=_read_model_registry_config,
+        )
+    )
+    if did_inject_registry:
+        logger.debug(
+            "Transporting %d model aliases to remote environment.",
+            len(effective_model_registry.aliases),
+        )
+    else:
+        logger.debug(
+            "Using preconfigured transported model registry with %d model aliases.",
+            len(effective_model_registry.aliases),
+        )
+    return transport_image, effective_model_registry
 
 
 def _build_execution_overrides(
@@ -537,15 +605,19 @@ class _FlowDefinition:
                 retries=retries,
             ),
         )
+        transport_image, effective_model_registry = _prepare_model_registry_transport(
+            resolved_execution.image
+        )
         frozen_execution_spec = build_frozen_execution_spec(
             resolved_execution=resolved_execution,
             flow_defaults=self._decorator_config,
             connection=resolved_connection,
+            model_registry=effective_model_registry,
         )
         configured_pipeline = self._pipeline.with_options(
             enable_cache=resolved_execution.cache,
             retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
-            settings=_build_settings(resolved_execution.image),
+            settings=_build_settings(transport_image),
         )
 
         with _temporary_active_stack(resolved_execution.stack):
@@ -606,15 +678,20 @@ class _FlowDefinition:
             decorator_overrides=self._decorator_config,
             invocation_overrides=invocation_overrides,
         )
+        resolved_connection = resolve_connection_config(validate_for_use=True)
+        transport_image, effective_model_registry = _prepare_model_registry_transport(
+            resolved_execution.image
+        )
         frozen_execution_spec = build_frozen_execution_spec(
             resolved_execution=resolved_execution,
             flow_defaults=self._decorator_config,
-            connection=resolve_connection_config(validate_for_use=True),
+            connection=resolved_connection,
+            model_registry=effective_model_registry,
         )
         configured_pipeline = self._pipeline.with_options(
             enable_cache=resolved_execution.cache,
             retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
-            settings=_build_settings(resolved_execution.image),
+            settings=_build_settings(transport_image),
         )
 
         with _temporary_active_stack(resolved_execution.stack):

@@ -16,11 +16,11 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Configuration** — `kitaru.configure(...)`, environment variables, and `[tool.kitaru]` in `pyproject.toml`, with precedence resolved at flow start and persisted per execution, including flow-bound stack defaults via `@flow(stack=...)` and one-off execution overrides via `.run(..., stack=...)`
 - **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`, `logs`), replaying from checkpoint boundaries (`replay`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
-- **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, local model aliases (`kitaru model register/list`), and env-first secret resolution for known providers
+- **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, model aliases (`kitaru model register/list`) that are automatically transported to submitted/replayed remote runs, and env-first secret resolution for known providers
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
-- **Stack lifecycle** — `kitaru.create_stack()` / `kitaru.delete_stack()`, `kitaru stack create/delete/show`, YAML-backed `kitaru stack create -f stack.yaml`, automatic activation for new local stacks, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings. For an end-to-end walkthrough, see the [Kubernetes stacks guide](https://kitaru.ai/docs/getting-started/kubernetes-stacks).
+- **Stack lifecycle** — Local stack lifecycle in the Python SDK (`kitaru.create_stack()` / `kitaru.delete_stack()`), plus local, Kubernetes, Vertex, SageMaker, and AzureML stack creation through `kitaru stack create`, YAML-backed `kitaru stack create -f stack.yaml`, MCP `manage_stack`, advanced component defaults via `--extra` / `extra:` and remote async defaults via `--async`, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only. For the broader story, see the [stack selection guide](https://kitaru.ai/docs/getting-started/stack-selection) and the [Kubernetes stacks guide](https://kitaru.ai/docs/getting-started/kubernetes-stacks).
 - **Execution CLI** — `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
-- **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
+- **Durable wait/resume** — `kitaru.wait(...)` suspends a flow until input is provided, either inline via the terminal prompt on local interactive runs or later through `client.executions.input(...)` / `client.executions.resume(...)` for non-interactive contexts
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
 - **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus Claude Code scoping and authoring skills available via the [plugin marketplace](https://github.com/zenml-io/kitaru-skills)
 
@@ -87,7 +87,7 @@ uv sync --extra local --extra mcp           # MCP query tools example
 | Core workflow basics | Artifacts | `uv run -m examples.basic_flow.flow_with_artifacts` | `kitaru.save()` / `kitaru.load()` across executions |
 | Core workflow basics | Configuration | `uv run -m examples.basic_flow.flow_with_configuration` | `kitaru.configure()` defaults, overrides, and frozen execution specs |
 | Execution lifecycle | Execution management | `uv run -m examples.execution_management.client_execution_management` | `KitaruClient` for inspecting runs, artifacts, and execution metadata |
-| Execution lifecycle | Wait and resume | `uv run -m examples.execution_management.wait_and_resume` | `kitaru.wait()` plus manual CLI resume from a second terminal |
+| Execution lifecycle | Wait and resume | `uv run -m examples.execution_management.wait_and_resume` | `kitaru.wait()` with inline local prompt or fallback CLI input/resume |
 | Execution lifecycle | Replay with overrides | `uv run -m examples.replay.replay_with_overrides` | Replay from a checkpoint boundary with targeted `checkpoint.*` overrides |
 | LLMs and integrations | Tracked LLM calls | `uv run -m examples.llm.flow_with_llm` | `kitaru.llm()` with model aliases, prompt/response capture, and usage metadata |
 | LLMs and integrations | PydanticAI adapter | `uv run -m examples.pydantic_ai_agent.pydantic_ai_adapter` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary |
@@ -100,7 +100,8 @@ uv run -m examples.<group>.<module_name>
 ```
 
 For the LLM example, the most reusable setup is to store credentials in a
-secret and link that secret to a local model alias:
+secret and link that secret to a model alias. Kitaru stores that alias locally
+and automatically transports it to submitted and replayed runs:
 
 ```bash
 kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
@@ -150,8 +151,13 @@ kitaru stack list                     List visible stacks
 kitaru stack current                  Show the active stack
 kitaru stack show <name-or-id>        Inspect one stack in Kitaru vocabulary
 kitaru stack use <name-or-id>         Switch active stack
-kitaru stack create <name>            Create a local stack and activate it
+kitaru stack create <name>            Create and activate a local stack
+kitaru stack create <name> --type vertex --artifact-store gs://... --container-registry us-central1-docker.pkg.dev/... --region us-central1
+kitaru stack create <name> --type kubernetes --artifact-store s3://... --container-registry ... --cluster ... --region ...
+kitaru stack create <name> --type sagemaker --artifact-store s3://... --container-registry ... --region ... --execution-role arn:aws:iam::123456789012:role/...
+kitaru stack create <name> --type azureml --artifact-store az://... --container-registry demo.azurecr.io/... --subscription-id ... --resource-group ... --workspace ...
 kitaru stack create -f stack.yaml     Create a stack from a YAML config file
+kitaru stack create <name> --type vertex ... --async --extra orchestrator.pipeline_root=gs://...
 kitaru stack create <name> --no-activate
 kitaru stack delete <name-or-id>      Delete a stack
 kitaru stack delete <name-or-id> --recursive [--force]
@@ -207,6 +213,7 @@ Two practical details matter here:
 
 - `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` must be set together.
 - When you connect to a remote server via env vars, `KITARU_PROJECT` is also required at first use.
+- `KITARU_MODEL_REGISTRY` is an advanced knob for manually supplying additional aliases or overriding matching transported aliases; most users should rely on automatic transport from `kitaru model register`.
 
 Under the hood, Kitaru translates its public `KITARU_*` connection/debug env
 vars into the ZenML env vars that the runtime already understands, so you do

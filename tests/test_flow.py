@@ -14,7 +14,13 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
-from kitaru.config import ResolvedExecutionConfig
+from kitaru.config import (
+    KITARU_MODEL_REGISTRY_ENV,
+    ImageSettings,
+    ModelAliasConfig,
+    ModelRegistryConfig,
+    ResolvedExecutionConfig,
+)
 from kitaru.errors import (
     FailureOrigin,
     KitaruRuntimeError,
@@ -24,6 +30,7 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     FlowHandle,
+    _inject_model_registry_env,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
     flow,
@@ -48,6 +55,11 @@ def _resolved_execution(
         cache=cache,
         retries=retries,
     )
+
+
+def _empty_registry_payload() -> str:
+    """Return the serialized empty transported registry payload."""
+    return ModelRegistryConfig().model_dump_json(exclude_none=True)
 
 
 class _DummyArtifact:
@@ -96,6 +108,84 @@ class _DummyRun:
         return self
 
 
+def test_inject_model_registry_env_adds_registry_to_empty_image() -> None:
+    """Submission should transport even an empty registry snapshot."""
+    image, registry, did_inject = _inject_model_registry_env(
+        None,
+        read_local_registry=ModelRegistryConfig,
+    )
+
+    assert did_inject is True
+    assert registry == ModelRegistryConfig()
+    assert image.environment == {KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()}
+
+
+def test_inject_model_registry_env_preserves_existing_override() -> None:
+    """A preconfigured image env registry should win over local config."""
+    transported_registry = ModelRegistryConfig(
+        aliases={
+            "fast": ModelAliasConfig(
+                model="openai/gpt-4.1-mini",
+                secret="remote-secret",
+            )
+        },
+        default="fast",
+    )
+
+    local_registry_reader = MagicMock(
+        return_value=ModelRegistryConfig(
+            aliases={"fast": ModelAliasConfig(model="openai/gpt-4o-mini")}
+        )
+    )
+    image, registry, did_inject = _inject_model_registry_env(
+        ImageSettings(
+            environment={
+                KITARU_MODEL_REGISTRY_ENV: transported_registry.model_dump_json(
+                    exclude_none=True
+                ),
+                "OPENAI_API_KEY": "already-there",
+            }
+        ),
+        read_local_registry=local_registry_reader,
+    )
+
+    assert did_inject is False
+    assert registry == transported_registry
+    local_registry_reader.assert_not_called()
+    assert image.environment == {
+        KITARU_MODEL_REGISTRY_ENV: transported_registry.model_dump_json(
+            exclude_none=True
+        ),
+        "OPENAI_API_KEY": "already-there",
+    }
+
+
+def test_inject_model_registry_env_replaces_blank_override() -> None:
+    """Blank image env values should be treated as missing and replaced."""
+    image, registry, did_inject = _inject_model_registry_env(
+        ImageSettings(environment={KITARU_MODEL_REGISTRY_ENV: "   "}),
+        read_local_registry=lambda: ModelRegistryConfig(
+            aliases={"fast": ModelAliasConfig(model="openai/gpt-4o-mini")},
+            default="fast",
+        ),
+    )
+
+    assert did_inject is True
+    assert registry.default == "fast"
+    assert image.environment == {
+        KITARU_MODEL_REGISTRY_ENV: registry.model_dump_json(exclude_none=True)
+    }
+
+
+def test_inject_model_registry_env_rejects_invalid_override() -> None:
+    """Invalid preconfigured transport payloads should fail before submission."""
+    with pytest.raises(KitaruUsageError, match=KITARU_MODEL_REGISTRY_ENV):
+        _inject_model_registry_env(
+            ImageSettings(environment={KITARU_MODEL_REGISTRY_ENV: "not-json"}),
+            read_local_registry=ModelRegistryConfig,
+        )
+
+
 def test_flow_decorator_creates_wrapper_with_run_and_deploy() -> None:
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
@@ -125,7 +215,12 @@ def test_flow_decorator_creates_wrapper_with_run_and_deploy() -> None:
     assert call_kwargs == call(
         enable_cache=True,
         retry=None,
-        settings={"docker": DockerSettings(requirements=["kitaru"])},
+        settings={
+            "docker": DockerSettings(
+                requirements=["kitaru"],
+                environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
+            )
+        },
     )
 
 
@@ -191,7 +286,12 @@ def test_deploy_is_run_sugar_with_stack_override() -> None:
         )
 
     settings = base_pipeline.with_options.call_args.kwargs["settings"]
-    assert settings == {"docker": DockerSettings(requirements=["kitaru"])}
+    assert settings == {
+        "docker": DockerSettings(
+            requirements=["kitaru"],
+            environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
+        )
+    }
     assert base_pipeline.with_options.call_args.kwargs["enable_cache"] is True
     assert base_pipeline.with_options.call_args.kwargs["retry"] is None
     assert client_mock.activate_stack.call_args_list == [
@@ -310,6 +410,10 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
     assert invocation_overrides.retries == 3
 
     build_frozen_spec_mock.assert_called_once()
+    assert (
+        build_frozen_spec_mock.call_args.kwargs["model_registry"]
+        == ModelRegistryConfig()
+    )
     persist_frozen_execution_spec_mock.assert_called_once_with(
         run_id=run.id,
         frozen_execution_spec=frozen_spec,
@@ -400,6 +504,13 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
     resolve_connection_mock.assert_called_once_with(validate_for_use=True)
     persist_mock.assert_called_once()
     assert persist_mock.call_args.kwargs["run_id"] == replayed_run.id
+    build_frozen_spec_call = base_pipeline.with_options.call_args
+    assert build_frozen_spec_call.kwargs["settings"] == {
+        "docker": DockerSettings(
+            requirements=["kitaru"],
+            environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
+        )
+    }
 
 
 def test_replay_resolves_config_with_invocation_stack_override() -> None:

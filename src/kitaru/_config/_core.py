@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import UUID
 
 from pydantic import (
@@ -27,6 +27,9 @@ from kitaru.errors import KitaruUsageError
 
 _KITARU_GLOBAL_CONFIG_FILENAME = "config.yaml"
 FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
+
+if TYPE_CHECKING:
+    from kitaru._config._models import ModelRegistryConfig
 
 
 class ImageSettings(BaseModel):
@@ -191,6 +194,7 @@ class FrozenExecutionSpec(BaseModel):
     resolved_execution: ResolvedExecutionConfig
     flow_defaults: KitaruConfig
     connection: ResolvedConnectionConfig
+    model_registry: ModelRegistryConfig | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -381,12 +385,14 @@ def build_frozen_execution_spec(
     resolved_execution: ResolvedExecutionConfig,
     flow_defaults: KitaruConfig,
     connection: ResolvedConnectionConfig,
+    model_registry: ModelRegistryConfig | None = None,
 ) -> FrozenExecutionSpec:
     """Create a frozen execution-spec payload persisted with each run."""
     return FrozenExecutionSpec(
         resolved_execution=resolved_execution,
         flow_defaults=flow_defaults,
         connection=connection,
+        model_registry=model_registry,
     )
 
 
