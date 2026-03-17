@@ -22,9 +22,16 @@ from kitaru.cli import (
 )
 from kitaru.client import ExecutionStatus, LogEntry
 from kitaru.config import (
+    KITARU_MODEL_REGISTRY_ENV,
     ActiveEnvironmentVariable,
+    AzureMLStackSpec,
     KubernetesStackSpec,
+    ModelAliasConfig,
+    ModelRegistryConfig,
+    SagemakerStackSpec,
+    StackComponentConfigOverrides,
     StackType,
+    VertexStackSpec,
 )
 
 
@@ -1682,6 +1689,33 @@ def test_model_list_renders_empty_state(capsys: pytest.CaptureFixture[str]) -> N
     assert "Models: none found" in output
 
 
+def test_model_list_reads_transported_registry(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`kitaru model list` should reflect aliases from KITARU_MODEL_REGISTRY."""
+    monkeypatch.setenv(
+        KITARU_MODEL_REGISTRY_ENV,
+        ModelRegistryConfig(
+            aliases={
+                "fast": ModelAliasConfig(
+                    model="openai/gpt-4o-mini",
+                    secret="openai-creds",
+                )
+            },
+            default="fast",
+        ).model_dump_json(exclude_none=True),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["model", "list"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru models" in output
+    assert "fast: openai/gpt-4o-mini (secret=openai-creds) [default]" in output
+
+
 def test_secrets_set_creates_secret(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -2165,7 +2199,7 @@ def test_stack_create_reports_auto_activation(
         "dev",
         stack_type=StackType.LOCAL,
         activate=True,
-        kubernetes=None,
+        remote_spec=None,
     )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
@@ -2191,7 +2225,7 @@ def test_stack_create_no_activate_skips_active_stack_line(
         "dev",
         stack_type=StackType.LOCAL,
         activate=False,
-        kubernetes=None,
+        remote_spec=None,
     )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
@@ -2228,13 +2262,14 @@ def test_stack_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
 def test_stack_create_rejects_kubernetes_flags_for_local_stack(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Local stack creation should reject Kubernetes-only flags."""
+    """Local stack creation should reject remote-stack flags."""
     with pytest.raises(SystemExit) as exc_info:
         app(["stack", "create", "dev", "--artifact-store", "s3://bucket/kitaru"])
 
     assert exc_info.value.code == 1
     assert (
-        "Kubernetes-only options require --type kubernetes: --artifact-store"
+        "Remote stack options require --type kubernetes, --type vertex, "
+        "--type sagemaker, or --type azureml: --artifact-store"
         in capsys.readouterr().err
     )
 
@@ -2242,13 +2277,14 @@ def test_stack_create_rejects_kubernetes_flags_for_local_stack(
 def test_stack_create_rejects_blank_kubernetes_flags_for_local_stack(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Blank Kubernetes-only flag values still count as explicit local-stack inputs."""
+    """Blank remote-stack flag values still count as explicit local-stack inputs."""
     with pytest.raises(SystemExit) as exc_info:
         app(["stack", "create", "dev", "--artifact-store", "   "])
 
     assert exc_info.value.code == 1
     assert (
-        "Kubernetes-only options require --type kubernetes: --artifact-store"
+        "Remote stack options require --type kubernetes, --type vertex, "
+        "--type sagemaker, or --type azureml: --artifact-store"
         in capsys.readouterr().err
     )
 
@@ -2267,6 +2303,155 @@ def test_stack_create_kubernetes_requires_all_mandatory_flags(
     ) in capsys.readouterr().err
 
 
+def test_stack_create_vertex_requires_all_mandatory_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vertex stack creation should report all missing required flags."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "vertex"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--type vertex requires: --artifact-store, --container-registry, --region."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_sagemaker_requires_all_mandatory_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """SageMaker stack creation should report all missing required flags."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "sagemaker"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--type sagemaker requires: --artifact-store, --container-registry, "
+        "--region, --execution-role."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_azureml_requires_all_mandatory_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AzureML stack creation should report all missing required flags."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "azureml"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--type azureml requires: --artifact-store, --container-registry, "
+        "--subscription-id, --resource-group, --workspace."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_vertex_rejects_kubernetes_only_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vertex stack creation should still reject Kubernetes-only inputs."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "vertex-dev",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--cluster",
+                "demo-gke",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert (
+        "Kubernetes-only options require --type kubernetes: --cluster"
+        in capsys.readouterr().err
+    )
+
+
+def test_stack_create_azureml_rejects_kubernetes_only_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AzureML stack creation should still reject Kubernetes-only inputs."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "azure-dev",
+                "--type",
+                "azureml",
+                "--artifact-store",
+                "az://container/kitaru",
+                "--container-registry",
+                "demo.azurecr.io/team/image",
+                "--subscription-id",
+                "00000000-0000-0000-0000-000000000123",
+                "--resource-group",
+                "rg-demo",
+                "--workspace",
+                "ws-demo",
+                "--cluster",
+                "demo-aks",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert (
+        "Kubernetes-only options require --type kubernetes: --cluster"
+        in capsys.readouterr().err
+    )
+
+
+def test_stack_create_local_rejects_sagemaker_only_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Non-SageMaker stack creation should reject SageMaker-only inputs."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "dev",
+                "--execution-role",
+                "arn:aws:iam::123456789012:role/SageMakerRole",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert (
+        "SageMaker-only options require --type sagemaker: --execution-role"
+        in capsys.readouterr().err
+    )
+
+
+def test_stack_create_local_rejects_azureml_only_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Non-AzureML stack creation should reject Azure-only inputs."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "dev",
+                "--subscription-id",
+                "00000000-0000-0000-0000-000000000123",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert (
+        "AzureML-only options require --type azureml: --subscription-id"
+        in capsys.readouterr().err
+    )
+
+
 def test_stack_create_rejects_unsupported_stack_type_json(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -2279,7 +2464,10 @@ def test_stack_create_rejects_unsupported_stack_type_json(
     assert payload == {
         "command": "stack.create",
         "error": {
-            "message": ("Unsupported stack type: modal. Use 'local' or 'kubernetes'."),
+            "message": (
+                "Unsupported stack type: modal. Use 'local', "
+                "'kubernetes', 'vertex', 'sagemaker', or 'azureml'."
+            ),
             "type": "ValueError",
         },
     }
@@ -2306,8 +2494,8 @@ region: us-east-1
 
     assert exc_info.value.code == 1
     assert (
-        "Unsupported stack type: . Use 'local' or 'kubernetes'."
-        in capsys.readouterr().err
+        "Unsupported stack type: . Use 'local', 'kubernetes', 'vertex', "
+        "'sagemaker', or 'azureml'." in capsys.readouterr().err
     )
 
 
@@ -2338,6 +2526,38 @@ def test_stack_create_kubernetes_rejects_unsupported_artifact_store_scheme(
     assert (
         "Cannot infer cloud provider from 'az://bucket/kitaru'. "
         "Use an s3:// or gs:// URI."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_azureml_rejects_non_azure_artifact_store(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AzureML stack creation should require an Azure artifact-store URI."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "azure-dev",
+                "--type",
+                "azureml",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "demo.azurecr.io/team/image",
+                "--subscription-id",
+                "00000000-0000-0000-0000-000000000123",
+                "--resource-group",
+                "rg-demo",
+                "--workspace",
+                "ws-demo",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert (
+        "AzureML stacks require an az://, abfs://, or abfss:// artifact store "
+        "URI. Received: 's3://bucket/kitaru'."
     ) in capsys.readouterr().err
 
 
@@ -2381,7 +2601,7 @@ def test_stack_create_kubernetes_builds_aws_spec() -> None:
     assert mock_create_stack.call_args.args == ("my-k8s",)
     assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.KUBERNETES
     assert mock_create_stack.call_args.kwargs["activate"] is True
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.model_dump(mode="json") == {
         "provider": "aws",
@@ -2438,7 +2658,7 @@ def test_stack_create_kubernetes_builds_gcp_spec_with_credentials_and_no_verify(
         )
 
     assert exc_info.value.code == 0
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.model_dump(mode="json") == {
         "provider": "gcp",
@@ -2449,6 +2669,409 @@ def test_stack_create_kubernetes_builds_gcp_spec_with_credentials_and_no_verify(
         "namespace": "agents",
         "credentials": "gcp-service-account:/tmp/key.json",
         "verify": False,
+    }
+
+
+def test_stack_create_vertex_builds_gcp_spec() -> None:
+    """Vertex stacks should build the shared Vertex spec without Kubernetes fields."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+            resources={
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--credentials",
+                "gcp-service-account:/tmp/key.json",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    vertex_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(vertex_spec, VertexStackSpec)
+    assert vertex_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+        "region": "us-central1",
+        "credentials": "gcp-service-account:/tmp/key.json",
+        "verify": False,
+    }
+
+
+def test_stack_create_sagemaker_builds_aws_spec() -> None:
+    """SageMaker stacks should build the shared spec without cluster fields."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-sagemaker",
+            stack_type="sagemaker",
+            resources={
+                "provider": "aws",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-sagemaker",
+                "--type",
+                "sagemaker",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--region",
+                "us-east-1",
+                "--execution-role",
+                "arn:aws:iam::123456789012:role/SageMakerRole",
+                "--credentials",
+                "aws-profile:ml-team",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    sagemaker_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(sagemaker_spec, SagemakerStackSpec)
+    assert sagemaker_spec.model_dump(mode="json") == {
+        "artifact_store": "s3://bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        "region": "us-east-1",
+        "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole",
+        "credentials": "aws-profile:ml-team",
+        "verify": False,
+    }
+
+
+def test_stack_create_azureml_builds_spec() -> None:
+    """AzureML stacks should build the shared AzureML spec cleanly."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-azure",
+            stack_type="azureml",
+            resources={
+                "provider": "azure",
+                "subscription_id": "00000000-0000-0000-0000-000000000123",
+                "resource_group": "rg-demo",
+                "workspace": "ws-demo",
+                "region": "westeurope",
+                "artifact_store": "az://container/kitaru",
+                "container_registry": "demo.azurecr.io/team/image",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-azure",
+                "--type",
+                "azureml",
+                "--artifact-store",
+                "az://container/kitaru",
+                "--container-registry",
+                "demo.azurecr.io/team/image",
+                "--subscription-id",
+                "00000000-0000-0000-0000-000000000123",
+                "--resource-group",
+                "rg-demo",
+                "--workspace",
+                "ws-demo",
+                "--region",
+                "westeurope",
+                "--credentials",
+                "azure-access-token:token-123",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    azureml_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(azureml_spec, AzureMLStackSpec)
+    assert azureml_spec.model_dump(mode="json") == {
+        "artifact_store": "az://container/kitaru",
+        "container_registry": "demo.azurecr.io/team/image",
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+        "resource_group": "rg-demo",
+        "workspace": "ws-demo",
+        "region": "westeurope",
+        "credentials": "azure-access-token:token-123",
+        "verify": False,
+    }
+
+
+def test_stack_create_sagemaker_builds_spec_from_yaml_file(tmp_path: Path) -> None:
+    """SageMaker stack creation should accept execution_role from YAML input."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-sagemaker
+type: sagemaker
+artifact_store: s3://bucket/kitaru
+container_registry: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+region: us-east-1
+execution_role: arn:aws:iam::123456789012:role/SageMakerRole
+credentials: aws-profile:ml-team
+verify: false
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-sagemaker",
+            stack_type="sagemaker",
+        )
+        app(["stack", "create", "--file", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    sagemaker_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(sagemaker_spec, SagemakerStackSpec)
+    assert sagemaker_spec.model_dump(mode="json") == {
+        "artifact_store": "s3://bucket/kitaru",
+        "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        "region": "us-east-1",
+        "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole",
+        "credentials": "aws-profile:ml-team",
+        "verify": False,
+    }
+
+
+def test_stack_create_azureml_builds_spec_from_yaml_and_cli_override(
+    tmp_path: Path,
+) -> None:
+    """AzureML stack creation should support YAML input and CLI precedence."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-azure
+type: azureml
+artifact_store: az://container/kitaru
+container_registry: demo.azurecr.io/team/image
+subscription-id: 00000000-0000-0000-0000-000000000123
+resource-group: rg-yaml
+workspace: ws-yaml
+region: westeurope
+credentials: implicit
+verify: true
+activate: false
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-azure",
+            stack_type="azureml",
+            previous_active_stack=None,
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "--file",
+                str(stack_file),
+                "--workspace",
+                "ws-cli",
+                "--no-verify",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.args == ("yaml-azure",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.AZUREML
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    azureml_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(azureml_spec, AzureMLStackSpec)
+    assert azureml_spec.model_dump(mode="json") == {
+        "artifact_store": "az://container/kitaru",
+        "container_registry": "demo.azurecr.io/team/image",
+        "subscription_id": "00000000-0000-0000-0000-000000000123",
+        "resource_group": "rg-yaml",
+        "workspace": "ws-cli",
+        "region": "westeurope",
+        "credentials": "implicit",
+        "verify": False,
+    }
+
+
+def test_stack_create_vertex_passes_extra_and_async_overrides() -> None:
+    """Advanced CLI stack-create flags should pass merged component overrides."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--extra",
+                "orchestrator.pipeline_root=gs://bucket/root",
+                "--extra",
+                "container_registry.default_repository=my-team",
+                "--async",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "pipeline_root": "gs://bucket/root",
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {"default_repository": "my-team"},
+    }
+
+
+def test_stack_create_extra_beats_async_default() -> None:
+    """Explicit `--extra orchestrator.synchronous=...` should beat `--async`."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--extra",
+                "orchestrator.synchronous=true",
+                "--async",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.orchestrator == {"synchronous": True}
+
+
+def test_stack_create_local_rejects_async_flag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--async` should only be valid for remote stack types."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--async"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--async requires --type kubernetes, --type vertex, "
+        "--type sagemaker, or --type azureml."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_merges_yaml_and_cli_component_overrides(tmp_path: Path) -> None:
+    """YAML `extra:` config should merge with repeatable CLI `--extra` flags."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-vertex
+type: vertex
+artifact_store: gs://bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/demo/repo
+region: us-central1
+async: true
+extra:
+  orchestrator:
+    pipeline_root: gs://bucket/root
+  container_registry:
+    default_repository: from-yaml
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-vertex",
+            stack_type="vertex",
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "-f",
+                str(stack_file),
+                "--extra",
+                "orchestrator.custom_job_parameters.machine_type=n1-standard-4",
+                "--extra",
+                "container_registry.default_repository=from-cli",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "pipeline_root": "gs://bucket/root",
+            "custom_job_parameters": {"machine_type": "n1-standard-4"},
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {"default_repository": "from-cli"},
     }
 
 
@@ -2500,6 +3123,162 @@ def test_stack_create_kubernetes_text_output(
         and "123456789012.dkr.ecr.us-east-1.amazonaws.com" in output
     )
     assert "Active stack: default → my-k8s" in output
+
+
+def test_stack_create_vertex_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vertex stack creation should render GCP resource details without a cluster."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+            resources={
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Created stack: my-vertex (vertex)" in output
+    assert "Provider:" in output and "gcp" in output
+    assert "Region:" in output and "us-central1" in output
+    assert "Artifacts:" in output and "gs://bucket/kitaru" in output
+    assert "Registry:" in output and "us-central1-docker.pkg.dev/demo/repo" in output
+    assert "Cluster:" not in output
+    assert "Active stack: default → my-vertex" in output
+
+
+def test_stack_create_sagemaker_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """SageMaker stack creation should render AWS resource details without a cluster."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-sagemaker",
+            stack_type="sagemaker",
+            resources={
+                "provider": "aws",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-sagemaker",
+                "--type",
+                "sagemaker",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--region",
+                "us-east-1",
+                "--execution-role",
+                "arn:aws:iam::123456789012:role/SageMakerRole",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Created stack: my-sagemaker (sagemaker)" in output
+    assert "Provider:" in output and "aws" in output
+    assert "Region:" in output and "us-east-1" in output
+    assert "Artifacts:" in output and "s3://bucket/kitaru" in output
+    assert (
+        "Registry:" in output
+        and "123456789012.dkr.ecr.us-east-1.amazonaws.com" in output
+    )
+    assert (
+        "Execution role:" in output
+        and "arn:aws:iam::123456789012:role/SageMakerRole" in output
+    )
+    assert "Cluster:" not in output
+    assert "Active stack: default → my-sagemaker" in output
+
+
+def test_stack_create_azureml_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AzureML stack creation should render Azure resource details cleanly."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-azure",
+            stack_type="azureml",
+            resources={
+                "provider": "azure",
+                "subscription_id": "00000000-0000-0000-0000-000000000123",
+                "resource_group": "rg-demo",
+                "workspace": "ws-demo",
+                "region": "westeurope",
+                "artifact_store": "az://container/kitaru",
+                "container_registry": "demo.azurecr.io/team/image",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-azure",
+                "--type",
+                "azureml",
+                "--artifact-store",
+                "az://container/kitaru",
+                "--container-registry",
+                "demo.azurecr.io/team/image",
+                "--subscription-id",
+                "00000000-0000-0000-0000-000000000123",
+                "--resource-group",
+                "rg-demo",
+                "--workspace",
+                "ws-demo",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Created stack: my-azure (azureml)" in output
+    assert "Provider:" in output and "azure" in output
+    assert (
+        "Subscription:" in output and "00000000-0000-0000-0000-000000000123" in output
+    )
+    assert "Resource group:" in output and "rg-demo" in output
+    assert "Workspace:" in output and "ws-demo" in output
+    assert "Region:" in output and "westeurope" in output
+    assert "Artifacts:" in output and "az://container/kitaru" in output
+    assert "Registry:" in output and "demo.azurecr.io/team/image" in output
+    assert "Active stack: default → my-azure" in output
 
 
 def test_stack_create_kubernetes_json_output(
@@ -2576,6 +3355,224 @@ def test_stack_create_kubernetes_json_output(
     }
 
 
+def test_stack_create_vertex_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Vertex stack creation JSON should expose the new stack type cleanly."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+            components_created=(
+                "my-vertex-orchestrator (orchestrator)",
+                "my-vertex-artifacts (artifact_store)",
+                "my-vertex-registry (container_registry)",
+            ),
+            service_connectors_created=("my-vertex-gcp",),
+            resources={
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "stack.create",
+        "item": {
+            "id": "stack-my-vertex-id",
+            "name": "my-vertex",
+            "is_active": True,
+            "previous_active_stack": "default",
+            "components_created": [
+                "my-vertex-orchestrator (orchestrator)",
+                "my-vertex-artifacts (artifact_store)",
+                "my-vertex-registry (container_registry)",
+            ],
+            "stack_type": "vertex",
+            "service_connectors_created": ["my-vertex-gcp"],
+            "resources": {
+                "provider": "gcp",
+                "region": "us-central1",
+                "artifact_store": "gs://bucket/kitaru",
+                "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+            },
+        },
+    }
+
+
+def test_stack_create_sagemaker_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """SageMaker stack creation JSON should expose the new stack type cleanly."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-sagemaker",
+            stack_type="sagemaker",
+            components_created=(
+                "my-sagemaker-orchestrator (orchestrator)",
+                "my-sagemaker-artifacts (artifact_store)",
+                "my-sagemaker-registry (container_registry)",
+            ),
+            service_connectors_created=("my-sagemaker-aws",),
+            resources={
+                "provider": "aws",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-sagemaker",
+                "--type",
+                "sagemaker",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--container-registry",
+                "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "--region",
+                "us-east-1",
+                "--execution-role",
+                "arn:aws:iam::123456789012:role/SageMakerRole",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "stack.create",
+        "item": {
+            "id": "stack-my-sagemaker-id",
+            "name": "my-sagemaker",
+            "is_active": True,
+            "previous_active_stack": "default",
+            "components_created": [
+                "my-sagemaker-orchestrator (orchestrator)",
+                "my-sagemaker-artifacts (artifact_store)",
+                "my-sagemaker-registry (container_registry)",
+            ],
+            "stack_type": "sagemaker",
+            "service_connectors_created": ["my-sagemaker-aws"],
+            "resources": {
+                "provider": "aws",
+                "region": "us-east-1",
+                "artifact_store": "s3://bucket/kitaru",
+                "container_registry": "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                "execution_role": "arn:aws:iam::123456789012:role/SageMakerRole",
+            },
+        },
+    }
+
+
+def test_stack_create_azureml_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AzureML stack creation JSON should expose the new stack type cleanly."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-azure",
+            stack_type="azureml",
+            components_created=(
+                "my-azure-orchestrator (orchestrator)",
+                "my-azure-artifacts (artifact_store)",
+                "my-azure-registry (container_registry)",
+            ),
+            service_connectors_created=("my-azure-connector",),
+            resources={
+                "provider": "azure",
+                "subscription_id": "00000000-0000-0000-0000-000000000123",
+                "resource_group": "rg-demo",
+                "workspace": "ws-demo",
+                "region": "westeurope",
+                "artifact_store": "az://container/kitaru",
+                "container_registry": "demo.azurecr.io/team/image",
+            },
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-azure",
+                "--type",
+                "azureml",
+                "--artifact-store",
+                "az://container/kitaru",
+                "--container-registry",
+                "demo.azurecr.io/team/image",
+                "--subscription-id",
+                "00000000-0000-0000-0000-000000000123",
+                "--resource-group",
+                "rg-demo",
+                "--workspace",
+                "ws-demo",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "stack.create",
+        "item": {
+            "id": "stack-my-azure-id",
+            "name": "my-azure",
+            "is_active": True,
+            "previous_active_stack": "default",
+            "components_created": [
+                "my-azure-orchestrator (orchestrator)",
+                "my-azure-artifacts (artifact_store)",
+                "my-azure-registry (container_registry)",
+            ],
+            "stack_type": "azureml",
+            "service_connectors_created": ["my-azure-connector"],
+            "resources": {
+                "provider": "azure",
+                "subscription_id": "00000000-0000-0000-0000-000000000123",
+                "resource_group": "rg-demo",
+                "workspace": "ws-demo",
+                "region": "westeurope",
+                "artifact_store": "az://container/kitaru",
+                "container_registry": "demo.azurecr.io/team/image",
+            },
+        },
+    }
+
+
 def test_stack_create_from_file_builds_local_stack(tmp_path: Path) -> None:
     """YAML-only local stack creation should use file inputs."""
     stack_file = _write_stack_create_file(
@@ -2599,7 +3596,7 @@ activate: true
         "yaml-local",
         stack_type=StackType.LOCAL,
         activate=True,
-        kubernetes=None,
+        remote_spec=None,
     )
 
 
@@ -2636,7 +3633,7 @@ activate: false
     assert mock_create_stack.call_args.args == ("yaml-k8s",)
     assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.KUBERNETES
     assert mock_create_stack.call_args.kwargs["activate"] is False
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.model_dump(mode="json") == {
         "provider": "aws",
@@ -2646,6 +3643,48 @@ activate: false
         "region": "us-east-1",
         "namespace": "ml",
         "credentials": "aws-profile:demo",
+        "verify": False,
+    }
+
+
+def test_stack_create_from_file_builds_vertex_stack(tmp_path: Path) -> None:
+    """YAML-only Vertex creation should build the same structured spec as flags."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-vertex
+type: vertex
+artifact_store: gs://bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/demo/repo
+region: us-central1
+credentials: gcp-service-account:/tmp/key.json
+verify: false
+activate: false
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-vertex",
+            stack_type="vertex",
+            previous_active_stack=None,
+        )
+        app(["stack", "create", "-f", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.args == ("yaml-vertex",)
+    assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.VERTEX
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    vertex_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(vertex_spec, VertexStackSpec)
+    assert vertex_spec.model_dump(mode="json") == {
+        "artifact_store": "gs://bucket/kitaru",
+        "container_registry": "us-central1-docker.pkg.dev/demo/repo",
+        "region": "us-central1",
+        "credentials": "gcp-service-account:/tmp/key.json",
         "verify": False,
     }
 
@@ -2696,7 +3735,7 @@ activate: true
     assert exc_info.value.code == 0
     assert mock_create_stack.call_args.args == ("cli-name",)
     assert mock_create_stack.call_args.kwargs["activate"] is False
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.model_dump(mode="json") == {
         "provider": "aws",
@@ -2791,6 +3830,44 @@ unexpected: true
 
     assert exc_info.value.code == 1
     assert "Unsupported stack config keys" in capsys.readouterr().err
+
+
+def test_stack_create_rejects_malformed_extra_json_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed `--extra` assignments should use the structured JSON error path."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--extra",
+                "orchestrator",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload == {
+        "command": "stack.create",
+        "error": {
+            "message": (
+                "Invalid --extra value 'orchestrator'. Use TARGET.FIELD=VALUE."
+            ),
+            "type": "ValueError",
+        },
+    }
 
 
 def test_stack_create_from_file_rejects_non_string_keys(

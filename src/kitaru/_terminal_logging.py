@@ -116,6 +116,14 @@ _REWRITE_RULES: list[tuple[re.Pattern[str], _TerminalKind | None, str]] = [
         "Flow completed.",
     ),
     (
+        re.compile(
+            r"^Waiting on wait condition `(.+?)` "
+            r"\(type=(.+?), timeout=(.+?)s, poll=(.+?)s\)\.$"
+        ),
+        "info",
+        "Waiting on `{0}` (type={1}, timeout={2}s, poll={3}s).",
+    ),
+    (
         re.compile(r"^Pausing pipeline run `(.+?)`\.$"),
         "warning",
         "Pausing execution `{0}`.",

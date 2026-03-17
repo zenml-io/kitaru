@@ -214,6 +214,36 @@ class TestDecidePipelineLifecycle:
         assert decision.kind == "success"
 
 
+class TestDecideWaitLifecycle:
+    """Wait condition messages should be rewritten to Kitaru vocabulary."""
+
+    def test_waiting_on_wait_condition(self) -> None:
+        record = _make_record(
+            "zenml.execution.pipeline.dynamic.runner",
+            "Waiting on wait condition `approval` "
+            "(type=external_input, timeout=60s, poll=5s).",
+        )
+        decision = _decide(record)
+        assert decision is not None
+        assert decision.text == (
+            "Waiting on `approval` (type=external_input, timeout=60s, poll=5s)."
+        )
+        assert decision.kind == "info"
+
+    def test_waiting_on_auto_named_wait_condition(self) -> None:
+        record = _make_record(
+            "zenml.execution.pipeline.dynamic.runner",
+            "Waiting on wait condition `wait_condition:0` "
+            "(type=external_input, timeout=600s, poll=5s).",
+        )
+        decision = _decide(record)
+        assert decision is not None
+        assert decision.text == (
+            "Waiting on `wait_condition:0` "
+            "(type=external_input, timeout=600s, poll=5s)."
+        )
+
+
 class TestDecideAliasCleanup:
     """Alias names should be stripped from matched capture groups."""
 

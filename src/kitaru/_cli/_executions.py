@@ -800,7 +800,7 @@ def input_(
     output: OutputFormatOption = "text",
     machine: MachineModeOption = None,
 ) -> None:
-    """Resolve pending wait input for an execution."""
+    """Resolve pending wait input for a non-interactive or timed-out execution."""
     command = "executions.input"
     output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
 
@@ -1026,7 +1026,7 @@ def resume_(
     output: OutputFormatOption = "text",
     machine: MachineModeOption = None,
 ) -> None:
-    """Resume a paused execution after wait input is resolved."""
+    """Resume a paused execution when it did not continue automatically after input."""
     command = "executions.resume"
     output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
     with _machine_mode_context(machine_mode):

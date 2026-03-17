@@ -464,6 +464,10 @@ class TestWriteDocsTree:
         assert "kitaru stack use STACK" in stack_use_content
         assert "| `STACK` | `str` | Yes |  |" in stack_use_content
 
+        stack_create_content = (output_dir / "stack" / "create.mdx").read_text()
+        assert "`--extra`" in stack_create_content
+        assert "`--async`" in stack_create_content
+
     def test_nested_subcommands_create_directories(self, output_dir: Path) -> None:
         import cyclopts
 
