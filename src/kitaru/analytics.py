@@ -15,11 +15,17 @@ _SUFFIX_TO_SOURCE_VALUE: dict[str, str] = {
     "cli": "kitaru-cli",
     "mcp": "kitaru-mcp",
     "api": "kitaru-api",
+    "dashboard": "kitaru-dashboard",  # reserved for future Kitaru dashboard UI
 }
 
 
-def set_source(suffix: str) -> None:
-    """Set the ZenML ``Source-Context`` header to the Kitaru source type for *suffix*.
+def set_source(suffix_or_source: str) -> None:
+    """Set the ZenML ``Source-Context`` header to the Kitaru source type.
+
+    Accepts either a short suffix (``"python"``, ``"cli"``, ``"mcp"``,
+    ``"api"``, ``"dashboard"``) or the full canonical value
+    (``"kitaru-python"``, ``"kitaru-api"``, etc.) — whichever is more
+    convenient at the call site.
 
     Silently ignored if ZenML's analytics module is unavailable.
     """
@@ -27,10 +33,19 @@ def set_source(suffix: str) -> None:
         from zenml.analytics import source_context
         from zenml.enums import SourceContextTypes
 
+        suffix = (
+            suffix_or_source.removeprefix("kitaru-")
+            if suffix_or_source.startswith("kitaru-")
+            else suffix_or_source
+        )
         value = _SUFFIX_TO_SOURCE_VALUE.get(suffix, f"kitaru-{suffix}")
         source_context.set(SourceContextTypes(value))
     except Exception:
-        logger.debug("Failed to set analytics source context", exc_info=True)
+        logger.debug(
+            "Failed to set analytics source context for %r",
+            suffix_or_source,
+            exc_info=True,
+        )
 
 
 # Tracks the active Kitaru interface surface for every analytics event.

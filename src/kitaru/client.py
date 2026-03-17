@@ -627,7 +627,6 @@ class _ExecutionsAPI:
                 raise KitaruRuntimeError(
                     "Resolved flow replay call did not return a valid execution handle."
                 )
-            track("Kitaru flow replayed", {"execution_id": str(exec_id)})
             return self.get(str(replay_exec_id))
 
         replay_pipeline = _resolve_pipeline_for_replay(source_run)
@@ -667,7 +666,7 @@ class _ExecutionsAPI:
         if not replayed_exec_id:
             raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
 
-        track("Kitaru flow replayed", {"execution_id": str(exec_id)})
+        track("Kitaru flow replayed", {"execution_id": replayed_exec_id})
         return self.get(replayed_exec_id)
 
     def get(self, exec_id: str) -> Execution:

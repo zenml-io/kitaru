@@ -37,22 +37,19 @@ The CLI also supports global runtime log-store configuration via
 ``kitaru stack list/current/use/create/delete``, and execution lifecycle commands via
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
-
+import os
 from ._env import apply_env_translations
 
 apply_env_translations()
 
-# ZenML must be imported explicitly here so that its init_logging() runs
-# (installing console + storage handlers on the root logger) before we swap
-# the console handler with Kitaru's terminal handler.
-import zenml as _zenml  # noqa: F401
+from kitaru.analytics import interface_context
+from kitaru.analytics import set_source
 
-# Stamp all analytics from this process as Kitaru-originated.
-from kitaru.analytics import interface_context as _interface_context
-from kitaru.analytics import set_source as _set_source
-
-_set_source("python")
-_interface_context.set("kitaru-python")
+_default_analytics_source = os.environ.get(
+    "KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-python"
+)
+set_source(_default_analytics_source)
+interface_context.set(_default_analytics_source)
 
 from ._terminal_logging import install_terminal_log_intercept
 

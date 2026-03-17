@@ -124,7 +124,14 @@ ENV \
   ZENML_CONFIG_PATH=/zenml/.zenconfig \
   KITARU_DEBUG=false \
   KITARU_ANALYTICS_OPT_IN=true \
-  KITARU_DEFAULT_ANALYTICS_SOURCE=kitaru-api
+  # User-facing analytics source knob (translated to ZENML_* by kitaru.__init__
+  # in client processes). The server process runs zenml.zen_server directly
+  # without ever importing kitaru, so infer_source_context() would never see
+  # the translation. ZENML_DEFAULT_ANALYTICS_SOURCE is set here directly so
+  # ZenML middleware classifies header-less requests (dashboard, internal calls)
+  # as "kitaru-api" rather than the plain "api" fallback.
+  KITARU_DEFAULT_ANALYTICS_SOURCE=kitaru-api \
+  ZENML_DEFAULT_ANALYTICS_SOURCE=kitaru-api
 
 # Set these to configure the server connection without `kitaru login`:
 # KITARU_SERVER_URL=https://...
