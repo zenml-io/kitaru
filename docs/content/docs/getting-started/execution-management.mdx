@@ -129,7 +129,10 @@ kitaru status --output json
 kitaru stack list --output json
 
 # Wait-input and lifecycle actions
-kitaru executions input kr-a8f3c2 --wait approve_deploy --value true
+kitaru executions input kr-a8f3c2 --value true
+kitaru executions input kr-a8f3c2 --abort
+kitaru executions input kr-a8f3c2 --interactive
+kitaru executions input --interactive  # sweep all waiting executions
 kitaru executions resume kr-a8f3c2
 kitaru executions replay kr-a8f3c2 --from write_draft --args '{"topic":"New topic"}' --overrides '{"checkpoint.research":"Edited notes"}'
 kitaru executions retry kr-a8f3c2
@@ -149,7 +152,7 @@ kitaru-mcp
 Then use tool calls like:
 
 - `kitaru_executions_list(status="waiting")`
-- `kitaru_executions_input(exec_id=..., wait=..., value=...)`
+- `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`)
 - `get_execution_logs(exec_id=...)`
 - `kitaru_artifacts_get(artifact_id=...)`
 - `kitaru_status()`

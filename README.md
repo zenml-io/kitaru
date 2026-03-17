@@ -136,7 +136,10 @@ kitaru info                   Show detailed environment information
 
 kitaru executions get <exec_id>
 kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
-kitaru executions input <exec_id> --wait <wait_name_or_id> --value <json>
+kitaru executions input <exec_id> --value <json>
+kitaru executions input <exec_id> --abort
+kitaru executions input <exec_id> --interactive
+kitaru executions input --interactive
 kitaru executions logs <exec_id> [--checkpoint <name>] [--source <step|runner>] [--limit <n>] [--follow]
 kitaru executions replay <exec_id> --from <selector> [--args <json>] [--overrides <json>]
 kitaru executions resume <exec_id>

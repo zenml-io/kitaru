@@ -98,6 +98,7 @@ from kitaru.errors import (
 from kitaru.replay import build_replay_plan
 
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
+_WAIT_CONDITION_RESOLUTION_ABORT = "abort"
 
 # The direct imports above preserve `kitaru.client.*` patch targets; this tuple
 # simply keeps intentionally re-exported private names alive for linting.
@@ -470,8 +471,24 @@ class _ExecutionsAPI:
             return sorted_entries[:limit]
         return sorted_entries
 
-    def input(self, exec_id: str, *, wait: str, value: Any) -> Execution:
-        """Provide input to a waiting execution."""
+    def pending_waits(self, exec_id: str) -> builtins.list[PendingWait]:
+        """List all pending wait conditions for an execution."""
+        run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        conditions = _list_pending_wait_conditions(
+            run=run,
+            client=self._client_ref,
+        )
+        return [_map_pending_wait(condition) for condition in conditions]
+
+    def _resolve_wait_condition(
+        self,
+        exec_id: str,
+        *,
+        wait: str,
+        resolution: str,
+        value: Any | None = None,
+    ) -> Execution:
+        """Resolve a pending wait condition with the given resolution."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         pending_conditions = _list_pending_wait_conditions(
             run=run,
@@ -491,7 +508,7 @@ class _ExecutionsAPI:
         try:
             cast(Any, self._client_ref._client()).resolve_run_wait_condition(
                 run_wait_condition_id=condition.id,
-                resolution=cast(Any, _WAIT_CONDITION_RESOLUTION_CONTINUE),
+                resolution=cast(Any, resolution),
                 result=value,
             )
         except (ValidationError, TypeError, ValueError) as exc:
@@ -506,6 +523,23 @@ class _ExecutionsAPI:
             ) from exc
 
         return self.get(exec_id)
+
+    def input(self, exec_id: str, *, wait: str, value: Any) -> Execution:
+        """Provide input to a waiting execution."""
+        return self._resolve_wait_condition(
+            exec_id,
+            wait=wait,
+            resolution=_WAIT_CONDITION_RESOLUTION_CONTINUE,
+            value=value,
+        )
+
+    def abort_wait(self, exec_id: str, *, wait: str) -> Execution:
+        """Abort a pending wait condition on an execution."""
+        return self._resolve_wait_condition(
+            exec_id,
+            wait=wait,
+            resolution=_WAIT_CONDITION_RESOLUTION_ABORT,
+        )
 
     def retry(self, exec_id: str) -> Execution:
         """Retry a failed execution as same-execution recovery."""

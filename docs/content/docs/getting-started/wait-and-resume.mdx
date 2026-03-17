@@ -48,7 +48,21 @@ execution = client.executions.resume(exec_id)
 ## Provide input from CLI
 
 ```bash
-kitaru executions input <exec_id> --wait approve_publish --value true
+kitaru executions input <exec_id> --value true
+```
+
+The CLI auto-detects the single pending wait. For interactive review
+(with JSON schema display, continue/abort choices, and multi-execution sweep):
+
+```bash
+kitaru executions input <exec_id> --interactive
+kitaru executions input --interactive  # sweep all waiting executions
+```
+
+To abort a wait instead of continuing:
+
+```bash
+kitaru executions input <exec_id> --abort
 ```
 
 Optional explicit resume step:

@@ -12,7 +12,7 @@ def test_watch_prints_manual_unblock_commands(monkeypatch, capsys) -> None:
     """Watcher should emit CLI commands once the pending wait becomes visible."""
     stop_event = wait_and_resume.threading.Event()
 
-    wait_lookup = Mock(side_effect=[None, ("kr-15", "wait-uuid")])
+    wait_lookup = Mock(side_effect=[None, "kr-15"])
     monkeypatch.setattr(wait_and_resume, "_find_pending_wait_for_topic", wait_lookup)
     monkeypatch.setattr(wait_and_resume.time, "sleep", lambda _: None)
 
@@ -23,7 +23,7 @@ def test_watch_prints_manual_unblock_commands(monkeypatch, capsys) -> None:
     )
 
     output = capsys.readouterr().out
-    assert "kitaru executions input kr-15 --wait wait-uuid --value true" in output
+    assert "kitaru executions input kr-15 --value true" in output
     assert "kitaru executions resume kr-15" in output
 
 

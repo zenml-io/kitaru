@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -10,7 +12,7 @@ from cyclopts import Parameter
 
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
-from kitaru.client import Execution, ExecutionStatus, LogEntry
+from kitaru.client import Execution, ExecutionStatus, LogEntry, PendingWait
 from kitaru.inspection import (
     serialize_execution,
     serialize_execution_summary,
@@ -27,6 +29,8 @@ from ._helpers import (
     _exit_with_error,
     _facade_module,
     _format_timestamp,
+    _is_input_interactive,
+    _is_interactive,
     _print_success,
     _resolve_output_format,
 )
@@ -572,43 +576,304 @@ def logs_(
     )
 
 
+@dataclass(frozen=True)
+class _InteractiveWaitCandidate:
+    """One wait condition to present during interactive resolution."""
+
+    execution: Execution
+    wait: PendingWait
+
+
+def _auto_detect_single_pending_wait(
+    client: Any,
+    exec_id: str,
+) -> PendingWait:
+    """Return the single pending wait for an execution, or raise."""
+    pending = client.executions.pending_waits(exec_id)
+    if not pending:
+        raise ValueError(f"Execution '{exec_id}' has no pending waits to resolve.")
+    if len(pending) > 1:
+        names = ", ".join(w.name for w in pending)
+        raise ValueError(
+            f"Execution '{exec_id}' has multiple pending waits ({names}). "
+            "Use `kitaru executions input --interactive` to resolve them."
+        )
+    return pending[0]
+
+
+def _collect_interactive_wait_candidates(
+    client: Any,
+    exec_id: str | None,
+) -> list[_InteractiveWaitCandidate]:
+    """Build the list of wait candidates for interactive resolution."""
+    candidates: list[_InteractiveWaitCandidate] = []
+
+    if exec_id is not None:
+        execution = client.executions.get(exec_id)
+        pending = client.executions.pending_waits(exec_id)
+        for wait in pending:
+            candidates.append(_InteractiveWaitCandidate(execution=execution, wait=wait))
+    else:
+        executions = client.executions.list(status="waiting")
+        for execution in executions:
+            pending = client.executions.pending_waits(execution.exec_id)
+            for wait in pending:
+                candidates.append(
+                    _InteractiveWaitCandidate(execution=execution, wait=wait)
+                )
+
+    return candidates
+
+
+def _render_interactive_wait_candidate(
+    candidate: _InteractiveWaitCandidate,
+    index: int,
+    total: int,
+) -> None:
+    """Print one wait candidate for interactive review."""
+    wait = candidate.wait
+    execution = candidate.execution
+    print(f"\n{'─' * 50}")
+    print(f"  [{index + 1}/{total}]")
+    print(f"  Execution:  {execution.exec_id}")
+    print(f"  Flow:       {execution.flow_name or 'unknown'}")
+    print(f"  Status:     {execution.status.value}")
+    print(f"  Wait name:  {wait.name}")
+    print(f"  Wait ID:    {wait.wait_id}")
+    print(f"  Question:   {wait.question or 'not set'}")
+    if wait.entered_waiting_at is not None:
+        print(f"  Waiting since: {_format_timestamp(wait.entered_waiting_at)}")
+    if wait.schema:
+        print("  JSON schema:")
+        print(json.dumps(wait.schema, indent=2, sort_keys=True))
+    else:
+        print("  JSON schema: not provided")
+    print(f"{'─' * 50}")
+
+
+def _prompt_interactive_action() -> str:
+    """Prompt for an interactive action choice."""
+    while True:
+        try:
+            response = (
+                input("Action [c=continue, a=abort, s=skip, q=quit]: ").strip().lower()
+            )
+        except EOFError:
+            return "quit"
+        if response in ("c", "continue"):
+            return "continue"
+        if response in ("a", "abort"):
+            return "abort"
+        if response in ("s", "skip"):
+            return "skip"
+        if response in ("q", "quit"):
+            return "quit"
+        print(f"Unknown action: {response!r}. Use c, a, s, or q.")
+
+
+def _prompt_interactive_value() -> Any:
+    """Prompt for a JSON value to continue a wait condition."""
+    while True:
+        try:
+            raw = input("JSON value for result (empty for null): ").strip()
+        except EOFError:
+            return None
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            print(
+                f"Invalid JSON: {exc.msg} "
+                f"(line {exc.lineno}, column {exc.colno}). "
+                "Try again."
+            )
+
+
+def _run_interactive_input_flow(
+    client: Any,
+    exec_id: str | None,
+) -> int:
+    """Run the interactive wait-resolution loop. Returns exit code."""
+    candidates = _collect_interactive_wait_candidates(client, exec_id)
+    if not candidates:
+        scope = f"execution '{exec_id}'" if exec_id else "any execution"
+        print(f"No pending waits found for {scope}.")
+        return 0
+
+    had_failures = False
+    for index, candidate in enumerate(candidates):
+        _render_interactive_wait_candidate(candidate, index, len(candidates))
+        action = _prompt_interactive_action()
+
+        if action == "quit":
+            break
+
+        if action == "skip":
+            continue
+
+        wait = candidate.wait
+        execution = candidate.execution
+
+        if action == "continue":
+            value = _prompt_interactive_value()
+            try:
+                updated = client.executions.input(
+                    execution.exec_id,
+                    wait=wait.wait_id,
+                    value=value,
+                )
+                _print_success(
+                    f"Resolved wait input for execution: {updated.exec_id}",
+                    detail=f"Status: {updated.status.value}",
+                )
+            except Exception as exc:
+                print(f"Error resolving wait '{wait.name}': {exc}", file=sys.stderr)
+                had_failures = True
+
+        elif action == "abort":
+            try:
+                updated = client.executions.abort_wait(
+                    execution.exec_id,
+                    wait=wait.wait_id,
+                )
+                _print_success(
+                    f"Aborted wait for execution: {updated.exec_id}",
+                    detail=f"Status: {updated.status.value}",
+                )
+            except Exception as exc:
+                print(f"Error aborting wait '{wait.name}': {exc}", file=sys.stderr)
+                had_failures = True
+
+    return 1 if had_failures else 0
+
+
 @executions_app.command
 def input_(
     exec_id: Annotated[
-        str,
-        Parameter(help="Execution ID."),
-    ],
+        str | None,
+        Parameter(
+            help=(
+                "Execution ID. Required in non-interactive mode. "
+                "Omit with --interactive to sweep all waiting executions."
+            ),
+        ),
+    ] = None,
     *,
-    wait: Annotated[
-        str,
-        Parameter(help="Pending wait name or wait-condition ID."),
-    ],
+    interactive: Annotated[
+        bool,
+        Parameter(
+            alias=["-i"],
+            help="Interactively review and resolve pending waits.",
+        ),
+    ] = False,
+    abort: Annotated[
+        bool,
+        Parameter(help="Abort the pending wait instead of continuing."),
+    ] = False,
     value: Annotated[
-        str,
+        str | None,
         Parameter(
             help=(
                 "Resolved wait input as JSON "
-                '(for example `true` or `{"approved": false}`).'
+                '(for example `true` or `{"approved": false}`). '
+                "Required in non-interactive continue mode."
             )
         ),
-    ],
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Resolve pending wait input for an execution."""
     command = "executions.input"
     output_format = _resolve_output_format(output)
 
+    if interactive:
+        if value is not None:
+            _exit_with_error(
+                command,
+                "`--value` cannot be used with `--interactive`.",
+                output=output_format,
+            )
+        if abort:
+            _exit_with_error(
+                command,
+                "`--abort` cannot be used with `--interactive`.",
+                output=output_format,
+            )
+        if output_format == CLIOutputFormat.JSON:
+            _exit_with_error(
+                command,
+                "`--output json` cannot be used with `--interactive`.",
+                output=output_format,
+            )
+        # stdin (for prompts) and stdout (for formatted output) must both be TTYs
+        if not _is_input_interactive() or not _is_interactive():
+            _exit_with_error(
+                command,
+                "Interactive mode requires a terminal (TTY) for input and output.",
+                output=output_format,
+            )
+
+        client = _facade_module().KitaruClient()
+        try:
+            exit_code = _run_interactive_input_flow(client, exec_id)
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            raise SystemExit(1) from None
+        raise SystemExit(exit_code)
+
+    if exec_id is None:
+        _exit_with_error(
+            command,
+            "Execution ID is required in non-interactive mode. "
+            "Use `--interactive` to sweep all waiting executions.",
+            output=output_format,
+        )
+
+    if abort:
+        if value is not None:
+            _exit_with_error(
+                command,
+                "`--value` cannot be used with `--abort`.",
+                output=output_format,
+            )
+
+        def _abort_wait() -> Execution:
+            client = _facade_module().KitaruClient()
+            wait = _auto_detect_single_pending_wait(client, exec_id)
+            return client.executions.abort_wait(exec_id, wait=wait.wait_id)
+
+        execution = run_with_cli_error_boundary(
+            _abort_wait,
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+        )
+
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command, serialize_execution(execution), output=output_format
+            )
+            return
+
+        _print_success(
+            f"Aborted wait for execution: {execution.exec_id}",
+            detail=f"Status: {execution.status.value}",
+        )
+        return
+
+    if value is None:
+        _exit_with_error(
+            command,
+            "`--value` is required (or use `--abort` / `--interactive`).",
+            output=output_format,
+        )
+
     def _resolve_input() -> Execution:
         parsed_value = _parse_json_value(value, option_name="--value")
-        return (
-            _facade_module()
-            .KitaruClient()
-            .executions.input(
-                exec_id,
-                wait=wait,
-                value=parsed_value,
-            )
-        )
+        client = _facade_module().KitaruClient()
+        wait = _auto_detect_single_pending_wait(client, exec_id)
+        return client.executions.input(exec_id, wait=wait.wait_id, value=parsed_value)
 
     execution = run_with_cli_error_boundary(
         _resolve_input,

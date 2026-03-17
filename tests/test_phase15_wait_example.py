@@ -76,12 +76,14 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
                 "image builds can take several minutes before the flow reaches wait()."
             )
 
-        exec_id, wait_id = found
+        exec_id = found
 
-        # Resolve the wait with approval.
+        # Resolve the wait using the new pending_waits API.
+        pending = client.executions.pending_waits(exec_id)
+        assert pending, f"No pending waits found for execution {exec_id}"
         execution_after_input = client.executions.input(
             exec_id,
-            wait=wait_id,
+            wait=pending[0].wait_id,
             value=True,
         )
 

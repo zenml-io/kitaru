@@ -78,7 +78,8 @@ execution reaches a `wait()` during normal execution, that wait behaves like any
 new wait and must be resolved through the normal wait input flow:
 
 - SDK: `client.executions.input(exec_id, wait="name", value=...)`
-- CLI: `kitaru executions input <exec_id> --wait name --value ...`
+- CLI: `kitaru executions input <exec_id> --value ...` (auto-detects single pending wait)
+- CLI interactive: `kitaru executions input <exec_id> --interactive`
 
 ## Divergence
 

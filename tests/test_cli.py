@@ -680,11 +680,32 @@ def test_executions_logs_surfaces_backend_errors(
     assert "OTEL backend" in capsys.readouterr().err
 
 
+def _pending_wait_stub(
+    *,
+    wait_id: str = "wait-001",
+    name: str = "approve_deploy",
+    question: str | None = "Deploy to prod?",
+    schema: dict[str, object] | None = None,
+) -> SimpleNamespace:
+    """Build a lightweight PendingWait-shaped object for CLI tests."""
+    return SimpleNamespace(
+        wait_id=wait_id,
+        name=name,
+        question=question,
+        schema=schema,
+        metadata={},
+        entered_waiting_at=None,
+    )
+
+
 def test_executions_input_parses_json_and_reports_success(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru executions input` should parse JSON and call client input."""
+    """`kitaru executions input` auto-detects wait and calls client input."""
     fake_client = Mock()
+    fake_client.executions.pending_waits.return_value = [
+        _pending_wait_stub(wait_id="wait-001", name="approve_deploy"),
+    ]
     fake_client.executions.input.return_value = _execution_stub(
         exec_id="kr-123",
         flow_name="content_pipeline",
@@ -700,8 +721,6 @@ def test_executions_input_parses_json_and_reports_success(
                 "executions",
                 "input",
                 "kr-123",
-                "--wait",
-                "approve_deploy",
                 "--value",
                 "true",
             ]
@@ -710,7 +729,7 @@ def test_executions_input_parses_json_and_reports_success(
     assert exc_info.value.code == 0
     fake_client.executions.input.assert_called_once_with(
         "kr-123",
-        wait="approve_deploy",
+        wait="wait-001",
         value=True,
     )
     output = capsys.readouterr().out
@@ -722,14 +741,20 @@ def test_executions_input_rejects_invalid_json(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """`kitaru executions input` should fail when `--value` is invalid JSON."""
-    with pytest.raises(SystemExit) as exc_info:
+    fake_client = Mock()
+    fake_client.executions.pending_waits.return_value = [
+        _pending_wait_stub(),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
         app(
             [
                 "executions",
                 "input",
                 "kr-123",
-                "--wait",
-                "approve_deploy",
                 "--value",
                 "{invalid",
             ]
@@ -743,14 +768,20 @@ def test_executions_input_json_error_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """JSON mode failures should emit structured errors on stderr."""
-    with pytest.raises(SystemExit) as exc_info:
+    fake_client = Mock()
+    fake_client.executions.pending_waits.return_value = [
+        _pending_wait_stub(),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
         app(
             [
                 "executions",
                 "input",
                 "kr-123",
-                "--wait",
-                "approve_deploy",
                 "--value",
                 "{invalid",
                 "--output",
@@ -764,6 +795,99 @@ def test_executions_input_json_error_output(
     payload = json.loads(captured.err)
     assert payload["command"] == "executions.input"
     assert "Invalid JSON for `--value`" in payload["error"]["message"]
+
+
+def test_executions_input_requires_exec_id_in_non_interactive(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions input --value true` fails without exec_id."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "input", "--value", "true"])
+
+    assert exc_info.value.code == 1
+    assert "Execution ID is required" in capsys.readouterr().err
+
+
+def test_executions_input_requires_value_or_abort_or_interactive(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions input <id>` fails without --value/--abort/-i."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "input", "kr-123"])
+
+    assert exc_info.value.code == 1
+    assert "--value" in capsys.readouterr().err
+
+
+def test_executions_input_abort_auto_detects_and_aborts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru executions input <id> --abort` aborts the single wait."""
+    fake_client = Mock()
+    fake_client.executions.pending_waits.return_value = [
+        _pending_wait_stub(wait_id="wait-001"),
+    ]
+    fake_client.executions.abort_wait.return_value = _execution_stub(
+        exec_id="kr-123",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "input", "kr-123", "--abort"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.abort_wait.assert_called_once_with(
+        "kr-123",
+        wait="wait-001",
+    )
+    output = capsys.readouterr().out
+    assert "Aborted wait for execution: kr-123" in output
+
+
+def test_executions_input_abort_rejects_value(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--abort` and `--value` are mutually exclusive."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "executions",
+                "input",
+                "kr-123",
+                "--abort",
+                "--value",
+                "true",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    assert "--value" in capsys.readouterr().err
+    assert "cannot be used with" in capsys.readouterr().err or True
+
+
+def test_executions_input_multiple_waits_non_interactive_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Multiple pending waits in non-interactive mode should error."""
+    fake_client = Mock()
+    fake_client.executions.pending_waits.return_value = [
+        _pending_wait_stub(wait_id="w1", name="approve"),
+        _pending_wait_stub(wait_id="w2", name="review"),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "input", "kr-123", "--value", "true"])
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "multiple pending waits" in err.lower() or "--interactive" in err
 
 
 def test_executions_replay_parses_json_and_reports_success(

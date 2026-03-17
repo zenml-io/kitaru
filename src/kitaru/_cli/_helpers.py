@@ -63,6 +63,11 @@ def _is_interactive(*, stderr: bool = False) -> bool:
     return hasattr(stream, "isatty") and stream.isatty()
 
 
+def _is_input_interactive() -> bool:
+    """Check whether stdin is an interactive terminal for user prompts."""
+    return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+
 def _value_style(value: str) -> str:
     """Choose a Rich style based on the value content."""
     if value in ("unavailable", "not set", "not started"):

@@ -763,6 +763,132 @@ def test_input_maps_validation_error() -> None:
             client.executions.input(str(run.id), wait="approve", value="yes")
 
 
+def test_pending_waits_returns_mapped_waits() -> None:
+    wait_condition = _dummy_wait_condition(
+        name="approve_deploy",
+        question="Deploy to prod?",
+        data_schema={"type": "boolean"},
+    )
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        active_wait_condition=wait_condition,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(
+            items=[wait_condition]
+        )
+
+        client = KitaruClient()
+        pending = client.executions.pending_waits(str(run.id))
+
+    assert len(pending) == 1
+    assert pending[0].name == "approve_deploy"
+    assert pending[0].question == "Deploy to prod?"
+    assert pending[0].schema == {"type": "boolean"}
+
+
+def test_pending_waits_returns_empty_list_when_none() -> None:
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        pending = client.executions.pending_waits(str(run.id))
+
+    assert pending == []
+
+
+def test_abort_wait_resolves_with_abort_resolution() -> None:
+    run_id = uuid4()
+    wait_condition = _dummy_wait_condition(
+        name="approve_deploy",
+        question="Deploy to prod?",
+    )
+    waiting_run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        active_wait_condition=wait_condition,
+    )
+    aborted_run = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(waiting_run),
+            _as_pipeline_run(aborted_run),
+        ]
+        client_mock.list_run_wait_conditions.side_effect = [
+            SimpleNamespace(items=[wait_condition]),
+            SimpleNamespace(items=[]),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.abort_wait(str(run_id), wait="approve_deploy")
+
+    client_mock.resolve_run_wait_condition.assert_called_once_with(
+        run_wait_condition_id=wait_condition.id,
+        resolution="abort",
+        result=None,
+    )
+    assert execution.status == ExecutionStatus.FAILED
+
+
+def test_abort_wait_rejects_when_no_pending_waits() -> None:
+    run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="no pending waits"):
+            client.executions.abort_wait(str(run.id), wait="approve")
+
+
 def test_resume_restarts_paused_execution() -> None:
     run_id = uuid4()
     snapshot_stack_id = uuid4()

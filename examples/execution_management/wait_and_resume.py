@@ -59,8 +59,8 @@ def _find_pending_wait_for_topic(
     *,
     client: KitaruClient,
     topic: str,
-) -> tuple[str, str] | None:
-    """Return (exec_id, wait_id) for the flow run that matches topic metadata."""
+) -> str | None:
+    """Return the exec_id for the flow run that matches topic metadata."""
     executions = client.executions.list(flow="wait_for_approval_flow", limit=20)
     for execution in executions:
         detailed_execution = client.executions.get(execution.exec_id)
@@ -69,7 +69,7 @@ def _find_pending_wait_for_topic(
             continue
         if pending_wait.metadata.get("topic") != topic:
             continue
-        return detailed_execution.exec_id, pending_wait.wait_id
+        return detailed_execution.exec_id
     return None
 
 
@@ -82,14 +82,13 @@ def _watch_and_print_unblock_commands(
     """Watch for a pending wait and print manual CLI unblock commands once."""
     printed = False
     while not stop_event.is_set() and not printed:
-        found = _find_pending_wait_for_topic(client=client, topic=topic)
-        if found is not None:
-            exec_id, wait_id = found
+        exec_id = _find_pending_wait_for_topic(client=client, topic=topic)
+        if exec_id is not None:
             print("\n⏸️  Flow is waiting for external input.")
             print("Run these commands in another terminal to continue:\n")
-            print(f"kitaru executions input {exec_id} --wait {wait_id} --value true")
+            print(f"kitaru executions input {exec_id} --value true")
             print(f"kitaru executions resume {exec_id}\n")
-            print("(Use --value false to reject instead.)\n")
+            print("(Use --value false to reject, or --abort to abort.)\n")
             printed = True
             break
         time.sleep(1.0)
