@@ -2114,7 +2114,7 @@ def test_stack_create_reports_auto_activation(
         "dev",
         stack_type=StackType.LOCAL,
         activate=True,
-        kubernetes=None,
+        remote_spec=None,
     )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
@@ -2140,7 +2140,7 @@ def test_stack_create_no_activate_skips_active_stack_line(
         "dev",
         stack_type=StackType.LOCAL,
         activate=False,
-        kubernetes=None,
+        remote_spec=None,
     )
     output = capsys.readouterr().out
     assert "Created stack: dev" in output
@@ -2232,6 +2232,20 @@ def test_stack_create_rejects_unsupported_stack_type_json(
             "type": "ValueError",
         },
     }
+
+
+def test_stack_create_rejects_known_future_stack_type_for_now(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Phase 1 keeps future stack types hidden from the current CLI surface."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--type", "vertex"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "Unsupported stack type: vertex. Use 'local' or 'kubernetes'."
+        in capsys.readouterr().err
+    )
 
 
 def test_stack_create_rejects_blank_type_override(
@@ -2330,7 +2344,7 @@ def test_stack_create_kubernetes_builds_aws_spec() -> None:
     assert mock_create_stack.call_args.args == ("my-k8s",)
     assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.KUBERNETES
     assert mock_create_stack.call_args.kwargs["activate"] is True
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.model_dump(mode="json") == {
         "provider": "aws",
@@ -2387,7 +2401,7 @@ def test_stack_create_kubernetes_builds_gcp_spec_with_credentials_and_no_verify(
         )
 
     assert exc_info.value.code == 0
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.model_dump(mode="json") == {
         "provider": "gcp",
@@ -2548,7 +2562,7 @@ activate: true
         "yaml-local",
         stack_type=StackType.LOCAL,
         activate=True,
-        kubernetes=None,
+        remote_spec=None,
     )
 
 
@@ -2585,7 +2599,7 @@ activate: false
     assert mock_create_stack.call_args.args == ("yaml-k8s",)
     assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.KUBERNETES
     assert mock_create_stack.call_args.kwargs["activate"] is False
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.model_dump(mode="json") == {
         "provider": "aws",
@@ -2645,7 +2659,7 @@ activate: true
     assert exc_info.value.code == 0
     assert mock_create_stack.call_args.args == ("cli-name",)
     assert mock_create_stack.call_args.kwargs["activate"] is False
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.model_dump(mode="json") == {
         "provider": "aws",

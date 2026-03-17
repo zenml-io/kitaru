@@ -9,8 +9,20 @@ from typing import Literal
 from kitaru._config._stacks import (
     CloudProvider,
     KubernetesStackSpec,
+    RemoteStackSpec,
     StackType,
 )
+
+_DEFAULT_INTERFACE_STACK_TYPES = (
+    StackType.LOCAL,
+    StackType.KUBERNETES,
+)
+
+_FIXED_PROVIDER_BY_STACK_TYPE = {
+    StackType.VERTEX: CloudProvider.GCP,
+    StackType.SAGEMAKER: CloudProvider.AWS,
+    StackType.AZUREML: CloudProvider.AZURE,
+}
 
 
 @dataclass(frozen=True)
@@ -56,7 +68,7 @@ class ManageStackCreateRequest:
     name: str
     activate: bool
     stack_type: StackType
-    kubernetes: KubernetesStackSpec | None
+    remote_spec: RemoteStackSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -76,23 +88,48 @@ def normalize_optional_stack_string(value: str | None) -> str | None:
     return normalized_value or None
 
 
-def normalize_stack_type(raw_type: str) -> StackType:
+def _render_supported_stack_types(allowed_stack_types: tuple[StackType, ...]) -> str:
+    """Render the supported stack types for a validation error."""
+    values = [stack_type.value for stack_type in allowed_stack_types]
+    if len(values) == 1:
+        return f"'{values[0]}'"
+    if len(values) == 2:
+        return f"'{values[0]}' or '{values[1]}'"
+    leading_values = ", ".join(f"'{value}'" for value in values[:-1])
+    return f"{leading_values}, or '{values[-1]}'"
+
+
+def normalize_stack_type(
+    raw_type: str,
+    *,
+    allowed_stack_types: tuple[StackType, ...] = _DEFAULT_INTERFACE_STACK_TYPES,
+) -> StackType:
     """Normalize a stack-type input into the internal enum."""
     normalized_type = raw_type.strip().lower()
     try:
-        return StackType(normalized_type)
+        stack_type = StackType(normalized_type)
     except ValueError as exc:
         raise ValueError(
-            f"Unsupported stack type: {raw_type}. Use 'local' or 'kubernetes'."
+            f"Unsupported stack type: {raw_type}. Use "
+            f"{_render_supported_stack_types(allowed_stack_types)}."
         ) from exc
+
+    if stack_type not in allowed_stack_types:
+        raise ValueError(
+            f"Unsupported stack type: {raw_type}. Use "
+            f"{_render_supported_stack_types(allowed_stack_types)}."
+        )
+    return stack_type
 
 
 def infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
-    """Infer the cloud provider from a Kubernetes artifact-store URI."""
+    """Infer the cloud provider from an artifact-store URI."""
     if artifact_store_uri.startswith("s3://"):
         return CloudProvider.AWS
     if artifact_store_uri.startswith("gs://"):
         return CloudProvider.GCP
+    if artifact_store_uri.startswith(("az://", "abfs://", "abfss://")):
+        return CloudProvider.AZURE
     raise ValueError(
         f"Cannot infer cloud provider from '{artifact_store_uri}'. "
         "Use an s3:// or gs:// URI."
@@ -169,8 +206,15 @@ def build_kubernetes_stack_spec(
     assert normalized_cluster is not None
     assert normalized_region is not None
 
+    provider = infer_cloud_provider(normalized_artifact_store)
+    if provider not in {CloudProvider.AWS, CloudProvider.GCP}:
+        raise ValueError(
+            f"Cannot infer cloud provider from '{normalized_artifact_store}'. "
+            "Use an s3:// or gs:// URI."
+        )
+
     return KubernetesStackSpec(
-        provider=infer_cloud_provider(normalized_artifact_store),
+        provider=provider,
         artifact_store=normalized_artifact_store,
         container_registry=normalized_container_registry,
         cluster=normalized_cluster,
@@ -178,6 +222,44 @@ def build_kubernetes_stack_spec(
         namespace=normalized_namespace or "default",
         credentials=normalized_credentials,
         verify=verify,
+    )
+
+
+def build_stack_create_request(
+    *,
+    name: str,
+    activate: bool,
+    stack_type: str,
+    artifact_store: str | None,
+    container_registry: str | None,
+    cluster: str | None,
+    region: str | None,
+    namespace: str | None,
+    credentials: str | None,
+    verify: bool,
+    labels: StackOptionLabels,
+    allowed_stack_types: tuple[StackType, ...] = _DEFAULT_INTERFACE_STACK_TYPES,
+) -> ManageStackCreateRequest:
+    """Validate create inputs and build a structured stack-create request."""
+    normalized_stack_type = normalize_stack_type(
+        stack_type,
+        allowed_stack_types=allowed_stack_types,
+    )
+    return ManageStackCreateRequest(
+        name=name,
+        activate=activate,
+        stack_type=normalized_stack_type,
+        remote_spec=build_kubernetes_stack_spec(
+            stack_type=normalized_stack_type,
+            artifact_store=artifact_store,
+            container_registry=container_registry,
+            cluster=cluster,
+            region=region,
+            namespace=namespace,
+            credentials=credentials,
+            verify=verify,
+            labels=labels,
+        ),
     )
 
 
@@ -203,22 +285,18 @@ def build_manage_stack_request(
             raise ValueError(
                 '`recursive` and `force` are only valid when action="delete".'
             )
-        normalized_stack_type = normalize_stack_type(stack_type)
-        return ManageStackCreateRequest(
+        return build_stack_create_request(
             name=name,
             activate=activate,
-            stack_type=normalized_stack_type,
-            kubernetes=build_kubernetes_stack_spec(
-                stack_type=normalized_stack_type,
-                artifact_store=artifact_store,
-                container_registry=container_registry,
-                cluster=cluster,
-                region=region,
-                namespace=namespace,
-                credentials=credentials,
-                verify=verify,
-                labels=MCP_STACK_OPTION_LABELS,
-            ),
+            stack_type=stack_type,
+            artifact_store=artifact_store,
+            container_registry=container_registry,
+            cluster=cluster,
+            region=region,
+            namespace=namespace,
+            credentials=credentials,
+            verify=verify,
+            labels=MCP_STACK_OPTION_LABELS,
         )
 
     if action == "delete":

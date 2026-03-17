@@ -733,7 +733,7 @@ def test_manage_stack_create_returns_structured_result() -> None:
         "dev",
         activate=True,
         stack_type=StackType.LOCAL,
-        kubernetes=None,
+        remote_spec=None,
     )
     assert payload == {
         "id": "stack-dev-id",
@@ -750,7 +750,7 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         name="dev",
         activate=True,
         stack_type=StackType.LOCAL,
-        kubernetes=None,
+        remote_spec=None,
     )
 
     with (
@@ -790,7 +790,7 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         "dev",
         activate=True,
         stack_type=StackType.LOCAL,
-        kubernetes=None,
+        remote_spec=None,
     )
 
 
@@ -932,7 +932,7 @@ def test_manage_stack_create_kubernetes_dispatches_structured_spec(
     assert mock_create_stack.call_args.kwargs["stack_type"] == StackType.KUBERNETES
     assert mock_create_stack.call_args.kwargs["activate"] is False
 
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.provider == expected_provider
     assert kubernetes_spec.artifact_store == artifact_store
@@ -1050,7 +1050,7 @@ def test_manage_stack_create_kubernetes_normalizes_blank_optional_inputs() -> No
             credentials="   ",
         )
 
-    kubernetes_spec = mock_create_stack.call_args.kwargs["kubernetes"]
+    kubernetes_spec = mock_create_stack.call_args.kwargs["remote_spec"]
     assert isinstance(kubernetes_spec, KubernetesStackSpec)
     assert kubernetes_spec.provider == CloudProvider.GCP
     assert kubernetes_spec.artifact_store == "gs://my-bucket/kitaru"
@@ -1063,6 +1063,20 @@ def test_manage_stack_create_kubernetes_normalizes_blank_optional_inputs() -> No
     assert kubernetes_spec.namespace == "default"
     assert kubernetes_spec.credentials is None
     assert kubernetes_spec.verify is True
+
+
+def test_manage_stack_create_rejects_known_future_stack_type_for_now() -> None:
+    """Phase 1 keeps future stack types hidden from the MCP surface too."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(
+            ValueError,
+            match=r"Unsupported stack type: vertex\. Use 'local' or 'kubernetes'\.",
+        ),
+    ):
+        manage_stack("create", "vertex-dev", stack_type="vertex")
+
+    mock_create_stack.assert_not_called()
 
 
 def test_manage_stack_create_kubernetes_rejects_unknown_provider() -> None:

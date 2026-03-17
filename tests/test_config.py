@@ -34,6 +34,7 @@ from kitaru.config import (
     KITARU_RETRIES_ENV,
     KITARU_SERVER_URL_ENV,
     KITARU_STACK_ENV,
+    AzureMLStackSpec,
     CloudProvider,
     FrozenExecutionSpec,
     ImageSettings,
@@ -41,7 +42,9 @@ from kitaru.config import (
     KubernetesStackSpec,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
+    SagemakerStackSpec,
     StackType,
+    VertexStackSpec,
     _create_kubernetes_stack_operation,
     _create_stack_operation,
     _delete_stack_components_best_effort,
@@ -1047,7 +1050,7 @@ def test_create_stack_dispatcher_requires_kubernetes_spec() -> None:
     with (
         patch("kitaru.config.Client") as mock_client,
         pytest.raises(
-            ValueError,
+            KitaruUsageError,
             match=r"Kubernetes spec required for --type kubernetes\.",
         ),
     ):
@@ -1077,7 +1080,7 @@ def test_create_stack_dispatcher_routes_kubernetes_requests() -> None:
         result = _create_stack_operation(
             "dev",
             stack_type=StackType.KUBERNETES,
-            kubernetes=spec,
+            remote_spec=spec,
             activate=False,
             labels={"owner": "ml"},
         )
@@ -1089,6 +1092,83 @@ def test_create_stack_dispatcher_routes_kubernetes_requests() -> None:
         labels={"owner": "ml"},
     )
     assert result is expected_result
+
+
+def test_create_stack_dispatcher_routes_future_vertex_requests() -> None:
+    """Dispatcher should already support the future Vertex handler seam."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+        credentials="gcp-service-account:/tmp/demo.json",
+        verify=False,
+    )
+    expected_result = SimpleNamespace(name="vertex-result")
+
+    with patch(
+        "kitaru.config._create_vertex_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_vertex:
+        result = _create_stack_operation(
+            "vertex-dev",
+            stack_type=StackType.VERTEX,
+            remote_spec=spec,
+            activate=False,
+            labels={"owner": "ml"},
+        )
+
+    mock_create_vertex.assert_called_once_with(
+        "vertex-dev",
+        spec=spec,
+        activate=False,
+        labels={"owner": "ml"},
+    )
+    assert result is expected_result
+
+
+@pytest.mark.parametrize(
+    ("stack_type", "remote_spec", "expected_message"),
+    [
+        (
+            StackType.VERTEX,
+            VertexStackSpec(
+                artifact_store="gs://bucket/path",
+                container_registry="us-docker.pkg.dev/demo-project/demo-repo",
+                region="us-central1",
+            ),
+            "Stack type 'vertex' is not implemented yet.",
+        ),
+        (
+            StackType.SAGEMAKER,
+            SagemakerStackSpec(
+                artifact_store="s3://bucket/path",
+                container_registry="123456789012.dkr.ecr.us-east-1.amazonaws.com",
+                region="us-east-1",
+                execution_role="arn:aws:iam::123456789012:role/SageMakerRole",
+            ),
+            "Stack type 'sagemaker' is not implemented yet.",
+        ),
+        (
+            StackType.AZUREML,
+            AzureMLStackSpec(
+                artifact_store="az://container/path",
+                container_registry="demo.azurecr.io",
+                subscription_id="sub-123",
+                resource_group="rg-demo",
+                workspace="ws-demo",
+            ),
+            "Stack type 'azureml' is not implemented yet.",
+        ),
+    ],
+)
+def test_create_stack_dispatcher_known_future_types_are_explicitly_unimplemented(
+    stack_type: StackType,
+    remote_spec: Any,
+    expected_message: str,
+) -> None:
+    """Known future stack types should fail explicitly instead of looking unknown."""
+    with pytest.raises(KitaruUsageError, match=expected_message):
+        _create_stack_operation("dev", stack_type=stack_type, remote_spec=remote_spec)
 
 
 def test_create_stack_dispatcher_rejects_unsupported_stack_type() -> None:

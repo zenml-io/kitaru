@@ -317,7 +317,7 @@ def manage_stack(
                 request.name,
                 activate=request.activate,
                 stack_type=request.stack_type,
-                kubernetes=request.kubernetes,
+                remote_spec=request.remote_spec,
             )
             return inspection.serialize_stack_create_result(result)
 

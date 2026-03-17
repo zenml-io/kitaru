@@ -47,13 +47,17 @@ class StackType(StrEnum):
 
     LOCAL = "local"
     KUBERNETES = "kubernetes"
+    VERTEX = "vertex"
+    SAGEMAKER = "sagemaker"
+    AZUREML = "azureml"
 
 
 class CloudProvider(StrEnum):
-    """Supported cloud providers for Kubernetes-backed stacks."""
+    """Supported cloud providers for remote stacks."""
 
     AWS = "aws"
     GCP = "gcp"
+    AZURE = "azure"
 
 
 class KubernetesStackSpec(BaseModel):
@@ -71,9 +75,54 @@ class KubernetesStackSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class VertexStackSpec(BaseModel):
+    """Request model for future Vertex AI stack creation."""
+
+    artifact_store: str
+    container_registry: str
+    region: str
+    credentials: str | None = None
+    verify: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SagemakerStackSpec(BaseModel):
+    """Request model for future SageMaker stack creation."""
+
+    artifact_store: str
+    container_registry: str
+    region: str
+    execution_role: str
+    credentials: str | None = None
+    verify: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AzureMLStackSpec(BaseModel):
+    """Request model for future AzureML stack creation."""
+
+    artifact_store: str
+    container_registry: str
+    subscription_id: str
+    resource_group: str
+    workspace: str
+    region: str | None = None
+    credentials: str | None = None
+    verify: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+
+RemoteStackSpec = (
+    KubernetesStackSpec | VertexStackSpec | SagemakerStackSpec | AzureMLStackSpec
+)
+
+
 @dataclass(frozen=True)
-class _ResolvedKubernetesConnectorSpec:
-    """Resolved ZenML connector information for Kubernetes stack creation."""
+class _ResolvedConnectorSpec:
+    """Resolved ZenML connector information for remote stack creation."""
 
     connector_info: ServiceConnectorInfo
     verify_connector_type: str
@@ -215,7 +264,7 @@ def _container_registry_resource_id(
 
 def _resolve_kubernetes_connector_spec(
     spec: KubernetesStackSpec,
-) -> _ResolvedKubernetesConnectorSpec:
+) -> _ResolvedConnectorSpec:
     """Translate Kitaru's Kubernetes credentials into ZenML connector info."""
     normalized_credentials = spec.credentials.strip() if spec.credentials else None
 
@@ -286,7 +335,7 @@ def _resolve_kubernetes_connector_spec(
                     "aws-profile, aws-access-keys, aws-session-token."
                 )
 
-        return _ResolvedKubernetesConnectorSpec(
+        return _ResolvedConnectorSpec(
             connector_info=ServiceConnectorInfo(
                 type=AWS_CONNECTOR_TYPE,
                 auth_method=auth_method,
@@ -332,7 +381,7 @@ def _resolve_kubernetes_connector_spec(
             auth_method = "service-account"
             configuration.update({"service_account_json": service_account_json})
 
-        return _ResolvedKubernetesConnectorSpec(
+        return _ResolvedConnectorSpec(
             connector_info=ServiceConnectorInfo(
                 type=GCP_CONNECTOR_TYPE,
                 auth_method=auth_method,
@@ -350,7 +399,7 @@ def _build_kubernetes_stack_request(
     name: str,
     *,
     spec: KubernetesStackSpec,
-    connector_spec: _ResolvedKubernetesConnectorSpec,
+    connector_spec: _ResolvedConnectorSpec,
     labels: dict[str, str] | None,
 ) -> StackRequest:
     """Build the one-shot ZenML stack request for a Kubernetes stack."""
@@ -421,19 +470,19 @@ def _get_required_stack_component(
     raw_components = getattr(stack_model, "components", None)
     if not isinstance(raw_components, Mapping):
         raise KitaruStateError(
-            "Unable to inspect components from the created Kubernetes stack."
+            "Unable to inspect components from the created remote stack."
         )
 
     components = raw_components.get(component_type, [])
     if len(components) != 1:
         raise KitaruStateError(
-            "Created Kubernetes stack is missing the expected "
+            "Created remote stack is missing the expected "
             f"{component_type.value} component."
         )
     return components[0]
 
 
-def _extract_kubernetes_stack_components(
+def _extract_remote_stack_components(
     stack_model: Any,
 ) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
     """Extract created component and connector names from a hydrated stack."""
@@ -452,7 +501,7 @@ def _extract_kubernetes_stack_components(
         component_name = str(getattr(component, "name", "")).strip()
         if not component_name:
             raise KitaruStateError(
-                "Unable to inspect components from the created Kubernetes stack."
+                "Unable to inspect components from the created remote stack."
             )
         component_labels.append(_format_stack_component_label(component_name, kind))
 
@@ -469,6 +518,109 @@ def _extract_kubernetes_stack_components(
             connector_names.append(connector_name)
 
     return tuple(component_labels), tuple(connector_names), missing_connector_metadata
+
+
+def _stack_type_display_name(stack_type: StackType) -> str:
+    """Render a user-facing stack-type label for errors and status messages."""
+    return {
+        StackType.LOCAL: "local",
+        StackType.KUBERNETES: "Kubernetes",
+        StackType.VERTEX: "Vertex",
+        StackType.SAGEMAKER: "SageMaker",
+        StackType.AZUREML: "AzureML",
+    }.get(stack_type, str(stack_type))
+
+
+def _create_remote_stack_operation(
+    name: str,
+    *,
+    stack_type: StackType,
+    connector_spec: _ResolvedConnectorSpec,
+    stack_request: StackRequest,
+    resource_summary: dict[str, str],
+    activate: bool = True,
+    verify: bool = True,
+    client_factory: Callable[[], Any] = Client,
+) -> _StackCreateResult:
+    """Create a remote stack via ZenML's one-shot stack API."""
+    selector = _normalize_stack_selector(name)
+    client = client_factory()
+
+    if any(
+        stack_model.name == selector for stack_model in _iter_available_stacks(client)
+    ):
+        raise KitaruStateError(_stack_name_collision_message(selector))
+
+    previous_active_stack = str(client.active_stack_model.name) if activate else None
+    stack_label = _stack_type_display_name(stack_type)
+
+    try:
+        client.create_service_connector(
+            name=selector,
+            connector_type=connector_spec.verify_connector_type,
+            resource_type=connector_spec.verify_resource_type,
+            auth_method=connector_spec.connector_info.auth_method,
+            configuration=connector_spec.verify_configuration,
+            verify=verify,
+            list_resources=False,
+            register=False,
+        )
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to prepare {stack_label} stack '{selector}': {exc}"
+        ) from exc
+
+    try:
+        client._validate_stack_configuration(stack_request)
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to validate {stack_label} stack '{selector}': {exc}"
+        ) from exc
+
+    try:
+        created_stack = client.zen_store.create_stack(stack=stack_request)
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to create {stack_label} stack '{selector}'. ZenML rolled back "
+            "any partially created components and service connectors. Original "
+            f"error: {exc}"
+        ) from exc
+
+    components_created, service_connectors_created, missing_connector_metadata = (
+        _extract_remote_stack_components(created_stack)
+    )
+    if missing_connector_metadata:
+        try:
+            refreshed_stack = client.get_stack(created_stack.id, hydrate=True)
+        except Exception:
+            refreshed_stack = None
+        if refreshed_stack is not None:
+            components_created, service_connectors_created, _ = (
+                _extract_remote_stack_components(refreshed_stack)
+            )
+
+    if activate:
+        try:
+            client.activate_stack(created_stack.id)
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Created {stack_label} stack '{selector}' but failed to activate "
+                "it. The stack was created successfully and remains available; "
+                f"run 'kitaru stack use {selector}' to activate it manually. "
+                f"Original error: {exc}"
+            ) from exc
+        active_stack_id = str(created_stack.id)
+    else:
+        active_stack_id = str(client.active_stack_model.id)
+
+    return _StackCreateResult(
+        stack=_stack_info_from_model(created_stack, active_stack_id=active_stack_id),
+        previous_active_stack=previous_active_stack,
+        components_created=components_created,
+        stack_type=stack_type.value,
+        service_connectors_created=service_connectors_created,
+        resources=resource_summary,
+    )
 
 
 def _normalize_stack_selector(name_or_id: str) -> str:
@@ -1055,88 +1207,19 @@ def _create_kubernetes_stack_operation(
 ) -> _StackCreateResult:
     """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
     selector = _normalize_stack_selector(name)
-    client = client_factory()
-
-    if any(
-        stack_model.name == selector for stack_model in _iter_available_stacks(client)
-    ):
-        raise KitaruStateError(_stack_name_collision_message(selector))
-
-    previous_active_stack = str(client.active_stack_model.name) if activate else None
     connector_spec = _resolve_kubernetes_connector_spec(spec)
-
-    try:
-        client.create_service_connector(
-            name=selector,
-            connector_type=connector_spec.verify_connector_type,
-            resource_type=connector_spec.verify_resource_type,
-            auth_method=connector_spec.connector_info.auth_method,
-            configuration=connector_spec.verify_configuration,
-            verify=spec.verify,
-            list_resources=False,
-            register=False,
-        )
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to prepare Kubernetes stack '{selector}': {exc}"
-        ) from exc
-
     stack_request = _build_kubernetes_stack_request(
         selector,
         spec=spec,
         connector_spec=connector_spec,
         labels=labels,
     )
-    try:
-        client._validate_stack_configuration(stack_request)
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to validate Kubernetes stack '{selector}': {exc}"
-        ) from exc
-
-    try:
-        created_stack = client.zen_store.create_stack(stack=stack_request)
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to create Kubernetes stack '{selector}'. ZenML rolled back "
-            "any partially created components and service connectors. Original "
-            f"error: {exc}"
-        ) from exc
-
-    components_created, service_connectors_created, missing_connector_metadata = (
-        _extract_kubernetes_stack_components(created_stack)
-    )
-    if missing_connector_metadata:
-        try:
-            refreshed_stack = client.get_stack(created_stack.id, hydrate=True)
-        except Exception:
-            refreshed_stack = None
-        if refreshed_stack is not None:
-            components_created, service_connectors_created, _ = (
-                _extract_kubernetes_stack_components(refreshed_stack)
-            )
-
-    if activate:
-        try:
-            client.activate_stack(created_stack.id)
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Created Kubernetes stack '{selector}' but failed to activate "
-                "it. The stack was created successfully and remains available; "
-                f"run 'kitaru stack use {selector}' to activate it manually. "
-                f"Original error: {exc}"
-            ) from exc
-        active_stack_id = str(created_stack.id)
-    else:
-        active_stack_id = str(client.active_stack_model.id)
-
-    return _StackCreateResult(
-        stack=_stack_info_from_model(created_stack, active_stack_id=active_stack_id),
-        previous_active_stack=previous_active_stack,
-        components_created=components_created,
-        stack_type=StackType.KUBERNETES.value,
-        service_connectors_created=service_connectors_created,
-        resources={
+    return _create_remote_stack_operation(
+        selector,
+        stack_type=StackType.KUBERNETES,
+        connector_spec=connector_spec,
+        stack_request=stack_request,
+        resource_summary={
             "provider": spec.provider.value,
             "cluster": spec.cluster,
             "region": spec.region,
@@ -1144,7 +1227,46 @@ def _create_kubernetes_stack_operation(
             "artifact_store": spec.artifact_store,
             "container_registry": spec.container_registry,
         },
+        activate=activate,
+        verify=spec.verify,
+        client_factory=client_factory,
     )
+
+
+def _create_vertex_stack_operation(
+    name: str,
+    *,
+    spec: VertexStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    client_factory: Callable[[], Any] = Client,
+) -> _StackCreateResult:
+    """Placeholder Vertex AI stack flow for future implementation phases."""
+    raise KitaruUsageError("Stack type 'vertex' is not implemented yet.")
+
+
+def _create_sagemaker_stack_operation(
+    name: str,
+    *,
+    spec: SagemakerStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    client_factory: Callable[[], Any] = Client,
+) -> _StackCreateResult:
+    """Placeholder SageMaker stack flow for future implementation phases."""
+    raise KitaruUsageError("Stack type 'sagemaker' is not implemented yet.")
+
+
+def _create_azureml_stack_operation(
+    name: str,
+    *,
+    spec: AzureMLStackSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    client_factory: Callable[[], Any] = Client,
+) -> _StackCreateResult:
+    """Placeholder AzureML stack flow for future implementation phases."""
+    raise KitaruUsageError("Stack type 'azureml' is not implemented yet.")
 
 
 def _create_stack_operation(
@@ -1153,34 +1275,37 @@ def _create_stack_operation(
     stack_type: StackType = StackType.LOCAL,
     activate: bool = True,
     labels: dict[str, str] | None = None,
-    kubernetes: KubernetesStackSpec | None = None,
-    create_local_stack_operation: Callable[..., _StackCreateResult] | None = None,
-    create_kubernetes_stack_operation: Callable[..., _StackCreateResult] | None = None,
+    remote_spec: RemoteStackSpec | None = None,
+    operation_overrides: dict[StackType, Callable[..., _StackCreateResult]]
+    | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
-    local_operation = create_local_stack_operation or _create_local_stack_operation
-    kubernetes_operation = (
-        create_kubernetes_stack_operation or _create_kubernetes_stack_operation
-    )
+    dispatch: dict[StackType, Callable[..., _StackCreateResult]] = {
+        StackType.LOCAL: _create_local_stack_operation,
+        StackType.KUBERNETES: _create_kubernetes_stack_operation,
+        StackType.VERTEX: _create_vertex_stack_operation,
+        StackType.SAGEMAKER: _create_sagemaker_stack_operation,
+        StackType.AZUREML: _create_azureml_stack_operation,
+    }
+    if operation_overrides:
+        dispatch.update(operation_overrides)
 
     if stack_type == StackType.LOCAL:
-        return local_operation(
-            name,
-            activate=activate,
-            labels=labels,
+        if remote_spec is not None:
+            raise KitaruUsageError("Local stacks do not accept remote stack specs.")
+        return dispatch[StackType.LOCAL](name, activate=activate, labels=labels)
+
+    operation = dispatch.get(stack_type)
+    if operation is None:
+        raise KitaruUsageError(f"Unsupported stack type: {stack_type}")
+
+    if remote_spec is None:
+        display = _stack_type_display_name(stack_type)
+        raise KitaruUsageError(
+            f"{display} spec required for --type {stack_type.value}."
         )
 
-    if stack_type == StackType.KUBERNETES:
-        if kubernetes is None:
-            raise KitaruUsageError("Kubernetes spec required for --type kubernetes.")
-        return kubernetes_operation(
-            name,
-            spec=kubernetes,
-            activate=activate,
-            labels=labels,
-        )
-
-    raise KitaruUsageError(f"Unsupported stack type: {stack_type}")
+    return operation(name, spec=remote_spec, activate=activate, labels=labels)
 
 
 def _create_local_stack_operation(

@@ -10,8 +10,15 @@ from cyclopts import Parameter
 from zenml.utils import yaml_utils
 
 from kitaru._interface_errors import run_with_cli_error_boundary
+from kitaru._interface_stacks import (
+    CLI_STACK_OPTION_LABELS,
+    normalize_optional_stack_string,
+)
+from kitaru._interface_stacks import (
+    build_stack_create_request as _build_shared_stack_create_request,
+)
 from kitaru.cli_output import CLIOutputFormat
-from kitaru.config import CloudProvider, KubernetesStackSpec, StackInfo, StackType
+from kitaru.config import StackInfo, StackType
 from kitaru.inspection import (
     serialize_stack,
     serialize_stack_create_result,
@@ -46,109 +53,6 @@ class _StackCreateInputs:
     namespace: str | None = None
     credentials: str | None = None
     verify: bool | None = None
-
-
-def _normalize_optional_cli_string(value: str | None) -> str | None:
-    """Normalize an optional CLI string, treating blanks as omitted."""
-    if value is None:
-        return None
-    normalized_value = value.strip()
-    return normalized_value or None
-
-
-def _normalize_stack_type(raw_type: str) -> StackType:
-    """Normalize a stack-type flag into the internal enum."""
-    normalized_type = raw_type.strip().lower()
-    try:
-        return StackType(normalized_type)
-    except ValueError as exc:
-        raise ValueError(
-            f"Unsupported stack type: {raw_type}. Use 'local' or 'kubernetes'."
-        ) from exc
-
-
-def _infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
-    """Infer the cloud provider from an artifact store URI."""
-    if artifact_store_uri.startswith("s3://"):
-        return CloudProvider.AWS
-    if artifact_store_uri.startswith("gs://"):
-        return CloudProvider.GCP
-    raise ValueError(
-        f"Cannot infer cloud provider from '{artifact_store_uri}'. "
-        "Use an s3:// or gs:// URI."
-    )
-
-
-def _build_kubernetes_stack_spec_from_cli(
-    *,
-    stack_type: StackType,
-    artifact_store: str | None,
-    container_registry: str | None,
-    cluster: str | None,
-    region: str | None,
-    namespace: str | None,
-    credentials: str | None,
-    no_verify: bool,
-) -> KubernetesStackSpec | None:
-    """Validate stack-create CLI flags and build a Kubernetes spec."""
-    normalized_artifact_store = _normalize_optional_cli_string(artifact_store)
-    normalized_container_registry = _normalize_optional_cli_string(container_registry)
-    normalized_cluster = _normalize_optional_cli_string(cluster)
-    normalized_region = _normalize_optional_cli_string(region)
-    normalized_namespace = _normalize_optional_cli_string(namespace)
-    normalized_credentials = _normalize_optional_cli_string(credentials)
-
-    kubernetes_option_flags = [
-        ("--artifact-store", artifact_store is not None),
-        ("--container-registry", container_registry is not None),
-        ("--cluster", cluster is not None),
-        ("--region", region is not None),
-        ("--namespace", namespace is not None),
-        ("--credentials", credentials is not None),
-        ("--no-verify", no_verify),
-    ]
-
-    if stack_type == StackType.LOCAL:
-        provided_kubernetes_flags = [
-            flag for flag, is_provided in kubernetes_option_flags if is_provided
-        ]
-        if provided_kubernetes_flags:
-            raise ValueError(
-                "Kubernetes-only options require --type kubernetes: "
-                + ", ".join(provided_kubernetes_flags)
-            )
-        return None
-
-    missing_required_flags = [
-        flag
-        for flag, value in (
-            ("--artifact-store", normalized_artifact_store),
-            ("--container-registry", normalized_container_registry),
-            ("--cluster", normalized_cluster),
-            ("--region", normalized_region),
-        )
-        if value is None
-    ]
-    if missing_required_flags:
-        raise ValueError(
-            "--type kubernetes requires: " + ", ".join(missing_required_flags) + "."
-        )
-
-    assert normalized_artifact_store is not None
-    assert normalized_container_registry is not None
-    assert normalized_cluster is not None
-    assert normalized_region is not None
-
-    return KubernetesStackSpec(
-        provider=_infer_cloud_provider(normalized_artifact_store),
-        artifact_store=normalized_artifact_store,
-        container_registry=normalized_container_registry,
-        cluster=normalized_cluster,
-        region=normalized_region,
-        namespace=normalized_namespace or "default",
-        credentials=normalized_credentials,
-        verify=not no_verify,
-    )
 
 
 _STACK_CREATE_FILE_KEY_ALIASES = {
@@ -609,35 +513,34 @@ def create(
             ),
             file_inputs=file_inputs,
         )
-        normalized_name = _normalize_optional_cli_string(merged_inputs.name)
+        normalized_name = normalize_optional_stack_string(merged_inputs.name)
         if normalized_name is None:
             raise ValueError("Stack name or ID cannot be empty.")
 
-        raw_stack_type = (
-            merged_inputs.type
-            if merged_inputs.type is not None
-            else StackType.LOCAL.value
-        )
-        stack_type = _normalize_stack_type(raw_stack_type)
-        kubernetes_spec = _build_kubernetes_stack_spec_from_cli(
-            stack_type=stack_type,
+        request = _build_shared_stack_create_request(
+            name=normalized_name,
+            activate=merged_inputs.activate
+            if merged_inputs.activate is not None
+            else True,
+            stack_type=(
+                merged_inputs.type
+                if merged_inputs.type is not None
+                else StackType.LOCAL.value
+            ),
             artifact_store=merged_inputs.artifact_store,
             container_registry=merged_inputs.container_registry,
             cluster=merged_inputs.cluster,
             region=merged_inputs.region,
             namespace=merged_inputs.namespace,
             credentials=merged_inputs.credentials,
-            no_verify=not (
-                merged_inputs.verify if merged_inputs.verify is not None else True
-            ),
+            verify=merged_inputs.verify if merged_inputs.verify is not None else True,
+            labels=CLI_STACK_OPTION_LABELS,
         )
         return _facade_module()._create_stack_operation(
-            normalized_name,
-            stack_type=stack_type,
-            activate=merged_inputs.activate
-            if merged_inputs.activate is not None
-            else True,
-            kubernetes=kubernetes_spec,
+            request.name,
+            stack_type=request.stack_type,
+            activate=request.activate,
+            remote_spec=request.remote_spec,
         )
 
     result = run_with_cli_error_boundary(
