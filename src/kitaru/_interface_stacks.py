@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from kitaru._config._stacks import (
+    AzureMLStackSpec,
     CloudProvider,
     KubernetesStackSpec,
     RemoteStackSpec,
+    SagemakerStackSpec,
     StackType,
     VertexStackSpec,
 )
@@ -18,14 +20,25 @@ _CREATE_ALLOWED_STACK_TYPES = (
     StackType.LOCAL,
     StackType.KUBERNETES,
     StackType.VERTEX,
+    StackType.SAGEMAKER,
+    StackType.AZUREML,
 )
 _DEFAULT_INTERFACE_STACK_TYPES = _CREATE_ALLOWED_STACK_TYPES
-_REMOTE_STACK_TYPES = (StackType.KUBERNETES, StackType.VERTEX)
+_REMOTE_STACK_TYPES = (
+    StackType.KUBERNETES,
+    StackType.VERTEX,
+    StackType.SAGEMAKER,
+    StackType.AZUREML,
+)
 _FIELD_ORDER = (
     "artifact_store",
     "container_registry",
     "cluster",
     "region",
+    "subscription_id",
+    "resource_group",
+    "workspace",
+    "execution_role",
     "namespace",
     "credentials",
     "verify",
@@ -42,12 +55,29 @@ _REQUIRED_FIELDS: dict[StackType, tuple[str, ...]] = {
         "container_registry",
         "region",
     ),
+    StackType.SAGEMAKER: (
+        "artifact_store",
+        "container_registry",
+        "region",
+        "execution_role",
+    ),
+    StackType.AZUREML: (
+        "artifact_store",
+        "container_registry",
+        "subscription_id",
+        "resource_group",
+        "workspace",
+    ),
 }
 _FIELD_ALLOWED_STACK_TYPES: dict[str, frozenset[StackType]] = {
     "artifact_store": frozenset(_REMOTE_STACK_TYPES),
     "container_registry": frozenset(_REMOTE_STACK_TYPES),
     "cluster": frozenset({StackType.KUBERNETES}),
     "region": frozenset(_REMOTE_STACK_TYPES),
+    "subscription_id": frozenset({StackType.AZUREML}),
+    "resource_group": frozenset({StackType.AZUREML}),
+    "workspace": frozenset({StackType.AZUREML}),
+    "execution_role": frozenset({StackType.SAGEMAKER}),
     "namespace": frozenset({StackType.KUBERNETES}),
     "credentials": frozenset(_REMOTE_STACK_TYPES),
     "verify": frozenset(_REMOTE_STACK_TYPES),
@@ -56,6 +86,11 @@ _FIXED_PROVIDER_BY_STACK_TYPE = {
     StackType.VERTEX: CloudProvider.GCP,
     StackType.SAGEMAKER: CloudProvider.AWS,
     StackType.AZUREML: CloudProvider.AZURE,
+}
+_PROVIDER_URI_DESCRIPTIONS: dict[StackType, tuple[str, str]] = {
+    StackType.VERTEX: ("Vertex", "a gs://"),
+    StackType.SAGEMAKER: ("SageMaker", "an s3://"),
+    StackType.AZUREML: ("AzureML", "an az://, abfs://, or abfss://"),
 }
 
 
@@ -72,12 +107,18 @@ CLI_STACK_OPTION_LABELS = StackOptionLabels(
         StackType.LOCAL: "--type local",
         StackType.KUBERNETES: "--type kubernetes",
         StackType.VERTEX: "--type vertex",
+        StackType.SAGEMAKER: "--type sagemaker",
+        StackType.AZUREML: "--type azureml",
     },
     field_labels={
         "artifact_store": "--artifact-store",
         "container_registry": "--container-registry",
         "cluster": "--cluster",
         "region": "--region",
+        "subscription_id": "--subscription-id",
+        "resource_group": "--resource-group",
+        "workspace": "--workspace",
+        "execution_role": "--execution-role",
         "namespace": "--namespace",
         "credentials": "--credentials",
         "verify": "--no-verify",
@@ -89,12 +130,18 @@ MCP_STACK_OPTION_LABELS = StackOptionLabels(
         StackType.LOCAL: '`stack_type="local"`',
         StackType.KUBERNETES: '`stack_type="kubernetes"`',
         StackType.VERTEX: '`stack_type="vertex"`',
+        StackType.SAGEMAKER: '`stack_type="sagemaker"`',
+        StackType.AZUREML: '`stack_type="azureml"`',
     },
     field_labels={
         "artifact_store": "`artifact_store`",
         "container_registry": "`container_registry`",
         "cluster": "`cluster`",
         "region": "`region`",
+        "subscription_id": "`subscription_id`",
+        "resource_group": "`resource_group`",
+        "workspace": "`workspace`",
+        "execution_role": "`execution_role`",
         "namespace": "`namespace`",
         "credentials": "`credentials`",
         "verify": "`verify`",
@@ -130,15 +177,21 @@ def normalize_optional_stack_string(value: str | None) -> str | None:
     return normalized_value or None
 
 
+def _render_oxford_comma_list(items: list[str]) -> str:
+    """Render a list of items with Oxford comma formatting."""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} or {items[1]}"
+    leading = ", ".join(items[:-1])
+    return f"{leading}, or {items[-1]}"
+
+
 def _render_supported_stack_types(allowed_stack_types: tuple[StackType, ...]) -> str:
     """Render the supported stack types for a validation error."""
-    values = [stack_type.value for stack_type in allowed_stack_types]
-    if len(values) == 1:
-        return f"'{values[0]}'"
-    if len(values) == 2:
-        return f"'{values[0]}' or '{values[1]}'"
-    leading_values = ", ".join(f"'{value}'" for value in values[:-1])
-    return f"{leading_values}, or '{values[-1]}'"
+    return _render_oxford_comma_list(
+        [f"'{stack_type.value}'" for stack_type in allowed_stack_types]
+    )
 
 
 def normalize_stack_type(
@@ -174,7 +227,7 @@ def infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
         return CloudProvider.AZURE
     raise ValueError(
         f"Cannot infer cloud provider from '{artifact_store_uri}'. "
-        "Use an s3:// or gs:// URI."
+        "Use an s3://, gs://, az://, abfs://, or abfss:// URI."
     )
 
 
@@ -194,12 +247,23 @@ def _render_stack_type_requirement(
         for stack_type in _CREATE_ALLOWED_STACK_TYPES
         if stack_type in allowed_stack_types and stack_type in labels.stack_type_labels
     ]
-    if len(ordered_labels) == 1:
-        return ordered_labels[0]
-    if len(ordered_labels) == 2:
-        return f"{ordered_labels[0]} or {ordered_labels[1]}"
-    leading_values = ", ".join(ordered_labels[:-1])
-    return f"{leading_values}, or {ordered_labels[-1]}"
+    return _render_oxford_comma_list(ordered_labels)
+
+
+def _option_group_label(allowed_stack_types: frozenset[StackType]) -> str:
+    """Return a human-friendly label for a set of allowed stack types."""
+    if allowed_stack_types == frozenset(_REMOTE_STACK_TYPES):
+        return "Remote stack options"
+    if len(allowed_stack_types) == 1:
+        stack_type = next(iter(allowed_stack_types))
+        display_name = {
+            StackType.KUBERNETES: "Kubernetes",
+            StackType.VERTEX: "Vertex",
+            StackType.SAGEMAKER: "SageMaker",
+            StackType.AZUREML: "AzureML",
+        }.get(stack_type, stack_type.value.capitalize())
+        return f"{display_name}-only options"
+    return "Stack-specific options"
 
 
 def _validate_explicit_field_usage(
@@ -231,17 +295,12 @@ def _validate_explicit_field_usage(
         ),
     )
     allowed_stack_types = ordered_allowed_type_groups[0]
-    option_label = (
-        "Remote stack options"
-        if allowed_stack_types == frozenset(_REMOTE_STACK_TYPES)
-        else "Kubernetes-only options"
-    )
     requirement_label = _render_stack_type_requirement(
         allowed_stack_types,
         labels=labels,
     )
     raise ValueError(
-        f"{option_label} require {requirement_label}: "
+        f"{_option_group_label(allowed_stack_types)} require {requirement_label}: "
         + _render_field_labels(
             invalid_fields_by_allowed_types[allowed_stack_types],
             labels=labels,
@@ -256,6 +315,10 @@ def build_remote_stack_spec(
     container_registry: str | None,
     cluster: str | None,
     region: str | None,
+    subscription_id: str | None,
+    resource_group: str | None,
+    workspace: str | None,
+    execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
     verify: bool,
@@ -267,6 +330,10 @@ def build_remote_stack_spec(
         "container_registry": container_registry is not None,
         "cluster": cluster is not None,
         "region": region is not None,
+        "subscription_id": subscription_id is not None,
+        "resource_group": resource_group is not None,
+        "workspace": workspace is not None,
+        "execution_role": execution_role is not None,
         "namespace": namespace is not None,
         "credentials": credentials is not None,
         "verify": not verify,
@@ -284,6 +351,10 @@ def build_remote_stack_spec(
     normalized_container_registry = normalize_optional_stack_string(container_registry)
     normalized_cluster = normalize_optional_stack_string(cluster)
     normalized_region = normalize_optional_stack_string(region)
+    normalized_subscription_id = normalize_optional_stack_string(subscription_id)
+    normalized_resource_group = normalize_optional_stack_string(resource_group)
+    normalized_workspace = normalize_optional_stack_string(workspace)
+    normalized_execution_role = normalize_optional_stack_string(execution_role)
     normalized_namespace = normalize_optional_stack_string(namespace)
     normalized_credentials = normalize_optional_stack_string(credentials)
 
@@ -292,6 +363,10 @@ def build_remote_stack_spec(
         "container_registry": normalized_container_registry,
         "cluster": normalized_cluster,
         "region": normalized_region,
+        "subscription_id": normalized_subscription_id,
+        "resource_group": normalized_resource_group,
+        "workspace": normalized_workspace,
+        "execution_role": normalized_execution_role,
     }
     missing_required_fields = [
         field_name
@@ -307,15 +382,16 @@ def build_remote_stack_spec(
 
     assert normalized_artifact_store is not None
     assert normalized_container_registry is not None
-    assert normalized_region is not None
 
     provider = infer_cloud_provider(normalized_artifact_store)
     fixed_provider = _FIXED_PROVIDER_BY_STACK_TYPE.get(stack_type)
     if fixed_provider is not None and provider != fixed_provider:
-        if stack_type == StackType.VERTEX:
+        uri_desc = _PROVIDER_URI_DESCRIPTIONS.get(stack_type)
+        if uri_desc is not None:
+            display_name, uri_prefix = uri_desc
             raise ValueError(
-                "Vertex stacks require a gs:// artifact store URI. "
-                f"Received: '{normalized_artifact_store}'."
+                f"{display_name} stacks require {uri_prefix} "
+                f"artifact store URI. Received: '{normalized_artifact_store}'."
             )
         raise ValueError(
             f"{stack_type.value} stacks require a "
@@ -329,6 +405,7 @@ def build_remote_stack_spec(
                 "Use an s3:// or gs:// URI."
             )
         assert normalized_cluster is not None
+        assert normalized_region is not None
         return KubernetesStackSpec(
             provider=provider,
             artifact_store=normalized_artifact_store,
@@ -341,9 +418,37 @@ def build_remote_stack_spec(
         )
 
     if stack_type == StackType.VERTEX:
+        assert normalized_region is not None
         return VertexStackSpec(
             artifact_store=normalized_artifact_store,
             container_registry=normalized_container_registry,
+            region=normalized_region,
+            credentials=normalized_credentials,
+            verify=verify,
+        )
+
+    if stack_type == StackType.SAGEMAKER:
+        assert normalized_region is not None
+        assert normalized_execution_role is not None
+        return SagemakerStackSpec(
+            artifact_store=normalized_artifact_store,
+            container_registry=normalized_container_registry,
+            region=normalized_region,
+            execution_role=normalized_execution_role,
+            credentials=normalized_credentials,
+            verify=verify,
+        )
+
+    if stack_type == StackType.AZUREML:
+        assert normalized_subscription_id is not None
+        assert normalized_resource_group is not None
+        assert normalized_workspace is not None
+        return AzureMLStackSpec(
+            artifact_store=normalized_artifact_store,
+            container_registry=normalized_container_registry,
+            subscription_id=normalized_subscription_id,
+            resource_group=normalized_resource_group,
+            workspace=normalized_workspace,
             region=normalized_region,
             credentials=normalized_credentials,
             verify=verify,
@@ -361,6 +466,10 @@ def build_stack_create_request(
     container_registry: str | None,
     cluster: str | None,
     region: str | None,
+    subscription_id: str | None,
+    resource_group: str | None,
+    workspace: str | None,
+    execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
     verify: bool,
@@ -382,6 +491,10 @@ def build_stack_create_request(
             container_registry=container_registry,
             cluster=cluster,
             region=region,
+            subscription_id=subscription_id,
+            resource_group=resource_group,
+            workspace=workspace,
+            execution_role=execution_role,
             namespace=namespace,
             credentials=credentials,
             verify=verify,
@@ -402,6 +515,10 @@ def build_manage_stack_request(
     container_registry: str | None,
     cluster: str | None,
     region: str | None,
+    subscription_id: str | None,
+    resource_group: str | None,
+    workspace: str | None,
+    execution_role: str | None,
     namespace: str | None,
     credentials: str | None,
     verify: bool,
@@ -420,6 +537,10 @@ def build_manage_stack_request(
             container_registry=container_registry,
             cluster=cluster,
             region=region,
+            subscription_id=subscription_id,
+            resource_group=resource_group,
+            workspace=workspace,
+            execution_role=execution_role,
             namespace=namespace,
             credentials=credentials,
             verify=verify,
@@ -442,6 +563,10 @@ def build_manage_stack_request(
                 ("container_registry", container_registry is not None),
                 ("cluster", cluster is not None),
                 ("region", region is not None),
+                ("subscription_id", subscription_id is not None),
+                ("resource_group", resource_group is not None),
+                ("workspace", workspace is not None),
+                ("execution_role", execution_role is not None),
                 ("namespace", namespace is not None),
                 ("credentials", credentials is not None),
                 ("verify", not verify),

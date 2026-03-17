@@ -289,11 +289,16 @@ def manage_stack(
     container_registry: str | None = None,
     cluster: str | None = None,
     region: str | None = None,
+    subscription_id: str | None = None,
+    resource_group: str | None = None,
+    workspace: str | None = None,
+    execution_role: str | None = None,
     namespace: str | None = None,
     credentials: str | None = None,
     verify: bool = True,
 ) -> dict[str, Any]:
-    """Create or delete a local, Kubernetes-backed, or Vertex AI stack."""
+    """Create or delete a local, Kubernetes-backed, Vertex AI, SageMaker,
+    or AzureML stack."""
 
     def _manage_stack() -> dict[str, Any]:
         request = stack_interface.build_manage_stack_request(
@@ -307,6 +312,10 @@ def manage_stack(
             container_registry=container_registry,
             cluster=cluster,
             region=region,
+            subscription_id=subscription_id,
+            resource_group=resource_group,
+            workspace=workspace,
+            execution_role=execution_role,
             namespace=namespace,
             credentials=credentials,
             verify=verify,

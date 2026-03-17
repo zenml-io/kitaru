@@ -18,7 +18,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
 - **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, local model aliases (`kitaru model register/list`), and env-first secret resolution for known providers
 - **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
-- **Stack lifecycle** — Local stack lifecycle in the Python SDK (`kitaru.create_stack()` / `kitaru.delete_stack()`), plus local, Kubernetes, and Vertex stack creation through `kitaru stack create`, YAML-backed `kitaru stack create -f stack.yaml`, MCP `manage_stack`, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings. For the broader story, see the [stack selection guide](https://kitaru.ai/docs/getting-started/stack-selection) and the [Kubernetes stacks guide](https://kitaru.ai/docs/getting-started/kubernetes-stacks).
+- **Stack lifecycle** — Local stack lifecycle in the Python SDK (`kitaru.create_stack()` / `kitaru.delete_stack()`), plus local, Kubernetes, Vertex, SageMaker, and AzureML stack creation through `kitaru stack create`, YAML-backed `kitaru stack create -f stack.yaml`, MCP `manage_stack`, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only. For the broader story, see the [stack selection guide](https://kitaru.ai/docs/getting-started/stack-selection) and the [Kubernetes stacks guide](https://kitaru.ai/docs/getting-started/kubernetes-stacks).
 - **Execution CLI** — `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
 - **Durable wait/resume** — `kitaru.wait(...)` pauses a flow until external input arrives via `client.executions.input(...)` / `client.executions.resume(...)`
 - **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
@@ -153,6 +153,8 @@ kitaru stack use <name-or-id>         Switch active stack
 kitaru stack create <name>            Create and activate a local stack
 kitaru stack create <name> --type vertex --artifact-store gs://... --container-registry us-central1-docker.pkg.dev/... --region us-central1
 kitaru stack create <name> --type kubernetes --artifact-store s3://... --container-registry ... --cluster ... --region ...
+kitaru stack create <name> --type sagemaker --artifact-store s3://... --container-registry ... --region ... --execution-role arn:aws:iam::123456789012:role/...
+kitaru stack create <name> --type azureml --artifact-store az://... --container-registry demo.azurecr.io/... --subscription-id ... --resource-group ... --workspace ...
 kitaru stack create -f stack.yaml     Create a stack from a YAML config file
 kitaru stack create <name> --no-activate
 kitaru stack delete <name-or-id>      Delete a stack

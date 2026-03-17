@@ -67,11 +67,13 @@ kitaru stack create dev --no-activate
 
 ## Create a remote stack
 
-Today, the CLI and MCP server can provision three shipped stack types:
+Today, the CLI and MCP server can provision five shipped stack types:
 
 - `local`
 - `kubernetes`
 - `vertex`
+- `sagemaker`
+- `azureml`
 
 In story form: Kitaru can assemble the stack definition and cloud connector for you, but it still expects the bucket, registry, and any cluster you point at to already exist.
 
@@ -97,6 +99,34 @@ kitaru stack create prod-vertex \
 ```
 
 Vertex uses a managed runner, so there is no `--cluster` or `--namespace` flag. `kitaru stack show prod-vertex` will report the runner `location` that ZenML stores for the Vertex orchestrator.
+
+### SageMaker example
+
+```bash
+kitaru stack create prod-sagemaker \
+  --type sagemaker \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com \
+  --region eu-west-1 \
+  --execution-role arn:aws:iam::123456789012:role/SageMakerExecutionRole
+```
+
+SageMaker is also a managed-runner path, so there is no `--cluster` or `--namespace` flag. `kitaru stack show prod-sagemaker` will report the runner region and execution role.
+
+### AzureML example
+
+```bash
+kitaru stack create prod-azureml \
+  --type azureml \
+  --artifact-store az://my-container/kitaru \
+  --container-registry demo.azurecr.io/my-team/my-image \
+  --subscription-id 00000000-0000-0000-0000-000000000123 \
+  --resource-group ml-platform \
+  --workspace team-ml \
+  --region westeurope
+```
+
+AzureML is another managed-runner path, so there is no `--cluster`, `--namespace`, or `--execution-role` flag. `kitaru stack show prod-azureml` will report the runner subscription, resource group, workspace, and location that ZenML stores for the AzureML orchestrator.
 
 You can also keep the same inputs in a YAML file and create the stack with:
 
@@ -155,7 +185,7 @@ The SDK keeps `StackInfo` intentionally small: `id`, `name`, and `is_active`.
 
 That means `is_managed` is part of structured list output, not part of `StackInfo` itself.
 
-One important scope note: the public Python SDK `kitaru.create_stack(...)` currently provisions local stacks only. Kubernetes and Vertex stack creation are exposed through the CLI and MCP surfaces.
+One important scope note: the public Python SDK `kitaru.create_stack(...)` currently provisions local stacks only. Kubernetes, Vertex, SageMaker, and AzureML stack creation are exposed through the CLI and MCP surfaces.
 
 ## Precedence with flow-level stack overrides
 

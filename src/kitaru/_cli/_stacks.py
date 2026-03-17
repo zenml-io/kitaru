@@ -51,6 +51,10 @@ class _StackCreateInputs:
     container_registry: str | None = None
     cluster: str | None = None
     region: str | None = None
+    subscription_id: str | None = None
+    resource_group: str | None = None
+    workspace: str | None = None
+    execution_role: str | None = None
     namespace: str | None = None
     credentials: str | None = None
     verify: bool | None = None
@@ -59,6 +63,9 @@ class _StackCreateInputs:
 _STACK_CREATE_FILE_KEY_ALIASES = {
     "artifact-store": "artifact_store",
     "container-registry": "container_registry",
+    "subscription-id": "subscription_id",
+    "resource-group": "resource_group",
+    "execution-role": "execution_role",
 }
 _STACK_CREATE_FILE_SUPPORTED_KEYS = {
     "name",
@@ -70,6 +77,13 @@ _STACK_CREATE_FILE_SUPPORTED_KEYS = {
     "container-registry",
     "cluster",
     "region",
+    "subscription_id",
+    "subscription-id",
+    "resource_group",
+    "resource-group",
+    "workspace",
+    "execution_role",
+    "execution-role",
     "namespace",
     "credentials",
     "verify",
@@ -81,6 +95,10 @@ _STACK_CREATE_FILE_STRING_KEYS = {
     "container_registry",
     "cluster",
     "region",
+    "subscription_id",
+    "resource_group",
+    "workspace",
+    "execution_role",
     "namespace",
     "credentials",
 }
@@ -196,7 +214,12 @@ def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
 def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     """Build optional detail rows for stack-create success output."""
     stack_type = getattr(result, "stack_type", StackType.LOCAL.value)
-    if stack_type not in {StackType.KUBERNETES.value, StackType.VERTEX.value}:
+    if stack_type not in {
+        StackType.KUBERNETES.value,
+        StackType.VERTEX.value,
+        StackType.SAGEMAKER.value,
+        StackType.AZUREML.value,
+    }:
         return []
 
     resources = getattr(result, "resources", None)
@@ -215,8 +238,20 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
         if region:
             cluster_value = f"{cluster_value} ({region})"
         rows.append(("Cluster:", cluster_value))
-    elif stack_type == StackType.VERTEX.value and region:
+    elif stack_type in {StackType.VERTEX.value, StackType.SAGEMAKER.value} and region:
         rows.append(("Region:", str(region)))
+    elif stack_type == StackType.AZUREML.value:
+        subscription_id = resources.get("subscription_id")
+        if subscription_id:
+            rows.append(("Subscription:", str(subscription_id)))
+        resource_group = resources.get("resource_group")
+        if resource_group:
+            rows.append(("Resource group:", str(resource_group)))
+        workspace = resources.get("workspace")
+        if workspace:
+            rows.append(("Workspace:", str(workspace)))
+        if region:
+            rows.append(("Region:", str(region)))
 
     artifact_store = resources.get("artifact_store")
     if artifact_store:
@@ -225,6 +260,10 @@ def _stack_create_detail_rows(result: Any) -> list[tuple[str, str]]:
     container_registry = resources.get("container_registry")
     if container_registry:
         rows.append(("Registry:", str(container_registry)))
+
+    execution_role = resources.get("execution_role")
+    if stack_type == StackType.SAGEMAKER.value and execution_role:
+        rows.append(("Execution role:", str(execution_role)))
 
     return rows
 
@@ -429,20 +468,26 @@ def create(
     ] = None,
     type: Annotated[
         str | None,
-        Parameter(help="Stack type: local, kubernetes, or vertex."),
+        Parameter(help="Stack type: local, kubernetes, vertex, sagemaker, or azureml."),
     ] = None,
     artifact_store: Annotated[
         str | None,
         Parameter(
             help=(
                 "Artifact store URI for remote stacks "
-                "(Kubernetes: s3:// or gs://; Vertex: gs://)."
+                "(Kubernetes: s3:// or gs://; Vertex: gs://; SageMaker: s3://; "
+                "AzureML: az://, abfs://, or abfss://)."
             )
         ),
     ] = None,
     container_registry: Annotated[
         str | None,
-        Parameter(help="Container registry URI for Kubernetes or Vertex stacks."),
+        Parameter(
+            help=(
+                "Container registry URI for Kubernetes, Vertex, SageMaker, or "
+                "AzureML stacks."
+            )
+        ),
     ] = None,
     cluster: Annotated[
         str | None,
@@ -450,7 +495,28 @@ def create(
     ] = None,
     region: Annotated[
         str | None,
-        Parameter(help="Cloud region for Kubernetes or Vertex stacks."),
+        Parameter(
+            help=(
+                "Cloud region for Kubernetes, Vertex, SageMaker, or AzureML "
+                "stacks. Optional for AzureML."
+            )
+        ),
+    ] = None,
+    subscription_id: Annotated[
+        str | None,
+        Parameter(help="Azure subscription ID for AzureML stacks."),
+    ] = None,
+    resource_group: Annotated[
+        str | None,
+        Parameter(help="Azure resource group for AzureML stacks."),
+    ] = None,
+    workspace: Annotated[
+        str | None,
+        Parameter(help="AzureML workspace name for AzureML stacks."),
+    ] = None,
+    execution_role: Annotated[
+        str | None,
+        Parameter(help="SageMaker execution role ARN."),
     ] = None,
     namespace: Annotated[
         str | None,
@@ -459,16 +525,24 @@ def create(
     credentials: Annotated[
         str | None,
         Parameter(
-            help="Optional credentials reference for Kubernetes or Vertex stacks."
+            help=(
+                "Optional credentials reference for Kubernetes, Vertex, "
+                "SageMaker, or AzureML stacks."
+            )
         ),
     ] = None,
     no_verify: Annotated[
         bool | None,
-        Parameter(help="Skip credential verification for Kubernetes or Vertex stacks."),
+        Parameter(
+            help=(
+                "Skip credential verification for Kubernetes, Vertex, "
+                "SageMaker, or AzureML stacks."
+            )
+        ),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a local, Kubernetes-backed, or Vertex AI stack."""
+    """Create a local, Kubernetes-backed, Vertex AI, SageMaker, or AzureML stack."""
     command = "stack.create"
     output_format = _resolve_output_format(output)
 
@@ -483,6 +557,10 @@ def create(
                 container_registry=container_registry,
                 cluster=cluster,
                 region=region,
+                subscription_id=subscription_id,
+                resource_group=resource_group,
+                workspace=workspace,
+                execution_role=execution_role,
                 namespace=namespace,
                 credentials=credentials,
                 verify=False if no_verify else None,
@@ -507,6 +585,10 @@ def create(
             container_registry=merged_inputs.container_registry,
             cluster=merged_inputs.cluster,
             region=merged_inputs.region,
+            subscription_id=merged_inputs.subscription_id,
+            resource_group=merged_inputs.resource_group,
+            workspace=merged_inputs.workspace,
+            execution_role=merged_inputs.execution_role,
             namespace=merged_inputs.namespace,
             credentials=merged_inputs.credentials,
             verify=merged_inputs.verify if merged_inputs.verify is not None else True,

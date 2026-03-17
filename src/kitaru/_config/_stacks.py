@@ -19,6 +19,13 @@ from zenml.integrations.aws import (
     AWS_CONNECTOR_TYPE,
     AWS_CONTAINER_REGISTRY_FLAVOR,
     AWS_RESOURCE_TYPE,
+    AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR,
+)
+from zenml.integrations.azure import (
+    AZURE_ARTIFACT_STORE_FLAVOR,
+    AZURE_CONNECTOR_TYPE,
+    AZURE_RESOURCE_TYPE,
+    AZUREML_ORCHESTRATOR_FLAVOR,
 )
 from zenml.integrations.gcp import (
     GCP_ARTIFACT_STORE_FLAVOR,
@@ -89,7 +96,7 @@ class VertexStackSpec(BaseModel):
 
 
 class SagemakerStackSpec(BaseModel):
-    """Request model for future SageMaker stack creation."""
+    """Request model for SageMaker stack creation."""
 
     artifact_store: str
     container_registry: str
@@ -126,9 +133,7 @@ class _ResolvedConnectorSpec:
     """Resolved ZenML connector information for remote stack creation."""
 
     connector_info: ServiceConnectorInfo
-    verify_connector_type: str
     verify_resource_type: str
-    verify_configuration: dict[str, Any]
 
 
 _StackComponentKind = Literal[
@@ -177,7 +182,14 @@ class _StackDeleteResult:
     recursive: bool
 
 
-_StackShowType = Literal["local", "kubernetes", "vertex", "custom"]
+_StackShowType = Literal[
+    "local",
+    "kubernetes",
+    "vertex",
+    "sagemaker",
+    "azureml",
+    "custom",
+]
 _StackComponentRole = Literal[
     "runner",
     "storage",
@@ -242,6 +254,12 @@ def _artifact_store_resource_id(
         return f"s3://{parsed.netloc}"
     if provider == CloudProvider.GCP and parsed.scheme == "gs" and parsed.netloc:
         return f"gs://{parsed.netloc}"
+    if (
+        provider == CloudProvider.AZURE
+        and parsed.scheme in {"az", "abfs", "abfss"}
+        and parsed.netloc
+    ):
+        return f"{parsed.scheme}://{parsed.netloc}"
     raise KitaruUsageError(
         f"Unsupported artifact store URI '{artifact_store_uri}' for provider "
         f"'{provider.value}'."
@@ -258,7 +276,7 @@ def _container_registry_resource_id(
     if not normalized_registry:
         raise KitaruUsageError("Container registry URI cannot be empty.")
 
-    if provider == CloudProvider.AWS:
+    if provider in {CloudProvider.AWS, CloudProvider.AZURE}:
         return normalized_registry.split("/", 1)[0]
     return normalized_registry
 
@@ -268,6 +286,83 @@ def _merge_managed_labels(labels: dict[str, str] | None) -> dict[str, str]:
     merged_labels = dict(labels or {})
     merged_labels[_STACK_MANAGED_LABEL_KEY] = _STACK_MANAGED_LABEL_VALUE
     return merged_labels
+
+
+def _resolve_aws_connector_spec(
+    *,
+    region: str,
+    credentials: str | None,
+) -> _ResolvedConnectorSpec:
+    """Translate Kitaru AWS credentials into ZenML connector info."""
+    normalized_credentials = credentials.strip() if credentials else None
+    auth_method = "implicit"
+    configuration: dict[str, Any] = {"region": region}
+
+    if normalized_credentials:
+        method, separator, raw_value = normalized_credentials.partition(":")
+        if not separator:
+            raise KitaruUsageError(
+                "Invalid AWS credentials format. Use one of: "
+                "aws-profile:PROFILE, aws-access-keys:KEY:SECRET, "
+                "aws-session-token:KEY:SECRET:TOKEN."
+            )
+
+        normalized_method = method.strip().lower()
+        credential_value = raw_value.strip()
+        if normalized_method == "aws-profile":
+            if not credential_value:
+                raise KitaruUsageError("AWS profile name cannot be empty.")
+            configuration["profile_name"] = credential_value
+        elif normalized_method in {"aws-access-key", "aws-access-keys"}:
+            access_key_id, middle, secret_access_key = credential_value.partition(":")
+            if not middle or not access_key_id.strip() or not secret_access_key.strip():
+                raise KitaruUsageError(
+                    "aws-access-keys credentials must be in the format "
+                    "aws-access-keys:ACCESS_KEY_ID:SECRET_ACCESS_KEY."
+                )
+            auth_method = "secret-key"
+            configuration.update(
+                {
+                    "aws_access_key_id": access_key_id.strip(),
+                    "aws_secret_access_key": secret_access_key.strip(),
+                }
+            )
+        elif normalized_method == "aws-session-token":
+            access_key_id, first_sep, remainder = credential_value.partition(":")
+            secret_access_key, second_sep, session_token = remainder.partition(":")
+            if (
+                not first_sep
+                or not second_sep
+                or not access_key_id.strip()
+                or not secret_access_key.strip()
+                or not session_token.strip()
+            ):
+                raise KitaruUsageError(
+                    "aws-session-token credentials must be in the format "
+                    "aws-session-token:ACCESS_KEY_ID:SECRET_ACCESS_KEY:SESSION_TOKEN."
+                )
+            auth_method = "sts-token"
+            configuration.update(
+                {
+                    "aws_access_key_id": access_key_id.strip(),
+                    "aws_secret_access_key": secret_access_key.strip(),
+                    "aws_session_token": session_token.strip(),
+                }
+            )
+        else:
+            raise KitaruUsageError(
+                "Unsupported AWS credentials method. Use one of: "
+                "aws-profile, aws-access-keys, aws-session-token."
+            )
+
+    return _ResolvedConnectorSpec(
+        connector_info=ServiceConnectorInfo(
+            type=AWS_CONNECTOR_TYPE,
+            auth_method=auth_method,
+            configuration=dict(configuration),
+        ),
+        verify_resource_type=AWS_RESOURCE_TYPE,
+    )
 
 
 def _resolve_gcp_connector_spec(
@@ -314,9 +409,74 @@ def _resolve_gcp_connector_spec(
             auth_method=auth_method,
             configuration=dict(configuration),
         ),
-        verify_connector_type=GCP_CONNECTOR_TYPE,
         verify_resource_type=GCP_RESOURCE_TYPE,
-        verify_configuration=dict(configuration),
+    )
+
+
+def _resolve_azure_connector_spec(
+    *,
+    subscription_id: str,
+    credentials: str | None,
+) -> _ResolvedConnectorSpec:
+    """Translate Kitaru Azure credentials into ZenML connector info."""
+    normalized_credentials = credentials.strip() if credentials else None
+    auth_method = "implicit"
+    configuration: dict[str, Any] = {"subscription_id": subscription_id}
+
+    if normalized_credentials:
+        if normalized_credentials.lower() == "implicit":
+            pass
+        else:
+            method, separator, raw_value = normalized_credentials.partition(":")
+            if not separator:
+                raise KitaruUsageError(
+                    "Invalid Azure credentials format. Use one of: implicit, "
+                    "azure-service-principal:TENANT_ID:CLIENT_ID:CLIENT_SECRET, "
+                    "azure-access-token:TOKEN."
+                )
+
+            normalized_method = method.strip().lower()
+            credential_value = raw_value.strip()
+            if normalized_method == "azure-service-principal":
+                tenant_id, first_sep, remainder = credential_value.partition(":")
+                client_id, second_sep, client_secret = remainder.partition(":")
+                if (
+                    not first_sep
+                    or not second_sep
+                    or not tenant_id.strip()
+                    or not client_id.strip()
+                    or not client_secret.strip()
+                ):
+                    raise KitaruUsageError(
+                        "azure-service-principal credentials must be in the format "
+                        "azure-service-principal:TENANT_ID:CLIENT_ID:CLIENT_SECRET."
+                    )
+                auth_method = "service-principal"
+                configuration.update(
+                    {
+                        "tenant_id": tenant_id.strip(),
+                        "client_id": client_id.strip(),
+                        "client_secret": client_secret.strip(),
+                    }
+                )
+            elif normalized_method == "azure-access-token":
+                if not credential_value:
+                    raise KitaruUsageError("Azure access token cannot be empty.")
+                auth_method = "access-token"
+                configuration["token"] = credential_value
+            else:
+                raise KitaruUsageError(
+                    "Unsupported Azure credentials method. Use one of: "
+                    "implicit, azure-service-principal, azure-access-token."
+                )
+
+    return _ResolvedConnectorSpec(
+        connector_info=ServiceConnectorInfo(
+            type=AZURE_CONNECTOR_TYPE,
+            auth_method=auth_method,
+            configuration=dict(configuration),
+        ),
+        verify_resource_type=AZURE_RESOURCE_TYPE,
     )
 
 
@@ -324,93 +484,32 @@ def _resolve_kubernetes_connector_spec(
     spec: KubernetesStackSpec,
 ) -> _ResolvedConnectorSpec:
     """Translate Kitaru's Kubernetes credentials into ZenML connector info."""
-    normalized_credentials = spec.credentials.strip() if spec.credentials else None
-
     if spec.provider == CloudProvider.AWS:
-        auth_method = "implicit"
-        configuration: dict[str, Any] = {"region": spec.region}
-
-        if normalized_credentials:
-            method, separator, raw_value = normalized_credentials.partition(":")
-            if not separator:
-                raise KitaruUsageError(
-                    "Invalid AWS credentials format. Use one of: "
-                    "aws-profile:PROFILE, aws-access-keys:KEY:SECRET, "
-                    "aws-session-token:KEY:SECRET:TOKEN."
-                )
-
-            normalized_method = method.strip().lower()
-            credential_value = raw_value.strip()
-            if normalized_method == "aws-profile":
-                if not credential_value:
-                    raise KitaruUsageError("AWS profile name cannot be empty.")
-                configuration["profile_name"] = credential_value
-            elif normalized_method in {"aws-access-key", "aws-access-keys"}:
-                access_key_id, middle, secret_access_key = credential_value.partition(
-                    ":"
-                )
-                if (
-                    not middle
-                    or not access_key_id.strip()
-                    or not secret_access_key.strip()
-                ):
-                    raise KitaruUsageError(
-                        "aws-access-keys credentials must be in the format "
-                        "aws-access-keys:ACCESS_KEY_ID:SECRET_ACCESS_KEY."
-                    )
-                auth_method = "secret-key"
-                configuration.update(
-                    {
-                        "aws_access_key_id": access_key_id.strip(),
-                        "aws_secret_access_key": secret_access_key.strip(),
-                    }
-                )
-            elif normalized_method == "aws-session-token":
-                access_key_id, first_sep, remainder = credential_value.partition(":")
-                secret_access_key, second_sep, session_token = remainder.partition(":")
-                if (
-                    not first_sep
-                    or not second_sep
-                    or not access_key_id.strip()
-                    or not secret_access_key.strip()
-                    or not session_token.strip()
-                ):
-                    raise KitaruUsageError(
-                        "aws-session-token credentials must be in the format "
-                        "aws-session-token:ACCESS_KEY_ID:SECRET_ACCESS_KEY:SESSION_TOKEN."
-                    )
-                auth_method = "sts-token"
-                configuration.update(
-                    {
-                        "aws_access_key_id": access_key_id.strip(),
-                        "aws_secret_access_key": secret_access_key.strip(),
-                        "aws_session_token": session_token.strip(),
-                    }
-                )
-            else:
-                raise KitaruUsageError(
-                    "Unsupported AWS credentials method. Use one of: "
-                    "aws-profile, aws-access-keys, aws-session-token."
-                )
-
-        return _ResolvedConnectorSpec(
-            connector_info=ServiceConnectorInfo(
-                type=AWS_CONNECTOR_TYPE,
-                auth_method=auth_method,
-                configuration=dict(configuration),
-            ),
-            verify_connector_type=AWS_CONNECTOR_TYPE,
-            verify_resource_type=AWS_RESOURCE_TYPE,
-            verify_configuration=dict(configuration),
+        return _resolve_aws_connector_spec(
+            region=spec.region,
+            credentials=spec.credentials,
         )
 
     if spec.provider == CloudProvider.GCP:
         return _resolve_gcp_connector_spec(
             container_registry=spec.container_registry,
-            credentials=normalized_credentials,
+            credentials=spec.credentials,
         )
 
     raise KitaruUsageError(f"Unsupported cloud provider: {spec.provider}")
+
+
+def _build_connector_services_list(
+    connector_spec: _ResolvedConnectorSpec,
+) -> list[UUID | ServiceConnectorInfo]:
+    """Build the service_connectors list shared by all remote stack requests."""
+    return [
+        ServiceConnectorInfo(
+            type=connector_spec.connector_info.type,
+            auth_method=connector_spec.connector_info.auth_method,
+            configuration=dict(connector_spec.connector_info.configuration),
+        )
+    ]
 
 
 def _build_kubernetes_stack_request(
@@ -469,13 +568,7 @@ def _build_kubernetes_stack_request(
                 )
             ],
         },
-        service_connectors=[
-            ServiceConnectorInfo(
-                type=connector_spec.connector_info.type,
-                auth_method=connector_spec.connector_info.auth_method,
-                configuration=dict(connector_spec.connector_info.configuration),
-            )
-        ],
+        service_connectors=_build_connector_services_list(connector_spec),
     )
 
 
@@ -523,13 +616,111 @@ def _build_vertex_stack_request(
                 )
             ],
         },
-        service_connectors=[
-            ServiceConnectorInfo(
-                type=connector_spec.connector_info.type,
-                auth_method=connector_spec.connector_info.auth_method,
-                configuration=dict(connector_spec.connector_info.configuration),
-            )
-        ],
+        service_connectors=_build_connector_services_list(connector_spec),
+    )
+
+
+def _build_sagemaker_stack_request(
+    name: str,
+    *,
+    spec: SagemakerStackSpec,
+    connector_spec: _ResolvedConnectorSpec,
+    labels: dict[str, str] | None,
+) -> StackRequest:
+    """Build the one-shot ZenML stack request for a SageMaker stack."""
+    merged_labels = _merge_managed_labels(labels)
+
+    return StackRequest(
+        name=name,
+        labels=merged_labels,
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                ComponentInfo(
+                    flavor=AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR,
+                    service_connector_index=0,
+                    configuration={"execution_role": spec.execution_role},
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                ComponentInfo(
+                    flavor="s3",
+                    service_connector_index=0,
+                    service_connector_resource_id=_artifact_store_resource_id(
+                        spec.artifact_store,
+                        CloudProvider.AWS,
+                    ),
+                    configuration={"path": spec.artifact_store},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                ComponentInfo(
+                    flavor=AWS_CONTAINER_REGISTRY_FLAVOR,
+                    service_connector_index=0,
+                    service_connector_resource_id=_container_registry_resource_id(
+                        spec.container_registry,
+                        CloudProvider.AWS,
+                    ),
+                    configuration={"uri": spec.container_registry},
+                )
+            ],
+        },
+        service_connectors=_build_connector_services_list(connector_spec),
+    )
+
+
+def _build_azureml_stack_request(
+    name: str,
+    *,
+    spec: AzureMLStackSpec,
+    connector_spec: _ResolvedConnectorSpec,
+    labels: dict[str, str] | None,
+) -> StackRequest:
+    """Build the one-shot ZenML stack request for an AzureML stack."""
+    merged_labels = _merge_managed_labels(labels)
+
+    orchestrator_configuration: dict[str, str] = {
+        "subscription_id": spec.subscription_id,
+        "resource_group": spec.resource_group,
+        "workspace": spec.workspace,
+    }
+    if spec.region is not None:
+        orchestrator_configuration["location"] = spec.region
+
+    return StackRequest(
+        name=name,
+        labels=merged_labels,
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                ComponentInfo(
+                    flavor=AZUREML_ORCHESTRATOR_FLAVOR,
+                    service_connector_index=0,
+                    configuration=orchestrator_configuration,
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                ComponentInfo(
+                    flavor=AZURE_ARTIFACT_STORE_FLAVOR,
+                    service_connector_index=0,
+                    service_connector_resource_id=_artifact_store_resource_id(
+                        spec.artifact_store,
+                        CloudProvider.AZURE,
+                    ),
+                    configuration={"path": spec.artifact_store},
+                )
+            ],
+            StackComponentType.CONTAINER_REGISTRY: [
+                ComponentInfo(
+                    flavor=ContainerRegistryFlavor.AZURE.value,
+                    service_connector_index=0,
+                    service_connector_resource_id=_container_registry_resource_id(
+                        spec.container_registry,
+                        CloudProvider.AZURE,
+                    ),
+                    configuration={"uri": spec.container_registry},
+                )
+            ],
+        },
+        service_connectors=_build_connector_services_list(connector_spec),
     )
 
 
@@ -628,10 +819,10 @@ def _create_remote_stack_operation(
     try:
         client.create_service_connector(
             name=selector,
-            connector_type=connector_spec.verify_connector_type,
+            connector_type=connector_spec.connector_info.type,
             resource_type=connector_spec.verify_resource_type,
             auth_method=connector_spec.connector_info.auth_method,
-            configuration=connector_spec.verify_configuration,
+            configuration=dict(connector_spec.connector_info.configuration),
             verify=verify,
             list_resources=False,
             register=False,
@@ -1035,6 +1226,8 @@ def _resolve_stack_for_show(client: Client, selector: str) -> Any:
             id_match = stack_model
         if str(getattr(stack_model, "name", "")).strip() == selector:
             name_match = stack_model
+        if id_match and name_match:
+            break
 
     resolved_stack = id_match or name_match
     if resolved_stack is None:
@@ -1076,6 +1269,76 @@ def _stack_component_details_from_model(
             location = _normalize_stack_detail_value(
                 component_configuration.get("location")
             )
+            if location is not None:
+                details.append(("location", location))
+
+            return StackComponentDetails(
+                role="runner",
+                name=component_name,
+                backend=backend,
+                details=tuple(details),
+            )
+
+        if backend == AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR:
+            details: list[tuple[str, str]] = []
+            region = _normalize_stack_detail_value(
+                connector_configuration.get("region")
+            )
+            if region is None:
+                region = _normalize_stack_detail_value(
+                    component_configuration.get("region")
+                )
+            if region is not None:
+                details.append(("region", region))
+
+            execution_role = _normalize_stack_detail_value(
+                component_configuration.get("execution_role")
+            )
+            if execution_role is not None:
+                details.append(("execution_role", execution_role))
+
+            return StackComponentDetails(
+                role="runner",
+                name=component_name,
+                backend=backend,
+                details=tuple(details),
+            )
+
+        if backend == AZUREML_ORCHESTRATOR_FLAVOR:
+            details: list[tuple[str, str]] = []
+            subscription_id = _normalize_stack_detail_value(
+                connector_configuration.get("subscription_id")
+            )
+            if subscription_id is None:
+                subscription_id = _normalize_stack_detail_value(
+                    component_configuration.get("subscription_id")
+                )
+            if subscription_id is not None:
+                details.append(("subscription_id", subscription_id))
+
+            resource_group = _normalize_stack_detail_value(
+                component_configuration.get("resource_group")
+            )
+            if resource_group is None:
+                resource_group = _normalize_stack_detail_value(
+                    connector_configuration.get("resource_group")
+                )
+            if resource_group is not None:
+                details.append(("resource_group", resource_group))
+
+            workspace = _normalize_stack_detail_value(
+                component_configuration.get("workspace")
+            )
+            if workspace is not None:
+                details.append(("workspace", workspace))
+
+            location = _normalize_stack_detail_value(
+                component_configuration.get("location")
+            )
+            if location is None:
+                location = _normalize_stack_detail_value(
+                    component_configuration.get("region")
+                )
             if location is not None:
                 details.append(("location", location))
 
@@ -1178,6 +1441,19 @@ def _infer_stack_details_type(
         for component in components
     ):
         return "vertex"
+
+    if any(
+        component.role == "runner"
+        and component.backend == AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR
+        for component in components
+    ):
+        return "sagemaker"
+
+    if any(
+        component.role == "runner" and component.backend == AZUREML_ORCHESTRATOR_FLAVOR
+        for component in components
+    ):
+        return "azureml"
 
     if any(
         component.role == "runner" and component.backend == "kubernetes"
@@ -1371,8 +1647,34 @@ def _create_sagemaker_stack_operation(
     labels: dict[str, str] | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> _StackCreateResult:
-    """Placeholder SageMaker stack flow for future implementation phases."""
-    raise KitaruUsageError("Stack type 'sagemaker' is not implemented yet.")
+    """Create a SageMaker-backed stack via ZenML's one-shot stack API."""
+    selector = _normalize_stack_selector(name)
+    connector_spec = _resolve_aws_connector_spec(
+        region=spec.region,
+        credentials=spec.credentials,
+    )
+    stack_request = _build_sagemaker_stack_request(
+        selector,
+        spec=spec,
+        connector_spec=connector_spec,
+        labels=labels,
+    )
+    return _create_remote_stack_operation(
+        selector,
+        stack_type=StackType.SAGEMAKER,
+        connector_spec=connector_spec,
+        stack_request=stack_request,
+        resource_summary={
+            "provider": CloudProvider.AWS.value,
+            "region": spec.region,
+            "artifact_store": spec.artifact_store,
+            "container_registry": spec.container_registry,
+            "execution_role": spec.execution_role,
+        },
+        activate=activate,
+        verify=spec.verify,
+        client_factory=client_factory,
+    )
 
 
 def _create_azureml_stack_operation(
@@ -1383,8 +1685,38 @@ def _create_azureml_stack_operation(
     labels: dict[str, str] | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> _StackCreateResult:
-    """Placeholder AzureML stack flow for future implementation phases."""
-    raise KitaruUsageError("Stack type 'azureml' is not implemented yet.")
+    """Create an AzureML-backed stack via ZenML's one-shot stack API."""
+    selector = _normalize_stack_selector(name)
+    connector_spec = _resolve_azure_connector_spec(
+        subscription_id=spec.subscription_id,
+        credentials=spec.credentials,
+    )
+    stack_request = _build_azureml_stack_request(
+        selector,
+        spec=spec,
+        connector_spec=connector_spec,
+        labels=labels,
+    )
+    resource_summary = {
+        "provider": CloudProvider.AZURE.value,
+        "subscription_id": spec.subscription_id,
+        "resource_group": spec.resource_group,
+        "workspace": spec.workspace,
+        "artifact_store": spec.artifact_store,
+        "container_registry": spec.container_registry,
+    }
+    if spec.region is not None:
+        resource_summary["region"] = spec.region
+    return _create_remote_stack_operation(
+        selector,
+        stack_type=StackType.AZUREML,
+        connector_spec=connector_spec,
+        stack_request=stack_request,
+        resource_summary=resource_summary,
+        activate=activate,
+        verify=spec.verify,
+        client_factory=client_factory,
+    )
 
 
 def _create_stack_operation(
