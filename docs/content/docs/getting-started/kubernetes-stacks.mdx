@@ -68,6 +68,47 @@ kitaru stack create prod-k8s \
 
 For the full option list, see [`kitaru stack create`](/cli/stack/create).
 
+## Advanced Kubernetes defaults
+
+Kitaru's named Kubernetes flags cover the basics. When you need a more specific pod or runner default, use `--extra`.
+
+For example, this keeps the normal named flags but adds two deeper orchestrator defaults:
+
+```bash
+kitaru stack create prod-k8s \
+  --type kubernetes \
+  --artifact-store s3://my-bucket/kitaru \
+  --container-registry 123456789012.dkr.ecr.eu-west-1.amazonaws.com \
+  --cluster prod-cluster \
+  --region eu-west-1 \
+  --namespace ml \
+  --async \
+  --extra orchestrator.pod_settings.node_selectors.pool=gpu \
+  --extra orchestrator.pod_settings.tolerations='[{key: gpu, operator: Exists}]'
+```
+
+In story form: the front-door flags still say *which* cluster and namespace to use; `--extra` lets you tuck extra instructions into the orchestrator's backpack before Kitaru hands it to the runtime.
+
+You can keep the same advanced defaults in YAML too:
+
+```yaml
+name: prod-k8s
+type: kubernetes
+artifact_store: s3://my-bucket/kitaru
+container_registry: 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+cluster: prod-cluster
+region: eu-west-1
+namespace: ml
+async: true
+extra:
+  orchestrator:
+    pod_settings:
+      node_selectors:
+        pool: gpu
+```
+
+If you then add a CLI extra on top, the nested mappings merge instead of the CLI replacing the entire YAML `extra:` block.
+
 ## Inspect what Kitaru created
 
 Once the stack exists, these three commands tell slightly different stories:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
@@ -11,8 +12,15 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from zenml.artifact_stores.local_artifact_store import LocalArtifactStoreFlavor
 from zenml.client import Client
+from zenml.container_registries.azure_container_registry import (
+    AzureContainerRegistryFlavor,
+)
+from zenml.container_registries.gcp_container_registry import (
+    GCPContainerRegistryFlavor,
+)
 from zenml.enums import ContainerRegistryFlavor, StackComponentType
 from zenml.exceptions import EntityExistsError
 from zenml.integrations.aws import (
@@ -21,11 +29,23 @@ from zenml.integrations.aws import (
     AWS_RESOURCE_TYPE,
     AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR,
 )
+from zenml.integrations.aws.flavors.aws_container_registry_flavor import (
+    AWSContainerRegistryFlavor,
+)
+from zenml.integrations.aws.flavors.sagemaker_orchestrator_flavor import (
+    SagemakerOrchestratorFlavor,
+)
 from zenml.integrations.azure import (
     AZURE_ARTIFACT_STORE_FLAVOR,
     AZURE_CONNECTOR_TYPE,
     AZURE_RESOURCE_TYPE,
     AZUREML_ORCHESTRATOR_FLAVOR,
+)
+from zenml.integrations.azure.flavors.azure_artifact_store_flavor import (
+    AzureArtifactStoreFlavor,
+)
+from zenml.integrations.azure.flavors.azureml_orchestrator_flavor import (
+    AzureMLOrchestratorFlavor,
 )
 from zenml.integrations.gcp import (
     GCP_ARTIFACT_STORE_FLAVOR,
@@ -33,8 +53,22 @@ from zenml.integrations.gcp import (
     GCP_RESOURCE_TYPE,
     GCP_VERTEX_ORCHESTRATOR_FLAVOR,
 )
+from zenml.integrations.gcp.flavors.gcp_artifact_store_flavor import (
+    GCPArtifactStoreFlavor,
+)
+from zenml.integrations.gcp.flavors.vertex_orchestrator_flavor import (
+    VertexOrchestratorFlavor,
+)
+from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import (
+    KubernetesOrchestratorFlavor,
+)
+from zenml.integrations.s3.flavors.s3_artifact_store_flavor import (
+    S3ArtifactStoreFlavor,
+)
 from zenml.models.v2.core.stack import StackRequest
 from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
+from zenml.orchestrators.local.local_orchestrator import LocalOrchestratorFlavor
+from zenml.stack.utils import validate_stack_component_config
 
 from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
 
@@ -66,6 +100,28 @@ class CloudProvider(StrEnum):
     AWS = "aws"
     GCP = "gcp"
     AZURE = "azure"
+
+
+class StackComponentTarget(StrEnum):
+    """Logical stack component targets used for advanced config overrides."""
+
+    ORCHESTRATOR = "orchestrator"
+    ARTIFACT_STORE = "artifact_store"
+    CONTAINER_REGISTRY = "container_registry"
+
+
+class StackComponentConfigOverrides(BaseModel):
+    """Per-component config overrides applied during stack creation."""
+
+    orchestrator: dict[str, Any] = Field(default_factory=dict)
+    artifact_store: dict[str, Any] = Field(default_factory=dict)
+    container_registry: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+    def is_empty(self) -> bool:
+        """Return whether the override payload contains any component entries."""
+        return not (self.orchestrator or self.artifact_store or self.container_registry)
 
 
 class KubernetesStackSpec(BaseModel):
@@ -136,6 +192,14 @@ class _ResolvedConnectorSpec:
     verify_resource_type: str
 
 
+@dataclass(frozen=True)
+class _ComponentValidationMetadata:
+    """Validation metadata for one Kitaru-managed ZenML component flavor."""
+
+    config_class: type[BaseModel]
+    docs_url: str | None
+
+
 _StackComponentKind = Literal[
     "orchestrator",
     "artifact_store",
@@ -180,6 +244,280 @@ class _StackDeleteResult:
     components_deleted: tuple[str, ...]
     new_active_stack: str | None
     recursive: bool
+
+
+_STACK_COMPONENT_TARGET_TO_TYPE: dict[StackComponentTarget, StackComponentType] = {
+    StackComponentTarget.ORCHESTRATOR: StackComponentType.ORCHESTRATOR,
+    StackComponentTarget.ARTIFACT_STORE: StackComponentType.ARTIFACT_STORE,
+    StackComponentTarget.CONTAINER_REGISTRY: StackComponentType.CONTAINER_REGISTRY,
+}
+_STACK_COMPONENT_TYPE_TO_TARGET: dict[StackComponentType, StackComponentTarget] = {
+    component_type: target
+    for target, component_type in _STACK_COMPONENT_TARGET_TO_TYPE.items()
+}
+
+
+def _build_component_validation_registry() -> dict[
+    tuple[StackComponentType, str], _ComponentValidationMetadata
+]:
+    """Build validation metadata for the ZenML flavors Kitaru creates."""
+    flavors = (
+        LocalOrchestratorFlavor(),
+        KubernetesOrchestratorFlavor(),
+        VertexOrchestratorFlavor(),
+        SagemakerOrchestratorFlavor(),
+        AzureMLOrchestratorFlavor(),
+        LocalArtifactStoreFlavor(),
+        S3ArtifactStoreFlavor(),
+        GCPArtifactStoreFlavor(),
+        AzureArtifactStoreFlavor(),
+        AWSContainerRegistryFlavor(),
+        GCPContainerRegistryFlavor(),
+        AzureContainerRegistryFlavor(),
+    )
+    return {
+        (flavor.type, flavor.name): _ComponentValidationMetadata(
+            config_class=flavor.config_class,
+            docs_url=flavor.docs_url,
+        )
+        for flavor in flavors
+    }
+
+
+_COMPONENT_VALIDATION_METADATA = _build_component_validation_registry()
+
+
+def _merge_configuration_dicts(
+    base: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Recursively merge two configuration mappings without mutating inputs."""
+    merged = {key: value for key, value in base.items()}
+    for key, value in overrides.items():
+        existing = merged.get(key)
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            merged[key] = _merge_configuration_dicts(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _component_override_values(
+    overrides: StackComponentConfigOverrides | None,
+    target: StackComponentTarget,
+) -> dict[str, Any]:
+    """Return override values for one component target."""
+    if overrides is None:
+        return {}
+    return dict(getattr(overrides, target.value))
+
+
+def _build_component_configuration(
+    base: Mapping[str, Any],
+    *,
+    overrides: StackComponentConfigOverrides | None,
+    target: StackComponentTarget,
+) -> dict[str, Any]:
+    """Merge base component config with user-provided overrides."""
+    return _merge_configuration_dicts(
+        base, _component_override_values(overrides, target)
+    )
+
+
+def _format_validation_path(path: tuple[Any, ...] | list[Any] | Any) -> str:
+    """Render a validation location path for user-facing errors."""
+    if isinstance(path, (tuple, list)):
+        return ".".join(str(part) for part in path if part not in {"__root__", ""})
+    return str(path)
+
+
+def _format_option_list(option_paths: list[str]) -> str:
+    """Render one or more invalid option paths for an error message."""
+    return ", ".join(f"`{path}`" for path in option_paths)
+
+
+def _format_component_validation_help(
+    docs_url: str | None,
+    *,
+    suggestion: str | None = None,
+) -> str:
+    """Render optional help text for rewritten component-validation errors."""
+    parts: list[str] = []
+    if suggestion is not None:
+        parts.append(f"Did you mean `{suggestion}`?")
+    if docs_url:
+        parts.append(f"See ZenML docs for supported fields: {docs_url}")
+    return " ".join(parts)
+
+
+def _component_validation_metadata(
+    *,
+    target: StackComponentTarget,
+    flavor: str,
+) -> _ComponentValidationMetadata | None:
+    """Return validation metadata for one managed component flavor."""
+    component_type = _STACK_COMPONENT_TARGET_TO_TYPE[target]
+    return _COMPONENT_VALIDATION_METADATA.get((component_type, flavor))
+
+
+def _rewrite_invalid_component_options(
+    *,
+    target: StackComponentTarget,
+    flavor: str,
+    invalid_paths: list[str],
+    metadata: _ComponentValidationMetadata | None,
+) -> str:
+    """Build a user-facing error for unknown ZenML component options."""
+    suggestion: str | None = None
+    if metadata is not None and len(invalid_paths) == 1:
+        invalid_leaf = invalid_paths[0].split(".")[-1]
+        suggestions = difflib.get_close_matches(
+            invalid_leaf,
+            list(metadata.config_class.model_fields),
+            n=1,
+        )
+        suggestion = suggestions[0] if suggestions else None
+
+    help_text = _format_component_validation_help(
+        metadata.docs_url if metadata is not None else None,
+        suggestion=suggestion,
+    )
+    message = (
+        f"Invalid ZenML option for {target.value} ({flavor} flavor): "
+        f"{_format_option_list(invalid_paths)}"
+    )
+    if help_text:
+        message = f"{message}. {help_text}"
+    return message
+
+
+def _rewrite_component_validation_error(
+    *,
+    target: StackComponentTarget,
+    flavor: str,
+    exc: ValidationError,
+    metadata: _ComponentValidationMetadata | None,
+) -> str:
+    """Rewrite a Pydantic validation error for one component config."""
+    errors = exc.errors()
+    extra_paths = sorted(
+        {
+            _format_validation_path(error["loc"])
+            for error in errors
+            if error.get("type") == "extra_forbidden"
+        }
+    )
+    if extra_paths:
+        return _rewrite_invalid_component_options(
+            target=target,
+            flavor=flavor,
+            invalid_paths=extra_paths,
+            metadata=metadata,
+        )
+
+    first_error = errors[0]
+    field_path = _format_validation_path(first_error.get("loc", ()))
+    detail = first_error.get("msg", str(exc))
+    message = f"Invalid ZenML value for {target.value} ({flavor} flavor)"
+    if field_path:
+        message += f" at `{field_path}`"
+    message += f": {detail}"
+    help_text = _format_component_validation_help(
+        metadata.docs_url if metadata is not None else None,
+    )
+    if help_text:
+        message = f"{message}. {help_text}"
+    return message
+
+
+def _rewrite_component_value_error(
+    *,
+    target: StackComponentTarget,
+    flavor: str,
+    exc: ValueError,
+    metadata: _ComponentValidationMetadata | None,
+) -> str:
+    """Rewrite a generic component-config validation ValueError."""
+    message = f"Invalid ZenML configuration for {target.value} ({flavor} flavor): {exc}"
+    help_text = _format_component_validation_help(
+        metadata.docs_url if metadata is not None else None,
+    )
+    if help_text:
+        message = f"{message}. {help_text}"
+    return message
+
+
+def _prevalidate_component_configuration(
+    *,
+    target: StackComponentTarget,
+    flavor: str,
+    configuration: Mapping[str, Any] | None,
+) -> None:
+    """Validate one component config and rewrite ZenML errors for Kitaru users."""
+    config_dict = dict(configuration or {})
+    metadata = _component_validation_metadata(target=target, flavor=flavor)
+    if metadata is not None:
+        extra_keys = sorted(set(config_dict) - set(metadata.config_class.model_fields))
+        if extra_keys:
+            raise KitaruUsageError(
+                _rewrite_invalid_component_options(
+                    target=target,
+                    flavor=flavor,
+                    invalid_paths=extra_keys,
+                    metadata=metadata,
+                )
+            )
+
+    component_type = _STACK_COMPONENT_TARGET_TO_TYPE[target]
+    try:
+        validate_stack_component_config(
+            configuration_dict=config_dict,
+            flavor=flavor,
+            component_type=component_type,
+            validate_custom_flavors=True,
+        )
+    except ValidationError as exc:
+        raise KitaruUsageError(
+            _rewrite_component_validation_error(
+                target=target,
+                flavor=flavor,
+                exc=exc,
+                metadata=metadata,
+            )
+        ) from exc
+    except ValueError as exc:
+        raise KitaruUsageError(
+            _rewrite_component_value_error(
+                target=target,
+                flavor=flavor,
+                exc=exc,
+                metadata=metadata,
+            )
+        ) from exc
+
+
+def _prevalidate_stack_request_components(stack_request: StackRequest) -> None:
+    """Prevalidate all inline component configs inside a stack request."""
+    if stack_request.components is None:
+        return
+
+    for component_type, components in stack_request.components.items():
+        target = _STACK_COMPONENT_TYPE_TO_TARGET.get(component_type)
+        if target is None:
+            continue
+        for component in components:
+            if not isinstance(component, ComponentInfo):
+                continue
+            raw_flavor = component.flavor
+            if isinstance(raw_flavor, str):
+                flavor = raw_flavor
+            else:
+                flavor = str(getattr(raw_flavor, "value", raw_flavor))
+            _prevalidate_component_configuration(
+                target=target,
+                flavor=flavor,
+                configuration=component.configuration,
+            )
 
 
 _StackShowType = Literal[
@@ -264,6 +602,13 @@ def _artifact_store_resource_id(
         f"Unsupported artifact store URI '{artifact_store_uri}' for provider "
         f"'{provider.value}'."
     )
+
+
+def _normalize_azure_artifact_store_uri(artifact_store_uri: str) -> str:
+    """Normalize Azure artifact store URIs to ZenML's supported schemes."""
+    if artifact_store_uri.startswith("abfss://"):
+        return "abfs://" + artifact_store_uri.removeprefix("abfss://")
+    return artifact_store_uri
 
 
 def _container_registry_resource_id(
@@ -518,6 +863,7 @@ def _build_kubernetes_stack_request(
     spec: KubernetesStackSpec,
     connector_spec: _ResolvedConnectorSpec,
     labels: dict[str, str] | None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> StackRequest:
     """Build the one-shot ZenML stack request for a Kubernetes stack."""
     merged_labels = _merge_managed_labels(labels)
@@ -540,9 +886,11 @@ def _build_kubernetes_stack_request(
                     flavor="kubernetes",
                     service_connector_index=0,
                     service_connector_resource_id=spec.cluster,
-                    configuration={
-                        "kubernetes_namespace": spec.namespace,
-                    },
+                    configuration=_build_component_configuration(
+                        {"kubernetes_namespace": spec.namespace},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ORCHESTRATOR,
+                    ),
                 )
             ],
             StackComponentType.ARTIFACT_STORE: [
@@ -553,7 +901,11 @@ def _build_kubernetes_stack_request(
                         spec.artifact_store,
                         spec.provider,
                     ),
-                    configuration={"path": spec.artifact_store},
+                    configuration=_build_component_configuration(
+                        {"path": spec.artifact_store},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ARTIFACT_STORE,
+                    ),
                 )
             ],
             StackComponentType.CONTAINER_REGISTRY: [
@@ -564,7 +916,11 @@ def _build_kubernetes_stack_request(
                         spec.container_registry,
                         spec.provider,
                     ),
-                    configuration={"uri": spec.container_registry},
+                    configuration=_build_component_configuration(
+                        {"uri": spec.container_registry},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.CONTAINER_REGISTRY,
+                    ),
                 )
             ],
         },
@@ -578,6 +934,7 @@ def _build_vertex_stack_request(
     spec: VertexStackSpec,
     connector_spec: _ResolvedConnectorSpec,
     labels: dict[str, str] | None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> StackRequest:
     """Build the one-shot ZenML stack request for a Vertex AI stack."""
     merged_labels = _merge_managed_labels(labels)
@@ -590,7 +947,11 @@ def _build_vertex_stack_request(
                 ComponentInfo(
                     flavor=GCP_VERTEX_ORCHESTRATOR_FLAVOR,
                     service_connector_index=0,
-                    configuration={"location": spec.region},
+                    configuration=_build_component_configuration(
+                        {"location": spec.region},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ORCHESTRATOR,
+                    ),
                 )
             ],
             StackComponentType.ARTIFACT_STORE: [
@@ -601,7 +962,11 @@ def _build_vertex_stack_request(
                         spec.artifact_store,
                         CloudProvider.GCP,
                     ),
-                    configuration={"path": spec.artifact_store},
+                    configuration=_build_component_configuration(
+                        {"path": spec.artifact_store},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ARTIFACT_STORE,
+                    ),
                 )
             ],
             StackComponentType.CONTAINER_REGISTRY: [
@@ -612,7 +977,11 @@ def _build_vertex_stack_request(
                         spec.container_registry,
                         CloudProvider.GCP,
                     ),
-                    configuration={"uri": spec.container_registry},
+                    configuration=_build_component_configuration(
+                        {"uri": spec.container_registry},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.CONTAINER_REGISTRY,
+                    ),
                 )
             ],
         },
@@ -626,6 +995,7 @@ def _build_sagemaker_stack_request(
     spec: SagemakerStackSpec,
     connector_spec: _ResolvedConnectorSpec,
     labels: dict[str, str] | None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> StackRequest:
     """Build the one-shot ZenML stack request for a SageMaker stack."""
     merged_labels = _merge_managed_labels(labels)
@@ -638,7 +1008,11 @@ def _build_sagemaker_stack_request(
                 ComponentInfo(
                     flavor=AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR,
                     service_connector_index=0,
-                    configuration={"execution_role": spec.execution_role},
+                    configuration=_build_component_configuration(
+                        {"execution_role": spec.execution_role},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ORCHESTRATOR,
+                    ),
                 )
             ],
             StackComponentType.ARTIFACT_STORE: [
@@ -649,7 +1023,11 @@ def _build_sagemaker_stack_request(
                         spec.artifact_store,
                         CloudProvider.AWS,
                     ),
-                    configuration={"path": spec.artifact_store},
+                    configuration=_build_component_configuration(
+                        {"path": spec.artifact_store},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ARTIFACT_STORE,
+                    ),
                 )
             ],
             StackComponentType.CONTAINER_REGISTRY: [
@@ -660,7 +1038,11 @@ def _build_sagemaker_stack_request(
                         spec.container_registry,
                         CloudProvider.AWS,
                     ),
-                    configuration={"uri": spec.container_registry},
+                    configuration=_build_component_configuration(
+                        {"uri": spec.container_registry},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.CONTAINER_REGISTRY,
+                    ),
                 )
             ],
         },
@@ -674,9 +1056,11 @@ def _build_azureml_stack_request(
     spec: AzureMLStackSpec,
     connector_spec: _ResolvedConnectorSpec,
     labels: dict[str, str] | None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> StackRequest:
     """Build the one-shot ZenML stack request for an AzureML stack."""
     merged_labels = _merge_managed_labels(labels)
+    artifact_store_uri = _normalize_azure_artifact_store_uri(spec.artifact_store)
 
     orchestrator_configuration: dict[str, str] = {
         "subscription_id": spec.subscription_id,
@@ -694,7 +1078,11 @@ def _build_azureml_stack_request(
                 ComponentInfo(
                     flavor=AZUREML_ORCHESTRATOR_FLAVOR,
                     service_connector_index=0,
-                    configuration=orchestrator_configuration,
+                    configuration=_build_component_configuration(
+                        orchestrator_configuration,
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ORCHESTRATOR,
+                    ),
                 )
             ],
             StackComponentType.ARTIFACT_STORE: [
@@ -702,10 +1090,14 @@ def _build_azureml_stack_request(
                     flavor=AZURE_ARTIFACT_STORE_FLAVOR,
                     service_connector_index=0,
                     service_connector_resource_id=_artifact_store_resource_id(
-                        spec.artifact_store,
+                        artifact_store_uri,
                         CloudProvider.AZURE,
                     ),
-                    configuration={"path": spec.artifact_store},
+                    configuration=_build_component_configuration(
+                        {"path": artifact_store_uri},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ARTIFACT_STORE,
+                    ),
                 )
             ],
             StackComponentType.CONTAINER_REGISTRY: [
@@ -716,7 +1108,11 @@ def _build_azureml_stack_request(
                         spec.container_registry,
                         CloudProvider.AZURE,
                     ),
-                    configuration={"uri": spec.container_registry},
+                    configuration=_build_component_configuration(
+                        {"uri": spec.container_registry},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.CONTAINER_REGISTRY,
+                    ),
                 )
             ],
         },
@@ -816,6 +1212,8 @@ def _create_remote_stack_operation(
     previous_active_stack = str(client.active_stack_model.name) if activate else None
     stack_label = _stack_type_display_name(stack_type)
 
+    _prevalidate_stack_request_components(stack_request)
+
     try:
         client.create_service_connector(
             name=selector,
@@ -834,6 +1232,12 @@ def _create_remote_stack_operation(
 
     try:
         client._validate_stack_configuration(stack_request)
+    except (ValueError, ValidationError) as exc:
+        raise KitaruUsageError(
+            f"Invalid {stack_label} stack configuration for '{selector}'. "
+            f"ZenML rejected the final stack request after Kitaru prevalidated "
+            f"the component defaults: {exc}"
+        ) from exc
     except Exception as exc:
         raise KitaruBackendError(
             f"Failed to validate {stack_label} stack '{selector}': {exc}"
@@ -1572,6 +1976,7 @@ def _create_kubernetes_stack_operation(
     spec: KubernetesStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> _StackCreateResult:
     """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
@@ -1582,6 +1987,7 @@ def _create_kubernetes_stack_operation(
         spec=spec,
         connector_spec=connector_spec,
         labels=labels,
+        component_overrides=component_overrides,
     )
     return _create_remote_stack_operation(
         selector,
@@ -1608,6 +2014,7 @@ def _create_vertex_stack_operation(
     spec: VertexStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> _StackCreateResult:
     """Create a Vertex AI-backed stack via ZenML's one-shot stack API."""
@@ -1621,6 +2028,7 @@ def _create_vertex_stack_operation(
         spec=spec,
         connector_spec=connector_spec,
         labels=labels,
+        component_overrides=component_overrides,
     )
     return _create_remote_stack_operation(
         selector,
@@ -1645,6 +2053,7 @@ def _create_sagemaker_stack_operation(
     spec: SagemakerStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> _StackCreateResult:
     """Create a SageMaker-backed stack via ZenML's one-shot stack API."""
@@ -1658,6 +2067,7 @@ def _create_sagemaker_stack_operation(
         spec=spec,
         connector_spec=connector_spec,
         labels=labels,
+        component_overrides=component_overrides,
     )
     return _create_remote_stack_operation(
         selector,
@@ -1683,6 +2093,7 @@ def _create_azureml_stack_operation(
     spec: AzureMLStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> _StackCreateResult:
     """Create an AzureML-backed stack via ZenML's one-shot stack API."""
@@ -1696,6 +2107,7 @@ def _create_azureml_stack_operation(
         spec=spec,
         connector_spec=connector_spec,
         labels=labels,
+        component_overrides=component_overrides,
     )
     resource_summary = {
         "provider": CloudProvider.AZURE.value,
@@ -1726,6 +2138,7 @@ def _create_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     remote_spec: RemoteStackSpec | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
     operation_overrides: dict[StackType, Callable[..., _StackCreateResult]]
     | None = None,
 ) -> _StackCreateResult:
@@ -1743,7 +2156,10 @@ def _create_stack_operation(
     if stack_type == StackType.LOCAL:
         if remote_spec is not None:
             raise KitaruUsageError("Local stacks do not accept remote stack specs.")
-        return dispatch[StackType.LOCAL](name, activate=activate, labels=labels)
+        local_kwargs: dict[str, Any] = {"activate": activate, "labels": labels}
+        if component_overrides is not None:
+            local_kwargs["component_overrides"] = component_overrides
+        return dispatch[StackType.LOCAL](name, **local_kwargs)
 
     operation = dispatch.get(stack_type)
     if operation is None:
@@ -1755,7 +2171,14 @@ def _create_stack_operation(
             f"{display} spec required for --type {stack_type.value}."
         )
 
-    return operation(name, spec=remote_spec, activate=activate, labels=labels)
+    operation_kwargs: dict[str, Any] = {
+        "spec": remote_spec,
+        "activate": activate,
+        "labels": labels,
+    }
+    if component_overrides is not None:
+        operation_kwargs["component_overrides"] = component_overrides
+    return operation(name, **operation_kwargs)
 
 
 def _create_local_stack_operation(
@@ -1763,6 +2186,7 @@ def _create_local_stack_operation(
     *,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
     client_factory: Callable[[], Any] = Client,
     current_stack_getter: Callable[[], StackInfo] | None = None,
 ) -> _StackCreateResult:
@@ -1777,6 +2201,22 @@ def _create_local_stack_operation(
 
     previous_active_stack = str(client.active_stack_model.name) if activate else None
     merged_labels = _merge_managed_labels(labels)
+    overrides = component_overrides or StackComponentConfigOverrides()
+    if overrides.container_registry:
+        raise KitaruUsageError(
+            "Local stacks do not create a container registry component, so "
+            "`container_registry` overrides are not allowed."
+        )
+    orchestrator_configuration = _build_component_configuration(
+        {},
+        overrides=overrides,
+        target=StackComponentTarget.ORCHESTRATOR,
+    )
+    artifact_store_configuration = _build_component_configuration(
+        {},
+        overrides=overrides,
+        target=StackComponentTarget.ARTIFACT_STORE,
+    )
 
     created_components: list[_StackComponent] = []
     components_created = (
@@ -1784,12 +2224,22 @@ def _create_local_stack_operation(
         _format_stack_component_label(selector, "artifact_store"),
     )
 
+    _prevalidate_component_configuration(
+        target=StackComponentTarget.ORCHESTRATOR,
+        flavor=StackType.LOCAL.value,
+        configuration=orchestrator_configuration,
+    )
+    _prevalidate_component_configuration(
+        target=StackComponentTarget.ARTIFACT_STORE,
+        flavor=StackType.LOCAL.value,
+        configuration=artifact_store_configuration,
+    )
     try:
         orchestrator = client.create_stack_component(
             name=selector,
             flavor="local",
             component_type=StackComponentType.ORCHESTRATOR,
-            configuration={},
+            configuration=orchestrator_configuration,
         )
         created_components.append(
             _StackComponent(
@@ -1808,7 +2258,7 @@ def _create_local_stack_operation(
             name=selector,
             flavor="local",
             component_type=StackComponentType.ARTIFACT_STORE,
-            configuration={},
+            configuration=artifact_store_configuration,
         )
         created_components.append(
             _StackComponent(

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Literal
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+import yaml
 
 from kitaru._config._stacks import (
     AzureMLStackSpec,
@@ -12,6 +14,8 @@ from kitaru._config._stacks import (
     KubernetesStackSpec,
     RemoteStackSpec,
     SagemakerStackSpec,
+    StackComponentConfigOverrides,
+    StackComponentTarget,
     StackType,
     VertexStackSpec,
 )
@@ -122,6 +126,8 @@ CLI_STACK_OPTION_LABELS = StackOptionLabels(
         "namespace": "--namespace",
         "credentials": "--credentials",
         "verify": "--no-verify",
+        "extra": "--extra",
+        "async": "--async",
     },
 )
 
@@ -145,6 +151,8 @@ MCP_STACK_OPTION_LABELS = StackOptionLabels(
         "namespace": "`namespace`",
         "credentials": "`credentials`",
         "verify": "`verify`",
+        "extra": "`extra`",
+        "async": "`async_mode`",
         "stack_type": "`stack_type`",
     },
 )
@@ -158,6 +166,9 @@ class ManageStackCreateRequest:
     activate: bool
     stack_type: StackType
     remote_spec: RemoteStackSpec | None = None
+    component_overrides: StackComponentConfigOverrides = field(
+        default_factory=StackComponentConfigOverrides
+    )
 
 
 @dataclass(frozen=True)
@@ -306,6 +317,245 @@ def _validate_explicit_field_usage(
             labels=labels,
         )
     )
+
+
+_LOCAL_COMPONENT_OVERRIDE_TARGETS = frozenset(
+    {StackComponentTarget.ORCHESTRATOR, StackComponentTarget.ARTIFACT_STORE}
+)
+_REMOTE_COMPONENT_OVERRIDE_TARGETS = frozenset(StackComponentTarget)
+
+
+def _deep_merge_config_values(base: Any, override: Any) -> Any:
+    """Recursively merge two config values, preferring the later leaf value."""
+    if isinstance(base, Mapping) and isinstance(override, Mapping):
+        merged = {key: value for key, value in base.items()}
+        for key, value in override.items():
+            merged[key] = _deep_merge_config_values(merged.get(key), value)
+        return merged
+    return override
+
+
+def _merge_nested_mapping(
+    base: Mapping[str, Any], override: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Merge two nested config mappings into a fresh dictionary."""
+    merged = {key: value for key, value in base.items()}
+    for key, value in override.items():
+        if key in merged:
+            merged[key] = _deep_merge_config_values(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def merge_component_overrides(
+    base: StackComponentConfigOverrides | None,
+    override: StackComponentConfigOverrides | None,
+) -> StackComponentConfigOverrides:
+    """Merge two component-override payloads with later values winning."""
+    base = base or StackComponentConfigOverrides()
+    override = override or StackComponentConfigOverrides()
+    return StackComponentConfigOverrides(
+        orchestrator=_merge_nested_mapping(base.orchestrator, override.orchestrator),
+        artifact_store=_merge_nested_mapping(
+            base.artifact_store,
+            override.artifact_store,
+        ),
+        container_registry=_merge_nested_mapping(
+            base.container_registry,
+            override.container_registry,
+        ),
+    )
+
+
+def _validate_nested_override_mapping(
+    raw: Mapping[str, Any],
+    *,
+    option_name: str,
+) -> dict[str, Any]:
+    """Validate a nested override mapping and normalize it to plain dicts."""
+    normalized: dict[str, Any] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{option_name} keys must be strings.")
+        if isinstance(value, Mapping):
+            normalized[key] = _validate_nested_override_mapping(
+                value,
+                option_name=option_name,
+            )
+        else:
+            normalized[key] = value
+    return normalized
+
+
+def _target_field_label(
+    target: StackComponentTarget,
+    *,
+    labels: StackOptionLabels,
+) -> str:
+    """Render one component target as an interface-specific extra field label."""
+    extra_label = labels.field_labels["extra"]
+    return f"{extra_label} {target.value}.*"
+
+
+def normalize_component_overrides_mapping(
+    raw: Mapping[str, Any],
+    *,
+    labels: StackOptionLabels,
+) -> StackComponentConfigOverrides:
+    """Normalize YAML/MCP component overrides into the shared override model."""
+    normalized: dict[str, dict[str, Any]] = {}
+    valid_targets = {target.value: target for target in StackComponentTarget}
+    for raw_target, raw_value in raw.items():
+        if not isinstance(raw_target, str):
+            raise ValueError(f"{labels.field_labels['extra']} keys must be strings.")
+        target = valid_targets.get(raw_target)
+        if target is None:
+            expected = ", ".join(sorted(valid_targets))
+            raise ValueError(
+                f"Unsupported {labels.field_labels['extra']} target '{raw_target}'. "
+                f"Use one of: {expected}."
+            )
+        if not isinstance(raw_value, Mapping):
+            raise ValueError(
+                f"{_target_field_label(target, labels=labels)} must be an object."
+            )
+        normalized[target.value] = _validate_nested_override_mapping(
+            raw_value,
+            option_name=_target_field_label(target, labels=labels),
+        )
+    return StackComponentConfigOverrides(**normalized)
+
+
+def _assign_nested_override(
+    root: dict[str, Any],
+    path_parts: list[str],
+    value: Any,
+) -> None:
+    """Assign a nested override path into a mutable mapping."""
+    cursor = root
+    for part in path_parts[:-1]:
+        existing = cursor.get(part)
+        if existing is None:
+            existing = {}
+            cursor[part] = existing
+        elif not isinstance(existing, dict):
+            raise ValueError(
+                f"Cannot assign nested override through non-object field '{part}'."
+            )
+        cursor = existing
+    cursor[path_parts[-1]] = value
+
+
+def _parse_component_override_value(
+    raw_value: str,
+    *,
+    labels: StackOptionLabels,
+) -> Any:
+    """Parse one CLI override value using YAML scalar/object semantics."""
+    if raw_value == "":
+        raise ValueError(
+            f"Invalid {labels.field_labels['extra']} value. Use TARGET.FIELD=VALUE."
+        )
+    try:
+        parsed = yaml.safe_load(raw_value)
+    except yaml.YAMLError as exc:
+        raise ValueError(
+            f"Invalid {labels.field_labels['extra']} value '{raw_value}': {exc}"
+        ) from exc
+    return parsed
+
+
+def parse_cli_component_overrides(
+    assignments: Sequence[str],
+    *,
+    labels: StackOptionLabels,
+) -> StackComponentConfigOverrides:
+    """Parse repeatable CLI TARGET.FIELD=VALUE assignments into overrides."""
+    merged = StackComponentConfigOverrides()
+    valid_targets = {target.value: target for target in StackComponentTarget}
+    for assignment in assignments:
+        lhs, separator, rhs = assignment.partition("=")
+        if not separator:
+            raise ValueError(
+                f"Invalid {labels.field_labels['extra']} value '{assignment}'. "
+                "Use TARGET.FIELD=VALUE."
+            )
+        target_name, field_separator, raw_path = lhs.partition(".")
+        if not field_separator or not target_name or not raw_path:
+            raise ValueError(
+                f"Invalid {labels.field_labels['extra']} value '{assignment}'. "
+                "Use TARGET.FIELD=VALUE."
+            )
+        target = valid_targets.get(target_name)
+        if target is None:
+            expected = ", ".join(sorted(valid_targets))
+            raise ValueError(
+                f"Unsupported {labels.field_labels['extra']} target '{target_name}'. "
+                f"Use one of: {expected}."
+            )
+        raw_path_parts = raw_path.split(".")
+        if not raw_path_parts or any(not part for part in raw_path_parts):
+            raise ValueError(
+                f"Invalid {labels.field_labels['extra']} value '{assignment}'. "
+                "Use TARGET.FIELD=VALUE."
+            )
+        override_mapping: dict[str, dict[str, Any]] = {target.value: {}}
+        _assign_nested_override(
+            override_mapping[target.value],
+            raw_path_parts,
+            _parse_component_override_value(rhs, labels=labels),
+        )
+        merged = merge_component_overrides(
+            merged,
+            StackComponentConfigOverrides(**override_mapping),
+        )
+    return merged
+
+
+def apply_async_override(
+    overrides: StackComponentConfigOverrides | None,
+    *,
+    async_enabled: bool,
+) -> StackComponentConfigOverrides:
+    """Inject `synchronous=false` unless the user already set it explicitly."""
+    merged = overrides or StackComponentConfigOverrides()
+    if not async_enabled or "synchronous" in merged.orchestrator:
+        return merged
+    return merge_component_overrides(
+        merged,
+        StackComponentConfigOverrides(orchestrator={"synchronous": False}),
+    )
+
+
+def validate_component_override_targets(
+    stack_type: StackType,
+    overrides: StackComponentConfigOverrides | None,
+    *,
+    labels: StackOptionLabels,
+) -> None:
+    """Validate that component override targets are legal for the stack type."""
+    overrides = overrides or StackComponentConfigOverrides()
+    allowed_targets = (
+        _LOCAL_COMPONENT_OVERRIDE_TARGETS
+        if stack_type == StackType.LOCAL
+        else _REMOTE_COMPONENT_OVERRIDE_TARGETS
+    )
+    for target in StackComponentTarget:
+        if not getattr(overrides, target.value):
+            continue
+        if target in allowed_targets:
+            continue
+        if target == StackComponentTarget.CONTAINER_REGISTRY:
+            raise ValueError(
+                f"{_target_field_label(target, labels=labels)} is not valid for "
+                f"{labels.stack_type_labels[stack_type]} because local stacks do "
+                "not create a container registry component."
+            )
+        raise ValueError(
+            f"{_target_field_label(target, labels=labels)} is not valid for "
+            f"{labels.stack_type_labels[stack_type]}."
+        )
 
 
 def build_remote_stack_spec(
@@ -473,6 +723,8 @@ def build_stack_create_request(
     namespace: str | None,
     credentials: str | None,
     verify: bool,
+    component_overrides: StackComponentConfigOverrides | None = None,
+    async_enabled: bool = False,
     labels: StackOptionLabels,
     allowed_stack_types: tuple[StackType, ...] = _DEFAULT_INTERFACE_STACK_TYPES,
 ) -> ManageStackCreateRequest:
@@ -480,6 +732,17 @@ def build_stack_create_request(
     normalized_stack_type = normalize_stack_type(
         stack_type,
         allowed_stack_types=allowed_stack_types,
+    )
+    if async_enabled and normalized_stack_type == StackType.LOCAL:
+        requirement = _render_stack_type_requirement(
+            frozenset(_REMOTE_STACK_TYPES),
+            labels=labels,
+        )
+        raise ValueError(f"{labels.field_labels['async']} requires {requirement}.")
+    validate_component_override_targets(
+        normalized_stack_type,
+        component_overrides,
+        labels=labels,
     )
     return ManageStackCreateRequest(
         name=name,
@@ -499,6 +762,10 @@ def build_stack_create_request(
             credentials=credentials,
             verify=verify,
             labels=labels,
+        ),
+        component_overrides=apply_async_override(
+            component_overrides,
+            async_enabled=async_enabled,
         ),
     )
 
@@ -522,6 +789,8 @@ def build_manage_stack_request(
     namespace: str | None,
     credentials: str | None,
     verify: bool,
+    extra: Mapping[str, Any] | None = None,
+    async_mode: bool = False,
 ) -> ManageStackCreateRequest | ManageStackDeleteRequest:
     """Validate MCP manage-stack inputs and build a structured request."""
     if action == "create":
@@ -529,6 +798,8 @@ def build_manage_stack_request(
             raise ValueError(
                 '`recursive` and `force` are only valid when action="delete".'
             )
+        if extra is not None and not isinstance(extra, Mapping):
+            raise ValueError("`extra` must be an object when provided.")
         return build_stack_create_request(
             name=name,
             activate=activate,
@@ -544,6 +815,14 @@ def build_manage_stack_request(
             namespace=namespace,
             credentials=credentials,
             verify=verify,
+            component_overrides=(
+                normalize_component_overrides_mapping(
+                    extra, labels=MCP_STACK_OPTION_LABELS
+                )
+                if extra is not None
+                else None
+            ),
+            async_enabled=async_mode,
             labels=MCP_STACK_OPTION_LABELS,
         )
 
@@ -570,6 +849,8 @@ def build_manage_stack_request(
                 ("namespace", namespace is not None),
                 ("credentials", credentials is not None),
                 ("verify", not verify),
+                ("extra", extra is not None),
+                ("async", async_mode),
             )
             if is_provided
         ]

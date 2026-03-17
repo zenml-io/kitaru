@@ -16,7 +16,7 @@ import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 import click
@@ -104,6 +104,7 @@ VertexStackSpec = _config_stacks.VertexStackSpec
 SagemakerStackSpec = _config_stacks.SagemakerStackSpec
 AzureMLStackSpec = _config_stacks.AzureMLStackSpec
 RemoteStackSpec = _config_stacks.RemoteStackSpec
+StackComponentConfigOverrides = _config_stacks.StackComponentConfigOverrides
 _ResolvedConnectorSpec = _config_stacks._ResolvedConnectorSpec
 _StackComponent = _config_stacks._StackComponent
 _StackListEntry = _config_stacks._StackListEntry
@@ -460,6 +461,7 @@ def _create_kubernetes_stack_operation(
     spec: KubernetesStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a Kubernetes-backed stack via ZenML's one-shot stack API."""
     return _config_stacks._create_kubernetes_stack_operation(
@@ -467,6 +469,7 @@ def _create_kubernetes_stack_operation(
         spec=spec,
         activate=activate,
         labels=labels,
+        component_overrides=component_overrides,
         client_factory=Client,
     )
 
@@ -477,6 +480,7 @@ def _create_vertex_stack_operation(
     spec: VertexStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a Vertex AI stack via ZenML's one-shot stack API."""
     return _config_stacks._create_vertex_stack_operation(
@@ -484,6 +488,7 @@ def _create_vertex_stack_operation(
         spec=spec,
         activate=activate,
         labels=labels,
+        component_overrides=component_overrides,
         client_factory=Client,
     )
 
@@ -494,6 +499,7 @@ def _create_sagemaker_stack_operation(
     spec: SagemakerStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a SageMaker stack via ZenML's one-shot stack API."""
     return _config_stacks._create_sagemaker_stack_operation(
@@ -501,6 +507,7 @@ def _create_sagemaker_stack_operation(
         spec=spec,
         activate=activate,
         labels=labels,
+        component_overrides=component_overrides,
         client_factory=Client,
     )
 
@@ -511,6 +518,7 @@ def _create_azureml_stack_operation(
     spec: AzureMLStackSpec,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create an AzureML stack via ZenML's one-shot stack API."""
     return _config_stacks._create_azureml_stack_operation(
@@ -518,6 +526,7 @@ def _create_azureml_stack_operation(
         spec=spec,
         activate=activate,
         labels=labels,
+        component_overrides=component_overrides,
         client_factory=Client,
     )
 
@@ -529,6 +538,7 @@ def _create_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     remote_spec: RemoteStackSpec | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
     return _config_stacks._create_stack_operation(
@@ -537,13 +547,17 @@ def _create_stack_operation(
         activate=activate,
         labels=labels,
         remote_spec=remote_spec,
-        operation_overrides={
-            StackType.LOCAL: _create_local_stack_operation,
-            StackType.KUBERNETES: _create_kubernetes_stack_operation,
-            StackType.VERTEX: _create_vertex_stack_operation,
-            StackType.SAGEMAKER: _create_sagemaker_stack_operation,
-            StackType.AZUREML: _create_azureml_stack_operation,
-        },
+        component_overrides=component_overrides,
+        operation_overrides=cast(
+            dict[StackType, Callable[..., _StackCreateResult]],
+            {
+                StackType.LOCAL: _create_local_stack_operation,
+                StackType.KUBERNETES: _create_kubernetes_stack_operation,
+                StackType.VERTEX: _create_vertex_stack_operation,
+                StackType.SAGEMAKER: _create_sagemaker_stack_operation,
+                StackType.AZUREML: _create_azureml_stack_operation,
+            },
+        ),
     )
 
 
@@ -552,12 +566,14 @@ def _create_local_stack_operation(
     *,
     activate: bool = True,
     labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a new local stack and return structured operation details."""
     return _config_stacks._create_local_stack_operation(
         name,
         activate=activate,
         labels=labels,
+        component_overrides=component_overrides,
         client_factory=Client,
         current_stack_getter=current_stack,
     )

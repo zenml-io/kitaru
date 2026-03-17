@@ -43,6 +43,7 @@ from kitaru.config import (
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
     SagemakerStackSpec,
+    StackComponentConfigOverrides,
     StackType,
     VertexStackSpec,
     _create_azureml_stack_operation,
@@ -1357,6 +1358,42 @@ def test_create_stack_dispatcher_routes_kubernetes_requests() -> None:
     assert result is expected_result
 
 
+def test_create_stack_dispatcher_forwards_component_overrides() -> None:
+    """Dispatcher should forward advanced component overrides to stack helpers."""
+    spec = KubernetesStackSpec(
+        provider=CloudProvider.AWS,
+        artifact_store="s3://bucket/path",
+        container_registry="123456789.dkr.ecr.eu-west-1.amazonaws.com/my-repo",
+        cluster="demo-cluster",
+        region="eu-west-1",
+    )
+    overrides = StackComponentConfigOverrides(
+        orchestrator={"synchronous": False},
+        container_registry={"default_repository": "team-ml"},
+    )
+    expected_result = SimpleNamespace(name="kubernetes-result")
+
+    with patch(
+        "kitaru.config._create_kubernetes_stack_operation",
+        return_value=expected_result,
+    ) as mock_create_kubernetes:
+        result = _create_stack_operation(
+            "dev",
+            stack_type=StackType.KUBERNETES,
+            remote_spec=spec,
+            component_overrides=overrides,
+        )
+
+    mock_create_kubernetes.assert_called_once_with(
+        "dev",
+        spec=spec,
+        activate=True,
+        labels=None,
+        component_overrides=overrides,
+    )
+    assert result is expected_result
+
+
 def test_create_stack_dispatcher_routes_vertex_requests() -> None:
     """Dispatcher should pass Vertex requests through to the Vertex helper."""
     spec = VertexStackSpec(
@@ -1818,6 +1855,98 @@ def test_create_vertex_stack_operation_creates_gcp_stack_and_activates(
     }
 
 
+def test_create_vertex_stack_operation_merges_component_overrides() -> None:
+    """Vertex stack creation should merge advanced component overrides."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _vertex_stack_model(
+        stack_id="stack-vertex-id",
+        name="vertex-dev",
+        connector_name="vertex-dev-gcp",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    overrides = StackComponentConfigOverrides(
+        orchestrator={
+            "synchronous": False,
+            "pipeline_root": "gs://bucket/root",
+        },
+        container_registry={"default_repository": "team-ml"},
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _create_vertex_stack_operation(
+            "vertex-dev",
+            spec=spec,
+            activate=False,
+            component_overrides=overrides,
+        )
+
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    orchestrator = stack_request.components[StackComponentType.ORCHESTRATOR][0]
+    assert orchestrator.configuration == {
+        "location": "us-central1",
+        "synchronous": False,
+        "pipeline_root": "gs://bucket/root",
+    }
+    container_registry = stack_request.components[
+        StackComponentType.CONTAINER_REGISTRY
+    ][0]
+    assert container_registry.configuration == {
+        "uri": "us-central1-docker.pkg.dev/demo-project/demo-repo",
+        "default_repository": "team-ml",
+    }
+
+
+def test_create_vertex_stack_operation_rewrites_invalid_component_option() -> None:
+    """Invalid advanced component options should surface as KitaruUsageError."""
+    spec = VertexStackSpec(
+        artifact_store="gs://bucket/path",
+        container_registry="us-central1-docker.pkg.dev/demo-project/demo-repo",
+        region="us-central1",
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    invalid_key = "syn" + "cronous"
+    overrides = StackComponentConfigOverrides(orchestrator={invalid_key: False})
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruUsageError,
+            match=r"Invalid ZenML option for orchestrator",
+        ) as exc_info,
+    ):
+        _create_vertex_stack_operation(
+            "vertex-dev",
+            spec=spec,
+            component_overrides=overrides,
+        )
+
+    assert "Did you mean `synchronous`?" in str(exc_info.value)
+    assert "https://docs.zenml.io/stack-components/orchestrators/vertex" in str(
+        exc_info.value
+    )
+    client_mock.create_service_connector.assert_not_called()
+
+
 def test_create_sagemaker_stack_operation_creates_aws_stack_and_activates() -> None:
     """SageMaker create should build a one-shot AWS stack request and activate it."""
     spec = SagemakerStackSpec(
@@ -2016,12 +2145,12 @@ def test_create_azureml_stack_operation_creates_stack_and_skips_activation() -> 
     artifact_store = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
     assert artifact_store.flavor == "azure"
     assert artifact_store.configuration == {
-        "path": "abfss://container@demo.dfs.core.windows.net/kitaru/path"
+        "path": "abfs://container@demo.dfs.core.windows.net/kitaru/path"
     }
     assert artifact_store.service_connector_index == 0
     assert (
         artifact_store.service_connector_resource_id
-        == "abfss://container@demo.dfs.core.windows.net"
+        == "abfs://container@demo.dfs.core.windows.net"
     )
 
     container_registry = stack_request.components[
@@ -2515,6 +2644,43 @@ def test_create_stack_without_activation_keeps_previous_active_stack() -> None:
     assert result.stack_type == "local"
     assert result.service_connectors_created == ()
     assert result.resources is None
+
+
+def test_create_local_stack_operation_applies_component_overrides() -> None:
+    """Local stack creation should pass merged orchestrator/store overrides through."""
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _stack_model(
+        stack_id="stack-dev-id",
+        name="dev",
+        labels={"kitaru.managed": "true"},
+        orchestrator_id="orc-dev-id",
+        artifact_store_id="art-dev-id",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.create_stack_component.side_effect = [
+        SimpleNamespace(id="orc-dev-id"),
+        SimpleNamespace(id="art-dev-id"),
+    ]
+    client_mock.create_stack.return_value = created_stack
+    overrides = StackComponentConfigOverrides(
+        artifact_store={"path": "/tmp/kitaru-artifacts"},
+    )
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _create_stack_operation("dev", activate=False, component_overrides=overrides)
+
+    orchestrator_call = client_mock.create_stack_component.call_args_list[0]
+    assert orchestrator_call.kwargs["configuration"] == {}
+    artifact_store_call = client_mock.create_stack_component.call_args_list[1]
+    assert artifact_store_call.kwargs["configuration"] == {
+        "path": "/tmp/kitaru-artifacts"
+    }
 
 
 def test_create_stack_rejects_existing_stack_name() -> None:

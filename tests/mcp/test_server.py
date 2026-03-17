@@ -20,6 +20,7 @@ from kitaru.config import (
     CloudProvider,
     KubernetesStackSpec,
     SagemakerStackSpec,
+    StackComponentConfigOverrides,
     StackInfo,
     StackType,
     VertexStackSpec,
@@ -791,6 +792,8 @@ def test_manage_stack_delegates_request_building_to_shared_interface() -> None:
         execution_role=None,
         namespace=None,
         credentials=None,
+        extra=None,
+        async_mode=False,
         verify=True,
     )
     mock_create_stack.assert_called_once_with(
@@ -871,6 +874,8 @@ def test_manage_stack_delete_delegates_request_building_to_shared_interface() ->
         execution_role=None,
         namespace=None,
         credentials=None,
+        extra=None,
+        async_mode=False,
         verify=True,
     )
     mock_delete_stack.assert_called_once_with(
@@ -1092,6 +1097,66 @@ def test_manage_stack_create_kubernetes_normalizes_blank_optional_inputs() -> No
     assert kubernetes_spec.namespace == "default"
     assert kubernetes_spec.credentials is None
     assert kubernetes_spec.verify is True
+
+
+def test_manage_stack_create_vertex_passes_extra_and_async_overrides() -> None:
+    """MCP manage_stack(create) should pass structured component overrides."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-vertex-id", name="vertex-dev", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "vertex-dev (orchestrator)",
+                "vertex-dev (artifact_store)",
+                "vertex-dev (container_registry)",
+            ),
+            stack_type="vertex",
+            service_connectors_created=(),
+            resources=None,
+        )
+
+        manage_stack(
+            "create",
+            "vertex-dev",
+            stack_type="vertex",
+            artifact_store="gs://my-bucket/kitaru",
+            container_registry="us-central1-docker.pkg.dev/my-project/my-repo",
+            region="us-central1",
+            async_mode=True,
+            extra={
+                "orchestrator": {"pipeline_root": "gs://bucket/root"},
+                "container_registry": {"default_repository": "team-ml"},
+            },
+        )
+
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "pipeline_root": "gs://bucket/root",
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {"default_repository": "team-ml"},
+    }
+
+
+def test_manage_stack_create_async_mode_rejected_for_local() -> None:
+    """Local MCP stacks should reject the async convenience flag."""
+    with (
+        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
+        pytest.raises(
+            ValueError,
+            match=(
+                r"`async_mode` requires `stack_type=\"kubernetes\"`, "
+                r"`stack_type=\"vertex\"`, `stack_type=\"sagemaker\"`, or "
+                r"`stack_type=\"azureml\"`\."
+            ),
+        ),
+    ):
+        manage_stack("create", "dev", async_mode=True)
+
+    mock_create_stack.assert_not_called()
 
 
 def test_manage_stack_create_vertex_dispatches_structured_spec() -> None:
@@ -1611,6 +1676,8 @@ def test_manage_stack_create_kubernetes_rejects_unknown_provider() -> None:
         {"resource_group": "rg-demo"},
         {"workspace": "ws-demo"},
         {"execution_role": "arn:aws:iam::123456789012:role/SageMakerRole"},
+        {"extra": {"orchestrator": {"synchronous": False}}},
+        {"async_mode": True},
         {"verify": False},
     ],
 )

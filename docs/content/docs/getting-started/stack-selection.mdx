@@ -136,6 +136,69 @@ kitaru stack create -f stack.yaml
 
 CLI flags still override YAML values when both are provided.
 
+## Advanced stack defaults with `--extra` and `--async`
+
+The named stack flags cover the common story: where artifacts live, which registry to use, which cluster or cloud region to target.
+
+Sometimes you need one layer deeper. That is what `--extra` is for.
+
+Think of it like this:
+
+- the named flags are the front desk
+- `--extra` is the side door into the underlying stack component defaults
+
+You pass overrides as `TARGET.FIELD=VALUE`, where `TARGET` is one of:
+
+- `orchestrator`
+- `artifact_store`
+- `container_registry`
+
+For example, this Vertex stack sets a pipeline root and leaves the orchestrator asynchronous by default:
+
+```bash
+kitaru stack create prod-vertex \
+  --type vertex \
+  --artifact-store gs://my-bucket/kitaru \
+  --container-registry us-central1-docker.pkg.dev/my-project/my-repo \
+  --region us-central1 \
+  --async \
+  --extra orchestrator.pipeline_root=gs://my-bucket/vertex-root
+```
+
+`--async` is just a convenience flag for the common case `orchestrator.synchronous=false`.
+
+If you need the explicit setting instead, `--extra` wins:
+
+```bash
+kitaru stack create prod-vertex \
+  --type vertex \
+  --artifact-store gs://my-bucket/kitaru \
+  --container-registry us-central1-docker.pkg.dev/my-project/my-repo \
+  --region us-central1 \
+  --async \
+  --extra orchestrator.synchronous=true
+```
+
+You can also keep the same advanced defaults in YAML:
+
+```yaml
+name: prod-vertex
+type: vertex
+artifact_store: gs://my-bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/my-project/my-repo
+region: us-central1
+async: true
+extra:
+  orchestrator:
+    pipeline_root: gs://my-bucket/vertex-root
+  container_registry:
+    default_repository: agents
+```
+
+CLI `--extra` values merge on top of YAML `extra:` values instead of replacing the whole object. In story form: the YAML file is your saved blueprint, and the CLI extras are the sticky notes you add for this one build.
+
+Kitaru does not try to duplicate every underlying field in its own docs. For full field inventories, use the ZenML component reference pages linked from the stack component docs.
+
 ## Switch to another stack
 
 ```bash

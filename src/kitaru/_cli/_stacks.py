@@ -13,7 +13,11 @@ from zenml.utils import yaml_utils
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru._interface_stacks import (
     CLI_STACK_OPTION_LABELS,
+    StackComponentConfigOverrides,
+    merge_component_overrides,
+    normalize_component_overrides_mapping,
     normalize_optional_stack_string,
+    parse_cli_component_overrides,
 )
 from kitaru._interface_stacks import (
     build_stack_create_request as _build_shared_stack_create_request,
@@ -58,6 +62,8 @@ class _StackCreateInputs:
     namespace: str | None = None
     credentials: str | None = None
     verify: bool | None = None
+    component_overrides: StackComponentConfigOverrides | None = None
+    async_mode: bool | None = None
 
 
 _STACK_CREATE_FILE_KEY_ALIASES = {
@@ -66,6 +72,8 @@ _STACK_CREATE_FILE_KEY_ALIASES = {
     "subscription-id": "subscription_id",
     "resource-group": "resource_group",
     "execution-role": "execution_role",
+    "extra": "component_overrides",
+    "async": "async_mode",
 }
 _STACK_CREATE_FILE_SUPPORTED_KEYS = {
     "name",
@@ -87,6 +95,8 @@ _STACK_CREATE_FILE_SUPPORTED_KEYS = {
     "namespace",
     "credentials",
     "verify",
+    "extra",
+    "async",
 }
 _STACK_CREATE_FILE_STRING_KEYS = {
     "name",
@@ -105,6 +115,7 @@ _STACK_CREATE_FILE_STRING_KEYS = {
 _STACK_CREATE_FILE_BOOLEAN_KEYS = {
     "activate",
     "verify",
+    "async_mode",
 }
 
 
@@ -144,6 +155,16 @@ def _normalize_stack_create_file_mapping(
             if value is not None and not isinstance(value, str):
                 raise ValueError(
                     f"Stack config key '{raw_key}' in '{source}' must be a string."
+                )
+        elif canonical_key == "component_overrides":
+            if value is not None and not isinstance(value, dict):
+                raise ValueError(
+                    f"Stack config key '{raw_key}' in '{source}' must be an object."
+                )
+            if value is not None:
+                value = normalize_component_overrides_mapping(
+                    value,
+                    labels=CLI_STACK_OPTION_LABELS,
                 )
         elif (
             canonical_key in _STACK_CREATE_FILE_BOOLEAN_KEYS
@@ -186,14 +207,19 @@ def _merge_stack_create_inputs(
 ) -> _StackCreateInputs:
     """Merge CLI and YAML stack-create inputs with CLI precedence."""
     file_inputs = file_inputs or _StackCreateInputs()
-    merged = {
-        field.name: (
-            cli_val
-            if (cli_val := getattr(cli_inputs, field.name)) is not None
-            else getattr(file_inputs, field.name)
+    merged: dict[str, Any] = {}
+    for field in dataclasses.fields(_StackCreateInputs):
+        if field.name == "component_overrides":
+            merged[field.name] = merge_component_overrides(
+                file_inputs.component_overrides,
+                cli_inputs.component_overrides,
+            )
+            continue
+
+        cli_value = getattr(cli_inputs, field.name)
+        merged[field.name] = (
+            cli_value if cli_value is not None else getattr(file_inputs, field.name)
         )
-        for field in dataclasses.fields(_StackCreateInputs)
-    }
     return _StackCreateInputs(**merged)
 
 
@@ -531,6 +557,28 @@ def create(
             )
         ),
     ] = None,
+    extra: Annotated[
+        list[str] | None,
+        Parameter(
+            name=["--extra"],
+            help=(
+                "Advanced component defaults as TARGET.FIELD=VALUE. "
+                "Valid targets: orchestrator, artifact_store, container_registry. "
+                "VALUE uses YAML parsing, so booleans, numbers, lists, and objects "
+                "are accepted."
+            ),
+        ),
+    ] = None,
+    async_mode: Annotated[
+        bool | None,
+        Parameter(
+            name=["--async"],
+            help=(
+                "Run remote stacks asynchronously by default "
+                "(equivalent to `--extra orchestrator.synchronous=false`)."
+            ),
+        ),
+    ] = None,
     no_verify: Annotated[
         bool | None,
         Parameter(
@@ -563,6 +611,13 @@ def create(
                 execution_role=execution_role,
                 namespace=namespace,
                 credentials=credentials,
+                component_overrides=parse_cli_component_overrides(
+                    extra,
+                    labels=CLI_STACK_OPTION_LABELS,
+                )
+                if extra
+                else None,
+                async_mode=async_mode,
                 verify=False if no_verify else None,
             ),
             file_inputs=file_inputs,
@@ -592,14 +647,18 @@ def create(
             namespace=merged_inputs.namespace,
             credentials=merged_inputs.credentials,
             verify=merged_inputs.verify if merged_inputs.verify is not None else True,
+            component_overrides=merged_inputs.component_overrides,
+            async_enabled=merged_inputs.async_mode is True,
             labels=CLI_STACK_OPTION_LABELS,
         )
-        return _facade_module()._create_stack_operation(
-            request.name,
-            stack_type=request.stack_type,
-            activate=request.activate,
-            remote_spec=request.remote_spec,
-        )
+        create_kwargs: dict[str, Any] = {
+            "stack_type": request.stack_type,
+            "activate": request.activate,
+            "remote_spec": request.remote_spec,
+        }
+        if not request.component_overrides.is_empty():
+            create_kwargs["component_overrides"] = request.component_overrides
+        return _facade_module()._create_stack_operation(request.name, **create_kwargs)
 
     result = run_with_cli_error_boundary(
         _create_stack,

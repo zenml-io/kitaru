@@ -26,6 +26,7 @@ from kitaru.config import (
     AzureMLStackSpec,
     KubernetesStackSpec,
     SagemakerStackSpec,
+    StackComponentConfigOverrides,
     StackType,
     VertexStackSpec,
 )
@@ -2846,6 +2847,153 @@ activate: false
     }
 
 
+def test_stack_create_vertex_passes_extra_and_async_overrides() -> None:
+    """Advanced CLI stack-create flags should pass merged component overrides."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--extra",
+                "orchestrator.pipeline_root=gs://bucket/root",
+                "--extra",
+                "container_registry.default_repository=my-team",
+                "--async",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "pipeline_root": "gs://bucket/root",
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {"default_repository": "my-team"},
+    }
+
+
+def test_stack_create_extra_beats_async_default() -> None:
+    """Explicit `--extra orchestrator.synchronous=...` should beat `--async`."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="my-vertex",
+            stack_type="vertex",
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--extra",
+                "orchestrator.synchronous=true",
+                "--async",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.orchestrator == {"synchronous": True}
+
+
+def test_stack_create_local_rejects_async_flag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--async` should only be valid for remote stack types."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--async"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "--async requires --type kubernetes, --type vertex, "
+        "--type sagemaker, or --type azureml."
+    ) in capsys.readouterr().err
+
+
+def test_stack_create_merges_yaml_and_cli_component_overrides(tmp_path: Path) -> None:
+    """YAML `extra:` config should merge with repeatable CLI `--extra` flags."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-vertex
+type: vertex
+artifact_store: gs://bucket/kitaru
+container_registry: us-central1-docker.pkg.dev/demo/repo
+region: us-central1
+async: true
+extra:
+  orchestrator:
+    pipeline_root: gs://bucket/root
+  container_registry:
+    default_repository: from-yaml
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-vertex",
+            stack_type="vertex",
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "-f",
+                str(stack_file),
+                "--extra",
+                "orchestrator.custom_job_parameters.machine_type=n1-standard-4",
+                "--extra",
+                "container_registry.default_repository=from-cli",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    overrides = mock_create_stack.call_args.kwargs["component_overrides"]
+    assert isinstance(overrides, StackComponentConfigOverrides)
+    assert overrides.model_dump() == {
+        "orchestrator": {
+            "pipeline_root": "gs://bucket/root",
+            "custom_job_parameters": {"machine_type": "n1-standard-4"},
+            "synchronous": False,
+        },
+        "artifact_store": {},
+        "container_registry": {"default_repository": "from-cli"},
+    }
+
+
 def test_stack_create_kubernetes_text_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -3601,6 +3749,44 @@ unexpected: true
 
     assert exc_info.value.code == 1
     assert "Unsupported stack config keys" in capsys.readouterr().err
+
+
+def test_stack_create_rejects_malformed_extra_json_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed `--extra` assignments should use the structured JSON error path."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "stack",
+                "create",
+                "my-vertex",
+                "--type",
+                "vertex",
+                "--artifact-store",
+                "gs://bucket/kitaru",
+                "--container-registry",
+                "us-central1-docker.pkg.dev/demo/repo",
+                "--region",
+                "us-central1",
+                "--extra",
+                "orchestrator",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload == {
+        "command": "stack.create",
+        "error": {
+            "message": (
+                "Invalid --extra value 'orchestrator'. Use TARGET.FIELD=VALUE."
+            ),
+            "type": "ValueError",
+        },
+    }
 
 
 def test_stack_create_from_file_rejects_non_string_keys(
