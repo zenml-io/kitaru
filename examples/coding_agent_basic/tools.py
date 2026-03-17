@@ -5,10 +5,15 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
 from urllib.parse import urlparse
+
+from zenml.types import HTMLString, JSONString, MarkdownString
 
 _MAX_CHARS = 12_000
 _READ_LIMIT = 400
+
+ToolResult = str | HTMLString | MarkdownString | JSONString
 
 
 def _truncate(text: str, max_chars: int = _MAX_CHARS) -> str:
@@ -31,61 +36,61 @@ def _resolve(cwd: str, path: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def read_file(cwd: str, path: str, offset: int = 0, limit: int = _READ_LIMIT) -> str:
+def read_file(cwd: str, path: str, offset: int = 0, limit: int = _READ_LIMIT) -> MarkdownString:
     """Read a file with line numbers."""
     target = _resolve(cwd, path)
     try:
         lines = target.read_text().splitlines()
     except FileNotFoundError:
-        return f"Error: file not found: {path}"
+        return MarkdownString(f"Error: file not found: {path}")
     except Exception as e:
-        return f"Error reading {path}: {e}"
+        return MarkdownString(f"Error reading {path}: {e}")
 
     selected = lines[offset : offset + limit]
     numbered = [f"{i + offset + 1:>6}\t{line}" for i, line in enumerate(selected)]
     result = "\n".join(numbered)
     if len(lines) > offset + limit:
         result += f"\n... [showing lines {offset + 1}-{offset + len(selected)} of {len(lines)}]"
-    return _truncate(result)
+    return MarkdownString(_truncate(result))
 
 
-def write_file(cwd: str, path: str, content: str) -> str:
+def write_file(cwd: str, path: str, content: str) -> JSONString:
     """Write content to a file."""
     target = _resolve(cwd, path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
-    return f"Wrote {len(content)} chars to {path}"
+    return JSONString(f'{{"path": "{path}", "chars": {len(content)}}}')
 
 
-def edit_file(cwd: str, path: str, old: str, new: str) -> str:
+def edit_file(cwd: str, path: str, old: str, new: str) -> JSONString:
     """Replace a single exact occurrence of old with new."""
     target = _resolve(cwd, path)
     try:
         text = target.read_text()
     except FileNotFoundError:
-        return f"Error: file not found: {path}"
+        return JSONString(f'{{"error": "file not found: {path}"}}')
 
     count = text.count(old)
     if count == 0:
-        return f"Error: old string not found in {path}"
+        return JSONString(f'{{"error": "old string not found in {path}"}}')
     if count > 1:
-        return f"Error: old string appears {count} times in {path} (expected exactly 1)"
+        return JSONString(f'{{"error": "old string appears {count} times in {path} (expected exactly 1)"}}')
 
     target.write_text(text.replace(old, new, 1))
-    return f"Edited {path}"
+    return JSONString(f'{{"path": "{path}", "status": "edited"}}')
 
 
-def list_files(cwd: str, pattern: str) -> str:
+def list_files(cwd: str, pattern: str) -> MarkdownString:
     """List files matching a glob pattern."""
     base = Path(cwd).resolve()
     matches = sorted(base.glob(pattern))[:500]
     relative = [str(m.relative_to(base)) for m in matches if m.is_file()]
     if not relative:
-        return f"No files matching: {pattern}"
-    return "\n".join(relative)
+        return MarkdownString(f"No files matching: {pattern}")
+    return MarkdownString("\n".join(relative))
 
 
-def search_files(cwd: str, pattern: str, glob: str = "**/*") -> str:
+def search_files(cwd: str, pattern: str, glob: str = "**/*") -> MarkdownString:
     """Search file contents for a pattern using grep."""
     base = Path(cwd).resolve()
     try:
@@ -96,12 +101,12 @@ def search_files(cwd: str, pattern: str, glob: str = "**/*") -> str:
             timeout=30,
         )
     except subprocess.TimeoutExpired:
-        return "Error: search timed out after 30s"
+        return MarkdownString("Error: search timed out after 30s")
     output = result.stdout.replace(str(base) + "/", "")
-    return _truncate(output) if output else f"No matches for: {pattern}"
+    return MarkdownString(_truncate(output) if output else f"No matches for: {pattern}")
 
 
-def run_command(cwd: str, command: str, timeout: int = 30) -> str:
+def run_command(cwd: str, command: str, timeout: int = 30) -> MarkdownString:
     """Run a shell command in the working directory."""
     base = Path(cwd).resolve()
     try:
@@ -114,12 +119,12 @@ def run_command(cwd: str, command: str, timeout: int = 30) -> str:
             cwd=str(base),
         )
     except subprocess.TimeoutExpired:
-        return f"Error: command timed out after {timeout}s"
+        return MarkdownString(f"Error: command timed out after {timeout}s")
     except Exception as e:
-        return f"Error executing command: {e}"
+        return MarkdownString(f"Error executing command: {e}")
 
     output = result.stdout + result.stderr
-    return _truncate(f"Exit code: {result.returncode}\n{output}")
+    return MarkdownString(_truncate(f"Exit code: {result.returncode}\n{output}"))
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +132,7 @@ def run_command(cwd: str, command: str, timeout: int = 30) -> str:
 # ---------------------------------------------------------------------------
 
 
-def python_exec(cwd: str, code: str, timeout: int = 60) -> str:
+def python_exec(cwd: str, code: str, timeout: int = 60) -> MarkdownString:
     """Execute a Python script via ``uv run`` and return stdout + stderr.
 
     If the script needs third-party packages, include PEP 723 inline
@@ -141,8 +146,6 @@ def python_exec(cwd: str, code: str, timeout: int = 60) -> str:
     cached ephemeral environment — no manual pip install needed.
     """
     base = Path(cwd).resolve()
-    # Write temp file to /tmp (always exists) — cwd may not be writable
-    # or may not exist in containerized environments.
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", delete=False
     ) as f:
@@ -158,14 +161,14 @@ def python_exec(cwd: str, code: str, timeout: int = 60) -> str:
             cwd=str(base) if base.is_dir() else None,
         )
     except subprocess.TimeoutExpired:
-        return f"Error: script timed out after {timeout}s"
+        return MarkdownString(f"Error: script timed out after {timeout}s")
     except Exception as e:
-        return f"Error executing script: {e}"
+        return MarkdownString(f"Error executing script: {e}")
     finally:
         Path(script_path).unlink(missing_ok=True)
 
     output = result.stdout + result.stderr
-    return _truncate(f"Exit code: {result.returncode}\n{output}")
+    return MarkdownString(_truncate(f"Exit code: {result.returncode}\n{output}"))
 
 
 # ---------------------------------------------------------------------------
@@ -175,11 +178,11 @@ def python_exec(cwd: str, code: str, timeout: int = 60) -> str:
 _ALLOWED_SCHEMES = {"http", "https"}
 
 
-def web_fetch(cwd: str, url: str, max_chars: int = _MAX_CHARS) -> str:
+def web_fetch(cwd: str, url: str, max_chars: int = _MAX_CHARS) -> HTMLString:
     """Fetch a URL and return its text content."""
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
-        return f"Error: only http/https URLs are supported, got {parsed.scheme!r}"
+        return HTMLString(f"Error: only http/https URLs are supported, got {parsed.scheme!r}")
 
     try:
         result = subprocess.run(
@@ -189,18 +192,22 @@ def web_fetch(cwd: str, url: str, max_chars: int = _MAX_CHARS) -> str:
             timeout=20,
         )
     except subprocess.TimeoutExpired:
-        return "Error: fetch timed out"
+        return HTMLString("Error: fetch timed out")
     except Exception as e:
-        return f"Error fetching URL: {e}"
+        return HTMLString(f"Error fetching URL: {e}")
 
     if result.returncode != 0:
-        return f"Error: curl exited with code {result.returncode}\n{result.stderr}"
-    return _truncate(result.stdout, max_chars)
+        return HTMLString(f"Error: curl exited with code {result.returncode}\n{result.stderr}")
+    return HTMLString(_truncate(result.stdout, max_chars))
 
 
-def web_search(cwd: str, query: str) -> str:
+def web_search(cwd: str, query: str) -> MarkdownString:
     """Search the web using a text query (via DuckDuckGo HTML)."""
-    search_url = f"https://html.duckduckgo.com/html/?q={query}"
+    import re
+
+    from urllib.parse import quote_plus
+
+    search_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
     try:
         result = subprocess.run(
             [
@@ -213,15 +220,12 @@ def web_search(cwd: str, query: str) -> str:
             timeout=20,
         )
     except subprocess.TimeoutExpired:
-        return "Error: search timed out"
+        return MarkdownString("Error: search timed out")
     except Exception as e:
-        return f"Error searching: {e}"
+        return MarkdownString(f"Error searching: {e}")
 
     if result.returncode != 0:
-        return f"Error: curl exited with code {result.returncode}"
-
-    # Extract result snippets from DuckDuckGo HTML
-    import re
+        return MarkdownString(f"Error: curl exited with code {result.returncode}")
 
     links = re.findall(
         r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
@@ -234,7 +238,7 @@ def web_search(cwd: str, query: str) -> str:
     )
 
     if not links:
-        return "No search results found."
+        return MarkdownString("No search results found.")
 
     results: list[str] = []
     for i, (href, title) in enumerate(links[:10]):
@@ -244,14 +248,14 @@ def web_search(cwd: str, query: str) -> str:
             snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
         results.append(f"{i + 1}. {title_clean}\n   {href}\n   {snippet}")
 
-    return "\n\n".join(results)
+    return MarkdownString("\n\n".join(results))
 
 
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
-_TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
+_TOOL_FUNCTIONS: dict[str, Callable[..., ToolResult]] = {
     "read_file": read_file,
     "write_file": write_file,
     "edit_file": edit_file,
@@ -264,7 +268,7 @@ _TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
 }
 
 
-def dispatch_tool(cwd: str, name: str, arguments: dict[str, Any]) -> str:
+def dispatch_tool(cwd: str, name: str, arguments: dict[str, Any]) -> ToolResult:
     """Execute a tool by name."""
     func = _TOOL_FUNCTIONS.get(name)
     if func is None:
