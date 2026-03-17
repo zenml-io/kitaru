@@ -19,7 +19,10 @@ from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
 from zenml.steps.step_decorator import step
 
-from kitaru._source_aliases import build_checkpoint_source_alias
+from kitaru._source_aliases import (
+    build_checkpoint_registration_name,
+    build_checkpoint_source_alias,
+)
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.runtime import (
     _checkpoint_scope,
@@ -40,6 +43,12 @@ _CHECKPOINT_NESTED_ERROR = (
 _CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR = (
     "Concurrent checkpoint execution is only available inside a running @flow."
 )
+
+
+def _checkpoint_registration_name(func: Callable[..., Any]) -> str:
+    """Build the plain ZenML step name for a checkpoint function."""
+    checkpoint_name = getattr(func, "__name__", func.__class__.__name__)
+    return build_checkpoint_registration_name(checkpoint_name)
 
 
 def _checkpoint_source_alias_name(func: Callable[..., Any]) -> str:
@@ -152,12 +161,14 @@ class _CheckpointDefinition:
             func,
             checkpoint_type=checkpoint_type,
         )
+        registration_name = _checkpoint_registration_name(func)
         source_alias = _checkpoint_source_alias_name(func)
         aliasable_entrypoint = cast(Any, wrapped_entrypoint)
         aliasable_entrypoint.__name__ = source_alias
         aliasable_entrypoint.__qualname__ = source_alias
 
         self._step = step(
+            name=registration_name,
             retry=_to_retry_config(self._default_retries),
             extra=_build_checkpoint_extra(checkpoint_type),
             step_type=_to_step_type(checkpoint_type),

@@ -116,7 +116,7 @@ def test_flow_decorator_creates_wrapper_with_run_and_deploy() -> None:
         wrapped = flow(lambda x: x)
         handle = wrapped.run(123)
 
-    pipeline_mock.assert_called_once_with(dynamic=True)
+    pipeline_mock.assert_called_once_with(dynamic=True, name="_lambda_")
     assert hasattr(wrapped, "run")
     assert hasattr(wrapped, "deploy")
     assert not hasattr(wrapped, "start")

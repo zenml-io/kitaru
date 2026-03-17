@@ -23,7 +23,10 @@ from zenml.models import PipelineRunResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
-from kitaru._source_aliases import build_pipeline_source_alias
+from kitaru._source_aliases import (
+    build_pipeline_registration_name,
+    build_pipeline_source_alias,
+)
 from kitaru.config import (
     ImageInput,
     ImageSettings,
@@ -71,6 +74,12 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
             yield
         finally:
             client.activate_stack(old_stack_id)
+
+
+def _pipeline_registration_name(func: Callable[..., Any]) -> str:
+    """Build the plain ZenML pipeline name for a flow function."""
+    flow_name = getattr(func, "__name__", func.__class__.__name__)
+    return build_pipeline_registration_name(flow_name)
 
 
 def _pipeline_source_alias_name(func: Callable[..., Any]) -> str:
@@ -429,12 +438,16 @@ class _FlowDefinition:
         )
 
         wrapped_entrypoint = _wrap_flow_entrypoint(func)
+        registration_name = _pipeline_registration_name(func)
         source_alias = _pipeline_source_alias_name(func)
         aliasable_entrypoint = cast(Any, wrapped_entrypoint)
         aliasable_entrypoint.__name__ = source_alias
         aliasable_entrypoint.__qualname__ = source_alias
 
-        self._pipeline: Pipeline = pipeline(dynamic=True)(wrapped_entrypoint)
+        self._pipeline: Pipeline = pipeline(
+            dynamic=True,
+            name=registration_name,
+        )(wrapped_entrypoint)
         _register_pipeline_source_alias(
             func=func,
             alias=source_alias,

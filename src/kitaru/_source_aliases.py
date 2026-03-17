@@ -1,11 +1,15 @@
-"""Shared Kitaru source-alias constants and normalization helpers.
+"""Shared Kitaru source-alias constants and naming helpers.
 
-Kitaru wraps ZenML pipelines and steps under internal alias names so that
-ZenML's source-resolution mechanism can reload them.  The alias prefixes and
-the corresponding cleanup logic are needed across the SDK (flow registration,
-checkpoint registration, runtime scoping, client mapping, replay planning,
-artifact lookup, and terminal log rewriting), so they live here as the single
-source of truth.
+Kitaru registers two distinct names for each flow/checkpoint with ZenML:
+
+1. **Registration name** — the plain, user-facing name passed to ZenML via
+   ``pipeline(name=...)`` / ``step(name=...)``.  This is what appears in the
+   ZenML UI, API responses, and stored run metadata.
+
+2. **Source alias** — an internal prefixed name (``__kitaru_pipeline_source_*``
+   / ``__kitaru_checkpoint_source_*``) used as a module-level attribute so that
+   ZenML's source-resolution mechanism can reload the underlying ``Pipeline`` /
+   step object.  This name is never user-facing.
 
 This module is internal — it is not part of the public API surface.
 """
@@ -32,6 +36,16 @@ def _normalize_callable_name(raw_name: str, *, fallback: str) -> str:
     if normalized[0].isdigit():
         normalized = f"{fallback}_{normalized}"
     return normalized
+
+
+def build_pipeline_registration_name(name: str) -> str:
+    """Build the plain ZenML pipeline name for a flow function."""
+    return _normalize_callable_name(name, fallback="flow")
+
+
+def build_checkpoint_registration_name(name: str) -> str:
+    """Build the plain ZenML step name for a checkpoint function."""
+    return _normalize_callable_name(name, fallback="checkpoint")
 
 
 def build_pipeline_source_alias(name: str) -> str:

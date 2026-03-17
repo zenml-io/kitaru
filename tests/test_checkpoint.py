@@ -73,10 +73,12 @@ def _build_checkpoint(
 
     def _fake_step(
         *,
+        name: str | None = None,
         retry: StepRetryConfig | None,
         extra: dict[str, Any],
         step_type: StepType | None = None,
     ) -> Any:
+        captured["name"] = name
         captured["retry"] = retry
         captured["extra"] = extra
         captured["step_type"] = step_type
@@ -169,6 +171,14 @@ def test_none_type_produces_no_step_type() -> None:
     _, captured = _build_checkpoint(lambda: "ok", checkpoint_type=None)
     assert captured["step_type"] is None
     assert "type" not in captured["extra"]["kitaru"]
+
+
+def test_checkpoint_passes_plain_name_to_zenml_step() -> None:
+    def my_example_checkpoint(value: int) -> int:
+        return value
+
+    _, captured = _build_checkpoint(my_example_checkpoint)
+    assert captured["name"] == "my_example_checkpoint"
 
 
 def test_checkpoint_registers_source_alias_for_step_reload() -> None:
@@ -305,7 +315,7 @@ def test_checkpoint_runtime_scope_is_set_while_user_code_runs() -> None:
     fake_step_context = SimpleNamespace(
         pipeline_run=SimpleNamespace(
             id="exec-123",
-            pipeline=SimpleNamespace(name="__kitaru_pipeline_source_my_flow"),
+            pipeline=SimpleNamespace(name="my_flow"),
         ),
         step_run=SimpleNamespace(id="checkpoint-456"),
     )

@@ -228,13 +228,13 @@ def test_get_maps_execution_details() -> None:
         metadata={"kitaru_artifact_type": "context"},
     )
     step = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={"research_context": [artifact]},
     )
     run = _DummyRun(
         status=ZenMLExecutionStatus.COMPLETED,
-        flow_name="__kitaru_pipeline_source_content_flow",
+        flow_name="content_flow",
         run_metadata={"kitaru_execution_spec": frozen},
         steps={step.name: step},
     )
@@ -273,13 +273,13 @@ def test_get_maps_execution_details() -> None:
 
 def test_get_surfaces_checkpoint_attempt_history() -> None:
     attempt_one = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.RETRIED,
         outputs={},
         exception_traceback="Traceback\nValueError: boom",
     )
     attempt_two = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
         original_step_run_id=attempt_one.id,
@@ -345,7 +345,7 @@ def test_get_surfaces_execution_failure_origin() -> None:
 
 def test_get_degrades_when_attempt_history_lookup_fails() -> None:
     step = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
@@ -865,7 +865,7 @@ def test_resume_rejects_non_paused_execution() -> None:
 def test_replay_delegates_to_flow_wrapper_when_available() -> None:
     source_run = _DummyRun(
         status=ZenMLExecutionStatus.COMPLETED,
-        flow_name="__kitaru_pipeline_source_sample_flow",
+        flow_name="sample_flow",
         snapshot=SimpleNamespace(
             pipeline_spec=SimpleNamespace(
                 source=_snapshot_source(
@@ -920,7 +920,7 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
 
 def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     fetch_step = _DummyStep(
-        name="__kitaru_checkpoint_source_fetch",
+        name="fetch",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={"output": []},
     )
@@ -931,7 +931,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     )
 
     write_step = _DummyStep(
-        name="__kitaru_checkpoint_source_write",
+        name="write",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={"output": []},
     )
@@ -943,7 +943,7 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
 
     source_run = _DummyRun(
         status=ZenMLExecutionStatus.COMPLETED,
-        flow_name="__kitaru_pipeline_source_sample_flow",
+        flow_name="sample_flow",
         steps={fetch_step.name: fetch_step, write_step.name: write_step},
         snapshot=SimpleNamespace(
             pipeline_spec=SimpleNamespace(
@@ -1019,7 +1019,7 @@ def test_artifact_get_maps_producing_call_and_loads_value() -> None:
         client_mock.get_artifact_version.return_value = _as_artifact(artifact)
         client_mock.get_run_step.return_value = _as_step_run(
             _DummyStep(
-                name="__kitaru_checkpoint_source_writer",
+                name="writer",
                 status=ZenMLExecutionStatus.COMPLETED,
                 outputs={},
                 step_id=step_id,
@@ -1038,12 +1038,12 @@ def test_artifact_get_maps_producing_call_and_loads_value() -> None:
 
 def test_logs_merges_step_entries_in_timestamp_order() -> None:
     step_research = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
     step_write = _DummyStep(
-        name="__kitaru_checkpoint_source_write",
+        name="write",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
@@ -1116,12 +1116,12 @@ def test_logs_merges_step_entries_in_timestamp_order() -> None:
 
 def test_logs_filters_by_checkpoint_name() -> None:
     step_research = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
     step_write = _DummyStep(
-        name="__kitaru_checkpoint_source_write",
+        name="write",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
@@ -1221,12 +1221,12 @@ def test_logs_rejects_checkpoint_with_runner_source() -> None:
 
 def test_logs_early_stops_when_limit_is_reached() -> None:
     first_step = _DummyStep(
-        name="__kitaru_checkpoint_source_first",
+        name="first",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
     second_step = _DummyStep(
-        name="__kitaru_checkpoint_source_second",
+        name="second",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
@@ -1273,7 +1273,7 @@ def test_logs_early_stops_when_limit_is_reached() -> None:
 
 def test_logs_require_server_backed_connection() -> None:
     step = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
@@ -1301,7 +1301,7 @@ def test_logs_require_server_backed_connection() -> None:
 
 def test_logs_map_otel_retrieval_errors_to_kitaru_error() -> None:
     step = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
@@ -1342,7 +1342,7 @@ def test_logs_map_otel_retrieval_errors_to_kitaru_error() -> None:
 
 def test_logs_return_empty_list_when_backend_reports_no_entries() -> None:
     step = _DummyStep(
-        name="__kitaru_checkpoint_source_research",
+        name="research",
         status=ZenMLExecutionStatus.COMPLETED,
         outputs={},
     )
