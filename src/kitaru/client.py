@@ -59,8 +59,6 @@ from kitaru._client._mappers import (
     _map_execution,
     _map_failure_info,
     _map_pending_wait,
-    _normalize_checkpoint_name,
-    _normalize_flow_name,
     _parse_frozen_execution_spec,
     _select_pending_wait_condition,
     _to_plain_dict,
@@ -76,6 +74,10 @@ from kitaru._client._models import (
     LogEntry,
     PendingWait,
 )
+from kitaru._source_aliases import (
+    normalize_checkpoint_name as _normalize_checkpoint_name,
+)
+from kitaru._source_aliases import normalize_flow_name as _normalize_flow_name
 from kitaru.config import (
     active_stack_log_store,
     resolve_connection_config,

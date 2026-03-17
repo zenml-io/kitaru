@@ -35,6 +35,9 @@ from zenml.models import PipelineRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 
 from kitaru._scope import _parse_scope_uuid
+from kitaru._source_aliases import (
+    normalize_checkpoint_name as _normalize_checkpoint_name,
+)
 from kitaru.errors import (
     KitaruContextError,
     KitaruRuntimeError,
@@ -55,7 +58,6 @@ _ALLOWED_ARTIFACT_TYPES = {
     "output",
     "blob",
 }
-_CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
 
 
 @dataclass(frozen=True)
@@ -126,9 +128,7 @@ def _normalize_artifact_type(artifact_type: str) -> str:
 
 def _normalize_step_name(step_name: str) -> str:
     """Normalize ZenML step names back to user-facing checkpoint names."""
-    if step_name.startswith(_CHECKPOINT_SOURCE_ALIAS_PREFIX):
-        return step_name.removeprefix(_CHECKPOINT_SOURCE_ALIAS_PREFIX)
-    return step_name
+    return _normalize_checkpoint_name(step_name)
 
 
 def _matches_requested_name(

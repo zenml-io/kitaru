@@ -67,9 +67,9 @@ def _step_log_fetch_order_key(step: StepRunResponse) -> tuple[float, str, str]:
             start_time = start_time.replace(tzinfo=UTC)
         start_key = start_time.timestamp()
 
-    from kitaru._client._mappers import _normalize_checkpoint_name
+    from kitaru._source_aliases import normalize_checkpoint_name
 
-    return (start_key, _normalize_checkpoint_name(step.name), str(step.id))
+    return (start_key, normalize_checkpoint_name(step.name), str(step.id))
 
 
 def _coerce_log_level(value: Any) -> str | None:
