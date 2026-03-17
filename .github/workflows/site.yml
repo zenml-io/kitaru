@@ -97,7 +97,7 @@ jobs:
       # --- Sticky PR comment with preview URL ---
       - name: Comment preview URL
         if: steps.preview.outcome == 'success'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: site-preview
           message: |
