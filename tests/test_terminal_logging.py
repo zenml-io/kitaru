@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Iterator
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ from kitaru._terminal_logging import (
     _TerminalDecision,
     install_terminal_log_intercept,
 )
+from kitaru.config import KITARU_MACHINE_MODE_ENV
 
 
 def _make_record(
@@ -368,6 +370,66 @@ class TestLogRecordImmutability:
         assert record.msg == original_msg
         assert record.args == original_args
         assert record.name == original_name
+
+
+class TestMachineModeHandler:
+    """Machine mode should suppress ANSI formatting and emit tracebacks."""
+
+    def test_machine_mode_resolves_from_environment_on_tty(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(KITARU_MACHINE_MODE_ENV, "true")
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+
+        handler = _KitaruTerminalHandler()
+
+        assert handler._interactive is True
+        assert handler._machine_mode is True
+
+    def test_machine_mode_renders_plain_text_even_on_tty(self) -> None:
+        record = _make_record(
+            "zenml.execution.pipeline.dynamic.runner",
+            "Pipeline completed successfully.",
+        )
+        rendered: list[str] = []
+
+        handler = _KitaruTerminalHandler()
+        handler._interactive = True
+        handler._machine_mode = True
+        handler._write = rendered.append
+
+        handler.emit(record)
+
+        joined = "".join(rendered)
+        assert "\x1b[" not in joined
+        assert joined == "Kitaru: Flow completed.\n"
+
+    def test_machine_mode_appends_traceback_text(self) -> None:
+        try:
+            raise RuntimeError("boom")
+        except RuntimeError:
+            record = logging.LogRecord(
+                name="zenml.execution.pipeline.dynamic.runner",
+                level=logging.ERROR,
+                pathname="",
+                lineno=0,
+                msg="Step `fetch_data` failed.",
+                args=(),
+                exc_info=sys.exc_info(),
+            )
+
+        rendered: list[str] = []
+        handler = _KitaruTerminalHandler()
+        handler._machine_mode = True
+        handler._write = rendered.append
+
+        handler.emit(record)
+
+        joined = "".join(rendered)
+        assert "Kitaru: Checkpoint `fetch_data` failed.\n" in joined
+        assert "Traceback (most recent call last):" in joined
+        assert "RuntimeError: boom" in joined
 
 
 # ---------------------------------------------------------------------------

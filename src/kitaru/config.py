@@ -55,6 +55,7 @@ _STACK_MANAGED_LABEL_VALUE = _config_stacks._STACK_MANAGED_LABEL_VALUE
 KITARU_ANALYTICS_OPT_IN_ENV = _kitaru_env.KITARU_ANALYTICS_OPT_IN_ENV
 KITARU_AUTH_TOKEN_ENV = _kitaru_env.KITARU_AUTH_TOKEN_ENV
 KITARU_DEBUG_ENV = _kitaru_env.KITARU_DEBUG_ENV
+KITARU_MACHINE_MODE_ENV = _kitaru_env.KITARU_MACHINE_MODE_ENV
 KITARU_PROJECT_ENV = _kitaru_env.KITARU_PROJECT_ENV
 KITARU_SERVER_URL_ENV = _kitaru_env.KITARU_SERVER_URL_ENV
 
@@ -116,6 +117,7 @@ _find_pyproject = _config_env._find_pyproject
 _read_project_config = _config_env._read_project_config
 _read_execution_env_config = _config_env._read_execution_env_config
 _read_connection_env_config = _config_env._read_connection_env_config
+_read_machine_mode_env_override = _config_env._read_machine_mode_env_override
 _read_zenml_connection_env_config = _config_env._read_zenml_connection_env_config
 _extract_store_token = _config_core._extract_store_token
 _read_runtime_execution_config = _config_core._read_runtime_execution_config
@@ -346,6 +348,44 @@ def resolve_log_store() -> ResolvedLogStore:
         read_log_store_env_override=_read_log_store_env_override,
         read_global_config=_read_kitaru_global_config,
     )
+
+
+def get_global_machine_mode() -> bool | None:
+    """Return the persisted machine-mode preference, if one exists."""
+    config = _read_kitaru_global_config_for_update()
+    return config.machine_mode
+
+
+def set_global_machine_mode(enabled: bool) -> bool:
+    """Persist the global machine-mode preference."""
+
+    def _mutate(global_config: _KitaruGlobalConfig) -> None:
+        global_config.machine_mode = enabled
+
+    config = _update_kitaru_global_config(_mutate)
+    return bool(config.machine_mode)
+
+
+def resolve_machine_mode(
+    *,
+    cli_override: bool | None = None,
+    output_json: bool = False,
+    interactive: bool,
+) -> bool:
+    """Resolve the effective machine-mode state for one terminal surface."""
+    if output_json:
+        return True
+    if not interactive:
+        return True
+    if cli_override is not None:
+        return cli_override
+    env_override = _read_machine_mode_env_override()
+    if env_override is not None:
+        return env_override
+    persisted = get_global_machine_mode()
+    if persisted is not None:
+        return persisted
+    return False
 
 
 def active_stack_log_store() -> ActiveStackLogStore | None:

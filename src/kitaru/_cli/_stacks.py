@@ -21,14 +21,16 @@ from kitaru.inspection import (
 
 from . import stack_app
 from ._helpers import (
+    MachineModeOption,
     OutputFormatOption,
     _emit_json_item,
     _emit_json_items,
     _emit_snapshot,
     _exit_with_error,
     _facade_module,
+    _machine_mode_context,
     _print_success,
-    _resolve_output_format,
+    _resolve_output_and_machine_mode,
 )
 
 
@@ -422,10 +424,13 @@ def _stack_show_rows(details: Any) -> list[tuple[str, str]]:
 
 
 @stack_app.command
-def list_(output: OutputFormatOption = "text") -> None:
+def list_(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """List stacks visible to the current user."""
     command = "stack.list"
-    output_format = _resolve_output_format(output)
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
     facade = _facade_module()
 
     def _list_stacks() -> tuple[list[StackInfo], list[Any] | None]:
@@ -437,45 +442,52 @@ def list_(output: OutputFormatOption = "text") -> None:
             stack_entries = None
         return stacks, stack_entries
 
-    stacks, stack_entries = run_with_cli_error_boundary(
-        _list_stacks,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if output_format == CLIOutputFormat.JSON:
-        assert stack_entries is not None
-        _emit_json_items(
-            command,
-            [
-                serialize_stack(entry.stack, is_managed=entry.is_managed)
-                for entry in stack_entries
-            ],
+    with _machine_mode_context(machine_mode):
+        stacks, stack_entries = run_with_cli_error_boundary(
+            _list_stacks,
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
 
-    _emit_snapshot("Kitaru stacks", _stack_list_rows(stacks))
+        if output_format == CLIOutputFormat.JSON:
+            assert stack_entries is not None
+            _emit_json_items(
+                command,
+                [
+                    serialize_stack(entry.stack, is_managed=entry.is_managed)
+                    for entry in stack_entries
+                ],
+                output=output_format,
+            )
+            return
+
+        _emit_snapshot("Kitaru stacks", _stack_list_rows(stacks))
 
 
 @stack_app.command
-def current(output: OutputFormatOption = "text") -> None:
+def current(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """Show the currently active stack."""
     command = "stack.current"
-    output_format = _resolve_output_format(output)
-    stack = run_with_cli_error_boundary(
-        _facade_module().get_current_stack,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        stack = run_with_cli_error_boundary(
+            _facade_module().get_current_stack,
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
+        )
 
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, serialize_stack(stack), output=output_format)
-        return
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(command, serialize_stack(stack), output=output_format)
+            return
 
-    _emit_snapshot("Kitaru stack", _current_stack_rows(stack))
+        _emit_snapshot("Kitaru stack", _current_stack_rows(stack))
 
 
 @stack_app.command
@@ -485,26 +497,29 @@ def show(
         Parameter(help="Stack name or ID."),
     ],
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Show translated details for a stack by name or ID."""
     command = "stack.show"
-    output_format = _resolve_output_format(output)
-    details = run_with_cli_error_boundary(
-        lambda: _facade_module()._show_stack_operation(name_or_id),
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command,
-            serialize_stack_details(details),
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        details = run_with_cli_error_boundary(
+            lambda: _facade_module()._show_stack_operation(name_or_id),
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
 
-    _emit_snapshot("Kitaru stack", _stack_show_rows(details))
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                serialize_stack_details(details),
+                output=output_format,
+            )
+            return
+
+        _emit_snapshot("Kitaru stack", _stack_show_rows(details))
 
 
 @stack_app.command
@@ -514,25 +529,30 @@ def use(
         Parameter(help="Stack name or ID to activate."),
     ],
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Use a stack as the active default by name or ID."""
     command = "stack.use"
-    output_format = _resolve_output_format(output)
-    selected_stack = run_with_cli_error_boundary(
-        lambda: _facade_module().set_active_stack(stack),
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        selected_stack = run_with_cli_error_boundary(
+            lambda: _facade_module().set_active_stack(stack),
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
+        )
 
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, serialize_stack(selected_stack), output=output_format)
-        return
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command, serialize_stack(selected_stack), output=output_format
+            )
+            return
 
-    _print_success(
-        f"Activated stack: {selected_stack.name}",
-        detail=f"Stack ID: {selected_stack.id}",
-    )
+        _print_success(
+            f"Activated stack: {selected_stack.name}",
+            detail=f"Stack ID: {selected_stack.id}",
+        )
 
 
 @stack_app.command
@@ -587,10 +607,11 @@ def create(
         Parameter(help="Skip credential verification for Kubernetes stacks."),
     ] = None,
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Create a local or Kubernetes-backed stack."""
     command = "stack.create"
-    output_format = _resolve_output_format(output)
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
 
     def _create_stack() -> Any:
         file_inputs = _load_stack_create_file(file) if file is not None else None
@@ -640,32 +661,34 @@ def create(
             kubernetes=kubernetes_spec,
         )
 
-    result = run_with_cli_error_boundary(
-        _create_stack,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command,
-            serialize_stack_create_result(result),
+    with _machine_mode_context(machine_mode):
+        result = run_with_cli_error_boundary(
+            _create_stack,
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
 
-    created_message = f"Created stack: {result.stack.name}"
-    if (
-        getattr(result, "stack_type", StackType.LOCAL.value)
-        == StackType.KUBERNETES.value
-    ):
-        created_message += " (kubernetes)"
-    _print_success(created_message)
-    for label, value in _stack_create_detail_rows(result):
-        print(f"{label:<12} {value}")
-    if result.previous_active_stack is not None:
-        print(f"Active stack: {result.previous_active_stack} → {result.stack.name}")
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                serialize_stack_create_result(result),
+                output=output_format,
+            )
+            return
+
+        created_message = f"Created stack: {result.stack.name}"
+        if (
+            getattr(result, "stack_type", StackType.LOCAL.value)
+            == StackType.KUBERNETES.value
+        ):
+            created_message += " (kubernetes)"
+        _print_success(created_message)
+        for label, value in _stack_create_detail_rows(result):
+            print(f"{label:<12} {value}")
+        if result.previous_active_stack is not None:
+            print(f"Active stack: {result.previous_active_stack} → {result.stack.name}")
 
 
 @stack_app.command
@@ -687,31 +710,34 @@ def delete(
         ),
     ] = False,
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Delete a stack by name or ID."""
     command = "stack.delete"
-    output_format = _resolve_output_format(output)
-    result = run_with_cli_error_boundary(
-        lambda: _facade_module()._delete_stack_operation(
-            stack,
-            recursive=recursive,
-            force=force,
-        ),
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command,
-            serialize_stack_delete_result(result),
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        result = run_with_cli_error_boundary(
+            lambda: _facade_module()._delete_stack_operation(
+                stack,
+                recursive=recursive,
+                force=force,
+            ),
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
 
-    _print_success(f"Deleted stack: {result.deleted_stack}")
-    if result.components_deleted:
-        print(f"Deleted components: {', '.join(result.components_deleted)}")
-    if result.new_active_stack is not None:
-        print(f"Active stack: {result.new_active_stack}")
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                serialize_stack_delete_result(result),
+                output=output_format,
+            )
+            return
+
+        _print_success(f"Deleted stack: {result.deleted_stack}")
+        if result.components_deleted:
+            print(f"Deleted components: {', '.join(result.components_deleted)}")
+        if result.new_active_stack is not None:
+            print(f"Active stack: {result.new_active_stack}")

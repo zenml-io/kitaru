@@ -265,6 +265,23 @@ def _render(decision: _TerminalDecision, *, interactive: bool) -> str:
     return f"{color}Kitaru {marker}{reset} {decision.text}"
 
 
+_EXCEPTION_FORMATTER = logging.Formatter()
+
+
+def _render_exception_text(record: logging.LogRecord) -> str | None:
+    """Render exception/stack details from a log record, if present."""
+    sections: list[str] = []
+
+    if record.exc_info:
+        sections.append(_EXCEPTION_FORMATTER.formatException(record.exc_info).rstrip())
+    if record.stack_info:
+        sections.append(str(record.stack_info).rstrip())
+
+    if not sections:
+        return None
+    return "\n".join(section for section in sections if section)
+
+
 # ---------------------------------------------------------------------------
 # Handler
 # ---------------------------------------------------------------------------
@@ -295,14 +312,27 @@ class _KitaruTerminalHandler(logging.Handler):
         super().__init__()
         self._write = _get_bypass_write()
         self._interactive = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        # Resolved once at handler construction — not expected to change mid-execution
+        from kitaru.config import resolve_machine_mode
+
+        self._machine_mode = resolve_machine_mode(
+            interactive=self._interactive,
+        )
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             decision = _decide(record)
             if decision is None:
                 return
-            text = _render(decision, interactive=self._interactive)
+            text = _render(
+                decision,
+                interactive=self._interactive and not self._machine_mode,
+            )
             self._write(text + "\n")
+            if self._machine_mode:
+                exception_text = _render_exception_text(record)
+                if exception_text:
+                    self._write(exception_text.rstrip() + "\n")
         except Exception:
             self.handleError(record)
 

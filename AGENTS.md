@@ -91,6 +91,7 @@ Agent-facing commands should keep the shared `--output json` / `-o json` contrac
 - single-item commands emit `{command, item}`
 - list commands emit `{command, items, count}`
 - `kitaru executions logs --follow --output json` emits JSONL event objects instead of one final document
+- most text-oriented agent-facing commands also support `--machine` / `--no-machine`; `KITARU_MACHINE_MODE` and `kitaru configure set machine_mode <true|false>` provide default preference layers, but JSON output and non-TTY contexts still take precedence
 
 ## Testing Guidelines
 

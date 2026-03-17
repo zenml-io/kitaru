@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NoReturn, Protocol, TypeVar
@@ -21,6 +22,7 @@ class CLIErrorEmitter(Protocol):
         *,
         output: CLIOutputFormat,
         error_type: str | None = None,
+        traceback_text: str | None = None,
     ) -> NoReturn: ...
 
 
@@ -46,6 +48,7 @@ def run_with_cli_error_boundary(
     command: str,
     output: CLIOutputFormat,
     exit_with_error: CLIErrorEmitter,
+    machine_mode: bool = False,
     handled_exceptions: tuple[type[Exception], ...] = (Exception,),
     translator: Callable[[Exception], InterfaceErrorDetails] = translate_to_user_error,
 ) -> T:
@@ -54,11 +57,17 @@ def run_with_cli_error_boundary(
         return operation()
     except handled_exceptions as exc:
         details = translator(exc)
+        traceback_text = None
+        if machine_mode and output == CLIOutputFormat.TEXT:
+            traceback_text = "".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )
         exit_with_error(
             command,
             details.message,
             output=output,
             error_type=details.error_type,
+            traceback_text=traceback_text,
         )
 
 

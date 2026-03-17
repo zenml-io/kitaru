@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from types import ModuleType
@@ -48,6 +51,18 @@ OutputFormatOption = Annotated[
         help='Output format: "text" (default) or "json".',
     ),
 ]
+MachineModeOption = Annotated[
+    bool | None,
+    Parameter(
+        help=(
+            "Force plain machine-oriented text output, or use `--no-machine` "
+            "to prefer rich text when stdout is a TTY."
+        ),
+        negative="no-machine",
+    ),
+]
+
+_CLI_MACHINE_MODE: ContextVar[bool] = ContextVar("_CLI_MACHINE_MODE", default=False)
 
 
 def _format_timestamp(value: datetime | None) -> str:
@@ -66,6 +81,26 @@ def _is_interactive(*, stderr: bool = False) -> bool:
 def _is_input_interactive() -> bool:
     """Check whether stdin is an interactive terminal for user prompts."""
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+
+def _current_machine_mode() -> bool:
+    """Return the effective machine-mode state for the active CLI command."""
+    return _CLI_MACHINE_MODE.get()
+
+
+@contextmanager
+def _machine_mode_context(enabled: bool) -> Iterator[None]:
+    """Temporarily set the effective machine-mode state for CLI helpers."""
+    token = _CLI_MACHINE_MODE.set(enabled)
+    try:
+        yield
+    finally:
+        _CLI_MACHINE_MODE.reset(token)
+
+
+def _should_render_rich(*, stderr: bool = False) -> bool:
+    """Return whether rich/colored rendering should be used for this stream."""
+    return _is_interactive(stderr=stderr) and not _current_machine_mode()
 
 
 def _value_style(value: str) -> str:
@@ -147,7 +182,7 @@ def _render_rich_snapshot_sections(
 
 def _print_success(message: str, detail: str | None = None) -> None:
     """Print a success message, styled when the terminal is interactive."""
-    if _is_interactive():
+    if _should_render_rich():
         console = Console()
         console.print(Text(message, style="green"))
         if detail:
@@ -171,12 +206,27 @@ def _resolve_output_format(raw_output: str) -> CLIOutputFormat:
         )
 
 
+def _resolve_output_and_machine_mode(
+    raw_output: str,
+    machine: bool | None,
+) -> tuple[CLIOutputFormat, bool]:
+    """Resolve the normalized output format and effective machine mode."""
+    output_format = _resolve_output_format(raw_output)
+    machine_mode = _facade_module().resolve_machine_mode(
+        cli_override=machine,
+        output_json=output_format == CLIOutputFormat.JSON,
+        interactive=_is_interactive(),
+    )
+    return output_format, machine_mode
+
+
 def _exit_with_error(
     command: str,
     message: str | None = None,
     *,
     output: CLIOutputFormat = CLIOutputFormat.TEXT,
     error_type: str | None = None,
+    traceback_text: str | None = None,
 ) -> NoReturn:
     """Print a format-aware CLI error and exit with a non-zero status."""
     if message is None:
@@ -191,7 +241,10 @@ def _exit_with_error(
             error_type=error_type,
         )
 
-    if _is_interactive(stderr=True):
+    if traceback_text:
+        print(traceback_text.rstrip(), file=sys.stderr)
+
+    if _should_render_rich(stderr=True):
         err = Text("Error: ", style="bold red")
         err.append(message, style="red")
         Console(stderr=True).print(err)
@@ -239,7 +292,7 @@ def _emit_snapshot(
     warning: str | None = None,
 ) -> None:
     """Render key/value snapshots in rich or plain-text mode."""
-    if _is_interactive():
+    if _should_render_rich():
         _render_rich_snapshot(title, rows, warning)
     else:
         print(_render_plain_snapshot(title, rows, warning))
@@ -251,7 +304,7 @@ def _emit_snapshot_sections(
     warning: str | None = None,
 ) -> None:
     """Render multi-section snapshots in rich or plain-text mode."""
-    if _is_interactive():
+    if _should_render_rich():
         _render_rich_snapshot_sections(title, sections, warning)
     else:
         print(_render_plain_snapshot_sections(title, sections, warning))
@@ -350,7 +403,7 @@ def _emit_table(
         _emit_snapshot(title, [(title.split()[-1], empty_message)])
         return
 
-    if _is_interactive():
+    if _should_render_rich():
         _render_rich_table(title, columns, table_rows)
     else:
         print(_render_plain_table(title, columns, table_rows))
