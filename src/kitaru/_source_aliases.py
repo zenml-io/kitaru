@@ -17,6 +17,8 @@ This module is internal — it is not part of the public API surface.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from typing import Any
 
 PIPELINE_SOURCE_ALIAS_PREFIX = "__kitaru_pipeline_source_"
 CHECKPOINT_SOURCE_ALIAS_PREFIX = "__kitaru_checkpoint_source_"
@@ -26,6 +28,11 @@ _ALIAS_PATTERN = re.compile(
     r"(?:__kitaru_pipeline_source_|__kitaru_checkpoint_source_)"
     r"([A-Za-z_][A-Za-z0-9_]*)"
 )
+
+
+def callable_name(func: Callable[..., Any]) -> str:
+    """Extract the plain name of a callable."""
+    return getattr(func, "__name__", func.__class__.__name__)
 
 
 def _normalize_callable_name(raw_name: str, *, fallback: str) -> str:

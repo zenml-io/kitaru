@@ -26,6 +26,7 @@ from zenml.pipelines.pipeline_definition import Pipeline
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
     build_pipeline_source_alias,
+    callable_name,
 )
 from kitaru.config import (
     ImageInput,
@@ -76,25 +77,6 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
             client.activate_stack(old_stack_id)
 
 
-def _pipeline_registration_name(func: Callable[..., Any]) -> str:
-    """Build the plain ZenML pipeline name for a flow function."""
-    flow_name = getattr(func, "__name__", func.__class__.__name__)
-    return build_pipeline_registration_name(flow_name)
-
-
-def _pipeline_source_alias_name(func: Callable[..., Any]) -> str:
-    """Build a stable module-level alias for ZenML source loading.
-
-    Args:
-        func: User flow function.
-
-    Returns:
-        Alias name used to expose the ZenML pipeline object.
-    """
-    flow_name = getattr(func, "__name__", func.__class__.__name__)
-    return build_pipeline_source_alias(flow_name)
-
-
 def _register_pipeline_source_alias(
     *,
     func: Callable[..., Any],
@@ -121,7 +103,7 @@ def _register_pipeline_source_alias(
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a flow entrypoint with Kitaru flow runtime scope."""
 
-    flow_name = getattr(func, "__name__", func.__class__.__name__)
+    flow_name = callable_name(func)
 
     @wraps(func)
     def _wrapped(*args: Any, **kwargs: Any) -> Any:
@@ -438,8 +420,9 @@ class _FlowDefinition:
         )
 
         wrapped_entrypoint = _wrap_flow_entrypoint(func)
-        registration_name = _pipeline_registration_name(func)
-        source_alias = _pipeline_source_alias_name(func)
+        func_name = callable_name(func)
+        registration_name = build_pipeline_registration_name(func_name)
+        source_alias = build_pipeline_source_alias(func_name)
         aliasable_entrypoint = cast(Any, wrapped_entrypoint)
         aliasable_entrypoint.__name__ = source_alias
         aliasable_entrypoint.__qualname__ = source_alias

@@ -22,6 +22,7 @@ from zenml.steps.step_decorator import step
 from kitaru._source_aliases import (
     build_checkpoint_registration_name,
     build_checkpoint_source_alias,
+    callable_name,
 )
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.runtime import (
@@ -43,18 +44,6 @@ _CHECKPOINT_NESTED_ERROR = (
 _CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR = (
     "Concurrent checkpoint execution is only available inside a running @flow."
 )
-
-
-def _checkpoint_registration_name(func: Callable[..., Any]) -> str:
-    """Build the plain ZenML step name for a checkpoint function."""
-    checkpoint_name = getattr(func, "__name__", func.__class__.__name__)
-    return build_checkpoint_registration_name(checkpoint_name)
-
-
-def _checkpoint_source_alias_name(func: Callable[..., Any]) -> str:
-    """Build a stable module-level alias for ZenML step source loading."""
-    checkpoint_name = getattr(func, "__name__", func.__class__.__name__)
-    return build_checkpoint_source_alias(checkpoint_name)
 
 
 def _register_checkpoint_source_alias(
@@ -112,7 +101,7 @@ def _wrap_entrypoint(
 ) -> Callable[..., Any]:
     """Wrap the user function with Kitaru checkpoint runtime scope."""
 
-    checkpoint_name = getattr(func, "__name__", func.__class__.__name__)
+    checkpoint_name = callable_name(func)
 
     @wraps(func)
     def _wrapped(*args: Any, **kwargs: Any) -> Any:
@@ -161,8 +150,9 @@ class _CheckpointDefinition:
             func,
             checkpoint_type=checkpoint_type,
         )
-        registration_name = _checkpoint_registration_name(func)
-        source_alias = _checkpoint_source_alias_name(func)
+        func_name = callable_name(func)
+        registration_name = build_checkpoint_registration_name(func_name)
+        source_alias = build_checkpoint_source_alias(func_name)
         aliasable_entrypoint = cast(Any, wrapped_entrypoint)
         aliasable_entrypoint.__name__ = source_alias
         aliasable_entrypoint.__qualname__ = source_alias
