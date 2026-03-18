@@ -230,6 +230,9 @@ design/
 !.claude/settings.json
 !.claude/skills/
 
+# Playwright MCP
+.playwright-mcp/
+
 # Codex
 .codex/*
 !.codex/skills/
