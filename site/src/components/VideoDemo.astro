@@ -1,0 +1,156 @@
+---
+// VideoDemo.astro — Dark demo video section with placeholder player
+---
+
+<section class="dark-section section-pad-compact" id="demo">
+  <div class="section-inner video-demo-inner">
+    <div class="video-container" data-reveal>
+      <div class="video-placeholder">
+        <button class="video-play-btn" aria-label="Demo coming soon" aria-disabled="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M8 5.14v13.72a1 1 0 001.5.86l11.04-6.86a1 1 0 000-1.72L9.5 4.28a1 1 0 00-1.5.86z" fill="#fff"/>
+          </svg>
+        </button>
+        <span class="video-label">Demo coming soon</span>
+      </div>
+    </div>
+
+    <div class="video-tags" data-reveal data-reveal-delay="2">
+      <span class="video-tag">agent run</span>
+      <span class="video-tag">pause + replay</span>
+      <span class="video-tag">approval gates</span>
+      <span class="video-tag">orchestration</span>
+      <span class="video-tag">kitaru engine</span>
+    </div>
+  </div>
+</section>
+
+<style>
+  .video-demo-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* Video container — 16:9 aspect ratio */
+  .video-container {
+    width: 100%;
+    max-width: 800px;
+    aspect-ratio: 16 / 9;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .video-placeholder {
+    width: 100%;
+    height: 100%;
+    background-color: #211C17;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    position: relative;
+  }
+
+  /* Play button — 72px circle */
+  .video-play-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 2px solid var(--color-accent);
+    background: rgba(241,120,41,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s ease, background 0.2s ease;
+    animation: shimmer 3s ease-in-out infinite;
+  }
+
+  .video-play-btn:hover {
+    transform: scale(1.08);
+    background: rgba(241,120,41,0.18);
+  }
+
+  .video-play-btn svg {
+    /* Slight offset to visually center the triangle */
+    margin-left: 3px;
+  }
+
+  .video-label {
+    font-size: 0.82rem;
+    color: rgba(232,228,222,0.45);
+    letter-spacing: 0.01em;
+  }
+
+  /* Tag pills row */
+  .video-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 32px;
+  }
+
+  .video-tag {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 100px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.5);
+    white-space: nowrap;
+    font-family: var(--font-ui);
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .video-container {
+      max-width: 100%;
+    }
+
+    .video-play-btn {
+      width: 56px;
+      height: 56px;
+    }
+
+    .video-play-btn svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .video-label {
+      font-size: 0.75rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .video-tags {
+      gap: 8px;
+      margin-top: 24px;
+    }
+
+    .video-tag {
+      font-size: 0.7rem;
+      padding: 5px 12px;
+    }
+  }
+
+  .video-play-btn[aria-disabled="true"] {
+    cursor: default;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .video-play-btn {
+      animation: none;
+    }
+  }
+</style>

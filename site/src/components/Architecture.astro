@@ -1,84 +1,122 @@
 ---
-// Architecture.astro — Layered stack diagram showing Kitaru's architecture
+// Architecture.astro — Two-column: layer stack + code snippet on dark background
 ---
 
-<section class="arch-section section-pad">
+<section class="arch-section section-pad dark-section" aria-labelledby="arch-heading">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>Architecture</span>
-    <h2 class="section-title" data-reveal data-reveal-delay="1">
-      Orchestration layer. <em class="arch-italic">Not a framework.</em>
-    </h2>
+    <div class="arch-grid">
 
-    <div class="arch-stack" data-reveal data-reveal-delay="2">
-      <div class="arch-layer arch-layer-agent">
-        <div class="arch-layer-label">Your Agent Code</div>
-        <div class="arch-layer-pills">
-          <span class="arch-pill">PydanticAI</span>
-          <span class="arch-pill">OpenAI SDK</span>
-          <span class="arch-pill">CrewAI</span>
-          <span class="arch-pill">Raw Python</span>
+      <!-- Left column: eyebrow + title + layer stack -->
+      <div class="arch-left" data-reveal="fade-left">
+        <span class="section-eyebrow">Architecture</span>
+        <h2 id="arch-heading" class="section-title arch-title">
+          Orchestration layer. <em class="arch-italic">Not a framework.</em>
+        </h2>
+
+        <div class="arch-stack">
+          <div class="arch-layer arch-layer-agent">
+            <div class="arch-layer-label">Your Agent Code</div>
+            <div class="arch-layer-pills">
+              <span class="arch-pill">PydanticAI</span>
+              <span class="arch-pill">OpenAI SDK</span>
+              <span class="arch-pill">CrewAI</span>
+              <span class="arch-pill">Raw Python</span>
+            </div>
+            <div class="arch-layer-note">Write agents your way</div>
+          </div>
+
+          <div class="arch-layer arch-layer-sdk">
+            <div class="arch-layer-label">Kitaru SDK</div>
+            <div class="arch-layer-pills">
+              <span class="arch-pill">@flow</span>
+              <span class="arch-pill">@checkpoint</span>
+              <span class="arch-pill">wait()</span>
+              <span class="arch-pill">log()</span>
+              <span class="arch-pill">configure()</span>
+            </div>
+            <div class="arch-layer-note">Eight primitives. Full durability.</div>
+          </div>
+
+          <div class="arch-layer arch-layer-engine">
+            <div class="arch-layer-label">Kitaru Engine</div>
+            <div class="arch-layer-pills">
+              <span class="arch-pill">Checkpointer</span>
+              <span class="arch-pill">DAG Builder</span>
+              <span class="arch-pill">Replay</span>
+              <span class="arch-pill">Cost Engine</span>
+            </div>
+            <div class="arch-layer-note">Powered by ZenML</div>
+          </div>
+
+          <div class="arch-layer arch-layer-infra">
+            <div class="arch-layer-label">Infrastructure</div>
+            <div class="arch-layer-pills">
+              <span class="arch-pill">Kubernetes</span>
+              <span class="arch-pill">AWS / GCP / Azure</span>
+              <span class="arch-pill">S3 / GCS</span>
+              <span class="arch-pill">Postgres</span>
+            </div>
+            <div class="arch-layer-note">Your cloud</div>
+          </div>
         </div>
-        <div class="arch-layer-note">Write agents your way</div>
       </div>
 
-      <div class="arch-layer arch-layer-sdk">
-        <div class="arch-layer-label">Kitaru SDK</div>
-        <div class="arch-layer-pills">
-          <span class="arch-pill">@flow</span>
-          <span class="arch-pill">@checkpoint</span>
-          <span class="arch-pill">wait()</span>
-          <span class="arch-pill">log()</span>
-          <span class="arch-pill">configure()</span>
+      <!-- Right column: code window -->
+      <div class="arch-right" data-reveal="fade-right">
+        <div class="arch-code-window">
+          <div class="arch-code-header">
+            <div class="arch-code-dots">
+              <span class="code-dot"></span>
+              <span class="code-dot"></span>
+              <span class="code-dot"></span>
+            </div>
+            <span class="arch-code-filename">agent.py</span>
+          </div>
+          <pre class="arch-code-pre"><code><span class="kw">import</span> kitaru
+<span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint
+
+<span class="dec">@flow</span>
+<span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    plan <span class="op">=</span> <span class="fn">analyze_issue</span>(issue)
+    patch <span class="op">=</span> <span class="fn">write_code</span>(plan)
+
+    <span class="cmt"># Pauses. Resumes when input arrives.</span>
+    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(
+        <span class="var">bool</span>, question<span class="op">=</span><span class="str">"Merge this PR?"</span>
+    )
+    <span class="kw">if</span> approved:
+        <span class="fn">merge</span>(patch)
+    <span class="kw">return</span> patch</code></pre>
         </div>
-        <div class="arch-layer-note">Eight primitives. Full durability.</div>
       </div>
 
-      <div class="arch-layer arch-layer-engine">
-        <div class="arch-layer-label">Kitaru Engine</div>
-        <div class="arch-layer-pills">
-          <span class="arch-pill">Checkpointer</span>
-          <span class="arch-pill">DAG Builder</span>
-          <span class="arch-pill">Replay</span>
-          <span class="arch-pill">Cost Engine</span>
-        </div>
-        <div class="arch-layer-note">Powered by ZenML</div>
-      </div>
-
-      <div class="arch-layer arch-layer-infra">
-        <div class="arch-layer-label">Infrastructure</div>
-        <div class="arch-layer-pills">
-          <span class="arch-pill">Kubernetes</span>
-          <span class="arch-pill">AWS / GCP / Azure</span>
-          <span class="arch-pill">S3 / GCS</span>
-          <span class="arch-pill">Postgres</span>
-        </div>
-        <div class="arch-layer-note">Your cloud</div>
-      </div>
-    </div>
-
-    <div class="arch-deploy-note" data-reveal data-reveal-delay="3">
-      <div class="deploy-cmd">
-        <code><span style="color: var(--color-accent);">$</span> kitaru stack use prod</code>
-      </div>
-      <p>Kitaru runs locally by default, and <code>kitaru stack use prod</code> targets your cloud. Same code, any stack.</p>
     </div>
   </div>
 </section>
 
 <style>
-  .arch-section {
-    background: var(--color-bg);
+  /* Title colors for dark background */
+  .arch-title {
+    color: var(--color-dark-text);
   }
 
   .arch-italic {
     font-style: italic;
     font-weight: 300;
-    color: var(--color-secondary);
+    color: rgba(255, 255, 255, 0.45);
   }
 
+  /* Two-column grid */
+  .arch-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: start;
+  }
+
+  /* Layer stack */
   .arch-stack {
-    max-width: 720px;
-    margin: 48px auto 0;
+    margin-top: 40px;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -86,7 +124,7 @@
 
   .arch-layer {
     display: grid;
-    grid-template-columns: 140px 1fr auto;
+    grid-template-columns: 130px 1fr auto;
     align-items: center;
     gap: 16px;
     padding: 16px 20px;
@@ -110,22 +148,21 @@
   }
 
   .arch-layer-infra {
-    background: rgba(60, 60, 60, 0.06);
-    border-color: rgba(60, 60, 60, 0.2);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
   .arch-layer-label {
     font-family: var(--font-ui);
     font-size: 0.85rem;
     font-weight: 600;
-    color: var(--color-primary);
     white-space: nowrap;
   }
 
   .arch-layer-agent .arch-layer-label { color: rgba(232, 168, 64, 0.95); }
   .arch-layer-sdk .arch-layer-label { color: rgba(241, 120, 41, 0.95); }
   .arch-layer-engine .arch-layer-label { color: rgba(196, 149, 106, 0.95); }
-  .arch-layer-infra .arch-layer-label { color: rgba(40, 40, 40, 0.8); }
+  .arch-layer-infra .arch-layer-label { color: rgba(255, 255, 255, 0.6); }
 
   .arch-layer-pills {
     display: flex;
@@ -138,81 +175,96 @@
     font-size: 0.65rem;
     padding: 3px 10px;
     border-radius: 4px;
-    color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .arch-layer-agent .arch-pill {
     color: rgba(232, 168, 64, 0.95);
     background: rgba(232, 168, 64, 0.14);
-    border-color: rgba(232, 168, 64, 0.3);
+    border: 1px solid rgba(232, 168, 64, 0.3);
   }
 
   .arch-layer-sdk .arch-pill {
     color: rgba(241, 120, 41, 0.95);
     background: rgba(241, 120, 41, 0.14);
-    border-color: rgba(241, 120, 41, 0.3);
+    border: 1px solid rgba(241, 120, 41, 0.3);
   }
 
   .arch-layer-engine .arch-pill {
     color: rgba(196, 149, 106, 0.95);
     background: rgba(196, 149, 106, 0.14);
-    border-color: rgba(196, 149, 106, 0.3);
+    border: 1px solid rgba(196, 149, 106, 0.3);
   }
 
   .arch-layer-infra .arch-pill {
-    color: rgba(40, 40, 40, 0.7);
-    background: rgba(60, 60, 60, 0.06);
-    border-color: rgba(60, 60, 60, 0.18);
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
   }
 
   .arch-layer-note {
     font-family: var(--font-ui);
     font-size: 0.72rem;
     font-style: italic;
-    color: var(--color-muted);
+    color: rgba(255, 255, 255, 0.4);
     white-space: nowrap;
     text-align: right;
   }
 
-  .arch-deploy-note {
-    max-width: 720px;
-    margin: 32px auto 0;
-    text-align: center;
+  /* Code window (dark variant) */
+  .arch-code-window {
+    background: #211C17;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 32px;
   }
 
-  .deploy-cmd {
-    display: inline-block;
-    background: #1A1714;
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
-    padding: 12px 24px;
-    margin-bottom: 16px;
+  .arch-code-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
-  .deploy-cmd code {
+  .arch-code-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .arch-code-filename {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  .arch-code-pre {
+    padding: 20px;
+    margin: 0;
+    overflow-x: auto;
     font-family: var(--font-mono);
     font-size: 0.78rem;
-    color: #E8E4DE;
+    line-height: 1.7;
+    color: var(--color-dark-text);
+    -webkit-overflow-scrolling: touch;
   }
 
-  .arch-deploy-note p {
-    font-size: 0.85rem;
-    color: var(--color-secondary);
-    line-height: 1.6;
-  }
+  /* Syntax highlighting */
+  .arch-code-pre .kw { color: #D4A76A; }
+  .arch-code-pre .fn { color: #E8985A; }
+  .arch-code-pre .str { color: #7DBF8E; }
+  .arch-code-pre .var { color: var(--color-dark-text); }
+  .arch-code-pre .op { color: #B0A798; }
+  .arch-code-pre .dec { color: #E8985A; font-style: italic; }
+  .arch-code-pre .cmt { color: #9E9790; font-style: italic; }
 
-  .arch-deploy-note p code {
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    color: var(--color-accent);
-    background: rgba(241, 120, 41, 0.08);
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
+  /* Responsive: single column below 768px */
+  @media (max-width: 768px) {
+    .arch-grid {
+      grid-template-columns: 1fr;
+      gap: 32px;
+    }
 
-  @media (max-width: 700px) {
     .arch-layer {
       grid-template-columns: 1fr;
       gap: 8px;
@@ -226,9 +278,33 @@
     .arch-layer-label {
       white-space: normal;
     }
+
+    .arch-code-window {
+      margin-top: 0;
+      position: relative;
+    }
+
+    .arch-code-window::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 32px;
+      background: linear-gradient(90deg, transparent, #211C17);
+      pointer-events: none;
+      border-radius: 0 12px 12px 0;
+    }
   }
 
   @media (max-width: 480px) {
-    .arch-layer { padding: 12px 14px; }
+    .arch-layer {
+      padding: 12px 14px;
+    }
+
+    .arch-code-pre {
+      padding: 16px;
+      font-size: 0.72rem;
+    }
   }
 </style>

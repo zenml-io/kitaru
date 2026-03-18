@@ -1,0 +1,155 @@
+---
+// WhyKitaru.astro — Three value proposition cards
+---
+
+<section id="why-kitaru" class="section-pad">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>WHY KITARU</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">Why teams choose Kitaru</h2>
+
+    <div class="why-grid">
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="2">
+        <div class="card-glow"></div>
+        <div class="why-card-content">
+          <div class="icon-circle">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9.5C6.46 19 4 16.54 4 13.5c0-2.64 1.86-4.84 4.34-5.36C9.28 5.29 11.98 3 15.25 3 18.98 3 22 6.02 22 9.75c0 .34-.03.67-.08 1C23.17 11.47 24 12.89 24 14.5c0 2.49-2.01 4.5-4.5 4.5h-2Z"/></svg>
+          </div>
+          <h3>Deployment flexibility</h3>
+          <p>Same Python code runs locally, on Kubernetes, or across AWS, GCP, and Azure. Switch stacks with one command.</p>
+        </div>
+      </div>
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="3">
+        <div class="card-glow"></div>
+        <div class="why-card-content">
+          <div class="icon-circle">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="4" width="4" height="16" rx="1"/><polygon points="4,4 12,12 4,20"/></svg>
+          </div>
+          <h3>Full execution control</h3>
+          <p>Pause at decision points, get human input, and resume — hours or days later. Replay from any checkpoint without re-running everything.</p>
+        </div>
+      </div>
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="4">
+        <div class="card-glow"></div>
+        <div class="why-card-content">
+          <div class="icon-circle">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </div>
+          <h3>Python-first, no lock-in</h3>
+          <p>Wrap any Python agent framework — PydanticAI, CrewAI, or raw code — with Kitaru decorators. No DSL to learn, no vendor lock-in.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<style>
+  .why-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 48px;
+  }
+
+  .why-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 28px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+
+  .why-card:hover {
+    border-color: var(--color-muted);
+  }
+
+  .why-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-accent), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .why-card:hover::before {
+    opacity: 1;
+  }
+
+  .card-glow {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(241,120,41,0.04), transparent 60%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 1;
+  }
+
+  .why-card:hover .card-glow {
+    opacity: 1;
+  }
+
+  .why-card-content {
+    position: relative;
+    z-index: 2;
+  }
+
+  .icon-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 1.5px solid var(--color-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    color: var(--color-accent);
+  }
+
+  .why-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+  }
+
+  .why-card p {
+    color: var(--color-secondary);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    font-weight: 300;
+  }
+
+  @media (max-width: 768px) {
+    .why-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.why-card').forEach(card => {
+    card.addEventListener('mousemove', (e: MouseEvent) => {
+      const rect = (card as HTMLElement).getBoundingClientRect();
+      (card as HTMLElement).style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');
+      (card as HTMLElement).style.setProperty('--mouse-y', ((e.clientY - rect.top) / rect.height * 100) + '%');
+    });
+    card.addEventListener('mouseleave', () => {
+      (card as HTMLElement).style.setProperty('--mouse-x', '50%');
+      (card as HTMLElement).style.setProperty('--mouse-y', '50%');
+    });
+  });
+</script>
