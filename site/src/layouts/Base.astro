@@ -30,6 +30,9 @@ const {
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <slot name="head" />
+  <noscript><style>
+    .feature-card, .prim-card, .tl-node, .replay-callout { opacity: 1 !important; transform: none !important; }
+  </style></noscript>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
