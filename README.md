@@ -88,6 +88,19 @@ Or with [uv](https://docs.astral.sh/uv/) (recommended):
 uv pip install kitaru
 ```
 
+### Optional: connect to an existing Kitaru server
+
+Flows run locally by default. If you already have a deployed Kitaru server and
+want this quick start to use it, connect first:
+
+```bash
+kitaru login https://my-server.example.com --api-key <API_KEY>
+# add --project <PROJECT> or other login flags if your setup requires them
+kitaru status
+```
+
+If you're just trying Kitaru locally, skip this step.
+
 ### Write your first flow
 
 ```python

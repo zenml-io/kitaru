@@ -7,6 +7,10 @@ artifacts are captured, and usage metadata is attached automatically.
 uv run examples/llm/flow_with_llm.py
 ```
 
+This example uses your current Kitaru connection context. If you want the run
+to use a deployed Kitaru server, connect first with `uv run kitaru login ...`
+(or `kitaru login ...`) and verify with `kitaru status`.
+
 For the full catalog, see [../README.md](../README.md).
 
 | Example | Requires | What it demonstrates | Test |

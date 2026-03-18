@@ -75,6 +75,10 @@ Today, the CLI and MCP server can provision five shipped stack types:
 - `sagemaker`
 - `azureml`
 
+These remote stack commands assume you are already connected to the Kitaru
+server that should own the stack. If you already have a deployed server,
+connect first with `kitaru login ...` and verify with `kitaru status`.
+
 In story form: Kitaru can assemble the stack definition and cloud connector for you, but it still expects the bucket, registry, and any cluster you point at to already exist.
 
 ### Kubernetes example

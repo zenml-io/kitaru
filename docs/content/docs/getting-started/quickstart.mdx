@@ -40,6 +40,32 @@ Kitaru requires **Python 3.11 or newer**.
   </Tab>
 </Tabs>
 
+## Optional: connect to an existing Kitaru server
+
+<Callout type="info">
+  Flows run locally by default. If you already have a deployed Kitaru server
+  and want this quickstart to use it, connect first, verify with
+  `kitaru status`, and then run the same flow commands below. If you are just
+  trying Kitaru locally, skip this section.
+</Callout>
+
+<Tabs items={["uv project", "pip environment"]}>
+  <Tab value="uv project">
+    ```bash
+    uv run kitaru login https://my-server.example.com --api-key <API_KEY>
+    # add --project <PROJECT> or other login flags if your setup requires them
+    uv run kitaru status
+    ```
+  </Tab>
+  <Tab value="pip environment">
+    ```bash
+    kitaru login https://my-server.example.com --api-key <API_KEY>
+    # add --project <PROJECT> or other login flags if your setup requires them
+    kitaru status
+    ```
+  </Tab>
+</Tabs>
+
 ## Run your first flow
 
 Create a small script named `demo.py`:

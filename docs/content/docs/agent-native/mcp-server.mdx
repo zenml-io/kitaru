@@ -113,7 +113,10 @@ or `manage_stack(action="delete", name="local-dev", force=True)`.
 ## Authentication and context
 
 The MCP server reuses the same config/auth context as `kitaru` CLI and SDK.
-If you can run `kitaru status`, MCP tools use that same connection.
+If you want MCP tools to target a deployed Kitaru server, connect first with
+`kitaru login ...` before starting `kitaru-mcp`, or set `KITARU_*` connection
+variables in the MCP server environment. If you can run `kitaru status`, MCP
+tools use that same connection.
 
 ## Replay behavior
 

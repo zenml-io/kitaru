@@ -8,6 +8,10 @@ uv sync --extra local --extra pydantic-ai
 uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py
 ```
 
+This example uses your current Kitaru connection context. If you want the run
+to use a deployed Kitaru server, connect first with `uv run kitaru login ...`
+(or `kitaru login ...`) and verify with `kitaru status`.
+
 For the full catalog, see [../README.md](../README.md).
 
 | Example | What it demonstrates | Test |

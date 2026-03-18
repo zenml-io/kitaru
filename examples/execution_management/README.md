@@ -7,6 +7,11 @@ handling waits, and resuming execution.
 uv run examples/execution_management/<module_name>.py
 ```
 
+These examples use your current Kitaru connection context. If you want to
+inspect or resume executions on a deployed Kitaru server, connect first with
+`uv run kitaru login ...` (or `kitaru login ...`) and verify with
+`kitaru status`.
+
 For the full catalog, see [../README.md](../README.md).
 
 | Example | Run | What it demonstrates | Test |

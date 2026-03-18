@@ -10,6 +10,11 @@ with:
 uv run examples/<group>/<module_name>.py
 ```
 
+Examples use your current Kitaru connection context. If you want them to use a
+deployed Kitaru server, connect first with `uv run kitaru login ...` (or
+`kitaru login ...` in a pip-managed environment) and confirm with
+`kitaru status`. If you are just trying Kitaru locally, run them as-is.
+
 ## Start here if you want to...
 
 - **Run the smallest possible durable flow:** `examples/basic_flow/first_working_flow.py`

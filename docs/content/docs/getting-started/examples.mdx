@@ -18,6 +18,20 @@ uv run examples/<group>/<module_name>.py
 | PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
 | MCP query tools example | `uv sync --extra local --extra mcp` |
 
+## Connection context
+
+Examples use whatever Kitaru connection context is already active.
+
+- If you are just trying Kitaru locally, run them as-is.
+- If you already have a deployed Kitaru server and want the examples to use it,
+  connect first and verify the active context before running the example.
+
+```bash
+uv run kitaru login https://my-server.example.com --api-key <API_KEY>
+# add --project <PROJECT> or other login flags if your setup requires them
+uv run kitaru status
+```
+
 ## Browse by goal
 
 If you want to...
