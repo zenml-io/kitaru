@@ -27,4 +27,5 @@ export const CATEGORY_STYLES: Record<
   Infrastructure: { bg: 'rgba(241,120,41,0.1)', color: '#C45A1A' },
   Design: { bg: 'rgba(61,140,92,0.1)', color: '#3D8C5C' },
   Philosophy: { bg: 'rgba(164,105,72,0.12)', color: '#A07848' },
+  Kitaru: { bg: 'rgba(241,120,41,0.14)', color: '#B84D0E' },
 };
