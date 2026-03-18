@@ -1,0 +1,146 @@
+---
+title: "Kitaru is open source and ready to use"
+description: "Today Kitaru is available for everyone — open-source durable execution for Python agents, built on five years of ZenML infrastructure."
+date: 2026-03-18
+author: "Hamza Tahir"
+category: "Infrastructure"
+---
+
+Today Kitaru is available for everyone — open-source durable execution for Python agents, built on five years of ZenML infrastructure.
+
+*(Kitaru is 来る — Japanese for "to arrive." Infrastructure whose whole job is making sure your agents get there.)*
+
+This post explains what we built, why we built it, and what it means for teams building agents in production.
+
+---
+
+## The problem we kept seeing
+
+Over the past year, we talked to a lot of teams building agents. Not toy agents — production agents. The kind that run for 20 minutes, make a dozen LLM calls, interact with external systems, and cost real money.
+
+Almost all of them had the same story.
+
+"We built it, it worked in demos, we put it in production, and then it started failing in ways we couldn't see or recover from."
+
+The failures weren't mysterious. An LLM call timed out. A third-party API returned a 500. A network blip killed the process. Normal production failures. But because the agent had no checkpointing, no crash recovery, no execution history, every failure meant restarting from scratch. Re-burning every token. Waiting another 20 minutes. Hoping it didn't fail in the same place again.
+
+The other version of the story: "We built it, it worked, but we have no idea what it's doing or what it costs. Every time something goes wrong we're reading logs trying to reconstruct what happened."
+
+These are infrastructure problems. And they have a clean solution.
+
+---
+
+## The moment coding agents are having
+
+Something shifted in the last few months. Coding agents stopped being demos and started being the way people actually work.
+
+[OpenClaw](https://openclaw.ai) — a self-hosted personal agent that runs on your machine and connects to your chat apps — went from obscure to 60,000 GitHub stars in 72 hours. People are waking up to Slack messages from their own agent telling them what it shipped overnight. Andrej Karpathy released [autoresearch](https://github.com/karpathy/autoresearch), a tool that lets an AI agent run 100 ML experiments while you sleep — editing code, running tests, keeping what works, discarding what doesn't, committing as it goes. "The goal," he wrote, "is to engineer your agents to make the fastest research progress indefinitely and without any of your own involvement."
+
+That dream is real now. Agents are genuinely capable of doing long-horizon, deep work — reviewing a codebase, writing a fix, testing it, iterating, opening a PR — while you're in a meeting, having coffee, or asleep. Every engineering team building serious software is going to run coding agents in the background. Not as a novelty. As infrastructure.
+
+But there's a catch that nobody talks about enough: token anxiety.
+
+A coding agent that runs for 45 minutes and crashes at step 6 doesn't just fail — it wastes $15 in tokens and forces a restart from scratch. An agent that runs 100 overnight experiments without any cost visibility burns your budget in ways you can't see until the bill arrives. The longer agents run and the more they do, the more expensive their failures become. And right now, most teams have no way to checkpoint progress, inspect what went wrong, or resume from where things broke.
+
+This is the infrastructure gap that Kitaru fills. Not just for coding agents — but coding agents are the clearest example of why it matters. The work is too expensive to redo. The runs are too long to monitor manually. The failures are too unpredictable to prevent. You need crash recovery, cost visibility, and the ability to pick up exactly where you left off. That's what we built.
+
+---
+
+## What Kitaru actually is
+
+Kitaru is an orchestration layer, not a framework.
+
+You write your agent in whatever way makes sense to you. Then you add two decorators:
+
+```python
+from kitaru import flow, checkpoint, wait
+
+@checkpoint
+def research(topic: str) -> str:
+    return my_pydantic_agent.run(topic)
+
+@checkpoint
+def review_gate(draft: str) -> str:
+    return wait(input=draft)  # pauses here, $0 compute
+
+@flow
+def writing_agent(topic: str) -> str:
+    data = research(topic)
+    return review_gate(data)
+```
+
+That's it. `@flow` marks the durable execution boundary. `@checkpoint` tells Kitaru to persist that function's output so it never runs twice. `wait()` suspends the process entirely — releasing compute, saving state — until input arrives, whether that's 30 seconds or 3 days later.
+
+Run it locally with `kitaru run`. Deploy it to any cloud with `kitaru stack use prod`. Same code, no changes.
+
+---
+
+## Three things we built that matter
+
+**Deployment flexibility without the overhead.** No workers. No message queues. No distributed systems PhD required. Kitaru runs on a single server backed by a SQL database. Point it at your Kubernetes cluster, your Vertex AI environment, your SageMaker setup — it works. The stack abstraction we built for ZenML carries over directly: swap infrastructure without touching your agent code.
+
+**Full execution control.** Every run is observable from day one. The dashboard ships with the server — not as an enterprise add-on. You can see your agent running step by step, inspect what each checkpoint produced, see exactly what an LLM call cost, and approve or resume a `wait()` step from a UI. When something goes wrong at step 6, you don't read logs. You look at what step 3 actually produced and replay from there.
+
+**Python-first, no lock-in.** Write normal Python. `if`, `for`, `try/except` — they all work. Kitaru doesn't need to know the execution shape upfront. It doesn't impose a graph model or a DSL. It works with PydanticAI, CrewAI, the OpenAI SDK, or whatever you're already using. It wraps your code, it doesn't replace it.
+
+---
+
+## What's on the roadmap
+
+The core is solid. Some things we're still building toward:
+
+Multi-agent coordination — agents calling agents, visualizing subagent lineage, managing shared context across a run. The primitives are there, the first-class experience is in progress.
+
+Native cross-run memory — agents that remember things across executions without you having to wire up a vector database yourself. We have a clear direction here and we're building it.
+
+Aggregated cost dashboards — cost tracking works at the individual run level today. Seeing total spend across all your flows, per agent, over time, is coming.
+
+We'll ship these in the open. The repo is public, the roadmap is public, and we'd rather show you what's real than promise what isn't.
+
+---
+
+## Five years of ZenML underneath
+
+Kitaru isn't starting from zero. The artifact store, the metadata layer, the orchestration engine, the stack abstraction — that's the ZenML infrastructure that teams at JetBrains, Adeo, and the Bundeswehr have run in production for years.
+
+We built ZenML because ML teams couldn't reproduce their pipelines or track what happened to their models. We watched the same problem appear for agents — teams who couldn't reproduce a failed run, couldn't see what their agent was doing, couldn't trust it in production.
+
+Same problem. Different workload. This time we built the interface from scratch, designed specifically for agents rather than adapted from a pipeline model.
+
+---
+
+## How to get started
+
+```bash
+pip install kitaru
+```
+
+Write a flow, add `@checkpoint` to the functions that matter, run it.
+
+If you want to see the dashboard, start the server:
+
+```bash
+kitaru login --local
+```
+
+To deploy to your cloud, configure a stack:
+
+```bash
+kitaru stack register my-prod-stack ...
+kitaru stack use my-prod-stack
+```
+
+The [getting started guide](https://kitaru.ai/docs) walks through the full setup. The [coding agent example](https://kitaru.ai/docs/getting-started/examples) shows what a real production agent looks like end to end — eight stages, checkpointed throughout, with a human approval gate before the expensive work starts.
+
+---
+
+If you're building agents in Python and you want them to survive production, this is for you.
+
+[Get started →](https://kitaru.ai)
+
+---
+
+*Continue reading*
+
+- [The anatomy of a production coding agent](/blog/anatomy-of-a-production-agent)
+- [From ZenML to Kitaru: why we built a new product](/blog/from-zenml-to-kitaru)
