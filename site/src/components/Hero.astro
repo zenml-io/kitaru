@@ -42,14 +42,14 @@
             <span class="code-dot"></span>
             <span class="code-dot"></span>
             <span class="code-dot"></span>
-            <div class="code-tabs">
-              <button class="code-tab active" data-tab="plain">Plain Python</button>
-              <button class="code-tab" data-tab="framework">With a framework</button>
+            <div class="code-tabs" role="tablist" aria-label="Code examples">
+              <button class="code-tab active" data-tab="plain" role="tab" id="tab-btn-plain" aria-selected="true" aria-controls="tab-plain" tabindex="0">Plain Python</button>
+              <button class="code-tab" data-tab="framework" role="tab" id="tab-btn-framework" aria-selected="false" aria-controls="tab-framework" tabindex="-1">With a framework</button>
             </div>
           </div>
           <div class="hero-code-body">
           <!-- Plain Python tab -->
-          <div class="code-tab-content active" id="tab-plain">
+          <div class="code-tab-content active" id="tab-plain" role="tabpanel" aria-labelledby="tab-btn-plain">
             <pre class="code-pre"><code><span class="kw">import</span> kitaru
 <span class="kw">from</span> kitaru <span class="kw">import</span> flow
 
@@ -70,7 +70,7 @@ coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><spa
 coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"aws-sandbox"</span>)</code></pre>
           </div>
           <!-- Framework tab -->
-          <div class="code-tab-content" id="tab-framework">
+          <div class="code-tab-content" id="tab-framework" role="tabpanel" aria-labelledby="tab-btn-framework">
             <pre class="code-pre"><code><span class="kw">from</span> kitaru <span class="kw">import</span> flow
 <span class="kw">from</span> kitaru.adapters <span class="kw">import</span> pydantic_ai <span class="kw">as</span> kp
 
@@ -333,15 +333,43 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
 </style>
 
 <script>
-  // Tab switching — scoped to hero code window
+  // Tab switching — scoped to hero code window (ARIA compliant)
   const heroWindow = document.querySelector('.hero-code-window');
-  heroWindow?.querySelectorAll('.code-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      heroWindow.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
-      heroWindow.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
-      tab.classList.add('active');
-      const target = tab.getAttribute('data-tab');
-      document.getElementById(`tab-${target}`)?.classList.add('active');
+  const tabs = heroWindow ? Array.from(heroWindow.querySelectorAll<HTMLButtonElement>('.code-tab')) : [];
+
+  function activateTab(tab: HTMLButtonElement) {
+    tabs.forEach(t => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+      t.setAttribute('tabindex', '-1');
+    });
+    heroWindow?.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
+    tab.setAttribute('tabindex', '0');
+    tab.focus();
+    const target = tab.getAttribute('data-tab');
+    document.getElementById(`tab-${target}`)?.classList.add('active');
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => activateTab(tab));
+    tab.addEventListener('keydown', (e: KeyboardEvent) => {
+      const idx = tabs.indexOf(tab);
+      let next: number | null = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        next = (idx + 1) % tabs.length;
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        next = (idx - 1 + tabs.length) % tabs.length;
+      } else if (e.key === 'Home') {
+        next = 0;
+      } else if (e.key === 'End') {
+        next = tabs.length - 1;
+      }
+      if (next !== null) {
+        e.preventDefault();
+        activateTab(tabs[next]);
+      }
     });
   });
 
