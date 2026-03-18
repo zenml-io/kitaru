@@ -22,15 +22,15 @@ dependencies = [
     "litellm>=1.75.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    # TODO: revert to "zenml>=0.94.0" once feature/kitaru is merged and released
+    # TODO: revert to "zenml>=0.94.0" once zenml release is out
     # Pinned to commit hash for tester stability; bump hash when updating
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@c5318663db4071c8da7ed9d3c56008ea801f4178",
+    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@f2030272cce32fa81862cf2c98ad625d4ce9baa9",
 ]
 
 [project.optional-dependencies]
 local = [
-    # TODO: revert to "zenml[local]>=0.94.0" once feature/kitaru is merged and released
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@c5318663db4071c8da7ed9d3c56008ea801f4178",
+    # TODO: revert to "zenml[local]>=0.94.0" once zenml release is out
+    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@f2030272cce32fa81862cf2c98ad625d4ce9baa9",
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=0.2.0",
@@ -63,8 +63,8 @@ dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    # TODO: revert to "zenml[local]>=0.94.0" once feature/kitaru is merged and released
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@c5318663db4071c8da7ed9d3c56008ea801f4178",
+    # TODO: revert to "zenml[local]>=0.94.0" once zenml release is out
+    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@f2030272cce32fa81862cf2c98ad625d4ce9baa9",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",

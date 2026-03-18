@@ -83,7 +83,7 @@ RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
 # zenmldocker/zenml-server image ships. Alembic is pinned for migration
 # stability (matches ZenML's own pin).
 #
-# TODO: Switch to released PyPI version once feature/kitaru is merged:
+# TODO: Switch to released PyPI version once the zenml release is out:
 #   uv pip install "zenml[server,secrets-aws,secrets-gcp,secrets-azure,
 #     secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,
 #     connectors-azure,azureml,sagemaker,vertex]>=X.Y.Z" "alembic==1.15.2"
