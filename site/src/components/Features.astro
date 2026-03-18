@@ -574,7 +574,9 @@
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         entry.target.classList.add('visible');
-        startFeatureAnimations();
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          startFeatureAnimations();
+        }
         gridObs.disconnect();
       }
     });

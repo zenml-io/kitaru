@@ -269,4 +269,18 @@ body::before {
   .btn-primary:hover {
     transform: none;
   }
+
+  .nav-brand .logo-ring,
+  .footer-brand .logo-ring {
+    animation: none;
+  }
+
+  .hero-badge .dot {
+    animation: none;
+  }
+
+  .pr-step.paused,
+  .tl-dot-wait {
+    animation: none;
+  }
 }
