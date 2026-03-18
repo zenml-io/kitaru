@@ -332,6 +332,23 @@ def tool_call(
 
     raw_result = dispatch_tool(cwd, tool_name, arguments)
 
+    # Save full file content as a browseable artifact (the LLM result is truncated)
+    if tool_name == "read_file" and "path" in arguments:
+        try:
+            full_path = Path(cwd) / arguments["path"]
+            full_content = full_path.read_text()
+            escaped = html.escape(full_content)
+            kitaru.save(
+                arguments["path"],
+                HTMLString(
+                    f'<pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;'
+                    f'border-radius:8px;overflow-x:auto;font-size:13px;'
+                    f'font-family:monospace;white-space:pre">{escaped}</pre>'
+                ),
+            )
+        except Exception:
+            pass
+
     # Save any new files the tool created as separate typed artifacts
     _save_generated_files(cwd, before)
 
