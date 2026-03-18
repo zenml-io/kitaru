@@ -40,7 +40,6 @@ def publish_release_note(draft: str) -> str:
     return f"PUBLISHED: {draft}"
 
 
-# TODO: remove explicit base_image once kitaru is on PyPI
 @flow(image={"base_image": "strickvl/kitaru-dev:latest"})
 def wait_for_approval_flow(topic: str) -> str:
     """Gate publication behind a durable human-approval wait."""

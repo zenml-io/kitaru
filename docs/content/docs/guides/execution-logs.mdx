@@ -68,10 +68,21 @@ important limits apply:
 
 1. **Server-backed connection required.** `KitaruClient().executions.logs(...)`
    calls backend log endpoints. In local database mode, those endpoints do not
-   exist, so Kitaru raises a clear `KitaruLogRetrievalError`.
+   exist, so Kitaru raises `KitaruLogRetrievalError`.
 2. **OTEL export-only backends are not retrievable through Kitaru.** In that
-   setup, Kitaru surfaces a clear retrieval error and points you at the OTEL
+   setup, Kitaru surfaces a retrieval error and points you at the OTEL
    backend instead of pretending the logs are available in-process.
+
+You can catch retrieval errors explicitly:
+
+```python
+import kitaru
+
+try:
+    entries = kitaru.KitaruClient().executions.logs(exec_id)
+except kitaru.KitaruLogRetrievalError as exc:
+    print("Log retrieval not available:", exc)
+```
 
 ## JSON output behavior
 

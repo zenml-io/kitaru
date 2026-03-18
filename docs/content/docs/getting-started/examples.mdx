@@ -35,7 +35,7 @@ If you want to...
 | Example | Run | Requires | Demonstrates | Related docs |
 |---|---|---|---|---|
 | Basic flow | `uv run -m examples.basic_flow.first_working_flow` | `uv sync --extra local` | Smallest end-to-end `@flow` + `@checkpoint` example | [Quickstart](/getting-started/quickstart) |
-| Structured logging | `uv run -m examples.basic_flow.flow_with_logging` | `uv sync --extra local` | `kitaru.log()` metadata at flow and checkpoint scope | [Execution Management](/guides/execution-management) |
+| Structured logging | `uv run -m examples.basic_flow.flow_with_logging` | `uv sync --extra local` | `kitaru.log()` metadata at flow and checkpoint scope | [Logging and Metadata](/concepts/logging) |
 | Artifacts | `uv run -m examples.basic_flow.flow_with_artifacts` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](/guides/artifacts) |
 | Configuration | `uv run -m examples.basic_flow.flow_with_configuration` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](/guides/configuration) |
 
@@ -53,7 +53,7 @@ If you want to...
 |---|---|---|---|---|
 | Tracked LLM calls | `uv run -m examples.llm.flow_with_llm` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
 | PydanticAI adapter | `uv run -m examples.pydantic_ai_agent.pydantic_ai_adapter` | `uv sync --extra local --extra pydantic-ai` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
-| MCP query tools | `uv run -m examples.mcp.mcp_query_tools` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [Execution Management](/guides/execution-management) |
+| MCP query tools | `uv run -m examples.mcp.mcp_query_tools` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
 
 ## Recommended path
 

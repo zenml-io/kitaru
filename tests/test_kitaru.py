@@ -108,6 +108,7 @@ class TestPublicExports:
             "KitaruError",
             "KitaruExecutionError",
             "KitaruFeatureNotAvailableError",
+            "KitaruLogRetrievalError",
             "KitaruRuntimeError",
             "KitaruStateError",
             "KitaruUsageError",

@@ -18,8 +18,15 @@ Both are checkpoint-only. Calling them outside `@checkpoint` raises an error.
 
 Use the client APIs for browsing artifacts from completed executions:
 
-- `KitaruClient().executions.get(exec_id).artifacts` — browse all artifacts.
-- `KitaruClient().artifacts.get(artifact_id)` — load a specific artifact.
+- `KitaruClient().executions.get(exec_id).artifacts` — browse all artifacts as `ArtifactRef` objects.
+- `KitaruClient().artifacts.get(artifact_id)` — get a reference to a specific artifact.
+
+Call `.load()` on any `ArtifactRef` to materialize the actual value:
+
+```python
+artifact = KitaruClient().artifacts.get(artifact_id)
+value = artifact.load()
+```
 
 ## Artifact types
 
