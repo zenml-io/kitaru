@@ -169,11 +169,10 @@ def _apply_runtime_version() -> None:
 
 def cli() -> None:
     """Entry point for the `kitaru` console script."""
-    from kitaru.analytics import interface_context, set_source, track
+    from kitaru.analytics import AnalyticsEvent, set_interface, track
 
-    set_source("cli")
-    interface_context.set("kitaru-cli")
-    track("Kitaru CLI invoked", {"command": " ".join(sys.argv[1:]) or "help"})
+    set_interface("cli")
+    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(sys.argv[1:]) or "help"})
     _apply_runtime_version()
     app()
 

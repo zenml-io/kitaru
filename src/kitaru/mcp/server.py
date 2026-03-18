@@ -18,7 +18,7 @@ import kitaru.client as client_api
 import kitaru.inspection as inspection
 from kitaru._config import _stacks as stack_ops
 from kitaru._interface_errors import run_with_mcp_error_boundary
-from kitaru.analytics import interface_context, set_source, track
+from kitaru.analytics import AnalyticsEvent, set_interface, track
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
@@ -43,13 +43,12 @@ def _load_fastmcp_class() -> type[Any]:
 mcp = _load_fastmcp_class()("kitaru")
 
 
-def track_analytics(func: Callable[..., _T]) -> Callable[..., _T]:
+def tracked_mcp_tool(func: Callable[..., _T]) -> Callable[..., _T]:
     """Register a function as a Kitaru MCP tool with automatic analytics tracking.
 
-    Drop-in replacement for ``@mcp.tool()`` that also fires
-    ``"Kitaru MCP tool called"`` on every invocation, recording the tool
-    name (derived from ``func.__name__``) and the success/failure outcome.
-    New tools get tracking for free just by using this decorator.
+    Combines ``@mcp.tool()`` registration with per-call analytics.  Every
+    invocation fires ``AnalyticsEvent.MCP_TOOL_CALLED`` with the tool name
+    (derived from ``func.__name__``) and the success/failure outcome.
     """
     tool_name = func.__name__
 
@@ -57,11 +56,11 @@ def track_analytics(func: Callable[..., _T]) -> Callable[..., _T]:
     def _wrapper(*args: Any, **kwargs: Any) -> _T:
         try:
             result = func(*args, **kwargs)
-            track("Kitaru MCP tool called", {"tool_name": tool_name, "success": True})
+            track(AnalyticsEvent.MCP_TOOL_CALLED, {"tool_name": tool_name, "success": True})
             return result
         except Exception as exc:
             track(
-                "Kitaru MCP tool called",
+                AnalyticsEvent.MCP_TOOL_CALLED,
                 {
                     "tool_name": tool_name,
                     "success": False,
@@ -73,7 +72,7 @@ def track_analytics(func: Callable[..., _T]) -> Callable[..., _T]:
     return mcp.tool()(_wrapper)
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_executions_list(
     status: str | None = None,
     flow: str | None = None,
@@ -99,7 +98,7 @@ def kitaru_executions_list(
     return run_with_mcp_error_boundary(_list_executions)
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_executions_get(exec_id: str) -> dict[str, Any]:
     """Get detailed information for one execution."""
     return run_with_mcp_error_boundary(
@@ -109,7 +108,7 @@ def kitaru_executions_get(exec_id: str) -> dict[str, Any]:
     )
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_executions_latest(
     status: str | None = None,
     flow: str | None = None,
@@ -130,7 +129,7 @@ def kitaru_executions_latest(
     return run_with_mcp_error_boundary(_latest_execution)
 
 
-@track_analytics
+@tracked_mcp_tool
 def get_execution_logs(
     exec_id: str,
     checkpoint: str | None = None,
@@ -154,7 +153,7 @@ def get_execution_logs(
     return run_with_mcp_error_boundary(_get_logs)
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_executions_run(
     target: str,
     args: dict[str, Any] | None = None,
@@ -183,7 +182,7 @@ def kitaru_executions_run(
     return run_with_mcp_error_boundary(_start_execution)
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_executions_cancel(exec_id: str) -> dict[str, Any]:
     """Cancel one execution and return updated details."""
     return run_with_mcp_error_boundary(
@@ -193,7 +192,7 @@ def kitaru_executions_cancel(exec_id: str) -> dict[str, Any]:
     )
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, Any]:
     """Provide input to a waiting execution and return updated details."""
 
@@ -212,7 +211,7 @@ def kitaru_executions_input(exec_id: str, wait: str, value: Any) -> dict[str, An
     return run_with_mcp_error_boundary(_provide_input)
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_executions_retry(exec_id: str) -> dict[str, Any]:
     """Retry one failed execution and return updated details."""
     return run_with_mcp_error_boundary(
@@ -222,7 +221,7 @@ def kitaru_executions_retry(exec_id: str) -> dict[str, Any]:
     )
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_executions_replay(
     exec_id: str,
     from_: str,
@@ -252,7 +251,7 @@ def kitaru_executions_replay(
     return run_with_mcp_error_boundary(_replay_execution)
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_artifacts_list(
     exec_id: str,
     name: str | None = None,
@@ -275,7 +274,7 @@ def kitaru_artifacts_list(
     )
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_artifacts_get(artifact_id: str) -> dict[str, Any]:
     """Get one artifact's metadata and loaded value."""
 
@@ -290,7 +289,7 @@ def kitaru_artifacts_get(artifact_id: str) -> dict[str, Any]:
     return run_with_mcp_error_boundary(_get_artifact)
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_status() -> dict[str, Any]:
     """Return structured status details for the current Kitaru connection."""
 
@@ -301,7 +300,7 @@ def kitaru_status() -> dict[str, Any]:
     return run_with_mcp_error_boundary(_status)
 
 
-@track_analytics
+@tracked_mcp_tool
 def kitaru_stacks_list() -> list[dict[str, Any]]:
     """List available stacks from the active connection context."""
     return run_with_mcp_error_boundary(
@@ -312,7 +311,7 @@ def kitaru_stacks_list() -> list[dict[str, Any]]:
     )
 
 
-@track_analytics
+@tracked_mcp_tool
 def manage_stack(
     action: Literal["create", "delete"],
     name: str,
@@ -384,7 +383,6 @@ def manage_stack(
 
 def main() -> None:
     """Entry point for the `kitaru-mcp` console script."""
-    set_source("mcp")
-    interface_context.set("kitaru-mcp")
-    track("Kitaru MCP server started")
+    set_interface("mcp")
+    track(AnalyticsEvent.MCP_SERVER_STARTED)
     mcp.run(transport="stdio")

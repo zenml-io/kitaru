@@ -42,14 +42,12 @@ from ._env import apply_env_translations
 
 apply_env_translations()
 
-from kitaru.analytics import interface_context
-from kitaru.analytics import set_source
+from kitaru.analytics import set_interface
 
 _default_analytics_source = os.environ.get(
     "KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-python"
 )
-set_source(_default_analytics_source)
-interface_context.set(_default_analytics_source)
+set_interface(_default_analytics_source)
 
 from ._terminal_logging import install_terminal_log_intercept
 
