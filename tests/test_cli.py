@@ -1083,10 +1083,10 @@ def test_login_surfaces_validation_errors(
     assert "Invalid Kitaru server URL" in capsys.readouterr().err
 
 
-def test_login_accepts_server_url_alias(
+def test_login_accepts_url_alias(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`--server-url` should remain a supported spelling for login."""
+    """`--url` should remain a supported spelling for login."""
     with (
         patch("kitaru.cli.login_to_server") as mock_login,
         patch(
@@ -1098,7 +1098,7 @@ def test_login_accepts_server_url_alias(
         app(
             [
                 "login",
-                "--server-url",
+                "--url",
                 "https://example.com/",
                 "--project",
                 "demo-project",
@@ -4207,7 +4207,7 @@ def test_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "command": "login",
-        "item": {"server_url": "https://example.com", "project": "demo"},
+        "item": {"url": "https://example.com", "project": "demo"},
     }
 
 
