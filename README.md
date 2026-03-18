@@ -1,258 +1,153 @@
-# Kitaru
+<p align="center">
+  <a href="https://kitaru.ai">
+    <img src="https://kitaru.ai/kitaru-logo.svg" alt="Kitaru" width="240">
+  </a>
+</p>
 
-Durable execution for AI agents, built on [ZenML](https://zenml.io).
+<h3 align="center">You build your agents. We make them durable.</h3>
 
-Kitaru makes agent workflows **persistent, replayable, and observable** using a small set of Python primitives. No graph DSL, no framework lock-in — just decorators on your existing code.
+<p align="center">
+  Open-source durable execution for AI agents, built on <a href="https://zenml.io">ZenML</a>.
+</p>
 
-> **Getting started?** See the [Early Tester Guide](GETTING_STARTED.md) for step-by-step setup, examples, and MCP integration instructions.
+<p align="center">
+  <a href="https://pypi.org/project/kitaru/"><img alt="PyPI" src="https://img.shields.io/pypi/v/kitaru?color=blue"></a>
+  <a href="https://pypi.org/project/kitaru/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/kitaru"></a>
+  <a href="https://github.com/zenml-io/kitaru/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/zenml-io/kitaru"></a>
+  <a href="https://zenml.io/slack"><img alt="Slack" src="https://img.shields.io/badge/chat-on%20slack-blueviolet"></a>
+</p>
 
-## Features
+<p align="center">
+  <a href="https://kitaru.ai/docs">Docs</a> &middot;
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="https://kitaru.ai/docs/getting-started/examples">Examples</a> &middot;
+  <a href="GETTING_STARTED.md">Getting Started Guide</a>
+</p>
 
-Kitaru is under active development. The core SDK primitives are implemented and functional:
+---
 
-- **Flows and checkpoints** — `@flow` and `@checkpoint` decorators for durable, replayable workflows with concurrent execution via `.submit()` / `.result()`
-- **Artifact persistence** — `kitaru.save()` / `kitaru.load()` for explicit artifact storage and cross-execution reuse inside checkpoints
-- **Structured logging + runtime log retrieval** — `kitaru.log()` attaches metadata to executions/checkpoints, and runtime logs are retrievable via `KitaruClient.executions.logs(...)`, `kitaru executions logs`, and the MCP `get_execution_logs` tool on server-backed connections, with clear errors for local DB / OTEL export-only cases
-- **Configuration** — `kitaru.configure(...)`, environment variables, and `[tool.kitaru]` in `pyproject.toml`, with precedence resolved at flow start and persisted per execution, including flow-bound stack defaults via `@flow(stack=...)` and one-off execution overrides via `.run(..., stack=...)`
-- **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`, `logs`), replaying from checkpoint boundaries (`replay`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
-- **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
-- **LLM calls** — `kitaru.llm()` with LiteLLM backend, automatic prompt/response capture, usage/cost/latency metadata, model aliases (`kitaru model register/list`) that are automatically transported to submitted/replayed remote runs, and env-first secret resolution for known providers
-- **Error handling** — Typed exception hierarchy (`KitaruContextError`, `KitaruExecutionError`, `KitaruUserCodeError`, etc.) with failure journaling via `execution.failure` and per-checkpoint `checkpoint.attempts`
-- **Stack lifecycle** — Local stack lifecycle in the Python SDK (`kitaru.create_stack()` / `kitaru.delete_stack()`), plus local, Kubernetes, Vertex, SageMaker, and AzureML stack creation through `kitaru stack create`, YAML-backed `kitaru stack create -f stack.yaml`, MCP `manage_stack`, advanced component defaults via `--extra` / `extra:` and remote async defaults via `--async`, translated component inspection via `kitaru stack show`, and `is_managed` in structured stack listings. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only. For the broader story, see the [stack selection guide](https://kitaru.ai/docs/getting-started/stack-selection) and the [Kubernetes stacks guide](https://kitaru.ai/docs/getting-started/kubernetes-stacks).
-- **Execution CLI** — `kitaru executions get/list/logs/input/replay/retry/resume/cancel` for full lifecycle management from the terminal
-- **Durable wait/resume** — `kitaru.wait(...)` suspends a flow until input is provided, either inline via the terminal prompt on local interactive runs or later through `client.executions.input(...)` / `client.executions.resume(...)` for non-interactive contexts
-- **Framework adapters** — `kitaru.adapters.pydantic_ai.wrap(agent)` tracks model requests and tool calls under the enclosing checkpoint (or a synthetic flow-scope checkpoint for `run()` / `run_sync()`), with per-tool capture modes (`full`, `metadata_only`, `off`) and HITL support via `hitl_tool(...)`
-- **Agent-native integrations** — Optional MCP server (`kitaru-mcp`) with execution/artifact/status query tools, plus Claude Code scoping and authoring skills available via the [plugin marketplace](https://github.com/zenml-io/kitaru-skills)
+<p align="center">
+  <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
+</p>
 
-### SDK primitives
+Kitaru makes your AI agent workflows **persistent, replayable, and observable**.
+Add a few Python decorators to your existing code — no graph DSL, no framework
+lock-in — and get durable execution with a built-in dashboard out of the box.
+
+## Why Kitaru?
+
+### Python-first, no graph DSL
+
+Write normal Python. Use `if`, `for`, `try/except` — whatever your agent needs.
+Kitaru gives you two decorators (`@flow` and `@checkpoint`) and a handful of
+utility functions. That's it.
 
 ```python
 from kitaru import checkpoint, flow
 
 @checkpoint
+def research(topic: str) -> str:
+    return do_research(topic)
+
+@checkpoint
+def write_draft(research: str) -> str:
+    return generate_draft(research)
+
+@flow
+def writing_agent(topic: str) -> str:
+    data = research(topic)
+    return write_draft(data)
+
+result = writing_agent.run("quantum computing").wait()
+```
+
+### Deployment simplicity
+
+No workers, no message queues, no distributed systems PhD required. Kitaru runs
+locally with zero config, and scales to production with a single server backed by
+a SQL database. Deploy your agents anywhere — Kubernetes, Vertex AI, SageMaker,
+or AzureML — using Kitaru's **stack** abstraction.
+
+### Built-in dashboard
+
+Every execution is observable from day one. See your agent runs, inspect
+checkpoint outputs, track LLM costs, and approve human-in-the-loop wait steps —
+all from a visual dashboard that ships with the Kitaru server.
+
+## Quick Start
+
+### Install
+
+```bash
+pip install kitaru
+```
+
+Or with [uv](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+uv pip install kitaru
+```
+
+### Write your first flow
+
+```python
+# agent.py
+from kitaru import checkpoint, flow
+
+@checkpoint
 def fetch_data(url: str) -> str:
-    """A checkpoint is a unit of work whose outcome is persisted."""
-    _ = url
     return "some data"
 
 @checkpoint
 def process_data(data: str) -> str:
-    """Checkpoints are composed inside a flow."""
     return data.upper()
 
 @flow
 def my_agent(url: str) -> str:
-    """A flow is the outer durable execution boundary."""
     data = fetch_data(url)
     return process_data(data)
 
-# Run and wait for result
 result = my_agent.run("https://example.com").wait()
 print(result)  # SOME DATA
 ```
 
-#### Concurrent checkpoints
-
-Checkpoints support `.submit()` for concurrent execution inside a flow:
-
-```python
-@flow
-def parallel_agent(urls: list[str]) -> list[str]:
-    futures = [fetch_data.submit(url) for url in urls]
-    return [f.result() for f in futures]
-```
-
-### Examples
-
-The `examples/` directory contains runnable workflows showcasing each feature.
-The implementations are now grouped into topic-focused subdirectories such as
-`examples/basic_flow/` and `examples/execution_management/`, while the public
-run commands stay stable.
-
-See the full catalog in [examples/README.md](examples/README.md) or the hosted
-[Examples guide](https://kitaru.ai/docs/getting-started/examples).
-
-Install dependencies first:
+### Run it
 
 ```bash
-uv sync --extra local                         # core, execution, replay, configuration, and LLM examples
-uv sync --extra local --extra pydantic-ai   # PydanticAI adapter example
-uv sync --extra local --extra mcp           # MCP query tools example
+python agent.py
 ```
 
-| Category | Example | Run | What it demonstrates |
-|---|---|---|---|
-| Core workflow basics | Basic flow | `uv run -m examples.basic_flow.first_working_flow` | The smallest end-to-end `@flow` + `@checkpoint` workflow |
-| Core workflow basics | Structured logging | `uv run -m examples.basic_flow.flow_with_logging` | `kitaru.log()` metadata at both flow and checkpoint scope |
-| Core workflow basics | Artifacts | `uv run -m examples.basic_flow.flow_with_artifacts` | `kitaru.save()` / `kitaru.load()` across executions |
-| Core workflow basics | Configuration | `uv run -m examples.basic_flow.flow_with_configuration` | `kitaru.configure()` defaults, overrides, and frozen execution specs |
-| Execution lifecycle | Execution management | `uv run -m examples.execution_management.client_execution_management` | `KitaruClient` for inspecting runs, artifacts, and execution metadata |
-| Execution lifecycle | Wait and resume | `uv run -m examples.execution_management.wait_and_resume` | `kitaru.wait()` with inline local prompt or fallback CLI input/resume |
-| Execution lifecycle | Replay with overrides | `uv run -m examples.replay.replay_with_overrides` | Replay from a checkpoint boundary with targeted `checkpoint.*` overrides |
-| LLMs and integrations | Tracked LLM calls | `uv run -m examples.llm.flow_with_llm` | `kitaru.llm()` with model aliases, prompt/response capture, and usage metadata |
-| LLMs and integrations | PydanticAI adapter | `uv run -m examples.pydantic_ai_agent.pydantic_ai_adapter` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary |
-| LLMs and integrations | MCP query tools | `uv run -m examples.mcp.mcp_query_tools` | Query executions and artifacts through the Kitaru MCP server |
-
-Run any example with:
+Every checkpoint's output is persisted automatically. You can inspect what
+happened, replay from any checkpoint, or resume a waiting flow:
 
 ```bash
-uv run -m examples.<group>.<module_name>
+kitaru executions list
+kitaru executions get <EXECUTION_ID>
+kitaru executions logs <EXECUTION_ID>
+kitaru executions replay <EXECUTION_ID> --from process_data
 ```
 
-For the LLM example, the most reusable setup is to store credentials in a
-secret and link that secret to a model alias. Kitaru stores that alias locally
-and automatically transports it to submitted and replayed runs:
+## Learn more
 
-```bash
-kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
-kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
-```
+| Resource | Description |
+|---|---|
+| [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
+| [Documentation](https://kitaru.ai/docs) | Complete reference and guides |
+| [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
+| [Stack Selection Guide](https://kitaru.ai/docs/getting-started/stack-selection) | Deploy to Kubernetes, Vertex AI, SageMaker, or AzureML |
 
-For quick local testing, you can also skip the linked secret and just export
-the provider key:
+## Contributing
 
-```bash
-kitaru model register fast --model openai/gpt-4o-mini
-export OPENAI_API_KEY=sk-...
-```
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for development
+setup, code style, and how to submit changes. The default branch is `develop` —
+all PRs should target it.
 
-For known providers, environment variables override a linked secret when both
-are present.
+## Community and support
 
-See the full walkthrough:
-https://kitaru.ai/docs/getting-started/secrets-and-model-registration
+- [Slack](https://zenml.io/slack) — chat with the team and other users
+- [GitHub Issues](https://github.com/zenml-io/kitaru/issues) — bug reports and feature requests
+- [kitaru.ai](https://kitaru.ai) — landing page and docs
 
-### CLI
+## License
 
-```
-kitaru --version              Show the SDK version
-kitaru --help                 Show available commands
-kitaru-mcp                    Run the MCP server (requires kitaru[mcp])
-
-kitaru login <server>         Connect to a Kitaru server
-kitaru login <server> --api-key <key>
-kitaru logout                 Log out and clear stored auth state
-kitaru status                 Show connection state and active stack
-kitaru info                   Show detailed environment information
-
-kitaru executions get <exec_id>
-kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
-kitaru executions input <exec_id> --value <json>
-kitaru executions input <exec_id> --abort
-kitaru executions input <exec_id> --interactive
-kitaru executions input --interactive
-kitaru executions logs <exec_id> [--checkpoint <name>] [--source <step|runner>] [--limit <n>] [--follow]
-kitaru executions replay <exec_id> --from <selector> [--args <json>] [--overrides <json>]
-kitaru executions resume <exec_id>
-kitaru executions retry <exec_id>
-kitaru executions cancel <exec_id>
-
-kitaru stack list                     List visible stacks
-kitaru stack current                  Show the active stack
-kitaru stack show <name-or-id>        Inspect one stack in Kitaru vocabulary
-kitaru stack use <name-or-id>         Switch active stack
-kitaru stack create <name>            Create and activate a local stack
-kitaru stack create <name> --type vertex --artifact-store gs://... --container-registry us-central1-docker.pkg.dev/... --region us-central1
-kitaru stack create <name> --type kubernetes --artifact-store s3://... --container-registry ... --cluster ... --region ...
-kitaru stack create <name> --type sagemaker --artifact-store s3://... --container-registry ... --region ... --execution-role arn:aws:iam::123456789012:role/...
-kitaru stack create <name> --type azureml --artifact-store az://... --container-registry demo.azurecr.io/... --subscription-id ... --resource-group ... --workspace ...
-kitaru stack create -f stack.yaml     Create a stack from a YAML config file
-kitaru stack create <name> --type vertex ... --async --extra orchestrator.pipeline_root=gs://...
-kitaru stack create <name> --no-activate
-kitaru stack delete <name-or-id>      Delete a stack
-kitaru stack delete <name-or-id> --recursive [--force]
-
-kitaru log-store show         Show effective global runtime log backend
-kitaru log-store set <backend> --endpoint <url> [--api-key <secret>]
-kitaru log-store reset        Clear global runtime log backend override
-
-kitaru secrets set <name> --KEY=value [--KEY=value ...]
-kitaru secrets show <name-or-id> [--show-values]
-kitaru secrets list
-kitaru secrets delete <name-or-id>
-
-kitaru model register <alias> --model <provider/model> [--secret <name-or-id>]
-kitaru model list
-```
-
-Most agent-facing commands also support `--output json` (or `-o json`).
-That gives you one consistent machine-readable contract:
-
-- single-item commands emit `{command, item}`
-- list commands emit `{command, items, count}`
-- `kitaru executions logs --follow --output json` is the special case: it emits one JSON event per line while following the stream
-
-### Headless / Docker / CI setup
-
-Kitaru can now be bootstrapped entirely from `KITARU_*` environment variables,
-which is the recommended public surface for containers, CI jobs, and other
-non-interactive environments.
-
-```bash
-# Connection
-export KITARU_SERVER_URL=https://my-server.example.com
-export KITARU_AUTH_TOKEN=kat_abc123...
-export KITARU_PROJECT=my-project
-
-# Execution
-export KITARU_STACK=my-remote-stack
-export KITARU_CACHE=true
-export KITARU_RETRIES=2
-
-# LLM
-export OPENAI_API_KEY=sk-...
-export KITARU_DEFAULT_MODEL=openai/gpt-4o
-
-# Housekeeping
-export KITARU_CONFIG_PATH=/app/.kitaru
-export KITARU_DEBUG=false
-export KITARU_ANALYTICS_OPT_IN=false
-```
-
-Two practical details matter here:
-
-- `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` must be set together.
-- When you connect to a remote server via env vars, `KITARU_PROJECT` is also required at first use.
-- `KITARU_MODEL_REGISTRY` is an advanced knob for manually supplying additional aliases or overriding matching transported aliases; most users should rely on automatic transport from `kitaru model register`.
-
-Under the hood, Kitaru translates its public `KITARU_*` connection/debug env
-vars into the ZenML env vars that the runtime already understands, so you do
-not need to set `ZENML_*` yourself.
-
-`kitaru status` will also show which `KITARU_*` vars are currently active and
-mask secret values like `KITARU_AUTH_TOKEN`.
-
-### Primitives still in progress
-
-No core SDK primitives are currently flagged as in progress in this branch.
-
-## Development
-
-Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and [just](https://github.com/casey/just). The `kitaru` and `kitaru-mcp` entrypoints fail fast with a clear error on older Python versions.
-
-```bash
-uv sync                            # Install dependencies
-uv sync --extra local              # Include local ZenML runtime components
-uv sync --extra mcp                # Include MCP server dependencies
-uv sync --extra local --extra mcp  # Local runtime + MCP tools
-just --list                        # Show all available recipes
-just check             # Run all checks (format, lint, typecheck, typos, yaml)
-just test              # Run tests
-just fix               # Auto-fix formatting, lint, and yaml
-just build             # Build wheel + sdist locally
-```
-
-Typo checking uses [`typos`](https://github.com/crate-ci/typos) (config in `.typos.toml`, run via `just typos`).
-
-### Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and how to submit changes. The default branch is `develop` — all PRs should target it.
-
-### Claude Code skills
-
-Install the official Astral skills for ty, ruff and uv:
-
-```shell
-/plugin marketplace add astral-sh/claude-code-plugins
-/plugin install astral@astral-sh
-```
+[Apache 2.0](LICENSE)
