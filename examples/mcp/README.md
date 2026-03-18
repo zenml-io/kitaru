@@ -8,6 +8,10 @@ uv sync --extra local --extra mcp
 uv run examples/mcp/mcp_query_tools.py
 ```
 
+This example uses your current Kitaru connection context. If you want MCP
+queries to target a deployed Kitaru server, connect first with `uv run kitaru
+login ...` (or `kitaru login ...`) and verify with `kitaru status`.
+
 For the full catalog, see [../README.md](../README.md).
 
 | Example | What it demonstrates | Test |

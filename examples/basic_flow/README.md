@@ -6,6 +6,10 @@ This group collects the shortest, most "start here" Kitaru examples.
 uv run examples/basic_flow/<module_name>.py
 ```
 
+These examples use your current Kitaru connection context. If you want them to
+run against a deployed Kitaru server, connect first with `uv run kitaru login
+...` (or `kitaru login ...`) and verify with `kitaru status`.
+
 For the full catalog, see [../README.md](../README.md).
 
 | Example | Run | What it demonstrates | Test |

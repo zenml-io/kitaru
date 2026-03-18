@@ -294,7 +294,7 @@ def login(
             help=(
                 "Kitaru server URL, managed workspace name, or managed workspace ID."
             ),
-            alias=["--server-url"],
+            alias=["--url"],
         ),
     ],
     api_key: Annotated[
@@ -358,7 +358,7 @@ def login(
         _emit_json_item(
             command,
             {
-                "server_url": connected_server_url,
+                "url": connected_server_url,
                 "project": project,
             },
             output=output_format,

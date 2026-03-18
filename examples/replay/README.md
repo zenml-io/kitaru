@@ -7,6 +7,10 @@ only the suffix you care about.
 uv run examples/replay/replay_with_overrides.py
 ```
 
+This example uses your current Kitaru connection context. If you want replay to
+run against a deployed Kitaru server, connect first with `uv run kitaru login
+...` (or `kitaru login ...`) and verify with `kitaru status`.
+
 For the full catalog, see [../README.md](../README.md).
 
 | Example | Run | What it demonstrates | Test |

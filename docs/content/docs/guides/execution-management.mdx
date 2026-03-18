@@ -6,6 +6,13 @@ description: Inspect execution status, fetch runtime logs, resolve waits, and ma
 `KitaruClient` is the programmatic API for managing and inspecting executions
 outside your flow functions.
 
+<Callout type="info">
+  `KitaruClient` and the CLI use your current Kitaru connection context. If you
+  want to inspect executions from a deployed Kitaru server, connect first with
+  `kitaru login ...` or provide `KITARU_*` connection variables in the current
+  environment.
+</Callout>
+
 ## Create a client
 
 ```python
