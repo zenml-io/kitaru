@@ -94,7 +94,7 @@ Flows run locally by default. If you already have a deployed Kitaru server and
 want this quick start to use it, connect first:
 
 ```bash
-kitaru login https://my-server.example.com --api-key <API_KEY>
+kitaru login https://my-server.example.com
 # add --project <PROJECT> or other login flags if your setup requires them
 kitaru status
 ```
