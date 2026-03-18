@@ -70,6 +70,10 @@ from kitaru._cli._helpers import (
     _resolve_output_format,
     _value_style,
 )
+from kitaru._cli._init import (
+    KITARU_REPOSITORY_DIRECTORY_NAME,
+    init,
+)
 from kitaru._cli._models import _model_rows, list___, register
 from kitaru._cli._secrets import (
     _SECRET_KEY_PATTERN,
@@ -173,6 +177,7 @@ def cli() -> None:
 
 
 __all__ = [
+    "KITARU_REPOSITORY_DIRECTORY_NAME",
     "_SECRET_KEY_PATTERN",
     "_STACK_CREATE_FILE_BOOLEAN_KEYS",
     "_STACK_CREATE_FILE_KEY_ALIASES",
@@ -280,6 +285,7 @@ __all__ = [
     "get_credentials_store",
     "get_current_stack",
     "info",
+    "init",
     "input_",
     "list_",
     "list__",

@@ -74,3 +74,6 @@ def apply_env_translations() -> None:
 
     # Disable ZenML Rich traceback formatting — Kitaru handles its own output.
     os.environ.setdefault("ZENML_ENABLE_RICH_TRACEBACK", "0")
+
+    # Use .kitaru/ instead of .zen/ as the local project marker directory.
+    os.environ.setdefault("ZENML_REPOSITORY_DIRECTORY_NAME", ".kitaru")

@@ -95,6 +95,7 @@ def isolated_zenml_global_config(
         ENV_ZENML_LOCAL_STORES_PATH,
         ENV_ZENML_REPOSITORY_PATH,
         ENV_ZENML_SERVER,
+        "ZENML_REPOSITORY_DIRECTORY_NAME",
     ):
         monkeypatch.delenv(env_name, raising=False)
 
