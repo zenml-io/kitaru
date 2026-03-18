@@ -1712,6 +1712,7 @@ def test_manage_stack_rejects_irrelevant_flags() -> None:
 
 def test_tracked_mcp_tool_fires_success_event() -> None:
     """tracked_mcp_tool decorator emits a success event after a successful operation."""
+
     @tracked_mcp_tool
     def _sample_tool() -> dict[str, str]:
         return {"key": "value"}
@@ -1728,6 +1729,7 @@ def test_tracked_mcp_tool_fires_success_event() -> None:
 
 def test_tracked_mcp_tool_fires_failure_event_and_reraises() -> None:
     """tracked_mcp_tool decorator emits a failure event and re-raises on error."""
+
     @tracked_mcp_tool
     def _failing_tool() -> None:
         raise RuntimeError("boom")
@@ -1750,6 +1752,7 @@ def test_tracked_mcp_tool_fires_failure_event_and_reraises() -> None:
 
 def test_tracked_mcp_tool_preserves_function_name() -> None:
     """tracked_mcp_tool should preserve the wrapped function's __name__."""
+
     @tracked_mcp_tool
     def kitaru_my_custom_tool() -> str:
         return "ok"
@@ -1764,6 +1767,7 @@ def test_tracked_mcp_tool_preserves_function_name() -> None:
 
 def test_tracked_mcp_tool_captures_concrete_error_type() -> None:
     """The error_type metadata should reflect the actual exception class."""
+
     @tracked_mcp_tool
     def _value_error_tool() -> None:
         raise ValueError("bad input")

@@ -14,12 +14,14 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
 class AnalyticsEvent(StrEnum):
     """Kitaru analytics event names.
 
     Members are strings and can be passed directly to ``track()``
     and ZenML's ``track(event=...)``.
     """
+
     CLI_INVOKED = "Kitaru CLI invoked"
     SERVER_CONNECTED = "Kitaru server connected"
     MCP_SERVER_STARTED = "Kitaru MCP server started"
