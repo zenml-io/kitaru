@@ -239,7 +239,25 @@ materializer_registry.register_and_overwrite_type(ToolCallResult, ToolCallResult
 @checkpoint(type="llm_call")
 def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
     """Single LLM completion call tracked as a checkpoint."""
+    import time
+
+    from kitaru.llm import _extract_usage  # noqa: PLC2701
+
+    started_at = time.perf_counter()
     response = completion(model=MODEL, messages=messages, tools=_ALL_TOOLS)
+    latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
+
+    usage = _extract_usage(response)
+    metadata: dict[str, Any] = {
+        "model": MODEL,
+        "latency_ms": latency_ms,
+        "tokens_input": usage.prompt_tokens,
+        "tokens_output": usage.completion_tokens,
+        "total_tokens": usage.total_tokens,
+        "cost_usd": usage.cost_usd,
+    }
+    kitaru.log(llm_usage={k: v for k, v in metadata.items() if v is not None})
+
     msg = response.choices[0].message
 
     tool_calls = None
