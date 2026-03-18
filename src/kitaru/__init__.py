@@ -38,6 +38,7 @@ The CLI also supports global runtime log-store configuration via
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
 import os
+
 from ._env import apply_env_translations
 
 apply_env_translations()

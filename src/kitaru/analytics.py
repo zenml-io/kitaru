@@ -109,7 +109,7 @@ def track(event_name: str, metadata: dict[str, Any] | None = None) -> bool:
         from zenml.analytics import track as _zenml_track
 
         merged = {"interface": interface_context.get(), **(metadata or {})}
-        return _zenml_track(event=event_name, metadata=merged)
+        return _zenml_track(event=event_name, metadata=merged)  # type: ignore[arg-type]  # ZenML accepts Union[AnalyticsEvent, str]
     except Exception:
         logger.debug("Analytics tracking failed", exc_info=True)
         return False

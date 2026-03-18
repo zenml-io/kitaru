@@ -29,7 +29,6 @@ from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
     get_execution_logs,
     kitaru_artifacts_get,
-    tracked_mcp_tool,
     kitaru_artifacts_list,
     kitaru_executions_cancel,
     kitaru_executions_get,
@@ -42,6 +41,7 @@ from kitaru.mcp.server import (
     kitaru_stacks_list,
     kitaru_status,
     manage_stack,
+    tracked_mcp_tool,
 )
 
 
@@ -1732,9 +1732,11 @@ def test_tracked_mcp_tool_fires_failure_event_and_reraises() -> None:
     def _failing_tool() -> None:
         raise RuntimeError("boom")
 
-    with patch("kitaru.mcp.server.track") as mock_track:
-        with pytest.raises(RuntimeError, match="boom"):
-            _failing_tool()
+    with (
+        patch("kitaru.mcp.server.track") as mock_track,
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        _failing_tool()
 
     mock_track.assert_called_once_with(
         "Kitaru MCP tool called",
@@ -1766,8 +1768,10 @@ def test_tracked_mcp_tool_captures_concrete_error_type() -> None:
     def _value_error_tool() -> None:
         raise ValueError("bad input")
 
-    with patch("kitaru.mcp.server.track") as mock_track:
-        with pytest.raises(ValueError):
-            _value_error_tool()
+    with (
+        patch("kitaru.mcp.server.track") as mock_track,
+        pytest.raises(ValueError),
+    ):
+        _value_error_tool()
 
     assert mock_track.call_args[0][1]["error_type"] == "ValueError"

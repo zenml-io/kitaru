@@ -50,13 +50,16 @@ def tracked_mcp_tool(func: Callable[..., _T]) -> Callable[..., _T]:
     invocation fires ``AnalyticsEvent.MCP_TOOL_CALLED`` with the tool name
     (derived from ``func.__name__``) and the success/failure outcome.
     """
-    tool_name = func.__name__
+    tool_name: str = getattr(func, "__name__", type(func).__name__)
 
     @wraps(func)
     def _wrapper(*args: Any, **kwargs: Any) -> _T:
         try:
             result = func(*args, **kwargs)
-            track(AnalyticsEvent.MCP_TOOL_CALLED, {"tool_name": tool_name, "success": True})
+            track(
+                AnalyticsEvent.MCP_TOOL_CALLED,
+                {"tool_name": tool_name, "success": True},
+            )
             return result
         except Exception as exc:
             track(
