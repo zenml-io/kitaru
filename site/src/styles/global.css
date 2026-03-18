@@ -155,6 +155,14 @@ body::before {
 /* ═══════════════════════════════════════════════════
    Shared layout
    ═══════════════════════════════════════════════════ */
+.section-pad {
+  padding: 80px clamp(24px, 5vw, 80px) 100px;
+}
+
+.section-pad-compact {
+  padding: 60px clamp(24px, 5vw, 80px) 100px;
+}
+
 .section-inner {
   max-width: 1200px;
   width: 100%;
