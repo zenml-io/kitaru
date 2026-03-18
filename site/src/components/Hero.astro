@@ -374,40 +374,6 @@ coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</s
   });
 
   // Waitlist form
-  const heroForm = document.getElementById('hero-waitlist-form') as HTMLFormElement;
-  heroForm?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = heroForm.querySelector('button')!;
-    const input = heroForm.querySelector('input')! as HTMLInputElement;
-    const email = input.value.trim();
-
-    btn.textContent = 'Submitting...';
-    btn.setAttribute('disabled', 'true');
-
-    try {
-      const res = await fetch('/api/waitlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-
-      if (res.ok) {
-        btn.textContent = "You're in \u2713";
-        btn.style.background = '#3D8C5C';
-        input.disabled = true;
-        window.analytics?.track('Waitlist Signup', {
-          email,
-          source: 'hero',
-          page: window.location.pathname,
-        });
-        window.analytics?.identify(email, { email });
-      } else {
-        btn.textContent = 'Try again';
-        btn.removeAttribute('disabled');
-      }
-    } catch (_err) {
-      btn.textContent = 'Try again';
-      btn.removeAttribute('disabled');
-    }
-  });
+  import { setupWaitlistForm } from '../scripts/waitlist';
+  setupWaitlistForm('hero-waitlist-form', 'hero');
 </script>
