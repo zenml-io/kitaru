@@ -588,7 +588,19 @@
   // ═══ Feature Animations ═══
   let featureTimers: number[] = [];
 
+  function scheduleTimer(fn: () => void, delay: number): number {
+    const id = setTimeout(() => {
+      const idx = featureTimers.indexOf(id);
+      if (idx !== -1) featureTimers.splice(idx, 1);
+      fn();
+    }, delay) as unknown as number;
+    featureTimers.push(id);
+    return id;
+  }
+
   function startFeatureAnimations() {
+    featureTimers.forEach(id => clearTimeout(id));
+    featureTimers = [];
     runPauseResumeAnim();
     runReplayAnim();
     runFrameworkAnim();
@@ -617,34 +629,29 @@
         if (progress) progress.style.width = (positions[i] - positions[0] + 2) + '%';
 
         if (i === 3) {
-          const t1 = setTimeout(() => {
+          scheduleTimer(() => {
             steps[i].classList.remove('active');
             steps[i].classList.add('paused');
             badge?.classList.add('visible');
-            const t2 = setTimeout(() => {
+            scheduleTimer(() => {
               badge?.classList.remove('visible');
               steps[i].classList.remove('paused');
               steps[i].classList.add('completed');
               i++;
               nextStep();
             }, 2000);
-            featureTimers.push(t2);
           }, 600);
-          featureTimers.push(t1);
         } else {
-          const t = setTimeout(() => { i++; nextStep(); }, 600);
-          featureTimers.push(t);
+          scheduleTimer(() => { i++; nextStep(); }, 600);
         }
       } else {
         steps[steps.length - 1].classList.remove('active');
         steps[steps.length - 1].classList.add('completed');
         if (progress) progress.style.width = '82%';
-        const t = setTimeout(() => runPauseResumeAnim(), 2000);
-        featureTimers.push(t);
+        scheduleTimer(() => runPauseResumeAnim(), 2000);
       }
     }
-    const t = setTimeout(nextStep, 500);
-    featureTimers.push(t);
+    scheduleTimer(nextStep, 500);
   }
 
   // --- Replay from Failure ---
@@ -665,37 +672,31 @@
         if (i === 5) {
           steps[i].classList.add('fail');
           if (status) { status.textContent = '✗ Step 6 failed — API timeout'; status.classList.add('error'); }
-          const t1 = setTimeout(() => {
+          scheduleTimer(() => {
             if (status) { status.textContent = '↻ Replaying from step 6...'; status.className = 'replay-status'; }
             steps[i].className = 'rstep';
-            const t2 = setTimeout(() => {
+            scheduleTimer(() => {
               steps[i].classList.add('replay');
               cost?.classList.add('visible');
-              const t3 = setTimeout(() => {
+              scheduleTimer(() => {
                 steps[i].classList.remove('replay');
                 steps[i].classList.add('ok');
                 i++;
                 nextRStep();
               }, 800);
-              featureTimers.push(t3);
             }, 600);
-            featureTimers.push(t2);
           }, 1500);
-          featureTimers.push(t1);
         } else {
           steps[i].classList.add('ok');
           i++;
-          const t = setTimeout(nextRStep, 350);
-          featureTimers.push(t);
+          scheduleTimer(nextRStep, 350);
         }
       } else {
         if (status) { status.textContent = '✓ All steps complete'; status.classList.add('success'); }
-        const t = setTimeout(() => runReplayAnim(), 2500);
-        featureTimers.push(t);
+        scheduleTimer(() => runReplayAnim(), 2500);
       }
     }
-    const t = setTimeout(nextRStep, 500);
-    featureTimers.push(t);
+    scheduleTimer(nextRStep, 500);
   }
 
   // --- Framework Orbit ---
@@ -709,11 +710,9 @@
       items.forEach(it => it.classList.remove('active'));
       items[current].classList.add('active');
       current = (current + 1) % items.length;
-      const t = setTimeout(highlight, 1500);
-      featureTimers.push(t);
+      scheduleTimer(highlight, 1500);
     }
-    const t = setTimeout(highlight, 800);
-    featureTimers.push(t);
+    scheduleTimer(highlight, 800);
   }
 
   // --- Parallel Branches ---
@@ -735,38 +734,31 @@
           const dot = branch.querySelector(`.par-dot[data-dot="${step}"]`);
           if (!dot) return;
           if (bIdx === failBranch && step === failDot) {
-            const t1 = setTimeout(() => {
+            scheduleTimer(() => {
               dot.classList.add('fail');
-              // After failure, replay
-              const t2 = setTimeout(() => {
+              scheduleTimer(() => {
                 dot.classList.remove('fail');
                 dot.classList.add('replay');
-                const t3 = setTimeout(() => {
+                scheduleTimer(() => {
                   dot.classList.remove('replay');
                   dot.classList.add('ok');
                   step++;
                   nextStep();
                 }, 600);
-                featureTimers.push(t3);
               }, 800);
-              featureTimers.push(t2);
             }, 200);
-            featureTimers.push(t1);
           } else {
             dot.classList.add('ok');
           }
         });
         if (!(failBranch >= 0 && step === failDot)) {
           step++;
-          const t = setTimeout(nextStep, 500);
-          featureTimers.push(t);
+          scheduleTimer(nextStep, 500);
         }
       } else {
-        const t = setTimeout(() => runParallelAnim(), 2500);
-        featureTimers.push(t);
+        scheduleTimer(() => runParallelAnim(), 2500);
       }
     }
-    const t = setTimeout(nextStep, 500);
-    featureTimers.push(t);
+    scheduleTimer(nextStep, 500);
   }
 </script>
