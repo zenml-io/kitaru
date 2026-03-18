@@ -469,7 +469,13 @@ def _parse_kitaru_config_file(
     if not config_path.exists():
         return None
 
-    config_values = yaml_utils.read_yaml(str(config_path))
+    try:
+        config_values = yaml_utils.read_yaml(str(config_path))
+    except Exception as exc:
+        raise KitaruUsageError(
+            "The Kitaru global config file is invalid. Fix or delete "
+            f"{config_path} and try again."
+        ) from exc
     if config_values is None:
         return None
 
@@ -526,7 +532,7 @@ def _read_kitaru_global_config_for_update_impl(
     """Read global config for mutation, recovering from malformed files."""
     try:
         return reader()
-    except ValueError:
+    except (KitaruUsageError, ValueError):
         return global_config_model()
 
 

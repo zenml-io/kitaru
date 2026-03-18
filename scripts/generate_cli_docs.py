@@ -18,7 +18,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args, get_origin
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = REPO_ROOT / "docs" / "content" / "docs" / "cli"
@@ -69,12 +69,19 @@ def _type_display(hint: Any) -> str:
     """Human-readable type name from a Python type hint."""
     if hint is inspect.Parameter.empty or hint is None:
         return ""
-    origin = getattr(hint, "__origin__", None)
+
+    origin = get_origin(hint)
+    args = get_args(hint)
     if origin is not None:
-        args = getattr(hint, "__args__", ())
+        if str(origin) == "<class 'typing.Annotated'>":
+            return _type_display(args[0]) if args else ""
+        non_none_args = [arg for arg in args if arg is not type(None)]
+        if len(non_none_args) == 1 and len(non_none_args) != len(args):
+            return _type_display(non_none_args[0])
         arg_strs = ", ".join(_type_display(a) for a in args)
         origin_name = getattr(origin, "__name__", str(origin))
         return f"{origin_name}[{arg_strs}]" if arg_strs else origin_name
+
     name = getattr(hint, "__name__", None)
     if name:
         return name
@@ -173,6 +180,11 @@ def _extract_parameters(app: Any) -> list[ParameterDoc]:
 
         positional_token = _positional_token(arg)
         explicit_aliases = list(getattr(arg.parameter, "alias", ()) or ())
+        negative_aliases = [
+            f"--{alias}"
+            for alias in (getattr(arg.parameter, "negative", ()) or ())
+            if isinstance(alias, str)
+        ]
         if positional_token is not None:
             names = [positional_token, *explicit_aliases]
             option_names = explicit_aliases
@@ -180,6 +192,8 @@ def _extract_parameters(app: Any) -> list[ParameterDoc]:
             option_names = (
                 list(arg.parameter.name) if arg.parameter.name else list(arg.names)
             )
+            if negative_aliases:
+                option_names = [*option_names, *negative_aliases]
             names = option_names
         help_text = arg.parameter.help or ""
         type_name = _type_display(arg.hint)
@@ -332,6 +346,29 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
             "- `kitaru executions logs --follow --output json` is the "
             "special case: it emits one JSON event per line while following "
             "the stream."
+        )
+        lines.append("")
+        lines.append("## Machine mode")
+        lines.append("")
+        lines.append(
+            "Most text commands also support `--machine` to force plain, "
+            "grep-friendly output."
+        )
+        lines.append(
+            "If you want that behavior by default, set "
+            "`KITARU_MACHINE_MODE=1` or run "
+            "`kitaru configure set machine_mode true`."
+        )
+        lines.append(
+            "Precedence is: `--output json` / non-TTY output "
+            "(always machine-style), then `--machine` / `--no-machine`, "
+            "then `KITARU_MACHINE_MODE`, then the persisted `configure` "
+            "setting."
+        )
+        lines.append(
+            "In non-TTY text mode, handled CLI/backend failures also emit "
+            "full Python tracebacks; `--output json` keeps structured JSON "
+            "errors instead."
         )
         lines.append("")
 

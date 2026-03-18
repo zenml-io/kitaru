@@ -13,13 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Runtime submission observer plumbing (`_submission_observer`, `_notify_submission_observer`) from `kitaru.runtime` and `kitaru.flow`
 
 ### Added
+- Phase 1 machine mode foundation for CLI output: most text commands now accept `--machine` / `--no-machine`, `KITARU_MACHINE_MODE` is supported as an environment override, `kitaru configure set machine_mode <true|false>` persists the preference locally, and non-TTY / `--output json` surfaces automatically use machine-style output
 - `kitaru executions input` now auto-detects the single pending wait condition, removing the need for `--wait`; use `--interactive` (`-i`) for guided review with JSON schema display, continue/abort/skip/quit actions, and multi-execution sweep mode; use `--abort` to abort a wait in non-interactive mode
 - `KitaruClient.executions.pending_waits(exec_id)` returns all pending wait conditions for an execution
 - `KitaruClient.executions.abort_wait(exec_id, wait=...)` aborts a pending wait condition
 - Native Kitaru terminal logging: ZenML console output is now intercepted and rewritten to Kitaru vocabulary (pipeline→flow, step→checkpoint, run→execution) with colored lifecycle markers; ZenML-specific noise (Dashboard URLs, user/build info, component listings) is suppressed from the terminal while remaining available in stored logs via `kitaru executions logs`
+- Interactive TTY Python flow runs now render a Rich live checkpoint tree with resolving flow/stack/execution header metadata, checkpoint compaction for long successful runs, grouping for contiguous `.submit()` fan-out launches, wait/input hints, and terminal retry/logs suggestions; machine mode and non-TTY contexts continue to use plain text
 - Shared source-alias module (`kitaru._source_aliases`) centralizing alias prefix constants and normalization helpers previously duplicated across 7+ files
 
 ### Changed
+- Machine-mode CLI failures now print full Python tracebacks in text mode for handled backend exceptions, while JSON output keeps the existing structured error contract; Python flow terminal logs also suppress ANSI formatting in machine mode and append full traceback text for exception-bearing records
 - **Breaking:** `kitaru executions input` no longer accepts `--wait`; the CLI auto-detects the single pending wait (use `--interactive` for multi-wait executions). MCP `kitaru_executions_input` still requires explicit `wait` for deterministic tool calls.
 - Flows and checkpoints now register with plain names in ZenML (e.g. `my_flow`, `fetch_data`) instead of prefixed internal aliases (`__kitaru_pipeline_source_my_flow`, `__kitaru_checkpoint_source_fetch_data`); the internal source aliases remain for ZenML source loading but are no longer visible in the ZenML UI or API responses
 - Moved Claude Code skills (kitaru-scoping, kitaru-authoring) to dedicated repository: [zenml-io/kitaru-skills](https://github.com/zenml-io/kitaru-skills)

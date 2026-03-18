@@ -13,14 +13,16 @@ from kitaru.inspection import serialize_model_alias
 
 from . import model_app
 from ._helpers import (
+    MachineModeOption,
     OutputFormatOption,
     _emit_json_item,
     _emit_json_items,
     _emit_snapshot,
     _exit_with_error,
     _facade_module,
+    _machine_mode_context,
     _print_success,
-    _resolve_output_format,
+    _resolve_output_and_machine_mode,
 )
 
 
@@ -59,6 +61,7 @@ def register(
         Parameter(help="Optional secret name/ID containing provider credentials."),
     ] = None,
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Register or update a model alias used by `kitaru.llm()`.
 
@@ -66,7 +69,7 @@ def register(
     replayed executions.
     """
     command = "model.register"
-    output_format = _resolve_output_format(output)
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
     facade = _facade_module()
 
     def _register_alias() -> ModelAliasEntry:
@@ -74,51 +77,58 @@ def register(
             facade._resolve_secret_exact(facade.Client(), secret)
         return facade.register_model_alias(alias, model=model, secret=secret)
 
-    alias_entry = run_with_cli_error_boundary(
-        _register_alias,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command,
-            serialize_model_alias(alias_entry),
+    with _machine_mode_context(machine_mode):
+        alias_entry = run_with_cli_error_boundary(
+            _register_alias,
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
 
-    detail = f"Model: {alias_entry.model}"
-    if alias_entry.secret:
-        detail += f" | Secret: {alias_entry.secret}"
-    if alias_entry.is_default:
-        detail += " | Default alias"
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                serialize_model_alias(alias_entry),
+                output=output_format,
+            )
+            return
 
-    _print_success(
-        f"Saved model alias: {alias_entry.alias}",
-        detail=detail,
-    )
+        detail = f"Model: {alias_entry.model}"
+        if alias_entry.secret:
+            detail += f" | Secret: {alias_entry.secret}"
+        if alias_entry.is_default:
+            detail += " | Default alias"
+
+        _print_success(
+            f"Saved model alias: {alias_entry.alias}",
+            detail=detail,
+        )
 
 
 @model_app.command
-def list___(output: OutputFormatOption = "text") -> None:
+def list___(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """List model aliases available to `kitaru.llm()` in this environment."""
     command = "model.list"
-    output_format = _resolve_output_format(output)
-    aliases = run_with_cli_error_boundary(
-        _facade_module().list_model_aliases,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_items(
-            command,
-            [serialize_model_alias(entry) for entry in aliases],
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        aliases = run_with_cli_error_boundary(
+            _facade_module().list_model_aliases,
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
 
-    _emit_snapshot("Kitaru models", _model_rows(aliases))
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_items(
+                command,
+                [serialize_model_alias(entry) for entry in aliases],
+                output=output_format,
+            )
+            return
+
+        _emit_snapshot("Kitaru models", _model_rows(aliases))

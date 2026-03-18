@@ -311,6 +311,48 @@ def test_submit_returns_zenml_future_object() -> None:
     )
 
 
+def test_submit_registers_terminal_submit_group() -> None:
+    def fetch_data(value: str) -> str:
+        return value
+
+    wrapped, captured = _build_checkpoint(fetch_data)
+
+    with (
+        _zenml_contexts(
+            step_active=False,
+            dynamic_run_active=True,
+            flow_active=True,
+        ),
+        patch("kitaru.checkpoint._register_terminal_submit_group") as register_group,
+    ):
+        wrapped.submit("payload")
+
+    register_group.assert_called_once_with("fetch_data")
+    assert captured["step"].submit_args == (("payload",), {"id": None, "after": None})
+
+
+def test_submit_ignores_terminal_submit_group_failures() -> None:
+    wrapped, captured = _build_checkpoint(lambda: "ok")
+    expected_future = object()
+    captured["step"].submit_result = expected_future
+
+    with (
+        _zenml_contexts(
+            step_active=False,
+            dynamic_run_active=True,
+            flow_active=True,
+        ),
+        patch(
+            "kitaru.checkpoint._register_terminal_submit_group",
+            side_effect=RuntimeError("boom"),
+        ),
+    ):
+        returned_future = wrapped.submit("payload")
+
+    assert returned_future is expected_future
+    assert captured["step"].submit_args == (("payload",), {"id": None, "after": None})
+
+
 def test_checkpoint_runtime_scope_is_set_while_user_code_runs() -> None:
     fake_step_context = SimpleNamespace(
         pipeline_run=SimpleNamespace(

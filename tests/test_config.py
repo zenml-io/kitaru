@@ -30,6 +30,7 @@ from kitaru.config import (
     KITARU_IMAGE_ENV,
     KITARU_LOG_STORE_BACKEND_ENV,
     KITARU_LOG_STORE_ENDPOINT_ENV,
+    KITARU_MACHINE_MODE_ENV,
     KITARU_MODEL_REGISTRY_ENV,
     KITARU_PROJECT_ENV,
     KITARU_RETRIES_ENV,
@@ -64,6 +65,7 @@ from kitaru.config import (
     create_stack,
     current_stack,
     delete_stack,
+    get_global_machine_mode,
     image_settings_to_docker_settings,
     list_active_kitaru_environment_variables,
     list_model_aliases,
@@ -74,8 +76,10 @@ from kitaru.config import (
     resolve_connection_config,
     resolve_execution_config,
     resolve_log_store,
+    resolve_machine_mode,
     resolve_model_selection,
     set_global_log_store,
+    set_global_machine_mode,
     use_stack,
 )
 from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
@@ -3494,6 +3498,7 @@ def test_active_environment_variables_mask_secrets(
     monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
     monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123456")
     monkeypatch.setenv(KITARU_DEFAULT_MODEL_ENV, "openai/gpt-4o")
+    monkeypatch.setenv(KITARU_MACHINE_MODE_ENV, "1")
 
     active = list_active_kitaru_environment_variables()
 
@@ -3501,6 +3506,7 @@ def test_active_environment_variables_mask_secrets(
         (KITARU_SERVER_URL_ENV, "https://server.example.com"),
         ("KITARU_AUTH_TOKEN", "token-12***"),
         (KITARU_DEFAULT_MODEL_ENV, "openai/gpt-4o"),
+        (KITARU_MACHINE_MODE_ENV, "1"),
     ]
 
 
@@ -3524,6 +3530,67 @@ def test_legacy_config_is_ignored(tmp_path: Path) -> None:
 
     new_path = _kitaru_config_path()
     assert not new_path.exists()
+
+
+def test_set_global_machine_mode_persists_and_preserves_other_settings() -> None:
+    """Persisting machine mode should not clobber other Kitaru global settings."""
+    register_model_alias("fast", model="openai/gpt-4o-mini")
+
+    stored = set_global_machine_mode(True)
+
+    assert stored is True
+    assert get_global_machine_mode() is True
+    aliases = list_model_aliases()
+    assert [entry.alias for entry in aliases] == ["fast"]
+
+
+def test_resolve_machine_mode_applies_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Machine mode should resolve as json/non-TTY > CLI > env > persisted > default."""
+    set_global_machine_mode(False)
+
+    assert resolve_machine_mode(interactive=True) is False
+
+    monkeypatch.setenv(KITARU_MACHINE_MODE_ENV, "true")
+    assert resolve_machine_mode(interactive=True) is True
+    assert resolve_machine_mode(cli_override=False, interactive=True) is False
+    assert resolve_machine_mode(output_json=True, interactive=True) is True
+    assert resolve_machine_mode(cli_override=False, interactive=False) is True
+
+
+def test_resolve_machine_mode_rejects_invalid_env_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid machine-mode env values should raise a clear parse error."""
+    monkeypatch.setenv(KITARU_MACHINE_MODE_ENV, "maybe")
+
+    with pytest.raises(KitaruUsageError, match=KITARU_MACHINE_MODE_ENV):
+        resolve_machine_mode(interactive=True)
+
+
+def test_resolve_machine_mode_uses_persisted_default_when_present() -> None:
+    """Persisted machine mode should apply when no CLI or env override exists."""
+    set_global_machine_mode(True)
+
+    assert get_global_machine_mode() is True
+    assert resolve_machine_mode(interactive=True) is True
+    assert resolve_machine_mode(cli_override=False, interactive=True) is False
+
+
+def test_machine_mode_recovery_ignores_malformed_persisted_yaml() -> None:
+    """Machine mode reads/updates should recover from syntactically broken YAML."""
+    config_path = _kitaru_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("machine_mode: [broken\n")
+
+    assert get_global_machine_mode() is None
+    assert resolve_machine_mode(interactive=True) is False
+
+    stored = set_global_machine_mode(True)
+
+    assert stored is True
+    assert get_global_machine_mode() is True
 
 
 def test_resolve_execution_config_applies_phase10_precedence(

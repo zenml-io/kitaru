@@ -12,7 +12,7 @@ Kitaru is under active development. The core SDK primitives are implemented and 
 
 - **Flows and checkpoints** — `@flow` and `@checkpoint` decorators for durable, replayable workflows with concurrent execution via `.submit()` / `.result()`
 - **Artifact persistence** — `kitaru.save()` / `kitaru.load()` for explicit artifact storage and cross-execution reuse inside checkpoints
-- **Structured logging + runtime log retrieval** — `kitaru.log()` attaches metadata to executions/checkpoints, and runtime logs are retrievable via `KitaruClient.executions.logs(...)`, `kitaru executions logs`, and the MCP `get_execution_logs` tool on server-backed connections, with clear errors for local DB / OTEL export-only cases
+- **Structured logging + runtime log retrieval** — `kitaru.log()` attaches metadata to executions/checkpoints; interactive Python flow runs on a TTY render a live checkpoint tree; and durable runtime logs remain retrievable via `KitaruClient.executions.logs(...)`, `kitaru executions logs`, and the MCP `get_execution_logs` tool on server-backed connections, with clear errors for local DB / OTEL export-only cases
 - **Configuration** — `kitaru.configure(...)`, environment variables, and `[tool.kitaru]` in `pyproject.toml`, with precedence resolved at flow start and persisted per execution, including flow-bound stack defaults via `@flow(stack=...)` and one-off execution overrides via `.run(..., stack=...)`
 - **Execution management** — `KitaruClient` for inspecting executions (`get`, `list`, `latest`, `logs`), replaying from checkpoint boundaries (`replay`), same-execution recovery (`retry`), cancellation (`cancel`), and artifact browsing/loading
 - **Secrets** — `kitaru secrets set/show/list/delete` for managing credentials (private by default, create-or-update semantics)
@@ -134,6 +134,7 @@ kitaru login <server> --api-key <key>
 kitaru logout                 Log out and clear stored auth state
 kitaru status                 Show connection state and active stack
 kitaru info                   Show detailed environment information
+kitaru configure set machine_mode <true|false>
 
 kitaru executions get <exec_id>
 kitaru executions list [--status <status>] [--flow <flow>] [--limit <n>]
@@ -182,6 +183,20 @@ That gives you one consistent machine-readable contract:
 - list commands emit `{command, items, count}`
 - `kitaru executions logs --follow --output json` is the special case: it emits one JSON event per line while following the stream
 
+Interactive Python flow runs are a separate terminal surface from the CLI log
+retrieval commands: on a TTY, `my_flow.run(...)` / `my_flow.deploy(...)` render
+an in-process live checkpoint tree, while `kitaru executions logs` reads the
+persisted runtime log stream for an existing execution.
+
+Text commands also support `--machine` / `--no-machine`:
+
+- `--machine` forces plain, grep-friendly text output
+- `--no-machine` prefers rich text when stdout is a TTY
+- `KITARU_MACHINE_MODE=1` sets the same preference through the environment
+- `kitaru configure set machine_mode true` persists the preference locally
+- non-TTY output and `--output json` automatically use machine-style behavior
+- in non-TTY text mode, handled CLI/backend failures also include full Python tracebacks; `--output json` keeps structured JSON errors instead
+
 ### Headless / Docker / CI setup
 
 Kitaru can now be bootstrapped entirely from `KITARU_*` environment variables,
@@ -202,6 +217,9 @@ export KITARU_RETRIES=2
 # LLM
 export OPENAI_API_KEY=sk-...
 export KITARU_DEFAULT_MODEL=openai/gpt-4o
+
+# CLI / observability
+export KITARU_MACHINE_MODE=1
 
 # Housekeeping
 export KITARU_CONFIG_PATH=/app/.kitaru

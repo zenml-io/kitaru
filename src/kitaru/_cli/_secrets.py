@@ -15,14 +15,16 @@ from kitaru.inspection import serialize_secret_detail, serialize_secret_summary
 
 from . import secrets_app
 from ._helpers import (
+    MachineModeOption,
     OutputFormatOption,
     _emit_json_item,
     _emit_json_items,
     _emit_snapshot,
     _exit_with_error,
     _facade_module,
+    _machine_mode_context,
     _print_success,
-    _resolve_output_format,
+    _resolve_output_and_machine_mode,
 )
 
 _SECRET_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -174,10 +176,11 @@ def set_(
         ),
     ],
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Set a secret with env-var-style key names, creating it if needed."""
     command = "secrets.set"
-    output_format = _resolve_output_format(output)
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
     facade = _facade_module()
 
     def _set_secret() -> tuple[SecretResponse, str]:
@@ -200,23 +203,25 @@ def set_(
             action = "Updated"
         return secret, action
 
-    secret, action = run_with_cli_error_boundary(
-        _set_secret,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
+    with _machine_mode_context(machine_mode):
+        secret, action = run_with_cli_error_boundary(
+            _set_secret,
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
+        )
 
-    if output_format == CLIOutputFormat.JSON:
-        payload = serialize_secret_summary(secret)
-        payload["result"] = action.lower()
-        _emit_json_item(command, payload, output=output_format)
-        return
+        if output_format == CLIOutputFormat.JSON:
+            payload = serialize_secret_summary(secret)
+            payload["result"] = action.lower()
+            _emit_json_item(command, payload, output=output_format)
+            return
 
-    _print_success(
-        f"{action} secret: {secret.name}",
-        detail=f"Secret ID: {secret.id}",
-    )
+        _print_success(
+            f"{action} secret: {secret.name}",
+            detail=f"Secret ID: {secret.id}",
+        )
 
 
 @secrets_app.command
@@ -230,56 +235,64 @@ def show_(
         Parameter(help="Display raw secret values in command output."),
     ] = False,
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Show a secret with metadata and optional raw values."""
     command = "secrets.show"
-    output_format = _resolve_output_format(output)
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
     facade = _facade_module()
-    secret = run_with_cli_error_boundary(
-        lambda: facade._resolve_secret_exact(facade.Client(), name_or_id),
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command,
-            serialize_secret_detail(secret, show_values=show_values),
+    with _machine_mode_context(machine_mode):
+        secret = run_with_cli_error_boundary(
+            lambda: facade._resolve_secret_exact(facade.Client(), name_or_id),
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
 
-    _emit_snapshot(
-        "Kitaru secret",
-        _secret_show_rows(secret, show_values=show_values),
-    )
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                serialize_secret_detail(secret, show_values=show_values),
+                output=output_format,
+            )
+            return
+
+        _emit_snapshot(
+            "Kitaru secret",
+            _secret_show_rows(secret, show_values=show_values),
+        )
 
 
 @secrets_app.command
-def list__(output: OutputFormatOption = "text") -> None:
+def list__(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """List all secrets visible to the current user context."""
     command = "secrets.list"
-    output_format = _resolve_output_format(output)
-    secrets = run_with_cli_error_boundary(
-        lambda: _list_accessible_secrets(_facade_module().Client()),
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
-
-    if output_format == CLIOutputFormat.JSON:
-        ordered = sorted(
-            secrets, key=lambda secret: (secret.name.lower(), str(secret.id))
-        )
-        _emit_json_items(
-            command,
-            [serialize_secret_summary(secret) for secret in ordered],
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        secrets = run_with_cli_error_boundary(
+            lambda: _list_accessible_secrets(_facade_module().Client()),
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
 
-    _emit_snapshot("Kitaru secrets", _secret_list_rows(secrets))
+        if output_format == CLIOutputFormat.JSON:
+            ordered = sorted(
+                secrets, key=lambda secret: (secret.name.lower(), str(secret.id))
+            )
+            _emit_json_items(
+                command,
+                [serialize_secret_summary(secret) for secret in ordered],
+                output=output_format,
+            )
+            return
+
+        _emit_snapshot("Kitaru secrets", _secret_list_rows(secrets))
 
 
 @secrets_app.command
@@ -289,10 +302,11 @@ def delete_(
         Parameter(help="Secret name or ID."),
     ],
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Delete a secret by exact name or exact ID."""
     command = "secrets.delete"
-    output_format = _resolve_output_format(output)
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
     facade = _facade_module()
 
     def _delete_secret() -> SecretResponse:
@@ -301,20 +315,22 @@ def delete_(
         client.delete_secret(name_id_or_prefix=str(secret.id))
         return secret
 
-    secret = run_with_cli_error_boundary(
-        _delete_secret,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-    )
+    with _machine_mode_context(machine_mode):
+        secret = run_with_cli_error_boundary(
+            _delete_secret,
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
+        )
 
-    if output_format == CLIOutputFormat.JSON:
-        payload = serialize_secret_summary(secret)
-        payload["result"] = "deleted"
-        _emit_json_item(command, payload, output=output_format)
-        return
+        if output_format == CLIOutputFormat.JSON:
+            payload = serialize_secret_summary(secret)
+            payload["result"] = "deleted"
+            _emit_json_item(command, payload, output=output_format)
+            return
 
-    _print_success(
-        f"Deleted secret: {secret.name}",
-        detail=f"Secret ID: {secret.id}",
-    )
+        _print_success(
+            f"Deleted secret: {secret.name}",
+            detail=f"Secret ID: {secret.id}",
+        )

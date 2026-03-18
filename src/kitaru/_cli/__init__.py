@@ -33,7 +33,12 @@ executions_app = cyclopts.App(
     name="executions",
     help="Inspect and manage flow executions.",
 )
+configure_app = cyclopts.App(
+    name="configure",
+    help="Manage persisted Kitaru CLI/runtime preferences.",
+)
 
+app.command(configure_app)
 app.command(log_store_app)
 app.command(stack_app)
 app.command(secrets_app)
@@ -47,11 +52,19 @@ def main() -> None:
     app.help_print()
 
 
-from . import _executions, _models, _secrets, _stacks, _status  # noqa: F401,E402
+from . import (  # noqa: F401,E402
+    _configure,
+    _executions,
+    _models,
+    _secrets,
+    _stacks,
+    _status,
+)
 
 __all__ = [
     "_UNKNOWN_VERSION",
     "app",
+    "configure_app",
     "executions_app",
     "log_store_app",
     "main",

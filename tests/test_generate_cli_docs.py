@@ -52,6 +52,7 @@ class TestBuildCommandTree:
 
         tree = build_command_tree(app)
         assert [sub.name for sub in tree.subcommands] == [
+            "configure",
             "executions",
             "info",
             "log-store",
@@ -213,6 +214,9 @@ class TestRenderCommandPage:
         assert "## Output formats" in page
         assert "`--output json`" in page
         assert "{command, item}" in page
+        assert "## Machine mode" in page
+        assert "KITARU_MACHINE_MODE=1" in page
+        assert "full Python tracebacks" in page
 
     def test_subcommand_page_has_no_global_flags(self) -> None:
         cmd = CommandDoc(
@@ -304,6 +308,7 @@ class TestWriteDocsTree:
         meta = json.loads((output_dir / "meta.json").read_text())
         assert meta["title"] == "CLI Reference"
         assert meta["pages"] == [
+            "configure",
             "executions",
             "info",
             "log-store",
@@ -385,11 +390,23 @@ class TestWriteDocsTree:
 
         status_page = (output_dir / "status.mdx").read_text()
         assert "`--output`, `-o`" in status_page
+        assert "`--machine`, `--no-machine`" in status_page
 
-        # executions, log-store, model, secrets, and stack have nested subcommands.
-        for command in ("executions", "log-store", "model", "secrets", "stack"):
+        # configure, executions, log-store, model, secrets, and stack
+        # have nested subcommands.
+        for command in (
+            "configure",
+            "executions",
+            "log-store",
+            "model",
+            "secrets",
+            "stack",
+        ):
             assert (output_dir / command / "index.mdx").exists()
             assert (output_dir / command / "meta.json").exists()
+
+        assert (output_dir / "configure" / "set.mdx").exists()
+        assert "configure/set.mdx" in files
 
         for command in (
             "cancel",

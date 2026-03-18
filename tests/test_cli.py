@@ -211,6 +211,7 @@ def test_help_flag_lists_available_commands(
     output = capsys.readouterr().out.lower()
     assert "kitaru" in output
     for command in (
+        "configure",
         "login",
         "logout",
         "status",
@@ -684,7 +685,9 @@ def test_executions_logs_surfaces_backend_errors(
         app(["executions", "logs", "kr-123"])
 
     assert exc_info.value.code == 1
-    assert "OTEL backend" in capsys.readouterr().err
+    error_output = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in error_output
+    assert "OTEL backend" in error_output
 
 
 def _pending_wait_stub(
@@ -1243,13 +1246,13 @@ def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
     """Logout should still clear persisted remote state without local mode."""
     fake_gc = Mock()
     fake_gc.uses_local_store = False
-    fake_gc.store_configuration = SimpleNamespace(url="http://127.0.0.1:8237")
-    fake_gc.set_default_store.side_effect = ImportError("sqlalchemy missing")
+    fake_gc.store_configuration.url = "http://127.0.0.1:8237"
     fake_credentials_store = Mock()
 
     with (
         patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
         patch("kitaru.cli._connected_to_local_server", return_value=False),
+        patch.object(fake_gc, "set_default_store", side_effect=ImportError("missing")),
         patch(
             "kitaru.cli.get_credentials_store",
             return_value=fake_credentials_store,
@@ -1262,6 +1265,52 @@ def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
         "http://127.0.0.1:8237"
     )
     assert "local fallback unavailable" in message
+
+
+def test_logout_surfaces_backend_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Logout should use the shared machine-mode traceback boundary on errors."""
+    with (
+        patch(
+            "kitaru._cli._status._logout_current_connection",
+            side_effect=RuntimeError("logout exploded"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["logout"])
+
+    assert exc_info.value.code == 1
+    error_output = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in error_output
+    assert "logout exploded" in error_output
+
+
+def test_configure_set_machine_mode_delegates_to_config(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru configure set machine_mode true` should persist the preference."""
+    with (
+        patch("kitaru.cli.set_global_machine_mode", return_value=True) as mock_set,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["configure", "set", "machine_mode", "true"])
+
+    assert exc_info.value.code == 0
+    mock_set.assert_called_once_with(True)
+    output = capsys.readouterr().out
+    assert "Saved setting: machine_mode = true" in output
+
+
+def test_configure_set_rejects_unknown_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unknown configure keys should fail with a user-facing error."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["configure", "set", "unknown_key", "true"])
+
+    assert exc_info.value.code == 1
+    assert "Unsupported setting `unknown_key`" in capsys.readouterr().err
 
 
 def test_log_store_set_delegates_to_config(
@@ -1461,7 +1510,9 @@ def test_log_store_set_surfaces_validation_errors(
         )
 
     assert exc_info.value.code == 1
-    assert "Invalid log-store endpoint" in capsys.readouterr().err
+    error_output = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in error_output
+    assert "Invalid log-store endpoint" in error_output
 
 
 def test_parse_secret_assignments_accepts_equals_and_split_values() -> None:
@@ -4329,6 +4380,44 @@ def test_status_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["command"] == "status"
     assert payload["item"]["connection"] == "remote Kitaru server"
     assert payload["item"]["active_stack"] == "prod"
+
+
+def test_status_surfaces_snapshot_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Status should surface snapshot failures through the shared error boundary."""
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot",
+            side_effect=RuntimeError("status exploded"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status"])
+
+    assert exc_info.value.code == 1
+    error_output = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in error_output
+    assert "status exploded" in error_output
+
+
+def test_info_surfaces_snapshot_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Info should surface snapshot failures through the shared error boundary."""
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot",
+            side_effect=RuntimeError("info exploded"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 1
+    error_output = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in error_output
+    assert "info exploded" in error_output
 
 
 def test_build_runtime_snapshot_handles_missing_local_store() -> None:

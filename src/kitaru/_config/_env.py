@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -19,6 +19,7 @@ from kitaru._config._core import (
 )
 from kitaru._env import (
     KITARU_AUTH_TOKEN_ENV,
+    KITARU_MACHINE_MODE_ENV,
     KITARU_PROJECT_ENV,
     KITARU_SERVER_URL_ENV,
     ZENML_STORE_API_KEY_ENV,
@@ -163,6 +164,18 @@ def _read_connection_env_config() -> KitaruConfig:
         values["project"] = raw_project
 
     return KitaruConfig.model_validate(values)
+
+
+def _read_machine_mode_env_override(
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> bool | None:
+    """Read an optional machine-mode override from the environment."""
+    env = os.environ if environ is None else environ
+    raw_value = env.get(KITARU_MACHINE_MODE_ENV)
+    if raw_value is None:
+        return None
+    return _parse_bool_env(KITARU_MACHINE_MODE_ENV, raw_value)
 
 
 def _read_zenml_connection_env_config() -> KitaruConfig:

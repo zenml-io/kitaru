@@ -20,6 +20,7 @@ from kitaru._env import (
     KITARU_ANALYTICS_OPT_IN_ENV,
     KITARU_AUTH_TOKEN_ENV,
     KITARU_DEBUG_ENV,
+    KITARU_MACHINE_MODE_ENV,
     KITARU_PROJECT_ENV,
     KITARU_SERVER_URL_ENV,
 )
@@ -120,6 +121,7 @@ class _KitaruGlobalConfig(BaseModel):
     """Persisted Kitaru global configuration."""
 
     version: int = 1
+    machine_mode: bool | None = None
     log_store: LogStoreOverride | None = None
     model_registry: ModelRegistryConfig | None = None
 
@@ -428,6 +430,7 @@ def list_active_kitaru_environment_variables(
         KITARU_LOG_STORE_ENDPOINT_ENV,
         KITARU_LOG_STORE_API_KEY_ENV,
         KITARU_DEFAULT_MODEL_ENV,
+        KITARU_MACHINE_MODE_ENV,
         KITARU_CONFIG_PATH_ENV,
         KITARU_DEBUG_ENV,
         KITARU_ANALYTICS_OPT_IN_ENV,

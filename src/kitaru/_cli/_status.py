@@ -29,6 +29,7 @@ from kitaru.inspection import combine_warnings as _combine_warnings
 
 from . import app, log_store_app
 from ._helpers import (
+    MachineModeOption,
     OutputFormatOption,
     SnapshotSection,
     _emit_json_item,
@@ -36,8 +37,9 @@ from ._helpers import (
     _emit_snapshot_sections,
     _exit_with_error,
     _facade_module,
+    _machine_mode_context,
     _print_success,
-    _resolve_output_format,
+    _resolve_output_and_machine_mode,
 )
 
 
@@ -327,59 +329,72 @@ def login(
         ),
     ] = None,
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Connect to a Kitaru server and persist the session globally."""
     command = "login"
-    output_format = _resolve_output_format(output)
-    _ensure_no_auth_environment_overrides(command=command, output=output_format)
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        _ensure_no_auth_environment_overrides(command=command, output=output_format)
 
-    facade = _facade_module()
-    run_with_cli_error_boundary(
-        lambda: facade.login_to_server(
-            server,
-            api_key=api_key,
-            refresh=refresh,
-            project=project,
-            no_verify_ssl=no_verify_ssl,
-            ssl_ca_cert=ssl_ca_cert,
-            cloud_api_url=cloud_api_url,
-        ),
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-        handled_exceptions=(RuntimeError, ValueError),
-    )
-
-    connected_server_url = facade._get_connected_server_url() or server.rstrip("/")
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command,
-            {
-                "server_url": connected_server_url,
-                "project": project,
-            },
+        facade = _facade_module()
+        run_with_cli_error_boundary(
+            lambda: facade.login_to_server(
+                server,
+                api_key=api_key,
+                refresh=refresh,
+                project=project,
+                no_verify_ssl=no_verify_ssl,
+                ssl_ca_cert=ssl_ca_cert,
+                cloud_api_url=cloud_api_url,
+            ),
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
+            handled_exceptions=(RuntimeError, ValueError),
         )
-        return
 
-    _print_success(f"Connected to Kitaru server: {connected_server_url}")
+        connected_server_url = facade._get_connected_server_url() or server.rstrip("/")
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                {
+                    "server_url": connected_server_url,
+                    "project": project,
+                },
+                output=output_format,
+            )
+            return
+
+        _print_success(f"Connected to Kitaru server: {connected_server_url}")
 
 
 @app.command
-def logout(output: OutputFormatOption = "text") -> None:
+def logout(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """Log out from the current Kitaru server and clear stored auth state."""
     command = "logout"
-    output_format = _resolve_output_format(output)
-    _ensure_no_auth_environment_overrides(command=command, output=output_format)
-    result = _logout_current_connection()
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            command,
-            _logout_result_payload(result),
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        _ensure_no_auth_environment_overrides(command=command, output=output_format)
+        result = run_with_cli_error_boundary(
+            _logout_current_connection,
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
-    _print_success(_logout_result_message(result))
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                _logout_result_payload(result),
+                output=output_format,
+            )
+            return
+        _print_success(_logout_result_message(result))
 
 
 @log_store_app.command
@@ -398,119 +413,154 @@ def set(
         Parameter(help="Optional API key or secret placeholder."),
     ] = None,
     output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
 ) -> None:
     """Set the global runtime log-store backend override."""
     command = "log-store.set"
-    output_format = _resolve_output_format(output)
-    snapshot = run_with_cli_error_boundary(
-        lambda: _facade_module().set_global_log_store(
-            backend,
-            endpoint=endpoint,
-            api_key=api_key,
-        ),
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-        handled_exceptions=(ValueError,),
-    )
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        snapshot = run_with_cli_error_boundary(
+            lambda: _facade_module().set_global_log_store(
+                backend,
+                endpoint=endpoint,
+                api_key=api_key,
+            ),
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
+            handled_exceptions=(ValueError,),
+        )
 
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
-        return
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
+            return
 
-    _print_success(
-        "Saved global log-store override.",
-        detail=_log_store_detail(snapshot),
-    )
+        _print_success(
+            "Saved global log-store override.",
+            detail=_log_store_detail(snapshot),
+        )
 
 
 @log_store_app.command
-def show__(output: OutputFormatOption = "text") -> None:
+def show__(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """Show the effective global runtime log-store configuration."""
     command = "log-store.show"
-    output_format = _resolve_output_format(output)
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
     facade = _facade_module()
-    snapshot = run_with_cli_error_boundary(
-        facade.resolve_log_store,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-        handled_exceptions=(ValueError,),
-    )
+    with _machine_mode_context(machine_mode):
+        snapshot = run_with_cli_error_boundary(
+            facade.resolve_log_store,
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
+            handled_exceptions=(ValueError,),
+        )
 
-    _, mismatch_warning = facade._log_store_mismatch_details(snapshot)
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
-        return
-    _emit_snapshot("Kitaru log store", _log_store_rows(snapshot), mismatch_warning)
+        _, mismatch_warning = facade._log_store_mismatch_details(snapshot)
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
+            return
+        _emit_snapshot("Kitaru log store", _log_store_rows(snapshot), mismatch_warning)
 
 
 @log_store_app.command
-def reset(output: OutputFormatOption = "text") -> None:
+def reset(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """Clear the persisted global runtime log-store override."""
     command = "log-store.reset"
-    output_format = _resolve_output_format(output)
-    snapshot = run_with_cli_error_boundary(
-        _facade_module().reset_global_log_store,
-        command=command,
-        output=output_format,
-        exit_with_error=_exit_with_error,
-        handled_exceptions=(ValueError,),
-    )
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        snapshot = run_with_cli_error_boundary(
+            _facade_module().reset_global_log_store,
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
+            handled_exceptions=(ValueError,),
+        )
 
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
-        return
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
+            return
 
-    _print_success(
-        "Cleared global log-store override.",
-        detail=_log_store_detail(snapshot),
-    )
+        _print_success(
+            "Cleared global log-store override.",
+            detail=_log_store_detail(snapshot),
+        )
 
 
 @app.command
-def status(output: OutputFormatOption = "text") -> None:
+def status(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """Show the current connection state and active stack context."""
-    output_format = _resolve_output_format(output)
-    snapshot = _facade_module()._build_runtime_snapshot()
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            "status",
-            serialize_runtime_snapshot(snapshot),
+    command = "status"
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        snapshot = run_with_cli_error_boundary(
+            _facade_module()._build_runtime_snapshot,
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
-
-    sections = [SnapshotSection(title=None, rows=_status_rows(snapshot))]
-    if snapshot.environment:
-        sections.append(
-            SnapshotSection(
-                title="Environment",
-                rows=_environment_rows(snapshot.environment),
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                serialize_runtime_snapshot(snapshot),
+                output=output_format,
             )
+            return
+
+        sections = [SnapshotSection(title=None, rows=_status_rows(snapshot))]
+        if snapshot.environment:
+            sections.append(
+                SnapshotSection(
+                    title="Environment",
+                    rows=_environment_rows(snapshot.environment),
+                )
+            )
+        _emit_snapshot_sections(
+            "Kitaru status",
+            sections,
+            _combine_warnings(snapshot.warning, snapshot.log_store_warning),
         )
-    _emit_snapshot_sections(
-        "Kitaru status",
-        sections,
-        _combine_warnings(snapshot.warning, snapshot.log_store_warning),
-    )
 
 
 @app.command
-def info(output: OutputFormatOption = "text") -> None:
+def info(
+    output: OutputFormatOption = "text",
+    machine: MachineModeOption = None,
+) -> None:
     """Show detailed environment information for the current setup."""
-    output_format = _resolve_output_format(output)
-    snapshot = _facade_module()._build_runtime_snapshot()
-    if output_format == CLIOutputFormat.JSON:
-        _emit_json_item(
-            "info",
-            serialize_runtime_snapshot(snapshot),
+    command = "info"
+    output_format, machine_mode = _resolve_output_and_machine_mode(output, machine)
+    with _machine_mode_context(machine_mode):
+        snapshot = run_with_cli_error_boundary(
+            _facade_module()._build_runtime_snapshot,
+            command=command,
             output=output_format,
+            exit_with_error=_exit_with_error,
+            machine_mode=machine_mode,
         )
-        return
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                serialize_runtime_snapshot(snapshot),
+                output=output_format,
+            )
+            return
 
-    _emit_snapshot(
-        "Kitaru info",
-        _info_rows(snapshot),
-        _combine_warnings(snapshot.warning, snapshot.log_store_warning),
-    )
+        _emit_snapshot(
+            "Kitaru info",
+            _info_rows(snapshot),
+            _combine_warnings(snapshot.warning, snapshot.log_store_warning),
+        )
