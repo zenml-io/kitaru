@@ -15,7 +15,7 @@ _SUFFIX_TO_SOURCE_VALUE: dict[str, str] = {
     "cli": "kitaru-cli",
     "mcp": "kitaru-mcp",
     "api": "kitaru-api",
-    "dashboard": "kitaru-dashboard",  # reserved for future Kitaru dashboard UI
+    "ui": "kitaru-ui",  # reserved for future Kitaru UI
 }
 
 
@@ -23,7 +23,7 @@ def set_source(suffix_or_source: str) -> None:
     """Set the ZenML ``Source-Context`` header to the Kitaru source type.
 
     Accepts either a short suffix (``"python"``, ``"cli"``, ``"mcp"``,
-    ``"api"``, ``"dashboard"``) or the full canonical value
+    ``"api"``, ``"ui"``) or the full canonical value
     (``"kitaru-python"``, ``"kitaru-api"``, etc.) — whichever is more
     convenient at the call site.
 
