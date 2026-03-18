@@ -1,6 +1,6 @@
 # Dev base image for testing kitaru flows on remote stacks (K8s, etc.).
 #
-# Builds from a clean Python image and installs ZenML (feature/kitaru
+# Builds from a clean Python image and installs ZenML (develop
 # branch) plus kitaru from the local source tree.
 #
 # Rebuild whenever kitaru or zenml dependencies change:
@@ -23,7 +23,7 @@ RUN apt-get update \
 RUN pip install --no-cache-dir --upgrade pip uv
 
 # Install kitaru from local source.  Its pyproject.toml pulls
-# zenml[local] from the feature/kitaru branch automatically.
+# zenml[local] from the develop branch automatically.
 COPY . /tmp/kitaru
 RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
 
@@ -31,4 +31,4 @@ RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
 # Same git ref as above so uv recognizes the installed package and
 # just adds the missing extras.
 RUN uv pip install \
-    "zenml[s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure] @ git+https://github.com/zenml-io/zenml.git@feature/kitaru"
+    "zenml[s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure] @ git+https://github.com/zenml-io/zenml.git@develop"
