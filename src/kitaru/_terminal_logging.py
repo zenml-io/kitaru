@@ -14,6 +14,7 @@ This module is internal — it is not part of the public API surface.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
@@ -24,7 +25,6 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
-from importlib import metadata as importlib_metadata
 from io import TextIOBase
 from threading import RLock, local
 from types import TracebackType
@@ -36,12 +36,13 @@ from rich.live import Live
 from rich.style import Style
 from rich.text import Text
 
-from kitaru._env import KITARU_DEBUG_ENV, ZENML_DEBUG_ENV
+from kitaru._env import KITARU_DEBUG_ENV
 from kitaru._source_aliases import (
     normalize_aliases_in_text,
     normalize_checkpoint_name,
     normalize_flow_name,
 )
+from kitaru._version import resolve_installed_version
 
 # ---------------------------------------------------------------------------
 # Decision / tracker types
@@ -531,14 +532,6 @@ def _compact_traceback_frames(
     return error, formatted_frames or None
 
 
-def _kitaru_version() -> str:
-    """Return the installed package version or a stable fallback."""
-    try:
-        return importlib_metadata.version("kitaru")
-    except importlib_metadata.PackageNotFoundError:
-        return "unknown"
-
-
 def _format_duration(seconds: float | None) -> str | None:
     """Format a duration for human-facing terminal output."""
     if seconds is None:
@@ -607,6 +600,7 @@ def _compact_rows(
         return list(rows)
 
     keep_positions = set(completed_positions[-3:])
+    completed_set = set(completed_positions)
     hidden_rows = [
         rows[index] for index in completed_positions if index not in keep_positions
     ]
@@ -622,7 +616,7 @@ def _compact_rows(
         index for index in completed_positions if index not in keep_positions
     )
     for index, row in enumerate(rows):
-        if index not in keep_positions and index in completed_positions:
+        if index not in keep_positions and index in completed_set:
             if not inserted_summary and index == first_hidden_position:
                 compacted.append(compaction)
                 inserted_summary = True
@@ -669,14 +663,24 @@ def _group_concurrent_rows(
     return grouped
 
 
+def _build_tally_line(total: int, passed: int, cached: int, failed: int) -> str | None:
+    """Build a checkpoint tally summary like '3 checkpoints  ✓ 2 passed  ⟳ 1 cached'."""
+    bits = [f"{total} checkpoints"] if total else []
+    if passed:
+        bits.append(f"✓ {passed} passed")
+    if cached:
+        bits.append(f"⟳ {cached} cached")
+    if failed:
+        bits.append(f"✗ {failed} failed")
+    return "  ".join(bits) if bits else None
+
+
 def _build_tree_rail_snapshot(
     tracker: CheckpointTracker,
     *,
     now: float,
-    version: str,
 ) -> _TreeRailSnapshot:
     """Build a pure render snapshot from tracker state."""
-    del version  # Version is rendered in the tree header, not stored here.
 
     terminal_status = _snapshot_terminal_status(tracker)
     checkpoint_states = list(tracker.checkpoints.values())
@@ -721,7 +725,8 @@ def _build_tree_rail_snapshot(
     passed_count = sum(1 for state in executed_states if state.status == "passed")
     cached_count = sum(1 for state in executed_states if state.status == "cached")
     failed_count = sum(1 for state in executed_states if state.status == "failed")
-    total_count = len([state for state in executed_states if state.status != "running"])
+    running_count = sum(1 for state in executed_states if state.status == "running")
+    total_count = len(executed_states) - running_count
 
     duration_text = None
     if tracker.flow_started_at is not None:
@@ -735,15 +740,9 @@ def _build_tree_rail_snapshot(
             summary_lines.append(f"Flow completed in {duration_text}")
         else:
             summary_lines.append("Flow completed")
-        tally_bits = [f"{total_count} checkpoints"] if total_count else []
-        if passed_count:
-            tally_bits.append(f"✓ {passed_count} passed")
-        if cached_count:
-            tally_bits.append(f"⟳ {cached_count} cached")
-        if failed_count:
-            tally_bits.append(f"✗ {failed_count} failed")
-        if tally_bits:
-            summary_lines.append("  ".join(tally_bits))
+        tally = _build_tally_line(total_count, passed_count, cached_count, failed_count)
+        if tally:
+            summary_lines.append(tally)
         if tracker.matched_prior_run is False and tracker.execution_id:
             hint_lines.append(f"kitaru executions logs {tracker.execution_id}")
     elif tracker.terminal_status == "failed":
@@ -756,15 +755,9 @@ def _build_tree_rail_snapshot(
             summary_lines.append(f"Flow failed after {duration_text}")
         else:
             summary_lines.append("Flow failed")
-        tally_bits = [f"{total_count} checkpoints"] if total_count else []
-        if passed_count:
-            tally_bits.append(f"✓ {passed_count} passed")
-        if cached_count:
-            tally_bits.append(f"⟳ {cached_count} cached")
-        if failed_count:
-            tally_bits.append(f"✗ {failed_count} failed")
-        if tally_bits:
-            summary_lines.append("  ".join(tally_bits))
+        tally = _build_tally_line(total_count, passed_count, cached_count, failed_count)
+        if tally:
+            summary_lines.append(tally)
         if tracker.execution_id:
             hint_lines.extend(
                 [
@@ -1141,19 +1134,28 @@ _DROP_PATTERNS: list[re.Pattern[str]] = [
 # ---------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=1)
 def _terminal_debug_enabled() -> bool:
-    """Return whether debug terminal chatter should remain visible."""
-    for env_name in (KITARU_DEBUG_ENV, ZENML_DEBUG_ENV):
-        raw = os.getenv(env_name)
-        if raw is None:
-            continue
-        normalized = raw.strip().lower()
-        if not normalized:
-            continue
-        if normalized in _DEBUG_TRUTHY:
-            return True
-        if normalized in _DEBUG_FALSY:
-            return False
+    """Return whether terminal-only debug chatter should remain visible.
+
+    This intentionally keys off ``KITARU_DEBUG`` only. ``ZENML_DEBUG`` may be
+    enabled for broader backend diagnostics, but we still want the interactive
+    Kitaru terminal to suppress noisy provider/library chatter unless the user
+    explicitly opts into Kitaru terminal debug output.
+
+    Cached after first call — env vars don't change mid-process.
+    Call ``_terminal_debug_enabled.cache_clear()`` in tests.
+    """
+    raw = os.getenv(KITARU_DEBUG_ENV)
+    if raw is None:
+        return False
+    normalized = raw.strip().lower()
+    if not normalized:
+        return False
+    if normalized in _DEBUG_TRUTHY:
+        return True
+    if normalized in _DEBUG_FALSY:
+        return False
     return False
 
 
@@ -1534,15 +1536,10 @@ class _FlowTreeRenderable:
         console: Console,
         options: ConsoleOptions,
     ) -> RenderResult:
-        snapshot = _build_tree_rail_snapshot(
-            self._tracker,
-            now=time.time(),
-            version=self._version,
-        )
+        now = time.time()
+        snapshot = _build_tree_rail_snapshot(self._tracker, now=now)
         width = max(options.max_width - 2, 20)
-        yield Group(
-            *_tree_lines(snapshot, version=self._version, now=time.time(), width=width)
-        )
+        yield Group(*_tree_lines(snapshot, version=self._version, now=now, width=width))
 
 
 class _FlowLiveSession:
@@ -1675,7 +1672,7 @@ class _KitaruTerminalHandler(logging.Handler):
 
         self._machine_mode = resolve_machine_mode(interactive=self._interactive)
         self._tracker = tracker or CheckpointTracker()
-        self._version = _kitaru_version()
+        self._version = resolve_installed_version()
         self._live_session: _FlowLiveSession | None = None
         self._kitaru_terminal_handler = True
 
@@ -1757,6 +1754,20 @@ class _KitaruTerminalHandler(logging.Handler):
                 _ACTIVE_TRACKER = None
             super().close()
 
+    def _emit_flat(
+        self, decision: _TerminalDecision, record: logging.LogRecord
+    ) -> None:
+        """Write a record as plain text, outside any Rich Live session."""
+        text = _render(
+            decision,
+            interactive=self._interactive and not self._machine_mode,
+        )
+        self._write(text + "\n")
+        if self._machine_mode:
+            exception_text = _render_exception_text(record)
+            if exception_text:
+                self._write(exception_text.rstrip() + "\n")
+
     def emit(self, record: logging.LogRecord) -> None:
         if _tracker_logs_suppressed():
             return
@@ -1777,15 +1788,7 @@ class _KitaruTerminalHandler(logging.Handler):
                 self._tracker.ingest(event=resolved.tracker_event, record=record)
 
             if not self._should_use_live(resolved):
-                text = _render(
-                    resolved.decision,
-                    interactive=self._interactive and not self._machine_mode,
-                )
-                self._write(text + "\n")
-                if self._machine_mode:
-                    exception_text = _render_exception_text(record)
-                    if exception_text:
-                        self._write(exception_text.rstrip() + "\n")
+                self._emit_flat(resolved.decision, record)
                 return
 
             try:
@@ -1821,15 +1824,7 @@ class _KitaruTerminalHandler(logging.Handler):
                     )
             except Exception:
                 self._disable_live_session()
-                text = _render(
-                    resolved.decision,
-                    interactive=self._interactive and not self._machine_mode,
-                )
-                self._write(text + "\n")
-                if self._machine_mode:
-                    exception_text = _render_exception_text(record)
-                    if exception_text:
-                        self._write(exception_text.rstrip() + "\n")
+                self._emit_flat(resolved.decision, record)
         except Exception:
             self.handleError(record)
 

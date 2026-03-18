@@ -5,23 +5,25 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Iterator
-from types import TracebackType
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from kitaru._env import ZENML_DEBUG_ENV
 from kitaru._terminal_logging import (
     CheckpointState,
     CheckpointTracker,
     _build_tree_rail_snapshot,
     _classify,
     _decide,
+    _ExcInfo,
     _FlowLiveSession,
     _is_kitaru_terminal_handler_instance,
     _KitaruTerminalHandler,
     _PriorCheckpointHints,
     _render,
+    _terminal_debug_enabled,
     _TerminalDecision,
     _TreeRailConcurrentGroup,
     install_terminal_log_intercept,
@@ -29,12 +31,6 @@ from kitaru._terminal_logging import (
     register_flow_execution,
 )
 from kitaru.config import KITARU_DEBUG_ENV, KITARU_MACHINE_MODE_ENV
-
-_ExcInfo = (
-    tuple[type[BaseException], BaseException, TracebackType | None]
-    | tuple[None, None, None]
-    | None
-)
 
 
 def _make_record(
@@ -71,6 +67,16 @@ def _snapshot_root_handlers() -> Iterator[None]:
     finally:
         root.handlers = original_handlers
         root.level = original_level
+
+
+@pytest.fixture(autouse=True)
+def _clear_terminal_debug_cache() -> Iterator[None]:
+    """Keep debug-env tests independent despite the terminal debug cache."""
+    _terminal_debug_enabled.cache_clear()
+    try:
+        yield
+    finally:
+        _terminal_debug_enabled.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +377,18 @@ class TestDecideLiteLLMNoise:
             decision.text
             == "LiteLLM completion() model= gpt-4o-mini; provider = openai"
         )
+
+    def test_litellm_info_stays_hidden_with_zenml_debug_only(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(ZENML_DEBUG_ENV, "true")
+        record = _make_record(
+            "LiteLLM",
+            "\nLiteLLM completion() model= gpt-4o-mini; provider = openai",
+        )
+
+        assert _decide(record) is None
 
     def test_litellm_warning_still_survives_default_filtering(self) -> None:
         record = _make_record(
@@ -746,7 +764,7 @@ class TestTreeRailSnapshot:
             },
         )
 
-        snapshot = _build_tree_rail_snapshot(tracker, now=5.0, version="test")
+        snapshot = _build_tree_rail_snapshot(tracker, now=5.0)
 
         assert len(snapshot.rows) == 1
         assert getattr(snapshot.rows[0], "name", None) == "fetch_data"
@@ -754,7 +772,7 @@ class TestTreeRailSnapshot:
         assert "kitaru executions logs exec-123" in snapshot.hint_lines
 
         tracker.matched_prior_run = True
-        later_snapshot = _build_tree_rail_snapshot(tracker, now=5.0, version="test")
+        later_snapshot = _build_tree_rail_snapshot(tracker, now=5.0)
         assert "kitaru executions logs exec-123" not in later_snapshot.hint_lines
 
     def test_wait_snapshot_adds_input_hint(self) -> None:
@@ -768,7 +786,7 @@ class TestTreeRailSnapshot:
             active_wait_poll_seconds="5",
         )
 
-        snapshot = _build_tree_rail_snapshot(tracker, now=12.0, version="test")
+        snapshot = _build_tree_rail_snapshot(tracker, now=12.0)
 
         assert snapshot.terminal_status == "waiting"
         assert any("approval" in line for line in snapshot.wait_lines)
@@ -796,7 +814,7 @@ class TestTreeRailSnapshot:
             submit_group=7,
         )
 
-        snapshot = _build_tree_rail_snapshot(tracker, now=12.0, version="test")
+        snapshot = _build_tree_rail_snapshot(tracker, now=12.0)
 
         assert any(
             type(row).__name__ == "_TreeRailCompactionRow" for row in snapshot.rows
