@@ -359,4 +359,18 @@ body::before {
   body::before {
     display: none;
   }
+
+  /* Sticky stacking cards — show all cards normally */
+  .features-sticky-container {
+    padding-bottom: 0;
+  }
+  .feature-card {
+    position: relative;
+    top: auto;
+    min-height: auto;
+    margin-bottom: 48px;
+  }
+  .feature-card.feature-card--last {
+    margin-bottom: 0;
+  }
 }
