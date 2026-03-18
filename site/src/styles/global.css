@@ -233,12 +233,9 @@ body::before {
 }
 
 @media (max-width: 600px) {
-  /* Tighten section padding on phones — inline styles use 80px/100px */
-  section {
-    padding-top: 48px !important;
-    padding-bottom: 48px !important;
-    padding-left: 16px !important;
-    padding-right: 16px !important;
+  .section-pad,
+  .section-pad-compact {
+    padding: 48px 16px;
   }
 }
 
