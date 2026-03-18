@@ -23,7 +23,7 @@ kitaru model register coding-agent --model anthropic/claude-sonnet-4-20250514 --
 
 ```bash
 # Start the agent with a task
-uv run python -m examples.coding_agent_basic.flow "Create a Plotly population pyramid for South Korea"
+uv run python -m flow "Create a Plotly population pyramid for South Korea"
 ```
 
 The agent works on the task, then calls `hand_back` with a summary and a question for you. You respond with a follow-up task or cancel the execution to stop.
