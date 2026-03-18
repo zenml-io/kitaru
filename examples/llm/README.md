@@ -4,7 +4,7 @@ This example shows how `kitaru.llm()` behaves inside a flow: prompt/response
 artifacts are captured, and usage metadata is attached automatically.
 
 ```bash
-uv run -m examples.llm.flow_with_llm
+uv run examples/llm/flow_with_llm.py
 ```
 
 For the full catalog, see [../README.md](../README.md).

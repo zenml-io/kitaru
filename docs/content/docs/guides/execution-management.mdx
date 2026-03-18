@@ -218,16 +218,16 @@ For the broader catalog, see [Examples](/getting-started/examples).
 
 ```bash
 uv sync --extra local
-uv run -m examples.execution_management.client_execution_management
+uv run examples/execution_management/client_execution_management.py
 uv run pytest tests/test_phase11_client_example.py
 
-uv run -m examples.execution_management.wait_and_resume
+uv run examples/execution_management/wait_and_resume.py
 uv run pytest tests/test_phase15_wait_example.py
 
-uv run -m examples.replay.replay_with_overrides
+uv run examples/replay/replay_with_overrides.py
 uv run pytest tests/test_phase16_replay_example.py
 
 uv sync --extra local --extra mcp
-uv run -m examples.mcp.mcp_query_tools
+uv run examples/mcp/mcp_query_tools.py
 uv run pytest tests/mcp/test_phase19_mcp_example.py
 ```
