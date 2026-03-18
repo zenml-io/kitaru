@@ -94,16 +94,30 @@ def _format_default(value: Any) -> str | None:
     return f"`{value!r}`"
 
 
-def _supports_positional(arg: Any) -> bool:
+def _supports_positional(arg: Any, *, has_keyword_boundary: bool = False) -> bool:
     """Return whether a cyclopts argument should be documented positionally."""
     kind = getattr(arg.field_info, "kind", None)
+
+    if kind is None:
+        # cyclopts reports POSITIONAL_ONLY params (after /) with kind=None.
+        # Detect by checking that every auto-assigned name lacks a -- prefix.
+        return all(not n.startswith("-") for n in (arg.names or ()))
+
     if kind not in {
         inspect.Parameter.POSITIONAL_ONLY,
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
     }:
         return False
 
-    return arg.required or _is_variadic_hint(arg.hint)
+    if arg.required or _is_variadic_hint(arg.hint):
+        return True
+
+    # Optional POSITIONAL_OR_KEYWORD: treat as positional only when the
+    # command uses a keyword boundary (*,) — any optional non-flag param
+    # placed before the boundary was intentionally positional.
+    if not has_keyword_boundary:
+        return False
+    return not arg.is_flag()
 
 
 def _is_variadic_hint(hint: Any) -> bool:
@@ -112,9 +126,9 @@ def _is_variadic_hint(hint: Any) -> bool:
     return origin in {list, tuple, set}
 
 
-def _positional_token(arg: Any) -> str | None:
+def _positional_token(arg: Any, *, has_keyword_boundary: bool = False) -> str | None:
     """Build a positional usage token from the underlying Python parameter."""
-    if not _supports_positional(arg):
+    if not _supports_positional(arg, has_keyword_boundary=has_keyword_boundary):
         return None
 
     field_name = getattr(arg.field_info, "name", None)
@@ -166,12 +180,22 @@ def _extract_parameters(app: Any) -> list[ParameterDoc]:
     except Exception:
         return []
 
+    # Detect whether the command uses a keyword boundary (*,).  When present,
+    # optional POSITIONAL_OR_KEYWORD params before the boundary are positional.
+    has_keyword_boundary = any(
+        getattr(a.field_info, "kind", None) == inspect.Parameter.KEYWORD_ONLY
+        for a in args
+        if a.show
+    )
+
     params: list[ParameterDoc] = []
     for arg in args:
         if not arg.show:
             continue
 
-        positional_token = _positional_token(arg)
+        positional_token = _positional_token(
+            arg, has_keyword_boundary=has_keyword_boundary
+        )
         explicit_aliases = list(getattr(arg.parameter, "alias", ()) or ())
         if positional_token is not None:
             names = [positional_token, *explicit_aliases]
@@ -186,6 +210,11 @@ def _extract_parameters(app: Any) -> list[ParameterDoc]:
         required = arg.required
         default = _format_default(arg.field_info.default)
         is_flag = arg.is_flag()
+
+        # Deduplicate while preserving order — handles cyclopts duplicates
+        # from overlapping auto-name and alias (e.g. from_ + alias=["--from"]).
+        names = list(dict.fromkeys(names))
+        option_names = list(dict.fromkeys(option_names))
 
         params.append(
             ParameterDoc(

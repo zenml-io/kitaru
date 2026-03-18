@@ -105,6 +105,43 @@ replayed = client.executions.replay(
 cancelled = client.executions.cancel(exec_id)
 ```
 
+## Execution convenience methods
+
+`Execution` objects returned by `client.executions.get(...)` also expose
+convenience methods that call back into the same client:
+
+```python
+execution = client.executions.get(exec_id)
+
+fresh = execution.refresh()          # re-fetch latest state
+retried = execution.retry()          # retry a failed execution
+resumed = execution.resume()         # resume after wait input
+cancelled = execution.cancel()       # cancel a running execution
+replayed = execution.replay(from_="write_draft", overrides={...})
+
+checkpoints = execution.list_checkpoints()
+artifacts = execution.list_artifacts()
+```
+
+These are equivalent to calling `client.executions.retry(exec_id)` etc. — they
+return a new `Execution` snapshot rather than mutating the existing object.
+
+## Inspect or abort waits programmatically
+
+List all pending wait conditions for an execution:
+
+```python
+waits = client.executions.pending_waits(exec_id)
+for w in waits:
+    print(w.name, w.question, w.schema)
+```
+
+Abort a pending wait instead of continuing it:
+
+```python
+execution = client.executions.abort_wait(exec_id, wait="approve_deploy")
+```
+
 ## Browse and load artifacts
 
 ```python
@@ -114,6 +151,14 @@ for artifact in artifacts:
 
 context_artifact = client.artifacts.get(artifact_id)
 value = context_artifact.load()
+```
+
+You can also filter artifact lists:
+
+```python
+client.artifacts.list(exec_id, kind="context")
+client.artifacts.list(exec_id, producing_call="research")
+client.artifacts.list(exec_id, name="research_context", limit=1)
 ```
 
 ## Manage executions from the CLI

@@ -265,8 +265,13 @@ There are really two different stories here:
 
 You can set the project explicitly with either:
 
-- **Environment variable:** `KITARU_PROJECT=my-project`
-- **SDK call:** `kitaru.configure(project="my-project")`
+- **Environment variable (preferred):** `KITARU_PROJECT=my-project`
+- **SDK call (advanced/internal):** `kitaru.configure(project="my-project")`
+
+<Callout type="info">
+  `configure(project=...)` is an internal/testing escape hatch, not a normal
+  user-facing setting. Prefer `KITARU_PROJECT` for standard usage.
+</Callout>
 
 When an explicit project override is set, it appears in `kitaru info` output
 as "Project override". It does not appear in `kitaru status` except as part of

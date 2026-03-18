@@ -33,6 +33,25 @@ def publish_flow(topic: str) -> str:
     return f"PUBLISHED: {topic}"
 ```
 
+## Timeout behavior
+
+By default, `kitaru.wait(...)` gives the runner up to 600 seconds to receive
+inline input before pausing the execution:
+
+```python
+approved = kitaru.wait(
+    schema=bool,
+    name="approve_publish",
+    question="Approve publishing?",
+    timeout=300,  # runner waits up to 300s for inline resolution
+)
+```
+
+`timeout` controls how long the runner keeps polling — it is **not** an
+expiration on the wait record itself. If the timeout elapses without input, the
+execution moves to `waiting` status and can still be resolved externally at any
+time.
+
 ## Resolve input externally (non-interactive runs)
 
 When the flow is running in a non-interactive context (or after the runner has
@@ -54,6 +73,12 @@ runner already exited), call `resume(...)`:
 
 ```python
 execution = client.executions.resume(exec_id)
+```
+
+To abort a wait instead of continuing:
+
+```python
+execution = client.executions.abort_wait(exec_id, wait="approve_publish")
 ```
 
 ### From CLI

@@ -69,6 +69,37 @@ Connection tools:
 - `kitaru_stacks_list`
 - `manage_stack`
 
+## Starting executions with `kitaru_executions_run`
+
+The `kitaru_executions_run` tool requires a `target` string in the format:
+
+```text
+<module_or_file>:<flow_name>
+```
+
+The left side can be an importable module path or a `.py` filesystem path.
+The right side is the flow attribute name in that module.
+
+Examples:
+
+```text
+examples.basic_flow.first_working_flow:my_agent
+./examples/basic_flow/first_working_flow.py:my_agent
+```
+
+Pass flow inputs as `args` (a JSON object) and optionally specify a `stack`:
+
+```json
+{
+  "target": "my_app.flows:research_flow",
+  "args": {"topic": "durable execution"},
+  "stack": "prod-k8s"
+}
+```
+
+When `stack` is omitted the tool calls `.run()`; when provided it calls
+`.deploy(stack=...)`.
+
 ## Example query flow
 
 1. Call `kitaru_executions_list(status="waiting")`

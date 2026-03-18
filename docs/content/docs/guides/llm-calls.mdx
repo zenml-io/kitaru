@@ -105,6 +105,40 @@ def writer(topic: str) -> str:
     )
 ```
 
+## Advanced options
+
+`kitaru.llm()` also accepts `system=`, `temperature=`, and `max_tokens=`:
+
+```python
+reply = kitaru.llm(
+    "Summarize this document in 3 bullets.",
+    model="fast",
+    system="You are a concise technical editor.",
+    temperature=0.2,
+    max_tokens=200,
+    name="summary_call",
+)
+```
+
+### Chat-style message lists
+
+Instead of a plain string, you can pass a chat-style message list:
+
+```python
+reply = kitaru.llm(
+    [
+        {"role": "user", "content": "Draft a release note headline."},
+        {"role": "assistant", "content": "Kitaru adds durable replay controls."},
+        {"role": "user", "content": "Now make it shorter."},
+    ],
+    model="fast",
+    name="headline_refine",
+)
+```
+
+Each message must include `role` and `content` keys. If `system=` is provided
+alongside a message list, Kitaru prepends a system message automatically.
+
 ## Runtime behavior by context
 
 - **Inside a flow (outside checkpoints):** `kitaru.llm()` runs as a synthetic durable call boundary.
