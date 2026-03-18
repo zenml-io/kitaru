@@ -13,6 +13,7 @@ Or via the CLI:
 """
 
 import copy
+import html
 import json
 import re
 import tempfile
@@ -276,10 +277,6 @@ def _save_generated_files(cwd: str, before: set[str]) -> None:
         if not path.is_file() or path.name in before:
             continue
         ext = path.suffix.lower()
-        
-        # This block determines the appropriate wrapper type (HTMLString, MarkdownString, etc.)
-        # for the generated file, based on its file extension. If no wrapper is registered for
-        # the extension, the file is skipped and not saved as an artifact.
         wrapper = _SAVE_EXTENSIONS.get(ext)
         if wrapper is None:
             continue
@@ -304,10 +301,8 @@ def tool_call(
 
     # Save the source code as an artifact before execution
     if tool_name == "python_exec" and "code" in arguments:
-        import html as html_mod
-
         code = arguments["code"]
-        escaped = html_mod.escape(code)
+        escaped = html.escape(code)
         kitaru.save(
             "script.py",
             HTMLString(
@@ -375,7 +370,6 @@ def coding_agent_basic(task: str) -> str:
 
         messages.append(response.to_message())
 
-        should_break = False
         for tc in response.tool_calls:  # type: ignore[union-attr]
             try:
                 tc_args = json.loads(tc.function.arguments)
@@ -448,9 +442,6 @@ def coding_agent_basic(task: str) -> str:
             messages.append(
                 {"role": "tool", "tool_call_id": tc.id, "content": result.output}
             )
-
-        if should_break:
-            break
     else:
         # Exhausted rounds
         messages.append(

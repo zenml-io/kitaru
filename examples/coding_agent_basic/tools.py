@@ -175,13 +175,10 @@ def python_exec(cwd: str, code: str, timeout: int = 60) -> MarkdownString:
 # Web tools
 # ---------------------------------------------------------------------------
 
-_ALLOWED_SCHEMES = {"http", "https"}
-
-
 def web_fetch(cwd: str, url: str, max_chars: int = _MAX_CHARS) -> HTMLString:
     """Fetch a URL and return its text content."""
     parsed = urlparse(url)
-    if parsed.scheme not in _ALLOWED_SCHEMES:
+    if parsed.scheme not in {"http", "https"}:
         return HTMLString(f"Error: only http/https URLs are supported, got {parsed.scheme!r}")
 
     try:
@@ -448,12 +445,6 @@ _WEB_SEARCH_SCHEMA: dict[str, Any] = {
         },
     },
 }
-
-READER_SCHEMAS: list[dict[str, Any]] = [
-    _READ_FILE_SCHEMA,
-    _LIST_FILES_SCHEMA,
-    _SEARCH_FILES_SCHEMA,
-]
 
 ALL_SCHEMAS: list[dict[str, Any]] = [
     _READ_FILE_SCHEMA,
