@@ -31,7 +31,6 @@ def publish(draft: str) -> str:
     return f"PUBLISHED: {draft}"
 
 
-# TODO: remove explicit base_image once kitaru is on PyPI
 @flow(image={"base_image": "strickvl/kitaru-dev:latest"})
 def content_pipeline(topic: str) -> str:
     """Simple durable content pipeline used for replay demonstration."""

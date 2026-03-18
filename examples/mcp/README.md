@@ -5,7 +5,7 @@ can inspect executions and artifacts from an AI client.
 
 ```bash
 uv sync --extra local --extra mcp
-uv run -m examples.mcp.mcp_query_tools
+uv run examples/mcp/mcp_query_tools.py
 ```
 
 For the full catalog, see [../README.md](../README.md).

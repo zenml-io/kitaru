@@ -5,7 +5,7 @@ durability and observability around it.
 
 ```bash
 uv sync --extra local --extra pydantic-ai
-uv run -m examples.pydantic_ai_agent.pydantic_ai_adapter
+uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py
 ```
 
 For the full catalog, see [../README.md](../README.md).

@@ -30,7 +30,6 @@ def process_data(data: str) -> str:
     return data.upper()
 
 
-# TODO: remove explicit base_image once kitaru is on PyPI
 @flow(image={"base_image": "strickvl/kitaru-dev:latest"})
 def my_agent(url: str) -> str:
     """Run the example Kitaru workflow.
