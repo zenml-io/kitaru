@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `KitaruClient.executions.pending_waits(exec_id)` returns all pending wait conditions for an execution
 - `KitaruClient.executions.abort_wait(exec_id, wait=...)` aborts a pending wait condition
 - Native Kitaru terminal logging: ZenML console output is now intercepted and rewritten to Kitaru vocabulary (pipeline→flow, step→checkpoint, run→execution) with colored lifecycle markers; ZenML-specific noise (Dashboard URLs, user/build info, component listings) is suppressed from the terminal while remaining available in stored logs via `kitaru executions logs`
+- Interactive TTY Python flow runs now render a Rich live checkpoint tree with resolving flow/stack/execution header metadata, checkpoint compaction for long successful runs, grouping for contiguous `.submit()` fan-out launches, wait/input hints, and terminal retry/logs suggestions; machine mode and non-TTY contexts continue to use plain text
 - Shared source-alias module (`kitaru._source_aliases`) centralizing alias prefix constants and normalization helpers previously duplicated across 7+ files
 
 ### Changed

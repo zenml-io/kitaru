@@ -94,6 +94,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - Static hand-written MDX pages under `docs/content/docs/` are tracked and can be edited directly when behavior changes.
 - Generated reference output should still come from the existing generation scripts rather than manual edits.
 - Agent-facing CLI commands should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.
+- Interactive Python flow runs now have a transient live checkpoint-tree renderer on TTYs. Document that separately from `kitaru executions logs`, which is the durable stored-log retrieval lane.
 - Most text-oriented agent-facing commands also support `--machine` / `--no-machine`. `KITARU_MACHINE_MODE` and `kitaru configure set machine_mode <true|false>` provide default preference layers; `--output json` and non-TTY contexts still take precedence.
 - Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
 - If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), not the generated `docs/content/docs/cli/*` output.

@@ -6,6 +6,11 @@ description: Retrieve execution and checkpoint runtime logs from the SDK, CLI, a
 Kitaru now ships a runtime-log retrieval lane that is separate from
 `kitaru.log(...)` metadata.
 
+If you run `my_flow.run(...)` or `my_flow.deploy(...)` in an interactive Python
+TTY, Kitaru also renders a live checkpoint tree in the terminal. That live tree
+is a transient in-process view. This guide is about the **durable runtime logs**
+you can fetch later from the SDK, CLI, or MCP.
+
 You can fetch runtime logs through:
 
 - Python SDK: `KitaruClient().executions.logs(...)`

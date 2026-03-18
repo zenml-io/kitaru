@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
@@ -10,7 +12,11 @@ import pytest
 
 from kitaru.config import ResolvedModelSelection
 from kitaru.errors import KitaruContextError, KitaruRuntimeError
-from kitaru.llm import _resolve_credential_overlay, llm
+from kitaru.llm import (
+    _configure_litellm_terminal_logger,
+    _resolve_credential_overlay,
+    llm,
+)
 from kitaru.runtime import _checkpoint_scope, _flow_scope
 
 
@@ -78,6 +84,26 @@ def test_llm_auto_names_calls_sequentially_within_flow_scope() -> None:
     assert second_request.call_name == "llm_2"
 
 
+def test_configure_litellm_terminal_logger_removes_console_handlers() -> None:
+    """LiteLLM should not keep its own stderr handler attached under Kitaru."""
+    logger = logging.getLogger("LiteLLM")
+    original_handlers = list(logger.handlers)
+    original_propagate = logger.propagate
+    stray_handler = logging.StreamHandler(sys.stderr)
+    logger.handlers = [stray_handler]
+    logger.propagate = False
+
+    try:
+        _configure_litellm_terminal_logger()
+
+        assert logger.handlers == []
+        assert logger.propagate is True
+    finally:
+        logger.handlers = original_handlers
+        logger.propagate = original_propagate
+        stray_handler.close()
+
+
 def test_llm_executes_litellm_with_normalized_messages_and_tracking() -> None:
     """LLM execution should normalize prompts and persist artifacts/metadata."""
     execution_id, checkpoint_id = _flow_checkpoint_scope()
@@ -107,6 +133,7 @@ def test_llm_executes_litellm_with_normalized_messages_and_tracking() -> None:
         patch(
             "kitaru.llm._resolve_credential_overlay", return_value=({}, "environment")
         ),
+        patch("kitaru.llm._configure_litellm_terminal_logger") as mock_configure_logger,
         patch("kitaru.llm.completion", return_value=fake_response) as mock_completion,
         patch("kitaru.llm.save") as mock_save,
         patch("kitaru.llm.log") as mock_log,
@@ -122,6 +149,7 @@ def test_llm_executes_litellm_with_normalized_messages_and_tracking() -> None:
 
     assert output == "hello world"
     mock_resolve_model.assert_called_once_with("fast")
+    mock_configure_logger.assert_called_once_with()
     mock_completion.assert_called_once_with(
         model="openai/gpt-4o-mini",
         messages=[

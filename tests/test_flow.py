@@ -31,6 +31,7 @@ from kitaru.errors import (
 from kitaru.flow import (
     FlowHandle,
     _inject_model_registry_env,
+    _register_flow_execution_bridge,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
     flow,
@@ -391,11 +392,14 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
         patch(
             "kitaru.flow.persist_frozen_execution_spec"
         ) as persist_frozen_execution_spec_mock,
+        patch("kitaru.flow._register_flow_execution_bridge") as bridge_mock,
         patch("kitaru.flow.Client") as client_cls,
     ):
         client_cls.return_value.active_stack_model.id = "old-stack-id"
         wrapped = flow(stack="decorator-stack", cache=True, retries=2)(lambda x: x)
         wrapped.run("payload", stack="invocation-stack", retries=3)
+
+    bridge_mock.assert_called_once_with(str(run.id))
 
     resolve_execution_config_mock.assert_called_once()
     resolve_connection_mock.assert_called_once_with(validate_for_use=True)
@@ -479,6 +483,7 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         ) as resolve_connection_mock,
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        patch("kitaru.flow._register_flow_execution_bridge") as bridge_mock,
         patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
     ):
         client_instance = client_cls.return_value
@@ -492,6 +497,8 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
             topic="new topic",
             overrides={"checkpoint.research": "edited"},
         )
+
+    bridge_mock.assert_called_once_with(str(replayed_run.id))
 
     assert isinstance(handle, FlowHandle)
     configured_pipeline.replay.assert_called_once_with(
@@ -574,6 +581,14 @@ def test_replay_validates_connection_before_loading_source_run() -> None:
 
     resolve_connection_mock.assert_called_once_with(validate_for_use=True)
     client_cls.return_value.get_pipeline_run.assert_not_called()
+
+
+def test_register_flow_execution_bridge_swallows_terminal_logging_errors() -> None:
+    with patch(
+        "kitaru._terminal_logging.register_flow_execution",
+        side_effect=RuntimeError("boom"),
+    ):
+        _register_flow_execution_bridge("exec-123")
 
 
 def test_temporary_active_stack_serializes_concurrent_bindings() -> None:

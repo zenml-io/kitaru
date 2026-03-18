@@ -3,11 +3,13 @@
 `kitaru.llm()` wraps one LiteLLM completion call with Kitaru tracking.
 """
 
+import logging
 import os
 import re
+import sys
 import time
 from collections.abc import Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any
 
 from litellm import completion
@@ -79,6 +81,31 @@ def _normalize_call_name(name: str | None) -> str:
     if normalized_name[0].isdigit():
         normalized_name = f"llm_{normalized_name}"
     return normalized_name
+
+
+def _configure_litellm_terminal_logger() -> None:
+    """Route LiteLLM chatter through root logging instead of its own stderr handler.
+
+    LiteLLM installs a default ``StreamHandler`` on the ``LiteLLM`` logger.
+    That handler writes directly to stderr before records propagate upward, which
+    bypasses Kitaru's terminal filtering and causes duplicate/noisy console
+    output. Remove only those direct console handlers so records still propagate
+    to root handlers for stored logs and debug visibility.
+    """
+    console_streams = {sys.stdout, sys.stderr, sys.__stdout__, sys.__stderr__}
+    for logger_name in ("LiteLLM", "litellm"):
+        logger = logging.getLogger(logger_name)
+        logger.propagate = True
+        for handler in list(logger.handlers):
+            if not isinstance(handler, logging.StreamHandler):
+                continue
+            if isinstance(handler, logging.FileHandler):
+                continue
+            if getattr(handler, "stream", None) not in console_streams:
+                continue
+            logger.removeHandler(handler)
+            with suppress(Exception):
+                handler.close()
 
 
 def _provider_name(model: str) -> str | None:
@@ -303,6 +330,7 @@ def _temporary_env(additions: Mapping[str, str]) -> Any:
 
 def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
+    _configure_litellm_terminal_logger()
     model_selection = resolve_model_selection(request.model)
     messages = _normalize_messages(request.prompt, system=request.system)
     env_overlay, credential_source = _resolve_credential_overlay(model_selection)

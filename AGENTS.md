@@ -148,6 +148,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 - **Environment-variable docs:** document `KITARU_*` env vars as the public surface. Mention `ZENML_*` only as a compatibility note when necessary to explain migration or interop.
 - **Model-registry docs:** `kitaru model register` still writes aliases to local config, but submitted/replayed runs automatically receive a transported registry snapshot via `KITARU_MODEL_REGISTRY`. `kitaru model list` should be described as listing aliases available in the current environment, not just aliases stored locally.
 - **Frontmatter required:** every `.mdx` page needs `title` and `description`.
+- **Live tree vs stored logs:** interactive Python flow runs on a TTY now use a transient live checkpoint tree. Document that separately from `kitaru executions logs`, which is the durable stored-log retrieval lane.
 
 ## Security & Configuration Notes
 

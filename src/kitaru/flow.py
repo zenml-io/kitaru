@@ -61,6 +61,22 @@ _STACK_BINDING_LOCK = threading.RLock()
 logger = logging.getLogger(__name__)
 
 
+def _register_flow_execution_bridge(exec_id: str) -> None:
+    """Best-effort bridge into the live terminal execution header.
+
+    The terminal tree renderer lives in ``kitaru._terminal_logging`` and should
+    not become a hard dependency for flow submission. Import lazily and swallow
+    bridge failures so execution submission/replay keeps working even if the
+    interactive terminal layer is unavailable.
+    """
+    try:
+        from kitaru._terminal_logging import register_flow_execution
+
+        register_flow_execution(exec_id)
+    except Exception:
+        return
+
+
 @contextmanager
 def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
     """Temporarily activate a stack for one flow invocation.
@@ -648,6 +664,7 @@ class _FlowDefinition:
         if replayed_run is None:
             raise KitaruRuntimeError("Replay did not produce a pipeline run.")
 
+        _register_flow_execution_bridge(str(replayed_run.id))
         persist_frozen_execution_spec(
             run_id=replayed_run.id,
             frozen_execution_spec=frozen_execution_spec,
@@ -698,6 +715,7 @@ class _FlowDefinition:
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
+        _register_flow_execution_bridge(str(run.id))
         persist_frozen_execution_spec(
             run_id=run.id,
             frozen_execution_spec=frozen_execution_spec,

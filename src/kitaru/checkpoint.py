@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Sequence
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 
@@ -57,6 +57,20 @@ def _register_checkpoint_source_alias(
     if module is None:
         return
     setattr(module, alias, step_obj)
+
+
+def _register_terminal_submit_group(
+    checkpoint_name: str,
+    *,
+    count: int = 1,
+) -> None:
+    """Best-effort bridge from checkpoint submission into terminal logging."""
+    try:
+        from kitaru._terminal_logging import register_checkpoint_submission
+
+        register_checkpoint_submission(checkpoint_name, count=count)
+    except Exception:
+        return
 
 
 def _normalize_retries(retries: int) -> int:
@@ -153,6 +167,7 @@ class _CheckpointDefinition:
         func_name = callable_name(func)
         registration_name = build_checkpoint_registration_name(func_name)
         source_alias = build_checkpoint_source_alias(func_name)
+        self._registration_name = registration_name
         aliasable_entrypoint = cast(Any, wrapped_entrypoint)
         aliasable_entrypoint.__name__ = source_alias
         aliasable_entrypoint.__qualname__ = source_alias
@@ -212,6 +227,8 @@ class _CheckpointDefinition:
     ) -> Any:
         """Submit the checkpoint concurrently inside a running flow."""
         self._assert_submit_allowed()
+        with suppress(Exception):
+            _register_terminal_submit_group(self._registration_name)
         return self._step.submit(*args, id=id, after=after, **kwargs)
 
     def map(
