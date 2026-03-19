@@ -99,25 +99,14 @@ def apply_env_translations() -> None:
     # Disable ZenML Rich traceback formatting — Kitaru handles its own output.
     os.environ.setdefault("ZENML_ENABLE_RICH_TRACEBACK", "0")
 
-
-def _apply_constants_overrides() -> None:
-    """Patch ZenML constants that have no env var backing.
-
-    Called from ``init()`` after env translations are applied. At this
-    point we are inside ``zenml.__init__`` (the hook runs at the top),
-    but ``zenml.constants`` is a standalone submodule that can be
-    safely imported without circular issues.
-    """
-    import zenml.constants
-
-    setattr(  # noqa: B010
-        zenml.constants,
-        "REPOSITORY_DIRECTORY_NAME",
-        KITARU_REPOSITORY_DIRECTORY_NAME,
+    # Set the repository directory name before zenml.constants is imported.
+    # The hook runs at the top of zenml.__init__, so constants.py hasn't
+    # frozen REPOSITORY_DIRECTORY_NAME yet — it will read this env var.
+    os.environ.setdefault(
+        "ZENML_REPOSITORY_DIRECTORY_NAME", KITARU_REPOSITORY_DIRECTORY_NAME
     )
 
 
 def init() -> None:
     """Entry point called by ZenML's init hook system."""
     apply_env_translations()
-    _apply_constants_overrides()
