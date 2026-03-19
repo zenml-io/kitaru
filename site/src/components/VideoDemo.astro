@@ -1,45 +1,44 @@
 ---
-// VideoDemo.astro — Dark demo video section with placeholder player
+// VideoDemo.astro — Dark video section with YouTube embed on play
 ---
 
-<section class="dark-section section-pad-compact" id="demo">
-  <div class="section-inner video-demo-inner">
-    <div class="video-container" data-reveal>
-      <div class="video-placeholder">
-        <button class="video-play-btn" aria-label="Demo coming soon" aria-disabled="true">
+<section class="dark-section video-section" id="demo">
+  <div class="video-wrapper" data-reveal>
+    <div class="video-container" id="videoContainer">
+      <div class="video-placeholder" id="videoPlaceholder">
+        <button class="video-play-btn" id="videoPlayBtn" aria-label="Watch the demo">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M8 5.14v13.72a1 1 0 001.5.86l11.04-6.86a1 1 0 000-1.72L9.5 4.28a1 1 0 00-1.5.86z" fill="#fff"/>
           </svg>
         </button>
-        <span class="video-label">Demo coming soon</span>
+        <span class="video-label">Watch the demo</span>
       </div>
-    </div>
-
-    <div class="video-tags" data-reveal data-reveal-delay="2">
-      <span class="video-tag">agent run</span>
-      <span class="video-tag">pause + replay</span>
-      <span class="video-tag">approval gates</span>
-      <span class="video-tag">orchestration</span>
-      <span class="video-tag">kitaru engine</span>
     </div>
   </div>
 </section>
 
 <style>
-  .video-demo-inner {
+  .video-section {
     display: flex;
-    flex-direction: column;
     align-items: center;
+    justify-content: center;
+    padding: 80px clamp(24px, 5vw, 80px);
   }
 
-  /* Video container — 16:9 aspect ratio */
+  .video-wrapper {
+    width: 100%;
+    max-width: 900px;
+  }
+
   .video-container {
     width: 100%;
-    max-width: 800px;
     aspect-ratio: 16 / 9;
     border-radius: 12px;
     overflow: hidden;
     position: relative;
+    box-shadow:
+      0 4px 24px oklch(0 0 0 / 0.3),
+      0 0 0 1px oklch(1 0 0 / 0.06);
   }
 
   .video-placeholder {
@@ -56,9 +55,9 @@
     justify-content: center;
     gap: 16px;
     position: relative;
+    cursor: pointer;
   }
 
-  /* Play button — 72px circle */
   .video-play-btn {
     width: 72px;
     height: 72px;
@@ -69,17 +68,20 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: transform 0.2s ease, background 0.2s ease;
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s;
     animation: shimmer 3s ease-in-out infinite;
   }
 
   .video-play-btn:hover {
-    transform: scale(1.08);
-    background: oklch(0.65 0.16 45 / 0.18);
+    transform: scale(1.1);
+    background: oklch(0.65 0.16 45 / 0.2);
+  }
+
+  .video-play-btn:active {
+    transform: scale(0.95);
   }
 
   .video-play-btn svg {
-    /* Slight offset to visually center the triangle */
     margin-left: 3px;
   }
 
@@ -89,32 +91,18 @@
     letter-spacing: 0.01em;
   }
 
-  /* Tag pills row */
-  .video-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-    margin-top: 32px;
+  /* YouTube iframe fills the container once loaded */
+  .video-container iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
   }
 
-  .video-tag {
-    display: inline-block;
-    padding: 6px 16px;
-    border-radius: 100px;
-    font-size: 0.75rem;
-    font-weight: 500;
-    background: oklch(1 0 0 / 0.04);
-    border: 1px solid oklch(1 0 0 / 0.12);
-    color: oklch(1 0 0 / 0.5);
-    white-space: nowrap;
-    font-family: var(--font-ui);
-  }
-
-  /* Responsive */
   @media (max-width: 768px) {
-    .video-container {
-      max-width: 100%;
+    .video-section {
+      padding: 60px 20px;
     }
 
     .video-play-btn {
@@ -133,23 +121,9 @@
   }
 
   @media (max-width: 480px) {
-    .video-tags {
-      gap: 8px;
-      margin-top: 24px;
+    .video-section {
+      padding: 48px 16px;
     }
-
-    .video-tag {
-      font-size: 0.7rem;
-      padding: 5px 12px;
-    }
-  }
-
-  .video-play-btn[aria-disabled="true"] {
-    cursor: not-allowed;
-  }
-
-  .video-play-btn[aria-disabled="true"]:hover {
-    transform: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -158,3 +132,25 @@
     }
   }
 </style>
+
+<script>
+  const container = document.getElementById('videoContainer');
+  const placeholder = document.getElementById('videoPlaceholder');
+  const playBtn = document.getElementById('videoPlayBtn');
+
+  function launchVideo() {
+    if (!container || !placeholder) return;
+    const videoId = 'wEVwIkDvUPs';
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
+    iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+    iframe.allowFullscreen = true;
+    iframe.title = 'Kitaru demo video';
+    iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:none;';
+    placeholder.remove();
+    container.appendChild(iframe);
+  }
+
+  playBtn?.addEventListener('click', launchVideo);
+  placeholder?.addEventListener('click', launchVideo);
+</script>

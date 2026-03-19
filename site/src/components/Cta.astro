@@ -17,12 +17,22 @@
       <span class="cta-line-solution">Stop re-running steps 1 through 4.</span>
     </h2>
 
-    <form class="cta-form" id="waitlist-form">
-      <label for="cta-email" class="sr-only">Email address</label>
-      <input type="email" id="cta-email" class="cta-input" placeholder="you@company.com" required aria-label="Email address">
-      <button type="submit" class="btn-accent">Get early access</button>
-    </form>
-    <p class="cta-note">Open source (Apache 2.0). Free to start. No credit card required.</p>
+    <div class="cta-actions">
+      <div class="cta-install">
+        <code>pip install kitaru</code>
+        <button class="copy-btn" aria-label="Copy install command" data-copy="pip install kitaru">
+          <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
+      </div>
+      <div class="cta-links">
+        <a href="/docs" class="btn-accent">Read the docs</a>
+        <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="btn-secondary-dark">
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+    <p class="cta-note">Open source (Apache 2.0). pip install and go.</p>
   </div>
 </section>
 
@@ -143,32 +153,106 @@
     color: var(--color-dark-text);
   }
 
-  .cta-form {
+  .cta-actions {
     display: flex;
-    gap: 10px;
-    max-width: 460px;
-    margin: 48px auto 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    margin-top: 48px;
   }
 
-  .cta-input {
-    flex: 1;
+  .cta-install {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    background: oklch(1 0 0 / 0.06);
+    border: 1px solid oklch(1 0 0 / 0.15);
+    border-radius: 8px;
+    padding: 4px 4px 4px 20px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  .cta-install:hover {
+    border-color: oklch(0.65 0.16 45 / 0.4);
+    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.08);
+  }
+
+  .cta-install code {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--color-dark-text);
+    user-select: all;
+  }
+
+  .cta-install .copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: oklch(1 0 0 / 0.35);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+    margin-left: 8px;
+    flex-shrink: 0;
+  }
+
+  .cta-install .copy-btn:hover {
+    color: oklch(1 0 0 / 0.7);
+    background: oklch(1 0 0 / 0.06);
+  }
+
+  .cta-install .copy-btn .check-icon {
+    display: none;
+    color: var(--color-success);
+  }
+
+  .cta-install .copy-btn.copied .copy-icon {
+    display: none;
+  }
+
+  .cta-install .copy-btn.copied .check-icon {
+    display: block;
+    animation: cta-check-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes cta-check-pop {
+    0% { transform: scale(0); opacity: 0; }
+    60% { transform: scale(1.2); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  .cta-links {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .btn-secondary-dark {
     font-family: var(--font-ui);
-    font-size: 0.9rem;
-    padding: 14px 18px;
+    font-size: 15px;
+    font-weight: 500;
+    color: oklch(1 0 0 / 0.7);
+    background: transparent;
+    padding: 14px 28px;
     border-radius: 8px;
     border: 1px solid oklch(1 0 0 / 0.15);
-    background: oklch(1 0 0 / 0.06);
-    color: var(--color-dark-text);
-    outline: none;
-    transition: border-color 0.2s;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
   }
 
-  .cta-input::placeholder {
-    color: oklch(1 0 0 / 0.35);
-  }
-
-  .cta-input:focus {
-    border-color: var(--color-accent);
+  .btn-secondary-dark:hover {
+    border-color: oklch(1 0 0 / 0.3);
+    color: oklch(1 0 0 / 0.9);
   }
 
   .cta-note {
@@ -176,11 +260,6 @@
     margin-top: 14px;
     color: oklch(1 0 0 / 0.35);
     text-align: center;
-  }
-
-  /* Keep button text legible when waitlist.ts applies --color-success background */
-  .cta-form button[disabled] {
-    color: oklch(1 0 0);
   }
 
   @media (max-width: 768px) {
@@ -196,9 +275,17 @@
     .cta-blob-2 { width: 200px; height: 200px; }
     .cta-blob-3 { width: 180px; height: 180px; }
 
-    .cta-form {
+    .cta-links {
       flex-direction: column;
-      max-width: 100%;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    .cta-links .btn-accent,
+    .cta-links .btn-secondary-dark {
+      width: 100%;
+      justify-content: center;
+      text-align: center;
     }
   }
 
@@ -416,7 +503,14 @@
     }
   }
 
-  // Waitlist form
-  import { setupWaitlistForm } from '../scripts/waitlist';
-  setupWaitlistForm('waitlist-form', 'cta');
+  // Copy-to-clipboard for CTA install command
+  document.querySelectorAll<HTMLButtonElement>('.cta-install .copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const text = btn.dataset.copy ?? '';
+      navigator.clipboard.writeText(text).then(() => {
+        btn.classList.add('copied');
+        setTimeout(() => btn.classList.remove('copied'), 1500);
+      });
+    });
+  });
 </script>

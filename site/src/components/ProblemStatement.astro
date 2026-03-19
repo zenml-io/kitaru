@@ -1,70 +1,82 @@
 ---
-// WhyKitaru.astro — Three value proposition cards
+// ProblemStatement.astro — "Why now" narrative between Hero and code showcase
 ---
 
-<section id="why-kitaru" class="section-pad">
+<section class="section-pad problem-section">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>WHY KITARU</span>
-    <h2 class="section-title" data-reveal data-reveal-delay="1">Why teams choose Kitaru</h2>
+    <span class="section-eyebrow" data-reveal>THE PROBLEM</span>
+    <h2 class="section-title problem-headline" data-reveal data-reveal-delay="1">
+      Your agents work. But they're trapped.
+    </h2>
 
-    <div class="why-grid">
+    <div class="problem-grid">
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="2">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/d9d8f212/kit-0.avif" alt="Observability built-in" loading="lazy" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/ffb15262/k-prob-1.avif" alt="Agents die when your laptop sleeps" loading="lazy" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>Observability built-in</h3>
-          <p>Free dashboard ships with the server. See every checkpoint, every LLM call, and what each step cost. Not a paid add-on.</p>
+          <h3>They die when your laptop sleeps</h3>
+          <p>One crash, one timeout, one closed lid — and hours of LLM calls vanish. You start over from scratch.</p>
         </div>
       </div>
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="3">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/5e721b4d/k-feat-2.avif" alt="Full execution control" loading="lazy" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/733ddc89/k-prob-2.avif" alt="Agents can't coordinate" loading="lazy" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>Full execution control</h3>
-          <p>Pause at decision points, get human input, and resume — hours or days later. Replay from any checkpoint without re-running everything.</p>
+          <h3>They can't coordinate with other agents</h3>
+          <p>No pause, no resume, no human-in-the-loop. Every agent is a fire-and-forget black box.</p>
         </div>
       </div>
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="4">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/735fb438/k-feat-3.avif" alt="Deployment flexibility" loading="lazy" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/34944ab3/k-prob-3.avif" alt="Results vanish when agents crash" loading="lazy" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>Deployment flexibility</h3>
-          <p>Same Python code runs locally, on Kubernetes, or across AWS, GCP, and Azure. Switch stacks with one command.</p>
-        </div>
-      </div>
-
-      <div class="why-card" data-reveal="scale-up" data-reveal-delay="5">
-        <div class="card-glow"></div>
-        <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/b63a92fd/k-feat-1.avif" alt="Python-first, no lock-in" loading="lazy" onerror="this.style.display='none'" />
-        </div>
-        <div class="why-card-content">
-          <h3>Python-first, no lock-in</h3>
-          <p>Wrap any Python agent framework — PydanticAI, CrewAI, or raw code — with Kitaru decorators. No DSL to learn, no vendor lock-in.</p>
+          <h3>Their results vanish when they crash</h3>
+          <p>No checkpoints, no artifacts, no audit trail. When something goes wrong you have nothing to debug.</p>
         </div>
       </div>
 
     </div>
+
+    <p class="problem-conclusion" data-reveal data-reveal-delay="5">
+      Kitaru moves your agents from your machine to your infrastructure.
+    </p>
   </div>
 </section>
 
 <style>
-  .why-grid {
+  .problem-section {
+    background: var(--color-bg);
+  }
+
+  .problem-headline {
+    max-width: 700px;
+  }
+
+  .problem-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 20px;
     margin-top: 48px;
   }
 
+  .problem-conclusion {
+    margin-top: 40px;
+    font-size: clamp(1rem, 1.8vw, 1.15rem);
+    font-weight: 500;
+    color: var(--color-primary);
+    letter-spacing: -0.01em;
+  }
+
+  /* ── Card styles — identical to WhyKitaru ── */
   .why-card {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
@@ -102,7 +114,6 @@
     min-height: 120px;
   }
 
-  .image-placeholder,
   .why-card-placeholder {
     width: 100%;
     aspect-ratio: 16 / 9;
@@ -138,14 +149,14 @@
   }
 
   @media (max-width: 768px) {
-    .why-grid {
+    .problem-grid {
       grid-template-columns: 1fr;
     }
   }
 </style>
 
 <script>
-  document.querySelectorAll('.why-card').forEach(card => {
+  document.querySelectorAll('.problem-section .why-card').forEach(card => {
     card.addEventListener('mousemove', (e: MouseEvent) => {
       const rect = (card as HTMLElement).getBoundingClientRect();
       (card as HTMLElement).style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');

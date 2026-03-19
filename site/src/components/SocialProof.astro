@@ -1,38 +1,50 @@
 ---
-// SocialProof.astro — Editorial pull-quote social proof
+// SocialProof.astro — Editorial heritage proof with dramatic stats
 ---
 
 <section id="social-proof" class="social-proof-section">
   <div class="social-proof-inner">
-    <h2 class="sr-only">What teams are saying</h2>
+    <h2 class="sr-only">Why teams trust Kitaru</h2>
 
-    <!-- Credibility line -->
-    <div class="credibility-row" data-reveal>
-      <div class="accent-dash" aria-hidden="true"></div>
-      <div class="credibility-content">
-        <div class="trusted-line">
-          <span class="trusted-label">Trusted by teams at</span>
-          <strong>JetBrains</strong>
-          <span class="trusted-sep">/</span>
-          <strong>Adeo</strong>
-          <span class="trusted-sep">/</span>
-          <strong>Bundeswehr</strong>
-        </div>
-        <p class="credibility-tagline">5+ years of ML orchestration, now applied to agents.</p>
+    <!-- Top: eyebrow + company row -->
+    <div class="sp-header" data-reveal>
+      <span class="section-eyebrow">TRUSTED IN PRODUCTION</span>
+      <div class="sp-companies">
+        <span class="sp-company">JetBrains</span>
+        <span class="sp-sep" aria-hidden="true"></span>
+        <span class="sp-company">Adeo</span>
+        <span class="sp-sep" aria-hidden="true"></span>
+        <span class="sp-company">Bundeswehr</span>
       </div>
     </div>
 
-    <!-- Quotes row -->
-    <div class="quotes-row" data-reveal>
-      <blockquote class="primary-quote">
-        <span class="quote-mark" aria-hidden="true">&ldquo;</span>
-        <p>We were spending 40% of our agent development time on retry logic and state recovery. Kitaru replaced all of that with two decorators.</p>
-        <footer>— <cite>ML Platform Lead, Series B AI Company</cite></footer>
-      </blockquote>
-      <blockquote class="secondary-quote">
-        <p>The replay capability alone saved us thousands in LLM costs during development. Being able to resume from a checkpoint instead of re-running everything is a game-changer.</p>
-        <footer>— <cite>Staff Engineer, Enterprise MLOps Team</cite></footer>
-      </blockquote>
+    <!-- Hero tagline -->
+    <p class="sp-tagline" data-reveal data-reveal-delay="1">
+      Built on the same ZenML infrastructure running production ML at scale for 5+&nbsp;years.
+    </p>
+
+    <!-- Stats grid — dramatic oversized numbers -->
+    <div class="sp-stats">
+      <div class="sp-stat" data-reveal="scale-up" data-reveal-delay="2">
+        <div class="sp-stat-accent" aria-hidden="true"></div>
+        <span class="sp-stat-number" data-count-to="5" data-suffix="+">5+</span>
+        <span class="sp-stat-unit">years</span>
+        <span class="sp-stat-desc">of production ML orchestration under the hood</span>
+      </div>
+
+      <div class="sp-stat" data-reveal="scale-up" data-reveal-delay="3">
+        <div class="sp-stat-accent" aria-hidden="true"></div>
+        <span class="sp-stat-number" data-count-to="4" data-suffix="">4</span>
+        <span class="sp-stat-unit">clouds</span>
+        <span class="sp-stat-desc">Kubernetes, Vertex AI, SageMaker, AzureML — same agent code</span>
+      </div>
+
+      <div class="sp-stat sp-stat-wide" data-reveal="scale-up" data-reveal-delay="4">
+        <div class="sp-stat-accent" aria-hidden="true"></div>
+        <span class="sp-stat-number sp-stat-text">Apache 2.0</span>
+        <span class="sp-stat-unit">license</span>
+        <span class="sp-stat-desc">Fully open source. No paid tiers. No gotchas.</span>
+      </div>
     </div>
 
   </div>
@@ -42,145 +54,135 @@
   .social-proof-section {
     background: var(--color-accent-light);
     padding: 120px 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Subtle warm gradient overlay for depth */
+  .social-proof-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -10%;
+    width: 60%;
+    height: 100%;
+    background: radial-gradient(ellipse at 70% 30%, oklch(0.65 0.16 45 / 0.04) 0%, transparent 70%);
+    pointer-events: none;
   }
 
   .social-proof-inner {
     max-width: 1200px;
     margin: 0 auto;
     padding: 0 clamp(24px, 5vw, 80px);
-    display: flex;
-    flex-direction: column;
-    gap: 80px;
+    position: relative;
   }
 
-  /* ── Credibility line ── */
-  .credibility-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  .accent-dash {
-    width: 40px;
-    height: 1px;
-    background: var(--color-accent);
-    flex-shrink: 0;
-    margin-top: 8px;
-  }
-
-  .credibility-content {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .trusted-line {
+  /* ── Header: eyebrow + companies ── */
+  .sp-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
+    gap: 24px;
+    margin-bottom: 20px;
   }
 
-  .trusted-label {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--color-secondary);
-    line-height: 14px;
+  .sp-companies {
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }
 
-  .trusted-line strong {
+  .sp-company {
     font-family: var(--font-ui);
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     color: var(--color-primary);
-    line-height: 18px;
+    letter-spacing: 0.02em;
   }
 
-  .trusted-sep {
-    font-size: 14px;
-    color: var(--color-secondary);
-    line-height: 18px;
+  .sp-sep {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    flex-shrink: 0;
   }
 
-  .credibility-tagline {
-    font-size: clamp(24px, 3vw, 36px);
+  /* ── Tagline ── */
+  .sp-tagline {
+    font-size: clamp(26px, 3.5vw, 42px);
     font-weight: 600;
     color: var(--color-primary);
     letter-spacing: -0.03em;
-    line-height: 1.2;
-    margin: 0;
+    line-height: 1.15;
+    margin: 0 0 56px;
+    max-width: 720px;
   }
 
-  /* ── Quotes row ── */
-  .quotes-row {
+  /* ── Stats grid ── */
+  .sp-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.2fr;
+    gap: 1px;
+    background: oklch(0.15 0.02 60 / 0.08);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .sp-stat {
+    background: var(--color-surface);
+    padding: 40px 36px;
     display: flex;
-    align-items: flex-start;
-    gap: 60px;
-  }
-
-  .primary-quote {
-    flex: 3 1 0%;
-    position: relative;
-    margin: 0;
-  }
-
-  .primary-quote p {
-    font-size: 28px;
-    line-height: 40px;
-    color: var(--color-primary);
-    margin: 0;
-    padding-left: 48px;
-  }
-
-  .quote-mark {
-    position: absolute;
-    top: -20px;
-    left: -16px;
-    font-family: 'DM Serif Display', serif;
-    font-size: 160px;
-    line-height: 100px;
-    color: var(--color-accent);
-    opacity: 0.15;
-    pointer-events: none;
-    user-select: none;
-  }
-
-  .secondary-quote {
-    flex: 2 1 0%;
-    border-left: 1px solid oklch(0.15 0.02 60 / 0.1);
-    padding-left: 40px;
-    display: flex;
-    align-items: flex-start;
     flex-direction: column;
-    margin: 0;
+    position: relative;
   }
 
-  .secondary-quote p {
-    font-size: 17px;
-    line-height: 28px;
-    color: var(--color-secondary);
-    font-style: italic;
-    margin: 0;
+  .sp-stat-accent {
+    position: absolute;
+    top: 0;
+    left: 36px;
+    right: 36px;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-accent), oklch(0.68 0.08 55));
+    border-radius: 0 0 2px 2px;
+    opacity: 0;
+    transition: opacity 0.3s;
   }
 
-  .primary-quote footer,
-  .secondary-quote footer {
+  .sp-stat:hover .sp-stat-accent {
+    opacity: 1;
+  }
+
+  .sp-stat-number {
+    font-size: clamp(56px, 7vw, 80px);
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: var(--color-primary);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sp-stat-text {
+    font-size: clamp(36px, 4.5vw, 52px);
+    letter-spacing: -0.03em;
+  }
+
+  .sp-stat-unit {
     font-family: var(--font-mono);
-    font-size: 0.72rem;
-    color: var(--color-muted);
-    margin-top: 16px;
-    padding-left: 48px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-top: 4px;
+    margin-bottom: 16px;
   }
 
-  .secondary-quote footer {
-    padding-left: 0;
-  }
-
-  .primary-quote cite,
-  .secondary-quote cite {
-    font-style: normal;
+  .sp-stat-desc {
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--color-secondary);
+    font-weight: 300;
+    max-width: 280px;
   }
 
   /* ── Mobile ── */
@@ -189,48 +191,77 @@
       padding: 80px 0;
     }
 
-    .social-proof-inner {
-      gap: 48px;
-    }
-
-    .credibility-tagline {
-      font-size: 20px;
-      line-height: 26px;
-    }
-
-    .quotes-row {
+    .sp-header {
       flex-direction: column;
-      gap: 40px;
+      align-items: flex-start;
+      gap: 12px;
     }
 
-    .primary-quote p {
+    .sp-tagline {
       font-size: 22px;
-      line-height: 32px;
-      padding-left: 40px;
+      line-height: 1.25;
+      margin-bottom: 40px;
     }
 
-    .quote-mark {
-      font-size: 100px;
-      line-height: 70px;
-      top: -14px;
-      left: -10px;
+    .sp-stats {
+      grid-template-columns: 1fr;
     }
 
-    .secondary-quote {
-      border-left: none;
-      border-top: 1px solid oklch(0.15 0.02 60 / 0.1);
-      padding-left: 0;
-      padding-top: 32px;
+    .sp-stat {
+      padding: 32px 28px;
+    }
+
+    .sp-stat-number {
+      font-size: 52px;
+    }
+
+    .sp-stat-text {
+      font-size: 32px;
+    }
+
+    .sp-stat-accent {
+      left: 28px;
+      right: 28px;
     }
   }
 
   @media (max-width: 480px) {
     .social-proof-section { padding: 60px 0; }
-    .social-proof-inner { gap: 32px; }
-    .credibility-tagline { font-size: 18px; line-height: 24px; }
-    .primary-quote p { font-size: 18px; line-height: 28px; padding-left: 32px; }
-    .quote-mark { font-size: 80px; line-height: 60px; }
-    .secondary-quote p { font-size: 15px; line-height: 24px; }
-    .primary-quote footer { padding-left: 32px; }
+    .sp-tagline { font-size: 19px; margin-bottom: 32px; }
+    .sp-stat { padding: 24px 20px; }
+    .sp-stat-number { font-size: 44px; }
+    .sp-stat-text { font-size: 28px; }
+    .sp-stat-accent { left: 20px; right: 20px; }
   }
 </style>
+
+<script>
+  // Count-up animation for stat numbers
+  const counters = document.querySelectorAll<HTMLElement>('.sp-stat-number[data-count-to]');
+  if (counters.length && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const el = entry.target as HTMLElement;
+        const target = parseInt(el.dataset.countTo ?? '0', 10);
+        const suffix = el.dataset.suffix ?? '';
+        const duration = 1200;
+        const start = performance.now();
+
+        function tick(now: number) {
+          const elapsed = now - start;
+          const progress = Math.min(elapsed / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          const current = Math.round(eased * target);
+          el.textContent = current + suffix;
+          if (progress < 1) requestAnimationFrame(tick);
+        }
+
+        requestAnimationFrame(tick);
+        observer.unobserve(el);
+      });
+    }, { threshold: 0.5 });
+
+    counters.forEach(el => observer.observe(el));
+  }
+</script>

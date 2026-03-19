@@ -2,7 +2,9 @@
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
+import ProblemStatement from '../components/ProblemStatement.astro';
 import VideoDemo from '../components/VideoDemo.astro';
+import CodeShowcase from '../components/CodeShowcase.astro';
 import Features from '../components/Features.astro';
 import WhyKitaru from '../components/WhyKitaru.astro';
 import Architecture from '../components/Architecture.astro';
@@ -18,17 +20,21 @@ import Footer from '../components/Footer.astro';
     <Hero />
     <!-- 2. Video demo (dark) — no divider, bg change is the break -->
     <VideoDemo />
-    <!-- 3. Features (light) — full-width sticky stacking cards -->
+    <!-- 3. Problem statement (light) — "why now" narrative -->
+    <ProblemStatement />
+    <!-- 4. Code showcase (dark) — full code example -->
+    <CodeShowcase />
+    <!-- 5. Features (light) — full-width sticky stacking cards -->
     <Features />
     <div class="gradient-divider"></div>
-    <!-- 4. Why Kitaru (light) -->
+    <!-- 6. Why Kitaru (light) -->
     <WhyKitaru />
-    <!-- 5. Architecture (dark) — no divider, bg change is the break -->
+    <!-- 7. Architecture (dark) — no divider, bg change is the break -->
     <Architecture />
-    <!-- 6. Social proof (light) — no divider after dark section -->
+    <!-- 8. Social proof (light) — no divider after dark section -->
     <SocialProof />
     <div class="gradient-divider"></div>
-    <!-- 7. CTA -->
+    <!-- 9. CTA -->
     <Cta />
   </main>
   <Footer />

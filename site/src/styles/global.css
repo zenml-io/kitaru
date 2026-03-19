@@ -239,6 +239,7 @@ body::before {
   text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
 }
 .btn-primary:hover { opacity: 0.85; transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(1px); opacity: 0.95; }
 .btn-primary svg { width: 16px; height: 16px; }
 
 .btn-secondary {
@@ -252,6 +253,10 @@ body::before {
 .btn-secondary:hover {
   border-color: var(--color-muted);
   color: var(--color-primary);
+  transform: translateY(-1px);
+}
+.btn-secondary:active {
+  transform: translateY(1px);
 }
 
 /* Dark section utility */
@@ -269,6 +274,7 @@ body::before {
   text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
 }
 .btn-accent:hover { opacity: 0.9; transform: translateY(-2px); }
+.btn-accent:active { transform: translateY(1px); opacity: 0.95; }
 
 /* Reusable pill badge */
 .pill-badge {

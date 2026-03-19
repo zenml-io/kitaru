@@ -17,7 +17,7 @@
         From the makers of ZenML
       </span>
       <span class="pill-badge">
-        Early access &rarr; March 2026
+        Open source &mdash; Apache 2.0
       </span>
     </div>
 
@@ -26,15 +26,23 @@
     </h1>
 
     <p class="hero-subtitle" data-reveal data-reveal-delay="2">
-      Production-grade reliability for Python agents. Any framework. Any cloud. No&nbsp;rewrite.
+      Open-source durable execution for Python agents. Checkpoint, replay, and deploy — any framework, any&nbsp;cloud.
     </p>
 
-    <div class="hero-buttons" data-reveal data-reveal-delay="3">
-      <a href="/#cta" class="btn-primary">Get early access</a>
-      <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="btn-secondary hero-gh-btn">
+    <div class="hero-install" data-reveal data-reveal-delay="3">
+      <code class="install-cmd">pip install kitaru</code>
+      <button class="copy-btn" aria-label="Copy install command" data-copy="pip install kitaru">
+        <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>
+    </div>
+
+    <div class="hero-buttons" data-reveal data-reveal-delay="4">
+      <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="btn-primary hero-gh-btn">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         View on GitHub
       </a>
+      <a href="/docs" class="btn-secondary">Read the docs</a>
     </div>
   </div>
 </section>
@@ -168,6 +176,22 @@
 
   .hero-accent {
     color: var(--color-accent);
+    background: linear-gradient(
+      90deg,
+      var(--color-accent) 0%,
+      oklch(0.78 0.14 55) 40%,
+      var(--color-accent) 80%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: accent-shimmer 4s ease-in-out infinite;
+  }
+
+  @keyframes accent-shimmer {
+    0%, 100% { background-position: 100% 50%; }
+    50% { background-position: 0% 50%; }
   }
 
   .hero-subtitle {
@@ -191,6 +215,79 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
+  }
+
+  /* Install command */
+  .hero-install {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 4px 4px 4px 20px;
+    margin-bottom: 20px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  .hero-install:hover {
+    border-color: oklch(0.65 0.16 45 / 0.3);
+    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.06);
+  }
+
+  .install-cmd {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-primary);
+    user-select: all;
+    letter-spacing: -0.01em;
+  }
+
+  .copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: var(--color-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+    margin-left: 8px;
+    flex-shrink: 0;
+  }
+
+  .copy-btn:hover {
+    color: var(--color-primary);
+    background: oklch(0 0 0 / 0.04);
+  }
+
+  .copy-btn .copy-icon,
+  .copy-btn .check-icon {
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s;
+  }
+
+  .copy-btn .check-icon {
+    display: none;
+    color: var(--color-success);
+  }
+
+  .copy-btn.copied .copy-icon {
+    display: none;
+  }
+
+  .copy-btn.copied .check-icon {
+    display: block;
+    animation: check-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes check-pop {
+    0% { transform: scale(0); opacity: 0; }
+    60% { transform: scale(1.2); }
+    100% { transform: scale(1); opacity: 1; }
   }
 
   @media (max-width: 768px) {
@@ -250,15 +347,31 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .pulse-dot {
+    .pulse-dot,
+    .mesh-blob,
+    .hero-accent {
       animation: none;
     }
 
-    .mesh-blob {
-      animation: none;
+    .hero-accent {
+      -webkit-text-fill-color: var(--color-accent);
+      background: none;
     }
   }
 </style>
+
+<script>
+  // ─── Copy-to-clipboard for install command ───
+  document.querySelectorAll<HTMLButtonElement>('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const text = btn.dataset.copy ?? '';
+      navigator.clipboard.writeText(text).then(() => {
+        btn.classList.add('copied');
+        setTimeout(() => btn.classList.remove('copied'), 1500);
+      });
+    });
+  });
+</script>
 
 <script>
   // ─── ASCII Canvas Background — Landscape zones ───

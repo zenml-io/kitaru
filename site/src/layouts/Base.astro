@@ -8,7 +8,7 @@ interface Props {
 
 const {
   title = 'Kitaru — Durable Agent Infrastructure for Python',
-  description = 'One decorator gives you crash recovery, cost tracking, replay, and artifact comparison — without switching frameworks.'
+  description = 'Open-source durable execution for Python agents. Checkpoint, replay, and deploy on any cloud — without rewriting your code.'
 } = Astro.props;
 ---
 
@@ -57,7 +57,7 @@ const {
     "@type": "Organization",
     "name": "Kitaru",
     "url": "https://kitaru.ai",
-    "description": "Durable agent infrastructure for Python. Run agents reliably with cost tracking, replay, and artifact comparison built in."
+    "description": "Open-source durable execution for Python agents. Checkpoint, replay, and deploy on any cloud — without rewriting your code."
   }
   </script>
   <!-- Plausible Analytics -->
@@ -78,5 +78,17 @@ const {
   <a href="#main-content" class="skip-link">Skip to content</a>
   <slot />
   <script src="../scripts/scroll-reveal.ts"></script>
+  <script is:inline>
+    console.log(
+      '%c@flow %c— durable execution for Python agents',
+      'color: #F17829; font-weight: bold; font-size: 14px;',
+      'color: inherit; font-size: 14px;'
+    );
+    console.log(
+      '%cpip install kitaru %c· https://github.com/zenml-io/kitaru',
+      'color: #F17829; font-family: monospace;',
+      'color: gray;'
+    );
+  </script>
 </body>
 </html>
