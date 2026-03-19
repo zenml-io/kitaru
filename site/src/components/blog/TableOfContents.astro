@@ -89,10 +89,10 @@ const tocHeadings = headings.filter((h) => h.depth === 2);
 
 <style>
   .toc-sidebar {
-    width: 220px;
+    width: var(--toc-width, 220px);
     flex-shrink: 0;
     order: -1;
-    margin-right: 48px;
+    margin-right: var(--toc-gap, 48px);
   }
 
   .toc-inner {
