@@ -70,7 +70,7 @@ We followed the following principles when designing Kitaru:
 
 In 2026, there are many tools that claim to do similar things. With Kitaru, we want to make it easy to understand what we do well, and what we consider out of our purview.
 
-First, Kitaru is not a tracing observability tool. In our view, the missing piece isn't observability. Most teams already have traces. 
+First, Kitaru is not a tracing observability tool. In our view, the missing piece isn't observability. Most teams already are tracking their traces. 
 While extremely useful, the problem is that traces are passive — they tell you what happened after the fact, from a distance, in a dashboard that has nothing to do with your code. They don't help your agent recover from where it failed. They don't let you pause mid-run and get a human to approve before the expensive step. 
 They don't scale your execution out of your laptop and onto a real cloud environment.
 
@@ -151,7 +151,7 @@ The repo is public. The roadmap is public. We'd rather ship real things than ann
 
 ## Five years of ZenML under the hood
 
-This isn't starting from zero. The artifact store, the metadata layer, the orchestration engine, the stack abstraction — that's the same ZenML infrastructure that teams at [JetBrains](https://zenml.io/case-studies), [Adeo](https://zenml.io/case-studies), and the Bundeswehr have run in production for years.
+We are not starting from zero. The artifact store, the metadata layer, the orchestration engine, the stack abstraction — that's the same ZenML infrastructure that teams at [JetBrains](https://zenml.io/case-studies), [Adeo](https://zenml.io/case-studies), and the Bundeswehr have run in production for years.
 
 We built ZenML because ML teams couldn't reproduce their training pipelines or track what happened to their data. Then we watched the exact same problem show up for agents. Teams who couldn't reproduce a failed run. Couldn't see what their agent was doing. Couldn't trust it in production.
 
