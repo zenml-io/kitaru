@@ -65,22 +65,18 @@ Kitaru allows long-horizon ambient agents to leave their host and run on your co
 We followed the following principles when designing Kitaru:
 
 1. **Observability built-in.** The dashboard ships free with the server. Not a paid add-on. Every run is visible — checkpoint by checkpoint, what each step produced, what each LLM call cost. When something breaks at step 6 you're not reading logs. You're looking at what step 3 actually returned and replaying from there.
-2. **Deployment flexibility.** No workers. No message queues. No distributed architecture to manage. Kitaru runs on a single server and a SQL database. Start local, and point it at Kubernetes, Vertex AI, SageMaker, or AzureML and it works. 
+2. **Deployment flexibility.** No workers. No message queues. No distributed architecture to manage. Kitaru runs on a single server and a SQL database. Start local, and point it at Kubernetes, Vertex AI, SageMaker, or AzureML and it works.
 3. **Python-first, no lock-in.** `if`, `for`, `try/except` — it all works. No graph DSL to learn. No framework opinions imposed on you. Kitaru wraps your code. It doesn't care how you wrote it.
 
 In 2026, there are many tools that claim to do similar things. With Kitaru, we want to make it easy to understand what we do well, and what we consider out of our purview.
 
-First, Kitaru is not a tracing observability tool. In our view, the missing piece isn't observability. Most teams already are tracking their traces. 
-While extremely useful, the problem is that traces are passive — they tell you what happened after the fact, from a distance, in a dashboard that has nothing to do with your code. They don't help your agent recover from where it failed. They don't let you pause mid-run and get a human to approve before the expensive step. 
-They don't scale your execution out of your laptop and onto a real cloud environment.
+**Kitaru is not a tracing tool. Kitaru is not an agent framework. Kitaru is the execution and deployment layer that sits underneath both.**
 
-What companies running agents at scale need on top of traces is execution that survives failures, control at the function level, human approval gates that actually pause the process, and the ability to run the same agent locally and in production without a rewrite.
+Traces are passive — they tell you what happened after the fact, from a distance, in a dashboard that has nothing to do with your code. They don't help your agent recover from where it failed. They don't let you pause mid-run and get a human to approve before the expensive step. They don't scale your execution out of your laptop and onto a real cloud environment. Most teams already have traces. What they need on top is execution that survives failures, control at the function level, human approval gates that actually pause the process, and the ability to run the same agent locally and in production without a rewrite.
 
-Finally, Kitaru is not an agent framework. Agent frameworks give building blocks to design AI agents. Depending on your use-case, you might or might not need to use agent frameworks.
+Agent frameworks give building blocks to design AI agents — and you should use one if it fits your use-case. But most frameworks stop at the boundary of deployment and management. For example, the awesome [Pydantic AI](https://ai.pydantic.dev/) framework gives an abstraction where tools like Kitaru can be [plugged in to orchestrate and interface with the runtime](https://ai.pydantic.dev/durable_execution/prefect/#durable-agent). The OpenAI Agents SDK and CrewAI SDK have similar abstractions.
 
-While the lines are still blurry, most frameworks stop at the boundary of taking over responsibility of deployment and management. For example, the awesome [Pydantic AI](https://ai.pydantic.dev/) framework gives an abstraction where tools like Kitaru can be [plugged in to orchestrate and interface with the runtime](https://ai.pydantic.dev/durable_execution/prefect/#durable-agent). The OpenAI Agents SDK and CrewAI SDK have similar abstractions.
-
-Kitaru ships with a Pydantic AI adapter at launch. We will develop more integrations soon. The goal is not to get in the way of your framework choice, but enable you to run and deploy agents at scale despite it. 
+Kitaru ships with a Pydantic AI adapter at launch. We will develop more integrations soon. The goal is not to get in the way of your framework choice, but enable you to run and deploy agents at scale despite it.
 
 ## Show me the code 
 
