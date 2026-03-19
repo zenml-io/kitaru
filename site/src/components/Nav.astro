@@ -1,5 +1,5 @@
 ---
-// Nav.astro — Fixed glass nav with spinning ring logo
+// Nav.astro — Fixed glass nav with spinning ring logo + mobile hamburger
 ---
 
 <nav class="nav" id="nav">
@@ -17,28 +17,53 @@
       </g>
     </svg>
   </a>
+
+  <!-- Desktop nav links -->
   <div class="nav-links">
     <a href="/docs">Docs</a>
     <a href="/blog">Blog</a>
-    <a href="/#features">Features</a>
+    <a href="/docs/guides">Examples</a>
+    <a href="/#how-it-works">Features</a>
     <a href="/#cta" class="nav-cta">Get early access</a>
   </div>
+
+  <!-- Mobile hamburger button -->
+  <button
+    class="nav-hamburger"
+    id="navHamburger"
+    aria-label="Open menu"
+    aria-expanded="false"
+    aria-controls="navMobileMenu"
+  >
+    <span class="hamburger-bar"></span>
+    <span class="hamburger-bar"></span>
+    <span class="hamburger-bar"></span>
+  </button>
+
+  <!-- Mobile slide-down menu -->
+  <div class="nav-mobile-menu" id="navMobileMenu" aria-hidden="true">
+    <a href="/docs">Docs</a>
+    <a href="/blog">Blog</a>
+    <a href="/docs/guides">Examples</a>
+    <a href="/#how-it-works">Features</a>
+    <a href="/#cta" class="nav-mobile-cta">Get early access</a>
+  </div>
 </nav>
-<div style="height:64px"></div>
 
 <style>
   .nav {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
     padding: 0 48px; height: 64px;
     display: flex; align-items: center; justify-content: space-between;
-    background: rgba(250, 250, 248, 0.8);
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    background: transparent;
+    backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px);
     border-bottom: 1px solid transparent;
-    transition: border-color 0.3s, background 0.3s;
+    transition: border-color 0.3s, background 0.3s, backdrop-filter 0.3s, -webkit-backdrop-filter 0.3s;
   }
   .nav.scrolled {
     border-bottom-color: var(--color-border);
-    background: rgba(250, 250, 248, 0.95);
+    background: oklch(0.985 0.003 90 / 0.95);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   }
   .nav-brand {
     display: flex; align-items: center; gap: 10px;
@@ -58,23 +83,120 @@
     text-decoration: none; transition: color 0.2s;
   }
   .nav-links a:hover { color: var(--color-primary); }
-  .nav-cta {
-    font-size: 13px; font-weight: 600; color: var(--color-surface) !important;
+  .nav-links .nav-cta {
+    font-size: 13px; font-weight: 600; color: var(--color-surface);
     background: var(--color-primary); padding: 8px 20px;
     border-radius: 6px; transition: opacity 0.2s, transform 0.15s;
   }
   .nav-cta:hover { opacity: 0.85; transform: translateY(-1px); }
 
+  /* Hamburger button — hidden on desktop */
+  .nav-hamburger {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 8px;
+    width: 44px;
+    height: 44px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+
+  .hamburger-bar {
+    display: block;
+    width: 20px;
+    height: 2px;
+    background: var(--color-primary);
+    border-radius: 1px;
+    transition: transform 0.3s, opacity 0.3s;
+  }
+
+  .nav-hamburger[aria-expanded="true"] .hamburger-bar:nth-child(1) {
+    transform: translateY(7px) rotate(45deg);
+  }
+  .nav-hamburger[aria-expanded="true"] .hamburger-bar:nth-child(2) {
+    opacity: 0;
+  }
+  .nav-hamburger[aria-expanded="true"] .hamburger-bar:nth-child(3) {
+    transform: translateY(-7px) rotate(-45deg);
+  }
+
+  /* Mobile menu — hidden on desktop */
+  .nav-mobile-menu {
+    display: none;
+    position: absolute;
+    top: 64px;
+    left: 0;
+    right: 0;
+    background: oklch(0.985 0.003 90 / 0.95);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--color-border);
+    padding: 16px 20px 20px;
+    flex-direction: column;
+    gap: 4px;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 0.25s, transform 0.25s;
+    pointer-events: none;
+  }
+
+  .nav-mobile-menu.open {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .nav-mobile-menu a {
+    display: block;
+    padding: 12px 16px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--color-secondary);
+    text-decoration: none;
+    border-radius: 8px;
+    transition: background 0.2s, color 0.2s;
+    min-height: 44px;
+    line-height: 20px;
+  }
+
+  .nav-mobile-menu a:hover {
+    background: oklch(0 0 0 / 0.03);
+    color: var(--color-primary);
+  }
+
+  .nav-mobile-cta {
+    font-weight: 600;
+    color: var(--color-surface);
+    background: var(--color-primary);
+    text-align: center;
+    border-radius: 8px;
+    margin-top: 8px;
+    padding: 14px 16px;
+  }
+
+  .nav-mobile-cta:hover {
+    opacity: 0.85;
+    background: var(--color-primary);
+  }
+
   @media (max-width: 768px) {
     .nav { padding: 0 20px; }
-    .nav-links { gap: 16px; }
-    .nav-links a:not(.nav-cta) { display: none; }
+    .nav-links { display: none; }
+    .nav-hamburger { display: flex; }
+    .nav-mobile-menu { display: flex; }
   }
 
   @media (max-width: 480px) {
     .nav { padding: 0 16px; }
     .nav-brand svg { height: 18px; }
-    .nav-cta { font-size: 12px; padding: 7px 14px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hamburger-bar { transition: none; }
+    .nav-mobile-menu { transition: none; }
   }
 </style>
 
@@ -83,4 +205,39 @@
   window.addEventListener('scroll', () => {
     nav?.classList.toggle('scrolled', window.scrollY > 20);
   }, { passive: true });
+
+  // Mobile menu toggle
+  const hamburger = document.getElementById('navHamburger');
+  const mobileMenu = document.getElementById('navMobileMenu');
+
+  function toggleMenu(open?: boolean) {
+    if (!hamburger || !mobileMenu) return;
+    const isOpen = open ?? hamburger.getAttribute('aria-expanded') !== 'true';
+    hamburger.setAttribute('aria-expanded', String(isOpen));
+    hamburger.setAttribute('aria-label', isOpen ? 'Close menu' : 'Open menu');
+    mobileMenu.setAttribute('aria-hidden', String(!isOpen));
+    mobileMenu.classList.toggle('open', isOpen);
+  }
+
+  hamburger?.addEventListener('click', () => toggleMenu());
+
+  // Close on link click (anchor navigation)
+  mobileMenu?.querySelectorAll('a').forEach(link => {
+    link.addEventListener('click', () => toggleMenu(false));
+  });
+
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    if (!nav?.contains(e.target as Node)) {
+      toggleMenu(false);
+    }
+  });
+
+  // Close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && hamburger?.getAttribute('aria-expanded') === 'true') {
+      toggleMenu(false);
+      hamburger.focus();
+    }
+  });
 </script>

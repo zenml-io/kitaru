@@ -2,39 +2,31 @@
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
-import Primitives from '../components/Primitives.astro';
-import Architecture from '../components/Architecture.astro';
-import Credibility from '../components/Credibility.astro';
-import CodingAgent from '../components/CodingAgent.astro';
+import VideoDemo from '../components/VideoDemo.astro';
 import Features from '../components/Features.astro';
-import AgentNative from '../components/AgentNative.astro';
+import WhyKitaru from '../components/WhyKitaru.astro';
+import Architecture from '../components/Architecture.astro';
+import SocialProof from '../components/SocialProof.astro';
 import Cta from '../components/Cta.astro';
 import Footer from '../components/Footer.astro';
 ---
 
 <Base>
   <Nav />
-  <main>
-    <!-- 1. Hero -->
+  <main id="main-content">
+    <!-- 1. Hero (light) -->
     <Hero />
-    <div class="gradient-divider"></div>
-    <!-- 2. Primitives -->
-    <Primitives />
-    <div class="gradient-divider"></div>
-    <!-- 3. Architecture -->
-    <Architecture />
-    <div class="gradient-divider"></div>
-    <!-- 4. Credibility -->
-    <Credibility />
-    <div class="gradient-divider"></div>
-    <!-- 5. Coding Agent timeline -->
-    <CodingAgent />
-    <div class="gradient-divider"></div>
-    <!-- 6. Features (animated cards) -->
+    <!-- 2. Video demo (dark) — no divider, bg change is the break -->
+    <VideoDemo />
+    <!-- 3. Features (light) — full-width sticky stacking cards -->
     <Features />
     <div class="gradient-divider"></div>
-    <!-- 6. Agent-native (MCP) -->
-    <AgentNative />
+    <!-- 4. Why Kitaru (light) -->
+    <WhyKitaru />
+    <!-- 5. Architecture (dark) — no divider, bg change is the break -->
+    <Architecture />
+    <!-- 6. Social proof (light) — no divider after dark section -->
+    <SocialProof />
     <div class="gradient-divider"></div>
     <!-- 7. CTA -->
     <Cta />

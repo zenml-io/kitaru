@@ -1,3 +1,7 @@
+# iCloud conflict duplicates
+* 2.*
+* 2
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -230,6 +234,9 @@ design/
 .claude/*
 !.claude/settings.json
 !.claude/skills/
+
+# Playwright MCP
+.playwright-mcp/
 
 # Codex
 .codex/*

@@ -18,6 +18,7 @@ const {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="theme-color" content="#f8f6f3" />
   <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href} />
   <title>{title}</title>
   <meta name="description" content={description} />
@@ -25,18 +26,29 @@ const {
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
   <meta property="og:type" content="website" />
+  <!-- TODO: Create and upload actual OG image to R2 (currently returns 404) -->
   <meta property="og:image" content="https://kitaru.ai/og-image.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <slot name="head" />
+  <noscript><style>
+    .feature-card, .prim-card, .tl-node, .replay-callout { opacity: 1 !important; transform: none !important; position: relative !important; top: auto !important; }
+  </style></noscript>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="preload"
+    as="style"
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap"
+  />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap"
     rel="stylesheet"
+    media="print"
+    onload="this.media='all'"
   />
 
   <script type="application/ld+json">

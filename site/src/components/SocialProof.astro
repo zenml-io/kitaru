@@ -1,0 +1,236 @@
+---
+// SocialProof.astro — Editorial pull-quote social proof
+---
+
+<section id="social-proof" class="social-proof-section">
+  <div class="social-proof-inner">
+    <h2 class="sr-only">What teams are saying</h2>
+
+    <!-- Credibility line -->
+    <div class="credibility-row" data-reveal>
+      <div class="accent-dash" aria-hidden="true"></div>
+      <div class="credibility-content">
+        <div class="trusted-line">
+          <span class="trusted-label">Trusted by teams at</span>
+          <strong>JetBrains</strong>
+          <span class="trusted-sep">/</span>
+          <strong>Adeo</strong>
+          <span class="trusted-sep">/</span>
+          <strong>Bundeswehr</strong>
+        </div>
+        <p class="credibility-tagline">5+ years of ML orchestration, now applied to agents.</p>
+      </div>
+    </div>
+
+    <!-- Quotes row -->
+    <div class="quotes-row" data-reveal>
+      <blockquote class="primary-quote">
+        <span class="quote-mark" aria-hidden="true">&ldquo;</span>
+        <p>We were spending 40% of our agent development time on retry logic and state recovery. Kitaru replaced all of that with two decorators.</p>
+        <footer>— <cite>ML Platform Lead, Series B AI Company</cite></footer>
+      </blockquote>
+      <blockquote class="secondary-quote">
+        <p>The replay capability alone saved us thousands in LLM costs during development. Being able to resume from a checkpoint instead of re-running everything is a game-changer.</p>
+        <footer>— <cite>Staff Engineer, Enterprise MLOps Team</cite></footer>
+      </blockquote>
+    </div>
+
+  </div>
+</section>
+
+<style>
+  .social-proof-section {
+    background: var(--color-accent-light);
+    padding: 120px 0;
+  }
+
+  .social-proof-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 clamp(24px, 5vw, 80px);
+    display: flex;
+    flex-direction: column;
+    gap: 80px;
+  }
+
+  /* ── Credibility line ── */
+  .credibility-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .accent-dash {
+    width: 40px;
+    height: 1px;
+    background: var(--color-accent);
+    flex-shrink: 0;
+    margin-top: 8px;
+  }
+
+  .credibility-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .trusted-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .trusted-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-secondary);
+    line-height: 14px;
+  }
+
+  .trusted-line strong {
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-primary);
+    line-height: 18px;
+  }
+
+  .trusted-sep {
+    font-size: 14px;
+    color: var(--color-secondary);
+    line-height: 18px;
+  }
+
+  .credibility-tagline {
+    font-size: clamp(24px, 3vw, 36px);
+    font-weight: 600;
+    color: var(--color-primary);
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin: 0;
+  }
+
+  /* ── Quotes row ── */
+  .quotes-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 60px;
+  }
+
+  .primary-quote {
+    flex: 3 1 0%;
+    position: relative;
+    margin: 0;
+  }
+
+  .primary-quote p {
+    font-size: 28px;
+    line-height: 40px;
+    color: var(--color-primary);
+    margin: 0;
+    padding-left: 48px;
+  }
+
+  .quote-mark {
+    position: absolute;
+    top: -20px;
+    left: -16px;
+    font-family: 'DM Serif Display', serif;
+    font-size: 160px;
+    line-height: 100px;
+    color: var(--color-accent);
+    opacity: 0.15;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .secondary-quote {
+    flex: 2 1 0%;
+    border-left: 1px solid oklch(0.15 0.02 60 / 0.1);
+    padding-left: 40px;
+    display: flex;
+    align-items: flex-start;
+    flex-direction: column;
+    margin: 0;
+  }
+
+  .secondary-quote p {
+    font-size: 17px;
+    line-height: 28px;
+    color: var(--color-secondary);
+    font-style: italic;
+    margin: 0;
+  }
+
+  .primary-quote footer,
+  .secondary-quote footer {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--color-muted);
+    margin-top: 16px;
+    padding-left: 48px;
+  }
+
+  .secondary-quote footer {
+    padding-left: 0;
+  }
+
+  .primary-quote cite,
+  .secondary-quote cite {
+    font-style: normal;
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    .social-proof-section {
+      padding: 80px 0;
+    }
+
+    .social-proof-inner {
+      gap: 48px;
+    }
+
+    .credibility-tagline {
+      font-size: 20px;
+      line-height: 26px;
+    }
+
+    .quotes-row {
+      flex-direction: column;
+      gap: 40px;
+    }
+
+    .primary-quote p {
+      font-size: 22px;
+      line-height: 32px;
+      padding-left: 40px;
+    }
+
+    .quote-mark {
+      font-size: 100px;
+      line-height: 70px;
+      top: -14px;
+      left: -10px;
+    }
+
+    .secondary-quote {
+      border-left: none;
+      border-top: 1px solid oklch(0.15 0.02 60 / 0.1);
+      padding-left: 0;
+      padding-top: 32px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .social-proof-section { padding: 60px 0; }
+    .social-proof-inner { gap: 32px; }
+    .credibility-tagline { font-size: 18px; line-height: 24px; }
+    .primary-quote p { font-size: 18px; line-height: 28px; padding-left: 32px; }
+    .quote-mark { font-size: 80px; line-height: 60px; }
+    .secondary-quote p { font-size: 15px; line-height: 24px; }
+    .primary-quote footer { padding-left: 32px; }
+  }
+</style>

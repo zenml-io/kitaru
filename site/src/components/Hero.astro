@@ -1,385 +1,527 @@
 ---
-// Hero.astro — Hero section with side-by-side layout + tabbed code
+// Hero.astro — Centered hero with ASCII canvas + mesh gradient background
 ---
 
-<section class="hero-section" style="height: calc(100dvh - 100px); padding: 0 clamp(24px, 5vw, 80px); display: flex; align-items: center; justify-content: center;">
-  <div class="section-inner">
-    <div class="hero-grid">
-      <!-- Left: copy + form -->
-      <div class="hero-left">
-        <div class="hero-badge" data-reveal>
-          <span class="dot"></span>
-          From the makers of <a href="https://zenml.io" target="_blank" rel="noopener" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;">ZenML</a> — early access March 2026
-        </div>
+<section class="hero-section" id="hero">
+  <canvas class="ascii-canvas" aria-hidden="true"></canvas>
+  <div class="mesh-gradient" aria-hidden="true">
+    <div class="mesh-blob mesh-blob-1"></div>
+    <div class="mesh-blob mesh-blob-2"></div>
+    <div class="mesh-blob mesh-blob-3"></div>
+  </div>
 
-        <h1
-          style="font-weight: 700; font-size: clamp(2.4rem, 5vw, 3.8rem); line-height: 1.08; letter-spacing: -0.03em; margin-bottom: 24px;"
-          data-reveal data-reveal-delay="1"
-        >
-          Agents get harder as they grow.<br>Infrastructure <em class="gradient-text" style="font-style: normal;">shouldn't.</em>
-        </h1>
+  <div class="hero-content">
+    <div class="hero-badges" data-reveal>
+      <span class="pill-badge">
+        <span class="pulse-dot"></span>
+        From the makers of ZenML
+      </span>
+      <span class="pill-badge">
+        Early access &rarr; March 2026
+      </span>
+    </div>
 
-        <p
-          style="font-size: clamp(1rem, 1.8vw, 1.15rem); max-width: 480px; line-height: 1.65; margin-bottom: 36px; font-weight: 300; color: var(--color-secondary);"
-          data-reveal data-reveal-delay="2"
-        >
-          Durable execution, <strong style="font-weight: 500; color: var(--color-primary);">input gates</strong>, and crash recovery for Python agents.
-        </p>
+    <h1 class="hero-headline" data-reveal data-reveal-delay="1">
+      You build your agents.<br>We make them <span class="hero-accent">durable</span>.
+    </h1>
 
-        <div data-reveal data-reveal-delay="3">
-          <form class="hero-form" id="hero-waitlist-form">
-            <input type="email" placeholder="you@company.com" required>
-            <button type="submit">Get Early Access</button>
-          </form>
-          <p style="font-size: 0.75rem; margin-top: 12px; color: var(--color-muted);">Open source. Free to start. No credit card required.</p>
-        </div>
-      </div>
+    <p class="hero-subtitle" data-reveal data-reveal-delay="2">
+      Production-grade reliability for Python agents. Any framework. Any cloud. No&nbsp;rewrite.
+    </p>
 
-      <!-- Right: tabbed code snippet -->
-      <div class="hero-right" data-reveal data-reveal-delay="3">
-        <div class="code-window hero-code-window">
-          <div class="code-header">
-            <span class="code-dot"></span>
-            <span class="code-dot"></span>
-            <span class="code-dot"></span>
-            <div class="code-tabs">
-              <button class="code-tab active" data-tab="plain">Plain Python</button>
-              <button class="code-tab" data-tab="framework">With a framework</button>
-            </div>
-          </div>
-          <div class="hero-code-body">
-          <!-- Plain Python tab -->
-          <div class="code-tab-content active" id="tab-plain">
-            <pre class="code-pre"><code><span class="kw">import</span> kitaru
-<span class="kw">from</span> kitaru <span class="kw">import</span> flow
-
-<span class="dec">@flow</span>
-<span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
-    plan <span class="op">=</span> <span class="fn">analyze_issue</span>(issue)    <span class="cmt"># cached on replay</span>
-    patch <span class="op">=</span> <span class="fn">write_code</span>(plan)      <span class="cmt"># cached on replay</span>
-
-    <span class="cmt"># Pauses. Resumes when input arrives.</span>
-    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(<span class="var">bool</span>, question<span class="op">=</span><span class="str">"Merge this PR?"</span>)
-    <span class="kw">if</span> approved:
-        <span class="fn">merge</span>(patch)
-    <span class="kw">return</span> patch
-
-<span class="cmt"># Replay — completed steps are cached.</span>
-coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-a8f3c2"</span>, issue<span class="op">=</span><span class="str">"New bug"</span>)
-<span class="cmt"># Same code, any infra.</span>
-coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"aws-sandbox"</span>)</code></pre>
-          </div>
-          <!-- Framework tab -->
-          <div class="code-tab-content" id="tab-framework">
-            <pre class="code-pre"><code><span class="kw">from</span> kitaru <span class="kw">import</span> flow
-<span class="kw">from</span> kitaru.adapters <span class="kw">import</span> pydantic_ai <span class="kw">as</span> kp
-
-<span class="cmt"># Every LLM call + tool use is checkpointed.</span>
-<span class="cmt"># Approval happens inside the agent loop.</span>
-coder <span class="op">=</span> kp.<span class="fn">wrap</span>(Agent(<span class="str">"claude-sonnet-4-6"</span>, tools<span class="op">=</span>[edit, test, approve]))
-
-<span class="dec">@flow</span>
-<span class="kw">def</span> <span class="fn">coding_agent</span>(issue: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
-    <span class="kw">return</span> coder.<span class="fn">run_sync</span>(<span class="str">f"Fix: </span>{'{'}issue{'}'}<span class="str">"</span>).output
-
-<span class="cmt"># Replay — completed steps are cached.</span>
-coding_agent.<span class="fn">replay</span>(exec_id<span class="op">=</span><span class="str">"kr-b7e4d1"</span>, issue<span class="op">=</span><span class="str">"New bug"</span>)
-<span class="cmt"># Same code, any infra.</span>
-coding_agent.<span class="fn">deploy</span>(<span class="str">"Fix login bug"</span>, stack<span class="op">=</span><span class="str">"gcp-production"</span>)</code></pre>
-          </div>
-          </div>
-        </div>
-      </div>
+    <div class="hero-buttons" data-reveal data-reveal-delay="3">
+      <a href="/#cta" class="btn-primary">Get early access</a>
+      <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="btn-secondary hero-gh-btn">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View on GitHub
+      </a>
     </div>
   </div>
 </section>
 
 <style>
-  .hero-grid {
-    display: grid;
-    grid-template-columns: 1fr 1.1fr;
-    gap: 60px;
+  .hero-section {
+    position: relative;
+    min-height: 100dvh;
+    display: flex;
     align-items: center;
+    justify-content: center;
+    padding: 80px clamp(24px, 5vw, 80px) 60px;
+    overflow: hidden;
   }
 
-  .hero-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 14px 6px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: 100px;
-    font-size: 0.8rem;
-    color: var(--color-secondary);
-    margin-bottom: 28px;
-    background: var(--color-surface);
+  .ascii-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
   }
 
-  .hero-badge .dot {
+  /* ─── Mesh gradient ─── */
+  .mesh-gradient {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .mesh-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    will-change: transform;
+  }
+
+  .mesh-blob-1 {
+    width: 800px;
+    height: 800px;
+    top: -20%;
+    left: -15%;
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.20) 0%, transparent 70%);
+    animation: meshFloat1 10s ease-in-out infinite alternate;
+  }
+
+  .mesh-blob-2 {
+    width: 700px;
+    height: 700px;
+    bottom: -25%;
+    right: -15%;
+    background: radial-gradient(circle, oklch(0.68 0.08 55 / 0.16) 0%, transparent 70%);
+    animation: meshFloat2 13s ease-in-out infinite alternate;
+  }
+
+  .mesh-blob-3 {
+    width: 600px;
+    height: 600px;
+    top: 20%;
+    left: 30%;
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.14) 0%, transparent 70%);
+    animation: meshFloat3 8s ease-in-out infinite alternate;
+  }
+
+  @keyframes meshFloat1 {
+    0%   { transform: translate(0, 0) scale(1); }
+    25%  { transform: translate(20%, 12%) scale(1.2); }
+    50%  { transform: translate(-8%, 25%) scale(0.9); }
+    75%  { transform: translate(15%, -8%) scale(1.15); }
+    100% { transform: translate(-5%, 15%) scale(1.05); }
+  }
+
+  @keyframes meshFloat2 {
+    0%   { transform: translate(0, 0) scale(1); }
+    25%  { transform: translate(-18%, -10%) scale(1.15); }
+    50%  { transform: translate(12%, -20%) scale(0.85); }
+    75%  { transform: translate(-10%, 8%) scale(1.1); }
+    100% { transform: translate(8%, -12%) scale(0.95); }
+  }
+
+  @keyframes meshFloat3 {
+    0%   { transform: translate(0, 0) scale(1); }
+    33%  { transform: translate(-25%, 20%) scale(1.25); }
+    66%  { transform: translate(20%, -15%) scale(0.85); }
+    100% { transform: translate(-10%, 5%) scale(1.1); }
+  }
+
+  .hero-content {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    max-width: 800px;
+    width: 100%;
+  }
+
+  .hero-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 32px;
+  }
+
+  .pulse-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background: var(--color-accent);
     animation: pulse-dot 2s ease-in-out infinite;
+    flex-shrink: 0;
   }
 
   @keyframes pulse-dot {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(241,120,41,0.4); }
-    50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(241,120,41,0); }
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.65 0.16 45 / 0.4); }
+    50% { opacity: 0.7; box-shadow: 0 0 0 6px oklch(0.65 0.16 45 / 0); }
   }
 
-  .gradient-text {
+  .hero-headline {
+    font-size: clamp(3rem, 6vw, 5rem);
+    font-weight: 700;
+    line-height: 1.06;
+    letter-spacing: -0.04em;
+    margin: 0 0 24px;
+    color: var(--color-primary);
+  }
+
+  .hero-accent {
     color: var(--color-accent);
   }
 
-  .hero-form {
+  .hero-subtitle {
+    font-size: clamp(1rem, 1.8vw, 1.15rem);
+    font-weight: 300;
+    line-height: 1.65;
+    color: var(--color-secondary);
+    max-width: 560px;
+    margin: 0 0 40px;
+  }
+
+  .hero-buttons {
     display: flex;
-    gap: 10px;
-    max-width: 420px;
-  }
-
-  .hero-form input {
-    flex: 1;
-    padding: 14px 18px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
-    color: var(--color-primary);
-    font-family: var(--font-ui);
-    font-size: 0.9rem;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-
-  .hero-form input::placeholder {
-    color: var(--color-muted);
-  }
-
-  .hero-form input:focus {
-    border-color: var(--color-accent);
-  }
-
-  .hero-form button {
-    padding: 14px 24px;
-    background: var(--color-primary);
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    cursor: pointer;
-    transition: all 0.25s;
-    white-space: nowrap;
-    font-family: var(--font-ui);
-  }
-
-  .hero-form button:hover {
-    opacity: 0.85;
-    transform: translateY(-1px);
-  }
-
-  /* Code window */
-  .code-window {
-    background: #F0EBE3;
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: none;
-  }
-
-  .code-header {
-    display: flex;
+    gap: 14px;
     align-items: center;
-    padding: 12px 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .hero-gh-btn {
+    display: inline-flex;
+    align-items: center;
     gap: 8px;
-    border-bottom: 1px solid rgba(0,0,0,0.06);
-    background: rgba(240,235,227,0.95);
   }
 
-  .code-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-  }
-
-  .code-dot:nth-child(1) { background: #E85540; }
-  .code-dot:nth-child(2) { background: #E8A840; }
-  .code-dot:nth-child(3) { background: #40C840; }
-
-  .code-pre {
-    margin: 0;
-    padding: 24px 28px;
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    line-height: 1.75;
-    color: #3D3530;
-    overflow-x: auto;
-    background: transparent;
-  }
-
-  .code-pre code {
-    font-family: inherit;
-  }
-
-  .code-pre .kw { color: #7D5C30; }
-  .code-pre .fn { color: #A85218; }
-  .code-pre .str { color: #277040; }
-  .code-pre .var { color: #3D3530; }
-  .code-pre .op { color: #746860; }
-  .code-pre .num { color: #3D3530; }
-  .code-pre .dec { color: #A85218; font-style: italic; }
-  .code-pre .cmt { color: #867D72; font-style: italic; }
-
-  /* Tabs */
-  .code-tabs {
-    display: flex;
-    gap: 0;
-    margin-left: auto;
-  }
-
-  .code-tab {
-    background: none;
-    border: none;
-    padding: 4px 14px;
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: rgba(0,0,0,0.35);
-    cursor: pointer;
-    border-radius: 4px;
-    transition: all 0.2s;
-  }
-
-  .code-tab:hover {
-    color: rgba(0,0,0,0.6);
-  }
-
-  .code-tab.active {
-    background: rgba(241,120,41,0.15);
-    color: #F17829;
-  }
-
-  .hero-code-body {
-    display: grid;
-  }
-
-  .hero-code-body > .code-tab-content {
-    grid-area: 1 / 1;
-    visibility: hidden;
-  }
-
-  .hero-code-body > .code-tab-content.active {
-    visibility: visible;
-  }
-
-  .hero-code-window {
-    width: 100%;
-  }
-
-  .code-filename {
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    color: rgba(0,0,0,0.35);
-    margin-left: 12px;
-  }
-
-  .divider-line {
-    height: 1px;
-    background: var(--color-border-light);
-  }
-
-  @media (max-width: 900px) {
-    .hero-grid {
-      grid-template-columns: 1fr;
-      gap: 40px;
+  @media (max-width: 768px) {
+    .ascii-canvas {
+      display: none;
     }
 
     .hero-section {
-      height: auto !important;
-      min-height: calc(100dvh - 100px);
-      padding-top: 80px !important;
-      padding-bottom: 60px !important;
+      min-height: 100dvh;
+      padding: 60px 24px 48px;
     }
 
-    .hero-form {
+    .hero-headline {
+      font-size: clamp(2.2rem, 8vw, 3rem);
+    }
+
+    .hero-buttons {
       flex-direction: column;
-      max-width: 100%;
+      width: 100%;
+      max-width: 320px;
     }
-  }
 
-  @media (max-width: 900px) {
-    .hero-left, .hero-right {
-      min-width: 0;
+    .hero-buttons .btn-primary,
+    .hero-buttons .btn-secondary {
+      width: 100%;
+      justify-content: center;
+      text-align: center;
     }
+
+    .mesh-blob-1 { width: 300px; height: 300px; }
+    .mesh-blob-2 { width: 250px; height: 250px; }
+    .mesh-blob-3 { width: 200px; height: 200px; }
   }
 
   @media (max-width: 480px) {
     .hero-section {
-      padding-top: 72px !important;
-      padding-bottom: 40px !important;
+      padding: 48px 16px 36px;
     }
 
-    .hero-grid { gap: 28px; }
+    .hero-badges {
+      margin-bottom: 24px;
+    }
 
-    .hero-badge { font-size: 0.7rem; margin-bottom: 20px; }
+    .hero-headline {
+      font-size: clamp(2rem, 7vw, 2.6rem);
+      margin-bottom: 18px;
+    }
 
-    .code-pre {
+    .hero-subtitle {
+      font-size: 0.95rem;
+      margin-bottom: 32px;
+    }
+
+    .pill-badge {
       font-size: 0.7rem;
-      padding: 16px 14px;
-      line-height: 1.6;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-dot {
+      animation: none;
     }
 
-    .code-tab { font-size: 0.62rem; padding: 3px 10px; }
+    .mesh-blob {
+      animation: none;
+    }
   }
 </style>
 
 <script>
-  // Tab switching — scoped to hero code window
-  const heroWindow = document.querySelector('.hero-code-window');
-  heroWindow?.querySelectorAll('.code-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      heroWindow.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
-      heroWindow.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
-      tab.classList.add('active');
-      const target = tab.getAttribute('data-tab');
-      document.getElementById(`tab-${target}`)?.classList.add('active');
-    });
-  });
+  // ─── ASCII Canvas Background — Landscape zones ───
+  import { sizeCanvasToParent, attachMouseTracker, attachResizeHandler, getAttractorPositions } from '../scripts/canvas-utils';
 
-  // Waitlist form
-  const heroForm = document.getElementById('hero-waitlist-form') as HTMLFormElement;
-  heroForm?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = heroForm.querySelector('button')!;
-    const input = heroForm.querySelector('input')! as HTMLInputElement;
-    const email = input.value.trim();
+  const canvas = document.querySelector<HTMLCanvasElement>('.ascii-canvas');
+  if (!canvas) throw new Error('ascii-canvas not found');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2d context unavailable');
 
-    btn.textContent = 'Submitting...';
-    btn.setAttribute('disabled', 'true');
+  const GRID_SPACING = 6;
+  const DOT_RADIUS = 2;
+  const CURSOR_RADIUS = 220;
+  const ATTRACTOR_RADIUS = 260;
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
 
-    try {
-      const res = await fetch('/api/waitlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
+  // Landscape tuning
+  const RIDGE_BASE = 0.72;
+  const RIDGE_AMP = [0.06, 0.03, 0.015];
+  const CLOUD_BAND = 0.12;
+  const CLOUD_THRESHOLD = 0.45;
+  const CENTER_SUPPRESS = 0.45;
 
-      if (res.ok) {
-        btn.textContent = "You're in \u2713";
-        btn.style.background = '#3D8C5C';
-        input.disabled = true;
-        window.analytics?.track('Waitlist Signup', {
-          email,
-          source: 'hero',
-          page: window.location.pathname,
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  type Zone = 'sky' | 'cloud' | 'mountain';
+
+  interface CharCell {
+    x: number;
+    y: number;
+    phase: number;
+    baseOpacity: number;
+    r: number;
+    g: number;
+    b: number;
+    zone: Zone;
+    colorStr: string;
+  }
+
+  let cells: CharCell[] = [];
+  let mouseX = -9999;
+  let mouseY = -9999;
+  let mouseActive = false;
+  let animId = 0;
+  let isVisible = true;
+  let canvasW = 0;
+  let canvasH = 0;
+
+  // Procedural ridgeline — 3 layered sine waves per column
+  function ridgelineAt(col: number, totalCols: number): number {
+    const nx = col / totalCols;
+    return RIDGE_BASE
+      + Math.sin(nx * Math.PI * 2.3 + 0.8) * RIDGE_AMP[0]
+      + Math.sin(nx * Math.PI * 5.1 + 2.1) * RIDGE_AMP[1]
+      + Math.sin(nx * Math.PI * 11.7 + 4.3) * RIDGE_AMP[2];
+  }
+
+  // Cloud clumpiness via cheap sine noise
+  function cloudNoise(col: number, row: number): number {
+    return (Math.sin(col * 0.7 + row * 1.3) * 0.5 + 0.5)
+      * (Math.cos(col * 1.1 - row * 0.9 + 2.7) * 0.5 + 0.5);
+  }
+
+  // Linear interpolation helper
+  function lerp(a: number, b: number, t: number): number {
+    return a + (b - a) * t;
+  }
+
+  function buildGrid() {
+    cells = [];
+    canvasW = canvas!.width / DPR;
+    canvasH = canvas!.height / DPR;
+    const cols = Math.ceil(canvasW / GRID_SPACING) + 1;
+    const rows = Math.ceil(canvasH / GRID_SPACING) + 1;
+    const cx = canvasW / 2;
+    const cy = canvasH / 2;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const x = c * GRID_SPACING;
+        const y = r * GRID_SPACING;
+        const ny = r / rows; // normalized Y (0 = top, 1 = bottom)
+        const ridge = ridgelineAt(c, cols);
+        const cloudTop = ridge - CLOUD_BAND;
+
+        // Zone classification
+        let zone: Zone;
+        let cr: number, cg: number, cb: number;
+        let base: number;
+
+        // Smooth blend: 0 = pure sky, 1 = pure mountain
+        const FADE_BAND = 0.06;
+        const blendCenter = (cloudTop + ridge) / 2;
+        const blendHalf = Math.max((ridge - cloudTop) / 2 + FADE_BAND, 0.01);
+        const rawBlend = (ny - blendCenter + blendHalf) / (blendHalf * 2);
+        const cb2 = Math.max(0, Math.min(rawBlend, 1));
+        const blend = cb2 * cb2 * (3 - 2 * cb2); // smoothstep
+
+        // Sky: warm peach
+        const skyT = Math.min(ny / Math.max(cloudTop, 0.01), 1);
+        const skyR = lerp(248, 240, skyT);
+        const skyG = lerp(220, 195, skyT);
+        const skyB = lerp(195, 170, skyT);
+
+        // Mountain: warm peach-orange → burnt orange (brand-aligned)
+        const mtnDepth = Math.min(Math.max(0, (ny - ridge) / Math.max(1 - ridge, 0.01)), 1);
+        const mtnR = lerp(238, 200, mtnDepth);
+        const mtnG = lerp(150, 105, mtnDepth);
+        const mtnB = lerp(90, 55, mtnDepth);
+
+        cr = Math.round(lerp(skyR, mtnR, blend));
+        cg = Math.round(lerp(skyG, mtnG, blend));
+        cb = Math.round(lerp(skyB, mtnB, blend));
+
+        // High contrast: nearly invisible sky, bold mountains
+        const skyBase = 0.02 + Math.random() * 0.02;
+        const mtnBase = 0.25 + Math.random() * 0.10;
+        base = lerp(skyBase, mtnBase, blend);
+
+        if (blend < 0.3) {
+          zone = 'sky';
+        } else if (blend > 0.7) {
+          zone = 'mountain';
+        } else {
+          zone = 'cloud';
+        }
+
+        // Center suppression — smooth radial fade for text readability
+        const dist = Math.sqrt((x - cx) ** 2 + ((y - cy) * 1.4) ** 2); // elliptical, wider than tall
+        const innerR = Math.min(cx, cy) * 0.2;
+        const outerR = Math.min(cx, cy) * 0.55;
+        if (dist < outerR) {
+          const t = Math.max(0, (dist - innerR) / (outerR - innerR));
+          const fade = t * t; // ease-in: fully suppressed at center, smooth ramp out
+          base *= CENTER_SUPPRESS + (1 - CENTER_SUPPRESS) * fade;
+        }
+
+        cells.push({
+          x,
+          y,
+          phase: Math.random() * Math.PI * 2,
+          baseOpacity: base,
+          r: cr,
+          g: cg,
+          b: cb,
+          zone,
+          colorStr: `rgb(${cr},${cg},${cb})`,
         });
-        window.analytics?.identify(email, { email });
-      } else {
-        btn.textContent = 'Try again';
-        btn.removeAttribute('disabled');
       }
-    } catch (_err) {
-      btn.textContent = 'Try again';
-      btn.removeAttribute('disabled');
     }
+  }
+
+  function resize() {
+    const dims = sizeCanvasToParent(canvas!, ctx!, DPR);
+    canvasW = dims.w;
+    canvasH = dims.h;
+    buildGrid();
+  }
+
+  function drawStatic() {
+    ctx!.clearRect(0, 0, canvasW, canvasH);
+
+    for (const cell of cells) {
+      ctx!.globalAlpha = cell.baseOpacity;
+      ctx!.fillStyle = cell.colorStr;
+      ctx!.beginPath();
+      ctx!.arc(cell.x, cell.y, DOT_RADIUS, 0, Math.PI * 2);
+      ctx!.fill();
+    }
+    ctx!.globalAlpha = 1;
+  }
+
+  function animate(time: number) {
+    if (document.hidden) {
+      animId = requestAnimationFrame(animate);
+      return;
+    }
+
+    ctx!.clearRect(0, 0, canvasW, canvasH);
+
+    const t = time * 0.001;
+
+    // Two wandering attractors — always running, Lissajous paths at different speeds
+    const { at1X, at1Y, at2X, at2Y } = getAttractorPositions(t, canvasW, canvasH);
+
+    for (const cell of cells) {
+      // Ambient breathing — gentle opacity pulse
+      const breath = Math.sin(t * 0.6 + cell.phase) * 0.03;
+      let opacity = cell.baseOpacity + breath;
+
+      // Attractor 1 — wandering glow (opacity only)
+      {
+        const adx = cell.x - at1X;
+        const ady = cell.y - at1Y;
+        const adist = Math.sqrt(adx * adx + ady * ady);
+        if (adist < ATTRACTOR_RADIUS) {
+          const ratio = 1 - (adist / ATTRACTOR_RADIUS);
+          const ease = ratio * ratio;
+          opacity = opacity + (0.28 - opacity) * ease;
+        }
+      }
+
+      // Attractor 2 — secondary wandering glow (opacity only)
+      {
+        const adx = cell.x - at2X;
+        const ady = cell.y - at2Y;
+        const adist = Math.sqrt(adx * adx + ady * ady);
+        if (adist < ATTRACTOR_RADIUS * 0.8) {
+          const ratio = 1 - (adist / (ATTRACTOR_RADIUS * 0.8));
+          const ease = ratio * ratio;
+          opacity = opacity + (0.22 - opacity) * ease * 0.6;
+        }
+      }
+
+      // Cursor interaction — opacity boost only
+      if (mouseActive) {
+        const cdx = cell.x - mouseX;
+        const cdy = cell.y - mouseY;
+        const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
+        if (cdist < CURSOR_RADIUS) {
+          const ratio = 1 - (cdist / CURSOR_RADIUS);
+          const ease = ratio * ratio;
+          opacity = opacity + (0.35 - opacity) * ease;
+        }
+      }
+
+      ctx!.globalAlpha = Math.max(0.02, Math.min(opacity, 0.35));
+      ctx!.fillStyle = cell.colorStr;
+      ctx!.beginPath();
+      ctx!.arc(cell.x, cell.y, DOT_RADIUS, 0, Math.PI * 2);
+      ctx!.fill();
+    }
+
+    ctx!.globalAlpha = 1;
+    animId = isVisible ? requestAnimationFrame(animate) : 0;
+  }
+
+  // Mouse tracking
+  attachMouseTracker(
+    canvas.closest('section')!,
+    canvas,
+    (x, y) => { mouseX = x; mouseY = y; mouseActive = true; },
+    () => { mouseActive = false; }
+  );
+
+  // Init
+  resize();
+
+  const heroObs = new IntersectionObserver((entries) => {
+    isVisible = entries[0].isIntersecting;
+    if (isVisible && !prefersReducedMotion && animId === 0) animId = requestAnimationFrame(animate);
+    else if (!isVisible) { cancelAnimationFrame(animId); animId = 0; }
+  }, { threshold: 0 });
+  heroObs.observe(canvas!.closest('section')!);
+
+  if (prefersReducedMotion) {
+    drawStatic();
+  } else {
+    animId = requestAnimationFrame(animate);
+  }
+
+  attachResizeHandler(() => {
+    resize();
+    if (prefersReducedMotion) drawStatic();
   });
 </script>

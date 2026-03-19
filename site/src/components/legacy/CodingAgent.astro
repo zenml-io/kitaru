@@ -2,7 +2,7 @@
 // CodingAgent.astro — Vertical timeline showing a real agent with checkpoints and wait states
 ---
 
-<section class="coding-agent-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+<section class="coding-agent-section section-pad">
   <div class="section-inner">
     <span class="section-eyebrow" data-reveal>See it in action</span>
     <h2 class="section-title" data-reveal data-reveal-delay="1">A real agent. Six checkpoints. One timeline.</h2>
@@ -196,7 +196,7 @@
 
   .tl-dot span {
     font-family: var(--font-mono);
-    font-size: 0.55rem;
+    font-size: 0.65rem;
     color: rgba(255,255,255,0.4);
   }
 
@@ -209,19 +209,14 @@
     color: var(--color-accent);
   }
 
-  .tl-dot-wait {
-    border-color: #E8A840 !important;
-    background: #221E15 !important;
+  .timeline-wrapper.visible .tl-dot-wait {
+    border-color: #E8A840;
+    background: #221E15;
     animation: pausePulse 1.5s ease infinite;
   }
 
-  .tl-dot-wait span {
-    color: #E8A840 !important;
-  }
-
-  @keyframes pausePulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(232,168,64,0.25); }
-    50% { box-shadow: 0 0 0 8px rgba(232,168,64,0); }
+  .timeline-wrapper.visible .tl-dot-wait span {
+    color: #E8A840;
   }
 
   .tl-header {
@@ -240,7 +235,7 @@
 
   .tl-badge {
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     padding: 2px 8px;
     border-radius: 4px;
     letter-spacing: 0.03em;
@@ -294,7 +289,7 @@
   }
 
   .loop-arrow {
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     color: rgba(255,255,255,0.2);
   }
 
@@ -326,12 +321,12 @@
 
   .tl-dispatch-label {
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     color: rgba(255,255,255,0.3);
   }
 
   .tl-dispatch-arrow {
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     color: rgba(255,255,255,0.15);
   }
 
@@ -352,7 +347,7 @@
 
   .tl-pill {
     font-family: var(--font-mono);
-    font-size: 0.55rem;
+    font-size: 0.65rem;
     padding: 1px 7px;
     border-radius: 3px;
     letter-spacing: 0.02em;
@@ -421,9 +416,9 @@
 
   @media (max-width: 480px) {
     .timeline-wrapper { padding-left: 24px; }
-    .tl-dot { left: -20px; width: 20px; height: 20px; font-size: 0.6rem; }
+    .tl-dot { left: -20px; width: 20px; height: 20px; font-size: 0.65rem; }
     .tl-fn { font-size: 0.75rem; }
-    .tl-badge { font-size: 0.6rem; padding: 2px 6px; }
+    .tl-badge { font-size: 0.65rem; padding: 2px 6px; }
     .tl-meta { font-size: 0.68rem; }
     .tl-dispatch { padding: 10px; }
     .tl-dispatch-label { font-size: 0.62rem; }

@@ -1,18 +1,29 @@
 ---
-// Features.astro — Four feature cards with animated visual areas (2×2 grid)
+// Features.astro — Full-width scroll-stacking cards with text left / animation right
 ---
 
-<section id="features" style="padding: 60px clamp(24px, 5vw, 80px) 100px;">
-  <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>How it works</span>
-    <h2 class="section-title" data-reveal data-reveal-delay="1">Four things. Not forty.</h2>
-    <p class="section-desc" data-reveal data-reveal-delay="2">Everything your agents need to ship. Nothing extra to learn.</p>
+<section id="how-it-works" class="features-section">
+  <!-- Header scrolls away normally -->
+  <div class="features-header">
+    <div class="section-inner">
+      <span class="section-eyebrow" data-reveal>How it works</span>
+      <h2 class="section-title" data-reveal data-reveal-delay="1">Four things. Not forty.</h2>
+      <p class="section-desc" data-reveal data-reveal-delay="2">Everything your agents need to ship. Nothing extra to learn.</p>
+    </div>
+  </div>
 
-    <div class="features-grid" id="featuresGrid">
+  <!-- Sticky container — outside section-inner to avoid overflow:clip breaking sticky -->
+  <div class="features-sticky-container">
 
-      <!-- Card 1: Pause & Resume -->
-      <div class="feature-card">
-        <div class="card-glow"></div>
+    <!-- Card 1: Pause & Resume -->
+    <div class="feature-card" data-feature="0">
+      <div class="card-glow"></div>
+      <div class="feature-card-inner">
+        <div class="feature-text">
+          <div class="feature-number">01 — Pause & Resume</div>
+          <h3>Pause. Get input. Continue.</h3>
+          <p>Suspends at decision points, releases compute, and picks up when input arrives — from a human, another agent, or a webhook. Hours or days later.</p>
+        </div>
         <div class="feature-visual">
           <div class="anim-pause-resume" id="animPause">
             <div class="timeline-track"></div>
@@ -29,16 +40,18 @@
             </div>
           </div>
         </div>
-        <div class="feature-text">
-          <div class="feature-number">01 — Pause & Resume</div>
-          <h3>Pause. Get input. Continue.</h3>
-          <p>Suspends at decision points, releases compute, and picks up when input arrives — from a human, another agent, or a webhook. Hours or days later.</p>
-        </div>
       </div>
+    </div>
 
-      <!-- Card 2: Replay from Failure -->
-      <div class="feature-card">
-        <div class="card-glow"></div>
+    <!-- Card 2: Replay from Failure -->
+    <div class="feature-card" data-feature="1">
+      <div class="card-glow"></div>
+      <div class="feature-card-inner">
+        <div class="feature-text">
+          <div class="feature-number">02 — Replay from Failure</div>
+          <h3>Crash at step 7? Resume from step 7.</h3>
+          <p>Every step is checkpointed. Fix the issue and pick up where you left off — no re-burning tokens.</p>
+        </div>
         <div class="feature-visual">
           <div class="anim-replay" id="animReplay">
             <div class="replay-row">
@@ -54,16 +67,18 @@
             <div class="cost-saved" id="costSaved">$12.40 in tokens saved</div>
           </div>
         </div>
-        <div class="feature-text">
-          <div class="feature-number">02 — Replay from Failure</div>
-          <h3>Crash at step 7? Resume from step 7.</h3>
-          <p>Every step is checkpointed. Fix the issue and pick up where you left off — no re-burning tokens.</p>
-        </div>
       </div>
+    </div>
 
-      <!-- Card 3: Bring Your Framework -->
-      <div class="feature-card">
-        <div class="card-glow"></div>
+    <!-- Card 3: Bring Your Framework -->
+    <div class="feature-card" data-feature="2">
+      <div class="card-glow"></div>
+      <div class="feature-card-inner">
+        <div class="feature-text">
+          <div class="feature-number">03 — Bring Your Framework</div>
+          <h3>PydanticAI. CrewAI. Whatever.</h3>
+          <p>Wrap it with Kitaru and it becomes durable. No lock-in. No opinions. Your framework, our infrastructure.</p>
+        </div>
         <div class="feature-visual">
           <div class="anim-framework" id="animFramework">
             <div class="framework-orbit"></div>
@@ -74,16 +89,18 @@
             <div class="fw-item" style="top: 50%; left: 5%; transform: translateY(-50%);">CrewAI</div>
           </div>
         </div>
-        <div class="feature-text">
-          <div class="feature-number">03 — Bring Your Framework</div>
-          <h3>PydanticAI. Your own code. Whatever.</h3>
-          <p>Wrap it with Kitaru and it becomes durable. No lock-in. No opinions. Your framework, our infrastructure.</p>
-        </div>
       </div>
+    </div>
 
-      <!-- Card 4: Parallel Branches -->
-      <div class="feature-card">
-        <div class="card-glow"></div>
+    <!-- Card 4: Parallel Branches -->
+    <div class="feature-card feature-card--last" data-feature="3">
+      <div class="card-glow"></div>
+      <div class="feature-card-inner">
+        <div class="feature-text">
+          <div class="feature-number">04 — Parallel Branches</div>
+          <h3>Fan out. Each branch checkpoints independently.</h3>
+          <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each has its own checkpoint history. Replay just the failed branch.</p>
+        </div>
         <div class="feature-visual">
           <div class="anim-parallel" id="animParallel">
             <div class="par-source"></div>
@@ -107,73 +124,77 @@
             </div>
           </div>
         </div>
-        <div class="feature-text">
-          <div class="feature-number">04 — Parallel Branches</div>
-          <h3>Fan out. Each branch checkpoints independently.</h3>
-          <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each has its own checkpoint history. Replay just the failed branch.</p>
-        </div>
       </div>
-
     </div>
+
+    <!-- Content-box spacer: sticky constraint ignores padding & margin,
+         only real content extends the rectangle. This div is the runway. -->
+    <div class="sticky-runway" aria-hidden="true"></div>
   </div>
 </section>
 
 <style>
-  .features-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-top: 48px;
+  /* ═══ Section container ═══ */
+  .features-section {
+    /* No overflow restrictions — sticky needs open overflow */
   }
 
+  .features-section.bg-loaded {
+    background: url('https://assets.kitaru.ai/content/site/01af00b0/kit-bg.avif') center bottom / cover no-repeat fixed;
+  }
+
+  .features-header {
+    padding: 80px clamp(24px, 5vw, 80px) 48px;
+  }
+
+  /* Override global .section-inner overflow:clip — it prevents the
+     IntersectionObserver from detecting the section-desc (which starts
+     shifted 32px down via data-reveal transform). */
+  .features-header .section-inner {
+    overflow: visible;
+  }
+
+  /* ═══ Sticky stacking container ═══ */
+  .features-sticky-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 clamp(24px, 5vw, 80px);
+  }
+
+  /* ═══ Sticky cards ═══ */
   .feature-card {
-    background: var(--color-surface);
+    position: sticky;
+    top: 25vh;
+    background: var(--color-bg);
+    border-radius: 16px;
     border: 1px solid var(--color-border);
-    border-radius: 12px;
-    padding: 0;
-    transition: border-color 0.3s, transform 0.3s;
-    position: relative;
+    box-shadow: 0 -4px 20px oklch(0.13 0.015 60 / 0.04);
+    margin-bottom: 40vh;
     overflow: hidden;
-    opacity: 0;
-    transform: translateY(24px);
-    transition: opacity 0.5s ease, transform 0.5s ease, border-color 0.3s;
   }
 
-  .features-grid.visible .feature-card:nth-child(1) { transition-delay: 0s; }
-  .features-grid.visible .feature-card:nth-child(2) { transition-delay: 0.1s; }
-  .features-grid.visible .feature-card:nth-child(3) { transition-delay: 0.2s; }
-  .features-grid.visible .feature-card:nth-child(4) { transition-delay: 0.3s; }
-
-  .features-grid.visible .feature-card {
-    opacity: 1;
-    transform: translateY(0);
+  .feature-card--last {
+    margin-bottom: 40vh;
   }
 
-  .feature-card:hover {
-    border-color: var(--color-muted);
-    transform: translateY(-2px);
-  }
+  /* 8px reveal cadence so each prior card's top edge remains visible. */
+  .feature-card[data-feature="1"] { top: calc(25vh + 8px); }
+  .feature-card[data-feature="2"] { top: calc(25vh + 16px); }
+  .feature-card[data-feature="3"] { top: calc(25vh + 24px); }
 
-  .feature-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%;
-    height: 2px;
-    background: linear-gradient(90deg, var(--color-accent), transparent);
-    opacity: 0;
-    transition: opacity 0.3s;
+  /* Content fades out when card is no longer active */
+  .feature-card-inner {
+    transition: opacity 0.4s ease;
   }
-
-  .feature-card:hover::before {
-    opacity: 1;
+  .feature-card.faded .feature-card-inner {
+    opacity: 0.15;
   }
 
   /* Card hover glow — follows cursor */
   .card-glow {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(241,120,41,0.04), transparent 60%);
+    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), oklch(0.65 0.16 45 / 0.04), transparent 60%);
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.3s;
@@ -184,49 +205,64 @@
     opacity: 1;
   }
 
-  /* Feature visual area (animation container) */
+  /* ═══ Card inner grid — text left, visual flush right ═══ */
+  .feature-card-inner {
+    display: grid;
+    grid-template-columns: 2fr 3fr;
+    gap: 0;
+    align-items: stretch;
+    min-height: 60vh;
+  }
+
+  /* ═══ Text area ═══ */
+  .feature-text {
+    position: relative;
+    z-index: 2;
+    padding: 48px clamp(32px, 3vw, 56px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .feature-number {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .feature-card h3 {
+    font-size: clamp(1.3rem, 2.5vw, 1.75rem);
+    font-weight: 700;
+    margin-bottom: 16px;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  .feature-card p {
+    color: var(--color-secondary);
+    font-size: clamp(0.9rem, 1.2vw, 1.05rem);
+    line-height: 1.7;
+    font-weight: 300;
+    max-width: 380px;
+  }
+
+  /* ═══ Visual area — full height, flush right, border-left separator ═══ */
   .feature-visual {
-    height: 200px;
-    background: #1A1714;
-    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-warm);
+    border-left: 1px solid var(--color-border);
     position: relative;
     overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Round only the right corners to match card border-radius */
+    border-radius: 0 15px 15px 0;
   }
 
-  .feature-text {
-    padding: 20px 24px;
-    position: relative;
-    z-index: 2;
-  }
-
-  .feature-number {
-    font-family: var(--font-mono);
-    font-size: 0.65rem;
-    letter-spacing: 0.15em;
-    color: var(--color-muted);
-    text-transform: uppercase;
-    margin-bottom: 6px;
-  }
-
-  .feature-card h3 {
-    font-size: 1.05rem;
-    font-weight: 600;
-    margin-bottom: 6px;
-    letter-spacing: -0.01em;
-    line-height: 1.3;
-  }
-
-  .feature-card p {
-    color: var(--color-secondary);
-    font-size: 0.85rem;
-    line-height: 1.6;
-    font-weight: 300;
-  }
-
-  /* ═══ ANIMATION: Pause & Resume ═══ */
+  /* ═══ ANIMATION: Pause & Resume (light) ═══ */
   .anim-pause-resume {
     width: 100%;
     height: 100%;
@@ -239,7 +275,7 @@
     left: 10%;
     right: 10%;
     height: 2px;
-    background: rgba(255,255,255,0.1);
+    background: oklch(0.13 0.015 60 / 0.1);
     transform: translateY(-50%);
   }
 
@@ -257,46 +293,41 @@
   .anim-pause-resume .pr-step {
     position: absolute;
     top: 50%;
-    width: 28px;
-    height: 28px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
-    background: #1A1714;
-    border: 1.5px solid rgba(255,255,255,0.15);
+    background: var(--color-surface-warm);
+    border: 1.5px solid oklch(0.13 0.015 60 / 0.15);
     transform: translate(-50%, -50%);
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: var(--font-mono);
-    font-size: 0.55rem;
-    color: rgba(255,255,255,0.3);
+    font-size: 0.7rem;
+    color: var(--color-muted);
     transition: all 0.4s ease;
     z-index: 2;
   }
 
   .pr-step.completed {
     border-color: var(--color-accent);
-    background: rgba(241,120,41,0.1);
+    background: oklch(0.65 0.16 45 / 0.1);
     color: var(--color-accent);
   }
 
   .pr-step.active {
     border-color: var(--color-accent);
     background: var(--color-accent);
-    color: #1A1714;
-    box-shadow: 0 0 20px rgba(241,120,41,0.3);
+    color: oklch(1 0 0);
+    box-shadow: 0 0 20px oklch(0.65 0.16 45 / 0.3);
     transform: translate(-50%, -50%) scale(1.15);
   }
 
   .pr-step.paused {
-    border-color: #E8A840;
-    background: rgba(232,168,64,0.1);
-    color: #E8A840;
+    border-color: oklch(0.73 0.12 80);
+    background: oklch(0.73 0.12 80 / 0.1);
+    color: oklch(0.73 0.12 80);
     animation: pausePulse 1.5s ease infinite;
-  }
-
-  @keyframes pausePulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(232,168,64,0.25); }
-    50% { box-shadow: 0 0 0 8px rgba(232,168,64,0); }
   }
 
   .human-badge {
@@ -304,13 +335,13 @@
     top: 18%;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(232,168,64,0.12);
-    border: 1px solid rgba(232,168,64,0.3);
+    background: oklch(0.73 0.12 80 / 0.12);
+    border: 1px solid oklch(0.73 0.12 80 / 0.3);
     border-radius: 12px;
-    padding: 4px 12px;
+    padding: 6px 14px;
     font-family: var(--font-mono);
-    font-size: 0.55rem;
-    color: #E8A840;
+    font-size: 0.7rem;
+    color: oklch(0.73 0.12 80);
     opacity: 0;
     transition: opacity 0.4s;
     white-space: nowrap;
@@ -323,7 +354,7 @@
     opacity: 1;
   }
 
-  /* ═══ ANIMATION: Replay ═══ */
+  /* ═══ ANIMATION: Replay (light) ═══ */
   .anim-replay {
     width: 100%;
     height: 100%;
@@ -337,34 +368,34 @@
     right: 8%;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     transform: translateY(-50%);
   }
 
   .rstep {
     flex: 1;
-    height: 32px;
-    border-radius: 4px;
-    background: #1A1714;
-    border: 1px solid rgba(255,255,255,0.1);
+    height: 40px;
+    border-radius: 6px;
+    background: var(--color-surface-warm);
+    border: 1px solid oklch(0.13 0.015 60 / 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: var(--font-mono);
-    font-size: 0.55rem;
-    color: rgba(255,255,255,0.2);
+    font-size: 0.7rem;
+    color: var(--color-muted);
     transition: all 0.3s ease;
   }
 
   .rstep.ok {
-    border-color: rgba(61,140,92,0.4);
-    background: rgba(61,140,92,0.08);
+    border-color: oklch(0.55 0.1 155 / 0.4);
+    background: oklch(0.55 0.1 155 / 0.08);
     color: var(--color-success);
   }
 
   .rstep.fail {
     border-color: var(--color-cost-up);
-    background: rgba(220,74,61,0.12);
+    background: oklch(0.55 0.18 25 / 0.08);
     color: var(--color-cost-up);
     animation: failShake 0.4s ease;
   }
@@ -379,9 +410,9 @@
 
   .rstep.replay {
     border-color: var(--color-accent);
-    background: rgba(241,120,41,0.12);
+    background: oklch(0.65 0.16 45 / 0.08);
     color: var(--color-accent);
-    box-shadow: 0 0 12px rgba(241,120,41,0.2);
+    box-shadow: 0 0 12px oklch(0.65 0.16 45 / 0.15);
   }
 
   .replay-status {
@@ -390,8 +421,8 @@
     left: 50%;
     transform: translateX(-50%);
     font-family: var(--font-mono);
-    font-size: 0.6rem;
-    color: rgba(255,255,255,0.3);
+    font-size: 0.7rem;
+    color: var(--color-muted);
     white-space: nowrap;
     transition: all 0.3s;
   }
@@ -404,7 +435,7 @@
     top: 15%;
     right: 10%;
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 0.7rem;
     color: var(--color-success);
     opacity: 0;
     transition: opacity 0.4s;
@@ -412,7 +443,7 @@
 
   .cost-saved.visible { opacity: 1; }
 
-  /* ═══ ANIMATION: Framework Orbit ═══ */
+  /* ═══ ANIMATION: Framework Orbit (light) ═══ */
   .anim-framework {
     width: 100%;
     height: 100%;
@@ -423,39 +454,39 @@
   }
 
   .kitaru-core {
-    width: 70px;
-    height: 70px;
+    width: 90px;
+    height: 90px;
     border: 2px solid var(--color-accent);
-    border-radius: 12px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: 0.8rem;
     color: var(--color-accent);
     letter-spacing: 0.1em;
     position: relative;
     z-index: 2;
-    background: #1A1714;
+    background: var(--color-surface-warm);
   }
 
   .framework-orbit {
     position: absolute;
-    width: 170px;
-    height: 170px;
-    border: 1px dashed rgba(255,255,255,0.1);
+    width: 240px;
+    height: 240px;
+    border: 1px dashed oklch(0.13 0.015 60 / 0.1);
     border-radius: 50%;
   }
 
   .fw-item {
     position: absolute;
-    background: #1A1714;
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 6px;
-    padding: 4px 10px;
+    background: var(--color-surface-warm);
+    border: 1px solid oklch(0.13 0.015 60 / 0.1);
+    border-radius: 8px;
+    padding: 6px 14px;
     font-family: var(--font-mono);
-    font-size: 0.55rem;
-    color: rgba(255,255,255,0.4);
+    font-size: 0.7rem;
+    color: var(--color-muted);
     white-space: nowrap;
     transition: all 0.5s ease;
   }
@@ -463,10 +494,10 @@
   .fw-item.active {
     border-color: var(--color-accent);
     color: var(--color-accent);
-    background: rgba(241,120,41,0.06);
+    background: oklch(0.65 0.16 45 / 0.06);
   }
 
-  /* ═══ ANIMATION: Parallel Branches ═══ */
+  /* ═══ ANIMATION: Parallel Branches (light) ═══ */
   .anim-parallel {
     width: 100%;
     height: 100%;
@@ -477,8 +508,8 @@
     position: absolute;
     left: 12%;
     top: 50%;
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: var(--color-accent);
     transform: translateY(-50%);
@@ -503,16 +534,16 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: rgba(255,255,255,0.08);
+    background: oklch(0.13 0.015 60 / 0.08);
   }
 
   .par-dot {
     position: absolute;
-    width: 12px;
-    height: 12px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    background: #1A1714;
-    border: 1.5px solid rgba(255,255,255,0.15);
+    background: var(--color-surface-warm);
+    border: 1.5px solid oklch(0.13 0.015 60 / 0.15);
     transition: all 0.4s ease;
     z-index: 2;
   }
@@ -522,79 +553,132 @@
   .par-dot[data-dot="2"] { left: 80%; }
 
   .par-dot.ok {
-    border-color: rgba(61,140,92,0.6);
-    background: rgba(61,140,92,0.15);
+    border-color: oklch(0.55 0.1 155 / 0.6);
+    background: oklch(0.93 0.03 155);
   }
 
   .par-dot.fail {
     border-color: var(--color-cost-up);
-    background: rgba(220,74,61,0.15);
+    background: oklch(0.93 0.03 25);
     animation: failShake 0.4s ease;
   }
 
   .par-dot.replay {
     border-color: var(--color-accent);
-    background: rgba(241,120,41,0.15);
-    box-shadow: 0 0 8px rgba(241,120,41,0.25);
+    background: oklch(0.93 0.03 55);
+    box-shadow: 0 0 8px oklch(0.65 0.16 45 / 0.2);
   }
 
+  /* Content-box spacer — extends the sticky container so the last
+     card has enough scroll runway to fully reach its sticky position. */
+  .sticky-runway {
+    height: 5vh;
+    pointer-events: none;
+  }
+
+  /* ═══ Mobile responsive (< 768px) ═══ */
   @media (max-width: 768px) {
-    .features-grid {
-      grid-template-columns: 1fr;
+    .features-header {
+      padding: 48px 16px 32px;
     }
+
+    .features-sticky-container {
+      padding: 0 16px;
+    }
+
+    .sticky-runway {
+      display: none;
+    }
+
+    .feature-card {
+      position: relative;
+      top: auto !important;
+      min-height: auto;
+      margin-bottom: 32px;
+    }
+
+    .feature-card.faded .feature-card-inner {
+      opacity: 1;
+    }
+
+    .feature-card--last {
+      margin-bottom: 0;
+    }
+
+    .feature-card-inner {
+      grid-template-columns: 1fr;
+      min-height: auto;
+    }
+
+    .feature-text {
+      padding: 28px 24px;
+    }
+
     .feature-visual {
-      height: 160px;
+      aspect-ratio: 16/10;
+      border-left: none;
+      border-top: 1px solid var(--color-border);
+      border-radius: 0 0 15px 15px;
+    }
+
+    .feature-card h3 {
+      font-size: 1.15rem;
+    }
+
+    .feature-card p {
+      max-width: none;
     }
   }
 
   @media (max-width: 480px) {
-    .feature-visual { height: 140px; }
-    .feature-card h3 { font-size: 1rem; }
-    .feature-card p { font-size: 0.82rem; }
-    .feature-text { padding: 16px; }
+    .feature-text {
+      padding: 24px 20px;
+    }
+    .feature-card h3 { font-size: 1.05rem; }
+    .feature-card p { font-size: 0.88rem; }
+    .feature-visual { aspect-ratio: 16/9; }
   }
 </style>
 
 <script>
   // ═══ Card hover glow tracking ═══
-  document.querySelectorAll('.feature-card').forEach(card => {
-    card.addEventListener('mousemove', (e: MouseEvent) => {
-      const rect = (card as HTMLElement).getBoundingClientRect();
-      (card as HTMLElement).style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');
-      (card as HTMLElement).style.setProperty('--mouse-y', ((e.clientY - rect.top) / rect.height * 100) + '%');
+  document.querySelectorAll<HTMLElement>('.feature-card').forEach(card => {
+    card.addEventListener('mousemove', (event) => {
+      const e = event as MouseEvent;
+      const rect = card.getBoundingClientRect();
+      card.style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');
+      card.style.setProperty('--mouse-y', ((e.clientY - rect.top) / rect.height * 100) + '%');
     });
     card.addEventListener('mouseleave', () => {
-      (card as HTMLElement).style.setProperty('--mouse-x', '50%');
-      (card as HTMLElement).style.setProperty('--mouse-y', '50%');
+      card.style.setProperty('--mouse-x', '50%');
+      card.style.setProperty('--mouse-y', '50%');
     });
   });
 
-  // ═══ Feature grid stagger reveal ═══
-  const gridObs = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('visible');
-        startFeatureAnimations();
-        gridObs.disconnect();
-      }
-    });
-  }, { threshold: 0.15 });
+  // ═══ Per-card animation system ═══
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const grid = document.getElementById('featuresGrid');
-  if (grid) gridObs.observe(grid);
+  // Timer arrays per card
+  const animTimers: number[][] = [[], [], [], []];
 
-  // ═══ Feature Animations ═══
-  let featureTimers: number[] = [];
-
-  function startFeatureAnimations() {
-    runPauseResumeAnim();
-    runReplayAnim();
-    runFrameworkAnim();
-    runParallelAnim();
+  function scheduleTimer(cardIdx: number, fn: () => void, delay: number): number {
+    const id = setTimeout(() => {
+      const arr = animTimers[cardIdx];
+      const idx = arr.indexOf(id);
+      if (idx !== -1) arr.splice(idx, 1);
+      fn();
+    }, delay) as unknown as number;
+    animTimers[cardIdx].push(id);
+    return id;
   }
 
-  // --- Pause & Resume ---
-  function runPauseResumeAnim() {
+  function clearCardTimers(cardIdx: number) {
+    animTimers[cardIdx].forEach(id => clearTimeout(id));
+    animTimers[cardIdx] = [];
+  }
+
+  // Animation starter functions — each takes its card index for timer tracking
+  function runPauseResumeAnim(ci: number) {
     const container = document.getElementById('animPause');
     if (!container) return;
     const steps = container.querySelectorAll('.pr-step');
@@ -615,38 +699,32 @@
         if (progress) progress.style.width = (positions[i] - positions[0] + 2) + '%';
 
         if (i === 3) {
-          const t1 = setTimeout(() => {
+          scheduleTimer(ci, () => {
             steps[i].classList.remove('active');
             steps[i].classList.add('paused');
             badge?.classList.add('visible');
-            const t2 = setTimeout(() => {
+            scheduleTimer(ci, () => {
               badge?.classList.remove('visible');
               steps[i].classList.remove('paused');
               steps[i].classList.add('completed');
               i++;
               nextStep();
             }, 2000);
-            featureTimers.push(t2);
           }, 600);
-          featureTimers.push(t1);
         } else {
-          const t = setTimeout(() => { i++; nextStep(); }, 600);
-          featureTimers.push(t);
+          scheduleTimer(ci, () => { i++; nextStep(); }, 600);
         }
       } else {
         steps[steps.length - 1].classList.remove('active');
         steps[steps.length - 1].classList.add('completed');
         if (progress) progress.style.width = '82%';
-        const t = setTimeout(() => runPauseResumeAnim(), 2000);
-        featureTimers.push(t);
+        scheduleTimer(ci, () => runPauseResumeAnim(ci), 2000);
       }
     }
-    const t = setTimeout(nextStep, 500);
-    featureTimers.push(t);
+    scheduleTimer(ci, nextStep, 500);
   }
 
-  // --- Replay from Failure ---
-  function runReplayAnim() {
+  function runReplayAnim(ci: number) {
     const container = document.getElementById('animReplay');
     if (!container) return;
     const steps = container.querySelectorAll('.rstep');
@@ -662,42 +740,35 @@
       if (i < steps.length) {
         if (i === 5) {
           steps[i].classList.add('fail');
-          if (status) { status.textContent = '✗ Step 6 failed — API timeout'; status.classList.add('error'); }
-          const t1 = setTimeout(() => {
-            if (status) { status.textContent = '↻ Replaying from step 6...'; status.className = 'replay-status'; }
+          if (status) { status.textContent = '\u2717 Step 6 failed \u2014 API timeout'; status.classList.add('error'); }
+          scheduleTimer(ci, () => {
+            if (status) { status.textContent = '\u21BB Replaying from step 6...'; status.className = 'replay-status'; }
             steps[i].className = 'rstep';
-            const t2 = setTimeout(() => {
+            scheduleTimer(ci, () => {
               steps[i].classList.add('replay');
               cost?.classList.add('visible');
-              const t3 = setTimeout(() => {
+              scheduleTimer(ci, () => {
                 steps[i].classList.remove('replay');
                 steps[i].classList.add('ok');
                 i++;
                 nextRStep();
               }, 800);
-              featureTimers.push(t3);
             }, 600);
-            featureTimers.push(t2);
           }, 1500);
-          featureTimers.push(t1);
         } else {
           steps[i].classList.add('ok');
           i++;
-          const t = setTimeout(nextRStep, 350);
-          featureTimers.push(t);
+          scheduleTimer(ci, nextRStep, 350);
         }
       } else {
-        if (status) { status.textContent = '✓ All steps complete'; status.classList.add('success'); }
-        const t = setTimeout(() => runReplayAnim(), 2500);
-        featureTimers.push(t);
+        if (status) { status.textContent = '\u2713 All steps complete'; status.classList.add('success'); }
+        scheduleTimer(ci, () => runReplayAnim(ci), 2500);
       }
     }
-    const t = setTimeout(nextRStep, 500);
-    featureTimers.push(t);
+    scheduleTimer(ci, nextRStep, 500);
   }
 
-  // --- Framework Orbit ---
-  function runFrameworkAnim() {
+  function runFrameworkAnim(ci: number) {
     const container = document.getElementById('animFramework');
     if (!container) return;
     const items = container.querySelectorAll('.fw-item');
@@ -707,15 +778,12 @@
       items.forEach(it => it.classList.remove('active'));
       items[current].classList.add('active');
       current = (current + 1) % items.length;
-      const t = setTimeout(highlight, 1500);
-      featureTimers.push(t);
+      scheduleTimer(ci, highlight, 1500);
     }
-    const t = setTimeout(highlight, 800);
-    featureTimers.push(t);
+    scheduleTimer(ci, highlight, 800);
   }
 
-  // --- Parallel Branches ---
-  function runParallelAnim() {
+  function runParallelAnim(ci: number) {
     const container = document.getElementById('animParallel');
     if (!container) return;
     const branches = container.querySelectorAll('.par-branch');
@@ -724,8 +792,8 @@
     allDots.forEach(d => { d.className = 'par-dot'; });
 
     let step = 0;
-    const failBranch = 2; // third branch fails
-    const failDot = 1;    // at second dot
+    const failBranch = 2;
+    const failDot = 1;
 
     function nextStep() {
       if (step < 3) {
@@ -733,38 +801,213 @@
           const dot = branch.querySelector(`.par-dot[data-dot="${step}"]`);
           if (!dot) return;
           if (bIdx === failBranch && step === failDot) {
-            const t1 = setTimeout(() => {
+            scheduleTimer(ci, () => {
               dot.classList.add('fail');
-              // After failure, replay
-              const t2 = setTimeout(() => {
+              scheduleTimer(ci, () => {
                 dot.classList.remove('fail');
                 dot.classList.add('replay');
-                const t3 = setTimeout(() => {
+                scheduleTimer(ci, () => {
                   dot.classList.remove('replay');
                   dot.classList.add('ok');
                   step++;
                   nextStep();
                 }, 600);
-                featureTimers.push(t3);
               }, 800);
-              featureTimers.push(t2);
             }, 200);
-            featureTimers.push(t1);
           } else {
             dot.classList.add('ok');
           }
         });
         if (!(failBranch >= 0 && step === failDot)) {
           step++;
-          const t = setTimeout(nextStep, 500);
-          featureTimers.push(t);
+          scheduleTimer(ci, nextStep, 500);
         }
       } else {
-        const t = setTimeout(() => runParallelAnim(), 2500);
-        featureTimers.push(t);
+        scheduleTimer(ci, () => runParallelAnim(ci), 2500);
       }
     }
-    const t = setTimeout(nextStep, 500);
-    featureTimers.push(t);
+    scheduleTimer(ci, nextStep, 500);
+  }
+
+  const animStarters = [runPauseResumeAnim, runReplayAnim, runFrameworkAnim, runParallelAnim];
+
+  function resetAnimState(cardIdx: number) {
+    clearCardTimers(cardIdx);
+    if (cardIdx === 0) {
+      const container = document.getElementById('animPause');
+      if (container) {
+        container.querySelectorAll('.pr-step').forEach(s => { s.className = 'pr-step'; });
+        document.getElementById('humanBadge')?.classList.remove('visible');
+        const pf = document.getElementById('progressFill');
+        if (pf) pf.style.width = '0%';
+      }
+    } else if (cardIdx === 1) {
+      const container = document.getElementById('animReplay');
+      if (container) {
+        container.querySelectorAll('.rstep').forEach(s => { s.className = 'rstep'; });
+        const status = document.getElementById('replayStatus');
+        if (status) { status.textContent = 'Running agent...'; status.className = 'replay-status'; }
+        document.getElementById('costSaved')?.classList.remove('visible');
+      }
+    } else if (cardIdx === 2) {
+      const container = document.getElementById('animFramework');
+      if (container) {
+        container.querySelectorAll('.fw-item').forEach(it => it.classList.remove('active'));
+      }
+    } else if (cardIdx === 3) {
+      const container = document.getElementById('animParallel');
+      if (container) {
+        container.querySelectorAll('.par-dot').forEach(d => { d.className = 'par-dot'; });
+      }
+    }
+  }
+
+  function setActiveCard(cards: NodeListOf<HTMLElement>, nextIdx: number, activeIdxRef: { value: number }) {
+    if (nextIdx === activeIdxRef.value) return;
+
+    if (activeIdxRef.value >= 0) {
+      resetAnimState(activeIdxRef.value);
+    }
+
+    activeIdxRef.value = nextIdx;
+
+    if (nextIdx >= 0) {
+      animStarters[nextIdx](nextIdx);
+    }
+
+    cards.forEach((card, idx) => {
+      if (idx < nextIdx) {
+        card.classList.add('faded');
+      } else {
+        card.classList.remove('faded');
+      }
+    });
+  }
+
+  function setupDesktopActivation(
+    section: HTMLElement,
+    cards: NodeListOf<HTMLElement>,
+    activeIdxRef: { value: number }
+  ): () => void {
+    let ticking = false;
+    const controller = new AbortController();
+
+    function computeStickyLine(card: HTMLElement): number {
+      const topPx = Number.parseFloat(window.getComputedStyle(card).top);
+      if (!Number.isNaN(topPx)) return topPx;
+      return window.innerHeight * 0.15;
+    }
+
+    function updateActiveCard() {
+      if (ticking) return;
+      ticking = true;
+
+      requestAnimationFrame(() => {
+        ticking = false;
+
+        const firstCard = cards[0];
+        if (!firstCard) return;
+
+        const stickyLine = computeStickyLine(firstCard);
+        const sectionRect = section.getBoundingClientRect();
+
+        // Section is not in sticky range yet.
+        if (sectionRect.top > stickyLine) {
+          setActiveCard(cards, -1, activeIdxRef);
+          return;
+        }
+
+        // Select the highest-index card that has reached its sticky threshold.
+        let nextIdx = -1;
+        cards.forEach((card, idx) => {
+          const topPx = computeStickyLine(card);
+          const rect = card.getBoundingClientRect();
+          if (rect.top <= topPx + 1) {
+            nextIdx = idx;
+          }
+        });
+
+        setActiveCard(cards, nextIdx, activeIdxRef);
+      });
+    }
+
+    window.addEventListener('scroll', updateActiveCard, { passive: true, signal: controller.signal });
+    window.addEventListener('resize', updateActiveCard, { passive: true, signal: controller.signal });
+
+    // Initialize immediately for refresh/deep-link/restored scroll positions.
+    updateActiveCard();
+
+    return () => {
+      controller.abort();
+      setActiveCard(cards, -1, activeIdxRef);
+    };
+  }
+
+  function setupMobileActivation(
+    cards: NodeListOf<HTMLElement>,
+    activeIdxRef: { value: number }
+  ): () => void {
+    const mobileObs = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        const card = entry.target as HTMLElement;
+        const idx = Number.parseInt(card.getAttribute('data-feature') || '-1', 10);
+        if (idx < 0) return;
+
+        if (entry.isIntersecting) {
+          setActiveCard(cards, idx, activeIdxRef);
+        } else if (activeIdxRef.value === idx) {
+          setActiveCard(cards, -1, activeIdxRef);
+        }
+      });
+    }, { threshold: 0.35 });
+
+    cards.forEach(card => mobileObs.observe(card));
+
+    return () => {
+      mobileObs.disconnect();
+      setActiveCard(cards, -1, activeIdxRef);
+      cards.forEach((_, idx) => resetAnimState(idx));
+    };
+  }
+
+  // Lazy-load background image
+  const featuresSection = document.querySelector<HTMLElement>('.features-section');
+  if (featuresSection) {
+    const bgObs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        featuresSection.classList.add('bg-loaded');
+        bgObs.disconnect();
+      }
+    }, { rootMargin: '200px' });
+    bgObs.observe(featuresSection);
+  }
+
+  if (!prefersReducedMotion) {
+    const section = document.querySelector<HTMLElement>('#how-it-works');
+    const cards = document.querySelectorAll<HTMLElement>('.feature-card');
+    const mobileQuery = window.matchMedia('(max-width: 767px)');
+    const activeIdxRef = { value: -1 };
+
+    if (section && cards.length) {
+      const sectionEl = section;
+      let teardownActivation: (() => void) | null = null;
+
+      function mountActivationMode() {
+        teardownActivation?.();
+        teardownActivation = mobileQuery.matches
+          ? setupMobileActivation(cards, activeIdxRef)
+          : setupDesktopActivation(sectionEl, cards, activeIdxRef);
+      }
+
+      mountActivationMode();
+
+      const handleModeChange = () => mountActivationMode();
+      mobileQuery.addEventListener('change', handleModeChange);
+
+      window.addEventListener('pagehide', () => {
+        mobileQuery.removeEventListener('change', handleModeChange);
+        teardownActivation?.();
+      }, { once: true });
+    }
   }
 </script>

@@ -2,7 +2,7 @@
 // AgentNative.astro — MCP server + AI assistant integration section
 ---
 
-<section class="agent-native-section" style="padding: 80px clamp(24px, 5vw, 80px) 100px;">
+<section class="agent-native-section section-pad">
   <div class="section-inner">
     <span class="section-eyebrow" data-reveal>Agent-native</span>
     <h2 class="section-title" data-reveal data-reveal-delay="1">Built to be AI-native.</h2>
@@ -92,16 +92,6 @@
     background: rgba(26,23,20,0.95);
   }
 
-  .code-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-  }
-
-  .code-dot:nth-child(1) { background: #E85540; }
-  .code-dot:nth-child(2) { background: #E8A840; }
-  .code-dot:nth-child(3) { background: #40C840; }
-
   .conv-title {
     font-family: var(--font-mono);
     font-size: 0.72rem;
@@ -124,7 +114,7 @@
 
   .conv-role {
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -219,7 +209,7 @@
   @media (max-width: 480px) {
     .conv-body { padding: 14px; }
     .conv-text { font-size: 0.78rem; }
-    .conv-tool { font-size: 0.58rem; }
+    .conv-tool { font-size: 0.65rem; }
     .mcp-features li code { font-size: 0.78rem; }
     .mcp-features li span { font-size: 0.78rem; }
   }
