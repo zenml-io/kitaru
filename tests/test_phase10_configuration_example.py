@@ -30,4 +30,5 @@ def test_phase10_configuration_example_runs_end_to_end(primed_zenml) -> None:
     assert resolved["cache"] is True
     assert resolved["retries"] == 3
     assert resolved["image"]["base_image"] == "python:3.12-slim"
-    assert resolved["image"]["environment"] == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
+    # Secret-looking env vars are redacted in the frozen spec.
+    assert resolved["image"]["environment"] == {"OPENAI_API_KEY": "***"}

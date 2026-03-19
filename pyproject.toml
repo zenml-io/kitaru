@@ -29,14 +29,14 @@ dependencies = [
 
 [project.optional-dependencies]
 local = [
-    # TODO: revert to "zenml[local]>=0.94.0" once zenml release is out
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@a14c7d4dd43b5170617cc865395fb03589ba062a",
+    # TODO: revert to "zenml[server]>=0.94.0" once zenml release is out
+    "zenml[server] @ git+https://github.com/zenml-io/zenml.git@a14c7d4dd43b5170617cc865395fb03589ba062a",
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=0.2.0",
 ]
 mcp = [
-    "mcp>=1.26.0",
+    "mcp>=1.19.0,<1.20.0",
 ]
 
 [project.scripts]
@@ -66,8 +66,8 @@ dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    # TODO: revert to "zenml[local]>=0.94.0" once zenml release is out
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@a14c7d4dd43b5170617cc865395fb03589ba062a",
+    # TODO: revert to "zenml[server]>=0.94.0" once zenml release is out
+    "zenml[server] @ git+https://github.com/zenml-io/zenml.git@a14c7d4dd43b5170617cc865395fb03589ba062a",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",

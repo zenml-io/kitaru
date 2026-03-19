@@ -221,6 +221,7 @@ site/.wrangler/
 
 # Design docs
 design/
+dogfood-output/
 
 # MCP
 .mcp.json

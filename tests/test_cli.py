@@ -1112,10 +1112,10 @@ def test_executions_cancel_reports_success(
     assert "Status: cancelled" in output
 
 
-def test_login_delegates_to_connect(
+def test_login_delegates_to_remote_connect(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru login` passes CLI options through to the login helper."""
+    """`kitaru login <server>` should delegate to the remote login helper."""
     with (
         patch("kitaru.cli.login_to_server") as mock_login,
         patch(
@@ -1134,6 +1134,8 @@ def test_login_delegates_to_connect(
                 "--project",
                 "demo-project",
                 "--no-verify-ssl",
+                "--timeout",
+                "45",
             ]
         )
 
@@ -1145,12 +1147,83 @@ def test_login_delegates_to_connect(
         project="demo-project",
         no_verify_ssl=True,
         ssl_ca_cert=None,
-        cloud_api_url=None,
+        timeout=45,
     )
 
     output = capsys.readouterr().out
     assert "Connected to Kitaru server: https://example.com" in output
     assert "Active project" not in output
+
+
+def test_login_without_server_starts_local_server(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bare `kitaru login` should start and connect to the local server."""
+    with (
+        patch(
+            "kitaru.cli.start_or_connect_local_server",
+            return_value=SimpleNamespace(
+                url="http://127.0.0.1:8383",
+                action="started",
+            ),
+        ) as mock_start,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login"])
+
+    assert exc_info.value.code == 0
+    mock_start.assert_called_once_with(port=None, timeout=60)
+    output = capsys.readouterr().out
+    assert "Starting local Kitaru server..." in output
+    assert "Server running at http://127.0.0.1:8383" in output
+    assert "Connected to local Kitaru server." in output
+
+
+def test_login_without_server_reuses_existing_local_server(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bare local login should connect to an already running daemon."""
+    with (
+        patch(
+            "kitaru.cli.start_or_connect_local_server",
+            return_value=SimpleNamespace(
+                url="http://127.0.0.1:9090",
+                action="connected",
+            ),
+        ) as mock_start,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login"])
+
+    assert exc_info.value.code == 0
+    mock_start.assert_called_once_with(port=None, timeout=60)
+    output = capsys.readouterr().out
+    assert "Server already running at http://127.0.0.1:9090" in output
+    assert "Connected to local Kitaru server." in output
+
+
+def test_login_without_server_restarts_local_server_on_explicit_port(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit `--port` should restart the local daemon on that port."""
+    with (
+        patch(
+            "kitaru.cli.start_or_connect_local_server",
+            return_value=SimpleNamespace(
+                url="http://127.0.0.1:9090",
+                action="restarted",
+            ),
+        ) as mock_start,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login", "--port", "9090"])
+
+    assert exc_info.value.code == 0
+    mock_start.assert_called_once_with(port=9090, timeout=60)
+    output = capsys.readouterr().out
+    assert "Restarting local Kitaru server on port 9090..." in output
+    assert "Server running at http://127.0.0.1:9090" in output
+    assert "Connected to local Kitaru server." in output
 
 
 def test_login_surfaces_validation_errors(
@@ -1164,77 +1237,38 @@ def test_login_surfaces_validation_errors(
     assert "Invalid Kitaru server URL" in capsys.readouterr().err
 
 
-def test_login_accepts_url_alias(
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["login", "--api-key", "secret"], "--api-key is only used"),
+        (["login", "--project", "demo"], "--project is only used"),
+        (["login", "--refresh"], "--refresh is only used"),
+        (["login", "--no-verify-ssl"], "--no-verify-ssl is only used"),
+        (["login", "--ssl-ca-cert", "/tmp/ca.pem"], "--ssl-ca-cert is only used"),
+    ],
+)
+def test_login_rejects_remote_only_flags_without_server(
+    args: list[str],
+    message: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`--url` should remain a supported spelling for login."""
-    with (
-        patch("kitaru.cli.login_to_server") as mock_login,
-        patch(
-            "kitaru.cli._get_connected_server_url",
-            return_value="https://example.com",
-        ),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "login",
-                "--url",
-                "https://example.com/",
-                "--project",
-                "demo-project",
-            ]
-        )
+    """Bare local login should reject remote-only flags."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(args)
 
-    assert exc_info.value.code == 0
-    mock_login.assert_called_once_with(
-        "https://example.com/",
-        api_key=None,
-        refresh=False,
-        project="demo-project",
-        no_verify_ssl=False,
-        ssl_ca_cert=None,
-        cloud_api_url=None,
-    )
-    output = capsys.readouterr().out
-    assert "Connected to Kitaru server: https://example.com" in output
+    assert exc_info.value.code == 1
+    assert message in capsys.readouterr().err
 
 
-def test_login_accepts_cloud_api_url_alias(
+def test_login_rejects_port_with_remote_server(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`--pro-api-url` should remain a supported compatibility alias."""
-    with (
-        patch("kitaru.cli.login_to_server") as mock_login,
-        patch(
-            "kitaru.cli._get_connected_server_url",
-            return_value="https://staging.example.com",
-        ),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        app(
-            [
-                "login",
-                "pause-resume",
-                "--pro-api-url",
-                "https://staging.cloudapi.zenml.io/",
-                "--project",
-                "kitaru",
-            ]
-        )
+    """Remote login should reject the local-only `--port` flag."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["login", "https://example.com", "--port", "9090"])
 
-    assert exc_info.value.code == 0
-    mock_login.assert_called_once_with(
-        "pause-resume",
-        api_key=None,
-        refresh=False,
-        project="kitaru",
-        no_verify_ssl=False,
-        ssl_ca_cert=None,
-        cloud_api_url="https://staging.cloudapi.zenml.io/",
-    )
-    output = capsys.readouterr().out
-    assert "Connected to Kitaru server: https://staging.example.com" in output
+    assert exc_info.value.code == 1
+    assert "--port is only used for local server startup." in capsys.readouterr().err
 
 
 def test_login_rejects_auth_environment_overrides(
@@ -1269,6 +1303,59 @@ def test_login_rejects_kitaru_auth_environment_overrides(
     assert "ZENML_STORE_URL" not in error_output
 
 
+def test_local_login_warns_for_auth_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Local login should warn but proceed when auth env vars are present."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://env.example.com")
+
+    with (
+        patch(
+            "kitaru.cli.start_or_connect_local_server",
+            return_value=SimpleNamespace(
+                url="http://127.0.0.1:8383",
+                action="started",
+            ),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Auth environment variables are active (KITARU_SERVER_URL)." in output
+    assert "runtime connections may still use those environment variables" in output
+    assert "Connected to local Kitaru server." in output
+
+
+def test_local_login_warns_when_switching_from_remote(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bare local login should warn when it disconnects from a remote target."""
+    with (
+        patch(
+            "kitaru.cli.start_or_connect_local_server",
+            return_value=SimpleNamespace(
+                url="http://127.0.0.1:8383",
+                action="started",
+            ),
+        ),
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="https://prod.kitaru.io",
+        ),
+        patch("kitaru.cli._connected_to_local_server", return_value=False),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Disconnecting from remote server: https://prod.kitaru.io" in output
+    assert "Connected to local Kitaru server." in output
+
+
 def test_logout_rejects_kitaru_auth_environment_overrides(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1283,7 +1370,7 @@ def test_logout_rejects_kitaru_auth_environment_overrides(
 
 
 def test_logout_resets_remote_connection() -> None:
-    """The logout helper should reset the active store and clear credentials."""
+    """Remote logout should also stop any registered local daemon."""
     fake_gc = Mock()
     fake_gc.uses_local_store = False
     fake_gc.store_configuration = SimpleNamespace(url="https://example.com/")
@@ -1293,17 +1380,58 @@ def test_logout_resets_remote_connection() -> None:
         patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
         patch("kitaru.cli._connected_to_local_server", return_value=False),
         patch(
+            "kitaru.cli._get_connected_server_url", return_value="https://example.com"
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(
+                stopped=True,
+                url="http://127.0.0.1:8383",
+            ),
+        ),
+        patch(
             "kitaru.cli.get_credentials_store",
             return_value=fake_credentials_store,
         ),
     ):
-        message = _logout_current_connection()
+        result = _logout_current_connection()
 
     fake_gc.set_default_store.assert_called_once_with()
     fake_credentials_store.clear_credentials.assert_called_once_with(
         "https://example.com"
     )
-    assert message == "Logged out from Kitaru server: https://example.com"
+    assert result.mode == "remote_server"
+    assert result.local_server_stopped is True
+    assert str(result) == (
+        "Logged out from Kitaru server: https://example.com\n"
+        "Stopped local server (port 8383)."
+    )
+
+
+def test_logout_returns_local_server_mode_for_local_connection() -> None:
+    """Local logout should report local-server mode and stop the daemon."""
+    fake_gc = Mock()
+
+    with (
+        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.cli._connected_to_local_server", return_value=True),
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="http://127.0.0.1:8383",
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(
+                stopped=True,
+                url="http://127.0.0.1:8383",
+            ),
+        ),
+    ):
+        result = _logout_current_connection()
+
+    assert result.mode == "local_server"
+    assert result.local_server_stopped is True
+    assert str(result) == "Logged out from the local Kitaru server."
 
 
 def test_logout_is_idempotent_on_local_store() -> None:
@@ -1314,14 +1442,19 @@ def test_logout_is_idempotent_on_local_store() -> None:
     with (
         patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
         patch("kitaru.cli._connected_to_local_server", return_value=False),
+        patch("kitaru.cli._get_connected_server_url", return_value=None),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(stopped=False, url=None),
+        ),
     ):
-        message = _logout_current_connection()
+        result = _logout_current_connection()
 
-    assert message == "Kitaru is already using its local default store."
+    assert str(result) == "Kitaru is already using its local default store."
 
 
 def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
-    """Logout should still clear persisted remote state without local mode."""
+    """Logout should still clear stale localhost state without local fallback."""
     fake_gc = Mock()
     fake_gc.uses_local_store = False
     fake_gc.store_configuration = SimpleNamespace(url="http://127.0.0.1:8237")
@@ -1332,17 +1465,27 @@ def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
         patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
         patch("kitaru.cli._connected_to_local_server", return_value=False),
         patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="http://127.0.0.1:8237",
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(
+                stopped=True,
+                url="http://127.0.0.1:8383",
+            ),
+        ),
+        patch(
             "kitaru.cli.get_credentials_store",
             return_value=fake_credentials_store,
         ),
     ):
-        message = _logout_current_connection()
+        result = _logout_current_connection()
 
     fake_gc._write_config.assert_called_once_with()
-    fake_credentials_store.clear_credentials.assert_called_once_with(
-        "http://127.0.0.1:8237"
-    )
-    assert "local fallback unavailable" in message
+    fake_credentials_store.clear_credentials.assert_not_called()
+    assert result.mode == "local_server"
+    assert result.local_server_stopped is True
 
 
 def test_log_store_set_delegates_to_config(
@@ -4271,8 +4414,8 @@ def test_info_shows_project_override_when_set(
     assert "Project override: staging-project" in output
 
 
-def test_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru login --output json` should emit a structured success payload."""
+def test_remote_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """Remote login JSON output should include `mode: remote`."""
     with (
         patch("kitaru.cli.login_to_server") as mock_login,
         patch(
@@ -4288,7 +4431,80 @@ def test_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "command": "login",
-        "item": {"url": "https://example.com", "project": "demo"},
+        "item": {
+            "mode": "remote",
+            "url": "https://example.com",
+            "project": "demo",
+        },
+    }
+
+
+def test_local_login_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """Bare local login JSON output should include `mode: local`."""
+    with (
+        patch(
+            "kitaru.cli.start_or_connect_local_server",
+            return_value=SimpleNamespace(
+                url="http://127.0.0.1:8383",
+                action="started",
+            ),
+        ) as mock_start,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["login", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    mock_start.assert_called_once_with(port=None, timeout=60)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "login",
+        "item": {
+            "mode": "local",
+            "url": "http://127.0.0.1:8383",
+        },
+    }
+
+
+def test_logout_json_output_includes_local_server_cleanup(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Logout JSON output should report whether a local daemon was stopped."""
+    fake_gc = Mock()
+    fake_gc.uses_local_store = False
+    fake_gc.store_configuration = SimpleNamespace(url="https://example.com/")
+    fake_credentials_store = Mock()
+
+    with (
+        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.cli._connected_to_local_server", return_value=False),
+        patch(
+            "kitaru.cli._get_connected_server_url", return_value="https://example.com"
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(
+                stopped=True,
+                url="http://127.0.0.1:8383",
+            ),
+        ),
+        patch(
+            "kitaru.cli.get_credentials_store",
+            return_value=fake_credentials_store,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["logout", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "logout",
+        "item": {
+            "mode": "remote_server",
+            "target": "https://example.com",
+            "local_fallback_available": True,
+            "local_server_stopped": True,
+        },
     }
 
 

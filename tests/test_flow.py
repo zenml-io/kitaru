@@ -186,7 +186,7 @@ def test_inject_model_registry_env_rejects_invalid_override() -> None:
         )
 
 
-def test_flow_decorator_creates_wrapper_with_run_and_deploy() -> None:
+def test_flow_decorator_creates_wrapper_with_run() -> None:
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
     base_pipeline = MagicMock()
@@ -208,7 +208,7 @@ def test_flow_decorator_creates_wrapper_with_run_and_deploy() -> None:
 
     pipeline_mock.assert_called_once_with(dynamic=True, name="_lambda_")
     assert hasattr(wrapped, "run")
-    assert hasattr(wrapped, "deploy")
+    assert not hasattr(wrapped, "deploy")
     assert not hasattr(wrapped, "start")
     assert isinstance(handle, FlowHandle)
     call_kwargs = base_pipeline.with_options.call_args
@@ -247,57 +247,6 @@ def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
         assert getattr(module, alias) is base_pipeline
     finally:
         delattr(module, alias)
-
-
-def test_deploy_is_run_sugar_with_stack_override() -> None:
-    run = _DummyRun(status=ExecutionStatus.RUNNING)
-    configured_pipeline = MagicMock(return_value=run)
-    base_pipeline = MagicMock()
-    base_pipeline.with_options.return_value = configured_pipeline
-    zenml_decorator = MagicMock(return_value=base_pipeline)
-
-    old_stack_id = uuid4()
-    client_mock = MagicMock()
-    client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
-
-    with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
-        patch("kitaru.flow.Client", return_value=client_mock),
-        patch(
-            "kitaru.flow.resolve_execution_config",
-            return_value=_resolved_execution(stack="prod"),
-        ),
-        patch("kitaru.flow.resolve_connection_config", return_value=object()),
-        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
-    ):
-        wrapped = flow(
-            stack="dev",
-            image="python:3.12",
-            cache=False,
-            retries=2,
-        )(lambda x: x)
-        wrapped.deploy(
-            1,
-            stack="prod",
-            image=DockerSettings(parent_image="python:3.13"),
-            cache=True,
-            retries=0,
-        )
-
-    settings = base_pipeline.with_options.call_args.kwargs["settings"]
-    assert settings == {
-        "docker": DockerSettings(
-            requirements=["kitaru"],
-            environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
-        )
-    }
-    assert base_pipeline.with_options.call_args.kwargs["enable_cache"] is True
-    assert base_pipeline.with_options.call_args.kwargs["retry"] is None
-    assert client_mock.activate_stack.call_args_list == [
-        call("prod"),
-        call(old_stack_id),
-    ]
 
 
 def test_direct_call_raises_usage_error() -> None:

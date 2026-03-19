@@ -16,6 +16,10 @@ import kitaru.client as client_api
 import kitaru.inspection as inspection
 from kitaru._config import _stacks as stack_ops
 from kitaru._interface_errors import run_with_mcp_error_boundary
+from kitaru._local_server import (
+    start_or_connect_local_server,
+    stop_registered_local_server,
+)
 
 _MCP_INSTALL_ERROR = (
     "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
@@ -125,7 +129,7 @@ def kitaru_executions_run(
     args: dict[str, Any] | None = None,
     stack: str | None = None,
 ) -> dict[str, Any]:
-    """Start or deploy a flow from `<module_or_file>:<flow_name>` target."""
+    """Start a flow from `<module_or_file>:<flow_name>` target."""
 
     def _start_execution() -> dict[str, Any]:
         client = client_api.KitaruClient()
@@ -141,7 +145,6 @@ def kitaru_executions_run(
         )
         return execution_interface.build_started_execution_payload(
             target=target,
-            invocation=result.invocation,
             details=details,
         )
 
@@ -253,6 +256,38 @@ def kitaru_artifacts_get(artifact_id: str) -> dict[str, Any]:
         return payload
 
     return run_with_mcp_error_boundary(_get_artifact)
+
+
+@mcp.tool()
+def kitaru_start_local_server(
+    port: int | None = None,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    """Start or connect to the local Kitaru server."""
+
+    def _start_local_server() -> dict[str, Any]:
+        result = start_or_connect_local_server(port=port, timeout=timeout)
+        return {
+            "mode": "local",
+            "url": result.url,
+            "action": result.action,
+        }
+
+    return run_with_mcp_error_boundary(_start_local_server)
+
+
+@mcp.tool()
+def kitaru_stop_local_server() -> dict[str, Any]:
+    """Stop the registered local Kitaru server, if one exists."""
+
+    def _stop_local_server() -> dict[str, Any]:
+        result = stop_registered_local_server()
+        return {
+            "stopped": result.stopped,
+            "url": result.url,
+        }
+
+    return run_with_mcp_error_boundary(_stop_local_server)
 
 
 @mcp.tool()

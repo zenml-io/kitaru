@@ -39,7 +39,9 @@ from kitaru.mcp.server import (
     kitaru_executions_retry,
     kitaru_executions_run,
     kitaru_stacks_list,
+    kitaru_start_local_server,
     kitaru_status,
+    kitaru_stop_local_server,
     manage_stack,
 )
 
@@ -50,8 +52,6 @@ def _write_flow_target_module(path: Path, *, marker: str) -> None:
         "class _FakeFlow:\n"
         f"    marker = {marker!r}\n"
         "    def run(self, *args, **kwargs):\n"
-        "        return None\n"
-        "    def deploy(self, *args, **kwargs):\n"
         "        return None\n\n"
         "demo_flow = _FakeFlow()\n",
         encoding="utf-8",
@@ -93,7 +93,6 @@ def test_load_flow_target_delegates_to_shared_module_loader() -> None:
     fake_flow = SimpleNamespace(
         marker="patched",
         run=MagicMock(),
-        deploy=MagicMock(),
     )
     fake_module = SimpleNamespace(demo_flow=fake_flow)
 
@@ -354,7 +353,6 @@ def test_executions_run_fetches_execution(
     """Run tool should run a flow and include execution details when available."""
     invocation_result = execution_interface.FlowInvocationResult(
         handle=SimpleNamespace(exec_id=sample_execution.exec_id),
-        invocation="run",
     )
 
     with (
@@ -387,7 +385,7 @@ def test_executions_run_fetches_execution(
         exec_id=sample_execution.exec_id,
         client=mock_kitaru_client,
     )
-    assert payload["invocation"] == "run"
+    assert "invocation" not in payload
     assert payload["execution"]["exec_id"] == sample_execution.exec_id
 
 
@@ -401,7 +399,6 @@ def test_executions_run_returns_warning_when_details_unavailable(
             "kitaru._interface_executions.invoke_flow_target",
             return_value=execution_interface.FlowInvocationResult(
                 handle=SimpleNamespace(exec_id="kr-new"),
-                invocation="deploy",
             ),
         ),
         patch(
@@ -634,6 +631,55 @@ def test_artifact_get_delegates_value_serialization_to_inspection(
     mock_serialize.assert_called_once_with(loaded_value)
     assert payload["value"] == "delegated"
     assert payload["value_type"] == "custom.Type"
+
+
+def test_start_local_server_returns_structured_payload() -> None:
+    """The MCP local-start tool should reuse the shared helper payload."""
+    with patch(
+        "kitaru.mcp.server.start_or_connect_local_server",
+        return_value=SimpleNamespace(
+            url="http://127.0.0.1:8383",
+            action="started",
+        ),
+    ) as mock_start:
+        payload = kitaru_start_local_server(port=9090, timeout=45)
+
+    mock_start.assert_called_once_with(port=9090, timeout=45)
+    assert payload == {
+        "mode": "local",
+        "url": "http://127.0.0.1:8383",
+        "action": "started",
+    }
+
+
+def test_stop_local_server_returns_structured_payload() -> None:
+    """The MCP local-stop tool should expose stop metadata."""
+    with patch(
+        "kitaru.mcp.server.stop_registered_local_server",
+        return_value=SimpleNamespace(
+            stopped=True,
+            url="http://127.0.0.1:8383",
+        ),
+    ) as mock_stop:
+        payload = kitaru_stop_local_server()
+
+    mock_stop.assert_called_once_with()
+    assert payload == {
+        "stopped": True,
+        "url": "http://127.0.0.1:8383",
+    }
+
+
+def test_start_local_server_propagates_failures() -> None:
+    """The MCP local-start tool should propagate lifecycle failures."""
+    with (
+        patch(
+            "kitaru.mcp.server.start_or_connect_local_server",
+            side_effect=RuntimeError("missing local deps"),
+        ),
+        pytest.raises(RuntimeError, match="missing local deps"),
+    ):
+        kitaru_start_local_server()
 
 
 def test_status_and_stack_tools_return_structured_payloads() -> None:

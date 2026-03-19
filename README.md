@@ -75,6 +75,12 @@ Every execution is observable from day one. See your agent runs, inspect
 checkpoint outputs, track LLM costs, and approve human-in-the-loop wait steps —
 all from a visual dashboard that ships with the Kitaru server. The dashboard
 ships free, with the server, from day one.
+<<<<<<< HEAD
+=======
+
+To start that server locally, run `kitaru login` after installing `kitaru[local]`.
+To connect to an existing remote server, run `kitaru login <server>`.
+>>>>>>> origin/develop
 
 ## Quick Start
 
@@ -90,18 +96,26 @@ Or with [uv](https://docs.astral.sh/uv/) (recommended):
 uv pip install kitaru
 ```
 
-### Optional: connect to an existing Kitaru server
+### Optional: start a local Kitaru server
 
-Flows run locally by default. If you already have a deployed Kitaru server and
-want this quick start to use it, connect first:
+Flows run locally by default with the base install. If you also want the local
+dashboard and REST API, install the local extra and then run bare `kitaru login`:
 
 ```bash
-kitaru login https://my-server.example.com
-# add --project <PROJECT> or other login flags if your setup requires them
+uv pip install "kitaru[local]"
+kitaru login
 kitaru status
 ```
 
-If you're just trying Kitaru locally, skip this step.
+### Optional: connect to an existing remote Kitaru server
+
+If you already have a deployed Kitaru server, connect to it explicitly:
+
+```bash
+kitaru login https://my-server.example.com
+# add --project <PROJECT> or other remote-login flags if your setup requires them
+kitaru status
+```
 
 ### Initialize your project
 

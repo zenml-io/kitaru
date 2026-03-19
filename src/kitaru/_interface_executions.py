@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import kitaru.inspection as inspection
 from kitaru import _flow_loading
@@ -22,10 +22,9 @@ class StartedExecutionDetails:
 
 @dataclass(frozen=True)
 class FlowInvocationResult:
-    """Structured result from starting or deploying a flow target."""
+    """Structured result from starting a flow target."""
 
     handle: _flow_loading._FlowHandleLike
-    invocation: Literal["run", "deploy"]
 
 
 def list_executions_filtered(
@@ -176,18 +175,16 @@ def invoke_flow_target(
     flow_inputs = args or {}
 
     if stack:
-        handle = flow_target.deploy(stack=stack, **flow_inputs)
-        invocation: Literal["run", "deploy"] = "deploy"
+        handle = flow_target.run(stack=stack, **flow_inputs)
     else:
         handle = flow_target.run(**flow_inputs)
-        invocation = "run"
 
     if not isinstance(handle, _flow_loading._FlowHandleLike):
         raise ValueError(
             "Flow execution did not return a valid handle with an `exec_id`."
         )
 
-    return FlowInvocationResult(handle=handle, invocation=invocation)
+    return FlowInvocationResult(handle=handle)
 
 
 def resolve_started_execution_details(
@@ -195,7 +192,7 @@ def resolve_started_execution_details(
     exec_id: str,
     client: KitaruClient,
 ) -> StartedExecutionDetails:
-    """Best-effort execution lookup after a run/deploy launch."""
+    """Best-effort execution lookup after a flow launch."""
     try:
         execution = client.executions.get(exec_id)
     except Exception as exc:
@@ -214,13 +211,11 @@ def resolve_started_execution_details(
 def build_started_execution_payload(
     *,
     target: str,
-    invocation: Literal["run", "deploy"],
     details: StartedExecutionDetails,
 ) -> dict[str, Any]:
-    """Build the shared structured payload for run/deploy responses."""
+    """Build the shared structured payload for flow launch responses."""
     return {
         "exec_id": details.exec_id,
-        "invocation": invocation,
         "target": target,
         "execution": (
             inspection.serialize_execution(details.execution)

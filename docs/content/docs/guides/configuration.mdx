@@ -84,7 +84,7 @@ The important distinction is:
 
 - `kitaru.configure(stack="...")` sets a process-local default
 - `@flow(stack="...")` sets a default for one flow definition
-- `my_flow.run(stack="...")` / `my_flow.deploy(stack="...")` override both for one execution
+- `my_flow.run(stack="...")` overrides both for one execution
 - none of those change the persisted active stack selected by `kitaru stack use ...`
 
 ## Environment variables
@@ -99,8 +99,13 @@ These are the key env vars for non-interactive setup:
 - `KITARU_AUTH_TOKEN`
 - `KITARU_PROJECT`
 
-For normal interactive use, prefer `kitaru login`. The `KITARU_*` connection
-variables are mainly for Docker, CI, and other headless environments.
+For normal interactive use:
+
+- `kitaru login` starts and connects to a local server
+- `kitaru login <server>` connects to a remote server
+
+The `KITARU_*` connection variables are mainly for Docker, CI, and other
+headless environments.
 
 Use them together for Docker, CI, or any other headless environment:
 
@@ -260,11 +265,15 @@ def my_flow(topic: str) -> str:
 
 There are really two different stories here:
 
-1. **Persisted login / default setup** — if you connect with `kitaru login`,
-   Kitaru can usually just follow the server-side default project and you do not
-   need to think about it much.
+1. **Persisted login / default setup** — if you connect with
+   `kitaru login <server>`, Kitaru can usually just follow the server-side
+   default project and you do not need to think about it much.
 2. **Env-driven remote bootstrap** — if you connect with `KITARU_SERVER_URL` /
    `KITARU_AUTH_TOKEN`, then `KITARU_PROJECT` is required at first use.
+
+Bare `kitaru login` is the local-server path instead: it does not use
+`KITARU_SERVER_URL` or `KITARU_AUTH_TOKEN`, and it warns instead of failing if
+those remote auth env vars are already set in your shell.
 
 You can set the project explicitly with either:
 

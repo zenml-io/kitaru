@@ -59,7 +59,7 @@ def _resolve_zenml_wait() -> Callable[..., Any]:
 
 def wait(
     *,
-    schema: Any = bool,
+    schema: Any = None,
     name: str | None = None,
     question: str | None = None,
     timeout: int | None = None,
@@ -73,7 +73,11 @@ def wait(
     ``KitaruClient``, the CLI, or MCP.
 
     Args:
-        schema: Expected type of the input value. Defaults to bool.
+        schema: Expected type of the input value. When ``None``
+            (the default), the wait acts as a pure continue/abort gate
+            and returns ``None`` on continuation. Pass an explicit type
+            (e.g. ``bool``, ``str``, a Pydantic model) when the caller
+            needs structured input from the human.
         name: Display name for this wait point.
         question: Human-readable prompt describing what input is needed.
         timeout: Maximum seconds the runner keeps polling before it pauses

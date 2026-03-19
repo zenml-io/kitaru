@@ -23,6 +23,26 @@ Kitaru requires **Python 3.11 or newer**.
   </Tab>
 </Tabs>
 
+The base install is enough to run flows locally against the default local
+database.
+
+## Optional: add local server support
+
+If you also want the local dashboard and REST API, install the local extra:
+
+<Tabs items={["uv (recommended)", "pip"]}>
+  <Tab value="uv (recommended)">
+    ```bash
+    uv add kitaru --extra local
+    ```
+  </Tab>
+  <Tab value="pip">
+    ```bash
+    pip install "kitaru[local]"
+    ```
+  </Tab>
+</Tabs>
+
 ## Verify the CLI
 
 <Tabs items={["uv project", "pip environment"]}>
@@ -40,27 +60,52 @@ Kitaru requires **Python 3.11 or newer**.
   </Tab>
 </Tabs>
 
-## Optional: connect to an existing Kitaru server
+## Optional: start a local Kitaru server
 
 <Callout type="info">
-  Flows run locally by default. If you already have a deployed Kitaru server
-  and want this quickstart to use it, connect first, verify with
-  `kitaru status`, and then run the same flow commands below. If you are just
-  trying Kitaru locally, skip this section.
+  Flows run locally without any login. Bare `kitaru login` is optional: it
+  starts a local server so you can browse executions in the dashboard and use
+  the REST API while keeping the same local runtime underneath.
 </Callout>
 
 <Tabs items={["uv project", "pip environment"]}>
   <Tab value="uv project">
     ```bash
+    uv run kitaru login
+    uv run kitaru status
+    ```
+  </Tab>
+  <Tab value="pip environment">
+    ```bash
+    kitaru login
+    kitaru status
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+  Local server startup is currently supported on Unix-like systems and WSL. If
+  you are on native Windows, use WSL for this flow.
+</Callout>
+
+## Optional: connect to an existing remote Kitaru server
+
+If you already have a deployed Kitaru server and want this quickstart to use
+it, connect first, verify with `kitaru status`, and then run the same flow
+commands below.
+
+<Tabs items={["uv project", "pip environment"]}>
+  <Tab value="uv project">
+    ```bash
     uv run kitaru login https://my-server.example.com --api-key <API_KEY>
-    # add --project <PROJECT> or other login flags if your setup requires them
+    # add --project <PROJECT> or other remote-login flags if your setup requires them
     uv run kitaru status
     ```
   </Tab>
   <Tab value="pip environment">
     ```bash
     kitaru login https://my-server.example.com --api-key <API_KEY>
-    # add --project <PROJECT> or other login flags if your setup requires them
+    # add --project <PROJECT> or other remote-login flags if your setup requires them
     kitaru status
     ```
   </Tab>
