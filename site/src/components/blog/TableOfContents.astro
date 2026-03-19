@@ -1,0 +1,207 @@
+---
+interface Props {
+  headings: { depth: number; slug: string; text: string }[];
+}
+
+const { headings } = Astro.props;
+
+// Only show h2 headings in the TOC
+const tocHeadings = headings.filter((h) => h.depth === 2);
+---
+
+{tocHeadings.length > 0 && (
+  <nav class="toc-sidebar" aria-label="Table of contents">
+    <div class="toc-inner">
+      <div class="toc-label">On this page</div>
+      <ul class="toc-list">
+        {tocHeadings.map((h) => (
+          <li>
+            <a href={`#${h.slug}`} data-toc-link data-section={h.slug}>
+              {h.text}
+            </a>
+          </li>
+        ))}
+      </ul>
+
+      {/* GitHub CTA */}
+      <div class="sidebar-cta">
+        <a href="https://github.com/zenml-io/kitaru" class="toc-gh-btn" target="_blank" rel="noopener noreferrer" aria-label="Star on GitHub (opens in new tab)">
+          <svg class="gh-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+          </svg>
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+)}
+
+<script>
+  function initScrollSpy() {
+    const links = document.querySelectorAll<HTMLAnchorElement>('[data-toc-link]');
+    if (links.length === 0) return;
+
+    const slugs = Array.from(links)
+      .map((a) => a.dataset.section ?? '')
+      .filter(Boolean);
+    const headingEls = slugs
+      .map((slug) => document.getElementById(slug))
+      .filter((el): el is HTMLElement => el !== null);
+
+    if (headingEls.length === 0) return;
+
+    function setActive(slug: string) {
+      links.forEach((a) => {
+        a.classList.toggle('active', a.dataset.section === slug);
+      });
+    }
+
+    setActive(slugs[0]);
+
+    // Single scroll-based approach: find the last heading above 25% of viewport
+    let ticking = false;
+    window.addEventListener(
+      'scroll',
+      () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          let current = slugs[0];
+          for (const el of headingEls) {
+            if (el.getBoundingClientRect().top <= window.innerHeight * 0.25) {
+              current = el.id;
+            }
+          }
+          setActive(current);
+          ticking = false;
+        });
+      },
+      { passive: true },
+    );
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initScrollSpy);
+  } else {
+    initScrollSpy();
+  }
+</script>
+
+<style>
+  .toc-sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    order: -1;
+    margin-right: 48px;
+  }
+
+  .toc-inner {
+    position: sticky;
+    top: 80px;
+    background: var(--color-surface);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
+    border: 1px solid var(--color-border);
+  }
+
+  .toc-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-muted);
+    margin-bottom: 12px;
+  }
+
+  .toc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .toc-list li {
+    margin-bottom: 2px;
+  }
+
+  .toc-list a {
+    display: block;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: var(--color-secondary);
+    text-decoration: none;
+    padding: 5px 10px;
+    border-radius: 6px;
+    transition: color 0.2s, background 0.2s;
+  }
+
+  .toc-list a:hover {
+    color: var(--color-accent);
+  }
+
+  .toc-list a:focus-visible {
+    color: var(--color-accent);
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+
+  .toc-list a.active {
+    color: var(--color-accent);
+    background: rgba(241, 120, 41, 0.08);
+    font-weight: 600;
+  }
+
+  /* ── Sidebar CTA ── */
+  .sidebar-cta {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border-light);
+  }
+
+  .gh-icon {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+  }
+
+  .toc-gh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    justify-content: center;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-family: var(--font-ui);
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: var(--color-primary);
+    color: #fff;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  .toc-gh-btn:hover {
+    opacity: 0.85;
+  }
+
+  .toc-gh-btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* ── Hide on smaller screens ── */
+  @media (max-width: 1100px) {
+    .toc-sidebar {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toc-list a,
+    .toc-gh-btn {
+      transition: none;
+    }
+  }
+</style>

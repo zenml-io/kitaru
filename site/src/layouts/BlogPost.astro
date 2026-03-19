@@ -2,7 +2,15 @@
 import Base from './Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import TableOfContents from '../components/blog/TableOfContents.astro';
+import BlogBottomCTA from '../components/blog/BlogBottomCTA.astro';
 import { AUTHORS, CATEGORY_STYLES } from '../lib/blog';
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
 
 interface Props {
   title: string;
@@ -14,6 +22,7 @@ interface Props {
   image?: string;
   readTime: string;
   relatedPosts?: { href: string; title: string; author: string; readTime: string }[];
+  headings?: Heading[];
 }
 
 const {
@@ -26,6 +35,7 @@ const {
   image,
   readTime,
   relatedPosts = [],
+  headings = [],
 } = Astro.props;
 
 const formatted = new Intl.DateTimeFormat('en-US', {
@@ -95,13 +105,17 @@ const ogImageUrl = ogImage
         </div>
       )}
 
-      <!-- Body -->
+      <!-- Body + TOC sidebar -->
       <div class="blog-post-body-wrap">
+        <TableOfContents headings={headings} />
         <div class="blog-post-body" itemprop="articleBody">
           <slot />
         </div>
       </div>
     </article>
+
+    <!-- Bottom CTA -->
+    <BlogBottomCTA />
 
     <!-- Related posts -->
     {relatedPosts.length > 0 && (
@@ -243,14 +257,19 @@ const ogImageUrl = ogImage
     border: 1px solid var(--color-border);
   }
 
-  /* ── Body ── */
+  /* ── Body + TOC wrapper ── */
   .blog-post-body-wrap {
-    max-width: 720px;
+    max-width: 1060px;
     margin: 0 auto;
-    padding: 48px clamp(16px, 5vw, 80px) 60px;
+    padding: 48px clamp(16px, 5vw, 48px) 60px;
+    display: flex;
+    justify-content: center;
   }
 
   .blog-post-body {
+    max-width: 720px;
+    width: 100%;
+    min-width: 0;
     font-size: clamp(0.95rem, 2.5vw, 1.05rem);
     line-height: 1.75;
     color: var(--color-secondary);
@@ -262,6 +281,7 @@ const ogImageUrl = ogImage
     color: var(--color-primary);
     margin: 48px 0 16px;
     letter-spacing: -0.01em;
+    scroll-margin-top: 80px;
   }
 
   .blog-post-body :global(h3) {
@@ -308,7 +328,6 @@ const ogImageUrl = ogImage
     padding: 16px 20px;
     overflow-x: auto;
     margin: 24px -16px;
-    -webkit-overflow-scrolling: touch;
   }
 
   .blog-post-body :global(pre code) {
@@ -373,6 +392,7 @@ const ogImageUrl = ogImage
     padding: 0 clamp(16px, 5vw, 80px) 80px;
     border-top: 1px solid var(--color-border-light);
     padding-top: 40px;
+    margin-top: 48px;
   }
 
   .blog-related-heading {
