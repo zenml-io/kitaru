@@ -1,6 +1,6 @@
-# iCloud conflict duplicates
-* 2.*
-* 2
+# iCloud conflict duplicates (pattern: "filename 2.ext" or "filename 2")
+*[[:space:]]2.[!.]*
+*[[:space:]]2
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

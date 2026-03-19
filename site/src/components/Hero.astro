@@ -361,13 +361,36 @@
 
 <script>
   // ─── Copy-to-clipboard for Hero install command only ───
+  function copyText(text: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // Fallback for restricted/unsupported clipboard environments
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+    } catch {
+      document.body.removeChild(ta);
+      return Promise.reject();
+    }
+    document.body.removeChild(ta);
+    return Promise.resolve();
+  }
+
   document.querySelectorAll<HTMLButtonElement>('#hero .copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const text = btn.dataset.copy ?? '';
-      navigator.clipboard.writeText(text).then(() => {
+      copyText(text).then(() => {
         btn.classList.add('copied');
         setTimeout(() => btn.classList.remove('copied'), 1500);
-      }).catch(() => {});
+      }).catch(() => {
+        btn.setAttribute('aria-label', 'Copy failed');
+        setTimeout(() => btn.setAttribute('aria-label', 'Copy install command'), 2000);
+      });
     });
   });
 </script>
