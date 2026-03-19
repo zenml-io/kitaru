@@ -76,6 +76,9 @@ checkpoint outputs, track LLM costs, and approve human-in-the-loop wait steps â€
 all from a visual dashboard that ships with the Kitaru server. The dashboard
 ships free, with the server, from day one.
 
+To start that server locally, run `kitaru login` after installing `kitaru[local]`.
+To connect to an existing remote server, run `kitaru login <server>`.
+
 ## Quick Start
 
 ### Install
