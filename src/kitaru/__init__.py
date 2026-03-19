@@ -38,24 +38,10 @@ The CLI also supports global runtime log-store configuration via
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
 
-# Reset the re-entry guard so apply_env_translations() can run on this
-# (re-)import.  On first import the ZenML init hook fires *during*
-# ``import zenml`` below and handles translations; the explicit call
-# after the import is a no-op thanks to the guard.  On
-# ``importlib.reload(kitaru)`` the init hook does NOT re-fire (zenml is
-# cached in sys.modules), so the explicit call below is the one that
-# actually runs.  Accessing via the module object (not a bare name) lets
-# ``patch("kitaru._env.apply_env_translations")`` intercept in tests.
-from . import _env as _env_mod
-
-_env_mod._reset_applied()
-
 # ZenML must be imported explicitly here so that its init_logging() runs
 # (installing console + storage handlers on the root logger) before we swap
 # the console handler with Kitaru's terminal handler.
 import zenml as _zenml  # noqa: F401
-
-_env_mod.apply_env_translations()
 
 from ._terminal_logging import install_terminal_log_intercept
 
