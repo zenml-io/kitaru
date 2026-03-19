@@ -275,7 +275,7 @@
   const DPR = Math.min(window.devicePixelRatio || 1, 2);
 
   // Landscape tuning
-  const RIDGE_BASE = 0.58;
+  const RIDGE_BASE = 0.72;
   const RIDGE_AMP = [0.06, 0.03, 0.015];
   const CLOUD_BAND = 0.12;
   const CLOUD_THRESHOLD = 0.45;
@@ -347,48 +347,51 @@
         let cr: number, cg: number, cb: number;
         let base: number;
 
-        if (ny < cloudTop) {
-          // Sky zone — peach gradient top to bottom
+        // Smooth blend: 0 = pure sky, 1 = pure mountain
+        const FADE_BAND = 0.06;
+        const blendCenter = (cloudTop + ridge) / 2;
+        const blendHalf = Math.max((ridge - cloudTop) / 2 + FADE_BAND, 0.01);
+        const rawBlend = (ny - blendCenter + blendHalf) / (blendHalf * 2);
+        const cb2 = Math.max(0, Math.min(rawBlend, 1));
+        const blend = cb2 * cb2 * (3 - 2 * cb2); // smoothstep
+
+        // Sky: warm peach
+        const skyT = Math.min(ny / Math.max(cloudTop, 0.01), 1);
+        const skyR = lerp(248, 240, skyT);
+        const skyG = lerp(220, 195, skyT);
+        const skyB = lerp(195, 170, skyT);
+
+        // Mountain: warm peach-orange → burnt orange (brand-aligned)
+        const mtnDepth = Math.min(Math.max(0, (ny - ridge) / Math.max(1 - ridge, 0.01)), 1);
+        const mtnR = lerp(238, 200, mtnDepth);
+        const mtnG = lerp(150, 105, mtnDepth);
+        const mtnB = lerp(90, 55, mtnDepth);
+
+        cr = Math.round(lerp(skyR, mtnR, blend));
+        cg = Math.round(lerp(skyG, mtnG, blend));
+        cb = Math.round(lerp(skyB, mtnB, blend));
+
+        // High contrast: nearly invisible sky, bold mountains
+        const skyBase = 0.02 + Math.random() * 0.02;
+        const mtnBase = 0.25 + Math.random() * 0.10;
+        base = lerp(skyBase, mtnBase, blend);
+
+        if (blend < 0.3) {
           zone = 'sky';
-          const skyT = ny / cloudTop; // 0 at top, 1 at cloud edge
-          cr = Math.round(lerp(248, 245, skyT));
-          cg = Math.round(lerp(220, 210, skyT));
-          cb = Math.round(lerp(195, 180, skyT));
-          base = 0.18 + Math.random() * 0.14;
-        } else if (ny < ridge) {
-          // Cloud zone — warm white, clumpy
-          zone = 'cloud';
-          const clump = cloudNoise(c, r);
-          if (clump > CLOUD_THRESHOLD) {
-            cr = 255; cg = 245; cb = 235;
-            base = 0.28 + Math.random() * 0.18;
-          } else {
-            cr = 248; cg = 225; cb = 205;
-            base = 0.14 + Math.random() * 0.12;
-          }
-        } else {
-          // Mountain zone — coral → terracotta → deep red gradient
+        } else if (blend > 0.7) {
           zone = 'mountain';
-          const mtnDepth = (ny - ridge) / (1 - ridge); // 0 at ridge, 1 at bottom
-          if (mtnDepth < 0.33) {
-            const mt = mtnDepth / 0.33;
-            cr = Math.round(lerp(230, 200, mt));
-            cg = Math.round(lerp(140, 100, mt));
-            cb = Math.round(lerp(110, 80, mt));
-          } else {
-            const mt = (mtnDepth - 0.33) / 0.67;
-            cr = Math.round(lerp(200, 170, mt));
-            cg = Math.round(lerp(100, 75, mt));
-            cb = Math.round(lerp(80, 60, mt));
-          }
-          base = 0.10 + Math.random() * 0.10;
+        } else {
+          zone = 'cloud';
         }
 
-        // Center suppression for text readability
-        const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-        const centerRadius = Math.min(cx, cy) * 0.35;
-        if (dist < centerRadius) {
-          base *= CENTER_SUPPRESS;
+        // Center suppression — smooth radial fade for text readability
+        const dist = Math.sqrt((x - cx) ** 2 + ((y - cy) * 1.4) ** 2); // elliptical, wider than tall
+        const innerR = Math.min(cx, cy) * 0.2;
+        const outerR = Math.min(cx, cy) * 0.55;
+        if (dist < outerR) {
+          const t = Math.max(0, (dist - innerR) / (outerR - innerR));
+          const fade = t * t; // ease-in: fully suppressed at center, smooth ramp out
+          base *= CENTER_SUPPRESS + (1 - CENTER_SUPPRESS) * fade;
         }
 
         cells.push({
@@ -446,28 +449,11 @@
     const at2Y = canvasH * 0.5 + Math.sin(t * 0.22) * canvasH * 0.32;
 
     for (const cell of cells) {
-      let opacity = cell.baseOpacity;
-      let dx = 0;
-      let dy = 0;
-      let scale = 1;
+      // Ambient breathing — gentle opacity pulse
+      const breath = Math.sin(t * 0.6 + cell.phase) * 0.03;
+      let opacity = cell.baseOpacity + breath;
 
-      // Ambient breathing — punchy
-      const breath = Math.sin(t * 0.8 + cell.phase) * 0.05;
-      opacity = cell.baseOpacity + breath;
-      opacity = Math.max(0.05, Math.min(opacity, 0.45));
-
-      // Cloud drift — gentle horizontal sway
-      if (cell.zone === 'cloud') {
-        dx += Math.sin(t * 0.15 + cell.phase) * 3;
-      }
-
-      // Mountain wave — vertical undulation that travels horizontally
-      if (cell.zone === 'mountain') {
-        opacity += Math.sin(t * 1.5 + cell.phase * 2) * 0.01;
-        dy += Math.sin(t * 0.8 + cell.x * 0.02 + cell.y * 0.01) * 2.5;
-      }
-
-      // Attractor 1 — ALWAYS active (primary wanderer)
+      // Attractor 1 — wandering glow (opacity only)
       {
         const adx = cell.x - at1X;
         const ady = cell.y - at1Y;
@@ -475,16 +461,11 @@
         if (adist < ATTRACTOR_RADIUS) {
           const ratio = 1 - (adist / ATTRACTOR_RADIUS);
           const ease = ratio * ratio;
-          opacity = opacity + (0.35 - opacity) * ease;
-          if (adist > 0.1) {
-            dx += (adx / adist) * ease * 6;
-            dy += (ady / adist) * ease * 6;
-          }
-          scale = Math.max(scale, 1 + ease * 0.18);
+          opacity = opacity + (0.28 - opacity) * ease;
         }
       }
 
-      // Attractor 2 — ALWAYS active (secondary wanderer, gentler)
+      // Attractor 2 — secondary wandering glow (opacity only)
       {
         const adx = cell.x - at2X;
         const ady = cell.y - at2Y;
@@ -492,37 +473,26 @@
         if (adist < ATTRACTOR_RADIUS * 0.8) {
           const ratio = 1 - (adist / (ATTRACTOR_RADIUS * 0.8));
           const ease = ratio * ratio;
-          opacity = opacity + (0.30 - opacity) * ease * 0.6;
-          if (adist > 0.1) {
-            dx += (adx / adist) * ease * 4;
-            dy += (ady / adist) * ease * 4;
-          }
-          scale = Math.max(scale, 1 + ease * 0.12);
+          opacity = opacity + (0.22 - opacity) * ease * 0.6;
         }
       }
 
-      // Cursor interaction — stacks on top of attractors
+      // Cursor interaction — opacity boost only
       if (mouseActive) {
         const cdx = cell.x - mouseX;
         const cdy = cell.y - mouseY;
         const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
-
         if (cdist < CURSOR_RADIUS) {
           const ratio = 1 - (cdist / CURSOR_RADIUS);
           const ease = ratio * ratio;
-          opacity = opacity + (0.50 - opacity) * ease;
-          if (cdist > 0.1) {
-            dx += (cdx / cdist) * ease * 8;
-            dy += (cdy / cdist) * ease * 8;
-          }
-          scale = Math.max(scale, 1 + ease * 0.3);
+          opacity = opacity + (0.35 - opacity) * ease;
         }
       }
 
-      ctx!.globalAlpha = Math.min(opacity, 0.55);
+      ctx!.globalAlpha = Math.max(0.02, Math.min(opacity, 0.35));
       ctx!.fillStyle = cell.colorStr;
       ctx!.beginPath();
-      ctx!.arc(cell.x + dx, cell.y + dy, DOT_RADIUS * scale, 0, Math.PI * 2);
+      ctx!.arc(cell.x, cell.y, DOT_RADIUS, 0, Math.PI * 2);
       ctx!.fill();
     }
 

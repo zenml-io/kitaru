@@ -4,15 +4,18 @@
 
 <section class="arch-section section-pad dark-section" aria-labelledby="arch-heading">
   <div class="section-inner">
+    <!-- Eyebrow + title above the grid -->
+    <div class="arch-header" data-reveal>
+      <span class="section-eyebrow">Architecture</span>
+      <h2 id="arch-heading" class="section-title arch-title">
+        Orchestration layer.<br><em class="arch-italic">Not a framework.</em>
+      </h2>
+    </div>
+
     <div class="arch-grid">
 
-      <!-- Left column: eyebrow + title + layer stack -->
+      <!-- Left column: layer stack -->
       <div class="arch-left" data-reveal="fade-left">
-        <span class="section-eyebrow">Architecture</span>
-        <h2 id="arch-heading" class="section-title arch-title">
-          Orchestration layer. <em class="arch-italic">Not a framework.</em>
-        </h2>
-
         <div class="arch-stack">
           <div class="arch-layer arch-layer-agent">
             <div class="arch-layer-label">Your Agent Code</div>
@@ -111,12 +114,15 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 48px;
-    align-items: start;
+    align-items: stretch;
+  }
+
+  .arch-header {
+    margin-bottom: 40px;
   }
 
   /* Layer stack */
   .arch-stack {
-    margin-top: 40px;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -210,13 +216,33 @@
     text-align: right;
   }
 
+  .arch-left {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .arch-stack {
+    flex: 1;
+  }
+
+  .arch-right {
+    display: flex;
+    flex-direction: column;
+  }
+
   /* Code window (dark variant) */
   .arch-code-window {
     background: #211C17;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     overflow: hidden;
-    margin-top: 32px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .arch-code-pre {
+    flex: 1;
   }
 
   .arch-code-header {
