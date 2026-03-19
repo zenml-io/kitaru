@@ -380,6 +380,26 @@ def image_settings_to_docker_settings(
     return DockerSettings(**docker_settings_kwargs)
 
 
+_SECRET_ENV_KEY_PATTERN = re.compile(
+    r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)",
+    re.IGNORECASE,
+)
+_REDACTED = "***"
+
+
+def _redact_image_environment(
+    image: ImageSettings | None,
+) -> ImageSettings | None:
+    """Return a copy of *image* with secret-looking environment values redacted."""
+    if image is None or not image.environment:
+        return image
+    redacted_env = {
+        k: (_REDACTED if _SECRET_ENV_KEY_PATTERN.search(k) else v)
+        for k, v in image.environment.items()
+    }
+    return image.model_copy(update={"environment": redacted_env})
+
+
 def build_frozen_execution_spec(
     *,
     resolved_execution: ResolvedExecutionConfig,
@@ -387,11 +407,29 @@ def build_frozen_execution_spec(
     connection: ResolvedConnectionConfig,
     model_registry: ModelRegistryConfig | None = None,
 ) -> FrozenExecutionSpec:
-    """Create a frozen execution-spec payload persisted with each run."""
+    """Create a frozen execution-spec payload persisted with each run.
+
+    Sensitive fields (auth tokens, secret-looking environment variables) are
+    stripped or redacted so that the persisted metadata never contains
+    plaintext secrets.
+    """
+    safe_connection = ResolvedConnectionConfig(
+        server_url=connection.server_url,
+        project=connection.project,
+    )
+    safe_flow_defaults = flow_defaults.model_copy(update={"auth_token": None})
+    safe_resolved_execution = resolved_execution.model_copy(
+        update={"image": _redact_image_environment(resolved_execution.image)},
+    )
+    safe_flow_defaults_image = _redact_image_environment(safe_flow_defaults.image)
+    if safe_flow_defaults_image is not safe_flow_defaults.image:
+        safe_flow_defaults = safe_flow_defaults.model_copy(
+            update={"image": safe_flow_defaults_image},
+        )
     return FrozenExecutionSpec(
-        resolved_execution=resolved_execution,
-        flow_defaults=flow_defaults,
-        connection=connection,
+        resolved_execution=safe_resolved_execution,
+        flow_defaults=safe_flow_defaults,
+        connection=safe_connection,
         model_registry=model_registry,
     )
 
@@ -422,6 +460,10 @@ def persist_frozen_execution_spec_impl(
             FROZEN_EXECUTION_SPEC_METADATA_KEY: frozen_execution_spec.model_dump(
                 mode="json",
                 exclude_none=True,
+                exclude={
+                    "connection": {"auth_token"},
+                    "flow_defaults": {"auth_token"},
+                },
             )
         },
         resources=[
