@@ -27,6 +27,9 @@ dependencies = [
     "zenml[local] @ git+https://github.com/zenml-io/zenml.git@f2030272cce32fa81862cf2c98ad625d4ce9baa9",
 ]
 
+[project.entry-points."zenml.init_hooks"]
+kitaru = "kitaru_init_hook:init"
+
 [project.optional-dependencies]
 local = [
     # TODO: revert to "zenml[local]>=0.94.0" once zenml release is out
@@ -56,7 +59,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kitaru"]
+packages = ["src/kitaru", "src/kitaru_init_hook"]
 
 [dependency-groups]
 dev = [
