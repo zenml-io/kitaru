@@ -38,10 +38,6 @@ The CLI also supports global runtime log-store configuration via
 ``kitaru executions get/list/logs/input/replay/retry/resume/cancel``.
 """
 
-from ._env import apply_env_translations
-
-apply_env_translations()
-
 # ZenML must be imported explicitly here so that its init_logging() runs
 # (installing console + storage handlers on the root logger) before we swap
 # the console handler with Kitaru's terminal handler.

@@ -215,7 +215,8 @@ site/.astro/
 site/.wrangler/
 .wrangler/
 
-# ZenML local project marker
+# Local project markers
+.kitaru/
 .zen/
 
 # Design docs

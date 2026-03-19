@@ -39,7 +39,17 @@ The extras give you:
 | `mcp` | MCP server (`kitaru-mcp`) — query executions, artifacts, and logs from Claude Code, Cursor, or any MCP client |
 | `pydantic-ai` | PydanticAI adapter — wrap PydanticAI agents with Kitaru tracking |
 
-### 2. Verify the installation
+### 2. Initialize the project
+
+```bash
+uv run kitaru init
+```
+
+This creates a `.kitaru/` directory in your project root. It tells
+Kitaru where your source code lives, which matters when packaging
+flows for remote execution.
+
+### 3. Verify the installation
 
 ```bash
 uv run kitaru status
@@ -59,7 +69,7 @@ uv run kitaru stack list
 
 That gives you a second local stack to switch to or delete while testing.
 
-### 3. Run your first flow
+### 4. Run your first flow
 
 ```bash
 uv run examples/basic_flow/first_working_flow.py
@@ -69,7 +79,7 @@ This runs a simple two-checkpoint flow (`fetch_data` → `process_data`)
 and prints the result. Everything is persisted locally — you can
 inspect it afterwards.
 
-### 4. Explore what happened
+### 5. Explore what happened
 
 ```bash
 # List recent executions
@@ -82,7 +92,7 @@ uv run kitaru executions get <EXECUTION_ID>
 uv run kitaru executions logs <EXECUTION_ID>
 ```
 
-### 5. Try more examples
+### 6. Try more examples
 
 Each example demonstrates a different Kitaru primitive. Run them in
 order of complexity. Examples are grouped into subdirectories under
@@ -288,6 +298,7 @@ docker stop kitaru-server && docker rm kitaru-server
 
 | Command | What it does |
 |---|---|
+| `uv run kitaru init` | Initialize a Kitaru project (creates `.kitaru/`) |
 | `uv run kitaru status` | Show connection state and active stack |
 | `uv run kitaru info` | Detailed environment info |
 | `uv run kitaru executions list` | List recent flow executions |
