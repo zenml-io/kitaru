@@ -17,6 +17,7 @@ import html
 import json
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -30,16 +31,13 @@ import kitaru
 from kitaru import checkpoint, flow
 
 try:
-    from .llm import MAX_TOOL_ROUNDS, MODEL
+    from . import llm as llm_mod
     from .materializers import LLMResponseMaterializer, ToolCallResultMaterializer
-    from .tools import ALL_SCHEMAS, dispatch_tool
+    from .tools import ALL_SCHEMAS, _resolve, dispatch_tool
 except ImportError:
-    from llm import MAX_TOOL_ROUNDS, MODEL
+    import llm as llm_mod  # type: ignore[no-redef]
     from materializers import LLMResponseMaterializer, ToolCallResultMaterializer
-    from tools import ALL_SCHEMAS, dispatch_tool
-
-
-_WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
+    from tools import ALL_SCHEMAS, _resolve, dispatch_tool
 
 SYSTEM_PROMPT = """\
 You are a capable general-purpose agent. You can solve any task the user gives \
@@ -225,10 +223,19 @@ class ToolCallResult(BaseModel):
 # PydanticMaterializer so our save_visualizations() is used.
 # ---------------------------------------------------------------------------
 
-LLMResponseMaterializer.ASSOCIATED_TYPES = (LLMResponse,)
-ToolCallResultMaterializer.ASSOCIATED_TYPES = (ToolCallResult,)
-materializer_registry.register_and_overwrite_type(LLMResponse, LLMResponseMaterializer)
-materializer_registry.register_and_overwrite_type(ToolCallResult, ToolCallResultMaterializer)
+_materializers_registered = False
+
+
+def _register_materializers() -> None:
+    """Register custom materializers. Safe to call multiple times."""
+    global _materializers_registered
+    if _materializers_registered:
+        return
+    LLMResponseMaterializer.ASSOCIATED_TYPES = (LLMResponse,)
+    ToolCallResultMaterializer.ASSOCIATED_TYPES = (ToolCallResult,)
+    materializer_registry.register_and_overwrite_type(LLMResponse, LLMResponseMaterializer)
+    materializer_registry.register_and_overwrite_type(ToolCallResult, ToolCallResultMaterializer)
+    _materializers_registered = True
 
 
 # ---------------------------------------------------------------------------
@@ -239,18 +246,19 @@ materializer_registry.register_and_overwrite_type(ToolCallResult, ToolCallResult
 @checkpoint(type="llm_call")
 def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
     """Single LLM completion call tracked as a checkpoint."""
-    import time
-
     from kitaru.llm import _extract_usage  # noqa: PLC2701
 
+    body_start = time.perf_counter()
+
     started_at = time.perf_counter()
-    response = completion(model=MODEL, messages=messages, tools=_ALL_TOOLS)
-    latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
+    with llm_mod.credential_env():
+        response = completion(model=llm_mod.MODEL, messages=messages, tools=_ALL_TOOLS)
+    litellm_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
     usage = _extract_usage(response)
     metadata: dict[str, Any] = {
-        "model": MODEL,
-        "latency_ms": latency_ms,
+        "model": llm_mod.MODEL,
+        "latency_ms": litellm_ms,
         "tokens_input": usage.prompt_tokens,
         "tokens_output": usage.completion_tokens,
         "total_tokens": usage.total_tokens,
@@ -273,6 +281,10 @@ def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
             )
             for tc in msg.tool_calls
         ]
+
+    body_ms = round((time.perf_counter() - body_start) * 1000, 3)
+    overhead_ms = round(body_ms - litellm_ms, 3)
+    print(f"[PROFILE-INNER] litellm={litellm_ms}ms, body={body_ms}ms, in-body-overhead={overhead_ms}ms")
 
     return LLMResponse(role=msg.role, content=msg.content, tool_calls=tool_calls)
 
@@ -314,6 +326,7 @@ def tool_call(
     cwd: str,
 ) -> ToolCallResult:
     """Execute a single tool call tracked as a checkpoint."""
+    body_start = time.perf_counter()
     cwd_path = Path(cwd)
     before = {p.name for p in cwd_path.iterdir() if p.is_file()} if cwd_path.is_dir() else set()
 
@@ -330,12 +343,14 @@ def tool_call(
             ),
         )
 
+    tool_start = time.perf_counter()
     raw_result = dispatch_tool(cwd, tool_name, arguments)
+    tool_exec_ms = round((time.perf_counter() - tool_start) * 1000, 3)
 
     # Save full file content as a browseable artifact (the LLM result is truncated)
     if tool_name == "read_file" and "path" in arguments:
         try:
-            full_path = Path(cwd) / arguments["path"]
+            full_path = _resolve(cwd, arguments["path"])
             full_content = full_path.read_text()
             escaped = html.escape(full_content)
             kitaru.save(
@@ -352,7 +367,23 @@ def tool_call(
     # Save any new files the tool created as separate typed artifacts
     _save_generated_files(cwd, before)
 
+    body_ms = round((time.perf_counter() - body_start) * 1000, 3)
+    overhead_ms = round(body_ms - tool_exec_ms, 3)
+    print(f"[PROFILE-INNER] tool_exec={tool_exec_ms}ms, body={body_ms}ms, in-body-overhead={overhead_ms}ms")
+
     return ToolCallResult(tool_name=tool_name, output=str(raw_result))
+
+
+@checkpoint
+def _setup_workspace() -> str:
+    """Create or restore a stable workspace directory."""
+    try:
+        cwd = kitaru.load("workspace_path")
+        Path(cwd).mkdir(parents=True, exist_ok=True)
+    except Exception:
+        cwd = tempfile.mkdtemp(prefix="agent_")
+        kitaru.save("workspace_path", cwd)
+    return cwd
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +405,11 @@ def coding_agent_basic(task: str) -> str:
     a task it hands control back to the user via kitaru.wait() so
     they can give follow-up instructions or quit.
     """
-    cwd = str(_WORKSPACE)
+    _register_materializers()
+    llm_mod.setup()
+
+    cwd = _setup_workspace()
+
     kitaru.log(task=task)
 
     messages: list[dict[str, Any]] = [
@@ -391,10 +426,18 @@ def coding_agent_basic(task: str) -> str:
     tool_calls_made = 0
     llm_count = 0
 
-    for _ in range(MAX_TOOL_ROUNDS):
+    # Profiling accumulators
+    _profile: list[dict[str, Any]] = []
+
+    for _ in range(llm_mod.MAX_TOOL_ROUNDS):
+        _t0 = time.perf_counter()
         response: LLMResponse = llm_call(
             messages, id=f"llm_{llm_count}"
         ).load()
+        _t1 = time.perf_counter()
+        _wall_ms = round((_t1 - _t0) * 1000, 1)
+        _profile.append({"step": f"llm_{llm_count}", "type": "llm_call", "wall_ms": _wall_ms})
+        print(f"[PROFILE] llm_{llm_count}: total={_wall_ms}ms")
         llm_count += 1
 
         if not response.has_tool_calls:
@@ -464,12 +507,17 @@ def coding_agent_basic(task: str) -> str:
 
             # Regular tool call
             print(f"Tool call: {display_name} — {tc.function.name}({tc_args})")
+            _t0 = time.perf_counter()
             result: ToolCallResult = tool_call(
                 tc.function.name,
                 tc_args,
                 cwd,
                 id=display_name,
             ).load()
+            _t1 = time.perf_counter()
+            _wall_ms = round((_t1 - _t0) * 1000, 1)
+            _profile.append({"step": display_name, "type": "tool_call", "tool": tc.function.name, "wall_ms": _wall_ms})
+            print(f"[PROFILE] {display_name}: total={_wall_ms}ms")
 
             print(f"Tool result [{tc.function.name}]: {result.output[:500]}")
             tool_calls_made += 1
@@ -485,9 +533,38 @@ def coding_agent_basic(task: str) -> str:
                 "content": "Tool call limit reached. Summarize what you accomplished.",
             }
         )
+        _t0 = time.perf_counter()
         final: LLMResponse = llm_call(messages, id=f"llm_{llm_count}").load()
+        _t1 = time.perf_counter()
+        _wall_ms = round((_t1 - _t0) * 1000, 1)
+        _profile.append({"step": f"llm_{llm_count}", "type": "llm_call", "wall_ms": _wall_ms})
+        print(f"[PROFILE] llm_{llm_count} (final): total={_wall_ms}ms")
         llm_count += 1
         results.append(final.content or "")
+
+    # --- Profiling summary ---
+    _llm_total = sum(p["wall_ms"] for p in _profile if p["type"] == "llm_call")
+    _tool_total = sum(p["wall_ms"] for p in _profile if p["type"] == "tool_call")
+    _all_total = sum(p["wall_ms"] for p in _profile)
+    print("\n" + "=" * 70)
+    print("PROFILING SUMMARY")
+    print("=" * 70)
+    print(f"{'Step':<35} {'Type':<15} {'Wall (ms)':>12}")
+    print("-" * 70)
+    for p in _profile:
+        print(f"{p['step']:<35} {p['type']:<15} {p['wall_ms']:>12.1f}")
+    print("-" * 70)
+    print(f"{'LLM checkpoints (total)':<35} {'':15} {_llm_total:>12.1f}")
+    print(f"{'Tool checkpoints (total)':<35} {'':15} {_tool_total:>12.1f}")
+    print(f"{'All checkpoints (total)':<35} {'':15} {_all_total:>12.1f}")
+    print("=" * 70)
+    print(
+        "NOTE: Each wall time includes ZenML checkpoint overhead (serialize + "
+        "persist + metadata). The 'latency_ms' logged inside llm_call is the "
+        "pure LiteLLM API time. Compare them in the dashboard metadata to see "
+        "the ZenML overhead per LLM call."
+    )
+    print("=" * 70)
 
     return "\n\n---\n\n".join(results) if results else "No tasks completed."
 

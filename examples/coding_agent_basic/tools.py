@@ -1,11 +1,13 @@
 """Tool implementations and schemas for the basic coding agent."""
 
+import json
 import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
 from urllib.parse import urlparse
 
 from zenml.types import HTMLString, JSONString, MarkdownString
@@ -59,7 +61,7 @@ def write_file(cwd: str, path: str, content: str) -> JSONString:
     target = _resolve(cwd, path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
-    return JSONString(f'{{"path": "{path}", "chars": {len(content)}}}')
+    return JSONString(json.dumps({"path": path, "chars": len(content)}))
 
 
 def edit_file(cwd: str, path: str, old: str, new: str) -> JSONString:
@@ -68,16 +70,18 @@ def edit_file(cwd: str, path: str, old: str, new: str) -> JSONString:
     try:
         text = target.read_text()
     except FileNotFoundError:
-        return JSONString(f'{{"error": "file not found: {path}"}}')
+        return JSONString(json.dumps({"error": f"file not found: {path}"}))
 
     count = text.count(old)
     if count == 0:
-        return JSONString(f'{{"error": "old string not found in {path}"}}')
+        return JSONString(json.dumps({"error": f"old string not found in {path}"}))
     if count > 1:
-        return JSONString(f'{{"error": "old string appears {count} times in {path} (expected exactly 1)"}}')
+        return JSONString(
+            json.dumps({"error": f"old string appears {count} times in {path} (expected exactly 1)"})
+        )
 
     target.write_text(text.replace(old, new, 1))
-    return JSONString(f'{{"path": "{path}", "status": "edited"}}')
+    return JSONString(json.dumps({"path": path, "status": "edited"}))
 
 
 def list_files(cwd: str, pattern: str) -> MarkdownString:
@@ -277,183 +281,95 @@ def dispatch_tool(cwd: str, name: str, arguments: dict[str, Any]) -> ToolResult:
 
 
 # ---------------------------------------------------------------------------
-# Schemas (OpenAI function-calling format)
+# Parameter models — single source of truth for tool schemas
 # ---------------------------------------------------------------------------
 
-_READ_FILE_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "read_file",
-        "description": "Read a file with line numbers. Use offset/limit to page through large files.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path relative to cwd"},
-                "offset": {"type": "integer", "description": "0-based line offset", "default": 0},
-                "limit": {"type": "integer", "description": "Max lines to return", "default": 400},
-            },
-            "required": ["path"],
-        },
-    },
-}
 
-_LIST_FILES_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "list_files",
-        "description": "List files matching a glob pattern relative to the working directory.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "pattern": {"type": "string", "description": "Glob pattern (e.g. '**/*.py')"},
-            },
-            "required": ["pattern"],
-        },
-    },
-}
+class ReadFileParams(BaseModel):
+    """Read a file with line numbers. Use offset/limit to page through large files."""
 
-_SEARCH_FILES_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "search_files",
-        "description": "Search file contents for a pattern using grep.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "pattern": {"type": "string", "description": "Search pattern (regex)"},
-                "glob": {"type": "string", "description": "File glob to limit search", "default": "**/*"},
-            },
-            "required": ["pattern"],
-        },
-    },
-}
+    path: str = Field(description="File path relative to cwd")
+    offset: int = Field(default=0, description="0-based line offset")
+    limit: int = Field(default=_READ_LIMIT, description="Max lines to return")
 
-_WRITE_FILE_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "write_file",
-        "description": "Write content to a file, creating parent directories as needed.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path relative to cwd"},
-                "content": {"type": "string", "description": "File content to write"},
-            },
-            "required": ["path", "content"],
-        },
-    },
-}
 
-_EDIT_FILE_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "edit_file",
-        "description": "Replace a single exact occurrence of old with new in a file.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path relative to cwd"},
-                "old": {"type": "string", "description": "Exact text to find"},
-                "new": {"type": "string", "description": "Replacement text"},
-            },
-            "required": ["path", "old", "new"],
-        },
-    },
-}
+class WriteFileParams(BaseModel):
+    """Write content to a file, creating parent directories as needed."""
 
-_RUN_COMMAND_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "run_command",
-        "description": "Run a shell command in the working directory.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string", "description": "Shell command to run"},
-                "timeout": {"type": "integer", "description": "Timeout in seconds", "default": 30},
-            },
-            "required": ["command"],
-        },
-    },
-}
+    path: str = Field(description="File path relative to cwd")
+    content: str = Field(description="File content to write")
 
-_PYTHON_EXEC_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "python_exec",
-        "description": (
-            "Execute a Python script via uv run and return stdout + stderr. "
-            "Use for math, data processing, generating plots "
-            "(save to file with plt.savefig or plotly write_html/write_image), "
-            "or any task best solved with code. "
-            "The script runs in the working directory. "
-            "If the script needs third-party packages, add PEP 723 inline "
-            "metadata at the top of the script:\n"
-            "# /// script\n"
-            "# dependencies = [\"plotly\", \"pandas\"]\n"
-            "# ///\n"
-            "uv will install them automatically."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "code": {"type": "string", "description": "Python source code to execute"},
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in seconds",
-                    "default": 60,
-                },
-            },
-            "required": ["code"],
-        },
-    },
-}
 
-_WEB_FETCH_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "web_fetch",
-        "description": (
-            "Fetch a URL and return its text content. "
-            "Use for reading web pages, API responses, documentation, etc."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "URL to fetch (http or https)"},
-            },
-            "required": ["url"],
-        },
-    },
-}
+class EditFileParams(BaseModel):
+    """Replace a single exact occurrence of old with new in a file."""
 
-_WEB_SEARCH_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "web_search",
-        "description": (
-            "Search the web using a text query. "
-            "Returns titles, URLs, and snippets from top results. "
-            "Use web_fetch to read a specific result page."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"},
-            },
-            "required": ["query"],
+    path: str = Field(description="File path relative to cwd")
+    old: str = Field(description="Exact text to find")
+    new: str = Field(description="Replacement text")
+
+
+class ListFilesParams(BaseModel):
+    """List files matching a glob pattern relative to the working directory."""
+
+    pattern: str = Field(description="Glob pattern (e.g. '**/*.py')")
+
+
+class SearchFilesParams(BaseModel):
+    """Search file contents for a pattern using grep."""
+
+    pattern: str = Field(description="Search pattern (regex)")
+    glob: str = Field(default="**/*", description="File glob to limit search")
+
+
+class RunCommandParams(BaseModel):
+    """Run a shell command in the working directory."""
+
+    command: str = Field(description="Shell command to run")
+    timeout: int = Field(default=30, description="Timeout in seconds")
+
+
+class PythonExecParams(BaseModel):
+    """Execute a Python script via uv run and return stdout + stderr. Use for math, data processing, generating plots (save to file with plt.savefig or plotly write_html/write_image), or any task best solved with code. The script runs in the working directory. If the script needs third-party packages, add PEP 723 inline metadata at the top of the script:\n# /// script\n# dependencies = ["plotly", "pandas"]\n# ///\nuv will install them automatically."""
+
+    code: str = Field(description="Python source code to execute")
+    timeout: int = Field(default=60, description="Timeout in seconds")
+
+
+class WebFetchParams(BaseModel):
+    """Fetch a URL and return its text content. Use for reading web pages, API responses, documentation, etc."""
+
+    url: str = Field(description="URL to fetch (http or https)")
+
+
+class WebSearchParams(BaseModel):
+    """Search the web using a text query. Returns titles, URLs, and snippets from top results. Use web_fetch to read a specific result page."""
+
+    query: str = Field(description="Search query")
+
+
+def _to_function_schema(name: str, params: type[BaseModel]) -> dict[str, Any]:
+    """Convert a Pydantic params model to OpenAI function-calling schema."""
+    schema = params.model_json_schema()
+    schema.pop("title", None)
+    schema.pop("$defs", None)
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": (params.__doc__ or "").strip(),
+            "parameters": schema,
         },
-    },
-}
+    }
+
 
 ALL_SCHEMAS: list[dict[str, Any]] = [
-    _READ_FILE_SCHEMA,
-    _WRITE_FILE_SCHEMA,
-    _EDIT_FILE_SCHEMA,
-    _LIST_FILES_SCHEMA,
-    _SEARCH_FILES_SCHEMA,
-    _RUN_COMMAND_SCHEMA,
-    _PYTHON_EXEC_SCHEMA,
-    _WEB_FETCH_SCHEMA,
-    _WEB_SEARCH_SCHEMA,
+    _to_function_schema("read_file", ReadFileParams),
+    _to_function_schema("write_file", WriteFileParams),
+    _to_function_schema("edit_file", EditFileParams),
+    _to_function_schema("list_files", ListFilesParams),
+    _to_function_schema("search_files", SearchFilesParams),
+    _to_function_schema("run_command", RunCommandParams),
+    _to_function_schema("python_exec", PythonExecParams),
+    _to_function_schema("web_fetch", WebFetchParams),
+    _to_function_schema("web_search", WebSearchParams),
 ]
