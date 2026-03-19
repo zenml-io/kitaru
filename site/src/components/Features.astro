@@ -16,7 +16,7 @@
   <div class="features-sticky-container">
 
     <!-- Card 1: Pause & Resume -->
-    <div class="feature-card" data-feature="0" data-reveal>
+    <div class="feature-card" data-feature="0">
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
@@ -44,7 +44,7 @@
     </div>
 
     <!-- Card 2: Replay from Failure -->
-    <div class="feature-card" data-feature="1" data-reveal>
+    <div class="feature-card" data-feature="1">
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
@@ -71,7 +71,7 @@
     </div>
 
     <!-- Card 3: Bring Your Framework -->
-    <div class="feature-card" data-feature="2" data-reveal>
+    <div class="feature-card" data-feature="2">
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
@@ -93,7 +93,7 @@
     </div>
 
     <!-- Card 4: Parallel Branches -->
-    <div class="feature-card feature-card--last" data-feature="3" data-reveal>
+    <div class="feature-card feature-card--last" data-feature="3">
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
@@ -127,6 +127,9 @@
       </div>
     </div>
 
+    <!-- Content-box spacer: sticky constraint ignores padding & margin,
+         only real content extends the rectangle. This div is the runway. -->
+    <div class="sticky-runway" aria-hidden="true"></div>
   </div>
 </section>
 
@@ -134,10 +137,19 @@
   /* ═══ Section container ═══ */
   .features-section {
     /* No overflow restrictions — sticky needs open overflow */
+    background: url('https://assets.kitaru.ai/content/site/01af00b0/kit-bg.avif') center bottom / cover no-repeat;
+    background-attachment: fixed;
   }
 
   .features-header {
     padding: 80px clamp(24px, 5vw, 80px) 48px;
+  }
+
+  /* Override global .section-inner overflow:clip — it prevents the
+     IntersectionObserver from detecting the section-desc (which starts
+     shifted 32px down via data-reveal transform). */
+  .features-header .section-inner {
+    overflow: visible;
   }
 
   /* ═══ Sticky stacking container ═══ */
@@ -145,15 +157,12 @@
     max-width: 1200px;
     margin: 0 auto;
     padding: 0 clamp(24px, 5vw, 80px);
-    /* Padding gives last card room to stick; negative margin hides the visual gap */
-    padding-bottom: 60vh;
-    margin-bottom: -55vh;
   }
 
   /* ═══ Sticky cards ═══ */
   .feature-card {
     position: sticky;
-    top: 15vh;
+    top: 25vh;
     background: var(--color-bg);
     border-radius: 16px;
     border: 1px solid var(--color-border);
@@ -163,13 +172,13 @@
   }
 
   .feature-card--last {
-    margin-bottom: 0;
+    margin-bottom: 40vh;
   }
 
-  /* Incremental top offsets for visible stacking depth */
-  .feature-card[data-feature="1"] { top: calc(15vh + 10px); }
-  .feature-card[data-feature="2"] { top: calc(15vh + 20px); }
-  .feature-card[data-feature="3"] { top: calc(15vh + 30px); }
+  /* 8px reveal cadence so each prior card's top edge remains visible. */
+  .feature-card[data-feature="1"] { top: calc(25vh + 8px); }
+  .feature-card[data-feature="2"] { top: calc(25vh + 16px); }
+  .feature-card[data-feature="3"] { top: calc(25vh + 24px); }
 
   /* Content fades out when card is no longer active */
   .feature-card-inner {
@@ -177,21 +186,6 @@
   }
   .feature-card.faded .feature-card-inner {
     opacity: 0.15;
-  }
-
-  .feature-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%;
-    height: 2px;
-    background: linear-gradient(90deg, var(--color-accent), transparent);
-    opacity: 0;
-    transition: opacity 0.3s;
-  }
-
-  .feature-card:hover::before {
-    opacity: 1;
   }
 
   /* Card hover glow — follows cursor */
@@ -558,19 +552,26 @@
 
   .par-dot.ok {
     border-color: rgba(61,140,92,0.6);
-    background: rgba(61,140,92,0.12);
+    background: oklch(0.93 0.03 155);
   }
 
   .par-dot.fail {
     border-color: var(--color-cost-up);
-    background: rgba(220,74,61,0.12);
+    background: oklch(0.93 0.03 25);
     animation: failShake 0.4s ease;
   }
 
   .par-dot.replay {
     border-color: var(--color-accent);
-    background: rgba(241,120,41,0.12);
+    background: oklch(0.93 0.03 55);
     box-shadow: 0 0 8px rgba(241,120,41,0.2);
+  }
+
+  /* Content-box spacer — extends the sticky container so the last
+     card has enough scroll runway to fully reach its sticky position. */
+  .sticky-runway {
+    height: 5vh;
+    pointer-events: none;
   }
 
   /* ═══ Mobile responsive (< 768px) ═══ */
@@ -581,7 +582,10 @@
 
     .features-sticky-container {
       padding: 0 16px;
-      padding-bottom: 0;
+    }
+
+    .sticky-runway {
+      display: none;
     }
 
     .feature-card {
@@ -636,21 +640,21 @@
 
 <script>
   // ═══ Card hover glow tracking ═══
-  document.querySelectorAll('.feature-card').forEach(card => {
-    card.addEventListener('mousemove', (e: MouseEvent) => {
-      const rect = (card as HTMLElement).getBoundingClientRect();
-      (card as HTMLElement).style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');
-      (card as HTMLElement).style.setProperty('--mouse-y', ((e.clientY - rect.top) / rect.height * 100) + '%');
+  document.querySelectorAll<HTMLElement>('.feature-card').forEach(card => {
+    card.addEventListener('mousemove', (event) => {
+      const e = event as MouseEvent;
+      const rect = card.getBoundingClientRect();
+      card.style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');
+      card.style.setProperty('--mouse-y', ((e.clientY - rect.top) / rect.height * 100) + '%');
     });
     card.addEventListener('mouseleave', () => {
-      (card as HTMLElement).style.setProperty('--mouse-x', '50%');
-      (card as HTMLElement).style.setProperty('--mouse-y', '50%');
+      card.style.setProperty('--mouse-x', '50%');
+      card.style.setProperty('--mouse-y', '50%');
     });
   });
 
   // ═══ Per-card animation system ═══
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const isMobile = window.innerWidth < 768;
 
   // Timer arrays per card
   const animTimers: number[][] = [[], [], [], []];
@@ -856,69 +860,140 @@
     }
   }
 
-  // ═══ Scroll-based activation (desktop) ═══
-  if (!prefersReducedMotion && !isMobile) {
-    const cards = document.querySelectorAll<HTMLElement>('.feature-card');
-    let activeCard = -1;
-    let ticking = false;
+  function setActiveCard(cards: NodeListOf<HTMLElement>, nextIdx: number, activeIdxRef: { value: number }) {
+    if (nextIdx === activeIdxRef.value) return;
 
-    function onScroll() {
+    if (activeIdxRef.value >= 0) {
+      resetAnimState(activeIdxRef.value);
+    }
+
+    activeIdxRef.value = nextIdx;
+
+    if (nextIdx >= 0) {
+      animStarters[nextIdx](nextIdx);
+    }
+
+    cards.forEach((card, idx) => {
+      if (idx < nextIdx) {
+        card.classList.add('faded');
+      } else {
+        card.classList.remove('faded');
+      }
+    });
+  }
+
+  function setupDesktopActivation(
+    section: HTMLElement,
+    cards: NodeListOf<HTMLElement>,
+    activeIdxRef: { value: number }
+  ): () => void {
+    let ticking = false;
+    const controller = new AbortController();
+
+    function computeStickyLine(card: HTMLElement): number {
+      const topPx = Number.parseFloat(window.getComputedStyle(card).top);
+      if (!Number.isNaN(topPx)) return topPx;
+      return window.innerHeight * 0.15;
+    }
+
+    function updateActiveCard() {
       if (ticking) return;
       ticking = true;
+
       requestAnimationFrame(() => {
         ticking = false;
-        let topmost = -1;
 
+        const firstCard = cards[0];
+        if (!firstCard) return;
+
+        const stickyLine = computeStickyLine(firstCard);
+        const sectionRect = section.getBoundingClientRect();
+
+        // Section is not in sticky range yet.
+        if (sectionRect.top > stickyLine) {
+          setActiveCard(cards, -1, activeIdxRef);
+          return;
+        }
+
+        // Select the highest-index card that has reached its sticky threshold.
+        let nextIdx = -1;
         cards.forEach((card, idx) => {
+          const topPx = computeStickyLine(card);
           const rect = card.getBoundingClientRect();
-          // Card is "active" when its top is within sticky range
-          const stickyTop = window.innerHeight * 0.15 + idx * 10;
-          if (rect.top <= stickyTop + 10 && rect.bottom > stickyTop + 100) {
-            topmost = idx;
+          if (rect.top <= topPx + 1) {
+            nextIdx = idx;
           }
         });
 
-        if (topmost !== activeCard) {
-          // Clear previous
-          if (activeCard >= 0) {
-            resetAnimState(activeCard);
-          }
-          activeCard = topmost;
-          // Start new
-          if (activeCard >= 0) {
-            animStarters[activeCard](activeCard);
-          }
-          // Fade out non-active cards, fade in active
-          cards.forEach((card, idx) => {
-            if (idx < activeCard) {
-              card.classList.add('faded');
-            } else {
-              card.classList.remove('faded');
-            }
-          });
-        }
+        setActiveCard(cards, nextIdx, activeIdxRef);
       });
     }
 
-    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', updateActiveCard, { passive: true, signal: controller.signal });
+    window.addEventListener('resize', updateActiveCard, { passive: true, signal: controller.signal });
+
+    // Initialize immediately for refresh/deep-link/restored scroll positions.
+    updateActiveCard();
+
+    return () => {
+      controller.abort();
+      setActiveCard(cards, -1, activeIdxRef);
+    };
   }
 
-  // ═══ Mobile: intersection-based activation ═══
-  if (!prefersReducedMotion && isMobile) {
-    const cards = document.querySelectorAll<HTMLElement>('.feature-card');
-
+  function setupMobileActivation(
+    cards: NodeListOf<HTMLElement>,
+    activeIdxRef: { value: number }
+  ): () => void {
     const mobileObs = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         const card = entry.target as HTMLElement;
-        const idx = parseInt(card.getAttribute('data-feature') || '0', 10);
+        const idx = Number.parseInt(card.getAttribute('data-feature') || '-1', 10);
+        if (idx < 0) return;
+
         if (entry.isIntersecting) {
-          animStarters[idx](idx);
-        } else {
-          resetAnimState(idx);
+          setActiveCard(cards, idx, activeIdxRef);
+        } else if (activeIdxRef.value === idx) {
+          setActiveCard(cards, -1, activeIdxRef);
         }
       });
-    }, { threshold: 0.3 });
+    }, { threshold: 0.35 });
 
     cards.forEach(card => mobileObs.observe(card));
+
+    return () => {
+      mobileObs.disconnect();
+      setActiveCard(cards, -1, activeIdxRef);
+      cards.forEach((_, idx) => resetAnimState(idx));
+    };
+  }
+
+  if (!prefersReducedMotion) {
+    const section = document.querySelector<HTMLElement>('#how-it-works');
+    const cards = document.querySelectorAll<HTMLElement>('.feature-card');
+    const mobileQuery = window.matchMedia('(max-width: 767px)');
+    const activeIdxRef = { value: -1 };
+
+    if (section && cards.length) {
+      const sectionEl = section;
+      let teardownActivation: (() => void) | null = null;
+
+      function mountActivationMode() {
+        teardownActivation?.();
+        teardownActivation = mobileQuery.matches
+          ? setupMobileActivation(cards, activeIdxRef)
+          : setupDesktopActivation(sectionEl, cards, activeIdxRef);
+      }
+
+      mountActivationMode();
+
+      const handleModeChange = () => mountActivationMode();
+      mobileQuery.addEventListener('change', handleModeChange);
+
+      window.addEventListener('pagehide', () => {
+        mobileQuery.removeEventListener('change', handleModeChange);
+        teardownActivation?.();
+      }, { once: true });
+    }
   }
 </script>

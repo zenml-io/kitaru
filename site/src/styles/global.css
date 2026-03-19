@@ -53,7 +53,7 @@ body {
   font-family: var(--font-ui);
   background: var(--color-bg);
   color: var(--color-primary);
-  overflow-x: hidden;
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
 }
 
