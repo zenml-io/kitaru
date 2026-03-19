@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import warnings
 
+KITARU_REPOSITORY_DIRECTORY_NAME = ".kitaru"
+
 KITARU_SERVER_URL_ENV = "KITARU_SERVER_URL"
 KITARU_AUTH_TOKEN_ENV = "KITARU_AUTH_TOKEN"
 KITARU_PROJECT_ENV = "KITARU_PROJECT"
@@ -37,8 +39,22 @@ def _normalized_kitaru_env(name: str) -> str | None:
     return value
 
 
+_applied = False
+
+
+def _reset_applied() -> None:
+    """Reset the re-entry guard so tests can call apply_env_translations again."""
+    global _applied
+    _applied = False
+
+
 def apply_env_translations() -> None:
     """Translate public ``KITARU_*`` env vars into ``ZENML_*`` equivalents."""
+    global _applied
+    if _applied:
+        return
+    _applied = True
+
     for kitaru_var, zenml_var in _ENV_TRANSLATIONS:
         kitaru_value = _normalized_kitaru_env(kitaru_var)
         if kitaru_value is None:
@@ -76,4 +92,6 @@ def apply_env_translations() -> None:
     os.environ.setdefault("ZENML_ENABLE_RICH_TRACEBACK", "0")
 
     # Use .kitaru/ instead of .zen/ as the local project marker directory.
-    os.environ.setdefault("ZENML_REPOSITORY_DIRECTORY_NAME", ".kitaru")
+    os.environ.setdefault(
+        "ZENML_REPOSITORY_DIRECTORY_NAME", KITARU_REPOSITORY_DIRECTORY_NAME
+    )

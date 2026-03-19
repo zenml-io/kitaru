@@ -7,6 +7,7 @@ from typing import Annotated
 
 from cyclopts import Parameter
 
+from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 
@@ -19,7 +20,6 @@ from ._helpers import (
     _resolve_output_format,
 )
 
-KITARU_REPOSITORY_DIRECTORY_NAME = ".kitaru"
 _LEGACY_REPOSITORY_DIRECTORY_NAME = ".zen"
 
 

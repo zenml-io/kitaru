@@ -53,6 +53,7 @@ _SRC_PATH = str(Path(__file__).resolve().parent.parent / "src")
 if _SRC_PATH not in sys.path:
     sys.path.insert(0, _SRC_PATH)
 
+from kitaru._env import _reset_applied as _reset_env_applied
 from kitaru.config import (
     KITARU_ANALYTICS_OPT_IN_ENV,
     KITARU_AUTH_TOKEN_ENV,
@@ -124,6 +125,7 @@ def isolated_zenml_global_config(
     monkeypatch.delenv("KITARU_RUNNER", raising=False)
 
     _reset_runtime_configuration()
+    _reset_env_applied()
 
     # xdist workers lack __main__.__file__, which ZenML needs for source root
     main = sys.modules.get("__main__")
@@ -140,6 +142,7 @@ def isolated_zenml_global_config(
     Client._reset_instance()
     GlobalConfiguration._reset_instance()
     _reset_runtime_configuration()
+    _reset_env_applied()
 
 
 @pytest.fixture()
