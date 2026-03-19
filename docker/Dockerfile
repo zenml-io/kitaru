@@ -21,7 +21,7 @@ ARG USERNAME=kitaru
 ARG USER_UID=1000
 ARG USER_GID=1000
 ARG ZENML_REPO_URL=https://github.com/zenml-io/zenml.git
-ARG ZENML_GIT_REF=c5318663db4071c8da7ed9d3c56008ea801f4178
+ARG ZENML_GIT_REF=a14c7d4dd43b5170617cc865395fb03589ba062a
 ARG ZENML_DASHBOARD_TAG=v0.41.4
 ARG ZENML_SERVER_EXTRAS=server,secrets-aws,secrets-gcp,secrets-azure,secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure,azureml,sagemaker,vertex
 
@@ -83,7 +83,7 @@ RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
 # zenmldocker/zenml-server image ships. Alembic is pinned for migration
 # stability (matches ZenML's own pin).
 #
-# TODO: Switch to released PyPI version once feature/kitaru is merged:
+# TODO: Switch to released PyPI version once the zenml release is out:
 #   uv pip install "zenml[server,secrets-aws,secrets-gcp,secrets-azure,
 #     secrets-hashicorp,s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,
 #     connectors-azure,azureml,sagemaker,vertex]>=X.Y.Z" "alembic==1.15.2"

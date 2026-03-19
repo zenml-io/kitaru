@@ -65,6 +65,28 @@ metadata noise.
 
 - Python 3.11 or later
 
+## Initialize your project
+
+After installing, initialize your project root so Kitaru knows where your
+source code lives:
+
+<Tabs items={["uv project", "pip environment"]}>
+  <Tab value="uv project">
+    ```bash
+    uv run kitaru init
+    ```
+  </Tab>
+  <Tab value="pip environment">
+    ```bash
+    kitaru init
+    ```
+  </Tab>
+</Tabs>
+
+This creates a `.kitaru/` directory in the current folder. It is used for
+source root detection when packaging flows for remote execution. Add
+`.kitaru/` to your `.gitignore`.
+
 ## Next Steps
 
 Head to the [Quickstart](/getting-started/quickstart) to explore what's

@@ -54,6 +54,7 @@ class TestBuildCommandTree:
         assert [sub.name for sub in tree.subcommands] == [
             "executions",
             "info",
+            "init",
             "log-store",
             "login",
             "logout",
@@ -306,6 +307,7 @@ class TestWriteDocsTree:
         assert meta["pages"] == [
             "executions",
             "info",
+            "init",
             "log-store",
             "login",
             "logout",
@@ -352,7 +354,7 @@ class TestWriteDocsTree:
         tree = build_command_tree(app)
         files = write_docs_tree(tree, output_dir)
 
-        for command in ("info", "login", "logout", "status"):
+        for command in ("info", "init", "login", "logout", "status"):
             assert (output_dir / f"{command}.mdx").exists()
             assert f"{command}.mdx" in files
             # No directory or meta.json for leaf commands
