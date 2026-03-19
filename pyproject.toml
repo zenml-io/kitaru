@@ -43,6 +43,9 @@ mcp = [
 kitaru = "kitaru.cli:cli"
 kitaru-mcp = "kitaru.mcp:main"
 
+[project.entry-points."zenml.init_hooks"]
+kitaru = "kitaru._env:apply_env_translations"
+
 [project.urls]
 Homepage = "https://kitaru.ai"
 Repository = "https://github.com/zenml-io/kitaru"
