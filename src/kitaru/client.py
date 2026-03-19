@@ -305,7 +305,7 @@ def _restart_run_from_snapshot(
         with _temporary_active_stack(str(snapshot.stack.id)):
             active_stack = client._client().active_stack
             orchestrator = cast(Any, active_stack.orchestrator)
-            orchestrator.restart(
+            orchestrator.resume_run(
                 snapshot=snapshot,
                 run=run,
                 stack=active_stack,
