@@ -368,7 +368,7 @@
       navigator.clipboard.writeText(text).then(() => {
         btn.classList.add('copied');
         setTimeout(() => btn.classList.remove('copied'), 1500);
-      });
+      }).catch(() => {});
     });
   });
 </script>

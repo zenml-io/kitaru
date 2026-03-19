@@ -140,6 +140,7 @@
 
   function launchVideo() {
     if (!container || !placeholder) return;
+    // TODO: Replace with Kitaru demo video ID before launch
     const videoId = 'wEVwIkDvUPs';
     const iframe = document.createElement('iframe');
     iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
