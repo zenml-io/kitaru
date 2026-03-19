@@ -12,11 +12,11 @@ Here's why we built it and what it does.
 
 ## Agents have truly arrived
 
-I spent a lot of the last 3 years talking to teams building agents. Not demos — actual production systems. These deployments created actually business value.
+I spent a lot of the last 3 years talking to teams building agents. Not demos — actual production systems. These deployments created actual business value.
 
 But it feels like since the beginning of this year, something has truly clicked.
 
-[OpenClaw](https://openclaw.ai) became the fastest growing open-source projects in history. [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) runs 100 ML experiments while you sleep without you touching a thing. 
+[OpenClaw](https://openclaw.ai) became the fastest growing open-source project in history. [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) runs 100 ML experiments while you sleep without you touching a thing. 
 
 The METR task-completion time horizon clearly showcases where the puck is going:
 
@@ -24,21 +24,21 @@ The METR task-completion time horizon clearly showcases where the puck is going:
 
 Agents doing long-horizon, deep work in the background — while you're in a meeting, having coffee, or asleep — is where every serious engineering team is heading. 
 
-At the same, there has been a collective realization that most good general agents are fundamentally coding agents.
-Anthropic realized this last year when they realized their coding harness generalizes well to general-purpose tasks,
-which lead to the creation of Claude Cowork. 
+At the same time, there has been a collective realization that most good general agents are fundamentally coding agents.
+Anthropic discovered this last year when they found their coding harness generalizes well to general-purpose tasks,
+which led to the creation of Claude Cowork. 
 
 Coding allows you to express complex tasks on the shoulders of decades of software engineering practices that were built to solve such tasks.
 It is no wonder that it generalizes. Software is built to solve complex tasks, mostly in the workplace. 
 
-## The opportunity cost is higher then it has ever been
+## The opportunity cost is higher than it has ever been
 
 Just in the last weeks, I've spoken to people experiencing ["token anxiety"](https://writing.nikunjk.com/p/token-anxiety). I'll be honest, I have a little myself.
 Running multiple coding agents in parallel, powered by sub-agent delegation, is the norm for me and the team.
 
-It just feels like a chance wasted if your laptop is shutdown and not working overnight: The opportunity cost of not running the next experiment is higher than it used to be. 
+It just feels like a chance wasted if your laptop is shut down and not working overnight: The opportunity cost of not running the next experiment is higher than it used to be. 
 
-I believe that having an army of agents running autonomously in the background and coordinating complex value-creation tasks will be fast be a norm worldwide. 
+I believe that having an army of agents running autonomously in the background and coordinating complex value-creation tasks will quickly become a norm worldwide. 
 
 Which leads me to a seemingly obvious prediction:
 
@@ -48,13 +48,13 @@ These agents work. But today, most of them are trapped in individual local machi
 
 They shutdown when your machine does. They cannot talk to coordinate with other agents doing other types of work. They are fragile and their results are hard to reproduce.
 
-This is a natural start - and there is a lot of value in a category of agents that will never leave their host machines. One can point to the continous sales of Mac Mini's as a proxy to understand this. 
+This is a natural start - and there is a lot of value in a category of agents that will never leave their host machines. One can point to the continuous sales of Mac Minis as a proxy to understand this. 
 
 However, there is a natural incentive for most enterprises to invest in building infrastructure that allows these agents to break free of their hosts, and join a managed army working together autonomously and without human intervention (for the most part).
 
-Digging deeper, this is fundamentally a platform problem. While the model providers are naturally inclined to eat that part of the stack, if past history is any indicator, a big portion of the market would do well to invest in building internal platform to deploy and run these agents themselves - on their terms. 
+Digging deeper, this is fundamentally a platform problem. While the model providers are naturally inclined to eat that part of the stack, if past history is any indicator, a big portion of the market would do well to invest in building internal platforms to deploy and run these agents themselves - on their terms. 
 
-It is now clear that companies that will success with agents are the ones who have in-house knowledge on how to develop, deploy, and manage ambient agents at scale.
+It is now clear that companies that will succeed with agents are the ones who have in-house knowledge on how to develop, deploy, and manage ambient agents at scale.
 
 That's where Kitaru comes in.
 
@@ -131,7 +131,7 @@ kitaru stack create prod-k8s \
 kitaru stack use prod-k8s
 ```
 
-And run the same code above, and now the code runs as K8s jobs that are orchestrated centrally via the Kitaru server. You have full control over this orchestration setups, and it works on all major cloud providers. This mechanism is also extensible.
+And run the same code above, and now the code runs as K8s jobs that are orchestrated centrally via the Kitaru server. You have full control over this orchestration setup, and it works on all major cloud providers. This mechanism is also extensible.
 
 ## What we're still building
 
@@ -174,4 +174,4 @@ kitaru login
 
 The stack commands shown above work identically against Kubernetes, AWS, GCP, and Azure — same agent code, different target. The [getting started guide](https://kitaru.ai/docs) has the full walkthrough, and the [coding agent example](https://kitaru.ai/docs/getting-started/examples) walks through a real production agent end to end — eight stages, checkpointed throughout, with a human approval gate before the expensive work starts.
 
-If your agents are dying in production and you're tired of restarting from scratch, give it a try. Or simple give us a star on [GitHub](https://github.com/zenml-io/kitaru) to show support!
+If your agents are dying in production and you're tired of restarting from scratch, give it a try. Or simply give us a star on [GitHub](https://github.com/zenml-io/kitaru) to show support!
