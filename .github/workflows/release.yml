@@ -159,7 +159,7 @@ jobs:
             --generate-notes
 
       # --- Docker image ---
-      # TODO: Once the ZenML dependency switches from feature/kitaru to a
+      # TODO: Once the ZenML dependency switches from develop to a
       # released PyPI version, remove this TODO. Until then, the Docker image
       # is built from an unreleased ZenML branch — verify the image works
       # before cutting a release that publishes it.
