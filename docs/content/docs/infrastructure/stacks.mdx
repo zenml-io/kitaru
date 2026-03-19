@@ -1,0 +1,48 @@
+---
+title: Stacks
+description: Where your flows run, where your data is stored, and where your containers live
+---
+
+A **stack** is the execution environment for your flows. It bundles three things:
+
+- **Compute** — where your flow code runs (locally, on Kubernetes, on Vertex AI, etc.)
+- **Storage** — where checkpoint outputs and saved data are persisted
+- **Container registry** — where container images are pushed for remote execution
+
+When you run a flow, Kitaru uses the active stack to decide where to execute it
+and where to store results. Locally, everything runs on your machine with local
+file storage. For production, you point the stack at cloud infrastructure.
+
+## The default stack
+
+After `kitaru init`, you get a `default` stack that runs everything locally:
+
+```bash
+kitaru stack current
+```
+
+This is enough to develop and test flows on your machine. No cloud accounts or
+containers required.
+
+## Switching stacks
+
+```bash
+kitaru stack use prod-k8s
+```
+
+Now every `.run()` call uses that stack. You can also override per-run:
+
+```python
+handle = my_agent.run(topic="...", stack="prod-k8s")
+```
+
+## Creating stacks
+
+```bash
+kitaru stack create my-stack --type kubernetes
+```
+
+Supported types: `local`, `kubernetes`, `vertex`, `sagemaker`, `azureml`.
+
+See [Stack Selection](/infrastructure/stack-selection) for the full guide on
+creating, inspecting, and managing stacks.

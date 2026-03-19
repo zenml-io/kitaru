@@ -1,64 +1,33 @@
 ---
 title: Quickstart
-description: Install Kitaru, verify the CLI, and run a tiny durable flow
+description: Run your first durable agent flow with Kitaru
 ---
 
-This guide walks you through installing Kitaru, verifying the CLI, and running
-your first small flow.
+This guide walks you through setting up a model and running your first durable
+flow. If you haven't installed Kitaru yet, start with
+[Installation](/getting-started/installation).
 
-Kitaru requires **Python 3.11 or newer**.
+## Set up a model
 
-## Install
+`kitaru.llm()` needs to know which model to call and how to authenticate.
+The quickest way is to register a model alias:
 
-<Tabs items={["uv (recommended)", "pip"]}>
-  <Tab value="uv (recommended)">
-    ```bash
-    uv add kitaru
-    ```
-  </Tab>
-  <Tab value="pip">
-    ```bash
-    pip install kitaru
-    ```
-  </Tab>
-</Tabs>
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+```
 
-The base install is enough to run flows locally against the default local
-database.
+This stores your API key in a Kitaru secret and creates an alias called `fast`
+that points to `openai/gpt-4o-mini`. The first alias you register becomes the
+default, so `kitaru.llm()` calls will use it automatically.
 
-## Optional: add local server support
-
-If you also want the local dashboard and REST API, install the local extra:
-
-<Tabs items={["uv (recommended)", "pip"]}>
-  <Tab value="uv (recommended)">
-    ```bash
-    uv add kitaru --extra local
-    ```
-  </Tab>
-  <Tab value="pip">
-    ```bash
-    pip install "kitaru[local]"
-    ```
-  </Tab>
-</Tabs>
-
-## Verify the CLI
-
-<Tabs items={["uv project", "pip environment"]}>
-  <Tab value="uv project">
-    ```bash
-    uv run kitaru --version
-    uv run kitaru --help
-    ```
-  </Tab>
-  <Tab value="pip environment">
-    ```bash
-    kitaru --version
-    kitaru --help
-    ```
-  </Tab>
-</Tabs>
+<Callout type="info">
+  You can skip registration and just set `OPENAI_API_KEY` in your environment —
+  `kitaru.llm(model="openai/gpt-4o-mini")` will pick it up. Aliases are useful
+  when you want to swap models or credentials without changing code. See
+  [Secrets + Model Registration](/guides/secrets-and-model-registration) for
+  the full setup.
+</Callout>
 
 ## Optional: start a local Kitaru server
 
@@ -131,22 +100,29 @@ it for source root detection when packaging flows for remote execution.
 
 ## Run your first flow
 
-Create a small script named `demo.py`:
+Create a file called `agent.py`:
 
 ```python
+import kitaru
 from kitaru import checkpoint, flow
 
 @checkpoint
-def fetch(topic: str) -> str:
-    return f"notes about {topic}"
+def research(topic: str) -> str:
+    return kitaru.llm(f"Summarize {topic} in two sentences.")
+
+@checkpoint
+def draft_report(summary: str) -> str:
+    return kitaru.llm(
+        f"Write a short report based on this summary:\n\n{summary}"
+    )
 
 @flow
-def demo(topic: str) -> str:
-    return fetch(topic).upper()
+def research_agent(topic: str) -> str:
+    summary = research(topic)
+    return draft_report(summary)
 
-handle = demo.run("kitaru")
-print("Execution:", handle.exec_id)
-print("Result:", handle.wait())
+if __name__ == "__main__":
+    research_agent.run("durable execution for AI agents")
 ```
 
 Then run it:
@@ -154,37 +130,39 @@ Then run it:
 <Tabs items={["uv (recommended)", "pip environment"]}>
   <Tab value="uv (recommended)">
     ```bash
-    uv run demo.py
+    uv run agent.py
     ```
   </Tab>
   <Tab value="pip environment">
     ```bash
-    python demo.py
+    python agent.py
     ```
   </Tab>
 </Tabs>
 
 What happens here:
 
-1. `@checkpoint` marks a durable unit of work
-2. `@flow` defines the outer execution boundary
-3. `demo.run(...)` starts a new execution and returns a `FlowHandle`
-4. `handle.wait()` blocks until the execution finishes and returns the flow result
+1. `@flow` marks the top-level execution boundary — everything inside is tracked
+2. Each `@checkpoint` persists its return value automatically
+3. `kitaru.llm()` resolves your default alias, injects the linked secret, calls the model, and captures the prompt, response, token usage, and cost
+4. `.run()` starts the execution and blocks until completion
 
-If you want to inspect that execution later, the execution ID you printed is the
-same ID used by `KitaruClient` and `kitaru executions ...`.
+## Why checkpoints matter
 
-## Prefer a repo example?
-
-If you would rather run a maintained example from this repository than type out
-your own `demo.py`, start here:
+Now imagine `research` succeeds but `draft_report` fails — maybe you hit a rate
+limit or the model returned an error. Without Kitaru you would re-run the entire
+script, paying for the `research` call again and losing progress. With Kitaru, you replay from the
+failure point:
 
 ```bash
-uv sync --extra local
-uv run examples/basic_flow/first_working_flow.py
+kitaru executions replay <exec-id> --from draft_report
 ```
 
-For the broader catalog, see [Examples](/getting-started/examples).
+Replay creates a new execution that **reuses the recorded output of `research`**
+and only re-executes `draft_report`. The more checkpoints your flow has, the
+less work you repeat when something goes wrong.
+
+This works the same whether you use `kitaru.llm()` or bring your own client:
 
 ## What's Next
 

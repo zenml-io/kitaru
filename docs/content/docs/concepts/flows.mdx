@@ -28,7 +28,7 @@ outputs are persisted.
 Use `.run()` to start an execution:
 
 ```python
-handle = my_agent.run("https://example.com")
+handle = my_agent.run(url="https://example.com")
 print(handle.exec_id)   # unique execution identifier
 # ... do other work ...
 result = handle.wait()   # block until finished
@@ -41,13 +41,13 @@ need the result.
 For a synchronous one-liner, chain `.wait()`:
 
 ```python
-result = my_agent.run("https://example.com").wait()
+result = my_agent.run(url="https://example.com").wait()
 ```
 
 To target a remote stack for one execution, pass `stack=`:
 
 ```python
-handle = my_agent.run("https://example.com", stack="production")
+handle = my_agent.run(url="https://example.com", stack="production")
 ```
 
 ## FlowHandle
@@ -80,7 +80,7 @@ def my_agent(url: str) -> str:
     ...
 
 # Override at call time
-handle = my_agent.run("https://example.com", retries=3, cache=True)
+handle = my_agent.run(url="https://example.com", retries=3, cache=True)
 ```
 
 | Option | Default | What it controls |

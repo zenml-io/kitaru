@@ -59,74 +59,19 @@ For a synchronous one-liner, chain `.wait()`:
 result = my_agent.run("https://example.com").wait()
 ```
 
-## How results surface
-
-When an execution completes successfully, Kitaru extracts the flow function's
-return value:
-
-- **Single return value** → returned directly
-- **Multiple return values** → returned as a tuple
-- **No return value** → returns `None`
-
-```python
-from kitaru import flow
-
-@flow
-def single_result() -> str:
-    return process()
-# result = single_result.run().wait()  → "processed data"
-
-@flow
-def no_result() -> None:
-    process()
-# result = no_result.run().wait()  → None
-```
-
 ## How errors surface
 
-### Failed executions
-
-If a flow execution fails, Kitaru raises a typed `KitaruExecutionError` with
-context about what went wrong:
+If a flow execution fails, `handle.wait()` raises a typed
+`KitaruExecutionError`:
 
 ```python
 import kitaru
 
 try:
-    result = my_agent.run("bad-input").wait()
+    result = my_agent.run(topic="bad-input").wait()
 except kitaru.KitaruExecutionError as exc:
     print(exc.exec_id, exc.status, exc.failure_origin)
 ```
-
-### `handle.get()` on an unfinished execution
-
-`handle.get()` is a **non-blocking** check. If the execution is still running,
-it raises immediately:
-
-```python
-import kitaru
-
-handle = my_agent.run("https://example.com")
-try:
-    result = handle.get()  # raises if not yet finished
-except kitaru.KitaruStateError:
-    result = handle.wait()  # block until done instead
-```
-
-### Misuse errors
-
-Kitaru raises errors immediately when SDK rules are violated:
-
-| Situation | Error |
-|---|---|
-| Calling a checkpoint outside a flow | `KitaruContextError` |
-| Nesting one checkpoint inside another | `KitaruContextError` |
-| Using `.submit()` outside a running flow | `KitaruContextError` |
-| Calling `kitaru.log()` outside a flow | `KitaruContextError` |
-| Passing negative `retries` | `KitaruUsageError` |
-
-These are not runtime failures — they are guardrails that catch mistakes at the
-point where they happen.
 
 ## Caching behavior
 

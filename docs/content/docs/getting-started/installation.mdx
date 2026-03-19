@@ -24,20 +24,19 @@ python --version
   </Tab>
 </Tabs>
 
+This gives you the full SDK, CLI, and everything you need to run flows locally.
+
 ## Optional extras
 
-Install MCP server support:
+| Extra | What it adds |
+|---|---|
+| `local` | Local server and UI for browsing executions in a local web UI |
+| `mcp` | MCP server for querying executions from AI assistants |
+| `pydantic-ai` | PydanticAI adapter for wrapping agents in checkpoints |
 
 ```bash
-uv add kitaru --extra mcp
-# or: pip install "kitaru[mcp]"
-```
-
-Install PydanticAI adapter support:
-
-```bash
-uv add kitaru --extra pydantic-ai
-# or: pip install "kitaru[pydantic-ai]"
+uv add "kitaru[mcp,pydantic-ai,local]"
+# or: pip install "kitaru[mcp,pydantic-ai,local]"
 ```
 
 ## Verify Installation
@@ -57,13 +56,18 @@ uv add kitaru --extra pydantic-ai
   </Tab>
 </Tabs>
 
-If you run `kitaru` or `kitaru-mcp` on an older Python version, Kitaru fails
-immediately with a clear error message instead of surfacing confusing startup
-metadata noise.
+## Local UI
 
-## Requirements
+If you installed the `local` extra, you can start a local server with a web
+UI for browsing executions:
 
-- Python 3.11 or later
+```bash
+kitaru login --local
+```
+
+This launches the Kitaru server on your machine and opens the UI in your
+browser. You can inspect flows, checkpoints, logs, and artifacts from any
+execution you have run locally.
 
 ## Initialize your project
 
