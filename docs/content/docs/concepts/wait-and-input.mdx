@@ -1,5 +1,5 @@
 ---
-title: Wait and Input
+title: Wait, Input, and Resume
 description: Pause flows for human or agent input, then resume from where they left off
 ---
 
@@ -37,7 +37,7 @@ def research_agent(topic: str) -> str:
     return write_report(summary)
 
 if __name__ == "__main__":
-    research_agent.run("durable execution for AI agents")
+    research_agent.run(topic="durable execution for AI agents")
 ```
 
 When execution reaches `kitaru.wait()`:
@@ -138,7 +138,7 @@ explicitly resume the execution:
 
 ## Next steps
 
-- [Wait and Resume guide](/guides/wait-and-resume) — detailed patterns
+- [Wait, Input, and Resume guide](/guides/wait-and-resume) — detailed patterns
   including local interactive mode and abort
 - [Execution Management](/guides/execution-management) — inspect, replay,
   and manage executions

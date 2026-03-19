@@ -27,7 +27,7 @@ def research_agent(topic: str) -> str:
     return draft_report(summary)
 
 if __name__ == "__main__":
-    research_agent.run("Why do AI agents need durable execution?")
+    research_agent.run(topic="Why do AI agents need durable execution?")
 ```
 
 Each `@checkpoint` is a durable unit of work — its output is persisted
@@ -78,7 +78,7 @@ Add these primitives to any Python agent code — no rewrites required.
     href="/guides/execution-management"
   />
   <Card
-    title="Wait and Resume"
+    title="Wait, Input, and Resume"
     description="Pause flows for external input and continue the same execution"
     href="/guides/wait-and-resume"
   />
@@ -98,9 +98,9 @@ Add these primitives to any Python agent code — no rewrites required.
     href="/guides/configuration"
   />
   <Card
-    title="Manage Stacks"
+    title="Stacks"
     description="Create, inspect, switch, and clean up local, Kubernetes, Vertex, SageMaker, and AzureML stacks"
-    href="/infrastructure/stack-selection"
+    href="/infrastructure/stacks"
   />
   <Card
     title="MCP Server"

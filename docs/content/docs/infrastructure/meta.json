@@ -4,7 +4,6 @@
   "pages": [
     "deploy-helm",
     "stacks",
-    "stack-selection",
     "kubernetes-stacks",
     "vertex-stacks",
     "sagemaker-stacks",

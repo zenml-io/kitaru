@@ -5,7 +5,7 @@ description: Durable work units with persistence and concurrency support
 
 A **checkpoint** is a unit of work inside a flow whose output is automatically
 persisted. When a flow re-executes, checkpoints that already succeeded can
-return their cached results instead of running again.
+return their recorded results instead of running again.
 
 ## Defining a checkpoint
 
@@ -99,6 +99,36 @@ Like flow options, `retries` must be non-negative.
 When retries are enabled, Kitaru records each failed attempt before the final
 checkpoint outcome. You can inspect this history through
 `KitaruClient().executions.get(exec_id).checkpoints[*].attempts`.
+
+## Error handling and retries
+
+When a checkpoint raises an unhandled exception, the flow stops immediately and
+the execution is marked as **failed**. No subsequent checkpoints run.
+
+### Automatic retries
+
+The `retries` parameter on `@checkpoint` tells Kitaru to re-run the checkpoint
+automatically before giving up:
+
+```python
+@checkpoint(retries=3)
+def call_model(prompt: str) -> str:
+    return client.chat(prompt)  # retried up to 3 times on failure
+```
+
+Each failed attempt is recorded, so you can inspect the full retry history
+through the execution's checkpoint attempts. If the checkpoint still fails after
+all retries, the flow fails.
+
+For retrying the **entire flow** (not just a single checkpoint), see the
+[`retries` option on flows](/concepts/flows#runtime-options).
+
+### Resuming after failure
+
+When a flow fails, you don't need to re-run everything from scratch. Use
+[replay](/guides/replay-and-overrides) to re-execute from the point of failure —
+checkpoints that already succeeded return their recorded results, and execution
+picks up at the first incomplete checkpoint.
 
 ## Return values
 

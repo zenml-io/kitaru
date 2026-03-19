@@ -15,7 +15,7 @@ like this:
 2. [Checkpoints](/concepts/checkpoints) inside the flow are the persisted work
    units
 3. Kitaru records the outcome of each checkpoint as it runs
-4. On re-execution, completed checkpoints can return cached results instead of
+4. On re-execution, completed checkpoints can return persisted results instead of
    running again
 
 Your Python code between checkpoints runs normally — Kitaru does not intercept
@@ -24,7 +24,7 @@ every line. The durability guarantees apply at the checkpoint boundaries.
 ## What happens when you run a flow
 
 ```python
-handle = my_agent.run("https://example.com")
+handle = my_agent.run(url="https://example.com")
 # execution runs in the background
 result = handle.wait()
 ```
@@ -56,7 +56,7 @@ Behind the scenes:
 For a synchronous one-liner, chain `.wait()`:
 
 ```python
-result = my_agent.run("https://example.com").wait()
+result = my_agent.run(url="https://example.com").wait()
 ```
 
 ## How errors surface
@@ -73,22 +73,22 @@ except kitaru.KitaruExecutionError as exc:
     print(exc.exec_id, exc.status, exc.failure_origin)
 ```
 
-## Caching behavior
+## Result reuse
 
-By default, checkpoint caching is **enabled** (`cache=True` on `@flow`).
+By default, checkpoint result reuse is **enabled** (`cache=True` on `@flow`).
 This means:
 
 - Checkpoints that already succeeded in a previous execution can return their
-  cached result without re-running
+  recorded output without re-running
 - This is especially useful during development when you want to iterate on later
   checkpoints without repeating expensive earlier work
 
-You can disable caching at the flow level or per-run:
+You can disable result reuse at the flow level or per-run:
 
 ```python
 from kitaru import flow
 
-# Disable caching by default
+# Disable result reuse by default
 @flow(cache=False)
 def always_fresh(url: str) -> str:
     ...

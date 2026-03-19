@@ -33,7 +33,7 @@ Examples use whatever Kitaru connection context is already active.
   connect first and verify the active context before running the example.
 
 ```bash
-kitaru login https://my-server.example.com --api-key <API_KEY>
+kitaru login https://my-server.example.com
 kitaru status
 ```
 
@@ -73,7 +73,7 @@ python first_working_flow.py
 | Example | Demonstrates | Related docs |
 |---|---|---|
 | `execution_management/client_execution_management.py` | `KitaruClient` for listing runs, reading details, and loading data | [Execution Management](/guides/execution-management) |
-| `execution_management/wait_and_resume.py` | `kitaru.wait()` with inline prompt or CLI input/resume | [Wait and Resume](/guides/wait-and-resume) |
+| `execution_management/wait_and_resume.py` | `kitaru.wait()` with inline prompt or CLI input/resume | [Wait, Input, and Resume](/guides/wait-and-resume) |
 | `replay/replay_with_overrides.py` | Replay from a checkpoint with overridden inputs | [Replay and Overrides](/guides/replay-and-overrides) |
 
 ## LLMs and agent integrations
@@ -97,7 +97,7 @@ If you are learning Kitaru from scratch:
 2. `basic_flow/flow_with_logging.py` — [Logging](/concepts/logging)
 3. `basic_flow/flow_with_artifacts.py` — [Artifacts](/guides/artifacts)
 4. `execution_management/client_execution_management.py` — [Execution Management](/guides/execution-management)
-5. `execution_management/wait_and_resume.py` — [Wait and Resume](/guides/wait-and-resume)
+5. `execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
 6. `replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
 7. `llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
 8. `pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)

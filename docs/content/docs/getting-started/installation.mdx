@@ -62,34 +62,12 @@ If you installed the `local` extra, you can start a local server with a web
 UI for browsing executions:
 
 ```bash
-kitaru login --local
+kitaru login
 ```
 
 This launches the Kitaru server on your machine and opens the UI in your
 browser. You can inspect flows, checkpoints, logs, and artifacts from any
 execution you have run locally.
-
-## Initialize your project
-
-After installing, initialize your project root so Kitaru knows where your
-source code lives:
-
-<Tabs items={["uv project", "pip environment"]}>
-  <Tab value="uv project">
-    ```bash
-    uv run kitaru init
-    ```
-  </Tab>
-  <Tab value="pip environment">
-    ```bash
-    kitaru init
-    ```
-  </Tab>
-</Tabs>
-
-This creates a `.kitaru/` directory in the current folder. It is used for
-source root detection when packaging flows for remote execution. Add
-`.kitaru/` to your `.gitignore`.
 
 ## Next Steps
 
