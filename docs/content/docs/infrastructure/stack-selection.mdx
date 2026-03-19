@@ -272,7 +272,7 @@ In story form:
 - `kitaru stack use prod` changes your persisted default stack
 - `kitaru.configure(stack="gpu-cluster")` changes the default only for the current Python process
 - `@flow(stack="gpu-cluster")` binds a default to one specific flow definition
-- `my_flow.run(stack="gpu-cluster")` or `my_flow.deploy(stack="gpu-cluster")` overrides everything else for that one execution
+- `my_flow.run(stack="gpu-cluster")` overrides everything else for that one execution
 
 Those higher-precedence overrides do **not** change the active stack you see in `kitaru stack current`; they are temporary execution-time bindings.
 

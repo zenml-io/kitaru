@@ -84,7 +84,7 @@ The important distinction is:
 
 - `kitaru.configure(stack="...")` sets a process-local default
 - `@flow(stack="...")` sets a default for one flow definition
-- `my_flow.run(stack="...")` / `my_flow.deploy(stack="...")` override both for one execution
+- `my_flow.run(stack="...")` overrides both for one execution
 - none of those change the persisted active stack selected by `kitaru stack use ...`
 
 ## Environment variables

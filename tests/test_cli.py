@@ -211,6 +211,7 @@ def test_help_flag_lists_available_commands(
     output = capsys.readouterr().out.lower()
     assert "kitaru" in output
     for command in (
+        "init",
         "login",
         "logout",
         "status",
@@ -231,6 +232,86 @@ def test_no_args_shows_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "kitaru" in captured.out.lower()
+
+
+class TestInit:
+    """Tests for ``kitaru init``."""
+
+    def test_creates_kitaru_directory(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``kitaru init <path>`` creates the repository marker directory."""
+        target = tmp_path / "myproject"
+        target.mkdir()
+        with pytest.raises(SystemExit) as exc_info:
+            app(["init", str(target)])
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "initialized" in captured.out.lower()
+        # ZenML creates a repo directory under the target.
+        # The exact name depends on whether ZENML_REPOSITORY_DIRECTORY_NAME
+        # is supported by the installed ZenML version (.kitaru or .zen).
+        assert (target / ".kitaru").is_dir() or (target / ".zen").is_dir()
+
+    def test_fails_on_existing_kitaru_marker(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Should fail when .kitaru/ already exists."""
+        target = tmp_path / "existing"
+        target.mkdir()
+        (target / ".kitaru").mkdir()
+        with pytest.raises(SystemExit) as exc_info:
+            app(["init", str(target)])
+        assert exc_info.value.code == 1
+        assert "already initialized" in capsys.readouterr().err.lower()
+
+    def test_fails_on_existing_zen_marker(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Should fail when legacy .zen/ already exists."""
+        target = tmp_path / "legacy"
+        target.mkdir()
+        (target / ".zen").mkdir()
+        with pytest.raises(SystemExit) as exc_info:
+            app(["init", str(target)])
+        assert exc_info.value.code == 1
+        assert "already initialized" in capsys.readouterr().err.lower()
+
+    def test_fails_on_nonexistent_path(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Should fail when the target directory does not exist."""
+        bogus = tmp_path / "does-not-exist"
+        with pytest.raises(SystemExit) as exc_info:
+            app(["init", str(bogus)])
+        assert exc_info.value.code == 1
+        assert "not a directory" in capsys.readouterr().err.lower()
+
+    def test_json_output(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """JSON mode emits the expected envelope."""
+        target = tmp_path / "jsontest"
+        target.mkdir()
+        with pytest.raises(SystemExit) as exc_info:
+            app(["init", str(target), "--output", "json"])
+        assert exc_info.value.code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["command"] == "init"
+        assert payload["item"]["repository_directory"] == ".kitaru"
+
+    def test_defaults_to_cwd(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Running without a path argument initializes the working directory."""
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(SystemExit) as exc_info:
+            app(["init"])
+        assert exc_info.value.code == 0
+        assert (tmp_path / ".kitaru").is_dir() or (tmp_path / ".zen").is_dir()
 
 
 def test_executions_help_lists_all_supported_subcommands(

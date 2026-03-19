@@ -125,7 +125,7 @@ def kitaru_executions_run(
     args: dict[str, Any] | None = None,
     stack: str | None = None,
 ) -> dict[str, Any]:
-    """Start or deploy a flow from `<module_or_file>:<flow_name>` target."""
+    """Start a flow from `<module_or_file>:<flow_name>` target."""
 
     def _start_execution() -> dict[str, Any]:
         client = client_api.KitaruClient()
@@ -141,7 +141,6 @@ def kitaru_executions_run(
         )
         return execution_interface.build_started_execution_payload(
             target=target,
-            invocation=result.invocation,
             details=details,
         )
 

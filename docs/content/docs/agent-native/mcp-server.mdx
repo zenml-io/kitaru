@@ -97,8 +97,8 @@ Pass flow inputs as `args` (a JSON object) and optionally specify a `stack`:
 }
 ```
 
-When `stack` is omitted the tool calls `.run()`; when provided it calls
-`.deploy(stack=...)`.
+When `stack` is provided, the tool passes it to `.run(stack=...)` so the
+execution targets that stack.
 
 ## Example query flow
 

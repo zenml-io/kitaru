@@ -101,6 +101,12 @@ kitaru status
 
 If you're just trying Kitaru locally, skip this step.
 
+### Initialize your project
+
+```bash
+kitaru init
+```
+
 ### Write your first flow
 
 ```python

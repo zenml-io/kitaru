@@ -66,6 +66,24 @@ Kitaru requires **Python 3.11 or newer**.
   </Tab>
 </Tabs>
 
+## Initialize your project
+
+<Tabs items={["uv project", "pip environment"]}>
+  <Tab value="uv project">
+    ```bash
+    uv run kitaru init
+    ```
+  </Tab>
+  <Tab value="pip environment">
+    ```bash
+    kitaru init
+    ```
+  </Tab>
+</Tabs>
+
+This creates a `.kitaru/` directory that marks your project root. Kitaru uses
+it for source root detection when packaging flows for remote execution.
+
 ## Run your first flow
 
 Create a small script named `demo.py`:

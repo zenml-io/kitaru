@@ -8,7 +8,7 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
-**ZenML mapping:** `@flow` → `@pipeline(dynamic=True)`, `@checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
+**ZenML mapping:** `@flow` → `@pipeline(dynamic=True)`, `@checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work. `kitaru init` creates `.kitaru/` (not `.zen/`) as the local project marker via `ZENML_REPOSITORY_DIRECTORY_NAME`.
 
 ## Project layout
 
@@ -190,10 +190,11 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | Execution CLI (`kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
 | `KitaruClient.executions.replay()` | Implemented |
+| `kitaru init` (project initialization, creates `.kitaru/`) | Implemented |
 
 ### Key design patterns
 
-- **Flows are top-level orchestration boundaries** — direct flow calls are blocked; start executions with `.run()` / `.deploy()`
+- **Flows are top-level orchestration boundaries** — direct flow calls are blocked; start executions with `.run()`
 - **Nested checkpoint calls are blocked in the current MVP implementation**
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive
 - **Replay** works by re-running the flow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute

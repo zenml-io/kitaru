@@ -22,15 +22,15 @@ dependencies = [
     "litellm>=1.75.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    # TODO: revert to "zenml>=0.94.0" once feature/kitaru is merged and released
+    # TODO: revert to "zenml>=0.94.0" once zenml release is out
     # Pinned to commit hash for tester stability; bump hash when updating
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@c5318663db4071c8da7ed9d3c56008ea801f4178",
+    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@a14c7d4dd43b5170617cc865395fb03589ba062a",
 ]
 
 [project.optional-dependencies]
 local = [
-    # TODO: revert to "zenml[local]>=0.94.0" once feature/kitaru is merged and released
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@c5318663db4071c8da7ed9d3c56008ea801f4178",
+    # TODO: revert to "zenml[local]>=0.94.0" once zenml release is out
+    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@a14c7d4dd43b5170617cc865395fb03589ba062a",
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=0.2.0",
@@ -42,6 +42,9 @@ mcp = [
 [project.scripts]
 kitaru = "kitaru.cli:cli"
 kitaru-mcp = "kitaru.mcp:main"
+
+[project.entry-points."zenml.init_hooks"]
+kitaru = "kitaru_init_hook:init"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
@@ -56,15 +59,15 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kitaru"]
+packages = ["src/kitaru", "src/kitaru_init_hook"]
 
 [dependency-groups]
 dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    # TODO: revert to "zenml[local]>=0.94.0" once feature/kitaru is merged and released
-    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@c5318663db4071c8da7ed9d3c56008ea801f4178",
+    # TODO: revert to "zenml[local]>=0.94.0" once zenml release is out
+    "zenml[local] @ git+https://github.com/zenml-io/zenml.git@a14c7d4dd43b5170617cc865395fb03589ba062a",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",

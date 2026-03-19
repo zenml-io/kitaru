@@ -202,12 +202,12 @@ This changes the stack Kitaru falls back to when no higher-precedence override i
 my_flow.run(stack="prod-k8s")
 ```
 
-This uses `prod-k8s` for that one execution only. You can also pass it via `.deploy(stack="prod-k8s")`.
+This uses `prod-k8s` for that one execution only.
 
 The important distinction is:
 
 - `kitaru stack use ...` changes your persisted fallback stack
-- `.run(stack=...)` / `.deploy(stack=...)` changes only that one execution
+- `.run(stack=...)` changes only that one execution
 - flow-level and runtime-level stack overrides also remain temporary
 
 So if you do a one-off remote run, `kitaru stack current` should still show the same persisted default afterward.
