@@ -216,10 +216,10 @@ class TestImplementedConnectionPrimitive:
 class TestPlaceholderBehavior:
     """Verify implemented/scaffolded primitive behavior in the current phase."""
 
-    def test_flow_returns_wrapper_with_run_and_deploy(self) -> None:
+    def test_flow_returns_wrapper_with_run(self) -> None:
         wrapped = kitaru.flow(lambda: None)
         assert hasattr(wrapped, "run")
-        assert hasattr(wrapped, "deploy")
+        assert not hasattr(wrapped, "deploy")
         assert not hasattr(wrapped, "start")
 
     def test_checkpoint_returns_callable_with_submit(self) -> None:

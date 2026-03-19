@@ -236,7 +236,7 @@ def _build_execution_overrides(
     cache: bool | None = None,
     retries: int | None = None,
 ) -> KitaruConfig:
-    """Build a partial execution config from flow/run/deploy overrides."""
+    """Build a partial execution config from flow and invocation overrides."""
     values: dict[str, Any] = {}
     if stack is not None:
         values["stack"] = stack
@@ -511,8 +511,7 @@ class _FlowDefinition:
         raise KitaruUsageError(
             "Direct flow calls are not supported. Use:\n"
             "  handle = my_flow.run(...)        # returns FlowHandle\n"
-            "  result = my_flow.run(...).wait()  # blocks until complete\n"
-            "  handle = my_flow.deploy(...)      # remote execution"
+            "  result = my_flow.run(...).wait()  # blocks until complete"
         )
 
     def run(
@@ -703,39 +702,6 @@ class _FlowDefinition:
             frozen_execution_spec=frozen_execution_spec,
         )
         return FlowHandle(run)
-
-    def deploy(
-        self,
-        *args: Any,
-        stack: str | None = None,
-        image: ImageSetting | None = None,
-        cache: bool | None = None,
-        retries: int | None = None,
-        **kwargs: Any,
-    ) -> FlowHandle:
-        """Run a flow execution, signaling remote/deployment intent.
-
-        This is semantic sugar for `.run(..., stack=...)`.
-
-        Args:
-            *args: Flow input args.
-            stack: Optional stack override.
-            image: Optional image override.
-            cache: Optional cache override.
-            retries: Optional retry override.
-            **kwargs: Flow input kwargs.
-
-        Returns:
-            A handle for the started execution.
-        """
-        return self.run(
-            *args,
-            stack=stack,
-            image=image,
-            cache=cache,
-            retries=retries,
-            **kwargs,
-        )
 
 
 @overload

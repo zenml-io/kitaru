@@ -50,8 +50,6 @@ def _write_flow_target_module(path: Path, *, marker: str) -> None:
         "class _FakeFlow:\n"
         f"    marker = {marker!r}\n"
         "    def run(self, *args, **kwargs):\n"
-        "        return None\n"
-        "    def deploy(self, *args, **kwargs):\n"
         "        return None\n\n"
         "demo_flow = _FakeFlow()\n",
         encoding="utf-8",
@@ -93,7 +91,6 @@ def test_load_flow_target_delegates_to_shared_module_loader() -> None:
     fake_flow = SimpleNamespace(
         marker="patched",
         run=MagicMock(),
-        deploy=MagicMock(),
     )
     fake_module = SimpleNamespace(demo_flow=fake_flow)
 
@@ -354,7 +351,6 @@ def test_executions_run_fetches_execution(
     """Run tool should run a flow and include execution details when available."""
     invocation_result = execution_interface.FlowInvocationResult(
         handle=SimpleNamespace(exec_id=sample_execution.exec_id),
-        invocation="run",
     )
 
     with (
@@ -387,7 +383,7 @@ def test_executions_run_fetches_execution(
         exec_id=sample_execution.exec_id,
         client=mock_kitaru_client,
     )
-    assert payload["invocation"] == "run"
+    assert "invocation" not in payload
     assert payload["execution"]["exec_id"] == sample_execution.exec_id
 
 
@@ -401,7 +397,6 @@ def test_executions_run_returns_warning_when_details_unavailable(
             "kitaru._interface_executions.invoke_flow_target",
             return_value=execution_interface.FlowInvocationResult(
                 handle=SimpleNamespace(exec_id="kr-new"),
-                invocation="deploy",
             ),
         ),
         patch(
