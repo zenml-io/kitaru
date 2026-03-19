@@ -44,7 +44,7 @@ kitaru = "kitaru.cli:cli"
 kitaru-mcp = "kitaru.mcp:main"
 
 [project.entry-points."zenml.init_hooks"]
-kitaru = "kitaru._env:apply_env_translations"
+kitaru = "kitaru_init_hook:init"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
@@ -59,7 +59,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kitaru"]
+packages = ["src/kitaru", "src/kitaru_init_hook"]
 
 [dependency-groups]
 dev = [
