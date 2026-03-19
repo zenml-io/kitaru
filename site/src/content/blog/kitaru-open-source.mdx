@@ -64,7 +64,7 @@ Kitaru allows long-horizon ambient agents to leave their host and run on your co
 We followed the following principles when designing Kitaru:
 
 1. **Observability built-in.** The dashboard ships free with the server. Not a paid add-on. Every run is visible — checkpoint by checkpoint, what each step produced, what each LLM call cost. When something breaks at step 6 you're not reading logs. You're looking at what step 3 actually returned and replaying from there.
-2. **Deployment flexibility.** No workers. No message queues. No distributed architecture to manage. Kitaru runs on a single server and a SQL database. Point it at Kubernetes, Vertex AI, SageMaker, or AzureML and it works. If you've used ZenML, you know the stack abstraction — same idea, swap your infra without touching agent code.
+2. **Deployment flexibility.** No workers. No message queues. No distributed architecture to manage. Kitaru runs on a single server and a SQL database. Point it at Kubernetes, Vertex AI, SageMaker, or AzureML and it works. 
 3. **Python-first, no lock-in.** `if`, `for`, `try/except` — it all works. No graph DSL to learn. No framework opinions imposed on you. Kitaru wraps your code. It doesn't care how you wrote it.
 
 In 2026, there are many tools that claim to do similar things. With Kitaru, we want to make it easy to understand what we do well, and what we consider out of our purview.
@@ -116,7 +116,7 @@ def writing_agent(topic: str) -> str:
     return review_gate(draft)
 ```
 
-
+If you've used ZenML, you know the stack abstraction — same idea, swap your infra without touching agent code.
 Deploy to your cloud with `kitaru stack use prod`. No rewrite, no config changes.
 
 ## What we're still building
