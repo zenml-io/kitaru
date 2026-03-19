@@ -911,8 +911,8 @@
         const stickyLine = computeStickyLine(firstCard);
         const sectionRect = section.getBoundingClientRect();
 
-        // Section is not in sticky range yet.
-        if (sectionRect.top > stickyLine) {
+        // Section is not in view yet — allow 200px early trigger to match card buffer.
+        if (sectionRect.top > stickyLine + 200) {
           setActiveCard(cards, -1, activeIdxRef);
           return;
         }
@@ -922,7 +922,8 @@
         cards.forEach((card, idx) => {
           const topPx = computeStickyLine(card);
           const rect = card.getBoundingClientRect();
-          if (rect.top <= topPx + 1) {
+          // Start animation early — when the card is within 200px of its sticky line
+          if (rect.top <= topPx + 200) {
             nextIdx = idx;
           }
         });
@@ -959,7 +960,7 @@
           setActiveCard(cards, -1, activeIdxRef);
         }
       });
-    }, { threshold: 0.35 });
+    }, { threshold: 0.15 });
 
     cards.forEach(card => mobileObs.observe(card));
 

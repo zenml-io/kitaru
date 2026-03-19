@@ -78,34 +78,33 @@
   .mesh-blob {
     position: absolute;
     border-radius: 50%;
-    filter: blur(80px);
     will-change: transform;
   }
 
   .mesh-blob-1 {
-    width: 800px;
-    height: 800px;
+    width: 1100px;
+    height: 1100px;
     top: -20%;
     left: -15%;
-    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.20) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.18) 0%, oklch(0.65 0.16 45 / 0.06) 40%, transparent 65%);
     animation: meshFloat1 10s ease-in-out infinite alternate;
   }
 
   .mesh-blob-2 {
-    width: 700px;
-    height: 700px;
+    width: 1000px;
+    height: 1000px;
     bottom: -25%;
     right: -15%;
-    background: radial-gradient(circle, oklch(0.68 0.08 55 / 0.16) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.68 0.08 55 / 0.14) 0%, oklch(0.68 0.08 55 / 0.05) 40%, transparent 65%);
     animation: meshFloat2 13s ease-in-out infinite alternate;
   }
 
   .mesh-blob-3 {
-    width: 600px;
-    height: 600px;
+    width: 900px;
+    height: 900px;
     top: 20%;
     left: 30%;
-    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.14) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.12) 0%, oklch(0.65 0.16 45 / 0.04) 40%, transparent 65%);
     animation: meshFloat3 8s ease-in-out infinite alternate;
   }
 
@@ -317,9 +316,9 @@
       text-align: center;
     }
 
-    .mesh-blob-1 { width: 300px; height: 300px; }
-    .mesh-blob-2 { width: 250px; height: 250px; }
-    .mesh-blob-3 { width: 200px; height: 200px; }
+    .mesh-blob-1 { width: 420px; height: 420px; }
+    .mesh-blob-2 { width: 350px; height: 350px; }
+    .mesh-blob-3 { width: 280px; height: 280px; }
   }
 
   @media (max-width: 480px) {
@@ -361,8 +360,8 @@
 </style>
 
 <script>
-  // ─── Copy-to-clipboard for install command ───
-  document.querySelectorAll<HTMLButtonElement>('.copy-btn').forEach(btn => {
+  // ─── Copy-to-clipboard for Hero install command only ───
+  document.querySelectorAll<HTMLButtonElement>('#hero .copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const text = btn.dataset.copy ?? '';
       navigator.clipboard.writeText(text).then(() => {

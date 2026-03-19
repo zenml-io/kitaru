@@ -138,8 +138,11 @@
   const placeholder = document.getElementById('videoPlaceholder');
   const playBtn = document.getElementById('videoPlayBtn');
 
+  let hasLaunched = false;
+
   function launchVideo() {
-    if (!container || !placeholder) return;
+    if (hasLaunched || !container || !placeholder) return;
+    hasLaunched = true;
     // TODO: Replace with Kitaru demo video ID before launch
     const videoId = 'wEVwIkDvUPs';
     const iframe = document.createElement('iframe');
