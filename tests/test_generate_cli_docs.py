@@ -152,8 +152,8 @@ class TestBuildCommandTree:
         stack_create = _find_command(tree, "stack", "create")
         stack_use = _find_command(tree, "stack", "use")
 
-        assert login.usage == "kitaru login SERVER [OPTIONS]"
-        assert login.parameters[0].names == ["SERVER", "--url"]
+        assert login.usage == "kitaru login [SERVER] [OPTIONS]"
+        assert login.parameters[0].names == ["SERVER"]
 
         assert get.usage.startswith("kitaru executions get EXEC_ID")
         assert get.parameters[0].names == ["EXEC_ID"]
@@ -438,8 +438,13 @@ class TestWriteDocsTree:
         assert "| `EXEC_ID` | `str` | Yes |  | Execution ID. |" in get_content
 
         login_content = (output_dir / "login.mdx").read_text()
-        assert "kitaru login SERVER [OPTIONS]" in login_content
-        assert "| `SERVER`, `--url` | `str` | Yes |  |" in login_content
+        assert "kitaru login [SERVER] [OPTIONS]" in login_content
+        assert "| `SERVER` | `str` | No | `None` |" in login_content
+        assert "`--url`" not in login_content
+        assert "`--pro-api-url`" not in login_content
+        assert "`--cloud-api-url`" not in login_content
+        assert "`--port`" in login_content
+        assert "`--timeout`" in login_content
 
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content

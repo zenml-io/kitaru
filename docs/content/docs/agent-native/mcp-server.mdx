@@ -21,6 +21,22 @@ structured tool calls instead of parsing CLI text output.
   </Tab>
 </Tabs>
 
+If you also want agents to start and stop the local Kitaru server, install the
+`local` extra too:
+
+<Tabs items={["uv (recommended)", "pip"]}>
+  <Tab value="uv (recommended)">
+    ```bash
+    uv add kitaru --extra mcp --extra local
+    ```
+  </Tab>
+  <Tab value="pip">
+    ```bash
+    pip install "kitaru[mcp,local]"
+    ```
+  </Tab>
+</Tabs>
+
 ## Start the server
 
 ```bash
@@ -65,6 +81,8 @@ Artifact tools:
 
 Connection tools:
 
+- `kitaru_start_local_server`
+- `kitaru_stop_local_server`
 - `kitaru_status`
 - `kitaru_stacks_list`
 - `manage_stack`
@@ -113,10 +131,12 @@ or `manage_stack(action="delete", name="local-dev", force=True)`.
 ## Authentication and context
 
 The MCP server reuses the same config/auth context as `kitaru` CLI and SDK.
-If you want MCP tools to target a deployed Kitaru server, connect first with
-`kitaru login ...` before starting `kitaru-mcp`, or set `KITARU_*` connection
-variables in the MCP server environment. If you can run `kitaru status`, MCP
-tools use that same connection.
+If you want MCP tools to target a local server, start one first with bare
+`kitaru login` or via `kitaru_start_local_server(...)`. If you want MCP tools
+to target a deployed Kitaru server, connect first with `kitaru login <server>`
+before starting `kitaru-mcp`, or set `KITARU_*` connection variables in the MCP
+server environment. If you can run `kitaru status`, MCP tools use that same
+connection.
 
 ## Replay behavior
 

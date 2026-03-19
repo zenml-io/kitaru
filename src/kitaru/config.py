@@ -674,6 +674,7 @@ def _login_to_server_target(
     project: str | None = None,
     verify_ssl: bool | str = True,
     cloud_api_url: str | None = None,
+    timeout: int | None = None,
 ) -> None:
     """Connect to a Kitaru server URL or managed workspace target.
 
@@ -685,22 +686,29 @@ def _login_to_server_target(
         verify_ssl: TLS verification mode or CA bundle path.
         cloud_api_url: Optional managed-cloud API URL used for staging or
             custom control planes.
+        timeout: Optional connection timeout forwarded when supported by the
+            underlying runtime.
 
     Raises:
         KitaruBackendError: If the underlying ZenML login flow fails.
         KitaruUsageError: If the login target is malformed.
     """
+    login_kwargs: dict[str, object] = {
+        "api_key": api_key,
+        "refresh": refresh,
+        "project": project,
+        "verify_ssl": verify_ssl,
+        "cloud_api_url": cloud_api_url,
+        "suppress_zenml_cli_messages": _suppress_zenml_cli_messages,
+        "zenml_connect_to_server": _zenml_connect_to_server,
+        "zenml_connect_to_pro_server": _zenml_connect_to_pro_server,
+        "zenml_is_pro_server": _zenml_is_pro_server,
+    }
+    if timeout is not None:
+        login_kwargs["timeout"] = timeout
     _config_connection._login_to_server_target_impl(
         server,
-        api_key=api_key,
-        refresh=refresh,
-        project=project,
-        verify_ssl=verify_ssl,
-        cloud_api_url=cloud_api_url,
-        suppress_zenml_cli_messages=_suppress_zenml_cli_messages,
-        zenml_connect_to_server=_zenml_connect_to_server,
-        zenml_connect_to_pro_server=_zenml_connect_to_pro_server,
-        zenml_is_pro_server=_zenml_is_pro_server,
+        **login_kwargs,
     )
 
 
@@ -749,6 +757,7 @@ def connect(
     no_verify_ssl: bool = False,
     ssl_ca_cert: str | None = None,
     cloud_api_url: str | None = None,
+    timeout: int | None = None,
 ) -> None:
     """Connect to a Kitaru server.
 
@@ -764,6 +773,8 @@ def connect(
         ssl_ca_cert: Path to a CA bundle used to verify the server.
         cloud_api_url: Optional managed-cloud API URL used when the server URL
             points at a managed Kitaru deployment or staging environment.
+        timeout: Optional connection timeout forwarded when supported by the
+            underlying runtime.
 
     Raises:
         KitaruUsageError: If the server URL is invalid.
@@ -773,13 +784,18 @@ def connect(
     verify_ssl: bool | str = (
         ssl_ca_cert if ssl_ca_cert is not None else not no_verify_ssl
     )
+    login_kwargs: dict[str, object] = {
+        "api_key": api_key,
+        "refresh": refresh,
+        "project": project,
+        "verify_ssl": verify_ssl,
+        "cloud_api_url": cloud_api_url,
+    }
+    if timeout is not None:
+        login_kwargs["timeout"] = timeout
     _login_to_server_target(
         normalized_url,
-        api_key=api_key,
-        refresh=refresh,
-        project=project,
-        verify_ssl=verify_ssl,
-        cloud_api_url=cloud_api_url,
+        **login_kwargs,
     )
 
 
@@ -792,6 +808,7 @@ def login_to_server(
     no_verify_ssl: bool = False,
     ssl_ca_cert: str | None = None,
     cloud_api_url: str | None = None,
+    timeout: int | None = None,
 ) -> None:
     """Connect to a Kitaru server URL or managed workspace target.
 
@@ -804,15 +821,22 @@ def login_to_server(
         ssl_ca_cert: Path to a CA bundle used to verify the server.
         cloud_api_url: Optional managed-cloud API URL used when connecting to
             staging or another non-default control plane.
+        timeout: Optional connection timeout forwarded when supported by the
+            underlying runtime.
     """
     verify_ssl: bool | str = (
         ssl_ca_cert if ssl_ca_cert is not None else not no_verify_ssl
     )
+    login_kwargs: dict[str, object] = {
+        "api_key": api_key,
+        "refresh": refresh,
+        "project": project,
+        "verify_ssl": verify_ssl,
+        "cloud_api_url": cloud_api_url,
+    }
+    if timeout is not None:
+        login_kwargs["timeout"] = timeout
     _login_to_server_target(
         server,
-        api_key=api_key,
-        refresh=refresh,
-        project=project,
-        verify_ssl=verify_ssl,
-        cloud_api_url=cloud_api_url,
+        **login_kwargs,
     )

@@ -158,6 +158,19 @@ def _print_success(message: str, detail: str | None = None) -> None:
             print(f"  {detail}")
 
 
+def _print_warning(message: str, detail: str | None = None) -> None:
+    """Print a warning message, styled when the terminal is interactive."""
+    if _is_interactive():
+        console = Console()
+        console.print(Text(message, style="yellow"))
+        if detail:
+            console.print(Text(f"  {detail}", style="dim"))
+    else:
+        print(message)
+        if detail:
+            print(f"  {detail}")
+
+
 def _resolve_output_format(raw_output: str) -> CLIOutputFormat:
     """Normalize a CLI output mode and fail with a text error if invalid."""
     try:
