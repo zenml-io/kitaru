@@ -129,6 +129,7 @@ class TestImplementedConnectionPrimitive:
             project="demo-project",
             verify_ssl=False,
             cloud_api_url=None,
+            timeout=None,
         )
 
     def test_connect_routes_pro_urls_to_managed_login(self) -> None:

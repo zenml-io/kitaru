@@ -693,22 +693,18 @@ def _login_to_server_target(
         KitaruBackendError: If the underlying ZenML login flow fails.
         KitaruUsageError: If the login target is malformed.
     """
-    login_kwargs: dict[str, object] = {
-        "api_key": api_key,
-        "refresh": refresh,
-        "project": project,
-        "verify_ssl": verify_ssl,
-        "cloud_api_url": cloud_api_url,
-        "suppress_zenml_cli_messages": _suppress_zenml_cli_messages,
-        "zenml_connect_to_server": _zenml_connect_to_server,
-        "zenml_connect_to_pro_server": _zenml_connect_to_pro_server,
-        "zenml_is_pro_server": _zenml_is_pro_server,
-    }
-    if timeout is not None:
-        login_kwargs["timeout"] = timeout
     _config_connection._login_to_server_target_impl(
         server,
-        **login_kwargs,
+        api_key=api_key,
+        refresh=refresh,
+        project=project,
+        verify_ssl=verify_ssl,
+        cloud_api_url=cloud_api_url,
+        timeout=timeout,
+        suppress_zenml_cli_messages=_suppress_zenml_cli_messages,
+        zenml_connect_to_server=_zenml_connect_to_server,
+        zenml_connect_to_pro_server=_zenml_connect_to_pro_server,
+        zenml_is_pro_server=_zenml_is_pro_server,
     )
 
 
@@ -784,18 +780,14 @@ def connect(
     verify_ssl: bool | str = (
         ssl_ca_cert if ssl_ca_cert is not None else not no_verify_ssl
     )
-    login_kwargs: dict[str, object] = {
-        "api_key": api_key,
-        "refresh": refresh,
-        "project": project,
-        "verify_ssl": verify_ssl,
-        "cloud_api_url": cloud_api_url,
-    }
-    if timeout is not None:
-        login_kwargs["timeout"] = timeout
     _login_to_server_target(
         normalized_url,
-        **login_kwargs,
+        api_key=api_key,
+        refresh=refresh,
+        project=project,
+        verify_ssl=verify_ssl,
+        cloud_api_url=cloud_api_url,
+        timeout=timeout,
     )
 
 
@@ -827,16 +819,12 @@ def login_to_server(
     verify_ssl: bool | str = (
         ssl_ca_cert if ssl_ca_cert is not None else not no_verify_ssl
     )
-    login_kwargs: dict[str, object] = {
-        "api_key": api_key,
-        "refresh": refresh,
-        "project": project,
-        "verify_ssl": verify_ssl,
-        "cloud_api_url": cloud_api_url,
-    }
-    if timeout is not None:
-        login_kwargs["timeout"] = timeout
     _login_to_server_target(
         server,
-        **login_kwargs,
+        api_key=api_key,
+        refresh=refresh,
+        project=project,
+        verify_ssl=verify_ssl,
+        cloud_api_url=cloud_api_url,
+        timeout=timeout,
     )
