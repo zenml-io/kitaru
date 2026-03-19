@@ -7,37 +7,37 @@
 
 @theme {
   /* Backgrounds */
-  --color-bg: #f8f6f3;
-  --color-surface: #FFFFFF;
-  --color-surface-warm: #FCFCFA;
+  --color-bg: oklch(0.975 0.008 75);
+  --color-surface: oklch(1 0 0);
+  --color-surface-warm: oklch(0.99 0.003 90);
 
   /* Text hierarchy */
-  --color-primary: #1A1714;
-  --color-secondary: #6B6560;
-  --color-muted: #9E9790;
+  --color-primary: oklch(0.13 0.015 60);
+  --color-secondary: oklch(0.49 0.015 55);
+  --color-muted: oklch(0.67 0.015 60);
 
   /* Accents */
-  --color-accent: #F17829;
-  --color-accent-warm: #C4956A;
-  --color-accent-deep: #A07848;
-  --color-accent-light: #F5EDE4;
+  --color-accent: oklch(0.65 0.16 45);
+  --color-accent-warm: oklch(0.68 0.08 55);
+  --color-accent-deep: oklch(0.57 0.09 65);
+  --color-accent-light: oklch(0.95 0.015 70);
 
   /* Status */
-  --color-success: #3D8C5C;
-  --color-success-bg: #EDF5E9;
-  --color-warm-status: #E8A840;
-  --color-warm-status-bg: #FFF8ED;
-  --color-cost-up: #DC4A3D;
-  --color-cost-up-bg: #FDDDE6;
+  --color-success: oklch(0.55 0.1 155);
+  --color-success-bg: oklch(0.96 0.025 145);
+  --color-warm-status: oklch(0.73 0.12 80);
+  --color-warm-status-bg: oklch(0.98 0.02 85);
+  --color-cost-up: oklch(0.55 0.18 25);
+  --color-cost-up-bg: oklch(0.93 0.03 350);
 
   /* Dark sections */
-  --color-dark-bg: #1A1714;
-  --color-dark-surface: #211C17;
-  --color-dark-text: #E8E4DE;
+  --color-dark-bg: oklch(0.13 0.015 60);
+  --color-dark-surface: oklch(0.16 0.015 60);
+  --color-dark-text: oklch(0.92 0.01 70);
 
   /* Borders */
-  --color-border: #E5E2DC;
-  --color-border-light: #F0EDE8;
+  --color-border: oklch(0.91 0.01 70);
+  --color-border-light: oklch(0.95 0.008 70);
 
   /* Fonts */
   --font-ui: 'DM Sans', -apple-system, sans-serif;
@@ -60,7 +60,7 @@ body {
 /* Grain overlay */
 body::before {
   content: '';
-  position: fixed; inset: 0; z-index: 9999;
+  position: fixed; inset: 0; z-index: 200;
   pointer-events: none;
   opacity: 0.025;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -69,7 +69,7 @@ body::before {
 }
 
 ::selection {
-  background: rgba(241,120,41,0.15);
+  background: oklch(0.65 0.16 45 / 0.15);
 }
 
 /* Focus styles */
@@ -89,7 +89,7 @@ body::before {
   z-index: 10000;
   padding: 8px 16px;
   background: var(--color-primary);
-  color: #fff;
+  color: oklch(1 0 0);
   font-family: var(--font-ui);
   font-size: 14px;
   font-weight: 600;
@@ -153,17 +153,17 @@ body::before {
   to { transform: rotate(360deg); }
 }
 @keyframes livePulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(61,140,92,0.4); }
-  50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(61,140,92,0); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.55 0.1 155 / 0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 4px oklch(0.55 0.1 155 / 0); }
 }
 @keyframes pausePulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(232,168,64,0.25); }
-  50% { box-shadow: 0 0 0 8px rgba(232,168,64,0); }
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.73 0.12 80 / 0.25); }
+  50% { box-shadow: 0 0 0 8px oklch(0.73 0.12 80 / 0); }
 }
 @keyframes shimmer {
-  0% { box-shadow: 0 0 0 0 rgba(241,120,41,0.3); }
-  50% { box-shadow: 0 0 20px 4px rgba(241,120,41,0.15); }
-  100% { box-shadow: 0 0 0 0 rgba(241,120,41,0.3); }
+  0% { box-shadow: 0 0 0 0 oklch(0.65 0.16 45 / 0.3); }
+  50% { box-shadow: 0 0 20px 4px oklch(0.65 0.16 45 / 0.15); }
+  100% { box-shadow: 0 0 0 0 oklch(0.65 0.16 45 / 0.3); }
 }
 @keyframes counter-up {
   from { opacity: 0; transform: translateY(8px); }
@@ -175,9 +175,9 @@ body::before {
   height: 10px;
   border-radius: 50%;
 }
-.code-dot:nth-child(1) { background: #E85540; }
-.code-dot:nth-child(2) { background: #E8A840; }
-.code-dot:nth-child(3) { background: #40C840; }
+.code-dot:nth-child(1) { background: oklch(0.57 0.19 25); }
+.code-dot:nth-child(2) { background: oklch(0.73 0.12 80); }
+.code-dot:nth-child(3) { background: oklch(0.72 0.18 145); }
 
 /* ═══════════════════════════════════════════════════
    Shared layout
@@ -233,7 +233,7 @@ body::before {
 /* Buttons */
 .btn-primary {
   font-family: var(--font-ui); font-size: 15px; font-weight: 600;
-  color: #fff; background: var(--color-primary);
+  color: oklch(1 0 0); background: var(--color-primary);
   padding: 14px 32px; border-radius: 8px; border: none;
   cursor: pointer; transition: opacity 0.2s, transform 0.15s;
   text-decoration: none; display: inline-flex; align-items: center; gap: 8px;

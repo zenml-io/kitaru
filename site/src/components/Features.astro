@@ -137,8 +137,10 @@
   /* ═══ Section container ═══ */
   .features-section {
     /* No overflow restrictions — sticky needs open overflow */
+  }
+
+  .features-section.bg-loaded {
     background: url('https://assets.kitaru.ai/content/site/01af00b0/kit-bg.avif') center bottom / cover no-repeat;
-    background-attachment: fixed;
   }
 
   .features-header {
@@ -166,7 +168,7 @@
     background: var(--color-bg);
     border-radius: 16px;
     border: 1px solid var(--color-border);
-    box-shadow: 0 -4px 20px rgba(26,23,20,0.04);
+    box-shadow: 0 -4px 20px oklch(0.13 0.015 60 / 0.04);
     margin-bottom: 40vh;
     overflow: hidden;
   }
@@ -192,7 +194,7 @@
   .card-glow {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(241,120,41,0.04), transparent 60%);
+    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), oklch(0.65 0.16 45 / 0.04), transparent 60%);
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.3s;
@@ -273,7 +275,7 @@
     left: 10%;
     right: 10%;
     height: 2px;
-    background: rgba(26,23,20,0.1);
+    background: oklch(0.13 0.015 60 / 0.1);
     transform: translateY(-50%);
   }
 
@@ -295,7 +297,7 @@
     height: 36px;
     border-radius: 50%;
     background: var(--color-surface-warm);
-    border: 1.5px solid rgba(26,23,20,0.15);
+    border: 1.5px solid oklch(0.13 0.015 60 / 0.15);
     transform: translate(-50%, -50%);
     display: flex;
     align-items: center;
@@ -309,22 +311,22 @@
 
   .pr-step.completed {
     border-color: var(--color-accent);
-    background: rgba(241,120,41,0.1);
+    background: oklch(0.65 0.16 45 / 0.1);
     color: var(--color-accent);
   }
 
   .pr-step.active {
     border-color: var(--color-accent);
     background: var(--color-accent);
-    color: #FFFFFF;
-    box-shadow: 0 0 20px rgba(241,120,41,0.3);
+    color: oklch(1 0 0);
+    box-shadow: 0 0 20px oklch(0.65 0.16 45 / 0.3);
     transform: translate(-50%, -50%) scale(1.15);
   }
 
   .pr-step.paused {
-    border-color: #E8A840;
-    background: rgba(232,168,64,0.1);
-    color: #E8A840;
+    border-color: oklch(0.73 0.12 80);
+    background: oklch(0.73 0.12 80 / 0.1);
+    color: oklch(0.73 0.12 80);
     animation: pausePulse 1.5s ease infinite;
   }
 
@@ -333,13 +335,13 @@
     top: 18%;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(232,168,64,0.12);
-    border: 1px solid rgba(232,168,64,0.3);
+    background: oklch(0.73 0.12 80 / 0.12);
+    border: 1px solid oklch(0.73 0.12 80 / 0.3);
     border-radius: 12px;
     padding: 6px 14px;
     font-family: var(--font-mono);
     font-size: 0.7rem;
-    color: #E8A840;
+    color: oklch(0.73 0.12 80);
     opacity: 0;
     transition: opacity 0.4s;
     white-space: nowrap;
@@ -375,7 +377,7 @@
     height: 40px;
     border-radius: 6px;
     background: var(--color-surface-warm);
-    border: 1px solid rgba(26,23,20,0.1);
+    border: 1px solid oklch(0.13 0.015 60 / 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -386,14 +388,14 @@
   }
 
   .rstep.ok {
-    border-color: rgba(61,140,92,0.4);
-    background: rgba(61,140,92,0.08);
+    border-color: oklch(0.55 0.1 155 / 0.4);
+    background: oklch(0.55 0.1 155 / 0.08);
     color: var(--color-success);
   }
 
   .rstep.fail {
     border-color: var(--color-cost-up);
-    background: rgba(220,74,61,0.08);
+    background: oklch(0.55 0.18 25 / 0.08);
     color: var(--color-cost-up);
     animation: failShake 0.4s ease;
   }
@@ -408,9 +410,9 @@
 
   .rstep.replay {
     border-color: var(--color-accent);
-    background: rgba(241,120,41,0.08);
+    background: oklch(0.65 0.16 45 / 0.08);
     color: var(--color-accent);
-    box-shadow: 0 0 12px rgba(241,120,41,0.15);
+    box-shadow: 0 0 12px oklch(0.65 0.16 45 / 0.15);
   }
 
   .replay-status {
@@ -472,14 +474,14 @@
     position: absolute;
     width: 240px;
     height: 240px;
-    border: 1px dashed rgba(26,23,20,0.1);
+    border: 1px dashed oklch(0.13 0.015 60 / 0.1);
     border-radius: 50%;
   }
 
   .fw-item {
     position: absolute;
     background: var(--color-surface-warm);
-    border: 1px solid rgba(26,23,20,0.1);
+    border: 1px solid oklch(0.13 0.015 60 / 0.1);
     border-radius: 8px;
     padding: 6px 14px;
     font-family: var(--font-mono);
@@ -492,7 +494,7 @@
   .fw-item.active {
     border-color: var(--color-accent);
     color: var(--color-accent);
-    background: rgba(241,120,41,0.06);
+    background: oklch(0.65 0.16 45 / 0.06);
   }
 
   /* ═══ ANIMATION: Parallel Branches (light) ═══ */
@@ -532,7 +534,7 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: rgba(26,23,20,0.08);
+    background: oklch(0.13 0.015 60 / 0.08);
   }
 
   .par-dot {
@@ -541,7 +543,7 @@
     height: 16px;
     border-radius: 50%;
     background: var(--color-surface-warm);
-    border: 1.5px solid rgba(26,23,20,0.15);
+    border: 1.5px solid oklch(0.13 0.015 60 / 0.15);
     transition: all 0.4s ease;
     z-index: 2;
   }
@@ -551,7 +553,7 @@
   .par-dot[data-dot="2"] { left: 80%; }
 
   .par-dot.ok {
-    border-color: rgba(61,140,92,0.6);
+    border-color: oklch(0.55 0.1 155 / 0.6);
     background: oklch(0.93 0.03 155);
   }
 
@@ -564,7 +566,7 @@
   .par-dot.replay {
     border-color: var(--color-accent);
     background: oklch(0.93 0.03 55);
-    box-shadow: 0 0 8px rgba(241,120,41,0.2);
+    box-shadow: 0 0 8px oklch(0.65 0.16 45 / 0.2);
   }
 
   /* Content-box spacer — extends the sticky container so the last
@@ -966,6 +968,18 @@
       setActiveCard(cards, -1, activeIdxRef);
       cards.forEach((_, idx) => resetAnimState(idx));
     };
+  }
+
+  // Lazy-load background image
+  const featuresSection = document.querySelector<HTMLElement>('.features-section');
+  if (featuresSection) {
+    const bgObs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        featuresSection.classList.add('bg-loaded');
+        bgObs.disconnect();
+      }
+    }, { rootMargin: '200px' });
+    bgObs.observe(featuresSection);
   }
 
   if (!prefersReducedMotion) {

@@ -79,7 +79,7 @@
     height: 800px;
     top: -20%;
     left: -15%;
-    background: radial-gradient(circle, rgba(241,120,41,0.20) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.20) 0%, transparent 70%);
     animation: meshFloat1 10s ease-in-out infinite alternate;
   }
 
@@ -88,7 +88,7 @@
     height: 700px;
     bottom: -25%;
     right: -15%;
-    background: radial-gradient(circle, rgba(196,149,106,0.16) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.68 0.08 55 / 0.16) 0%, transparent 70%);
     animation: meshFloat2 13s ease-in-out infinite alternate;
   }
 
@@ -97,7 +97,7 @@
     height: 600px;
     top: 20%;
     left: 30%;
-    background: radial-gradient(circle, rgba(241,120,41,0.14) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.14) 0%, transparent 70%);
     animation: meshFloat3 8s ease-in-out infinite alternate;
   }
 
@@ -153,8 +153,8 @@
   }
 
   @keyframes pulse-dot {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(241,120,41,0.4); }
-    50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(241,120,41,0); }
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.65 0.16 45 / 0.4); }
+    50% { opacity: 0.7; box-shadow: 0 0 0 6px oklch(0.65 0.16 45 / 0); }
   }
 
   .hero-headline {
@@ -262,11 +262,12 @@
 
 <script>
   // ─── ASCII Canvas Background — Landscape zones ───
-  (() => {
+  import { sizeCanvasToParent, attachMouseTracker, attachResizeHandler, getAttractorPositions } from '../scripts/canvas-utils';
+
   const canvas = document.querySelector<HTMLCanvasElement>('.ascii-canvas');
-  if (!canvas) return;
+  if (!canvas) throw new Error('ascii-canvas not found');
   const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) throw new Error('2d context unavailable');
 
   const GRID_SPACING = 6;
   const DOT_RADIUS = 2;
@@ -302,6 +303,7 @@
   let mouseY = -9999;
   let mouseActive = false;
   let animId = 0;
+  let isVisible = true;
   let canvasW = 0;
   let canvasH = 0;
 
@@ -410,12 +412,9 @@
   }
 
   function resize() {
-    const rect = canvas!.parentElement!.getBoundingClientRect();
-    canvas!.width = rect.width * DPR;
-    canvas!.height = rect.height * DPR;
-    canvas!.style.width = rect.width + 'px';
-    canvas!.style.height = rect.height + 'px';
-    ctx!.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const dims = sizeCanvasToParent(canvas!, ctx!, DPR);
+    canvasW = dims.w;
+    canvasH = dims.h;
     buildGrid();
   }
 
@@ -443,10 +442,7 @@
     const t = time * 0.001;
 
     // Two wandering attractors — always running, Lissajous paths at different speeds
-    const at1X = canvasW * 0.5 + Math.sin(t * 0.25) * canvasW * 0.42;
-    const at1Y = canvasH * 0.5 + Math.cos(t * 0.18) * canvasH * 0.38;
-    const at2X = canvasW * 0.5 + Math.cos(t * 0.15) * canvasW * 0.35;
-    const at2Y = canvasH * 0.5 + Math.sin(t * 0.22) * canvasH * 0.32;
+    const { at1X, at1Y, at2X, at2Y } = getAttractorPositions(t, canvasW, canvasH);
 
     for (const cell of cells) {
       // Ambient breathing — gentle opacity pulse
@@ -497,28 +493,26 @@
     }
 
     ctx!.globalAlpha = 1;
-    animId = requestAnimationFrame(animate);
+    animId = isVisible ? requestAnimationFrame(animate) : 0;
   }
 
   // Mouse tracking
-  const heroSection = document.getElementById('hero');
-
-  function updateMouse(clientX: number, clientY: number) {
-    const rect = canvas!.getBoundingClientRect();
-    mouseX = clientX - rect.left;
-    mouseY = clientY - rect.top;
-    mouseActive = true;
-  }
-
-  heroSection?.addEventListener('mousemove', (e) => updateMouse(e.clientX, e.clientY));
-  heroSection?.addEventListener('touchmove', (e) => {
-    if (e.touches.length > 0) updateMouse(e.touches[0].clientX, e.touches[0].clientY);
-  }, { passive: true });
-  heroSection?.addEventListener('mouseleave', () => { mouseActive = false; });
-  heroSection?.addEventListener('touchend', () => { mouseActive = false; });
+  attachMouseTracker(
+    canvas.closest('section')!,
+    canvas,
+    (x, y) => { mouseX = x; mouseY = y; mouseActive = true; },
+    () => { mouseActive = false; }
+  );
 
   // Init
   resize();
+
+  const heroObs = new IntersectionObserver((entries) => {
+    isVisible = entries[0].isIntersecting;
+    if (isVisible && !prefersReducedMotion && animId === 0) animId = requestAnimationFrame(animate);
+    else if (!isVisible) { cancelAnimationFrame(animId); animId = 0; }
+  }, { threshold: 0 });
+  heroObs.observe(canvas!.closest('section')!);
 
   if (prefersReducedMotion) {
     drawStatic();
@@ -526,13 +520,8 @@
     animId = requestAnimationFrame(animate);
   }
 
-  let resizeTimer: ReturnType<typeof setTimeout>;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      resize();
-      if (prefersReducedMotion) drawStatic();
-    }, 150);
+  attachResizeHandler(() => {
+    resize();
+    if (prefersReducedMotion) drawStatic();
   });
-  })();
 </script>

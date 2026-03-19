@@ -64,7 +64,7 @@
     height: 700px;
     top: -30%;
     left: 0%;
-    background: radial-gradient(circle, rgba(241,120,41,0.28) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.28) 0%, transparent 70%);
     animation: ctaMesh1 10s ease-in-out infinite alternate;
   }
 
@@ -73,7 +73,7 @@
     height: 650px;
     bottom: -35%;
     right: -5%;
-    background: radial-gradient(circle, rgba(196,149,106,0.20) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.68 0.08 55 / 0.20) 0%, transparent 70%);
     animation: ctaMesh2 14s ease-in-out infinite alternate;
   }
 
@@ -82,7 +82,7 @@
     height: 550px;
     top: 10%;
     right: 20%;
-    background: radial-gradient(circle, rgba(241,120,41,0.18) 0%, transparent 70%);
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.18) 0%, transparent 70%);
     animation: ctaMesh3 8s ease-in-out infinite alternate;
   }
 
@@ -135,7 +135,7 @@
 
   .cta-line-problem {
     font-weight: 400;
-    color: rgba(255, 255, 255, 0.5);
+    color: oklch(1 0 0 / 0.5);
   }
 
   .cta-line-solution {
@@ -156,15 +156,15 @@
     font-size: 0.9rem;
     padding: 14px 18px;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid oklch(1 0 0 / 0.15);
+    background: oklch(1 0 0 / 0.06);
     color: var(--color-dark-text);
     outline: none;
     transition: border-color 0.2s;
   }
 
   .cta-input::placeholder {
-    color: rgba(255, 255, 255, 0.35);
+    color: oklch(1 0 0 / 0.35);
   }
 
   .cta-input:focus {
@@ -174,13 +174,13 @@
   .cta-note {
     font-size: 0.75rem;
     margin-top: 14px;
-    color: rgba(255, 255, 255, 0.35);
+    color: oklch(1 0 0 / 0.35);
     text-align: center;
   }
 
   /* Keep button text legible when waitlist.ts applies --color-success background */
   .cta-form button[disabled] {
-    color: #fff;
+    color: oklch(1 0 0);
   }
 
   @media (max-width: 768px) {
@@ -221,6 +221,8 @@
 
 <script>
   // ─── CTA ASCII Canvas Background ───
+  import { sizeCanvasToParent, attachMouseTracker, attachResizeHandler, getAttractorPositions } from '../scripts/canvas-utils';
+
   const ctaCanvas = document.querySelector<HTMLCanvasElement>('.cta-ascii-canvas');
   if (ctaCanvas) {
     const ctaCtx = ctaCanvas.getContext('2d');
@@ -246,6 +248,7 @@
       let my = -9999;
       let active = false;
       let raf = 0;
+      let isCtaVisible = true;
       let cW = 0;
       let cH = 0;
 
@@ -270,12 +273,9 @@
       }
 
       function sizeCanvas() {
-        const rect = ctaCanvas!.parentElement!.getBoundingClientRect();
-        ctaCanvas!.width = rect.width * DPR;
-        ctaCanvas!.height = rect.height * DPR;
-        ctaCanvas!.style.width = rect.width + 'px';
-        ctaCanvas!.style.height = rect.height + 'px';
-        ctaCtx!.setTransform(DPR, 0, 0, DPR, 0, 0);
+        const dims = sizeCanvasToParent(ctaCanvas!, ctaCtx!, DPR);
+        cW = dims.w;
+        cH = dims.h;
         build();
       }
 
@@ -308,10 +308,7 @@
         const t = time * 0.001;
 
         // Two wandering attractors — always running
-        const at1X = cW * 0.5 + Math.sin(t * 0.25) * cW * 0.42;
-        const at1Y = cH * 0.5 + Math.cos(t * 0.18) * cH * 0.38;
-        const at2X = cW * 0.5 + Math.cos(t * 0.15) * cW * 0.35;
-        const at2Y = cH * 0.5 + Math.sin(t * 0.22) * cH * 0.32;
+        const { at1X, at1Y, at2X, at2Y } = getAttractorPositions(t, cW, cH);
 
         for (const cell of grid) {
           let opacity = cell.base;
@@ -385,28 +382,26 @@
         }
 
         ctaCtx!.globalAlpha = 1;
-        raf = requestAnimationFrame(loop);
+        raf = isCtaVisible ? requestAnimationFrame(loop) : 0;
       }
 
       // Mouse/touch tracking
-      const ctaSection = document.getElementById('cta');
-
-      function setMouse(clientX: number, clientY: number) {
-        const rect = ctaCanvas!.getBoundingClientRect();
-        mx = clientX - rect.left;
-        my = clientY - rect.top;
-        active = true;
-      }
-
-      ctaSection?.addEventListener('mousemove', (e) => setMouse(e.clientX, e.clientY));
-      ctaSection?.addEventListener('touchmove', (e) => {
-        if (e.touches.length > 0) setMouse(e.touches[0].clientX, e.touches[0].clientY);
-      }, { passive: true });
-      ctaSection?.addEventListener('mouseleave', () => { active = false; });
-      ctaSection?.addEventListener('touchend', () => { active = false; });
+      attachMouseTracker(
+        ctaCanvas.closest('section')!,
+        ctaCanvas,
+        (x, y) => { mx = x; my = y; active = true; },
+        () => { active = false; }
+      );
 
       // Init
       sizeCanvas();
+
+      const ctaObs = new IntersectionObserver((entries) => {
+        isCtaVisible = entries[0].isIntersecting;
+        if (isCtaVisible && !reducedMotion && raf === 0) raf = requestAnimationFrame(loop);
+        else if (!isCtaVisible) { cancelAnimationFrame(raf); raf = 0; }
+      }, { threshold: 0 });
+      ctaObs.observe(ctaCanvas!.closest('section')!);
 
       if (reducedMotion) {
         drawOnce();
@@ -414,13 +409,9 @@
         raf = requestAnimationFrame(loop);
       }
 
-      let timer: ReturnType<typeof setTimeout>;
-      window.addEventListener('resize', () => {
-        clearTimeout(timer);
-        timer = setTimeout(() => {
-          sizeCanvas();
-          if (reducedMotion) drawOnce();
-        }, 150);
+      attachResizeHandler(() => {
+        sizeCanvas();
+        if (reducedMotion) drawOnce();
       });
     }
   }

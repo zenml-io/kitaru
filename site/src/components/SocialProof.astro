@@ -4,6 +4,7 @@
 
 <section id="social-proof" class="social-proof-section">
   <div class="social-proof-inner">
+    <h2 class="sr-only">What teams are saying</h2>
 
     <!-- Credibility line -->
     <div class="credibility-row" data-reveal>
@@ -23,13 +24,15 @@
 
     <!-- Quotes row -->
     <div class="quotes-row" data-reveal>
-      <div class="primary-quote">
+      <blockquote class="primary-quote">
         <span class="quote-mark" aria-hidden="true">&ldquo;</span>
         <p>We were spending 40% of our agent development time on retry logic and state recovery. Kitaru replaced all of that with two decorators.</p>
-      </div>
-      <div class="secondary-quote">
+        <footer>— <cite>ML Platform Lead, Series B AI Company</cite></footer>
+      </blockquote>
+      <blockquote class="secondary-quote">
         <p>The replay capability alone saved us thousands in LLM costs during development. Being able to resume from a checkpoint instead of re-running everything is a game-changer.</p>
-      </div>
+        <footer>— <cite>Staff Engineer, Enterprise MLOps Team</cite></footer>
+      </blockquote>
     </div>
 
   </div>
@@ -44,7 +47,7 @@
   .social-proof-inner {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 0 var(--section-px, 24px);
+    padding: 0 clamp(24px, 5vw, 80px);
     display: flex;
     flex-direction: column;
     gap: 80px;
@@ -88,7 +91,7 @@
   }
 
   .trusted-line strong {
-    font-family: var(--font-body);
+    font-family: var(--font-ui);
     font-size: 14px;
     font-weight: 700;
     color: var(--color-primary);
@@ -120,6 +123,7 @@
   .primary-quote {
     flex: 3 1 0%;
     position: relative;
+    margin: 0;
   }
 
   .primary-quote p {
@@ -149,6 +153,8 @@
     padding-left: 40px;
     display: flex;
     align-items: flex-start;
+    flex-direction: column;
+    margin: 0;
   }
 
   .secondary-quote p {
@@ -157,6 +163,24 @@
     color: var(--color-secondary);
     font-style: italic;
     margin: 0;
+  }
+
+  .primary-quote footer,
+  .secondary-quote footer {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--color-muted);
+    margin-top: 16px;
+    padding-left: 48px;
+  }
+
+  .secondary-quote footer {
+    padding-left: 0;
+  }
+
+  .primary-quote cite,
+  .secondary-quote cite {
+    font-style: normal;
   }
 
   /* ── Mobile ── */
@@ -198,5 +222,15 @@
       padding-left: 0;
       padding-top: 32px;
     }
+  }
+
+  @media (max-width: 480px) {
+    .social-proof-section { padding: 60px 0; }
+    .social-proof-inner { gap: 32px; }
+    .credibility-tagline { font-size: 18px; line-height: 24px; }
+    .primary-quote p { font-size: 18px; line-height: 28px; padding-left: 32px; }
+    .quote-mark { font-size: 80px; line-height: 60px; }
+    .secondary-quote p { font-size: 15px; line-height: 24px; }
+    .primary-quote footer { padding-left: 32px; }
   }
 </style>

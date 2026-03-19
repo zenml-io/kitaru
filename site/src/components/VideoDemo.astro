@@ -45,10 +45,10 @@
   .video-placeholder {
     width: 100%;
     height: 100%;
-    background-color: #211C17;
+    background-color: oklch(0.16 0.015 60);
     background-image:
-      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      linear-gradient(oklch(1 0 0 / 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(1 0 0 / 0.03) 1px, transparent 1px);
     background-size: 40px 40px;
     display: flex;
     flex-direction: column;
@@ -64,7 +64,7 @@
     height: 72px;
     border-radius: 50%;
     border: 2px solid var(--color-accent);
-    background: rgba(241,120,41,0.1);
+    background: oklch(0.65 0.16 45 / 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -75,7 +75,7 @@
 
   .video-play-btn:hover {
     transform: scale(1.08);
-    background: rgba(241,120,41,0.18);
+    background: oklch(0.65 0.16 45 / 0.18);
   }
 
   .video-play-btn svg {
@@ -85,7 +85,7 @@
 
   .video-label {
     font-size: 0.82rem;
-    color: rgba(232,228,222,0.45);
+    color: oklch(0.91 0.008 65 / 0.45);
     letter-spacing: 0.01em;
   }
 
@@ -104,9 +104,9 @@
     border-radius: 100px;
     font-size: 0.75rem;
     font-weight: 500;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.12);
-    color: rgba(255,255,255,0.5);
+    background: oklch(1 0 0 / 0.04);
+    border: 1px solid oklch(1 0 0 / 0.12);
+    color: oklch(1 0 0 / 0.5);
     white-space: nowrap;
     font-family: var(--font-ui);
   }
@@ -145,7 +145,11 @@
   }
 
   .video-play-btn[aria-disabled="true"] {
-    cursor: default;
+    cursor: not-allowed;
+  }
+
+  .video-play-btn[aria-disabled="true"]:hover {
+    transform: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
