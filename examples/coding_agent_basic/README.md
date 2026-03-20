@@ -32,11 +32,11 @@ The agent works on the task, then calls `hand_back` with a summary and a questio
 
 ```bash
 # Send follow-up input
-kitaru executions input <eid> --wait follow_up_0 --value '{"message": "Now add a legend"}'
-kitaru executions resume <eid>
+kitaru executions input <exec_id> --wait follow_up_0 --value '{"message": "Now add a legend"}'
+kitaru executions resume <exec_id>
 
 # Cancel to stop
-kitaru executions cancel <eid>
+kitaru executions cancel <exec_id>
 ```
 
 ## Environment variables

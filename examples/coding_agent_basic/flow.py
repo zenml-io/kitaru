@@ -2,13 +2,17 @@
 
 Agent loop where each LLM call and tool call is a visible checkpoint.
 The initial task is passed as a flow parameter. If the LLM needs
-clarification it calls the ask_user tool, which triggers kitaru.wait().
+clarification it calls the ask_user tool, which triggers
+kitaru.wait().
 
-    PYTHONPATH=. uv run python -m examples.coding_agent_basic.flow "Create a plotly chart"
+Usage::
 
-Or via the CLI:
+    uv run python -m flow "Create a plotly chart"
 
-    kitaru executions input <exec-id> --wait ask_0 --value "use population data"
+Or via the CLI::
+
+    kitaru executions input <exec-id> \\
+        --wait ask_0 --value "use population data"
     kitaru executions resume <exec-id>
 """
 
@@ -22,74 +26,18 @@ from typing import Any
 
 import click
 from litellm import completion
+from llm import MAX_TOOL_ROUNDS, MODEL
+from materializers import LLMResponseMaterializer, ToolCallResultMaterializer
+from prompts import SYSTEM_PROMPT
 from pydantic import BaseModel
+from tools import ALL_SCHEMAS, dispatch_tool
 from zenml.materializers.materializer_registry import materializer_registry
 from zenml.types import CSVString, HTMLString, JSONString, MarkdownString
 
 import kitaru
 from kitaru import checkpoint, flow
 
-try:
-    from .llm import MAX_TOOL_ROUNDS, MODEL
-    from .materializers import LLMResponseMaterializer, ToolCallResultMaterializer
-    from .tools import ALL_SCHEMAS, dispatch_tool
-except ImportError:
-    from llm import MAX_TOOL_ROUNDS, MODEL
-    from materializers import LLMResponseMaterializer, ToolCallResultMaterializer
-    from tools import ALL_SCHEMAS, dispatch_tool
-
-
 _WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
-
-SYSTEM_PROMPT = """\
-You are a capable general-purpose agent. You can solve any task the user gives \
-you by combining the available tools.
-
-Your capabilities:
-- **File operations**: read, write, edit, search, and list files
-- **Shell commands**: run any command in the working directory
-- **Python execution**: write and run Python scripts for math, data processing, \
-plotting (plotly, matplotlib), analysis, or any computational task
-- **Web browsing**: search the web and fetch pages for research, documentation, \
-API references, or current information
-
-IMPORTANT rules:
-- For ANY HTTP request or web access, ALWAYS use the web_fetch or web_search \
-tools. NEVER write Python code (requests, urllib, httpx, etc.) to make HTTP \
-requests — use the dedicated web tools instead.
-- python_exec is for computation, data processing, and file generation ONLY — \
-not for network I/O.
-- python_exec runs in a minimal environment with ONLY the standard library. \
-Any third-party package (numpy, pandas, plotly, matplotlib, scipy, etc.) MUST \
-be declared in PEP 723 inline script metadata at the very top of the script. \
-ALWAYS include this block — scripts without it WILL fail for any non-stdlib import:
-  # /// script
-  # dependencies = ["plotly", "pandas", "numpy"]
-  # ///
-- If web_search returns poor results, try web_fetch with a direct URL instead.
-- If a tool returns an error, report the error honestly. Do NOT claim the \
-environment is restricted — diagnose the specific failure and try a \
-different approach.
-- When you need clarification or a decision from the user, call ask_user with \
-a clear question. Do NOT guess — ask.
-- When you have completed a task, ALWAYS call hand_back with a summary and a \
-question for the user. Do NOT just respond with text — use hand_back so the \
-user can give you follow-up instructions.
-
-Guidelines:
-- Think step by step. Break complex problems into smaller parts.
-- For math/computation: write a Python script with python_exec rather than \
-trying to compute in your head.
-- For visualizations: use python_exec to write a script that generates the \
-output (e.g. plotly write_html, matplotlib savefig). Save files to the \
-working directory.
-- For research: use web_search to find information, then web_fetch to read \
-specific pages.
-- For code tasks: read relevant files first, then make targeted edits.
-- Prefer edit_file over write_file for existing files (smaller, safer edits).
-- Run verification commands after making changes.
-- Report what you did, key results, and where any output files were saved.\
-"""
 
 # Add ask_user to the tool schemas sent to the LLM
 _ASK_USER_SCHEMA: dict[str, Any] = {
@@ -144,6 +92,7 @@ _HAND_BACK_SCHEMA: dict[str, Any] = {
         },
     },
 }
+
 
 def _inject_display_name(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Add a _display_name parameter to every tool schema.
@@ -228,7 +177,9 @@ class ToolCallResult(BaseModel):
 LLMResponseMaterializer.ASSOCIATED_TYPES = (LLMResponse,)
 ToolCallResultMaterializer.ASSOCIATED_TYPES = (ToolCallResult,)
 materializer_registry.register_and_overwrite_type(LLMResponse, LLMResponseMaterializer)
-materializer_registry.register_and_overwrite_type(ToolCallResult, ToolCallResultMaterializer)
+materializer_registry.register_and_overwrite_type(
+    ToolCallResult, ToolCallResultMaterializer
+)
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +192,7 @@ def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
     """Single LLM completion call tracked as a checkpoint."""
     import time
 
-    from kitaru.llm import _extract_usage  # noqa: PLC2701
+    from kitaru.llm import _extract_usage
 
     started_at = time.perf_counter()
     response = completion(model=MODEL, messages=messages, tools=_ALL_TOOLS)
@@ -315,7 +266,11 @@ def tool_call(
 ) -> ToolCallResult:
     """Execute a single tool call tracked as a checkpoint."""
     cwd_path = Path(cwd)
-    before = {p.name for p in cwd_path.iterdir() if p.is_file()} if cwd_path.is_dir() else set()
+    before = (
+        {p.name for p in cwd_path.iterdir() if p.is_file()}
+        if cwd_path.is_dir()
+        else set()
+    )
 
     # Save the source code as an artifact before execution
     if tool_name == "python_exec" and "code" in arguments:
@@ -325,14 +280,14 @@ def tool_call(
             "script.py",
             HTMLString(
                 f'<pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;'
-                f'border-radius:8px;overflow-x:auto;font-size:13px;'
+                f"border-radius:8px;overflow-x:auto;font-size:13px;"
                 f'font-family:monospace;white-space:pre">{escaped}</pre>'
             ),
         )
 
     raw_result = dispatch_tool(cwd, tool_name, arguments)
 
-    # Save full file content as a browseable artifact (the LLM result is truncated)
+    # Save full file content as a browsable artifact (the LLM result is truncated)
     if tool_name == "read_file" and "path" in arguments:
         try:
             full_path = Path(cwd) / arguments["path"]
@@ -342,7 +297,7 @@ def tool_call(
                 arguments["path"],
                 HTMLString(
                     f'<pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;'
-                    f'border-radius:8px;overflow-x:auto;font-size:13px;'
+                    f"border-radius:8px;overflow-x:auto;font-size:13px;"
                     f'font-family:monospace;white-space:pre">{escaped}</pre>'
                 ),
             )
@@ -392,9 +347,7 @@ def coding_agent_basic(task: str) -> str:
     llm_count = 0
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response: LLMResponse = llm_call(
-            messages, id=f"llm_{llm_count}"
-        ).load()
+        response: LLMResponse = llm_call(messages, id=f"llm_{llm_count}").load()
         llm_count += 1
 
         if not response.has_tool_calls:
@@ -405,7 +358,7 @@ def coding_agent_basic(task: str) -> str:
 
         messages.append(response.to_message())
 
-        for tc in response.tool_calls:  # type: ignore[union-attr]
+        for tc in response.tool_calls:
             try:
                 tc_args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
@@ -439,9 +392,7 @@ def coding_agent_basic(task: str) -> str:
                 messages.append(
                     {"role": "tool", "tool_call_id": tc.id, "content": summary}
                 )
-                messages.append(
-                    {"role": "user", "content": follow_up.message}
-                )
+                messages.append({"role": "user", "content": follow_up.message})
                 tool_calls_made += 1
                 continue
 

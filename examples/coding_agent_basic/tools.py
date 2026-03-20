@@ -5,7 +5,6 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
 from urllib.parse import urlparse
 
 from zenml.types import HTMLString, JSONString, MarkdownString
@@ -36,7 +35,9 @@ def _resolve(cwd: str, path: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def read_file(cwd: str, path: str, offset: int = 0, limit: int = _READ_LIMIT) -> MarkdownString:
+def read_file(
+    cwd: str, path: str, offset: int = 0, limit: int = _READ_LIMIT
+) -> MarkdownString:
     """Read a file with line numbers."""
     target = _resolve(cwd, path)
     try:
@@ -50,7 +51,8 @@ def read_file(cwd: str, path: str, offset: int = 0, limit: int = _READ_LIMIT) ->
     numbered = [f"{i + offset + 1:>6}\t{line}" for i, line in enumerate(selected)]
     result = "\n".join(numbered)
     if len(lines) > offset + limit:
-        result += f"\n... [showing lines {offset + 1}-{offset + len(selected)} of {len(lines)}]"
+        shown = f"{offset + 1}-{offset + len(selected)}"
+        result += f"\n... [showing lines {shown} of {len(lines)}]"
     return MarkdownString(_truncate(result))
 
 
@@ -74,7 +76,10 @@ def edit_file(cwd: str, path: str, old: str, new: str) -> JSONString:
     if count == 0:
         return JSONString(f'{{"error": "old string not found in {path}"}}')
     if count > 1:
-        return JSONString(f'{{"error": "old string appears {count} times in {path} (expected exactly 1)"}}')
+        return JSONString(
+            f'{{"error": "old string appears {count} times '
+            f'in {path} (expected exactly 1)"}}'
+        )
 
     target.write_text(text.replace(old, new, 1))
     return JSONString(f'{{"path": "{path}", "status": "edited"}}')
@@ -146,9 +151,7 @@ def python_exec(cwd: str, code: str, timeout: int = 60) -> MarkdownString:
     cached ephemeral environment — no manual pip install needed.
     """
     base = Path(cwd).resolve()
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(code)
         script_path = f.name
 
@@ -175,11 +178,14 @@ def python_exec(cwd: str, code: str, timeout: int = 60) -> MarkdownString:
 # Web tools
 # ---------------------------------------------------------------------------
 
+
 def web_fetch(cwd: str, url: str, max_chars: int = _MAX_CHARS) -> HTMLString:
     """Fetch a URL and return its text content."""
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
-        return HTMLString(f"Error: only http/https URLs are supported, got {parsed.scheme!r}")
+        return HTMLString(
+            f"Error: only http/https URLs are supported, got {parsed.scheme!r}"
+        )
 
     try:
         result = subprocess.run(
@@ -194,22 +200,27 @@ def web_fetch(cwd: str, url: str, max_chars: int = _MAX_CHARS) -> HTMLString:
         return HTMLString(f"Error fetching URL: {e}")
 
     if result.returncode != 0:
-        return HTMLString(f"Error: curl exited with code {result.returncode}\n{result.stderr}")
+        return HTMLString(
+            f"Error: curl exited with code {result.returncode}\n{result.stderr}"
+        )
     return HTMLString(_truncate(result.stdout, max_chars))
 
 
 def web_search(cwd: str, query: str) -> MarkdownString:
     """Search the web using a text query (via DuckDuckGo HTML)."""
     import re
-
     from urllib.parse import quote_plus
 
     search_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
     try:
         result = subprocess.run(
             [
-                "curl", "-sL", "--max-time", "15",
-                "-A", "KitaruAgent/1.0",
+                "curl",
+                "-sL",
+                "--max-time",
+                "15",
+                "-A",
+                "KitaruAgent/1.0",
                 search_url,
             ],
             capture_output=True,
@@ -284,13 +295,24 @@ _READ_FILE_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "read_file",
-        "description": "Read a file with line numbers. Use offset/limit to page through large files.",
+        "description": (
+            "Read a file with line numbers. "
+            "Use offset/limit to page through large files."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "File path relative to cwd"},
-                "offset": {"type": "integer", "description": "0-based line offset", "default": 0},
-                "limit": {"type": "integer", "description": "Max lines to return", "default": 400},
+                "offset": {
+                    "type": "integer",
+                    "description": "0-based line offset",
+                    "default": 0,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max lines to return",
+                    "default": 400,
+                },
             },
             "required": ["path"],
         },
@@ -301,11 +323,16 @@ _LIST_FILES_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "list_files",
-        "description": "List files matching a glob pattern relative to the working directory.",
+        "description": (
+            "List files matching a glob pattern relative to the working directory."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Glob pattern (e.g. '**/*.py')"},
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern (e.g. '**/*.py')",
+                },
             },
             "required": ["pattern"],
         },
@@ -321,7 +348,11 @@ _SEARCH_FILES_SCHEMA: dict[str, Any] = {
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "Search pattern (regex)"},
-                "glob": {"type": "string", "description": "File glob to limit search", "default": "**/*"},
+                "glob": {
+                    "type": "string",
+                    "description": "File glob to limit search",
+                    "default": "**/*",
+                },
             },
             "required": ["pattern"],
         },
@@ -332,7 +363,9 @@ _WRITE_FILE_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "write_file",
-        "description": "Write content to a file, creating parent directories as needed.",
+        "description": (
+            "Write content to a file, creating parent directories as needed."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -370,7 +403,11 @@ _RUN_COMMAND_SCHEMA: dict[str, Any] = {
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "Shell command to run"},
-                "timeout": {"type": "integer", "description": "Timeout in seconds", "default": 30},
+                "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in seconds",
+                    "default": 30,
+                },
             },
             "required": ["command"],
         },
@@ -390,14 +427,17 @@ _PYTHON_EXEC_SCHEMA: dict[str, Any] = {
             "If the script needs third-party packages, add PEP 723 inline "
             "metadata at the top of the script:\n"
             "# /// script\n"
-            "# dependencies = [\"plotly\", \"pandas\"]\n"
+            '# dependencies = ["plotly", "pandas"]\n'
             "# ///\n"
             "uv will install them automatically."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "code": {"type": "string", "description": "Python source code to execute"},
+                "code": {
+                    "type": "string",
+                    "description": "Python source code to execute",
+                },
                 "timeout": {
                     "type": "integer",
                     "description": "Timeout in seconds",
@@ -420,7 +460,10 @@ _WEB_FETCH_SCHEMA: dict[str, Any] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "URL to fetch (http or https)"},
+                "url": {
+                    "type": "string",
+                    "description": "URL to fetch (http or https)",
+                },
             },
             "required": ["url"],
         },

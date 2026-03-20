@@ -3,7 +3,7 @@
 import os
 
 from kitaru.config import register_model_alias, resolve_model_selection
-from kitaru.llm import _resolve_credential_overlay  # noqa: PLC2701
+from kitaru.llm import _resolve_credential_overlay
 
 # ---------------------------------------------------------------------------
 # Model registration + credential resolution (runs once at import time)

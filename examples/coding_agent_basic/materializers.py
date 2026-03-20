@@ -11,7 +11,7 @@ or ToolCallResult).
 
 import html
 import os
-from typing import Any, ClassVar, Dict, Tuple, Type
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 from zenml.enums import VisualizationType
@@ -30,9 +30,9 @@ class _ToolCallResultPlaceholder(BaseModel):
 class LLMResponseMaterializer(PydanticMaterializer):
     """Materializer for LLMResponse with dynamic Markdown visualization."""
 
-    ASSOCIATED_TYPES: ClassVar[Tuple[Type[Any], ...]] = (_LLMResponsePlaceholder,)
+    ASSOCIATED_TYPES: ClassVar[tuple[type[Any], ...]] = (_LLMResponsePlaceholder,)
 
-    def save_visualizations(self, data: Any) -> Dict[str, VisualizationType]:
+    def save_visualizations(self, data: Any) -> dict[str, VisualizationType]:
         """Render LLM response as Markdown for the dashboard."""
         parts: list[str] = []
 
@@ -68,9 +68,9 @@ _CODE_TOOLS = {"python_exec"}
 class ToolCallResultMaterializer(PydanticMaterializer):
     """Materializer for ToolCallResult with tool-aware visualization."""
 
-    ASSOCIATED_TYPES: ClassVar[Tuple[Type[Any], ...]] = (_ToolCallResultPlaceholder,)
+    ASSOCIATED_TYPES: ClassVar[tuple[type[Any], ...]] = (_ToolCallResultPlaceholder,)
 
-    def save_visualizations(self, data: Any) -> Dict[str, VisualizationType]:
+    def save_visualizations(self, data: Any) -> dict[str, VisualizationType]:
         """Render tool output with the appropriate visualization type."""
         tool_name: str = getattr(data, "tool_name", "")
         output: str = getattr(data, "output", "")
@@ -83,13 +83,13 @@ class ToolCallResultMaterializer(PydanticMaterializer):
 
         return self._save_markdown(tool_name, output)
 
-    def _save_html(self, content: str) -> Dict[str, VisualizationType]:
+    def _save_html(self, content: str) -> dict[str, VisualizationType]:
         vis_path = os.path.join(self.uri, "visualization.html")
         with fileio.open(vis_path, "w") as f:
             f.write(content)
         return {vis_path.replace("\\", "/"): VisualizationType.HTML}
 
-    def _save_code_html(self, output: str) -> Dict[str, VisualizationType]:
+    def _save_code_html(self, output: str) -> dict[str, VisualizationType]:
         """Render python_exec output as styled HTML."""
         escaped = html.escape(output)
         page = (
@@ -107,7 +107,7 @@ class ToolCallResultMaterializer(PydanticMaterializer):
 
     def _save_markdown(
         self, tool_name: str, output: str
-    ) -> Dict[str, VisualizationType]:
+    ) -> dict[str, VisualizationType]:
         md = f"### `{tool_name}`\n\n```\n{output}\n```"
         vis_path = os.path.join(self.uri, "visualization.md")
         with fileio.open(vis_path, "w") as f:
