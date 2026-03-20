@@ -164,10 +164,6 @@ jobs:
             --generate-notes
 
       # --- Docker image ---
-      # TODO: Once the ZenML dependency switches from develop to a
-      # released PyPI version, remove this TODO. Until then, the Docker image
-      # is built from an unreleased ZenML branch — verify the image works
-      # before cutting a release that publishes it.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Log in to Docker Hub
@@ -183,6 +179,10 @@ jobs:
           file: docker/Dockerfile
           target: server
           push: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+          build-args: |
+            ZENML_SERVER_TAG=0.94.1
+            KITARU_UI_TAG=v${{ env.VERSION }}
+            KITARU_VERSION=${{ env.VERSION }}
           tags: |
             zenmldocker/kitaru:${{ env.VERSION }}
             zenmldocker/kitaru:latest

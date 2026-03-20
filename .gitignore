@@ -233,6 +233,9 @@ site/.wrangler/
 design/
 dogfood-output/
 
+# Local Kitaru UI build artifacts (used by docker/Dockerfile.server-dev)
+docker/kitaru-ui-dist/
+
 # MCP
 .mcp.json
 

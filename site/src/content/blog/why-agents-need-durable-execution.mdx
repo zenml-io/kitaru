@@ -1,6 +1,6 @@
 ---
-title: "Why your AI agents need durable execution"
-description: "AI agents fail. They timeout, hit rate limits, crash on bad API responses. Without durable execution, every failure means starting over from scratch."
+title: "Why Your AI Agents Need Durable Execution"
+description: "AI agents fail - they timeout, hit rate limits, crash on bad API responses. Without durable execution, every failure means starting over from scratch."
 date: 2026-03-01
 author: "Hamza Tahir"
 category: "Infrastructure"
@@ -10,23 +10,23 @@ image: "https://assets.kitaru.ai/content/blog/8975e15d/why-agents-need-durable-e
 
 Your agent just spent 45 minutes and $30 in API calls researching a topic. It made it through 23 tool calls, synthesized data from 8 sources, and was about to write the final summary.
 
-Then the OpenAI API returned a 429. Your agent crashed. All that work — gone.
+Then the OpenAI API returned a 429. Your agent crashed. All that work just gone.
 
 ## The problem with stateless agents
 
 Most agent frameworks treat each run as stateless. When something fails, you start over. There's no concept of "pick up where I left off."
 
-This is fine for short tasks. A single LLM call that fails? Retry it. But agents are getting longer and more complex:
+This is fine for short tasks like a single LLM call that fails? Retry it. But agents are getting longer and more complex:
 
 - **Research agents** that run for hours, making dozens of API calls
 - **Coding agents** that iterate through multiple rounds of write-test-fix
 - **Multi-step workflows** with human approval gates in the middle
 
-For these, starting over is not just annoying — it's wasteful. You're re-burning tokens, re-calling APIs, re-doing work that already succeeded.
+For these, starting over is not just annoying; it's wasteful. You're re-burning tokens, re-calling APIs, re-doing work that already succeeded.
 
 ## What durable execution gives you
 
-Durable execution means every meaningful step in your agent is checkpointed. If it crashes at step 15, you restart from step 15 — not step 1.
+Durable execution means every meaningful step in your agent is checkpointed. If it crashes at step 15, you restart from step 15, not step 1.
 
 ```python
 from kitaru import checkpoint, flow
@@ -54,11 +54,11 @@ When you replay after a failure, `step_one` returns its cached output instantly.
 
 Once you have checkpointed execution, other things become possible:
 
-**Human-in-the-loop.** Your agent can pause mid-execution, wait for human input, and resume later. Not with a polling loop burning compute — with actual suspension. The process stops. When input arrives, it restarts from the checkpoint.
+**Human-in-the-loop:** Your agent can pause mid-execution, wait for human input, and resume later. Not with a polling loop burning compute, with actual suspension. The process stops. When input arrives, it restarts from the checkpoint.
 
-**Replay with overrides.** Your agent made a bad decision at step 5? Go back, swap in a different input, and replay from there. All subsequent steps re-execute with the new data.
+**Replay with overrides:** Your agent made a bad decision at step 5? Go back, swap in a different input, and replay from there. All subsequent steps re-execute with the new data.
 
-**Artifact inspection.** Every checkpoint output is a versioned artifact you can inspect, compare across runs, and query programmatically.
+**Artifact inspection:** Every checkpoint output is a versioned artifact you can inspect, compare across runs, and query programmatically.
 
 ## Why not just use try/except?
 
