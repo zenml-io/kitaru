@@ -122,7 +122,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --extra mcp
       - name: Check typos
         uses: crate-ci/typos@v1
       - name: Lint
@@ -132,7 +132,7 @@ jobs:
       - name: Type check
         run: uv run ty check
       - name: Test
-        run: uv run pytest
+        run: uv run pytest --ignore=tests/mcp
 
       # --- Build ---
       - name: Build package
