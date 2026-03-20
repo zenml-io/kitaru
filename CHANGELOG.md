@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-20
+
 ### Added
 - `docker/Dockerfile.server-dev` for local server + UI development without a published UI release
 
