@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Runtime submission observer plumbing (`_submission_observer`, `_notify_submission_observer`) from `kitaru.runtime` and `kitaru.flow`
 
 ### Added
+- Unified config directory: Kitaru and ZenML now share a single config directory by default; the init hook sets `ZENML_CONFIG_PATH` to Kitaru's app dir so the database, credentials, and local stores live alongside Kitaru's own config; `KITARU_CONFIG_PATH` overrides the location for both; `kitaru status` now reports this unified directory
 - `kitaru init` command to initialize a project root by creating a `.kitaru/` directory; this sets the source root for code packaging during remote execution and prevents ambiguous source-root heuristics; the command checks for both `.kitaru/` and legacy `.zen/` markers before initializing
 - `kitaru executions input` now auto-detects the single pending wait condition, removing the need for `--wait`; use `--interactive` (`-i`) for guided review with JSON schema display, continue/abort/skip/quit actions, and multi-execution sweep mode; use `--abort` to abort a wait in non-interactive mode
 - `KitaruClient.executions.pending_waits(exec_id)` returns all pending wait conditions for an execution

@@ -35,6 +35,7 @@ from kitaru._config import _images as _config_images
 from kitaru._config import _log_store as _config_log_store
 from kitaru._config import _models as _config_models
 from kitaru._config import _stacks as _config_stacks
+from kitaru._env import ZENML_CONFIG_PATH_ENV as _ZENML_CONFIG_PATH_ENV
 from kitaru._env import ZENML_STORE_API_KEY_ENV as _ZENML_STORE_API_KEY_ENV
 from kitaru._env import ZENML_STORE_URL_ENV as _ZENML_STORE_URL_ENV
 
@@ -69,6 +70,7 @@ KITARU_IMAGE_ENV = _config_env.KITARU_IMAGE_ENV
 KITARU_DEFAULT_MODEL_ENV = _config_env.KITARU_DEFAULT_MODEL_ENV
 KITARU_CONFIG_PATH_ENV = _config_env.KITARU_CONFIG_PATH_ENV
 KITARU_MODEL_REGISTRY_ENV = _kitaru_env.KITARU_MODEL_REGISTRY_ENV
+ZENML_CONFIG_PATH_ENV = _ZENML_CONFIG_PATH_ENV
 ZENML_STORE_API_KEY_ENV = _ZENML_STORE_API_KEY_ENV
 ZENML_STORE_URL_ENV = _ZENML_STORE_URL_ENV
 
@@ -267,6 +269,7 @@ def _kitaru_config_dir() -> Path:
     return _config_core._kitaru_config_dir_impl(
         config_path_env_name=KITARU_CONFIG_PATH_ENV,
         app_dir_getter=click.get_app_dir,
+        fallback_config_path_env_name=ZENML_CONFIG_PATH_ENV,
     )
 
 

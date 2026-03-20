@@ -25,7 +25,7 @@ from zenml.utils import io_utils, yaml_utils
 from kitaru._config._connection import _normalize_server_url
 from kitaru.errors import KitaruUsageError
 
-_KITARU_GLOBAL_CONFIG_FILENAME = "config.yaml"
+_KITARU_GLOBAL_CONFIG_FILENAME = "kitaru.yaml"
 FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
 
 if TYPE_CHECKING:
@@ -485,11 +485,24 @@ def _kitaru_config_dir_impl(
     *,
     config_path_env_name: str,
     app_dir_getter: Callable[[str], str],
+    fallback_config_path_env_name: str | None = None,
 ) -> Path:
-    """Return the Kitaru-owned global config directory."""
+    """Return the Kitaru-owned global config directory.
+
+    Precedence:
+    1. ``KITARU_CONFIG_PATH`` (explicit user override)
+    2. ``ZENML_CONFIG_PATH`` (set by the init hook or a server subprocess)
+    3. ``click.get_app_dir("kitaru")`` (platform default)
+    """
     custom_dir = os.environ.get(config_path_env_name)
     if custom_dir:
         return Path(custom_dir)
+
+    if fallback_config_path_env_name:
+        fallback_dir = os.environ.get(fallback_config_path_env_name)
+        if fallback_dir:
+            return Path(fallback_dir)
+
     return Path(app_dir_getter("kitaru"))
 
 

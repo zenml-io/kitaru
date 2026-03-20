@@ -518,6 +518,7 @@ def login(
         connected_server_url = facade._get_connected_server_url()
         if (
             connected_server_url
+            and not connected_server_url.startswith("sqlite:")
             and not facade._connected_to_local_server()
             and not _is_localhost_url(connected_server_url)
         ):

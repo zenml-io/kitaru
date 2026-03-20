@@ -5,14 +5,16 @@ ZenML can discover and call it via ``zenml.init_hooks`` entry points
 without triggering ``import kitaru`` — which would itself import ZenML
 and cause a circular import during ZenML's own initialization.
 
-Only ``os`` and ``warnings`` are imported here. No ``kitaru`` or
-``zenml`` imports are allowed.
+Only ``os``, ``warnings``, and ``click`` are imported here. No
+``kitaru`` or ``zenml`` imports are allowed.
 """
 
 from __future__ import annotations
 
 import os
 import warnings
+
+import click
 
 KITARU_REPOSITORY_DIRECTORY_NAME = ".kitaru"
 
@@ -23,6 +25,7 @@ KITARU_DEBUG_ENV = "KITARU_DEBUG"
 KITARU_ANALYTICS_OPT_IN_ENV = "KITARU_ANALYTICS_OPT_IN"
 KITARU_DEFAULT_ANALYTICS_SOURCE_ENV = "KITARU_DEFAULT_ANALYTICS_SOURCE"
 KITARU_MODEL_REGISTRY_ENV = "KITARU_MODEL_REGISTRY"
+KITARU_CONFIG_PATH_ENV = "KITARU_CONFIG_PATH"
 
 ZENML_STORE_URL_ENV = "ZENML_STORE_URL"
 ZENML_STORE_API_KEY_ENV = "ZENML_STORE_API_KEY"
@@ -30,6 +33,7 @@ ZENML_ACTIVE_PROJECT_ID_ENV = "ZENML_ACTIVE_PROJECT_ID"
 ZENML_DEBUG_ENV = "ZENML_DEBUG"
 ZENML_ANALYTICS_OPT_IN_ENV = "ZENML_ANALYTICS_OPT_IN"
 ZENML_DEFAULT_ANALYTICS_SOURCE_ENV = "ZENML_DEFAULT_ANALYTICS_SOURCE"
+ZENML_CONFIG_PATH_ENV = "ZENML_CONFIG_PATH"
 
 _ENV_TRANSLATIONS: tuple[tuple[str, str], ...] = (
     (KITARU_SERVER_URL_ENV, ZENML_STORE_URL_ENV),
@@ -38,6 +42,7 @@ _ENV_TRANSLATIONS: tuple[tuple[str, str], ...] = (
     (KITARU_DEBUG_ENV, ZENML_DEBUG_ENV),
     (KITARU_ANALYTICS_OPT_IN_ENV, ZENML_ANALYTICS_OPT_IN_ENV),
     (KITARU_DEFAULT_ANALYTICS_SOURCE_ENV, ZENML_DEFAULT_ANALYTICS_SOURCE_ENV),
+    (KITARU_CONFIG_PATH_ENV, ZENML_CONFIG_PATH_ENV),
 )
 
 _applied = False
@@ -98,6 +103,16 @@ def apply_env_translations() -> None:
             "KITARU_AUTH_TOKEN is set but no server URL is available. "
             "Set KITARU_SERVER_URL (or ZENML_STORE_URL)."
         )
+
+    # Unify config directories: ZenML should store its database,
+    # credentials, and local_stores alongside Kitaru's own config.
+    # If KITARU_CONFIG_PATH was set, the translation loop above already
+    # copied it into ZENML_CONFIG_PATH.  If neither was set, default
+    # both to Kitaru's app dir so everything lives in one place.
+    # If only ZENML_CONFIG_PATH is set (e.g. a server subprocess),
+    # leave it alone.
+    if not os.environ.get(ZENML_CONFIG_PATH_ENV):
+        os.environ[ZENML_CONFIG_PATH_ENV] = click.get_app_dir("kitaru")
 
     # Disable ZenML Rich traceback formatting — Kitaru handles its own output.
     os.environ.setdefault("ZENML_ENABLE_RICH_TRACEBACK", "0")

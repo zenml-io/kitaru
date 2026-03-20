@@ -10,6 +10,8 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 
 **ZenML mapping:** `@flow` → `@pipeline(dynamic=True)`, `@checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work. `kitaru init` creates `.kitaru/` (not `.zen/`) as the local project marker via `ZENML_REPOSITORY_DIRECTORY_NAME`.
 
+**Unified config directory:** Kitaru and ZenML share a single config directory. The `kitaru_init_hook` sets `ZENML_CONFIG_PATH` to Kitaru's app dir (e.g. `~/.config/kitaru/` on Linux, `~/Library/Application Support/kitaru/` on macOS) so the database, credentials, local stores, and Kitaru's own `kitaru.yaml` all live together. `KITARU_CONFIG_PATH` overrides this for both. Server subprocesses that set `ZENML_CONFIG_PATH` directly are respected.
+
 ## Project layout
 
 ```
