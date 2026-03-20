@@ -1,0 +1,148 @@
+# Default values for the Kitaru Helm chart.
+#
+# The Kitaru server runs on ZenML's server runtime. All server configuration
+# is passed to the ZenML subchart under the 'kitaru' key. ZenML-native settings
+# (database, auth, ingress, secrets store, etc.) go under 'kitaru.zenml'.
+#
+# See the ZenML Helm chart values reference for the full list of options:
+# https://artifacthub.io/packages/helm/zenml/zenml?modal=values
+
+kitaru:
+
+  zenml:
+
+    replicaCount: 1
+
+    image:
+      repository: zenmldocker/kitaru
+      pullPolicy: IfNotPresent
+      # Overrides the image tag whose default is the chart version.
+      tag:
+
+    # The URL where the Kitaru server API is reachable from outside the cluster.
+    # Used for browser-based login redirects and CLI connection instructions.
+    serverURL:
+
+    debug: true
+
+    # Telemetry opt-in.
+    analyticsOptIn: true
+
+    auth:
+      # OAuth2 device-flow auth (browser-based login).
+      authType: OAUTH2_PASSWORD_BEARER
+
+      # JWT secret key for signing auth tokens. If not set, a random key is
+      # generated on first install and reused on upgrades. Set this explicitly
+      # when running multiple replicas — all pods must share the same key.
+      #
+      # Generate one with: openssl rand -hex 32
+      jwtSecretKey:
+
+    # Database configuration. If url is not set, a local SQLite database is
+    # used. Set url to a MySQL connection string for production use.
+    database:
+
+      # Persist the SQLite database across pod restarts.
+      # Only relevant when no external database url is set.
+      persistence:
+        enabled: true
+        size: 1Gi
+        storageClassName: ""
+
+      # External database URL. When set, SQLite persistence is ignored and the
+      # server connects to this database instead.
+      #
+      # Example: "mysql://user:password@mysql-host:3306/kitaru"
+      url:
+
+      # Reference a Kubernetes Secret for the database password instead of
+      # embedding it in the url.
+      passwordSecretRef: {}
+        # name: kitaru-db-password
+        # key: password
+
+      # MySQL SSL options.
+      ssl: false
+      sslCa:
+      sslCert:
+      sslKey:
+      sslVerifyServerCert: false
+
+    # Secrets store settings. Secrets are stored in the SQL database by default.
+    secretsStore:
+      enabled: true
+      type: sql
+
+      sql:
+        # Encryption key for secrets stored in the SQL database. Set this to
+        # a random 32+ character hex string. If not set, secrets are stored
+        # unencrypted.
+        #
+        # Generate one with: openssl rand -hex 32
+        #
+        # IMPORTANT: keep this value safe — losing it means losing access to
+        # all stored secrets.
+        encryptionKey:
+
+    # Extra environment variables to set on the server container.
+    # Kitaru-specific env vars are pre-configured here.
+    environment:
+      KITARU_DEBUG: "true"
+      KITARU_ANALYTICS_OPT_IN: "true"
+
+    # Extra secret environment variables. These are stored in a Kubernetes
+    # Secret and mounted as env vars.
+    secretEnvironment: {}
+
+    service:
+      type: ClusterIP
+      port: 80
+      annotations: {}
+
+    ingress:
+      enabled: false
+      className: "nginx"
+      annotations: {}
+        # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        # cert-manager.io/cluster-issuer: "letsencrypt"
+      host:
+      path: /
+      tls:
+        enabled: false
+        secretName: kitaru-tls-certs
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  podAnnotations: {}
+
+  podSecurityContext:
+    fsGroup: 1000
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+
+  resources: {}
+    # requests:
+    #   cpu: 250m
+    #   memory: 512Mi
+    # limits:
+    #   cpu: "1"
+    #   memory: 2Gi
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+    # targetMemoryUtilizationPercentage: 80
+
+  nodeSelector: {}
+
+  tolerations: []
+
+  affinity: {}
