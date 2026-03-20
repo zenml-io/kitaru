@@ -209,7 +209,6 @@ jobs:
             echo ""
             echo "No changes were pushed, published, or tagged."
           } >> "$GITHUB_STEP_SUMMARY"
-
   publish-helm-chart:
     needs: release
     uses: ./.github/workflows/publish_helm_chart.yml
