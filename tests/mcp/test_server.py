@@ -43,6 +43,7 @@ from kitaru.mcp.server import (
     kitaru_status,
     kitaru_stop_local_server,
     manage_stack,
+    tracked_mcp_tool,
 )
 
 
@@ -1750,3 +1751,77 @@ def test_manage_stack_rejects_irrelevant_flags() -> None:
 
     with pytest.raises(ValueError, match='only valid when action="create"'):
         manage_stack("delete", "dev", activate=False)
+
+
+# ── Per-tool analytics tracking ──────────────────────────────────────────────
+
+
+def test_tracked_mcp_tool_fires_success_event() -> None:
+    """tracked_mcp_tool decorator emits a success event after a successful operation."""
+
+    @tracked_mcp_tool
+    def _sample_tool() -> dict[str, str]:
+        return {"key": "value"}
+
+    with patch("kitaru.mcp.server.track") as mock_track:
+        result = _sample_tool()
+
+    assert result == {"key": "value"}
+    mock_track.assert_called_once_with(
+        "Kitaru MCP tool called",
+        {"tool_name": "_sample_tool", "success": True},
+    )
+
+
+def test_tracked_mcp_tool_fires_failure_event_and_reraises() -> None:
+    """tracked_mcp_tool decorator emits a failure event and re-raises on error."""
+
+    @tracked_mcp_tool
+    def _failing_tool() -> None:
+        raise RuntimeError("boom")
+
+    with (
+        patch("kitaru.mcp.server.track") as mock_track,
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        _failing_tool()
+
+    mock_track.assert_called_once_with(
+        "Kitaru MCP tool called",
+        {
+            "tool_name": "_failing_tool",
+            "success": False,
+            "error_type": "RuntimeError",
+        },
+    )
+
+
+def test_tracked_mcp_tool_preserves_function_name() -> None:
+    """tracked_mcp_tool should preserve the wrapped function's __name__."""
+
+    @tracked_mcp_tool
+    def kitaru_my_custom_tool() -> str:
+        return "ok"
+
+    with patch("kitaru.mcp.server.track") as mock_track:
+        kitaru_my_custom_tool()
+
+    mock_track.assert_called_once()
+    call_args = mock_track.call_args[0]
+    assert call_args[1]["tool_name"] == "kitaru_my_custom_tool"
+
+
+def test_tracked_mcp_tool_captures_concrete_error_type() -> None:
+    """The error_type metadata should reflect the actual exception class."""
+
+    @tracked_mcp_tool
+    def _value_error_tool() -> None:
+        raise ValueError("bad input")
+
+    with (
+        patch("kitaru.mcp.server.track") as mock_track,
+        pytest.raises(ValueError),
+    ):
+        _value_error_tool()
+
+    assert mock_track.call_args[0][1]["error_type"] == "ValueError"

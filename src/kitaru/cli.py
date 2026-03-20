@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 from zenml.client import Client
@@ -177,6 +178,14 @@ def _apply_runtime_version() -> None:
 
 def cli() -> None:
     """Entry point for the `kitaru` console script."""
+    from kitaru.analytics import AnalyticsEvent, set_source, track
+
+    set_source("cli")
+    # Touch zen_store to mark GlobalConfiguration as initialized before
+    # any analytics calls.  Without this, AnalyticsContext.__enter__()
+    # sees is_initialized=False and silently skips all tracking.
+    GlobalConfiguration().zen_store  # noqa: B018
+    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(sys.argv[1:2]) or "help"})
     _apply_runtime_version()
     app()
 
