@@ -2,6 +2,7 @@
   "title": "Deploy",
   "defaultOpen": true,
   "pages": [
-    "docker"
+    "docker",
+    "helm"
   ]
 }
