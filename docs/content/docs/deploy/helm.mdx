@@ -1,5 +1,5 @@
 ---
-title: Helm / Kubernetes
+title: Helm 
 description: Deploy the Kitaru server on Kubernetes using the Kitaru Helm chart
 ---
 
@@ -8,7 +8,7 @@ The Kitaru Helm chart wraps the
 dependency, overriding defaults to use the Kitaru server image and
 Kitaru-specific environment variables. All ZenML server features — database
 migrations, secrets encryption, ingress, autoscaling — are available through
-the subchart. Server configuration goes under the `kitaru.zenml` key in your
+the subchart. Server configuration goes under the `kitaru.server` key in your
 values file.
 
 ## Prerequisites
@@ -22,24 +22,12 @@ values file.
 
 ## Quick start
 
-<Tabs items={["From OCI registry", "From local checkout"]}>
-  <Tab value="From OCI registry">
-    ```bash
-    helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
-      --version 0.1.0 \
-      --namespace kitaru \
-      --create-namespace
-    ```
-  </Tab>
-  <Tab value="From local checkout">
-    ```bash
-    helm dependency update ./helm
-    helm install kitaru-server ./helm \
-      --namespace kitaru \
-      --create-namespace
-    ```
-  </Tab>
-</Tabs>
+```bash
+helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
+  --version 0.1.0 \
+  --namespace kitaru \
+  --create-namespace
+```
 
 This starts a single Kitaru server pod with a local SQLite database persisted
 via a PersistentVolumeClaim.
@@ -50,12 +38,6 @@ Once the pod is ready, port-forward and connect:
 kubectl -n kitaru port-forward svc/kitaru-server-kitaru 8080:80
 kitaru login http://localhost:8080
 ```
-
-<Callout type="info">
-  The first time the server starts, you need to activate it by visiting the
-  dashboard at `http://localhost:8080` and creating an initial admin user
-  account.
-</Callout>
 
 Check the pod is healthy:
 
@@ -78,10 +60,10 @@ helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
   -f custom-values.yaml
 ```
 
-Server settings go under `kitaru.zenml`. For the full list of available options,
+Server settings go under `kitaru.server`. For the full list of available options,
 see the
 [ZenML Helm chart values](https://artifacthub.io/packages/helm/zenml/zenml?modal=values)
-— all options are available under the `kitaru.zenml` key.
+— all options are available under the `kitaru.server` key.
 
 The sections below show what to put in your values file for common scenarios.
 
@@ -104,7 +86,7 @@ SQLite limitation and enables horizontal scaling.
 
 ```yaml
 kitaru:
-  zenml:
+  server:
     database:
       url: "mysql://kitaru_user:password@mysql-host:3306/kitaru"
 ```
@@ -129,7 +111,7 @@ kubectl -n kitaru create secret generic kitaru-db-password \
 
 ```yaml
 kitaru:
-  zenml:
+  server:
     database:
       url: "mysql://kitaru_user@mysql-host:3306/kitaru"
       passwordSecretRef:
@@ -141,7 +123,7 @@ kitaru:
 
 ```yaml
 kitaru:
-  zenml:
+  server:
     database:
       url: "mysql://kitaru_user@mysql-host:3306/kitaru"
       ssl: true
@@ -167,7 +149,7 @@ kitaru login http://localhost:8080
 
 ```yaml
 kitaru:
-  zenml:
+  server:
     service:
       type: LoadBalancer
 ```
@@ -239,7 +221,7 @@ Then deploy Kitaru with Ingress enabled:
 
 ```yaml
 kitaru:
-  zenml:
+  server:
     serverURL: https://kitaru.example.com
 
     ingress:
@@ -282,7 +264,7 @@ openssl rand -hex 32
 
 ```yaml
 kitaru:
-  zenml:
+  server:
     auth:
       jwtSecretKey: "<paste the generated key>"
 ```
@@ -298,7 +280,7 @@ openssl rand -hex 32
 
 ```yaml
 kitaru:
-  zenml:
+  server:
     secretsStore:
       enabled: true
       type: sql
@@ -317,7 +299,7 @@ encryption, resource limits, and autoscaling:
 
 ```yaml
 kitaru:
-  zenml:
+  server:
     replicaCount: 2
 
     serverURL: https://kitaru.example.com
@@ -396,7 +378,7 @@ The JWT secret key is preserved automatically across upgrades. The server runs a
 database migration job before the new version starts.
 
 <Callout type="info">
-  Use a version-pinned image tag (e.g. `kitaru.zenml.image.tag: "0.2.0"`) that
+  Use a version-pinned image tag (e.g. `kitaru.server.image.tag: "0.2.0"`) that
   matches your client SDK version to avoid API incompatibilities.
 </Callout>
 
@@ -425,7 +407,7 @@ kubectl -n kitaru describe pod -l app.kubernetes.io/name=kitaru
 Common causes:
 
 - Database connection refused (wrong host/port/credentials in
-  `kitaru.zenml.database.url`)
+  `kitaru.server.database.url`)
 - Database name contains hyphens (use underscores or plain alphanumeric names)
 - PVC pending — no storage class available or insufficient capacity
   (`kubectl -n kitaru get pvc`)
@@ -456,7 +438,7 @@ Common causes:
 
 - Confirm the server pod is healthy: `kubectl -n kitaru get pods`
 - Check the Ingress controller logs for upstream errors.
-- Verify `kitaru.zenml.ingress.host` matches your DNS record.
+- Verify `kitaru.server.ingress.host` matches your DNS record.
 - If using TLS, check that the TLS Secret exists and contains valid
   certificate data: `kubectl -n kitaru describe secret kitaru-tls`
 
