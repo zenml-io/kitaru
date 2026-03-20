@@ -22,40 +22,37 @@
             </div>
             <span class="showcase-code-filename">agent.py</span>
           </div>
-          <pre class="showcase-code-pre" aria-label="Example Kitaru agent code"><code><span class="kw">import</span> kitaru
-<span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint
-
-<span class="code-line" data-primitive="flow"><span class="dec">@flow</span></span>
-<span class="code-line" data-primitive="flow"><span class="kw">def</span> <span class="fn">research_agent</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:</span>
-<span class="code-line" data-primitive="configure">    kitaru.<span class="fn">configure</span>(project<span class="op">=</span><span class="str">"research"</span>)</span>
-    sources <span class="op">=</span> <span class="fn">gather_sources</span>(topic)
-    analysis <span class="op">=</span> <span class="fn">analyze</span>(sources)
-
-<span class="code-line" data-primitive="save">    kitaru.<span class="fn">save</span>(<span class="str">"draft"</span>, analysis)</span>
-
-    <span class="cmt"># Suspends the process. Resume when</span>
-    <span class="cmt"># a human responds — 30s or 3 days later.</span>
-<span class="code-line" data-primitive="wait">    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(</span>
-<span class="code-line" data-primitive="wait">        schema<span class="op">=</span><span class="var">bool</span>, question<span class="op">=</span><span class="str">"Publish this report?"</span></span>
-<span class="code-line" data-primitive="wait">    )</span>
-    <span class="kw">if</span> approved:
-        <span class="fn">publish</span>(analysis)
-
-<span class="code-line" data-primitive="load">    prev <span class="op">=</span> kitaru.<span class="fn">load</span>(exec_id, <span class="str">"draft"</span>)</span>
-
-<span class="code-line" data-primitive="llm">    summary <span class="op">=</span> kitaru.<span class="fn">llm</span>(</span>
-<span class="code-line" data-primitive="llm">        <span class="str">"Summarize: "</span> <span class="op">+</span> analysis, model<span class="op">=</span><span class="str">"gpt-4o"</span></span>
+          <pre class="showcase-code-pre" aria-label="Example Kitaru agent code"><code><span class="code-line"><span class="kw">import</span> kitaru</span>
+<span class="code-line"><span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="configure">kitaru.<span class="fn">configure</span>(stack<span class="op">=</span><span class="str">"local"</span>)</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
+<span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">research</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">dict</span>:</span>
+<span class="code-line" data-primitive="checkpoint">    results <span class="op">=</span> <span class="fn">search_web</span>(topic)</span>
+<span class="code-line" data-primitive="save">    kitaru.<span class="fn">save</span>(<span class="str">"sources"</span>, results)</span>
+<span class="code-line" data-primitive="checkpoint">    <span class="kw">return</span> <span class="fn">summarize</span>(results)</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
+<span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">write_draft</span>(context: <span class="var">str</span>, prev_id: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:</span>
+<span class="code-line" data-primitive="load">    prior <span class="op">=</span> kitaru.<span class="fn">load</span>(prev_id, <span class="str">"sources"</span>)</span>
+<span class="code-line" data-primitive="llm">    <span class="kw">return</span> kitaru.<span class="fn">llm</span>(</span>
+<span class="code-line" data-primitive="llm">        <span class="str">"Draft a report on: "</span> <span class="op">+</span> context,</span>
+<span class="code-line" data-primitive="llm">        model<span class="op">=</span><span class="str">"gpt-4o"</span>,</span>
 <span class="code-line" data-primitive="llm">    )</span>
-<span class="code-line" data-primitive="log">    kitaru.<span class="fn">log</span>(summary_length<span class="op">=</span><span class="fn">len</span>(summary))</span>
-    <span class="kw">return</span> summary
-
-<span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
-<span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">gather_sources</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">list</span>:</span>
-<span class="code-line" data-primitive="checkpoint">    <span class="kw">return</span> <span class="fn">search_web</span>(topic)</span>
-
-<span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
-<span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">analyze</span>(sources: <span class="var">list</span>) <span class="op">-></span> <span class="var">str</span>:</span>
-<span class="code-line" data-primitive="checkpoint">    <span class="kw">return</span> <span class="fn">run_analysis</span>(sources)</span></code></pre>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="flow"><span class="dec">@flow</span></span>
+<span class="code-line" data-primitive="flow"><span class="kw">def</span> <span class="fn">report_agent</span>(topic: <span class="var">str</span>, prev_id: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:</span>
+<span class="code-line">    data <span class="op">=</span> <span class="fn">research</span>(topic)</span>
+<span class="code-line">    draft <span class="op">=</span> <span class="fn">write_draft</span>(<span class="fn">str</span>(data), prev_id)</span>
+<span class="code-line" data-primitive="log">    kitaru.<span class="fn">log</span>(topic<span class="op">=</span>topic, words<span class="op">=</span><span class="fn">len</span>(draft.<span class="fn">split</span>()))</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="wait">    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(</span>
+<span class="code-line" data-primitive="wait">        schema<span class="op">=</span><span class="var">bool</span>, question<span class="op">=</span><span class="str">"Publish?"</span></span>
+<span class="code-line" data-primitive="wait">    )</span>
+<span class="code-line">    <span class="kw">if</span> approved:</span>
+<span class="code-line">        <span class="fn">publish</span>(draft)</span>
+<span class="code-line">    <span class="kw">return</span> draft</span></code></pre>
         </div>
       </div>
 
@@ -79,19 +76,19 @@
         </div>
         <div class="annotation" data-highlight="log">
           <code class="annotation-label">kitaru.log()</code>
-          <p>Structured metadata on every execution. See it in the free dashboard.</p>
+          <p>Structured metadata on every execution. Query it in the dashboard.</p>
         </div>
         <div class="annotation" data-highlight="save">
           <code class="annotation-label">kitaru.save()</code>
-          <p>Persist any artifact by name. Available across checkpoints and replays.</p>
+          <p>Persist any artifact by name inside a checkpoint.</p>
         </div>
         <div class="annotation" data-highlight="load">
           <code class="annotation-label">kitaru.load()</code>
-          <p>Retrieve a saved artifact by name. Works across executions.</p>
+          <p>Retrieve saved artifacts from any prior execution by ID.</p>
         </div>
         <div class="annotation" data-highlight="configure">
           <code class="annotation-label">kitaru.configure()</code>
-          <p>Set project, stack, and runtime options. Zero config locally, one line for production.</p>
+          <p>Set stack, project, and runtime defaults. Zero config locally.</p>
         </div>
       </div>
 
@@ -168,6 +165,10 @@
     margin: 0 -4px;
   }
 
+  .code-line[data-primitive] {
+    cursor: default;
+  }
+
   .code-line.highlighted {
     background: oklch(0.65 0.16 45 / 0.12);
   }
@@ -178,6 +179,15 @@
   }
 
   .showcase-code-pre.has-highlight .code-line.highlighted {
+    opacity: 1;
+  }
+
+  /* Dim non-active annotations when a highlight is active */
+  .showcase-annotations.has-highlight .annotation:not(.active) {
+    opacity: 0.4;
+  }
+
+  .showcase-annotations.has-highlight .annotation.active {
     opacity: 1;
   }
 
@@ -195,7 +205,7 @@
     border: 1px solid oklch(1 0 0 / 0.08);
     background: oklch(1 0 0 / 0.03);
     cursor: default;
-    transition: border-color 0.2s, background 0.2s;
+    transition: border-color 0.2s, background 0.2s, opacity 0.2s;
   }
 
   .annotation:hover,
@@ -249,25 +259,52 @@
 </style>
 
 <script>
-  const annotations = document.querySelectorAll<HTMLElement>('#code-showcase .annotation');
-  const codeBlock = document.querySelector<HTMLElement>('#code-showcase .showcase-code-pre');
+  const section = document.getElementById('code-showcase');
+  if (section) {
+    const annotations = section.querySelectorAll<HTMLElement>('.annotation');
+    const codeBlock = section.querySelector<HTMLElement>('.showcase-code-pre');
+    const annContainer = section.querySelector<HTMLElement>('.showcase-annotations');
+    if (codeBlock && annContainer) {
+      // Build lookup maps
+      const annByPrimitive = new Map<string, HTMLElement>();
+      annotations.forEach(ann => {
+        const p = ann.dataset.highlight;
+        if (p) annByPrimitive.set(p, ann);
+      });
 
-  annotations.forEach(ann => {
-    const primitive = ann.dataset.highlight;
-    if (!primitive || !codeBlock) return;
+      function activate(primitive: string) {
+        codeBlock!.classList.add('has-highlight');
+        annContainer!.classList.add('has-highlight');
+        const ann = annByPrimitive.get(primitive);
+        if (ann) ann.classList.add('active');
+        codeBlock!.querySelectorAll<HTMLElement>(`.code-line[data-primitive="${primitive}"]`)
+          .forEach(l => l.classList.add('highlighted'));
+      }
 
-    const lines = codeBlock.querySelectorAll<HTMLElement>(`.code-line[data-primitive="${primitive}"]`);
+      function deactivate(primitive: string) {
+        codeBlock!.classList.remove('has-highlight');
+        annContainer!.classList.remove('has-highlight');
+        const ann = annByPrimitive.get(primitive);
+        if (ann) ann.classList.remove('active');
+        codeBlock!.querySelectorAll<HTMLElement>(`.code-line[data-primitive="${primitive}"]`)
+          .forEach(l => l.classList.remove('highlighted'));
+      }
 
-    ann.addEventListener('mouseenter', () => {
-      codeBlock.classList.add('has-highlight');
-      ann.classList.add('active');
-      lines.forEach(l => l.classList.add('highlighted'));
-    });
+      // Annotation hover → highlight code lines
+      annotations.forEach(ann => {
+        const primitive = ann.dataset.highlight;
+        if (!primitive) return;
+        ann.addEventListener('mouseenter', () => activate(primitive));
+        ann.addEventListener('mouseleave', () => deactivate(primitive));
+      });
 
-    ann.addEventListener('mouseleave', () => {
-      codeBlock.classList.remove('has-highlight');
-      ann.classList.remove('active');
-      lines.forEach(l => l.classList.remove('highlighted'));
-    });
-  });
+      // Code line hover → highlight annotation
+      codeBlock.querySelectorAll<HTMLElement>('.code-line[data-primitive]').forEach(line => {
+        const primitive = line.dataset.primitive;
+        if (!primitive) return;
+        line.addEventListener('mouseenter', () => activate(primitive));
+        line.addEventListener('mouseleave', () => deactivate(primitive));
+      });
+    }
+  }
 </script>
