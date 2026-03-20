@@ -13,7 +13,6 @@ sources:
   - https://github.com/zenml-io/kitaru
 icon: https://kitaru.ai/kitaru-logo.svg
 
-# Do we want to pin the chart version?
 dependencies:
   - name: zenml
     version: "0.94.1"
