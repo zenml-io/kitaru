@@ -24,6 +24,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' && '' || 'pypi' }}
+    outputs:
+      version: ${{ steps.version_out.outputs.version }}
     steps:
       # --- Determine version and trigger mode ---
       - name: Set version from dispatch
@@ -40,6 +42,9 @@ jobs:
             echo "::error::Invalid version format: $VERSION (expected semver like 1.2.3 or 1.2.3-rc.1)"
             exit 1
           fi
+      - name: Record version for downstream jobs
+        id: version_out
+        run: echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Check tag does not already exist (dispatch only)
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -204,3 +209,11 @@ jobs:
             echo ""
             echo "No changes were pushed, published, or tagged."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-helm-chart:
+    needs: release
+    uses: ./.github/workflows/publish_helm_chart.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.release.outputs.version }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
