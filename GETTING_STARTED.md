@@ -29,6 +29,7 @@ uv sync
 
 # Or with pip (editable install)
 pip install -e ".[mcp,pydantic-ai]"
+
 ```
 
 The extras give you:
