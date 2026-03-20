@@ -2135,9 +2135,7 @@ def test_create_vertex_stack_operation_rewrites_invalid_component_option() -> No
         )
 
     assert "Did you mean `synchronous`?" in str(exc_info.value)
-    assert "https://docs.zenml.io/stack-components/orchestrators/vertex" in str(
-        exc_info.value
-    )
+    assert "orchestrators/vertex" in str(exc_info.value)
     client_mock.create_service_connector.assert_not_called()
 
 

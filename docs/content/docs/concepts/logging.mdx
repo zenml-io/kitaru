@@ -132,10 +132,10 @@ The precedence for Kitaru's preferred runtime log backend is:
 2. **Global user config** (set via `kitaru log-store set`)
 3. **Built-in default** (the `artifact-store` backend)
 
-The active stack's ZenML stack log store still controls where runtime logs are actually
-emitted at execution time. If that active destination differs from Kitaru's
-saved preference, `kitaru status` and `kitaru log-store show` will warn about
-the mismatch.
+The active stack's log store controls where runtime logs are actually emitted
+at execution time. If the stack's log store differs from Kitaru's saved
+preference, `kitaru status` and `kitaru log-store show` will warn about the
+mismatch.
 
 For full details, see [View Execution Runtime Logs](/guides/execution-logs)
 and [Configure Runtime Log Storage](/infrastructure/log-store).

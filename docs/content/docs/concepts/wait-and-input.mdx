@@ -1,0 +1,144 @@
+---
+title: Wait, Input, and Resume
+description: Pause flows for human or agent input, then resume from where they left off
+---
+
+`kitaru.wait()` suspends a running flow until someone — a human, another agent,
+or an external system — provides input. While waiting, the compute is fully
+released. The execution can resume seconds, hours, or months later.
+
+## Full example
+
+```python
+import kitaru
+from kitaru import checkpoint, flow
+
+@checkpoint
+def research(topic: str) -> str:
+    return kitaru.llm(f"Summarize the latest developments in {topic}.")
+
+@checkpoint
+def write_report(summary: str) -> str:
+    return kitaru.llm(f"Write a short report based on:\n\n{summary}")
+
+@flow
+def research_agent(topic: str) -> str:
+    summary = research(topic)
+
+    approved = kitaru.wait(
+        name="approve_summary",
+        question=f"The agent produced this summary:\n\n{summary}\n\nApprove?",
+        schema=bool,
+    )
+
+    if not approved:
+        return "Report rejected by reviewer."
+
+    return write_report(summary)
+
+if __name__ == "__main__":
+    research_agent.run(topic="durable execution for AI agents")
+```
+
+When execution reaches `kitaru.wait()`:
+
+1. The flow suspends and the execution moves to `waiting` status
+2. The question, schema, and metadata are recorded on the server
+3. Compute is released — no process is blocked, no pod is running
+4. The flow resumes from exactly this point once input is provided
+
+## Providing input
+
+### From the CLI
+
+```bash
+# Provide the answer directly
+kitaru executions input <exec-id> --wait approve_summary --value true
+
+# Interactive mode — shows the question and schema, prompts for input
+kitaru executions input <exec-id> --interactive
+
+# Sweep all waiting executions interactively
+kitaru executions input --interactive
+```
+
+### From Python
+
+```python
+client = kitaru.KitaruClient()
+client.executions.input(
+    "<exec-id>",
+    wait="approve_summary",
+    value=True,
+)
+```
+
+### From the UI
+
+The UI shows all executions in `waiting` status with the question and
+expected schema. You can provide input directly from the UI.
+
+{/* TODO: add screenshot of UI wait input UI */}
+
+## Before timeout vs. after timeout
+
+This is an important distinction. The `timeout` parameter (default: 600
+seconds) controls how long the **runner process** keeps polling for input
+before it exits:
+
+### Input arrives before timeout
+
+The runner is still alive and polling. When you provide input, the flow
+continues immediately in the same process. No extra step needed.
+
+### Input arrives after timeout
+
+The runner has already exited and released compute. Your input is recorded on
+the server, but there is no running process to pick it up. You need to
+explicitly resume the execution:
+
+<Tabs items={["CLI", "Python"]}>
+  <Tab value="CLI">
+    ```bash
+    # Step 1: provide the input
+    kitaru executions input <exec-id> --wait approve_summary --value true
+
+    # Step 2: resume the execution (starts a new runner)
+    kitaru executions resume <exec-id>
+    ```
+  </Tab>
+  <Tab value="Python">
+    ```python
+    client = kitaru.KitaruClient()
+
+    # Step 1: provide the input
+    client.executions.input("<exec-id>", wait="approve_summary", value=True)
+
+    # Step 2: resume the execution
+    client.executions.resume("<exec-id>")
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+  The `timeout` is not a deadline on the wait itself — the wait never expires.
+  It only controls how long the runner process stays alive polling for a
+  response. After timeout, the input can still be provided at any time.
+</Callout>
+
+## Wait parameters
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `name` | Auto-generated | Identifier for this wait point (used when providing input) |
+| `question` | `None` | Human-readable prompt shown in the CLI, UI, and MCP |
+| `schema` | `bool` | Expected type of the input — input is validated against this |
+| `timeout` | `600` | Seconds the runner polls before exiting (not a wait expiration) |
+| `metadata` | `None` | Additional key-value data attached to the wait record |
+
+## Next steps
+
+- [Wait, Input, and Resume guide](/guides/wait-and-resume) — detailed patterns
+  including local interactive mode and abort
+- [Execution Management](/guides/execution-management) — inspect, replay,
+  and manage executions

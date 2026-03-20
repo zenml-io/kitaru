@@ -1,19 +1,28 @@
 ---
-title: Manage Stacks
+title: Stacks
 description: Create, inspect, switch, and delete the stacks Kitaru uses for execution
 ---
 
-This guide shows how to manage stacks in Kitaru.
+A **stack** is the execution environment for your flows. It bundles three things:
 
-A stack is the named execution environment Kitaru uses as a persisted fallback target when no higher-precedence stack source is set.
+- **Compute** — where your flow code runs (locally, on Kubernetes, on Vertex AI, etc.)
+- **Storage** — where checkpoint outputs and saved data are persisted
+- **Container registry** — where container images are pushed for remote execution
 
-This page covers the general stack story: current stack, switching, local stack creation, remote stack creation, deletion, and precedence. If you want the end-to-end workflow for a Kubernetes-backed stack, use [Kubernetes Stacks](/infrastructure/kubernetes-stacks).
+When you run a flow, Kitaru uses the active stack to decide where to execute it
+and where to store results. Locally, everything runs on your machine with local
+file storage. For production, you point the stack at cloud infrastructure.
 
-## Show the current stack
+## The default stack
+
+After `kitaru init`, you get a `default` stack that runs everything locally:
 
 ```bash
 kitaru stack current
 ```
+
+This is enough to develop and test flows on your machine. No cloud accounts or
+containers required.
 
 ## List available stacks
 
@@ -37,6 +46,24 @@ Each list item includes:
 - `is_managed`
 
 `is_managed` is `true` for stacks created by Kitaru's `stack create` command.
+
+## Switching stacks
+
+```bash
+kitaru stack use prod-k8s
+```
+
+You can pass either a stack name or a stack ID. The selected stack is persisted
+as your default until you switch it again.
+
+Now every `.run()` call uses that stack. You can also override per-run:
+
+```python
+my_agent.run(topic="...", stack="prod-k8s")
+```
+
+This command changes the fallback stack Kitaru will use when no higher-precedence
+override is present. It does **not** rewrite any per-flow or per-run overrides.
 
 ## Create a local stack
 
@@ -92,6 +119,7 @@ kitaru stack create prod-k8s \
   --region eu-west-1
 ```
 
+For the end-to-end Kubernetes setup, see [Kubernetes](/infrastructure/kubernetes-stacks).
 For all available orchestrator fields (useful with `--extra`), see the [ZenML Kubernetes orchestrator reference](https://docs.zenml.io/stacks/stack-components/orchestrators/kubernetes).
 
 ### Vertex example
@@ -205,18 +233,6 @@ CLI `--extra` values merge on top of YAML `extra:` values instead of replacing t
 
 Kitaru does not try to duplicate every underlying field in its own docs. For full field inventories, see the ZenML component reference for your orchestrator type: [Kubernetes](https://docs.zenml.io/stacks/stack-components/orchestrators/kubernetes), [Vertex](https://docs.zenml.io/stacks/stack-components/orchestrators/vertex), [SageMaker](https://docs.zenml.io/stacks/stack-components/orchestrators/sagemaker), [AzureML](https://docs.zenml.io/stacks/stack-components/orchestrators/azureml).
 
-## Switch to another stack
-
-```bash
-kitaru stack use production
-```
-
-You can pass either a stack name or a stack ID.
-
-The selected stack is persisted as your default until you switch it again.
-
-This command changes the fallback stack Kitaru will use when no higher-precedence override is present. It does **not** rewrite any per-flow or per-run overrides.
-
 ## Delete a stack
 
 To delete only the stack record and keep its components:
@@ -278,6 +294,7 @@ Those higher-precedence overrides do **not** change the active stack you see in 
 
 ## Related pages
 
-- [Kubernetes Stacks](/infrastructure/kubernetes-stacks)
+- [Kubernetes](/infrastructure/kubernetes-stacks)
+- [Containerization](/guides/containerization)
 - [Flows](/concepts/flows)
 - [CLI stack commands](/cli/stack)

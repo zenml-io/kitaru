@@ -1,0 +1,92 @@
+---
+title: How It Works
+description: What runs where when you execute a Kitaru flow
+---
+
+When you call `.run()` on a flow, three things work together to make it
+durable. During local development they all live on your machine. In production
+they separate across your infrastructure.
+
+## Agent runtime
+
+Where your flow code actually executes. The runtime runs your checkpoints,
+calls `kitaru.llm()`, and persists outputs to storage. Locally this is your
+Python process. In production this is typically Kubernetes — each flow
+execution becomes a pod.
+
+## Server
+
+The central coordination layer. The agent runtime reports execution state,
+checkpoint results, and logs to the server. The server stores everything
+and makes it queryable.
+
+Locally, the server runs embedded in your Python process (no setup needed).
+For production, you [deploy it on Kubernetes](/infrastructure/deploy-helm) so
+your team can share executions and agents can run independently of your machine.
+
+## Client
+
+How you observe and interact with executions. The client connects to the
+server to inspect runs, view logs, provide human input, replay, and cancel
+executions. This can be:
+
+- **`KitaruClient`** — the Python SDK for programmatic access
+- **CLI** — `kitaru executions list`, `kitaru executions logs`, etc.
+- **UI** — the web interface for browsing executions visually
+- **MCP server** — for AI assistants to query and manage executions
+
+## Local development
+
+When you are developing locally, all three components run inside a single
+Python process on your machine. The server is embedded — no separate service to
+start, no database to configure. Checkpoint outputs are written to your local
+filesystem.
+
+This means you can install Kitaru, run `kitaru init`, and have a fully working
+durable execution environment in under a minute. Your flows behave exactly the
+same as they will in production — same checkpointing, same replay, same
+observability — just without the cloud infrastructure underneath.
+
+Optionally, you can run a [local server and UI](/getting-started/installation#local-UI)
+to browse executions in a web UI.
+
+## Production
+
+In production, the three components separate across your infrastructure:
+
+- The **server** runs as a long-lived Kubernetes pod (deployed via
+  [Helm](/infrastructure/deploy-helm)). It stores execution state in a
+  database and serves the UI UI. Your whole team connects to it.
+
+- The **agent runtime** runs on the compute backend defined by your
+  [stack](/infrastructure/stacks) — Kubernetes pods, Vertex AI jobs,
+  SageMaker jobs, or any other supported environment. When you call `.run()`,
+  the client fetches short-lived credentials from the server and dispatches
+  the execution directly to the compute backend. The runtime runs your
+  checkpoints and writes outputs to cloud storage. If the execution crashes,
+  replay picks up from the last completed checkpoint.
+
+- The **client** runs wherever you are — your laptop, CI, or another service.
+  It connects to the server to kick off executions, tail logs, provide human
+  input to waiting flows, or replay failed runs.
+
+The agent runtime writes checkpoint outputs and artifacts to the cloud storage
+backend (S3, GCS, or Azure Blob) defined by the stack. The server tracks
+execution metadata but does not access storage directly. When a client needs to
+read files — artifacts, checkpoint outputs, logs — it can fetch temporary
+credentials brokered by the server to access storage directly.
+
+## What goes where
+
+| Component | What it does | Where it runs |
+|---|---|---|
+| Agent runtime | Executes your flow code, writes checkpoint outputs | Your process locally or Kubernetes pods |
+| Server | Stores execution state, checkpoint results, logs | Embedded locally or Kubernetes pod |
+| Client | Observe executions, provide input, replay, cancel | Your machine — SDK, CLI, UI, or MCP |
+| Storage | Persists all data | Local filesystem, S3, GCS, Azure Blob |
+
+## Next steps
+
+- [Stacks](/infrastructure/stacks) — how compute, storage, and container
+  registry are bundled into a named runtime
+- [Deploy Your Agent](/getting-started/deploy) — move from local to production
