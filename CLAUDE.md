@@ -32,7 +32,10 @@ scripts/              # Doc generation + site merge scripts
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
-docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing stack)
+docker/               # Dockerfiles — see docker/CLAUDE.md for full architecture details
+  Dockerfile          # Production server (FROM zenmldocker/zenml-server + Kitaru + Kitaru UI)
+  Dockerfile.server-dev  # Dev server for local UI testing (local source + local UI dist)
+  Dockerfile.dev      # Flow-execution image for remote stacks (K8s, etc.)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
@@ -151,7 +154,9 @@ just site-build                       # Full unified build (generate + build + m
 # Docker
 just server-image                    # Build production server image (zenmldocker/kitaru:latest)
 just server-image TAG=v0.2.0         # Build with specific tag
+just server-image UI_TAG=v0.1.0      # Build with specific Kitaru UI release
 just server-image-push               # Build + push to Docker Hub
+just server-dev-image                # Build dev server image (requires docker/kitaru-ui-dist/)
 
 # Manual deploy to Cloudflare
 unset CF_API_TOKEN CLOUDFLARE_API_TOKEN  # Clear stale tokens (use wrangler login credentials)

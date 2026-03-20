@@ -1,0 +1,40 @@
+# Dev Kitaru server image — for local testing without a kitaru-ui release.
+#
+# Installs Kitaru from local source and copies a locally-built Kitaru UI
+# from docker/kitaru-ui-dist/ into the ZenML dashboard directory.
+#
+# Usage:
+#   1. Build kitaru-ui locally:
+#        cd /path/to/kitaru-ui && pnpm install && pnpm build
+#   2. Copy the build output into the Docker build context:
+#        cp -r /path/to/kitaru-ui/dist/ docker/kitaru-ui-dist/
+#   3. Build the dev server image:
+#        just server-dev-image
+#   4. Run:
+#        docker run -p 8080:8080 kitaru-server-dev
+
+ARG ZENML_SERVER_TAG=0.94.1
+
+FROM zenmldocker/zenml-server:${ZENML_SERVER_TAG} AS server
+
+# Install Kitaru from local source.
+COPY . /tmp/kitaru
+RUN cd /tmp/kitaru && pip install --no-cache-dir . && rm -rf /tmp/kitaru
+
+# Copy locally-built Kitaru UI into the ZenML dashboard directory.
+COPY docker/kitaru-ui-dist/ /tmp/kitaru-ui-dist/
+RUN set -eux \
+    && test -f /tmp/kitaru-ui-dist/index.html \
+    || { echo "Local UI dist missing index.html — did you copy kitaru-ui/dist/ to docker/kitaru-ui-dist/?" >&2; exit 1; } \
+    && DASHBOARD_DIR="$(python -c 'import zenml; print(zenml.__path__[0])')/zen_server/dashboard" \
+    && rm -rf "$DASHBOARD_DIR" \
+    && mkdir -p "$DASHBOARD_DIR" \
+    && cp -r /tmp/kitaru-ui-dist/* "$DASHBOARD_DIR/" \
+    && rm -rf /tmp/kitaru-ui-dist \
+    && test -f "$DASHBOARD_DIR/index.html" \
+    || { echo "Kitaru UI assets missing after copy: $DASHBOARD_DIR/index.html" >&2; exit 1; }
+
+ENV KITARU_DEBUG=true \
+    KITARU_ANALYTICS_OPT_IN=false
+
+EXPOSE 8080

@@ -1221,8 +1221,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=0.2.0" },
     { name = "rich", specifier = ">=12.0.0" },
-    { name = "zenml", extras = ["local"], git = "https://github.com/zenml-io/zenml.git?rev=a14c7d4dd43b5170617cc865395fb03589ba062a" },
-    { name = "zenml", extras = ["server"], marker = "extra == 'local'", git = "https://github.com/zenml-io/zenml.git?rev=a14c7d4dd43b5170617cc865395fb03589ba062a" },
+    { name = "zenml", extras = ["local"], specifier = ">=0.94.1" },
+    { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.94.1" },
 ]
 provides-extras = ["local", "pydantic-ai", "mcp"]
 
@@ -1238,7 +1238,7 @@ dev = [
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
-    { name = "zenml", extras = ["server"], git = "https://github.com/zenml-io/zenml.git?rev=a14c7d4dd43b5170617cc865395fb03589ba062a" },
+    { name = "zenml", extras = ["server"], specifier = ">=0.94.1" },
 ]
 
 [[package]]
@@ -3156,8 +3156,8 @@ wheels = [
 
 [[package]]
 name = "zenml"
-version = "0.94.0"
-source = { git = "https://github.com/zenml-io/zenml.git?rev=a14c7d4dd43b5170617cc865395fb03589ba062a#a14c7d4dd43b5170617cc865395fb03589ba062a" }
+version = "0.94.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "click" },
@@ -3174,6 +3174,10 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
     { name = "setuptools" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/33/52/5feb76c4fd039aaa23146ae5f2dd06bac9302f3b939b0f46c1635f63be2e/zenml-0.94.1.tar.gz", hash = "sha256:3564723585c8405de14125e50ec503ba870b7dc9c109bdc552466aae5dd1c533", size = 7083620, upload-time = "2026-03-19T17:10:49.258Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/e9/249bbc4dad71522fea518a3c74a58e8381038312b9408bdf939aa544b9dc/zenml-0.94.1-py3-none-any.whl", hash = "sha256:360bdf783456e3efb65e133f7f2d25178c8020ee1078e23def9db65fb77e64de", size = 8200405, upload-time = "2026-03-19T17:10:46.011Z" },
 ]
 
 [package.optional-dependencies]

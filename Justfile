@@ -1,3 +1,8 @@
+# Pinned ZenML server image version — bump here when upgrading.
+# Must match the ARG ZENML_SERVER_TAG default in docker/Dockerfile and
+# docker/Dockerfile.server-dev (enforced by contract tests).
+ZENML_SERVER_TAG := "0.94.1"
+
 # List available recipes
 default:
     @just --list
@@ -67,8 +72,8 @@ test *ARGS:
 build:
     uv build
 
-# Build and push dev base image for remote stack testing (K8s, etc.)
-# The image bakes in kitaru + its zenml git dependency from local source.
+# Build dev base image for remote stack testing (K8s, etc.)
+# The image bakes in kitaru from local source + ZenML from PyPI.
 # Pass REPO to override the target registry/image.
 dev-image REPO="strickvl/kitaru-dev":
     docker build -f docker/Dockerfile.dev -t kitaru-dev .
@@ -76,17 +81,30 @@ dev-image REPO="strickvl/kitaru-dev":
     docker push {{ REPO }}:latest
     @printf 'Dev image pushed to {{ REPO }}:latest\n'
 
-# Build production server image (ZenML server + cloud plugins + Kitaru).
-# Pass REPO to override the target registry/image.
-server-image REPO="zenmldocker/kitaru" TAG="latest":
-    docker build -f docker/Dockerfile --target server -t kitaru-server .
+# Build production server image (ZenML server base + Kitaru + Kitaru UI).
+# Pass REPO/TAG to override the target registry/image.
+# ZENML_SERVER_TAG and UI_TAG control the base image and UI release versions.
+server-image REPO="zenmldocker/kitaru" TAG="latest" SERVER_TAG=ZENML_SERVER_TAG UI_TAG="latest":
+    docker build -f docker/Dockerfile --target server \
+        --build-arg ZENML_SERVER_TAG={{ SERVER_TAG }} \
+        --build-arg KITARU_UI_TAG={{ UI_TAG }} \
+        -t kitaru-server .
     docker tag kitaru-server {{ REPO }}:{{ TAG }}
     @printf 'Server image built: {{ REPO }}:{{ TAG }}\n'
 
 # Build and push production server image
-server-image-push REPO="zenmldocker/kitaru" TAG="latest": (server-image REPO TAG)
+server-image-push REPO="zenmldocker/kitaru" TAG="latest" SERVER_TAG=ZENML_SERVER_TAG UI_TAG="latest": (server-image REPO TAG SERVER_TAG UI_TAG)
     docker push {{ REPO }}:{{ TAG }}
     @printf 'Server image pushed: {{ REPO }}:{{ TAG }}\n'
+
+# Build dev server image for local UI testing.
+# Requires docker/kitaru-ui-dist/ to exist (copy from kitaru-ui/dist/).
+server-dev-image SERVER_TAG=ZENML_SERVER_TAG:
+    @test -d docker/kitaru-ui-dist || { printf 'Error: docker/kitaru-ui-dist/ not found.\nBuild kitaru-ui first: cd kitaru-ui && pnpm build\nThen: cp -r dist/ /path/to/kitaru/docker/kitaru-ui-dist/\n' >&2; exit 1; }
+    docker build -f docker/Dockerfile.server-dev --target server \
+        --build-arg ZENML_SERVER_TAG={{ SERVER_TAG }} \
+        -t kitaru-server-dev .
+    @printf 'Server dev image built: kitaru-server-dev\n'
 
 # Generate all docs content from Python source (CLI reference + changelog + SDK reference)
 generate-docs:

@@ -38,3 +38,4 @@ build/
 # Docker (avoid recursive copy)
 docker/Dockerfile
 docker/Dockerfile.dev
+docker/Dockerfile.server-dev

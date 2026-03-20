@@ -49,11 +49,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   docker-smoke:
     runs-on: ubuntu-latest
+    env:
+      ZENML_SERVER_TAG: 0.94.1
+      KITARU_UI_TAG: latest
     steps:
       - uses: actions/checkout@v6
       - name: Build server image
-        run: docker build -f docker/Dockerfile --target server -t kitaru-ci-server
-          .
+        run: >-
+          docker build -f docker/Dockerfile --target server
+          --build-arg ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
+          --build-arg KITARU_UI_TAG=${{ env.KITARU_UI_TAG }}
+          -t kitaru-ci-server .
       - name: Start server container
         run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 kitaru-ci-server
       - name: Wait for health endpoint
@@ -71,7 +77,17 @@ jobs:
       - name: Verify bundled dashboard assets exist in the installed package
         run: |
           set -euo pipefail
-          docker exec kitaru-ci-server sh -c 'DASHBOARD="$(/opt/venv/bin/python -c "import zenml; print(zenml.__path__[0])")/zen_server/dashboard/index.html" && test -f "$DASHBOARD" && echo "OK: $DASHBOARD"'
+          docker exec kitaru-ci-server sh -c 'python -c "import zenml, os; d=os.path.join(zenml.__path__[0],\"zen_server/dashboard/index.html\"); assert os.path.isfile(d), f\"missing: {d}\"; print(\"OK:\", d)"'
+      - name: Smoke test root route serves dashboard HTML
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o /tmp/root-response.txt -w '%{http_code}' 'http://127.0.0.1:18080/')
+          test "$status" = "200"
+          grep -qi '<!doctype html\|<html' /tmp/root-response.txt || {
+            echo "Root route did not return HTML." >&2
+            cat /tmp/root-response.txt >&2
+            exit 1
+          }
       - name: Smoke test device verification route
         run: |
           set -euo pipefail

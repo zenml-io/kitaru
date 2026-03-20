@@ -1,7 +1,7 @@
 # Dev base image for testing kitaru flows on remote stacks (K8s, etc.).
 #
-# Builds from a clean Python image and installs ZenML (develop
-# branch) plus kitaru from the local source tree.
+# Builds from a clean Python image and installs ZenML (from PyPI)
+# plus kitaru from the local source tree.
 #
 # Rebuild whenever kitaru or zenml dependencies change:
 #   just dev-image
@@ -16,19 +16,13 @@ FROM python:3.12-slim-bookworm
 # so those generated commands work in this venv-less image.
 ENV UV_SYSTEM_PYTHON=1
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN pip install --no-cache-dir --upgrade pip uv
 
-# Install kitaru from local source.  Its pyproject.toml pulls
-# zenml[local] from the develop branch automatically.
+# Install kitaru from local source. Its pyproject.toml pulls
+# zenml[local]>=0.94.1 from PyPI automatically.
 COPY . /tmp/kitaru
 RUN cd /tmp/kitaru && uv pip install . && rm -rf /tmp/kitaru
 
 # Layer on cloud extras for remote artifact stores and connectors.
-# Same git ref as above so uv recognizes the installed package and
-# just adds the missing extras.
 RUN uv pip install \
-    "zenml[s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure] @ git+https://github.com/zenml-io/zenml.git@develop"
+    "zenml[s3fs,gcsfs,adlfs,connectors-aws,connectors-gcp,connectors-azure]>=0.94.1"
