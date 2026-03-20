@@ -13,7 +13,7 @@ on:
         type: string
       dry_run:
         description: >-
-          Run helm dependency build, lint, and package only; skip AWS and push.
+          Run helm dependency update, lint, and package only; skip AWS and push.
         required: false
         type: boolean
         default: false
@@ -25,7 +25,7 @@ on:
         type: string
       dry_run:
         description: >-
-          Run helm dependency build, lint, and package only; skip AWS and push.
+          Run helm dependency update, lint, and package only; skip AWS and push.
         required: false
         type: boolean
         default: false
@@ -55,8 +55,8 @@ jobs:
         with:
           version: v3.9.2
 
-      - name: Helm dependency build
-        run: helm dependency build ./helm
+      - name: Helm dependency update
+        run: helm dependency update ./helm
 
       - name: Helm lint
         run: helm lint ./helm
