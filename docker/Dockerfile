@@ -19,6 +19,7 @@ FROM zenmldocker/zenml-server:${ZENML_SERVER_TAG} AS server
 
 ARG KITARU_UI_TAG=latest
 ARG KITARU_UI_REPO_URL=https://github.com/zenml-io/kitaru-ui
+ARG KITARU_VERSION=""
 
 # The base image runs as non-root user "zenml" (UID 1000).
 # Switch to root for package installation and file operations.
@@ -29,10 +30,16 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Kitaru from local source so CI and release builds always test
-# the checked-out code rather than a previously published PyPI version.
+# Install Kitaru. When KITARU_VERSION is set (release builds), install from
+# PyPI for provenance. Otherwise install from the checked-out source tree
+# (CI and local builds).
 COPY . /tmp/kitaru
-RUN cd /tmp/kitaru && pip install --no-cache-dir . && rm -rf /tmp/kitaru
+RUN if [ -n "$KITARU_VERSION" ]; then \
+      pip install --no-cache-dir "kitaru==$KITARU_VERSION"; \
+    else \
+      pip install --no-cache-dir /tmp/kitaru; \
+    fi \
+    && rm -rf /tmp/kitaru
 
 # Replace the ZenML dashboard with the Kitaru UI.
 # Downloads the released archive, verifies its checksum, and extracts

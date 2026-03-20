@@ -177,6 +177,7 @@ jobs:
           build-args: |
             ZENML_SERVER_TAG=0.94.1
             KITARU_UI_TAG=v${{ env.VERSION }}
+            KITARU_VERSION=${{ env.VERSION }}
           tags: |
             zenmldocker/kitaru:${{ env.VERSION }}
             zenmldocker/kitaru:latest

@@ -77,11 +77,12 @@ def test_dockerfile_pins_zenml_server_tag() -> None:
     )
 
 
-def test_dockerfile_installs_kitaru_from_local_source() -> None:
-    """The image should install Kitaru from the repo source."""
+def test_dockerfile_installs_kitaru() -> None:
+    """The image should support both PyPI and local-source Kitaru installs."""
     dockerfile = _read_dockerfile()
     assert "COPY . /tmp/kitaru" in dockerfile
     assert "pip install" in dockerfile
+    assert "KITARU_VERSION" in dockerfile
 
 
 def test_dockerfile_downloads_kitaru_ui() -> None:

@@ -52,6 +52,7 @@ by `COPY` instructions.
 | `ZENML_SERVER_TAG` | *(pinned, see Dockerfile)* | ZenML server Docker image tag |
 | `KITARU_UI_TAG` | `latest` | Kitaru UI GitHub release tag |
 | `KITARU_UI_REPO_URL` | `https://github.com/zenml-io/kitaru-ui` | Kitaru UI repo for release downloads |
+| `KITARU_VERSION` | *(empty)* | If set, install Kitaru from PyPI (`kitaru==<version>`); if empty, install from local source |
 
 ### `Dockerfile.server-dev` (dev)
 
