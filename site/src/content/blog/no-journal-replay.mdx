@@ -1,5 +1,5 @@
 ---
-title: "Why Kitaru doesn't use journal replay"
+title: "Why Kitaru Doesn't Use Journal Replay?"
 description: "Every durable execution engine today forces your code to be deterministic. Kitaru takes a different approach — and it matters more than you think."
 date: 2026-03-05
 author: "Hamza Tahir"
@@ -8,15 +8,17 @@ ogImage: "https://assets.kitaru.ai/content/blog/8a6acec1/no-journal-replay.avif"
 image: "https://assets.kitaru.ai/content/blog/8a6acec1/no-journal-replay.avif"
 ---
 
-Every durable execution platform — Temporal, Restate, Inngest, DBOS — achieves durability through some form of journal replay. The system records every side effect in a log. On crash or resume, it re-executes your code from the top and replays the journal to reconstruct state.
+Every durable execution platform - Temporal, Restate, Inngest, DBOS, achieves durability through some form of journal replay. The system records every side effect in a log. On crash or resume, it re-executes your code from the top and replays the journal to reconstruct state.
 
-This creates one universal constraint: **your code must produce the exact same sequence of operations on replay as it did originally.** Change code while executions are in-flight and the journal no longer matches. Everything breaks.
+This creates one universal constraint: **your code must produce the exact same sequence of operations on replay as it did originally.** Change code while executions are in-flight and the journal no longer matches and everything breaks.
 
 Kitaru sidesteps this entirely. And for AI agents, that changes everything.
 
 ## The determinism tax
 
-Here's what journal replay means in practice. Inside your workflow code, you cannot:
+Here's what journal replay means in practice. 
+
+Inside your workflow code, you cannot:
 
 - Call `datetime.now()` or `time.time()`
 - Use `random.random()` or `uuid.uuid4()`
@@ -24,11 +26,17 @@ Here's what journal replay means in practice. Inside your workflow code, you can
 - Access environment variables that might change
 - Use threads or async in certain ways
 
-Every side effect must go through a special API — `ctx.run()` in Restate, Activities in Temporal, `step.run()` in Inngest. Miss one, and you get a non-determinism error that's hard to debug and impossible to Google.
+Every side effect must go through a special API:
 
-For a payment processing workflow, this is manageable. The logic is predictable. You know the shape of execution upfront.
+- `ctx.run()` in Restate
+- Activities in Temporal, 
+- `step.run()` in Inngest. 
 
-For an AI agent? It's a nightmare. Agents are inherently non-deterministic. They call LLMs that return different responses each time. They make tool-use decisions at runtime. They branch unpredictably. Forcing this into a deterministic journal model means fighting your execution engine at every step.
+Miss one, and you get a non-determinism error that's hard to debug and impossible to Google.
+
+For a payment processing workflow, this is manageable. The logic is predictable and you know the shape of execution upfront.
+
+For an AI agent? It's a nightmare. Agents are inherently non-deterministic. They call LLMs that return different responses each time and make tool-use decisions at runtime. What's more, they branch unpredictably, forcing this into a deterministic journal model means fighting your execution engine at every step.
 
 ## How Kitaru works instead
 
@@ -44,36 +52,36 @@ def research(topic: str) -> str:
 
 On resume, Kitaru reruns your flow from the top. When it hits a checkpoint that already has a cached output, it returns the cached value and moves on. When it hits the checkpoint that failed (or the one after a `wait()`), it executes live.
 
-No journal. No replay. No determinism constraint.
+No journal, replay, or determinism constraint.
 
 ## What this means for deploying new code
 
 This is where it gets interesting. With journal replay, deploying new code to a running execution is dangerous:
 
 - **Temporal** needs Worker Versioning (build IDs, version pinning, old workers running alongside new ones) and a `patched()` API for code-level changes
-- **Restate** pins executions to immutable deployment URLs — you must run old and new endpoints side by side
+- **Restate** pins executions to immutable deployment URLs; you must run old and new endpoints side by side
 - **Inngest** requires new function IDs for breaking changes and timestamp filters on old functions
 - **DBOS** uses source hash versioning with blue-green deploys
 
-With Kitaru, you just deploy. Changed a prompt? Fine — old executions use cached checkpoint outputs, new executions run new code. Refactored logic between checkpoints? Fine. Added logging? Fine.
+With Kitaru, you just deploy. Changed a prompt? Fine, old executions use cached checkpoint outputs, new executions run new code. Refactored logic between checkpoints? Fine. Added logging? Fine.
 
 The only thing that matters is checkpoint structure. If you add, remove, or reorder checkpoints _before_ the resume point of a running execution, Kitaru detects the structural mismatch and raises a clear error. But that's a much smaller surface area than "every line of code must produce the same operations."
 
 ## The tradeoff
 
-This model has a real cost: **resume latency**. Temporal workers can resume a cached workflow in milliseconds. Kitaru must start a new process and rerun from the top — seconds, not milliseconds.
+This model has a real cost: **resume latency**. Temporal workers can resume a cached workflow in milliseconds. Kitaru must start a new process and rerun from the top: seconds, not milliseconds.
 
-For AI agents, this doesn't matter. Each LLM call takes seconds and costs dollars. Pod startup latency is noise. But for high-throughput, low-latency workloads like payment processing, the journal replay model genuinely wins.
+For AI agents, this doesn't matter. Each LLM call takes seconds and costs dollars. Pod startup latency is noise, but for high-throughput, low-latency workloads like payment processing, the journal replay model genuinely wins.
 
-That's the point. Kitaru isn't trying to be a general-purpose durable execution engine. It's built for a specific workload — long-running, expensive, non-deterministic AI agents — where the journal replay model's constraints hurt the most and its benefits matter the least.
+That's the point. Kitaru isn't trying to be a general-purpose durable execution engine. It's built for a specific workload - long-running, expensive, non-deterministic AI agents, where the journal replay model's constraints hurt the most and its benefits matter the least.
 
 ## The right model for the right workload
 
 The durable execution world and the ML pipeline world evolved independently. Temporal came from Uber's ride-matching system. Restate came from distributed systems engineers at AWS. They were solving for millions of short-lived, predictable workflows per second.
 
-AI agents are a different beast. They're long-running, expensive, unpredictable, and you want humans in the loop. The ML pipeline world — where each step is a pod that caches its output — turns out to be a much better foundation for that workload than replaying journals.
+AI agents are all together a different beast. They're long-running, expensive, unpredictable, and you want humans in the loop. The ML pipeline world where each step is a pod that caches its output, turns out to be a much better foundation for that workload than replaying journals.
 
-Kitaru connects these two worlds. ZenML's "spin up a step, cache the output, skip on rerun" machinery, repurposed as a durable execution model for agents. No journal. No determinism. Just cached checkpoints and normal Python.
+Kitaru connects these two worlds. ZenML's "spin up a step, cache the output, skip on rerun" machinery, repurposed as a durable execution model for agents without any journal or determinism. Just cached checkpoints and normal Python.
 
 ## Continue in the docs
 
