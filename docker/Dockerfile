@@ -69,6 +69,8 @@ RUN test -f "$(python -c 'import zenml; print(zenml.__path__[0])')/zen_server/da
 USER zenml
 
 ENV KITARU_DEBUG=false \
-    KITARU_ANALYTICS_OPT_IN=true
+    KITARU_ANALYTICS_OPT_IN=true \
+    KITARU_DEFAULT_ANALYTICS_SOURCE=kitaru-api \
+    ZENML_DEFAULT_ANALYTICS_SOURCE=kitaru-api
 
 EXPOSE 8080
