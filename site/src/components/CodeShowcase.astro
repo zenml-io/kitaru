@@ -25,7 +25,7 @@
           <pre class="showcase-code-pre" aria-label="Example Kitaru agent code"><code><span class="code-line"><span class="kw">import</span> kitaru</span>
 <span class="code-line"><span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint</span>
 <span class="code-line"> </span>
-<span class="code-line" data-primitive="configure">kitaru.<span class="fn">configure</span>(stack<span class="op">=</span><span class="str">"local"</span>)</span>
+<span class="code-line" data-primitive="configure">kitaru.<span class="fn">configure</span>(stack<span class="op">=</span><span class="str">"kubernetes"</span>)</span>
 <span class="code-line"> </span>
 <span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
 <span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">research</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">dict</span>:</span>
