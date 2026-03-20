@@ -64,7 +64,7 @@ def track(event_name: str, metadata: dict[str, Any] | None = None) -> bool:
     try:
         from zenml.analytics import track as _zenml_track
 
-        return _zenml_track(event=event_name, metadata=metadata or {})  # type: ignore[arg-type]  # ZenML accepts Union[AnalyticsEvent, str]
+        return _zenml_track(event=event_name, metadata=metadata or {})  # ZenML accepts Union[AnalyticsEvent, str]
     except Exception:
         logger.debug("Analytics tracking failed", exc_info=True)
         return False
