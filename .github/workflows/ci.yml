@@ -73,6 +73,7 @@ jobs:
             sleep 2
           done
           echo "Server did not become healthy in time." >&2
+          docker logs kitaru-ci-server || true
           exit 1
       - name: Verify bundled dashboard assets exist in the installed package
         run: |

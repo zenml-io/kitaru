@@ -145,3 +145,59 @@ def test_server_dev_dockerfile_copies_local_ui_dist() -> None:
     dockerfile = _read_server_dev_dockerfile()
     assert "docker/kitaru-ui-dist/" in dockerfile
     assert "kitaru-ui.tar.gz" not in dockerfile
+
+
+# ---------------------------------------------------------------------------
+# Flow-execution Dockerfile contract
+# ---------------------------------------------------------------------------
+
+
+def _read_dev_dockerfile() -> str:
+    """Read the flow-execution image Dockerfile (not the dev *server*)."""
+    return (_repo_root() / "docker" / "Dockerfile.dev").read_text()
+
+
+def test_dockerfile_dev_has_no_git_refs() -> None:
+    """Dockerfile.dev should install ZenML from PyPI, not git refs."""
+    dockerfile = _read_dev_dockerfile()
+    for marker in ["git+https://", "git clone", "@develop", "@main"]:
+        assert marker not in dockerfile, (
+            f"Dockerfile.dev contains git ref marker '{marker}'. "
+            "Use PyPI version specs instead."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Cross-file consistency
+# ---------------------------------------------------------------------------
+
+
+def test_dockerfile_uses_curl_fail_flag() -> None:
+    """curl must use --fail (-f) so HTTP errors are not silently ignored."""
+    dockerfile = _read_dockerfile()
+    for line in dockerfile.splitlines():
+        if "curl " in line and "-o " in line:
+            assert re.search(r"-[a-zA-Z]*f", line) or "--fail" in line, (
+                f"curl download missing --fail flag: {line.strip()}"
+            )
+
+
+def test_server_dockerfiles_switch_to_root_for_build() -> None:
+    """Server Dockerfiles must switch to root before COPY/RUN build steps.
+
+    The base image runs as non-root user "zenml". Without USER root,
+    COPY creates root-owned files that subsequent RUN commands (as zenml)
+    cannot clean up.
+    """
+    for name, content in [
+        ("Dockerfile", _read_dockerfile()),
+        ("Dockerfile.server-dev", _read_server_dev_dockerfile()),
+    ]:
+        assert "USER root" in content, (
+            f"{name} must contain 'USER root' to switch to root "
+            "before package installation and file operations."
+        )
+        assert "USER zenml" in content, (
+            f"{name} must contain 'USER zenml' to switch back to "
+            "the non-root runtime user after build steps."
+        )

@@ -33,11 +33,15 @@ tag — a contract test enforces alignment.
 
 The base image provides:
 - ZenML with all server + cloud extras
-- User/runtime setup
+- Non-root user `zenml` (UID 1000) as the runtime user
 - Entrypoint and CMD (uvicorn)
 - Dashboard directory structure
 
 Kitaru layers on top without overriding the entrypoint or CMD.
+Both server Dockerfiles use `USER root` for build steps (package installation,
+file operations) and switch back to `USER zenml` at the end. This is required
+because the base image's non-root user cannot delete root-owned files created
+by `COPY` instructions.
 
 ## Build args
 
@@ -105,10 +109,13 @@ cutting a Kitaru release.
 ## Contract tests
 
 `tests/test_dockerfile_contract.py` validates:
-- Production Dockerfile uses `zenmldocker/zenml-server` as base
-- ZenML server tag is pinned (not `latest`)
-- Kitaru UI is downloaded with checksum verification
+- `pyproject.toml` has no ZenML git direct references or direct-reference allowance
+- Production Dockerfile uses `zenmldocker/zenml-server` as base with a pinned tag
+- Production Dockerfile installs Kitaru from local source
+- Kitaru UI is downloaded with checksum verification and `curl --fail`
 - Dashboard sentinel is checked
 - No legacy git-clone / install-dashboard.sh remains
-- Server-dev Dockerfile exists and copies from `docker/kitaru-ui-dist/`
-- `pyproject.toml` has no ZenML git direct references
+- Server-dev Dockerfile exists, uses the same base, and copies from `docker/kitaru-ui-dist/`
+- Both server Dockerfiles pin the same `ZENML_SERVER_TAG`
+- Both server Dockerfiles switch to `USER root` for build steps
+- `Dockerfile.dev` has no git refs

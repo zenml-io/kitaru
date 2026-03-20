@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `docker/Dockerfile.server-dev` for local server + UI development without a published UI release
+
 ### Changed
 - Switch ZenML dependency from pinned git commit to PyPI release (`zenml>=0.94.1`)
 - Production server Docker image now layers on `zenmldocker/zenml-server` instead of rebuilding ZenML from source
 - Kitaru UI is now bundled into the server image, replacing the ZenML dashboard
-- Add `docker/Dockerfile.server-dev` for local server + UI development without a published UI release
 - Flow-execution image (`docker/Dockerfile.dev`) now installs ZenML from PyPI instead of git
 
 ### Removed

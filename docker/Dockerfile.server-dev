@@ -17,22 +17,33 @@ ARG ZENML_SERVER_TAG=0.94.1
 
 FROM zenmldocker/zenml-server:${ZENML_SERVER_TAG} AS server
 
+# The base image runs as non-root user "zenml" (UID 1000).
+# Switch to root for package installation and file operations.
+USER root
+
 # Install Kitaru from local source.
 COPY . /tmp/kitaru
 RUN cd /tmp/kitaru && pip install --no-cache-dir . && rm -rf /tmp/kitaru
 
-# Copy locally-built Kitaru UI into the ZenML dashboard directory.
+# Check that the locally-built UI dist has been copied into the build context.
 COPY docker/kitaru-ui-dist/ /tmp/kitaru-ui-dist/
+RUN test -f /tmp/kitaru-ui-dist/index.html \
+    || { echo "Local UI dist missing index.html — did you copy kitaru-ui/dist/ to docker/kitaru-ui-dist/?" >&2; exit 1; }
+
+# Copy locally-built Kitaru UI into the ZenML dashboard directory.
 RUN set -eux \
-    && test -f /tmp/kitaru-ui-dist/index.html \
-    || { echo "Local UI dist missing index.html — did you copy kitaru-ui/dist/ to docker/kitaru-ui-dist/?" >&2; exit 1; } \
     && DASHBOARD_DIR="$(python -c 'import zenml; print(zenml.__path__[0])')/zen_server/dashboard" \
     && rm -rf "$DASHBOARD_DIR" \
     && mkdir -p "$DASHBOARD_DIR" \
     && cp -r /tmp/kitaru-ui-dist/* "$DASHBOARD_DIR/" \
-    && rm -rf /tmp/kitaru-ui-dist \
-    && test -f "$DASHBOARD_DIR/index.html" \
-    || { echo "Kitaru UI assets missing after copy: $DASHBOARD_DIR/index.html" >&2; exit 1; }
+    && rm -rf /tmp/kitaru-ui-dist
+
+# Verify the dashboard sentinel file exists.
+RUN test -f "$(python -c 'import zenml; print(zenml.__path__[0])')/zen_server/dashboard/index.html" \
+    || { echo "Kitaru UI assets missing after copy: index.html not found in dashboard directory" >&2; exit 1; }
+
+# Switch back to non-root user (matches base image).
+USER zenml
 
 ENV KITARU_DEBUG=true \
     KITARU_ANALYTICS_OPT_IN=false

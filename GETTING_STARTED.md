@@ -233,10 +233,15 @@ image with Kitaru and the Kitaru UI layered on top.
 ### 1. Build the server image locally
 
 ```bash
-just server-image REPO=kitaru-local TAG=dev
+just server-image REPO=kitaru-local TAG=dev UI_TAG=v0.1.0
 # or, if you do not have `just` installed:
-docker build -f docker/Dockerfile --target server -t kitaru-local:dev .
+docker build -f docker/Dockerfile --target server \
+    --build-arg KITARU_UI_TAG=v0.1.0 \
+    -t kitaru-local:dev .
 ```
+
+> Replace `v0.1.0` with the desired Kitaru UI release tag. Without an
+> explicit tag, the build defaults to `latest` (the most recent GitHub release).
 
 This creates a local image tag called `kitaru-local:dev`.
 

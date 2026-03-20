@@ -1,6 +1,7 @@
 # Pinned ZenML server image version — bump here when upgrading.
 # Must match the ARG ZENML_SERVER_TAG default in docker/Dockerfile and
-# docker/Dockerfile.server-dev (enforced by contract tests).
+# docker/Dockerfile.server-dev (those two are enforced by contract tests;
+# this Justfile value and the CI/release workflow values are not).
 ZENML_SERVER_TAG := "0.94.1"
 
 # List available recipes
@@ -100,7 +101,7 @@ server-image-push REPO="zenmldocker/kitaru" TAG="latest" SERVER_TAG=ZENML_SERVER
 # Build dev server image for local UI testing.
 # Requires docker/kitaru-ui-dist/ to exist (copy from kitaru-ui/dist/).
 server-dev-image SERVER_TAG=ZENML_SERVER_TAG:
-    @test -d docker/kitaru-ui-dist || { printf 'Error: docker/kitaru-ui-dist/ not found.\nBuild kitaru-ui first: cd kitaru-ui && pnpm build\nThen: cp -r dist/ /path/to/kitaru/docker/kitaru-ui-dist/\n' >&2; exit 1; }
+    @test -f docker/kitaru-ui-dist/index.html || { printf 'Error: docker/kitaru-ui-dist/index.html not found.\nBuild kitaru-ui first: cd kitaru-ui && pnpm build\nThen: cp -r dist/ /path/to/kitaru/docker/kitaru-ui-dist/\n' >&2; exit 1; }
     docker build -f docker/Dockerfile.server-dev --target server \
         --build-arg ZENML_SERVER_TAG={{ SERVER_TAG }} \
         -t kitaru-server-dev .
