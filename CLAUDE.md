@@ -154,9 +154,9 @@ just site-build-only                  # Build landing page only (no docs merge)
 just site-build                       # Full unified build (generate + build + merge)
 
 # Docker
-just server-image                    # Build production server image (zenmldocker/kitaru:latest)
-just server-image TAG=v0.2.0         # Build with specific tag
-just server-image UI_TAG=v0.1.0      # Build with specific Kitaru UI release
+just server-image                              # Build production server image (zenmldocker/kitaru:latest)
+just DOCKER_TAG=v0.2.0 server-image            # Build with specific tag
+just UI_TAG=v0.1.0 server-image                # Build with specific Kitaru UI release
 just server-image-push               # Build + push to Docker Hub
 just server-dev-image                # Build dev server image (requires docker/kitaru-ui-dist/)
 

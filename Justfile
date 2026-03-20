@@ -3,6 +3,9 @@
 # docker/Dockerfile.server-dev (those two are enforced by contract tests;
 # this Justfile value and the CI/release workflow values are not).
 ZENML_SERVER_TAG := "0.94.1"
+DOCKER_REPO := "zenmldocker/kitaru"
+DOCKER_TAG := "latest"
+UI_TAG := "latest"
 
 # List available recipes
 default:
@@ -83,27 +86,29 @@ dev-image REPO="strickvl/kitaru-dev":
     @printf 'Dev image pushed to {{ REPO }}:latest\n'
 
 # Build production server image (ZenML server base + Kitaru + Kitaru UI).
-# Pass REPO/TAG to override the target registry/image.
-# ZENML_SERVER_TAG and UI_TAG control the base image and UI release versions.
-server-image REPO="zenmldocker/kitaru" TAG="latest" SERVER_TAG=ZENML_SERVER_TAG UI_TAG="latest":
+# Override variables on the command line:
+#   just server-image                          # defaults
+#   just UI_TAG=v0.1.0 server-image            # specific UI release
+#   just DOCKER_TAG=v0.2.0 server-image        # specific image tag
+server-image:
     docker build -f docker/Dockerfile --target server \
-        --build-arg ZENML_SERVER_TAG={{ SERVER_TAG }} \
+        --build-arg ZENML_SERVER_TAG={{ ZENML_SERVER_TAG }} \
         --build-arg KITARU_UI_TAG={{ UI_TAG }} \
         -t kitaru-server .
-    docker tag kitaru-server {{ REPO }}:{{ TAG }}
-    @printf 'Server image built: {{ REPO }}:{{ TAG }}\n'
+    docker tag kitaru-server {{ DOCKER_REPO }}:{{ DOCKER_TAG }}
+    @printf 'Server image built: {{ DOCKER_REPO }}:{{ DOCKER_TAG }}\n'
 
 # Build and push production server image
-server-image-push REPO="zenmldocker/kitaru" TAG="latest" SERVER_TAG=ZENML_SERVER_TAG UI_TAG="latest": (server-image REPO TAG SERVER_TAG UI_TAG)
-    docker push {{ REPO }}:{{ TAG }}
-    @printf 'Server image pushed: {{ REPO }}:{{ TAG }}\n'
+server-image-push: server-image
+    docker push {{ DOCKER_REPO }}:{{ DOCKER_TAG }}
+    @printf 'Server image pushed: {{ DOCKER_REPO }}:{{ DOCKER_TAG }}\n'
 
 # Build dev server image for local UI testing.
 # Requires docker/kitaru-ui-dist/ to exist (copy from kitaru-ui/dist/).
-server-dev-image SERVER_TAG=ZENML_SERVER_TAG:
+server-dev-image:
     @test -f docker/kitaru-ui-dist/index.html || { printf 'Error: docker/kitaru-ui-dist/index.html not found.\nBuild kitaru-ui first: cd kitaru-ui && pnpm build\nThen: cp -r dist/ /path/to/kitaru/docker/kitaru-ui-dist/\n' >&2; exit 1; }
     docker build -f docker/Dockerfile.server-dev --target server \
-        --build-arg ZENML_SERVER_TAG={{ SERVER_TAG }} \
+        --build-arg ZENML_SERVER_TAG={{ ZENML_SERVER_TAG }} \
         -t kitaru-server-dev .
     @printf 'Server dev image built: kitaru-server-dev\n'
 

@@ -92,7 +92,7 @@ The `docker/kitaru-ui-dist/` directory is gitignored.
 ### Building a release-like image
 
 ```bash
-just server-image UI_TAG=v0.1.0
+just UI_TAG=v0.1.0 server-image
 ```
 
 ### CI and release
