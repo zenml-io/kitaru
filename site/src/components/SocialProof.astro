@@ -10,11 +10,11 @@
     <div class="sp-header" data-reveal>
       <span class="section-eyebrow">TRUSTED IN PRODUCTION</span>
       <div class="sp-companies">
-        <span class="sp-company">JetBrains</span>
+        <a class="sp-company" href="https://www.zenml.io/case-study/jetbrains" target="_blank" rel="noopener">JetBrains</a>
         <span class="sp-sep" aria-hidden="true"></span>
-        <span class="sp-company">Adeo</span>
+        <a class="sp-company" href="https://www.zenml.io/case-study/adeo-leroy-merlin" target="_blank" rel="noopener">Adeo</a>
         <span class="sp-sep" aria-hidden="true"></span>
-        <span class="sp-company">Bundeswehr</span>
+        <a class="sp-company" href="https://www.zenml.io/case-study/brevo" target="_blank" rel="noopener">Brevo</a>
       </div>
     </div>
 
@@ -73,8 +73,9 @@
   /* ── Header: eyebrow + companies ── */
   .sp-header {
     display: flex;
-    align-items: center;
-    gap: 24px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
     margin-bottom: 20px;
   }
 
@@ -90,6 +91,12 @@
     font-weight: 600;
     color: var(--color-primary);
     letter-spacing: 0.02em;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  .sp-company:hover {
+    opacity: 0.7;
   }
 
   .sp-sep {
@@ -185,8 +192,6 @@
     }
 
     .sp-header {
-      flex-direction: column;
-      align-items: flex-start;
       gap: 12px;
     }
 
