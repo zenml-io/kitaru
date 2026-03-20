@@ -1,5 +1,5 @@
 ---
-title: "Your agents are not microservices"
+title: "Your Agents Are Not Microservices"
 description: "Durable execution engines were built for payment flows and order processing. AI agents need something different. Here's why."
 date: 2026-02-25
 author: "Hamza Tahir"
@@ -8,7 +8,7 @@ ogImage: "https://assets.kitaru.ai/content/blog/deb278bd/agents-are-not-microser
 image: "https://assets.kitaru.ai/content/blog/deb278bd/agents-are-not-microservices.avif"
 ---
 
-Temporal was born at Uber. It was designed for ride matching, payment processing, and order fulfillment — millions of short-lived, predictable workflows per second, each needing sub-100ms latency.
+Temporal grew out of Uber’s Cadence project, which was built for durable workflow orchestration across Uber’s services. Public materials describe it as supporting long-running applications, millions of concurrent executions, and high-throughput task processing.
 
 That's not what your AI agent does.
 
@@ -28,7 +28,7 @@ Durable execution engines were designed around a set of assumptions that made pe
 
 **Long-running workers.** Workers poll for tasks and stay alive indefinitely. This amortizes startup cost across thousands of workflow executions.
 
-Every design decision in Temporal, Restate, and similar systems flows from these assumptions. They're good assumptions — for microservices.
+Every design decision in Temporal, Restate, and similar systems flows from these assumptions. They're good assumptions for microservices.
 
 ## The agent reality
 
@@ -36,7 +36,7 @@ AI agents violate every one of these assumptions:
 
 **Low concurrency, high compute per task.** A research agent makes 40 LLM calls at $0.05-$5 each. Each call takes 5-30 seconds. You're running 10 of these, not 100,000. The bottleneck is LLM API cost, not workflow throughput.
 
-**Unpredictable execution paths.** The agent decides at runtime which tools to call, how many times to iterate, and when to ask a human. You can't predict the sequence of operations upfront. Forcing this into a deterministic model means fighting the framework.
+**Unpredictable execution paths.** The agent decides at runtime which tools to call, how many times to iterate, and when to ask a human. You can't predict the sequence of operations upfront. Deterministic workflow engines constrain the orchestration layer, not the agent’s LLM or tool calls themselves. Dynamic agent decisions can still happen at runtime as long as those decisions are captured through durable workflow steps.
 
 **Resume latency doesn't matter.** When a human approves a PR review at 3 PM after the agent submitted it at 11 AM, nobody cares if resume takes 2 seconds instead of 17 milliseconds.
 
@@ -48,13 +48,13 @@ Strip away the microservice assumptions and ask: what does an AI agent workload 
 
 **Crash recovery without re-burning tokens.** If the agent crashes at step 38, resume from step 38. Don't re-run the $25 worth of LLM calls that already succeeded.
 
-**Human-in-the-loop as a first-class primitive.** Not signals. Not callbacks. A real `wait()` that suspends the execution, releases compute, and resumes when input arrives — minutes, hours, or days later.
+**Human-in-the-loop as a first-class primitive.** Not signals. Not callbacks. A real `wait()` that suspends the execution, releases compute, and resumes when input arrives; minutes, hours, or days later.
 
 **No determinism constraints.** Agents call `datetime.now()`, use `random()`, make HTTP requests in their main logic. A framework that bans these from workflow code is a non-starter.
 
 **Cost visibility.** How much did this execution cost? Which LLM call was the most expensive? How does run #47 compare to run #46? This is table stakes for agent operations.
 
-**Artifact tracking.** Every intermediate result should be inspectable, comparable across runs, and queryable. Not just a trace — actual versioned outputs.
+**Artifact tracking.** Every intermediate result should be inspectable, comparable across runs, and queryable. Not just a trace; actual versioned outputs.
 
 ## The right tool for the job
 
@@ -66,13 +66,13 @@ This isn't about which platform is "better." It's about fit:
 | Serverless RPC handlers | Push-based, short-lived, stateless | Restate, Inngest |
 | AI agents | Crash recovery, human-in-the-loop, cost tracking, no determinism | Kitaru |
 
-Temporal is excellent at what it does. So is Restate. But using them for AI agents means accepting constraints that were designed for a different problem — and working around them at every turn.
+Temporal is excellent at what it does. So is Restate. But using them for AI agents means accepting constraints that were designed for a different problem and working around them at every turn.
 
 ## Start from the workload, not the architecture
 
 Kitaru's execution model is simple: each checkpoint caches its output. On resume, cached outputs are returned instantly. Failed or new checkpoints execute live. No journal. No replay. No worker fleet.
 
-This is "too simple" for payment processing — you'd need sub-millisecond resume and hundred-thousand concurrent workflows. But for 10 agents doing expensive LLM work with humans in the loop, simplicity is the feature.
+This is "too simple" for payment processing, you'd need sub-millisecond resume and hundred-thousand concurrent workflows. But for 10 agents doing expensive LLM work with humans in the loop, simplicity is the feature.
 
 ```python
 import kitaru
@@ -97,7 +97,7 @@ def research_agent(topic: str) -> str:
 
 Two decorators. `pip install kitaru`. Your Python stays Python.
 
-The agent landscape is evolving fast. Maybe someday agents will need microservice-scale throughput. But today, the agents hitting production — coding agents, research agents, content workflows — are long-running, expensive, and human-supervised. That's the workload Kitaru is built for.
+The agent landscape is evolving fast. Maybe someday agents will need microservice-scale throughput. But today, the agents hitting production: coding agents, research agents, content workflows, are long-running, expensive, and human-supervised. That's the workload Kitaru is built for.
 
 ## Continue in the docs
 

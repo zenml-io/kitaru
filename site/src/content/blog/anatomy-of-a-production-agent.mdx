@@ -1,5 +1,5 @@
 ---
-title: "The anatomy of a production coding agent"
+title: "The Anatomy of a Production Coding Agent"
 description: "A production coding agent isn't a prompt and a while loop. It's eight stages, each with different failure modes, costs, and human touchpoints. Here's the full pattern."
 date: 2026-03-15
 author: "Hamza Tahir"
@@ -10,7 +10,7 @@ image: "https://assets.kitaru.ai/content/blog/52f6129f/anatomy-of-a-production-a
 
 The gap between a demo coding agent and a production one isn't features. It's failure handling, cost awareness, and the ability to stop, inspect, and resume at any point.
 
-Here's the full pattern — the eight stages a coding agent goes through from issue to pull request, and what each stage actually requires from your infrastructure.
+Here's the full pattern: the eight stages a coding agent goes through from issue to pull request, and what each stage actually requires from your infrastructure.
 
 ## The eight stages
 
@@ -26,13 +26,13 @@ def analyze_issue(issue: str, codebase_context: str) -> AnalysisPlan:
     )
 ```
 
-**Why this is a checkpoint:** This LLM call costs $0.50-$2.00 depending on context size. If the agent crashes later, you don't want to re-run this.
+**Why this is a checkpoint:** This LLM call costs $0.50-$2.00 depending on context size, if the agent crashes later, you don't want to re-run this.
 
-**Failure mode:** The LLM misunderstands the issue. Without a checkpoint, you'd never know — the agent would barrel ahead with a wrong plan.
+**Failure mode:** The LLM misunderstands the issue. Without a checkpoint, you'd never know and the agent could barrel ahead with a wrong plan.
 
 ### 2. Codebase exploration
 
-The agent navigates the repo — finding relevant files, understanding architecture, tracing dependencies.
+The agent navigates the repo, it finds relevant files, understanding architecture, tracing dependencies.
 
 ```python
 @checkpoint
@@ -48,7 +48,7 @@ def explore_codebase(plan: AnalysisPlan) -> ExplorationResult:
 
 ### 3. Plan formulation
 
-The agent creates a concrete implementation plan — which files to change, in what order, with what approach.
+The agent creates a concrete implementation plan that has steps for: which files to change, in what order, with what approach.
 
 ```python
 @checkpoint
@@ -74,9 +74,9 @@ if not approved:
     return "Plan rejected by reviewer."
 ```
 
-**Why this matters:** The agent is about to spend $5-$20 writing and testing code. A 30-second human review of the plan saves hours of wasted compute. This isn't a nice-to-have — it's the difference between a useful tool and an expensive liability.
+**Why this matters:** The agent is about to spend $5-$20 writing and testing code. A 30-second human review of the plan saves hours of wasted compute. This isn't a nice-to-have; it's the difference between a useful tool and an expensive liability.
 
-**Infrastructure requirement:** Real suspension. The process should stop, release compute, and resume when the human responds — whether that's 30 seconds or 3 days later.
+**Infrastructure requirement:** Real suspension. The process should stop, release compute, and resume when the human responds, whether that's 30 seconds or 3 days later.
 
 ### 5. Code generation
 
@@ -92,7 +92,7 @@ def write_code(plan: ImplementationPlan) -> CodeChanges:
     return CodeChanges(changes=changes)
 ```
 
-**Why this is a checkpoint:** This is usually the most expensive step — multiple LLM calls, each generating code. Caching this is critical for cost control.
+**Why this is a checkpoint:** This is usually the most expensive step because multiple LLM calls are involved, each generating code. Caching this is critical for cost control.
 
 **Failure mode:** The generated code has a bug. With a checkpoint, you can replay from this point with a different prompt or model, keeping all the previous work.
 
@@ -108,7 +108,7 @@ def run_tests(changes: CodeChanges) -> TestResult:
     return result
 ```
 
-**Failure mode:** Tests fail. The agent now has a decision to make — fix the code or escalate. This is where most demo agents fall apart. A production agent with checkpointed state can loop back to step 5 with the test failure context, or escalate to a human with the full execution history.
+**Failure mode:** Tests fail. The agent now has a decision to make: fix the code or escalate. This is where most demo agents fall apart. A production agent with checkpointed state can loop back to step 5 with the test failure context, or escalate to a human with the full execution history.
 
 ### 7. Fix loop
 
@@ -122,7 +122,7 @@ for attempt in range(max_attempts):
     test_result = run_tests(code)
 ```
 
-Each iteration through this loop is checkpointed. If the agent crashes on attempt 3, it resumes from attempt 3 — not from scratch.
+Each iteration through this loop is checkpointed. If the agent crashes on attempt 3, it resumes from attempt 3; not from scratch.
 
 ### 8. PR creation and review
 
@@ -170,21 +170,21 @@ def coding_agent(issue: str) -> str:
     return create_pr(code, plan)
 ```
 
-That's normal Python. No graph. No YAML. No special control flow. But every meaningful step is checkpointed, there's a human approval gate, and the whole thing survives crashes.
+That's normal Python. There's no graph, no YAML, and no special control flow. But every meaningful step is checkpointed, there's a human approval gate, and the whole thing survives crashes.
 
 ## What production requires that demos don't
 
 Looking at this pattern, the requirements become clear:
 
-**Checkpoint caching.** Each stage can cost $0.50-$5 in LLM tokens. Re-running from scratch on every failure is unacceptable.
+**Checkpoint caching:** Each stage can cost $0.50-$5 in LLM tokens. Re-running from scratch on every failure is unacceptable.
 
-**Real suspension.** The human approval step needs actual process suspension — not a polling loop burning compute while someone reviews a plan over lunch.
+**Real suspension:** The human approval step needs actual process suspension and not a polling loop burning compute while someone reviews a plan over lunch.
 
-**Artifact inspection.** When something goes wrong at step 6, you need to look at what step 3 produced. Not a log line — the actual plan object.
+**Artifact inspection:** When something goes wrong at step 6, you need to look at what step 3 produced. Not a log line; the actual plan object.
 
-**Replay from any point.** The fix loop failed after 3 attempts? Go back to step 5, swap in a different model, and try again. Don't re-run the whole agent.
+**Replay from any point:** The fix loop failed after 3 attempts? Go back to step 5, swap in a different model, and try again. Don't re-run the whole agent.
 
-**Cost tracking.** How much did this run cost? Which step was most expensive? Is attempt 3 of the fix loop worth it, or should the agent escalate?
+**Cost tracking:** How much did this run cost? Which step was most expensive? Is attempt 3 of the fix loop worth it, or should the agent escalate?
 
 These aren't nice-to-haves. They're the difference between a tool your team trusts and one they abandon after the first $200 surprise.
 
