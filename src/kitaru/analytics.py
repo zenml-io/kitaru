@@ -24,7 +24,6 @@ class AnalyticsEvent(StrEnum):
     CLI_INVOKED = "Kitaru CLI invoked"
     MCP_SERVER_STARTED = "Kitaru MCP server started"
     MCP_TOOL_CALLED = "Kitaru MCP tool called"
-    FLOW_DEPLOYED = "Kitaru flow deployed"
     FLOW_REPLAYED = "Kitaru flow replayed"
 
 
@@ -64,7 +63,9 @@ def track(event_name: str, metadata: dict[str, Any] | None = None) -> bool:
     try:
         from zenml.analytics import track as _zenml_track
 
-        return _zenml_track(event=event_name, metadata=metadata or {})  # ZenML accepts Union[AnalyticsEvent, str]
+        return _zenml_track(
+            event=event_name, metadata=metadata or {}
+        )  # ZenML accepts Union[AnalyticsEvent, str]
     except Exception:
         logger.debug("Analytics tracking failed", exc_info=True)
         return False

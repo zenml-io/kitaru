@@ -14,7 +14,6 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
-from kitaru.analytics import AnalyticsEvent
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ImageSettings,
@@ -248,86 +247,6 @@ def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
         assert getattr(module, alias) is base_pipeline
     finally:
         delattr(module, alias)
-
-
-def test_deploy_is_run_sugar_with_stack_override() -> None:
-    run = _DummyRun(status=ExecutionStatus.RUNNING)
-    configured_pipeline = MagicMock(return_value=run)
-    base_pipeline = MagicMock()
-    base_pipeline.with_options.return_value = configured_pipeline
-    zenml_decorator = MagicMock(return_value=base_pipeline)
-
-    old_stack_id = uuid4()
-    client_mock = MagicMock()
-    client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
-
-    with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
-        patch("kitaru.flow.Client", return_value=client_mock),
-        patch(
-            "kitaru.flow.resolve_execution_config",
-            return_value=_resolved_execution(stack="prod"),
-        ),
-        patch("kitaru.flow.resolve_connection_config", return_value=object()),
-        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
-    ):
-        wrapped = flow(
-            stack="dev",
-            image="python:3.12",
-            cache=False,
-            retries=2,
-        )(lambda x: x)
-        wrapped.deploy(
-            1,
-            stack="prod",
-            image=DockerSettings(parent_image="python:3.13"),
-            cache=True,
-            retries=0,
-        )
-
-    settings = base_pipeline.with_options.call_args.kwargs["settings"]
-    assert settings == {
-        "docker": DockerSettings(
-            requirements=["kitaru"],
-            environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
-        )
-    }
-    assert base_pipeline.with_options.call_args.kwargs["enable_cache"] is True
-    assert base_pipeline.with_options.call_args.kwargs["retry"] is None
-    assert client_mock.activate_stack.call_args_list == [
-        call("prod"),
-        call(old_stack_id),
-    ]
-
-
-def test_deploy_tracks_event_with_pipeline_name() -> None:
-    """deploy() should emit FLOW_DEPLOYED with the canonical pipeline name."""
-    run = _DummyRun(status=ExecutionStatus.RUNNING)
-    configured_pipeline = MagicMock(return_value=run)
-    base_pipeline = MagicMock()
-    base_pipeline.with_options.return_value = configured_pipeline
-    base_pipeline.name = "my_flow"
-    zenml_decorator = MagicMock(return_value=base_pipeline)
-
-    with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
-        patch(
-            "kitaru.flow.resolve_execution_config",
-            return_value=_resolved_execution(),
-        ),
-        patch("kitaru.flow.resolve_connection_config", return_value=object()),
-        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
-        patch("kitaru.flow.track") as track_mock,
-    ):
-        wrapped = flow(lambda x: x)
-        wrapped.deploy(123)
-
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_DEPLOYED,
-        {"flow_name": "my_flow"},
-    )
 
 
 def test_direct_call_raises_usage_error() -> None:

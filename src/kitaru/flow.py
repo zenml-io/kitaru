@@ -705,41 +705,6 @@ class _FlowDefinition:
         )
         return FlowHandle(run)
 
-    def deploy(
-        self,
-        *args: Any,
-        stack: str | None = None,
-        image: ImageSetting | None = None,
-        cache: bool | None = None,
-        retries: int | None = None,
-        **kwargs: Any,
-    ) -> FlowHandle:
-        """Run a flow execution, signaling remote/deployment intent.
-
-        This is semantic sugar for `.run(..., stack=...)`.
-
-        Args:
-            *args: Flow input args.
-            stack: Optional stack override.
-            image: Optional image override.
-            cache: Optional cache override.
-            retries: Optional retry override.
-            **kwargs: Flow input kwargs.
-
-        Returns:
-            A handle for the started execution.
-        """
-        handle = self.run(
-            *args,
-            stack=stack,
-            image=image,
-            cache=cache,
-            retries=retries,
-            **kwargs,
-        )
-        track(AnalyticsEvent.FLOW_DEPLOYED, {"flow_name": self._pipeline.name})
-        return handle
-
 
 @overload
 def flow(func: Callable[..., Any], /) -> _FlowDefinition: ...
