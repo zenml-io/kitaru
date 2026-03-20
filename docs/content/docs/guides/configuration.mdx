@@ -9,10 +9,9 @@ how precedence is resolved.
 
 ## Config directory
 
-Kitaru stores its user-facing configuration in your platform's standard
-application config directory.
-
-Examples:
+Kitaru stores all of its state — settings, database, credentials, and local
+stores — in a single directory. By default this is your platform's standard
+application config directory:
 
 ```text
 Linux:   ~/.config/kitaru/
@@ -20,15 +19,13 @@ macOS:   ~/Library/Application Support/kitaru/
 Windows: %APPDATA%\\kitaru\\
 ```
 
-Inside that directory, Kitaru stores:
+Inside that directory you will find:
 
 ```text
-config.yaml    # Log-store, model aliases, and other Kitaru settings
+kitaru.yaml    # Log-store, model aliases, and other Kitaru settings
+config.yaml    # Internal runtime configuration (managed automatically)
+local_stores/  # SQLite database and local artifact storage
 ```
-
-This is the only config directory that appears in CLI output and error
-messages. Kitaru also maintains internal state in a separate location, but
-you never need to interact with it directly.
 
 You can see the active config directory by running `kitaru status` or
 `kitaru info`.
@@ -39,8 +36,9 @@ If you want to relocate that directory, set:
 export KITARU_CONFIG_PATH=/app/.kitaru
 ```
 
-Kitaru reads that path immediately, but it only creates the directory on first
-write.
+This moves everything — settings, database, and credentials — to the new
+location. Kitaru reads that path immediately, but it only creates the
+directory on first write.
 
 ## Configure runtime defaults in Python
 

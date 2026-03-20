@@ -197,6 +197,7 @@ def start_or_connect_local_server(
 
     try:
         import os
+
         os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-api"
         deployed_server = deployer.deploy_server(config, timeout=timeout)
         deployer.connect_to_server()
