@@ -3451,10 +3451,10 @@ def test_global_connection_config_does_not_infer_project() -> None:
 
 
 def test_kitaru_config_path_uses_kitaru_dir() -> None:
-    """Kitaru's config file should live under the app-specific config dir."""
+    """Kitaru's config file should live under the unified config dir."""
     path = _kitaru_config_path()
     assert path.parent.name == "kitaru-config"
-    assert path.name == "config.yaml"
+    assert path.name == "kitaru.yaml"
 
 
 def test_kitaru_config_path_env_overrides_directory(
@@ -3482,7 +3482,80 @@ def test_kitaru_config_path_dir_is_created_on_first_write(
     register_model_alias("fast", model="openai/gpt-4o-mini")
 
     assert custom_dir.exists()
-    assert (custom_dir / "config.yaml").exists()
+    assert (custom_dir / "kitaru.yaml").exists()
+
+
+def test_apply_env_translations_sets_zenml_config_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """KITARU_CONFIG_PATH should populate ZENML_CONFIG_PATH."""
+    custom_dir = tmp_path / "custom-kitaru-home"
+    monkeypatch.delenv("ZENML_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("KITARU_CONFIG_PATH", str(custom_dir))
+
+    apply_env_translations()
+
+    assert os.environ["ZENML_CONFIG_PATH"] == str(custom_dir)
+
+
+def test_apply_env_translations_warns_on_config_path_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """KITARU_CONFIG_PATH should win over a conflicting ZENML_CONFIG_PATH."""
+    kitaru_dir = tmp_path / "kitaru-home"
+    zenml_dir = tmp_path / "zenml-home"
+    monkeypatch.setenv("KITARU_CONFIG_PATH", str(kitaru_dir))
+    monkeypatch.setenv("ZENML_CONFIG_PATH", str(zenml_dir))
+
+    with pytest.warns(UserWarning, match="KITARU_CONFIG_PATH"):
+        apply_env_translations()
+
+    assert os.environ["ZENML_CONFIG_PATH"] == str(kitaru_dir)
+
+
+def test_apply_env_translations_defaults_zenml_config_path_to_kitaru_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ZENML_CONFIG_PATH defaults to kitaru's app dir."""
+    monkeypatch.delenv("KITARU_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("ZENML_CONFIG_PATH", raising=False)
+
+    apply_env_translations()
+
+    import click
+
+    expected = click.get_app_dir("kitaru")
+    assert os.environ["ZENML_CONFIG_PATH"] == expected
+
+
+def test_apply_env_translations_preserves_existing_zenml_config_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Existing ZENML_CONFIG_PATH (server subprocess) is not overwritten."""
+    server_dir = tmp_path / "server-config"
+    monkeypatch.delenv("KITARU_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("ZENML_CONFIG_PATH", str(server_dir))
+
+    apply_env_translations()
+
+    assert os.environ["ZENML_CONFIG_PATH"] == str(server_dir)
+
+
+def test_kitaru_config_dir_follows_zenml_config_path_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Kitaru config dir follows ZENML_CONFIG_PATH fallback."""
+    from kitaru.config import _kitaru_config_dir
+
+    server_dir = tmp_path / "server-config"
+    monkeypatch.delenv("KITARU_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("ZENML_CONFIG_PATH", str(server_dir))
+
+    assert _kitaru_config_dir() == server_dir
 
 
 def test_active_environment_variables_mask_secrets(
