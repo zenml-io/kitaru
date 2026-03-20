@@ -47,6 +47,15 @@ from ._terminal_logging import install_terminal_log_intercept
 
 install_terminal_log_intercept()
 
+import os
+
+from kitaru.analytics import set_source
+
+_default_analytics_source = os.environ.get(
+    "KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-python"
+)
+set_source(_default_analytics_source)
+
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
 from kitaru.client import KitaruClient

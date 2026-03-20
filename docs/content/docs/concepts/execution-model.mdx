@@ -15,7 +15,7 @@ like this:
 2. [Checkpoints](/concepts/checkpoints) inside the flow are the persisted work
    units
 3. Kitaru records the outcome of each checkpoint as it runs
-4. On re-execution, completed checkpoints can return cached results instead of
+4. On re-execution, completed checkpoints can return persisted results instead of
    running again
 
 Your Python code between checkpoints runs normally — Kitaru does not intercept
@@ -24,7 +24,7 @@ every line. The durability guarantees apply at the checkpoint boundaries.
 ## What happens when you run a flow
 
 ```python
-handle = my_agent.run("https://example.com")
+handle = my_agent.run(url="https://example.com")
 # execution runs in the background
 result = handle.wait()
 ```
@@ -56,94 +56,39 @@ Behind the scenes:
 For a synchronous one-liner, chain `.wait()`:
 
 ```python
-result = my_agent.run("https://example.com").wait()
-```
-
-## How results surface
-
-When an execution completes successfully, Kitaru extracts the flow function's
-return value:
-
-- **Single return value** → returned directly
-- **Multiple return values** → returned as a tuple
-- **No return value** → returns `None`
-
-```python
-from kitaru import flow
-
-@flow
-def single_result() -> str:
-    return process()
-# result = single_result.run().wait()  → "processed data"
-
-@flow
-def no_result() -> None:
-    process()
-# result = no_result.run().wait()  → None
+result = my_agent.run(url="https://example.com").wait()
 ```
 
 ## How errors surface
 
-### Failed executions
-
-If a flow execution fails, Kitaru raises a typed `KitaruExecutionError` with
-context about what went wrong:
+If a flow execution fails, `handle.wait()` raises a typed
+`KitaruExecutionError`:
 
 ```python
 import kitaru
 
 try:
-    result = my_agent.run("bad-input").wait()
+    result = my_agent.run(topic="bad-input").wait()
 except kitaru.KitaruExecutionError as exc:
     print(exc.exec_id, exc.status, exc.failure_origin)
 ```
 
-### `handle.get()` on an unfinished execution
+## Result reuse
 
-`handle.get()` is a **non-blocking** check. If the execution is still running,
-it raises immediately:
-
-```python
-import kitaru
-
-handle = my_agent.run("https://example.com")
-try:
-    result = handle.get()  # raises if not yet finished
-except kitaru.KitaruStateError:
-    result = handle.wait()  # block until done instead
-```
-
-### Misuse errors
-
-Kitaru raises errors immediately when SDK rules are violated:
-
-| Situation | Error |
-|---|---|
-| Calling a checkpoint outside a flow | `KitaruContextError` |
-| Nesting one checkpoint inside another | `KitaruContextError` |
-| Using `.submit()` outside a running flow | `KitaruContextError` |
-| Calling `kitaru.log()` outside a flow | `KitaruContextError` |
-| Passing negative `retries` | `KitaruUsageError` |
-
-These are not runtime failures — they are guardrails that catch mistakes at the
-point where they happen.
-
-## Caching behavior
-
-By default, checkpoint caching is **enabled** (`cache=True` on `@flow`).
+By default, checkpoint result reuse is **enabled** (`cache=True` on `@flow`).
 This means:
 
 - Checkpoints that already succeeded in a previous execution can return their
-  cached result without re-running
+  recorded output without re-running
 - This is especially useful during development when you want to iterate on later
   checkpoints without repeating expensive earlier work
 
-You can disable caching at the flow level or per-run:
+You can disable result reuse at the flow level or per-run:
 
 ```python
 from kitaru import flow
 
-# Disable caching by default
+# Disable result reuse by default
 @flow(cache=False)
 def always_fresh(url: str) -> str:
     ...

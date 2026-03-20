@@ -139,6 +139,39 @@ reply = kitaru.llm(
 Each message must include `role` and `content` keys. If `system=` is provided
 alongside a message list, Kitaru prepends a system message automatically.
 
+## When to use `kitaru.llm()` vs your own client
+
+`kitaru.llm()` is designed for simple text-in/text-out model calls. It handles
+credential resolution, prompt/response capture, and cost tracking automatically.
+
+For advanced patterns — tool calling, structured outputs, streaming, vision
+inputs, or multi-turn conversation management — use your LLM client directly
+inside a `@checkpoint`. You still get durable checkpointing and replay; you
+just manage the model interaction yourself:
+
+```python
+from litellm import completion
+from kitaru import checkpoint
+
+@checkpoint
+def agent_step(messages: list[dict]) -> str:
+    resp = completion(
+        model="openai/gpt-4o-mini",
+        messages=messages,
+        tools=[...],  # tool calling, structured output, etc.
+    )
+    return resp.choices[0].message.content
+```
+
+For a full example of a tool-calling agent built this way, see
+[`examples/coding_agent_basic/`](https://github.com/zenml-io/kitaru/tree/develop/examples/coding_agent_basic).
+
+<Callout type="info">
+  Tool calling and structured output support for `kitaru.llm()` is on the
+  roadmap. For now, use your preferred LLM client inside checkpoints for
+  these patterns.
+</Callout>
+
 ## Runtime behavior by context
 
 - **Inside a flow (outside checkpoints):** `kitaru.llm()` runs as a synthetic durable call boundary.

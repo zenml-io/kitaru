@@ -22,6 +22,7 @@ from kitaru._env import (
     KITARU_DEBUG_ENV,
     KITARU_PROJECT_ENV,
     KITARU_SERVER_URL_ENV,
+    ZENML_CONFIG_PATH_ENV,
 )
 from kitaru.errors import KitaruUsageError
 
@@ -129,6 +130,7 @@ def _kitaru_config_dir() -> Path:
     return _config_core._kitaru_config_dir_impl(
         config_path_env_name=KITARU_CONFIG_PATH_ENV,
         app_dir_getter=click.get_app_dir,
+        fallback_config_path_env_name=ZENML_CONFIG_PATH_ENV,
     )
 
 

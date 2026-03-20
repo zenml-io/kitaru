@@ -35,7 +35,6 @@ from kitaru.config import (
     StackComponentDetails,
     StackDetails,
     StackInfo,
-    _kitaru_config_dir,
     _read_runtime_connection_config,
     _StackCreateResult,
     _StackDeleteResult,
@@ -112,7 +111,7 @@ def _build_snapshot_without_local_store(
         sdk_version=_sdk_version(),
         connection="local mode (unavailable)",
         connection_target="unavailable",
-        config_directory=str(_kitaru_config_dir()),
+        config_directory=_gc.config_directory,
         local_server_status=describe_local_server(),
         warning=combine_warnings(
             (
@@ -210,7 +209,7 @@ def build_runtime_snapshot() -> RuntimeSnapshot:
         connection=connection,
         connection_target=store_cfg.url,
         server_url=server_url,
-        config_directory=str(_kitaru_config_dir()),
+        config_directory=gc.config_directory,
         local_server_status=describe_local_server(),
         environment=list_active_kitaru_environment_variables(),
     )

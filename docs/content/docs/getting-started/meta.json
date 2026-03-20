@@ -4,6 +4,7 @@
   "pages": [
     "installation",
     "quickstart",
-    "examples"
+    "examples",
+    "deploy"
   ]
 }

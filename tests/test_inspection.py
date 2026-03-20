@@ -91,6 +91,8 @@ class _Unjsonable:
 
 
 class _BrokenGlobalConfig:
+    config_directory = "/tmp/fake-kitaru-config"
+
     @property
     def store_configuration(self) -> Any:
         raise ImportError("missing local runtime support")
@@ -671,6 +673,7 @@ def test_build_runtime_snapshot_appends_legacy_warning_for_stale_local_server(
     fake_gc = SimpleNamespace(
         uses_local_store=False,
         store_configuration=SimpleNamespace(url="http://127.0.0.1:8237"),
+        config_directory="/tmp/fake-kitaru-config",
     )
 
     with (
@@ -701,6 +704,7 @@ def test_build_runtime_snapshot_populates_log_store_mismatch_details() -> None:
     fake_gc = SimpleNamespace(
         uses_local_store=False,
         store_configuration=SimpleNamespace(url="https://example.com"),
+        config_directory="/tmp/fake-kitaru-config",
     )
     fake_client = SimpleNamespace(
         active_user=SimpleNamespace(name="alice"),
@@ -766,6 +770,7 @@ def test_build_runtime_snapshot_returns_early_when_log_store_resolution_fails(
     fake_gc = SimpleNamespace(
         uses_local_store=False,
         store_configuration=SimpleNamespace(url="https://example.com"),
+        config_directory="/tmp/fake-kitaru-config",
     )
 
     with (

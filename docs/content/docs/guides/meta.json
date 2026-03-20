@@ -3,6 +3,7 @@
   "defaultOpen": true,
   "pages": [
     "configuration",
+    "containerization",
     "execution-management",
     "execution-logs",
     "replay-and-overrides",
