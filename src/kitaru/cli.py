@@ -185,7 +185,7 @@ def cli() -> None:
     # any analytics calls.  Without this, AnalyticsContext.__enter__()
     # sees is_initialized=False and silently skips all tracking.
     GlobalConfiguration().zen_store  # noqa: B018
-    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(sys.argv[1:]) or "help"})
+    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(sys.argv[1:2]) or "help"})
     _apply_runtime_version()
     app()
 
