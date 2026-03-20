@@ -64,9 +64,9 @@ kitaru:
 
       # MySQL SSL options.
       ssl: false
-      sslCa:
-      sslCert:
-      sslKey:
+      sslCa: {}
+      sslCert: {}
+      sslKey: {}
       sslVerifyServerCert: false
 
     # Secrets store settings. Secrets are stored in the SQL database by default.
