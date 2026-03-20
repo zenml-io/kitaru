@@ -503,29 +503,12 @@
   }
 
   // Copy-to-clipboard for CTA install command
-  function ctaCopyText(text: string): Promise<void> {
-    if (navigator.clipboard?.writeText) {
-      return navigator.clipboard.writeText(text);
-    }
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
-    document.body.appendChild(ta);
-    ta.select();
-    try {
-      document.execCommand('copy');
-    } catch {
-      document.body.removeChild(ta);
-      return Promise.reject();
-    }
-    document.body.removeChild(ta);
-    return Promise.resolve();
-  }
+  import { copyToClipboard } from '../scripts/clipboard';
 
   document.querySelectorAll<HTMLButtonElement>('.cta-install .copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const text = btn.dataset.copy ?? '';
-      ctaCopyText(text).then(() => {
+      copyToClipboard(text).then(() => {
         btn.classList.add('copied');
         setTimeout(() => btn.classList.remove('copied'), 1500);
       }).catch(() => {

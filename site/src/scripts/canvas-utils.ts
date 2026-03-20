@@ -4,7 +4,8 @@ export function sizeCanvasToParent(
   ctx: CanvasRenderingContext2D,
   dpr: number
 ): { w: number; h: number } {
-  const rect = canvas.parentElement!.getBoundingClientRect();
+  if (!canvas.parentElement) return { w: 0, h: 0 };
+  const rect = canvas.parentElement.getBoundingClientRect();
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
   canvas.style.width = rect.width + 'px';
