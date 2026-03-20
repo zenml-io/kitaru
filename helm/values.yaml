@@ -23,13 +23,13 @@ kitaru:
     # Used for browser-based login redirects and CLI connection instructions.
     serverURL:
 
-    debug: true
+    debug: false
 
-    # Telemetry opt-in.
-    analyticsOptIn: true
+    # Flag to enable/disable the tracking process of the analytics
+    analyticsOptIn: false
 
     auth:
-      # OAuth2 device-flow auth (browser-based login).
+      # OAuth2 password bearer
       authType: OAUTH2_PASSWORD_BEARER
 
       # JWT secret key for signing auth tokens. If not set, a random key is
@@ -86,10 +86,7 @@ kitaru:
         encryptionKey:
 
     # Extra environment variables to set on the server container.
-    # Kitaru-specific env vars are pre-configured here.
-    environment:
-      KITARU_DEBUG: "true"
-      KITARU_ANALYTICS_OPT_IN: "true"
+    environment: {}
 
     # Extra secret environment variables. These are stored in a Kubernetes
     # Secret and mounted as env vars.
