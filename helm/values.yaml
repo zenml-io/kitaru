@@ -2,14 +2,14 @@
 #
 # The Kitaru server runs on ZenML's server runtime. All server configuration
 # is passed to the ZenML subchart under the 'kitaru' key. ZenML-native settings
-# (database, auth, ingress, secrets store, etc.) go under 'kitaru.zenml'.
+# (database, auth, ingress, secrets store, etc.) go under 'kitaru.server'.
 #
 # See the ZenML Helm chart values reference for the full list of options:
 # https://artifacthub.io/packages/helm/zenml/zenml?modal=values
 
 kitaru:
 
-  zenml:
+  server:
 
     replicaCount: 1
 

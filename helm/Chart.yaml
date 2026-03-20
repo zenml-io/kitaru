@@ -16,6 +16,6 @@ icon: https://kitaru.ai/kitaru-logo.svg
 # Do we want to pin the chart version?
 dependencies:
   - name: zenml
-    version: "0.94.0"
+    version: "0.94.1"
     repository: "oci://public.ecr.aws/zenml"
     alias: kitaru
