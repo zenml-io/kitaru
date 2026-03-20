@@ -417,6 +417,7 @@ def test_apply_env_translations_sets_zenml_mirrors(
     monkeypatch.setenv("KITARU_PROJECT", "demo-project")
     monkeypatch.setenv("KITARU_DEBUG", "false")
     monkeypatch.setenv("KITARU_ANALYTICS_OPT_IN", "true")
+    monkeypatch.setenv("KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-cli")
 
     apply_env_translations()
 
@@ -425,6 +426,7 @@ def test_apply_env_translations_sets_zenml_mirrors(
     assert os.environ["ZENML_ACTIVE_PROJECT_ID"] == "demo-project"
     assert os.environ["ZENML_DEBUG"] == "false"
     assert os.environ["ZENML_ANALYTICS_OPT_IN"] == "true"
+    assert os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] == "kitaru-cli"
 
 
 def test_apply_env_translations_warns_and_overwrites_conflicts(
