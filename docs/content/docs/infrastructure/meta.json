@@ -1,9 +1,13 @@
 {
-  "title": "Infrastructure",
+  "title": "Deployment & Compute",
   "defaultOpen": true,
   "pages": [
-    "stack-selection",
+    "deploy-helm",
+    "stacks",
     "kubernetes-stacks",
+    "vertex-stacks",
+    "sagemaker-stacks",
+    "azureml-stacks",
     "log-store"
   ]
 }

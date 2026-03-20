@@ -46,14 +46,18 @@ apply_env_translations()
 
 from kitaru.analytics import set_source
 
-_default_analytics_source = os.environ.get(
-    "KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-python"
-)
-set_source(_default_analytics_source)
+# ZenML must be imported explicitly here so that its init_logging() runs
+# (installing console + storage handlers on the root logger) before we swap
+# the console handler with Kitaru's terminal handler.
+import zenml as _zenml  # noqa: F401
 
 from ._terminal_logging import install_terminal_log_intercept
 
 install_terminal_log_intercept()
+_default_analytics_source = os.environ.get(
+    "KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-python"
+)
+set_source(_default_analytics_source)
 
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint

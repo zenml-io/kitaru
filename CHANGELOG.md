@@ -8,14 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Removed
+- `_FlowDefinition.deploy()` method; `.run(stack="...")` is now the single way to start a flow execution, whether local or remote
+- `FlowInvocationResult.invocation` field and the `"invocation"` key in MCP run-tool payloads
 - `kitaru run` CLI command and its live terminal renderer; flow execution is now started via Python (`my_flow.run(...)` / `my_flow.deploy(...)`) or MCP tools, while the CLI focuses on execution lifecycle management via `kitaru executions ...`
 - `kitaru.terminal` module (run-only Rich Live renderer and helpers)
 - Runtime submission observer plumbing (`_submission_observer`, `_notify_submission_observer`) from `kitaru.runtime` and `kitaru.flow`
 
 ### Added
+- `kitaru init` command to initialize a project root by creating a `.kitaru/` directory; this sets the source root for code packaging during remote execution and prevents ambiguous source-root heuristics; the command checks for both `.kitaru/` and legacy `.zen/` markers before initializing
 - `kitaru executions input` now auto-detects the single pending wait condition, removing the need for `--wait`; use `--interactive` (`-i`) for guided review with JSON schema display, continue/abort/skip/quit actions, and multi-execution sweep mode; use `--abort` to abort a wait in non-interactive mode
 - `KitaruClient.executions.pending_waits(exec_id)` returns all pending wait conditions for an execution
 - `KitaruClient.executions.abort_wait(exec_id, wait=...)` aborts a pending wait condition
+- MCP local lifecycle tools: `kitaru_start_local_server(port?, timeout?)` and `kitaru_stop_local_server()`
 - Native Kitaru terminal logging: ZenML console output is now intercepted and rewritten to Kitaru vocabulary (pipeline→flow, step→checkpoint, run→execution) with colored lifecycle markers; ZenML-specific noise (Dashboard URLs, user/build info, component listings) is suppressed from the terminal while remaining available in stored logs via `kitaru executions logs`
 - Shared source-alias module (`kitaru._source_aliases`) centralizing alias prefix constants and normalization helpers previously duplicated across 7+ files
 
@@ -39,7 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Kitaru now treats `KITARU_*` environment variables as the public configuration surface for remote connection/bootstrap, translating the supported connection/debug vars into `ZENML_*` env vars before CLI/SDK startup
 - Connection resolution now understands direct `ZENML_*` env vars as a compatibility layer below `KITARU_*`, while env-driven remote connections fail at first use unless an explicit project is set
 - `kitaru status` now includes an Environment section showing active `KITARU_*` variables with token/API-key masking
-- `kitaru login` and `kitaru logout` now refuse both `ZENML_*` and `KITARU_*` auth environment overrides, and report the public `KITARU_*` names when those are driving auth
+- `kitaru login` now starts and connects to a local daemon server when you omit `SERVER`; remote login remains `kitaru login <server>`
+- `kitaru login` CLI flags now distinguish local and remote modes: removed `--url` and `--cloud-api-url` / `--pro-api-url`, added local `--port`, and made `--timeout` shared across local startup and remote connection flows
+- Local login now warns — instead of failing — when `KITARU_*` / `ZENML_*` auth environment overrides are active; remote login and `kitaru logout` still refuse to fight those environment variables
+- `kitaru logout --output json` now includes `local_server_stopped`, and logout now also tears down any registered local daemon while disconnecting from remote state
 - Kitaru now supports `KITARU_CONFIG_PATH` for relocating its config directory and `KITARU_DEFAULT_MODEL` for setting the default `kitaru.llm()` model without touching the alias registry
 - The production Docker image now uses `KITARU_DEBUG` / `KITARU_ANALYTICS_OPT_IN` defaults and documents `KITARU_SERVER_URL` / `KITARU_AUTH_TOKEN` / `KITARU_PROJECT` for headless server connection setup
 - `kitaru status` and `kitaru log-store show` now surface a mismatch warning when the Kitaru log-store preference differs from the active stack's ZenML stack log store

@@ -47,7 +47,7 @@ def main() -> None:
     app.help_print()
 
 
-from . import _executions, _models, _secrets, _stacks, _status  # noqa: F401,E402
+from . import _executions, _init, _models, _secrets, _stacks, _status  # noqa: F401,E402
 
 __all__ = [
     "_UNKNOWN_VERSION",

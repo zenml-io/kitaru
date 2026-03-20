@@ -1,11 +1,11 @@
 ---
-title: Kubernetes Stacks
+title: Kubernetes
 description: Create, inspect, use, and clean up Kubernetes-backed stacks in Kitaru
 ---
 
 This guide shows the practical workflow for Kubernetes-backed stacks in Kitaru: create one, inspect it, decide whether it should become your default, and clean it up safely when you are done.
 
-Kubernetes is one shipped remote-stack path. If you want the broader stack story or a managed-runner option without `--cluster`, start with [Manage Stacks](/infrastructure/stack-selection), which also covers Vertex, SageMaker, and AzureML.
+Kubernetes is one shipped remote-stack path. If you want the broader stack story or a managed-runner option without `--cluster`, start with [Stacks](/infrastructure/stacks), which also covers Vertex, SageMaker, and AzureML.
 
 Use this page for the story and the happy path. For exact flag syntax and every supported option, use the generated CLI reference for [`kitaru stack create`](/cli/stack/create), [`kitaru stack show`](/cli/stack/show), and [`kitaru stack delete`](/cli/stack/delete).
 
@@ -202,12 +202,12 @@ This changes the stack Kitaru falls back to when no higher-precedence override i
 my_flow.run(stack="prod-k8s")
 ```
 
-This uses `prod-k8s` for that one execution only. You can also pass it via `.deploy(stack="prod-k8s")`.
+This uses `prod-k8s` for that one execution only.
 
 The important distinction is:
 
 - `kitaru stack use ...` changes your persisted fallback stack
-- `.run(stack=...)` / `.deploy(stack=...)` changes only that one execution
+- `.run(stack=...)` changes only that one execution
 - flow-level and runtime-level stack overrides also remain temporary
 
 So if you do a one-off remote run, `kitaru stack current` should still show the same persisted default afterward.

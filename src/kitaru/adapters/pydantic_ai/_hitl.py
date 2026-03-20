@@ -19,7 +19,7 @@ class HitlConfig:
 
     question: str | None = None
     name: str | None = None
-    schema: Any = bool
+    schema: Any = None
 
 
 def _config_from_target(target: object) -> HitlConfig | None:
@@ -34,7 +34,7 @@ def hitl_tool(
     *,
     question: str | None = None,
     name: str | None = None,
-    schema: Any = bool,
+    schema: Any = None,
 ) -> Callable[[Any], Any]:
     """Mark a PydanticAI tool as requiring flow-level human input."""
     config = HitlConfig(question=question, name=name, schema=schema)

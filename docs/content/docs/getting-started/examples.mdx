@@ -3,20 +3,26 @@ title: Examples
 description: Runnable Kitaru examples and what each one demonstrates
 ---
 
-Kitaru ships a set of runnable examples in the `examples` package, grouped by
-topic:
+The Kitaru repo includes runnable examples that demonstrate each primitive.
+Each example is a standalone project — clone the repo, `cd` into the example
+you want, and run it directly.
+
+## Get the examples
 
 ```bash
-uv run examples/<group>/<module_name>.py
+git clone https://github.com/zenml-io/kitaru.git
+cd kitaru/examples/basic_flow
+kitaru init
+python first_working_flow.py
 ```
 
-## Install the right extras
+<Callout type="info">
+  Run `kitaru init` once before your first example to set up the local
+  execution environment.
+</Callout>
 
-| Goal | Install command |
-|---|---|
-| Core workflow, execution, replay, configuration, and LLM examples | `uv sync --extra local` |
-| PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
-| MCP query tools example | `uv sync --extra local --extra mcp` |
+Every example uses imports relative to its own directory, so always `cd` into
+the example folder before running.
 
 ## Connection context
 
@@ -27,61 +33,72 @@ Examples use whatever Kitaru connection context is already active.
   connect first and verify the active context before running the example.
 
 ```bash
-uv run kitaru login https://my-server.example.com --api-key <API_KEY>
-# add --project <PROJECT> or other login flags if your setup requires them
-uv run kitaru status
+kitaru login https://my-server.example.com
+kitaru status
 ```
 
 ## Browse by goal
 
-If you want to...
+| I want to... | Example | Run |
+|---|---|---|
+| Start with the smallest runnable flow | `basic_flow/` | `python first_working_flow.py` |
+| See structured metadata logging | `basic_flow/` | `python flow_with_logging.py` |
+| Persist and reload data across executions | `basic_flow/` | `python flow_with_artifacts.py` |
+| Set runtime configuration defaults | `basic_flow/` | `python flow_with_configuration.py` |
+| Inspect and manage past executions | `execution_management/` | `python client_execution_management.py` |
+| Pause for human input and resume later | `execution_management/` | `python wait_and_resume.py` |
+| Replay from a checkpoint with overrides | `replay/` | `python replay_with_overrides.py` |
+| Track a model call inside a flow | `llm/` | `python flow_with_llm.py` |
+| Wrap a PydanticAI agent | `pydantic_ai_agent/` | `python pydantic_ai_adapter.py` |
+| Query executions from an MCP client | `mcp/` | `python mcp_query_tools.py` |
 
-- **Start with the smallest runnable flow**, run `examples/basic_flow/first_working_flow.py`
-- **Inspect executions after the fact**, run `examples/execution_management/client_execution_management.py`
-- **Pause for external approval and continue later**, run `examples/execution_management/wait_and_resume.py`
-- **Replay only the suffix that changed**, run `examples/replay/replay_with_overrides.py`
-- **Track a model call inside a flow**, run `examples/llm/flow_with_llm.py`
-- **Wrap an existing PydanticAI agent**, run `examples/pydantic_ai_agent/pydantic_ai_adapter.py`
-- **Explore Kitaru from an MCP client**, run `examples/mcp/mcp_query_tools.py`
+For example:
+
+```bash
+cd examples/basic_flow
+python first_working_flow.py
+```
 
 ## Core workflow basics
 
-| Example | Run | Requires | Demonstrates | Related docs |
-|---|---|---|---|---|
-| Basic flow | `uv run examples/basic_flow/first_working_flow.py` | `uv sync --extra local` | Smallest end-to-end `@flow` + `@checkpoint` example | [Quickstart](/getting-started/quickstart) |
-| Structured logging | `uv run examples/basic_flow/flow_with_logging.py` | `uv sync --extra local` | `kitaru.log()` metadata at flow and checkpoint scope | [Logging and Metadata](/concepts/logging) |
-| Artifacts | `uv run examples/basic_flow/flow_with_artifacts.py` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](/guides/artifacts) |
-| Configuration | `uv run examples/basic_flow/flow_with_configuration.py` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](/guides/configuration) |
+| Example | Demonstrates | Related docs |
+|---|---|---|
+| `basic_flow/first_working_flow.py` | Smallest `@flow` + `@checkpoint` example | [Quickstart](/getting-started/quickstart) |
+| `basic_flow/flow_with_logging.py` | `kitaru.log()` metadata at flow and checkpoint scope | [Logging](/concepts/logging) |
+| `basic_flow/flow_with_artifacts.py` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](/guides/artifacts) |
+| `basic_flow/flow_with_configuration.py` | `kitaru.configure()` defaults, overrides, and frozen specs | [Configuration](/guides/configuration) |
 
 ## Execution lifecycle and recovery
 
-| Example | Run | Requires | Demonstrates | Related docs |
-|---|---|---|---|---|
-| Execution management | `uv run examples/execution_management/client_execution_management.py` | `uv sync --extra local` | `KitaruClient` for listing runs, reading details, and loading artifacts | [Execution Management](/guides/execution-management) |
-| Wait and resume | `uv run examples/execution_management/wait_and_resume.py` | `uv sync --extra local` | `kitaru.wait()` with inline local prompt or fallback CLI input/resume | [Wait and Resume](/guides/wait-and-resume) |
-| Replay with overrides | `uv run examples/replay/replay_with_overrides.py` | `uv sync --extra local` | Replay from a checkpoint boundary while overriding selected inputs | [Replay and Overrides](/guides/replay-and-overrides) |
+| Example | Demonstrates | Related docs |
+|---|---|---|
+| `execution_management/client_execution_management.py` | `KitaruClient` for listing runs, reading details, and loading data | [Execution Management](/guides/execution-management) |
+| `execution_management/wait_and_resume.py` | `kitaru.wait()` with inline prompt or CLI input/resume | [Wait, Input, and Resume](/guides/wait-and-resume) |
+| `replay/replay_with_overrides.py` | Replay from a checkpoint with overridden inputs | [Replay and Overrides](/guides/replay-and-overrides) |
 
 ## LLMs and agent integrations
 
-| Example | Run | Requires | Demonstrates | Related docs |
-|---|---|---|---|---|
-| Tracked LLM calls | `uv run examples/llm/flow_with_llm.py` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
-| PydanticAI adapter | `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py` | `uv sync --extra local --extra pydantic-ai` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
-| MCP query tools | `uv run examples/mcp/mcp_query_tools.py` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
+| Example | Demonstrates | Related docs |
+|---|---|---|
+| `llm/flow_with_llm.py` | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
+| `pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with Kitaru replay boundaries | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
+| `mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
+
+<Callout type="info">
+  The LLM and PydanticAI examples require additional dependencies — check each
+  example's README for setup instructions.
+</Callout>
 
 ## Recommended path
 
-If you are learning Kitaru from scratch, this order usually feels best:
+If you are learning Kitaru from scratch:
 
-1. [Quickstart](/getting-started/quickstart) and `examples/basic_flow/first_working_flow.py`
-2. `examples/basic_flow/flow_with_logging.py`
-3. [Artifacts](/guides/artifacts) and `examples/basic_flow/flow_with_artifacts.py`
-4. [Execution Management](/guides/execution-management) and `examples/execution_management/client_execution_management.py`
-5. [Wait and Resume](/guides/wait-and-resume) and `examples/execution_management/wait_and_resume.py`
-6. [Replay and Overrides](/guides/replay-and-overrides) and `examples/replay/replay_with_overrides.py`
-7. [Tracked LLM Calls](/guides/llm-calls) and `examples/llm/flow_with_llm.py`
-8. [PydanticAI Adapter](/guides/pydantic-ai-adapter) and `examples/pydantic_ai_agent/pydantic_ai_adapter.py`
-9. [MCP Server](/agent-native/mcp-server) and `examples/mcp/mcp_query_tools.py`
-
-If you prefer the GitHub view, the full repo catalog also lives in
-[`examples/README.md`](https://github.com/zenml-io/kitaru/blob/develop/examples/README.md).
+1. `basic_flow/first_working_flow.py` — [Quickstart](/getting-started/quickstart)
+2. `basic_flow/flow_with_logging.py` — [Logging](/concepts/logging)
+3. `basic_flow/flow_with_artifacts.py` — [Artifacts](/guides/artifacts)
+4. `execution_management/client_execution_management.py` — [Execution Management](/guides/execution-management)
+5. `execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
+6. `replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
+7. `llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
+8. `pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
+9. `mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)

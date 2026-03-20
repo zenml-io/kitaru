@@ -10,7 +10,7 @@ const blog = defineCollection({
     author: z.string(),
     draft: z.boolean().default(false),
     category: z
-      .enum(['Agents', 'Infrastructure', 'Design', 'Philosophy'])
+      .enum(['Agents', 'Infrastructure', 'Design', 'Philosophy', 'Kitaru'])
       .default('Agents'),
     ogImage: z.string().url().optional(),
     image: z.string().url().optional(),

@@ -1,0 +1,87 @@
+---
+title: Deploy Your Agent
+description: Move from local development to running agents in production
+---
+
+You have a working flow on your laptop. Now you want it running in the cloud,
+surviving restarts, and accessible to your team. Three steps.
+
+## 1. Deploy a Kitaru server
+
+Locally, the server runs embedded in your Python process. In production, you
+deploy it as a standalone service so your team can share a single view of all
+executions — and so agents can run independently of your machine.
+
+The server stores execution metadata, checkpoint state, and logs. It does not
+access your cloud storage directly — it brokers temporary credentials so
+clients and the UI can read artifacts when needed.
+
+<Cards>
+  <Card
+    title="Deploy with Helm"
+    description="Install the Kitaru server on any Kubernetes cluster"
+    href="/infrastructure/deploy-helm"
+  />
+</Cards>
+
+## 2. Connect to the server
+
+Point your local client at the deployed server:
+
+```bash
+kitaru login --url https://kitaru.your-company.com
+```
+
+From here, the CLI, `KitaruClient`, and the UI all talk to the same
+server. Any executions you start will be visible to your whole team.
+
+## 3. Set up a cloud stack
+
+A [stack](/infrastructure/stacks) is a named runtime that tells Kitaru where
+to run your agent code and where to store its outputs. Pick the compute
+backend that matches your cloud:
+
+<Cards>
+  <Card
+    title="Kubernetes"
+    description="Run agents on any Kubernetes cluster with S3 or GCS storage"
+    href="/infrastructure/kubernetes-stacks"
+  />
+  <Card
+    title="AWS (SageMaker)"
+    description="Run agents as SageMaker jobs with S3 storage"
+    href="/infrastructure/sagemaker-stacks"
+  />
+  <Card
+    title="GCP (Vertex AI)"
+    description="Run agents as Vertex AI jobs with GCS storage"
+    href="/infrastructure/vertex-stacks"
+  />
+  <Card
+    title="Azure (AzureML)"
+    description="Run agents as AzureML jobs with Azure Blob storage"
+    href="/infrastructure/azureml-stacks"
+  />
+</Cards>
+
+Once your stack is created, switch to it:
+
+```bash
+kitaru stack use prod-k8s
+```
+
+## 4. Run your agent in the cloud
+
+Your code doesn't change. The same flow, the same checkpoints, the same
+replay — now running on cloud compute with durable storage.
+
+```python
+if __name__ == "__main__":
+    research_agent.run(topic="durable execution for AI agents")
+```
+
+When you call `.run()`, the client fetches short-lived credentials from the
+server and dispatches the execution directly to your stack's compute backend.
+Checkpoint outputs are written to cloud storage. You can observe the execution
+from the UI, the CLI, or any `KitaruClient` connected to the same
+server.

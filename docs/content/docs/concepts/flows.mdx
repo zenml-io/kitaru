@@ -23,15 +23,12 @@ The decorated function becomes a callable wrapper object. Inside the flow body,
 you compose [checkpoints](/concepts/checkpoints) — the units of work whose
 outputs are persisted.
 
-## Two ways to run a flow
+## Running a flow
 
-Every `@flow` supports two invocation styles. They both run the same underlying
-durable execution — they differ only in how you interact with the result.
-
-### `.run()` (the standard way)
+Use `.run()` to start an execution:
 
 ```python
-handle = my_agent.run("https://example.com")
+handle = my_agent.run(url="https://example.com")
 print(handle.exec_id)   # unique execution identifier
 # ... do other work ...
 result = handle.wait()   # block until finished
@@ -44,23 +41,18 @@ need the result.
 For a synchronous one-liner, chain `.wait()`:
 
 ```python
-result = my_agent.run("https://example.com").wait()
+result = my_agent.run(url="https://example.com").wait()
 ```
 
-### `.deploy()` (remote intent)
+To target a remote stack for one execution, pass `stack=`:
 
 ```python
-handle = my_agent.deploy("https://example.com", stack="production")
+handle = my_agent.run(url="https://example.com", stack="production")
 ```
-
-`.deploy()` is semantic sugar for `.run()` that signals remote execution
-intent. Today it behaves identically to `.run()` with a `stack` parameter —
-it exists to make your code more readable when the intent is deployment rather
-than local development.
 
 ## FlowHandle
 
-A `FlowHandle` is returned by `.run()` and `.deploy()`. It gives you
+A `FlowHandle` is returned by `.run()`. It gives you
 access to the running execution:
 
 | Property / Method | What it does |
@@ -78,7 +70,7 @@ access to the running execution:
 ## Runtime options
 
 You can configure execution behavior at the decorator level (defaults) or
-override per-run via `.run()` and `.deploy()`:
+override per-run via `.run()`:
 
 ```python
 from kitaru import flow
@@ -88,13 +80,13 @@ def my_agent(url: str) -> str:
     ...
 
 # Override at call time
-handle = my_agent.run("https://example.com", retries=3, cache=True)
+handle = my_agent.run(url="https://example.com", retries=3, cache=True)
 ```
 
 | Option | Default | What it controls |
 |---|---|---|
 | `retries` | `0` | Number of automatic retries on failure |
-| `cache` | `True` | Whether checkpoint results can be reused from previous runs |
+| `cache` | `True` | Whether checkpointed outputs can be reused from previous runs |
 | `stack` | `None` | Target execution environment for this run (overrides the active stack default) |
 | `image` | `None` | Container image for remote execution (string, mapping, or settings object). Supports `base_image`, `requirements`, `environment`, `apt_packages`, `replicate_local_python_environment`, and `dockerfile`. |
 
@@ -103,7 +95,7 @@ decorator default applies.
 
 For `stack`, the full precedence chain is:
 
-1. `.run(..., stack="...")` / `.deploy(..., stack="...")`
+1. `.run(..., stack="...")`
 2. `@flow(stack="...")`
 3. `kitaru.configure(stack="...")`
 4. `KITARU_STACK`

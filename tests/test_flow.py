@@ -187,7 +187,7 @@ def test_inject_model_registry_env_rejects_invalid_override() -> None:
         )
 
 
-def test_flow_decorator_creates_wrapper_with_run_and_deploy() -> None:
+def test_flow_decorator_creates_wrapper_with_run() -> None:
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
     base_pipeline = MagicMock()
@@ -209,7 +209,7 @@ def test_flow_decorator_creates_wrapper_with_run_and_deploy() -> None:
 
     pipeline_mock.assert_called_once_with(dynamic=True, name="_lambda_")
     assert hasattr(wrapped, "run")
-    assert hasattr(wrapped, "deploy")
+    assert not hasattr(wrapped, "deploy")
     assert not hasattr(wrapped, "start")
     assert isinstance(handle, FlowHandle)
     call_kwargs = base_pipeline.with_options.call_args

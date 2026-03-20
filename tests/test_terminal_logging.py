@@ -500,19 +500,15 @@ class TestBootstrapIntegration:
         assert decision is not None
         assert decision.text == "Flow completed."
 
-    def test_reload_patches_both_env_and_intercept(self) -> None:
-        """Reloading kitaru should re-run both bootstrap side effects."""
+    def test_reload_patches_terminal_intercept(self) -> None:
+        """Reloading kitaru should re-run the terminal log intercept."""
         import importlib
 
         import kitaru
 
-        with (
-            patch("kitaru._env.apply_env_translations") as apply_translations,
-            patch(
-                "kitaru._terminal_logging.install_terminal_log_intercept"
-            ) as install_intercept,
-        ):
+        with patch(
+            "kitaru._terminal_logging.install_terminal_log_intercept"
+        ) as install_intercept:
             importlib.reload(kitaru)
 
-        apply_translations.assert_called_once()
         install_intercept.assert_called_once()

@@ -54,6 +54,7 @@ class TestBuildCommandTree:
         assert [sub.name for sub in tree.subcommands] == [
             "executions",
             "info",
+            "init",
             "log-store",
             "login",
             "logout",
@@ -151,8 +152,8 @@ class TestBuildCommandTree:
         stack_create = _find_command(tree, "stack", "create")
         stack_use = _find_command(tree, "stack", "use")
 
-        assert login.usage == "kitaru login SERVER [OPTIONS]"
-        assert login.parameters[0].names == ["SERVER", "--url"]
+        assert login.usage == "kitaru login [SERVER] [OPTIONS]"
+        assert login.parameters[0].names == ["SERVER"]
 
         assert get.usage.startswith("kitaru executions get EXEC_ID")
         assert get.parameters[0].names == ["EXEC_ID"]
@@ -306,6 +307,7 @@ class TestWriteDocsTree:
         assert meta["pages"] == [
             "executions",
             "info",
+            "init",
             "log-store",
             "login",
             "logout",
@@ -352,7 +354,7 @@ class TestWriteDocsTree:
         tree = build_command_tree(app)
         files = write_docs_tree(tree, output_dir)
 
-        for command in ("info", "login", "logout", "status"):
+        for command in ("info", "init", "login", "logout", "status"):
             assert (output_dir / f"{command}.mdx").exists()
             assert f"{command}.mdx" in files
             # No directory or meta.json for leaf commands
@@ -436,8 +438,13 @@ class TestWriteDocsTree:
         assert "| `EXEC_ID` | `str` | Yes |  | Execution ID. |" in get_content
 
         login_content = (output_dir / "login.mdx").read_text()
-        assert "kitaru login SERVER [OPTIONS]" in login_content
-        assert "| `SERVER`, `--url` | `str` | Yes |  |" in login_content
+        assert "kitaru login [SERVER] [OPTIONS]" in login_content
+        assert "| `SERVER` | `str` | No | `None` |" in login_content
+        assert "`--url`" not in login_content
+        assert "`--pro-api-url`" not in login_content
+        assert "`--cloud-api-url`" not in login_content
+        assert "`--port`" in login_content
+        assert "`--timeout`" in login_content
 
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content

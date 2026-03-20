@@ -70,8 +70,8 @@ def test_wait_runs_when_checkpoint_scope_is_suspended() -> None:
     """wait() should succeed once checkpoint scope is temporarily suspended."""
     execution_id, checkpoint_id = _scope_ids()
 
-    def mock_zenml_wait(**_: object) -> bool:
-        return True
+    def mock_zenml_wait(**_: object) -> None:
+        return None
 
     with (
         _flow_scope(name="demo_flow", execution_id=execution_id),
@@ -84,4 +84,4 @@ def test_wait_runs_when_checkpoint_scope_is_suspended() -> None:
         patch("kitaru.wait._resolve_zenml_wait", return_value=mock_zenml_wait),
         _suspend_checkpoint_scope(),
     ):
-        assert wait(name="approve") is True
+        assert wait(name="approve") is None

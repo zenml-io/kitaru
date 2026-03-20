@@ -1,46 +1,53 @@
 ---
-title: What is Kitaru?
+title: Overview
 description: Durable execution for AI agents
 ---
 
-Kitaru is a framework for making AI agent workflows **persistent**,
-**replayable**, and **observable** — without requiring you to learn a graph DSL
-or change your Python control flow.
+Kitaru is an orchestration layer that makes AI agent workflows
+**persistent**, **replayable**, and **observable** — without requiring you to
+learn a graph DSL or change your Python control flow.
 
-## Vision
+## Create a durable agent
 
-Kitaru provides a small set of primitives — workflows, checkpoints, wait
-points, tracked LLM calls, artifacts, and structured logging — that let you
-write normal Python code while getting durable execution guarantees underneath.
-When something fails halfway through a multi-step agent workflow, Kitaru can
-reuse earlier checkpoint results instead of starting over from scratch.
+```python
+import kitaru
+from kitaru import checkpoint, flow
 
-<Callout type="info">
-  Kitaru is still early, but the core user-facing surface is already shipped:
-  `@flow`, `@checkpoint`, `kitaru.log()`, `kitaru.save()`, `kitaru.load()`,
-  `kitaru.configure()`, `kitaru.wait()`, `kitaru.llm()`, `KitaruClient`,
-  stack helpers, runtime log retrieval, `kitaru-mcp`, Claude Code skills, and
-  the PydanticAI adapter.
-</Callout>
+@checkpoint
+def research(topic: str) -> str:
+    return kitaru.llm(f"Summarize {topic} in two sentences.")
 
-## Current Status
+@checkpoint
+def draft_report(summary: str) -> str:
+    return kitaru.llm(f"Write a short report based on: {summary}")
 
-The current release includes:
+@flow
+def research_agent(topic: str) -> str:
+    summary = research(topic)
+    return draft_report(summary)
 
-- Core SDK execution primitives: `@flow` and `@checkpoint`
-- Structured metadata logging with `kitaru.log()`
-- Artifact persistence + cross-execution reads with `kitaru.save()` / `kitaru.load()`
-- Durable wait/resume via `kitaru.wait()` plus `input(...)` / `resume(...)`
-- Tracked LLM calls via `kitaru.llm()` with model aliases and secret-backed credentials
-- Runtime configuration defaults via `kitaru.configure(...)`
-- Stack selection + runtime log-store commands (`stack ...`, `log-store ...`)
-- Execution management via `KitaruClient` and `kitaru executions ...`
-- Runtime log retrieval via SDK, CLI, and MCP `get_execution_logs`
-- Secrets and model alias management from the CLI
-- Agent-native integrations: MCP server, Claude Code skills, and PydanticAI adapter
-- Typed exceptions and structured failure journaling
+if __name__ == "__main__":
+    research_agent.run(topic="Why do AI agents need durable execution?")
+```
 
-More adapters and higher-level ergonomics are still under active development.
+Each `@checkpoint` is a durable unit of work — its output is persisted
+automatically. If the flow fails at `draft_report`, replaying it skips
+`research` and reuses its recorded result. `kitaru.llm()` tracks model
+calls with prompt, response, usage, and cost capture built in.
+
+See the [Quickstart](/getting-started/quickstart) to install and run this yourself.
+
+## What your agent can do with Kitaru
+
+Add these primitives to any Python agent code — no rewrites required.
+
+- **Crash recovery:** Wrap steps in [`@checkpoint`](/concepts/checkpoints) and your agent picks up where it left off — no re-running expensive LLM calls
+- **Human-in-the-loop:** Add [`kitaru.wait()`](/guides/wait-and-resume) and let agents hand off to a human while compute is released — resume minutes or months later
+- **Tracked LLM calls:** Use [`kitaru.llm()`](/guides/llm-calls) and every call gets automatic secret resolution, prompt/response capture, and cost tracking
+- **Persistent data:** [`kitaru.save()` / `kitaru.load()`](/guides/artifacts) let agents store and retrieve files, objects, and results across executions
+- **Structured observability:** [`kitaru.log()`](/concepts/logging) attaches key-value metadata to any checkpoint or flow for debugging and the UI
+- **Runtime configuration:** [`kitaru.configure()`](/guides/configuration) sets your model, log store, and stack defaults in one call
+- **Execution management:** [`KitaruClient`](/guides/execution-management) lets you inspect, replay, retry, resume, and cancel any execution from code or CLI
 
 ## Next Steps
 
@@ -71,7 +78,7 @@ More adapters and higher-level ergonomics are still under active development.
     href="/guides/execution-management"
   />
   <Card
-    title="Wait and Resume"
+    title="Wait, Input, and Resume"
     description="Pause flows for external input and continue the same execution"
     href="/guides/wait-and-resume"
   />
@@ -91,9 +98,9 @@ More adapters and higher-level ergonomics are still under active development.
     href="/guides/configuration"
   />
   <Card
-    title="Manage Stacks"
+    title="Stacks"
     description="Create, inspect, switch, and clean up local, Kubernetes, Vertex, SageMaker, and AzureML stacks"
-    href="/infrastructure/stack-selection"
+    href="/infrastructure/stacks"
   />
   <Card
     title="MCP Server"

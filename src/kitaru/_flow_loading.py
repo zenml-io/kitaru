@@ -12,7 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class _FlowHandleLike(Protocol):
-    """Protocol for flow handles returned by `.run()` / `.deploy()`."""
+    """Protocol for flow handles returned by `.run()`."""
 
     @property
     def exec_id(self) -> str: ...
@@ -20,11 +20,9 @@ class _FlowHandleLike(Protocol):
 
 @runtime_checkable
 class _FlowTarget(Protocol):
-    """Protocol for flow objects that support `.run()` and `.deploy()`."""
+    """Protocol for flow objects that support `.run()`."""
 
     def run(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
-
-    def deploy(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
 
 
 def _load_module_from_python_path(

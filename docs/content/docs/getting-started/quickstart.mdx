@@ -1,66 +1,64 @@
 ---
 title: Quickstart
-description: Install Kitaru, verify the CLI, and run a tiny durable flow
+description: Run your first durable agent flow with Kitaru
 ---
 
-This guide walks you through installing Kitaru, verifying the CLI, and running
-your first small flow.
+This guide walks you through setting up a model and running your first durable
+flow. If you haven't installed Kitaru yet, start with
+[Installation](/getting-started/installation).
 
-Kitaru requires **Python 3.11 or newer**.
+## Initialize your project
 
-## Install
+```bash
+kitaru init
+```
 
-<Tabs items={["uv (recommended)", "pip"]}>
-  <Tab value="uv (recommended)">
-    ```bash
-    uv add kitaru
-    ```
-  </Tab>
-  <Tab value="pip">
-    ```bash
-    pip install kitaru
-    ```
-  </Tab>
-</Tabs>
+This creates a `.kitaru/` directory that marks your project root.
 
-## Verify the CLI
+## Set up a model
 
-<Tabs items={["uv project", "pip environment"]}>
-  <Tab value="uv project">
-    ```bash
-    uv run kitaru --version
-    uv run kitaru --help
-    ```
-  </Tab>
-  <Tab value="pip environment">
-    ```bash
-    kitaru --version
-    kitaru --help
-    ```
-  </Tab>
-</Tabs>
+`kitaru.llm()` needs to know which model to call and how to authenticate.
+Set your provider API key as an environment variable:
 
-## Optional: connect to an existing Kitaru server
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+That's it — `kitaru.llm()` will pick it up automatically.
 
 <Callout type="info">
-  Flows run locally by default. If you already have a deployed Kitaru server
-  and want this quickstart to use it, connect first, verify with
-  `kitaru status`, and then run the same flow commands below. If you are just
-  trying Kitaru locally, skip this section.
+  For production, register a model alias so you can swap models or credentials
+  without changing code:
+
+  ```bash
+  kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+  kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+  ```
+
+  See [Secrets + Model Registration](/guides/secrets-and-model-registration)
+  for the full setup.
+</Callout>
+
+## Optional: start a local Kitaru server
+
+<Callout type="info">
+  Flows always run where you execute them — the server does not run your code.
+  It stores execution metadata, secrets, model aliases, and serves the UI.
+  If you already have a deployed server and want your executions tracked there,
+  connect first and verify with `kitaru status`. If you are just trying Kitaru
+  locally, skip this section.
 </Callout>
 
 <Tabs items={["uv project", "pip environment"]}>
   <Tab value="uv project">
     ```bash
-    uv run kitaru login https://my-server.example.com --api-key <API_KEY>
-    # add --project <PROJECT> or other login flags if your setup requires them
+    uv run kitaru login https://my-server.example.com
     uv run kitaru status
     ```
   </Tab>
   <Tab value="pip environment">
     ```bash
-    kitaru login https://my-server.example.com --api-key <API_KEY>
-    # add --project <PROJECT> or other login flags if your setup requires them
+    kitaru login https://my-server.example.com
     kitaru status
     ```
   </Tab>
@@ -68,22 +66,29 @@ Kitaru requires **Python 3.11 or newer**.
 
 ## Run your first flow
 
-Create a small script named `demo.py`:
+Create a file called `agent.py`:
 
 ```python
+import kitaru
 from kitaru import checkpoint, flow
 
 @checkpoint
-def fetch(topic: str) -> str:
-    return f"notes about {topic}"
+def research(topic: str) -> str:
+    return kitaru.llm(f"Summarize {topic} in two sentences.")
+
+@checkpoint
+def draft_report(summary: str) -> str:
+    return kitaru.llm(
+        f"Write a short report based on this summary:\n\n{summary}"
+    )
 
 @flow
-def demo(topic: str) -> str:
-    return fetch(topic).upper()
+def research_agent(topic: str) -> str:
+    summary = research(topic)
+    return draft_report(summary)
 
-handle = demo.run("kitaru")
-print("Execution:", handle.exec_id)
-print("Result:", handle.wait())
+if __name__ == "__main__":
+    research_agent.run(topic="durable execution for AI agents")
 ```
 
 Then run it:
@@ -91,37 +96,64 @@ Then run it:
 <Tabs items={["uv (recommended)", "pip environment"]}>
   <Tab value="uv (recommended)">
     ```bash
-    uv run demo.py
+    uv run agent.py
     ```
   </Tab>
   <Tab value="pip environment">
     ```bash
-    python demo.py
+    python agent.py
     ```
   </Tab>
 </Tabs>
 
 What happens here:
 
-1. `@checkpoint` marks a durable unit of work
-2. `@flow` defines the outer execution boundary
-3. `demo.run(...)` starts a new execution and returns a `FlowHandle`
-4. `handle.wait()` blocks until the execution finishes and returns the flow result
+1. `@flow` marks the top-level execution boundary — everything inside is tracked
+2. Each `@checkpoint` persists its return value automatically
+3. `kitaru.llm()` picks up your API key from the environment, calls the model, and captures the prompt, response, token usage, and cost
+4. `.run()` starts the execution and blocks until completion
 
-If you want to inspect that execution later, the execution ID you printed is the
-same ID used by `KitaruClient` and `kitaru executions ...`.
+## Why checkpoints matter
 
-## Prefer a repo example?
-
-If you would rather run a maintained example from this repository than type out
-your own `demo.py`, start here:
+Now imagine `research` succeeds but `draft_report` fails — maybe you hit a rate
+limit or the model returned an error. Without Kitaru you would re-run the entire
+script, paying for the `research` call again and losing progress. With Kitaru, you replay from the
+failure point:
 
 ```bash
-uv sync --extra local
-uv run examples/basic_flow/first_working_flow.py
+kitaru executions list          # find the execution ID
+kitaru executions replay <exec-id> --from draft_report
 ```
 
-For the broader catalog, see [Examples](/getting-started/examples).
+Replay creates a new execution that **reuses the recorded output of `research`**
+and only re-executes `draft_report`. The more checkpoints your flow has, the
+less work you repeat when something goes wrong.
+
+This works the same whether you use `kitaru.llm()` or bring your own client.
+
+## Deploy to a remote stack
+
+Everything above runs locally. To run on remote infrastructure (Kubernetes,
+Vertex AI, etc.), point your flow at a remote stack. When targeting a remote stack, Kitaru automatically builds a container image
+with your code and dependencies. You can control the base image, Python
+packages, system packages, and environment variables through the `image`
+parameter:
+
+```python
+@flow(
+    stack="prod-k8s",
+    image={
+        "base_image": "python:3.12-slim",
+        "requirements": ["httpx", "pydantic-ai"],
+        "apt_packages": ["git"],
+    },
+)
+def research_agent(topic: str) -> str:
+    ...
+```
+
+See the [Containerization guide](/guides/containerization) for the full set of
+image options, custom Dockerfiles, and how Kitaru packages your source code.
 
 ## What's Next
 
@@ -150,7 +182,12 @@ fits what you want to learn:
     href="/getting-started/examples"
   />
   <Card
-    title="Wait and Resume"
+    title="Containerization"
+    description="Control base images, dependencies, and Dockerfiles for remote execution"
+    href="/guides/containerization"
+  />
+  <Card
+    title="Wait, Input, and Resume"
     description="Pause flows for external input and continue later"
     href="/guides/wait-and-resume"
   />

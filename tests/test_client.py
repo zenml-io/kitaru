@@ -508,7 +508,7 @@ def test_retry_restarts_failed_execution() -> None:
     )
 
     old_stack_id = uuid4()
-    active_stack = SimpleNamespace(orchestrator=SimpleNamespace(restart=MagicMock()))
+    active_stack = SimpleNamespace(orchestrator=SimpleNamespace(resume_run=MagicMock()))
 
     with (
         patch(
@@ -528,7 +528,7 @@ def test_retry_restarts_failed_execution() -> None:
         client = KitaruClient()
         execution = client.executions.retry(str(run_id))
 
-    active_stack.orchestrator.restart.assert_called_once_with(
+    active_stack.orchestrator.resume_run.assert_called_once_with(
         snapshot=failed.snapshot,
         run=_as_pipeline_run(failed),
         stack=active_stack,
@@ -906,7 +906,7 @@ def test_resume_restarts_paused_execution() -> None:
     )
 
     old_stack_id = uuid4()
-    active_stack = SimpleNamespace(orchestrator=SimpleNamespace(restart=MagicMock()))
+    active_stack = SimpleNamespace(orchestrator=SimpleNamespace(resume_run=MagicMock()))
 
     with (
         patch(
@@ -928,7 +928,7 @@ def test_resume_restarts_paused_execution() -> None:
         client = KitaruClient()
         execution = client.executions.resume(str(run_id))
 
-    active_stack.orchestrator.restart.assert_called_once_with(
+    active_stack.orchestrator.resume_run.assert_called_once_with(
         snapshot=paused.snapshot,
         run=_as_pipeline_run(paused),
         stack=active_stack,

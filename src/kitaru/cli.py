@@ -64,6 +64,7 @@ from kitaru._cli._helpers import (
     _is_input_interactive,
     _is_interactive,
     _print_success,
+    _print_warning,
     _render_plain_snapshot,
     _render_plain_snapshot_sections,
     _render_rich_snapshot,
@@ -71,6 +72,7 @@ from kitaru._cli._helpers import (
     _resolve_output_format,
     _value_style,
 )
+from kitaru._cli._init import init
 from kitaru._cli._models import _model_rows, list___, register
 from kitaru._cli._secrets import (
     _SECRET_KEY_PATTERN,
@@ -129,6 +131,13 @@ from kitaru._cli._status import (
     show__,
     status,
 )
+from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
+from kitaru._local_server import (
+    LocalServerConnectionResult,
+    LocalServerStopResult,
+    start_or_connect_local_server,
+    stop_registered_local_server,
+)
 from kitaru._version import resolve_installed_version
 from kitaru.client import Execution, ExecutionStatus, KitaruClient, LogEntry
 from kitaru.config import (
@@ -182,6 +191,7 @@ def cli() -> None:
 
 
 __all__ = [
+    "KITARU_REPOSITORY_DIRECTORY_NAME",
     "_SECRET_KEY_PATTERN",
     "_STACK_CREATE_FILE_BOOLEAN_KEYS",
     "_STACK_CREATE_FILE_KEY_ALIASES",
@@ -194,7 +204,9 @@ __all__ = [
     "ExecutionStatus",
     "GlobalConfiguration",
     "KitaruClient",
+    "LocalServerConnectionResult",
     "LocalServerDeployer",
+    "LocalServerStopResult",
     "LogEntry",
     "LogoutResult",
     "OutputFormatOption",
@@ -255,6 +267,7 @@ __all__ = [
     "_parse_json_value",
     "_parse_secret_assignments",
     "_print_success",
+    "_print_warning",
     "_prompt_interactive_action",
     "_prompt_interactive_value",
     "_render_interactive_wait_candidate",
@@ -289,6 +302,7 @@ __all__ = [
     "get_credentials_store",
     "get_current_stack",
     "info",
+    "init",
     "input_",
     "list_",
     "list__",
@@ -320,7 +334,9 @@ __all__ = [
     "show_",
     "show__",
     "stack_app",
+    "start_or_connect_local_server",
     "status",
+    "stop_registered_local_server",
     "time",
     "use",
 ]

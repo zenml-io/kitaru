@@ -8,7 +8,7 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
-**ZenML mapping:** `@flow` → `@pipeline(dynamic=True)`, `@checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work.
+**ZenML mapping:** `@flow` → `@pipeline(dynamic=True)`, `@checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work. `kitaru init` creates `.kitaru/` (not `.zen/`) as the local project marker via `ZENML_REPOSITORY_DIRECTORY_NAME`.
 
 ## Project layout
 
@@ -94,6 +94,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - Static hand-written MDX pages under `docs/content/docs/` are tracked and can be edited directly when behavior changes.
 - Generated reference output should still come from the existing generation scripts rather than manual edits.
 - Agent-facing CLI docs should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.
+- Login docs/guidance should treat bare `kitaru login` as local server startup and `kitaru login <server>` as remote login. Local server support requires the `kitaru[local]` extra.
 - Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
 - If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), not the generated `docs/content/docs/cli/*` output.
 - Current shipped stack-create types on the CLI/MCP surface are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. Advanced CLI/MCP stack creation also supports `--extra` / structured `extra` plus the remote-only `--async` / `async_mode` convenience flag. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only, so docs should keep that distinction explicit.
@@ -190,10 +191,11 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | Execution CLI (`kitaru executions get/list/logs/input/replay/retry/resume/cancel`) | Implemented |
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
 | `KitaruClient.executions.replay()` | Implemented |
+| `kitaru init` (project initialization, creates `.kitaru/`) | Implemented |
 
 ### Key design patterns
 
-- **Flows are top-level orchestration boundaries** — direct flow calls are blocked; start executions with `.run()` / `.deploy()`
+- **Flows are top-level orchestration boundaries** — direct flow calls are blocked; start executions with `.run()`
 - **Nested checkpoint calls are blocked in the current MVP implementation**
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive
 - **Replay** works by re-running the flow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
