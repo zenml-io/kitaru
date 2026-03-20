@@ -1,0 +1,37 @@
+{{- $server := .Values.kitaru.server -}}
+{{- if $server.ingress.enabled }}
+{{- if $server.ingress.host }}
+
+Kitaru server is available at:
+
+  http{{ if $server.ingress.tls.enabled }}s{{ end }}://{{ $server.ingress.host }}{{ $server.ingress.path }}
+
+Connect your CLI:
+
+  kitaru login http{{ if $server.ingress.tls.enabled }}s{{ end }}://{{ $server.ingress.host }}
+
+{{- end }}
+{{- else }}
+
+Access the Kitaru server using one of these methods:
+
+{{- if contains "NodePort" $server.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ .Release.Name }}-kitaru)
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo "Kitaru server: http://$NODE_IP:$NODE_PORT"
+  kitaru login http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" $server.service.type }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+        Watch status with: kubectl get svc --namespace {{ .Release.Namespace }} -w {{ .Release.Name }}-kitaru
+
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ .Release.Name }}-kitaru --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo "Kitaru server: http://$SERVICE_IP:{{ $server.service.port }}"
+  kitaru login http://$SERVICE_IP:{{ $server.service.port }}
+{{- else if contains "ClusterIP" $server.service.type }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-kitaru 8080:{{ $server.service.port }}
+
+  Then connect:
+
+  kitaru login http://localhost:8080
+{{- end }}
+{{- end }}
