@@ -5,15 +5,14 @@ ZenML can discover and call it via ``zenml.init_hooks`` entry points
 without triggering ``import kitaru`` — which would itself import ZenML
 and cause a circular import during ZenML's own initialization.
 
-Only stdlib (``os``, ``warnings``, ``pathlib``) and ``click`` are
-imported here. No ``kitaru`` or ``zenml`` imports are allowed.
+Only ``os``, ``warnings``, and ``click`` are imported here. No
+``kitaru`` or ``zenml`` imports are allowed.
 """
 
 from __future__ import annotations
 
 import os
 import warnings
-from pathlib import Path
 
 import click
 
@@ -60,34 +59,6 @@ def _reset_applied() -> None:
     """Reset the re-entry guard so tests can call apply_env_translations again."""
     global _applied
     _applied = False
-
-
-def _migrate_legacy_config(config_dir: str) -> None:
-    """Rename old ``config.yaml`` to ``kitaru.yaml`` if needed.
-
-    Before the config-dir unification, Kitaru stored its settings in
-    ``config.yaml``.  Now that ZenML shares the same directory and
-    also writes ``config.yaml``, Kitaru's file must be renamed to
-    avoid a collision.
-    """
-    old_path = Path(config_dir) / "config.yaml"
-    new_path = Path(config_dir) / "kitaru.yaml"
-    if new_path.exists() or not old_path.exists():
-        return
-
-    # Heuristic: ZenML's config.yaml always contains the key
-    # "store_configuration" (part of GlobalConfiguration schema).
-    # Kitaru's old config only had model_registry/log_store keys,
-    # so this substring reliably distinguishes the two formats.
-    try:
-        content = old_path.read_text(encoding="utf-8")
-    except OSError:
-        return
-
-    if "store_configuration" in content:
-        return
-
-    old_path.rename(new_path)
 
 
 def apply_env_translations() -> None:
@@ -139,8 +110,6 @@ def apply_env_translations() -> None:
     # leave it alone.
     if not os.environ.get(ZENML_CONFIG_PATH_ENV):
         os.environ[ZENML_CONFIG_PATH_ENV] = click.get_app_dir("kitaru")
-
-    _migrate_legacy_config(os.environ[ZENML_CONFIG_PATH_ENV])
 
     # Disable ZenML Rich traceback formatting — Kitaru handles its own output.
     os.environ.setdefault("ZENML_ENABLE_RICH_TRACEBACK", "0")
