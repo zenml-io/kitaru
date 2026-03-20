@@ -1,4 +1,4 @@
-# Basic Coding Agent
+# Coding Agent
 
 A general-purpose interactive agent built with **kitaru primitives + LiteLLM** — no PydanticAI, no LangChain, no agent framework.
 

@@ -322,7 +322,7 @@ def tool_call(
         "apt_packages": ["curl", "ca-certificates"],
     },
 )
-def coding_agent_basic(task: str) -> str:
+def coding_agent(task: str) -> str:
     """General-purpose agent that solves tasks using available tools.
 
     The initial task is passed as a parameter. After the agent completes
@@ -451,7 +451,7 @@ def coding_agent_basic(task: str) -> str:
 @click.command(help="General-purpose interactive agent.")
 @click.argument("task")
 def main(task: str) -> None:
-    coding_agent_basic.run(task)
+    coding_agent.run(task)
 
 
 if __name__ == "__main__":

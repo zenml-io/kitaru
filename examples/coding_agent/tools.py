@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from pydantic import BaseModel, Field
 from zenml.types import HTMLString, JSONString, MarkdownString
 
 _MAX_CHARS = 12_000
@@ -276,227 +277,135 @@ _TOOL_FUNCTIONS: dict[str, Callable[..., ToolResult]] = {
 }
 
 
-def dispatch_tool(cwd: str, name: str, arguments: dict[str, Any]) -> ToolResult:
-    """Execute a tool by name."""
-    func = _TOOL_FUNCTIONS.get(name)
-    if func is None:
-        return f"Error: unknown tool '{name}'"
-    try:
-        return func(cwd, **arguments)
-    except Exception as exc:
-        return f"Error running {name}: {type(exc).__name__}: {exc}"
+# ---------------------------------------------------------------------------
+# Parameter models (drive both schema generation and input validation)
+# ---------------------------------------------------------------------------
+
+
+class ReadFileParams(BaseModel):
+    path: str = Field(description="File path relative to cwd")
+    offset: int = Field(default=0, description="0-based line offset")
+    limit: int = Field(default=_READ_LIMIT, description="Max lines to return")
+
+
+class WriteFileParams(BaseModel):
+    path: str = Field(description="File path relative to cwd")
+    content: str = Field(description="File content to write")
+
+
+class EditFileParams(BaseModel):
+    path: str = Field(description="File path relative to cwd")
+    old: str = Field(description="Exact text to find")
+    new: str = Field(description="Replacement text")
+
+
+class ListFilesParams(BaseModel):
+    pattern: str = Field(description="Glob pattern (e.g. '**/*.py')")
+
+
+class SearchFilesParams(BaseModel):
+    pattern: str = Field(description="Search pattern (regex)")
+    glob: str = Field(default="**/*", description="File glob to limit search")
+
+
+class RunCommandParams(BaseModel):
+    command: str = Field(description="Shell command to run")
+    timeout: int = Field(default=30, description="Timeout in seconds")
+
+
+class PythonExecParams(BaseModel):
+    code: str = Field(description="Python source code to execute")
+    timeout: int = Field(default=60, description="Timeout in seconds")
+
+
+class WebFetchParams(BaseModel):
+    url: str = Field(description="URL to fetch (http or https)")
+
+
+class WebSearchParams(BaseModel):
+    query: str = Field(description="Search query")
 
 
 # ---------------------------------------------------------------------------
-# Schemas (OpenAI function-calling format)
+# Schema generation + dispatch
 # ---------------------------------------------------------------------------
 
-_READ_FILE_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "read_file",
-        "description": (
-            "Read a file with line numbers. "
-            "Use offset/limit to page through large files."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path relative to cwd"},
-                "offset": {
-                    "type": "integer",
-                    "description": "0-based line offset",
-                    "default": 0,
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max lines to return",
-                    "default": 400,
-                },
-            },
-            "required": ["path"],
-        },
-    },
+_TOOL_MODELS: dict[str, type[BaseModel]] = {
+    "read_file": ReadFileParams,
+    "write_file": WriteFileParams,
+    "edit_file": EditFileParams,
+    "list_files": ListFilesParams,
+    "search_files": SearchFilesParams,
+    "run_command": RunCommandParams,
+    "python_exec": PythonExecParams,
+    "web_fetch": WebFetchParams,
+    "web_search": WebSearchParams,
 }
 
-_LIST_FILES_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "list_files",
-        "description": (
-            "List files matching a glob pattern relative to the working directory."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Glob pattern (e.g. '**/*.py')",
-                },
-            },
-            "required": ["pattern"],
-        },
-    },
+_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "read_file": (
+        "Read a file with line numbers. "
+        "Use offset/limit to page through large files."
+    ),
+    "write_file": "Write content to a file, creating parent directories as needed.",
+    "edit_file": "Replace a single exact occurrence of old with new in a file.",
+    "list_files": (
+        "List files matching a glob pattern relative to the working directory."
+    ),
+    "search_files": "Search file contents for a pattern using grep.",
+    "run_command": "Run a shell command in the working directory.",
+    "python_exec": (
+        "Execute a Python script via uv run and return stdout + stderr. "
+        "Use for math, data processing, generating plots "
+        "(save to file with plt.savefig or plotly write_html/write_image), "
+        "or any task best solved with code. "
+        "The script runs in the working directory. "
+        "If the script needs third-party packages, add PEP 723 inline "
+        "metadata at the top of the script:\n"
+        "# /// script\n"
+        '# dependencies = ["plotly", "pandas"]\n'
+        "# ///\n"
+        "uv will install them automatically."
+    ),
+    "web_fetch": (
+        "Fetch a URL and return its text content. "
+        "Use for reading web pages, API responses, documentation, etc."
+    ),
+    "web_search": (
+        "Search the web using a text query. "
+        "Returns titles, URLs, and snippets from top results. "
+        "Use web_fetch to read a specific result page."
+    ),
 }
 
-_SEARCH_FILES_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "search_files",
-        "description": "Search file contents for a pattern using grep.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "pattern": {"type": "string", "description": "Search pattern (regex)"},
-                "glob": {
-                    "type": "string",
-                    "description": "File glob to limit search",
-                    "default": "**/*",
-                },
-            },
-            "required": ["pattern"],
-        },
-    },
-}
 
-_WRITE_FILE_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "write_file",
-        "description": (
-            "Write content to a file, creating parent directories as needed."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path relative to cwd"},
-                "content": {"type": "string", "description": "File content to write"},
-            },
-            "required": ["path", "content"],
-        },
-    },
-}
+def _schema_from_model(
+    name: str, description: str, model: type[BaseModel]
+) -> dict[str, Any]:
+    """Wrap a Pydantic model's JSON schema in the OpenAI function-calling envelope."""
+    schema = model.model_json_schema()
+    # model_json_schema adds a top-level 'title' key that OpenAI doesn't expect
+    schema.pop("title", None)
+    return {
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": schema},
+    }
 
-_EDIT_FILE_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "edit_file",
-        "description": "Replace a single exact occurrence of old with new in a file.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path relative to cwd"},
-                "old": {"type": "string", "description": "Exact text to find"},
-                "new": {"type": "string", "description": "Replacement text"},
-            },
-            "required": ["path", "old", "new"],
-        },
-    },
-}
-
-_RUN_COMMAND_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "run_command",
-        "description": "Run a shell command in the working directory.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string", "description": "Shell command to run"},
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in seconds",
-                    "default": 30,
-                },
-            },
-            "required": ["command"],
-        },
-    },
-}
-
-_PYTHON_EXEC_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "python_exec",
-        "description": (
-            "Execute a Python script via uv run and return stdout + stderr. "
-            "Use for math, data processing, generating plots "
-            "(save to file with plt.savefig or plotly write_html/write_image), "
-            "or any task best solved with code. "
-            "The script runs in the working directory. "
-            "If the script needs third-party packages, add PEP 723 inline "
-            "metadata at the top of the script:\n"
-            "# /// script\n"
-            '# dependencies = ["plotly", "pandas"]\n'
-            "# ///\n"
-            "uv will install them automatically."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "description": "Python source code to execute",
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in seconds",
-                    "default": 60,
-                },
-            },
-            "required": ["code"],
-        },
-    },
-}
-
-_WEB_FETCH_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "web_fetch",
-        "description": (
-            "Fetch a URL and return its text content. "
-            "Use for reading web pages, API responses, documentation, etc."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "URL to fetch (http or https)",
-                },
-            },
-            "required": ["url"],
-        },
-    },
-}
-
-_WEB_SEARCH_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "web_search",
-        "description": (
-            "Search the web using a text query. "
-            "Returns titles, URLs, and snippets from top results. "
-            "Use web_fetch to read a specific result page."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"},
-            },
-            "required": ["query"],
-        },
-    },
-}
 
 ALL_SCHEMAS: list[dict[str, Any]] = [
-    _READ_FILE_SCHEMA,
-    _WRITE_FILE_SCHEMA,
-    _EDIT_FILE_SCHEMA,
-    _LIST_FILES_SCHEMA,
-    _SEARCH_FILES_SCHEMA,
-    _RUN_COMMAND_SCHEMA,
-    _PYTHON_EXEC_SCHEMA,
-    _WEB_FETCH_SCHEMA,
-    _WEB_SEARCH_SCHEMA,
+    _schema_from_model(name, _TOOL_DESCRIPTIONS[name], model)
+    for name, model in _TOOL_MODELS.items()
 ]
+
+
+def dispatch_tool(cwd: str, name: str, arguments: dict[str, Any]) -> ToolResult:
+    """Execute a tool by name, validating arguments via the Pydantic model."""
+    func = _TOOL_FUNCTIONS.get(name)
+    model = _TOOL_MODELS.get(name)
+    if func is None or model is None:
+        return f"Error: unknown tool '{name}'"
+    try:
+        validated = model(**arguments)
+        return func(cwd, **validated.model_dump())
+    except Exception as exc:
+        return f"Error running {name}: {type(exc).__name__}: {exc}"
