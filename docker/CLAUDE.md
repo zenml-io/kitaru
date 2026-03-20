@@ -43,6 +43,13 @@ file operations) and switch back to `USER zenml` at the end. This is required
 because the base image's non-root user cannot delete root-owned files created
 by `COPY` instructions.
 
+All three Dockerfiles use [uv](https://docs.astral.sh/uv/) for Python package
+installation instead of pip. uv is copied as a static binary from the
+distroless image (`ghcr.io/astral-sh/uv`) — no pip install or apt-get needed.
+The base image sets `VIRTUAL_ENV=/opt/venv`, so `uv pip install` targets the
+venv automatically in the server Dockerfiles. `Dockerfile.dev` uses
+`UV_SYSTEM_PYTHON=1` instead (no venv).
+
 ## Build args
 
 ### `Dockerfile` (production)

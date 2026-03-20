@@ -25,7 +25,10 @@ ARG KITARU_VERSION=""
 # Switch to root for package installation and file operations.
 USER root
 
-# Install curl for downloading release assets (not in the slim base image).
+# Install uv (fast Python package installer) and curl (for downloading
+# release assets). uv is copied as a static binary from the distroless
+# image; curl is not in the slim base image so needs apt-get.
+COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /uvx /bin/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
@@ -35,9 +38,9 @@ RUN apt-get update \
 # (CI and local builds).
 COPY . /tmp/kitaru
 RUN if [ -n "$KITARU_VERSION" ]; then \
-      pip install --no-cache-dir "kitaru==$KITARU_VERSION"; \
+      uv pip install --no-cache "kitaru==$KITARU_VERSION"; \
     else \
-      pip install --no-cache-dir /tmp/kitaru; \
+      uv pip install --no-cache /tmp/kitaru; \
     fi \
     && rm -rf /tmp/kitaru
 

@@ -21,9 +21,11 @@ FROM zenmldocker/zenml-server:${ZENML_SERVER_TAG} AS server
 # Switch to root for package installation and file operations.
 USER root
 
+COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /uvx /bin/
+
 # Install Kitaru from local source.
 COPY . /tmp/kitaru
-RUN cd /tmp/kitaru && pip install --no-cache-dir . && rm -rf /tmp/kitaru
+RUN uv pip install --no-cache /tmp/kitaru && rm -rf /tmp/kitaru
 
 # Check that the locally-built UI dist has been copied into the build context.
 COPY docker/kitaru-ui-dist/ /tmp/kitaru-ui-dist/
