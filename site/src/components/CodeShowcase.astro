@@ -36,15 +36,15 @@
     <span class="cmt"># Suspends the process. Resume when</span>
     <span class="cmt"># a human responds — 30s or 3 days later.</span>
 <span class="code-line" data-primitive="wait">    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(</span>
-<span class="code-line" data-primitive="wait">        <span class="var">bool</span>, question<span class="op">=</span><span class="str">"Publish this report?"</span></span>
+<span class="code-line" data-primitive="wait">        schema<span class="op">=</span><span class="var">bool</span>, question<span class="op">=</span><span class="str">"Publish this report?"</span></span>
 <span class="code-line" data-primitive="wait">    )</span>
     <span class="kw">if</span> approved:
         <span class="fn">publish</span>(analysis)
 
-<span class="code-line" data-primitive="load">    prev <span class="op">=</span> kitaru.<span class="fn">load</span>(<span class="str">"draft"</span>)</span>
+<span class="code-line" data-primitive="load">    prev <span class="op">=</span> kitaru.<span class="fn">load</span>(exec_id, <span class="str">"draft"</span>)</span>
 
-<span class="code-line" data-primitive="llm">    summary <span class="op">=</span> kitaru.<span class="fn">llm</span>(<span class="str">"gpt-4o"</span>).<span class="fn">complete</span>(</span>
-<span class="code-line" data-primitive="llm">        <span class="str">"Summarize: "</span> <span class="op">+</span> analysis</span>
+<span class="code-line" data-primitive="llm">    summary <span class="op">=</span> kitaru.<span class="fn">llm</span>(</span>
+<span class="code-line" data-primitive="llm">        <span class="str">"Summarize: "</span> <span class="op">+</span> analysis, model<span class="op">=</span><span class="str">"gpt-4o"</span></span>
 <span class="code-line" data-primitive="llm">    )</span>
 <span class="code-line" data-primitive="log">    kitaru.<span class="fn">log</span>(summary_length<span class="op">=</span><span class="fn">len</span>(summary))</span>
     <span class="kw">return</span> summary
