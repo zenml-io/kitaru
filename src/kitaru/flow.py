@@ -738,7 +738,7 @@ class _FlowDefinition:
             retries=retries,
             **kwargs,
         )
-        track(AnalyticsEvent.FLOW_DEPLOYED, {"flow_name": callable_name(self._func)})
+        track(AnalyticsEvent.FLOW_DEPLOYED, {"flow_name": self._pipeline.name})
         return handle
 
 

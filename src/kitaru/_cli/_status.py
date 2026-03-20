@@ -9,7 +9,6 @@ from typing import Annotated, Any
 from cyclopts import Parameter
 
 from kitaru._interface_errors import run_with_cli_error_boundary
-from kitaru.analytics import AnalyticsEvent, track
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.config import (
     KITARU_AUTH_TOKEN_ENV,
@@ -350,8 +349,6 @@ def login(
         exit_with_error=_exit_with_error,
         handled_exceptions=(RuntimeError, ValueError),
     )
-
-    track(AnalyticsEvent.SERVER_CONNECTED)
 
     connected_server_url = facade._get_connected_server_url() or server.rstrip("/")
     if output_format == CLIOutputFormat.JSON:

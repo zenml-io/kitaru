@@ -169,9 +169,9 @@ def _apply_runtime_version() -> None:
 
 def cli() -> None:
     """Entry point for the `kitaru` console script."""
-    from kitaru.analytics import AnalyticsEvent, set_interface, track
+    from kitaru.analytics import AnalyticsEvent, set_source, track
 
-    set_interface("cli")
+    set_source("cli")
     # Touch zen_store to mark GlobalConfiguration as initialized before
     # any analytics calls.  Without this, AnalyticsContext.__enter__()
     # sees is_initialized=False and silently skips all tracking.
