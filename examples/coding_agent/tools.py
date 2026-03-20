@@ -344,8 +344,7 @@ _TOOL_MODELS: dict[str, type[BaseModel]] = {
 
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "read_file": (
-        "Read a file with line numbers. "
-        "Use offset/limit to page through large files."
+        "Read a file with line numbers. Use offset/limit to page through large files."
     ),
     "write_file": "Write content to a file, creating parent directories as needed.",
     "edit_file": "Replace a single exact occurrence of old with new in a file.",
