@@ -1,21 +1,33 @@
 # Kitaru Helm Chart
 
-Deploy the [Kitaru](https://kitaru.ai) server on Kubernetes.
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/kitaru)](https://artifacthub.io/packages/helm/kitaru/kitaru)
 
-The Kitaru chart wraps the [ZenML Helm chart](https://artifacthub.io/packages/helm/zenml/zenml)
-as a dependency, overriding defaults to use the Kitaru server image and
-Kitaru-specific environment variables. All ZenML server features (database
-migrations, secrets encryption, ingress, autoscaling, etc.) are available
-through the subchart.
+![Kitaru Logo](https://raw.githubusercontent.com/zenml-io/kitaru/main/assets/kitaru_logo.png)
 
-## Quick start
+## Overview
+
+[Kitaru](https://kitaru.ai) is a durable execution layer for AI agents. It provides primitives that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
+
+## Features
+
+- Easy deployment of the Kitaru server on Kubernetes.
+- Wraps the [ZenML Helm chart](https://artifacthub.io/packages/helm/zenml/zenml) as a dependency with Kitaru-specific defaults.
+- All ZenML server features available: database migrations, secrets encryption, ingress, autoscaling, and more.
+- Highly configurable via Helm values.
+- Supports multiple secrets store backends (AWS Secrets Manager, GCP Secrets Manager, Azure Key Vault).
+
+## Quickstart
+
+### Install the Chart
+
+To install the Kitaru chart directly from Amazon ECR, use the following command:
 
 ```bash
-helm dependency update ./helm
-helm install kitaru-server ./helm \
-  --namespace kitaru \
-  --create-namespace
+# example command for version 0.2.0
+helm install kitaru-server oci://public.ecr.aws/zenml/kitaru --version 0.2.0
 ```
+
+Note: Ensure you have OCI support enabled in your Helm client and that you are authenticated with Amazon ECR.
 
 This starts a Kitaru server with a local SQLite database persisted via a
 PersistentVolumeClaim. Once the pod is ready, port-forward and connect:
@@ -32,8 +44,7 @@ All configuration is done through a values file. Server settings go under
 `my-values.yaml` with the settings you need, then install:
 
 ```bash
-helm dependency update ./helm
-helm install kitaru-server ./helm \
+helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
   --namespace kitaru \
   --create-namespace \
   -f my-values.yaml
@@ -115,8 +126,8 @@ For the full list of available settings, see the
 ## Upgrading
 
 ```bash
-helm dependency update ./helm
-helm upgrade kitaru-server ./helm -n kitaru -f my-values.yaml
+helm upgrade kitaru-server oci://public.ecr.aws/zenml/kitaru \
+  -n kitaru -f my-values.yaml
 ```
 
 ## Uninstalling
