@@ -1,6 +1,6 @@
 {
-  "title": "Deploy",
-  "defaultOpen": true,
+  "title": "Server Deployment",
+  "defaultOpen": false,
   "pages": [
     "docker",
     "helm"

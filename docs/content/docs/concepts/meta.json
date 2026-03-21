@@ -1,5 +1,5 @@
 {
   "title": "Core Concepts",
-  "defaultOpen": true,
+  "defaultOpen": false,
   "pages": ["flows", "checkpoints", "wait-and-input", "logging", "execution-model", "how-it-works"]
 }

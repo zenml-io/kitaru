@@ -9,7 +9,10 @@ import { gitConfig } from '@/lib/layout.shared';
 
 export default async function Page(props: PageProps<'/[[...slug]]'>) {
   const params = await props.params;
+  console.log('[DEBUG] params.slug:', JSON.stringify(params.slug));
+  console.log('[DEBUG] all pages:', source.getPages().map(p => p.slugs));
   const page = source.getPage(params.slug);
+  console.log('[DEBUG] found page:', !!page);
   if (!page) notFound();
 
   const MDX = page.data.body;
@@ -44,7 +47,10 @@ export async function generateStaticParams() {
 
 export async function generateMetadata(props: PageProps<'/[[...slug]]'>): Promise<Metadata> {
   const params = await props.params;
+  console.log('[DEBUG-meta] params.slug:', JSON.stringify(params.slug));
+  console.log('[DEBUG-meta] page count:', source.getPages().length);
   const page = source.getPage(params.slug);
+  console.log('[DEBUG-meta] found page:', !!page);
   if (!page) notFound();
 
   return {
