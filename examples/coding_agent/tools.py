@@ -1,5 +1,12 @@
-"""Tool implementations and schemas for the basic coding agent."""
+"""Tool implementations and schemas for the coding agent.
 
+Each tool function takes ``cwd`` (working directory) as its first argument,
+followed by tool-specific parameters described by a companion Pydantic model.
+Schemas are auto-generated from these models and sent to the LLM.
+"""
+
+import copy
+import re
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -8,7 +15,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
-from zenml.types import HTMLString, JSONString, MarkdownString
+from zenml.types import CSVString, HTMLString, JSONString, MarkdownString
+
+import kitaru
 
 _MAX_CHARS = 12_000
 _READ_LIMIT = 400
@@ -408,3 +417,142 @@ def dispatch_tool(cwd: str, name: str, arguments: dict[str, Any]) -> ToolResult:
         return func(cwd, **validated.model_dump())
     except Exception as exc:
         return f"Error running {name}: {type(exc).__name__}: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Flow-control tool schemas (ask_user / hand_back)
+# ---------------------------------------------------------------------------
+
+ASK_USER_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "ask_user",
+        "description": (
+            "Ask the user a question and wait for their response. "
+            "Use when you need clarification, a decision, or additional "
+            "information to proceed with the current task."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to ask the user",
+                },
+            },
+            "required": ["question"],
+        },
+    },
+}
+
+HAND_BACK_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "hand_back",
+        "description": (
+            "Hand control back to the user after completing the current task. "
+            "You MUST call this tool when you are done with a task instead of "
+            "just responding with text. Provide a summary of what you did and "
+            "a suggested next step or question for the user."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "A brief summary of what you accomplished",
+                },
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "A question or prompt for the user about what to do next, "
+                        "e.g. 'Would you like me to refine the chart?' or "
+                        "'What should I work on next?'"
+                    ),
+                },
+            },
+            "required": ["summary", "question"],
+        },
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Display-name injection
+# ---------------------------------------------------------------------------
+
+
+def _inject_display_name(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add a ``_display_name`` parameter to every tool schema.
+
+    The LLM fills this with a short, descriptive label (e.g.
+    ``fetch_population_data``) which becomes the checkpoint ID in the
+    dashboard.
+    """
+    augmented: list[dict[str, Any]] = []
+    for schema in schemas:
+        s = copy.deepcopy(schema)
+        s["function"]["parameters"]["properties"]["_display_name"] = {
+            "type": "string",
+            "description": (
+                "A short, descriptive snake_case label for this tool call "
+                "(e.g. 'fetch_population_data', 'generate_pyramid_chart'). "
+                "Used as the step name in the dashboard."
+            ),
+        }
+        augmented.append(s)
+    return augmented
+
+
+def sanitize_display_name(name: str, counter: int) -> str:
+    """Sanitize an LLM-provided display name into a valid checkpoint ID."""
+    cleaned = re.sub(r"[^a-z0-9_]", "_", name.strip().lower())
+    return f"{cleaned}_{counter}"
+
+
+# Combined tool list sent to the LLM
+ALL_TOOLS = _inject_display_name([*ALL_SCHEMAS, ASK_USER_SCHEMA, HAND_BACK_SCHEMA])
+
+
+# ---------------------------------------------------------------------------
+# Generated-file artifact saving
+# ---------------------------------------------------------------------------
+
+_TEXT_EXTENSIONS: dict[str, type] = {
+    ".html": HTMLString,
+    ".md": MarkdownString,
+    ".csv": CSVString,
+    ".json": JSONString,
+}
+
+_BINARY_EXTENSIONS: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
+
+def save_generated_files(cwd: str, before: set[str]) -> None:
+    """Save files created in *cwd* since *before* as typed artifacts."""
+    cwd_path = Path(cwd)
+    if not cwd_path.is_dir():
+        return
+
+    for path in sorted(cwd_path.iterdir()):
+        if not path.is_file() or path.name in before:
+            continue
+        ext = path.suffix.lower()
+        try:
+            if ext in _BINARY_EXTENSIONS:
+                # Wrap images in an HTML <img> tag so the dashboard renders them
+                import base64
+
+                data = base64.b64encode(path.read_bytes()).decode()
+                mime = "image/svg+xml" if ext == ".svg" else f"image/{ext.lstrip('.')}"
+                if ext == ".jpeg":
+                    mime = "image/jpeg"
+                kitaru.save(
+                    path.name,
+                    HTMLString(f'<img src="data:{mime};base64,{data}" style="max-width:100%">'),
+                )
+            elif ext in _TEXT_EXTENSIONS:
+                content = path.read_text(errors="replace")
+                kitaru.save(path.name, _TEXT_EXTENSIONS[ext](content))
+        except Exception:
+            continue

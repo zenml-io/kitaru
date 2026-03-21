@@ -1,44 +1,30 @@
 """Custom materializers for agent checkpoint outputs.
 
-These extend ZenML's PydanticMaterializer to dynamically generate
-visualizations based on checkpoint content.
-
-Generated files (HTML, Markdown, etc.) are saved as separate artifacts
-via kitaru.save() inside the checkpoint — the materializer only handles
-the visualization of the checkpoint's own return value (LLMResponse
-or ToolCallResult).
+These extend ZenML's PydanticMaterializer to generate dashboard
+visualizations for LLM responses and tool call results.
 """
 
 import html
 import os
 from typing import Any, ClassVar
 
-from pydantic import BaseModel
+from models import LLMResponse, ToolCallResult
 from zenml.enums import VisualizationType
 from zenml.io import fileio
+from zenml.materializers.materializer_registry import materializer_registry
 from zenml.materializers.pydantic_materializer import PydanticMaterializer
 
 
-class _LLMResponsePlaceholder(BaseModel):
-    pass
-
-
-class _ToolCallResultPlaceholder(BaseModel):
-    pass
-
-
 class LLMResponseMaterializer(PydanticMaterializer):
-    """Materializer for LLMResponse with dynamic Markdown visualization."""
+    """Materializer for LLMResponse with Markdown visualization."""
 
-    ASSOCIATED_TYPES: ClassVar[tuple[type[Any], ...]] = (_LLMResponsePlaceholder,)
+    ASSOCIATED_TYPES: ClassVar[tuple[type[Any], ...]] = (LLMResponse,)
 
     def save_visualizations(self, data: Any) -> dict[str, VisualizationType]:
-        """Render LLM response as Markdown for the dashboard."""
         parts: list[str] = []
 
-        content = getattr(data, "content", None)
-        if content:
-            parts.append(content)
+        if getattr(data, "content", None):
+            parts.append(data.content)
 
         tool_calls = getattr(data, "tool_calls", None)
         if tool_calls:
@@ -53,34 +39,25 @@ class LLMResponseMaterializer(PydanticMaterializer):
                 parts.append(f"| {i + 1} | `{name}` | `{args_preview}` |")
 
         md_content = "\n".join(parts) if parts else "_Empty response_"
-
         vis_path = os.path.join(self.uri, "visualization.md")
         with fileio.open(vis_path, "w") as f:
             f.write(md_content)
-
         return {vis_path.replace("\\", "/"): VisualizationType.MARKDOWN}
-
-
-_HTML_TOOLS = {"web_fetch"}
-_CODE_TOOLS = {"python_exec"}
 
 
 class ToolCallResultMaterializer(PydanticMaterializer):
     """Materializer for ToolCallResult with tool-aware visualization."""
 
-    ASSOCIATED_TYPES: ClassVar[tuple[type[Any], ...]] = (_ToolCallResultPlaceholder,)
+    ASSOCIATED_TYPES: ClassVar[tuple[type[Any], ...]] = (ToolCallResult,)
 
     def save_visualizations(self, data: Any) -> dict[str, VisualizationType]:
-        """Render tool output with the appropriate visualization type."""
         tool_name: str = getattr(data, "tool_name", "")
         output: str = getattr(data, "output", "")
 
-        if tool_name in _HTML_TOOLS:
+        if tool_name == "web_fetch":
             return self._save_html(output)
-
-        if tool_name in _CODE_TOOLS:
+        if tool_name == "python_exec":
             return self._save_code_html(output)
-
         return self._save_markdown(tool_name, output)
 
     def _save_html(self, content: str) -> dict[str, VisualizationType]:
@@ -90,7 +67,6 @@ class ToolCallResultMaterializer(PydanticMaterializer):
         return {vis_path.replace("\\", "/"): VisualizationType.HTML}
 
     def _save_code_html(self, output: str) -> dict[str, VisualizationType]:
-        """Render python_exec output as styled HTML."""
         escaped = html.escape(output)
         page = (
             "<html><body>"
@@ -113,3 +89,16 @@ class ToolCallResultMaterializer(PydanticMaterializer):
         with fileio.open(vis_path, "w") as f:
             f.write(md)
         return {vis_path.replace("\\", "/"): VisualizationType.MARKDOWN}
+
+
+# ---------------------------------------------------------------------------
+# Register materializers so ZenML uses them instead of the default
+# PydanticMaterializer. This must run before any checkpoint executes.
+# ---------------------------------------------------------------------------
+
+materializer_registry.register_and_overwrite_type(
+    LLMResponse, LLMResponseMaterializer
+)
+materializer_registry.register_and_overwrite_type(
+    ToolCallResult, ToolCallResultMaterializer
+)
