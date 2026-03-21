@@ -1,4 +1,4 @@
-"""Tool implementations and schemas for the basic coding agent."""
+"""Tool implementations and schemas for the coding agent."""
 
 import subprocess
 import tempfile
