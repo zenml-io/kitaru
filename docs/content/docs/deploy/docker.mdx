@@ -71,13 +71,13 @@ docker run -d --name kitaru-server -p 8080:8080 \
 
 If you are testing changes from a local checkout:
 
-<Tabs items={["just (recommended)", "raw Docker"]}>
+<Tabs items={["just (recommended)", "Docker"]}>
   <Tab value="just (recommended)">
     ```bash
     just server-image REPO=kitaru-local TAG=dev
     ```
   </Tab>
-  <Tab value="raw Docker">
+  <Tab value="Docker">
     ```bash
     docker build -f docker/Dockerfile --target server -t kitaru-local:dev .
     ```
@@ -134,6 +134,13 @@ Mount a host directory or Docker volume at the default data path:
     ```
   </Tab>
 </Tabs>
+
+<Callout type="info">
+  The path `/zenml/.zenconfig/local_stores/default_zen_store` is an internal
+  default inherited from the base image. It may change in a future release. For
+  production deployments, use an [external MySQL database](#using-mysql-recommended-for-production)
+  instead of relying on this path.
+</Callout>
 
 <Callout type="warn">
   The container runs as UID 1000 (`kitaru`). If using a bind mount, ensure the
@@ -332,5 +339,5 @@ command, or use `extra_hosts` in Docker Compose.
 ## Related pages
 
 - [Configuration](/guides/configuration)
-- [Stack Selection](/infrastructure/stack-selection)
+- [Stacks](/infrastructure/stacks)
 - [Kubernetes Stacks](/infrastructure/kubernetes-stacks)

@@ -24,7 +24,7 @@ values file.
 
 ```bash
 helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
-  --version 0.1.0 \
+  --version 0.2.0 \
   --namespace kitaru \
   --create-namespace
 ```
@@ -54,7 +54,7 @@ defaults), then install or upgrade:
 
 ```bash
 helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
-  --version 0.1.0 \
+  --version 0.2.0 \
   --namespace kitaru \
   --create-namespace \
   -f custom-values.yaml
@@ -360,7 +360,7 @@ kubectl -n kitaru create secret generic kitaru-db-password \
   --from-literal=password=my-secret-password
 
 helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
-  --version 0.1.0 \
+  --version 0.2.0 \
   --namespace kitaru \
   --create-namespace \
   -f production-values.yaml
@@ -370,7 +370,7 @@ helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
 
 ```bash
 helm upgrade kitaru-server oci://public.ecr.aws/zenml/kitaru \
-  --version 0.1.0 \
+  --version 0.2.0 \
   -n kitaru -f custom-values.yaml
 ```
 
