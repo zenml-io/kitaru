@@ -1,5 +1,5 @@
 ---
-title: "Your agents need more than traces"
+title: "Your Agents Need More Than Just Traces"
 description: "Tracing shows you what went wrong. But what if you could go back, fix the input, and resume from where it failed — without re-running everything?"
 date: 2026-03-08
 author: "Hamza Tahir"
@@ -10,7 +10,7 @@ image: "https://assets.kitaru.ai/content/blog/a1cd18e3/agents-need-more-than-tra
 
 You're building an agent that does deep research. It runs for an hour, makes 40 tool calls, burns $25 in tokens. At step 38, it hits a rate limit and crashes.
 
-You open your tracing dashboard. You can see exactly what happened — every LLM call, every tool invocation, the exact error. Beautiful.
+You open your tracing dashboard. You can see exactly what happened; every LLM call, every tool invocation, the exact error. Beautiful.
 
 Now what?
 
@@ -59,27 +59,27 @@ def research_agent(topic: str) -> str:
     return analyze(sources)
 ```
 
-Each `@checkpoint` persists its return value. If `analyze` fails, you don't re-run `gather_sources` — its output is cached. You fix the issue and replay from the failure point.
+Each `@checkpoint` persists its return value. If `analyze` fails, you don't re-run `gather_sources`; its output is cached. You fix the issue and replay from the failure point.
 
-The `wait()` call is a real suspension. The process stops. No polling loop. No compute burning. When the human approves — from the CLI, the API, or an AI assistant via MCP — the flow resumes from exactly where it paused.
+The `wait()` call is a real suspension. The process stops. No polling loop. No compute burning. When the human approves, from the CLI, the API, or an AI assistant via MCP, the flow resumes from exactly where it paused.
 
 ## Not another runtime
 
-There are durable execution engines that solve this. They're powerful. They're also heavy — a separate runtime to deploy, a new SDK to learn, infrastructure to manage.
+There are durable execution engines that solve this. They're powerful but also heavy; a separate runtime to deploy, a new SDK to learn, infrastructure to manage, and much more to take care of.
 
-Kitaru takes a different approach: two decorators and `pip install`. Your code stays Python. Your control flow stays yours — if/else, loops, try/except, all work naturally. The durability is invisible until you need it.
+Kitaru takes a different approach: two decorators and `pip install`. Your code stays Python and your control flow stays yours: if/else, loops, try/except, all work naturally. The durability is invisible until you need it.
 
 ## What this means for agent builders
 
 When every step is checkpointed, new patterns emerge:
 
-**Cost control.** You stop re-burning tokens on steps that already worked. A 40-step agent that fails at step 38 costs you 2 steps to retry, not 40.
+**Cost control:** You stop re-burning tokens on steps that already worked. A 40-step agent that fails at step 38 costs you 2 steps to retry, not 40.
 
-**Human oversight.** You can insert approval gates anywhere in your flow. The agent pauses, the human reviews, the agent continues. No architectural changes — just add `wait()`.
+**Human oversight:** You can insert approval gates anywhere in your flow. The agent pauses, the human reviews, the agent continues, no architectural changes needed, just add `wait()`.
 
-**Debugging by replay.** Something went wrong at step 15? Replay from step 14 with different inputs. Compare both runs. Iterate until it works.
+**Debugging by replay:** Something went wrong at step 15? Replay from step 14 with different inputs, compare both runs, and iterate until it works.
 
-**Multi-agent coordination.** One agent can read another agent's artifacts. A master agent can monitor, resume, and feed input to a fleet of sub-agents — all through the same API.
+**Multi-agent coordination:** One agent can read another agent's artifacts. A master agent can monitor, resume, and feed input to a fleet of sub-agents; all through the same API.
 
 Your agents are getting more complex. Your infrastructure should make that manageable, not painful.
 

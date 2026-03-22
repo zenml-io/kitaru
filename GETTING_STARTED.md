@@ -6,7 +6,6 @@ locally, running example flows, and exploring the CLI.
 ## Prerequisites
 
 - Python 3.11+
-- Git (needed to clone the repo and install the ZenML dependency)
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - Docker (only if you want to run the Kitaru server image)
 
@@ -229,23 +228,32 @@ build durable workflows. See the [Claude Code Skills docs](https://kitaru.ai/doc
 If you want a client-server setup (e.g. to share state across machines
 or test the login flow), you can run the server as a Docker container.
 
-For **branch testing**, build the image from your current checkout first.
-That guarantees you are testing the code on disk rather than a stale
-published tag.
+The production server image is based on the official `zenmldocker/zenml-server`
+image with Kitaru and the Kitaru UI layered on top.
 
 ### 1. Build the server image locally
 
 ```bash
-just server-image REPO=kitaru-local TAG=dev
+just server-image REPO=kitaru-local TAG=dev UI_TAG=v0.1.0
 # or, if you do not have `just` installed:
-docker build -f docker/Dockerfile --target server -t kitaru-local:dev .
+docker build -f docker/Dockerfile --target server \
+    --build-arg KITARU_UI_TAG=v0.1.0 \
+    -t kitaru-local:dev .
 ```
+
+> Replace `v0.1.0` with the desired Kitaru UI release tag. Without an
+> explicit tag, the build defaults to `latest` (the most recent GitHub release).
 
 This creates a local image tag called `kitaru-local:dev`.
 
-> Once a fixed image is published, you can substitute that published tag.
-> Until then, do not assume `zenmldocker/kitaru:latest` contains the
-> latest Docker login fix.
+For local UI development (without a published Kitaru UI release), use
+the dev server image instead:
+
+```bash
+# Build kitaru-ui first, then copy dist/ into the build context:
+cp -r /path/to/kitaru-ui/dist/ docker/kitaru-ui-dist/
+just server-dev-image
+```
 
 ### 2. Start the server
 

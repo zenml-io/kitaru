@@ -1,3 +1,13 @@
+# Helm dependency artifacts (rebuilt via helm dep update)
+helm/charts/
+helm/Chart.lock
+
+# pnpm
+**/.pnpm-store
+
+# macOS
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -222,6 +232,9 @@ site/.wrangler/
 # Design docs
 design/
 dogfood-output/
+
+# Local Kitaru UI build artifacts (used by docker/Dockerfile.server-dev)
+docker/kitaru-ui-dist/
 
 # MCP
 .mcp.json
