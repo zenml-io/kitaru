@@ -547,10 +547,8 @@ def save_generated_files(cwd: str, before: set[str]) -> None:
                 mime = "image/svg+xml" if ext == ".svg" else f"image/{ext.lstrip('.')}"
                 if ext == ".jpeg":
                     mime = "image/jpeg"
-                kitaru.save(
-                    path.name,
-                    HTMLString(f'<img src="data:{mime};base64,{data}" style="max-width:100%">'),
-                )
+                tag = f'<img src="data:{mime};base64,{data}" style="max-width:100%">'
+                kitaru.save(path.name, HTMLString(tag))
             elif ext in _TEXT_EXTENSIONS:
                 content = path.read_text(errors="replace")
                 kitaru.save(path.name, _TEXT_EXTENSIONS[ext](content))

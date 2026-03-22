@@ -29,15 +29,20 @@ import click
 import materializers as _materializers  # noqa: F401 — registers custom materializers
 from litellm import completion
 from llm import MAX_TOOL_ROUNDS, MODEL
-from models import FollowUp, LLMResponse, ToolCallFunction, ToolCallRequest, ToolCallResult
+from models import (
+    FollowUp,
+    LLMResponse,
+    ToolCallFunction,
+    ToolCallRequest,
+    ToolCallResult,
+)
 from prompts import SYSTEM_PROMPT
 from tools import ALL_TOOLS, dispatch_tool, sanitize_display_name, save_generated_files
 from zenml.types import HTMLString
 
-from kitaru.llm import _extract_usage
-
 import kitaru
 from kitaru import checkpoint, flow
+from kitaru.llm import _extract_usage
 
 _WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
 
@@ -199,7 +204,8 @@ def coding_agent(task: str) -> str:
                 if follow_up.is_finished:
                     results.append(summary)
                     return "\n\n---\n\n".join(results)
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": summary})
+                msg = {"role": "tool", "tool_call_id": tc.id, "content": summary}
+                messages.append(msg)
                 messages.append({"role": "user", "content": follow_up.message})
                 counter += 1
                 continue
@@ -213,7 +219,8 @@ def coding_agent(task: str) -> str:
                     schema=str,
                     question=question,
                 )
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": answer})
+                msg = {"role": "tool", "tool_call_id": tc.id, "content": answer}
+                messages.append(msg)
                 counter += 1
                 continue
 
@@ -221,13 +228,17 @@ def coding_agent(task: str) -> str:
             result: ToolCallResult = tool_call(
                 tc.function.name, args, cwd, id=display_name
             ).load()
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result.output})
+            msg = {"role": "tool", "tool_call_id": tc.id, "content": result.output}
+            messages.append(msg)
             counter += 1
 
     else:
         # Exhausted tool-call budget — ask for a summary
         messages.append(
-            {"role": "user", "content": "Tool call limit reached. Summarize what you accomplished."}
+            {
+                "role": "user",
+                "content": "Tool call limit reached. Summarize what you accomplished.",
+            }
         )
         final: LLMResponse = llm_call(messages, id=f"llm_{counter}").load()
         results.append(final.content or "")

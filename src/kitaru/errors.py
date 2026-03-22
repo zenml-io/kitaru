@@ -82,6 +82,7 @@ class KitaruFeatureNotAvailableError(KitaruError, NotImplementedError):
     """Raised when a documented API is intentionally not implemented yet."""
 
 
+
 _DIVERGENCE_HINTS: Final[tuple[str, ...]] = (
     "diverg",
     "durable call sequence",
