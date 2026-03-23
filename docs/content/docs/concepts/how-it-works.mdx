@@ -21,7 +21,7 @@ checkpoint results, and logs to the server. The server stores everything
 and makes it queryable.
 
 Locally, the server runs embedded in your Python process (no setup needed).
-For production, you [deploy it on Kubernetes](/infrastructure/deploy-helm) so
+For production, you [deploy it on Kubernetes](/deploy/helm) so
 your team can share executions and agents can run independently of your machine.
 
 ## Client
@@ -47,7 +47,7 @@ durable execution environment in under a minute. Your flows behave exactly the
 same as they will in production — same checkpointing, same replay, same
 observability — just without the cloud infrastructure underneath.
 
-Optionally, you can run a [local server and UI](/getting-started/installation#local-UI)
+Optionally, you can run a [local server and UI](/getting-started/installation#local-ui)
 to browse executions in a web UI.
 
 ## Production
@@ -55,11 +55,11 @@ to browse executions in a web UI.
 In production, the three components separate across your infrastructure:
 
 - The **server** runs as a long-lived Kubernetes pod (deployed via
-  [Helm](/infrastructure/deploy-helm)). It stores execution state in a
+  [Helm](/deploy/helm)). It stores execution state in a
   database and serves the UI UI. Your whole team connects to it.
 
 - The **agent runtime** runs on the compute backend defined by your
-  [stack](/infrastructure/stacks) — Kubernetes pods, Vertex AI jobs,
+  [stack](/stacks) — Kubernetes pods, Vertex AI jobs,
   SageMaker jobs, or any other supported environment. When you call `.run()`,
   the client fetches short-lived credentials from the server and dispatches
   the execution directly to the compute backend. The runtime runs your
@@ -87,6 +87,6 @@ credentials brokered by the server to access storage directly.
 
 ## Next steps
 
-- [Stacks](/infrastructure/stacks) — how compute, storage, and container
+- [Stacks](/stacks) — how compute, storage, and container
   registry are bundled into a named runtime
 - [Deploy Your Agent](/getting-started/deploy) — move from local to production
