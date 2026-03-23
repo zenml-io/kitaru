@@ -152,8 +152,10 @@
     iframe.allowFullscreen = true;
     iframe.title = 'Kitaru demo video';
     iframe.style.cssText = 'position:absolute;top:0;left:50%;transform:translateX(-50%);width:114%;height:100%;border:none;';
-    placeholder.remove();
+    placeholder.style.display = 'none';
     container.appendChild(iframe);
+    iframe.onload = () => placeholder.remove();
+    iframe.onerror = () => { placeholder.style.display = ''; hasLaunched = false; };
   }
 
   playBtn?.addEventListener('click', launchVideo);

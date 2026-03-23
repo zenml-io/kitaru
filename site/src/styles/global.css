@@ -140,21 +140,9 @@ body::before {
 /* ═══════════════════════════════════════════════════
    Keyframes
    ═══════════════════════════════════════════════════ */
-@keyframes fadeDown {
-  from { opacity: 0; transform: translateY(-12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(24px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 @keyframes ring-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
-}
-@keyframes livePulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.55 0.1 155 / 0.4); }
-  50% { opacity: 0.7; box-shadow: 0 0 0 4px oklch(0.55 0.1 155 / 0); }
 }
 @keyframes pausePulse {
   0%, 100% { box-shadow: 0 0 0 0 oklch(0.73 0.12 80 / 0.25); }
@@ -165,11 +153,7 @@ body::before {
   50% { box-shadow: 0 0 20px 4px oklch(0.65 0.16 45 / 0.15); }
   100% { box-shadow: 0 0 0 0 oklch(0.65 0.16 45 / 0.3); }
 }
-@keyframes counter-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-/* Shared code window dots (used in Hero and AgentNative) */
+/* Shared code window dots (used in Architecture and CodeShowcase) */
 .code-dot {
   width: 10px;
   height: 10px;
@@ -415,7 +399,6 @@ body::before {
     animation: none;
   }
 
-  .hero-badge .dot,
   .pulse-dot {
     animation: none;
   }

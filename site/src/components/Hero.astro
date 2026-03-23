@@ -381,10 +381,11 @@
   // ─── ASCII Canvas Background — Landscape zones ───
   import { sizeCanvasToParent, attachMouseTracker, attachResizeHandler, getAttractorPositions } from '../scripts/canvas-utils';
 
+  (function initHeroCanvas() {
   const canvas = document.querySelector<HTMLCanvasElement>('.ascii-canvas');
-  if (!canvas) throw new Error('ascii-canvas not found');
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('2d context unavailable');
+  if (!ctx) return;
 
   const GRID_SPACING = 6;
   const DOT_RADIUS = 2;
@@ -642,4 +643,5 @@
     resize();
     if (prefersReducedMotion) drawStatic();
   });
+  })();
 </script>
