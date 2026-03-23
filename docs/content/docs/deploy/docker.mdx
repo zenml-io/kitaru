@@ -74,7 +74,7 @@ If you are testing changes from a local checkout:
 <Tabs items={["just (recommended)", "Docker"]}>
   <Tab value="just (recommended)">
     ```bash
-    just server-image REPO=kitaru-local TAG=dev
+    just DOCKER_REPO=kitaru-local DOCKER_TAG=dev server-image
     ```
   </Tab>
   <Tab value="Docker">
@@ -143,7 +143,7 @@ Mount a host directory or Docker volume at the default data path:
 </Callout>
 
 <Callout type="warn">
-  The container runs as UID 1000 (`kitaru`). If using a bind mount, ensure the
+  The container runs as UID 1000 (`zenml`). If using a bind mount, ensure the
   host directory is writable by UID 1000: `chown -R 1000:1000 kitaru-data`
 </Callout>
 
@@ -339,5 +339,5 @@ command, or use `extra_hosts` in Docker Compose.
 ## Related pages
 
 - [Configuration](/guides/configuration)
-- [Stacks](/infrastructure/stacks)
-- [Kubernetes Stacks](/infrastructure/kubernetes-stacks)
+- [Stacks](/stacks)
+- [Kubernetes Stacks](/stacks/kubernetes-stacks)
