@@ -100,27 +100,8 @@ kubectl -n kitaru create secret generic kitaru-db-password \
   --from-literal=password=my-secret-password
 ```
 
-### Key values
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `kitaru.server.image.repository` | `zenmldocker/kitaru` | Server image |
-| `kitaru.server.image.tag` | Chart version | Image tag |
-| `kitaru.server.serverURL` | — | External server URL (for login redirects) |
-| `kitaru.server.debug` | `false` | Enable debug logging |
-| `kitaru.server.database.url` | — | External DB URL. SQLite if unset |
-| `kitaru.server.database.persistence.enabled` | `true` | Persist SQLite via PVC |
-| `kitaru.server.auth.jwtSecretKey` | auto-generated | JWT signing key |
-| `kitaru.server.secretsStore.sql.encryptionKey` | — | Encryption key for stored secrets |
-| `kitaru.server.ingress.enabled` | `false` | Enable Ingress |
-| `kitaru.server.ingress.host` | — | Ingress hostname |
-| `kitaru.server.ingress.tls.enabled` | `false` | Enable TLS |
-| `kitaru.server.service.type` | `ClusterIP` | Service type |
-| `kitaru.server.environment` | Kitaru env vars | Extra env vars |
-| `kitaru.resources` | `{}` | CPU/memory requests and limits |
-| `kitaru.autoscaling.enabled` | `false` | Enable HPA |
-
-For the full list of available settings, see the
+All available settings are documented with inline comments in
+[`values.yaml`](values.yaml). For the full list of ZenML server options, see the
 [ZenML Helm chart values](https://artifacthub.io/packages/helm/zenml/zenml?modal=values)
 — all options are available under the `kitaru.server` key.
 
