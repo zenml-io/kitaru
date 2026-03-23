@@ -122,6 +122,16 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 
 This project uses [just](https://github.com/casey/just) as a command stack. Run `just --list` to see all recipes.
 
+### Core workflow (the three commands you'll use most)
+
+| Command | What it does | When to run |
+|---|---|---|
+| **`just check`** | Runs *all* checks: format, lint, typecheck, typos, yaml, actions lint, links | After every chunk of work and before committing/pushing |
+| **`just fix`** | Auto-fixes formatting, lint issues, and yaml | When `just check` reports fixable issues — handles most linting problems automatically |
+| **`just test`** | Runs the full pytest suite | After code changes and before committing/pushing |
+
+**Typical loop:** write code → `just fix` (auto-fix what it can) → `just check` (verify everything passes) → `just test` (make sure nothing is broken) → commit.
+
 ```bash
 # Setup
 uv sync                              # Install dependencies

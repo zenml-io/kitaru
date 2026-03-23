@@ -318,6 +318,38 @@ class TestDecideDropRules:
         )
         assert _decide(record) is None
 
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "Deploying a local daemon ZenML server.",
+            "Connecting to the local daemon ZenML server (http://127.0.0.1:8383).",
+            "Connected to the local daemon ZenML server (http://127.0.0.1:8383).",
+            "Disconnecting from the local (http://127.0.0.1:8383) ZenML server.",
+            "Tearing down the local daemon ZenML server.",
+            "Shutting down the local daemon ZenML server.",
+            "Updated the global store configuration.",
+        ],
+    )
+    def test_server_lifecycle_dropped(self, msg: str) -> None:
+        record = _make_record("zenml.zen_server.deploy.deployer", msg)
+        assert _decide(record) is None
+
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "Migrating the ZenML global configuration from version "
+            "0.94.0 to version 0.94.1...",
+            "Backing up the database before migration to `/tmp/zenml-backup.db`.",
+            "Database successfully backed up to `/tmp/zenml-backup.db`. If something "
+            "goes wrong with the upgrade, ZenML will attempt to restore the database "
+            "from this backup automatically.",
+            "Successfully cleaned up database dump file `/tmp/zenml-backup.db`.",
+        ],
+    )
+    def test_migration_noise_dropped(self, msg: str) -> None:
+        record = _make_record("zenml.config.global_config", msg)
+        assert _decide(record) is None
+
 
 class TestDecidePassthrough:
     """Non-ZenML records and unmatched ZenML messages pass through."""

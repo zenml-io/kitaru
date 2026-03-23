@@ -245,6 +245,10 @@ docker/kitaru-ui-dist/
 !.claude/settings.json
 !.claude/skills/
 
+# Bundled Kitaru UI (generated at build time by scripts/download-ui.sh)
+src/kitaru/_ui/dist/
+src/kitaru/_ui/bundle_manifest.json
+
 # Codex
 .codex/*
 !.codex/skills/
