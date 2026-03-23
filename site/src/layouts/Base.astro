@@ -77,6 +77,17 @@ const {
     analytics.page();
     }}();
   </script>
+  <!-- RB2B visitor identification -->
+  <script is:inline>
+    !function(key) {
+      if (window.reb2b) return;
+      window.reb2b = {loaded: true};
+      var s = document.createElement("script");
+      s.async = true;
+      s.src = "https://b2bjsstore.s3.us-west-2.amazonaws.com/b/" + key + "/" + key + ".js.gz";
+      document.getElementsByTagName("script")[0].parentNode.insertBefore(s, document.getElementsByTagName("script")[0]);
+    }("Z6PVLHP07Q6R");
+  </script>
 </head>
 <body>
   <a href="#main-content" class="skip-link">Skip to content</a>

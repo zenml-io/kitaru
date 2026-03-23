@@ -50,6 +50,12 @@ export default function Layout({ children }: LayoutProps<'/'>) {
               'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)};plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()',
           }}
         />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              '!function(key){if(window.reb2b)return;window.reb2b={loaded:true};var s=document.createElement("script");s.async=true;s.src="https://b2bjsstore.s3.us-west-2.amazonaws.com/b/"+key+"/"+key+".js.gz";document.getElementsByTagName("script")[0].parentNode.insertBefore(s,document.getElementsByTagName("script")[0])}("Z6PVLHP07Q6R")',
+          }}
+        />
       </head>
       <body className="flex flex-col min-h-screen">
         <Provider>{children}</Provider>
