@@ -96,9 +96,7 @@ class ToolCallResultMaterializer(PydanticMaterializer):
 # PydanticMaterializer. This must run before any checkpoint executes.
 # ---------------------------------------------------------------------------
 
-materializer_registry.register_and_overwrite_type(
-    LLMResponse, LLMResponseMaterializer
-)
+materializer_registry.register_and_overwrite_type(LLMResponse, LLMResponseMaterializer)
 materializer_registry.register_and_overwrite_type(
     ToolCallResult, ToolCallResultMaterializer
 )
