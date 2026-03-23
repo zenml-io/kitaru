@@ -1,21 +1,39 @@
 # Tracked LLM example
 
 This example shows how `kitaru.llm()` behaves inside a flow: prompt/response
-artifacts are captured, and usage metadata is attached automatically.
+artifacts are captured, and usage metadata (tokens, cost, latency) is attached
+automatically.
+
+## Getting started
 
 ```bash
-uv run examples/llm/flow_with_llm.py
+cd examples/llm
+uv sync --extra local       # Install dependencies (from repo root, or use pip)
+kitaru init                  # Initialize a Kitaru project in this directory
 ```
 
-This example uses your current Kitaru connection context. If you want the run
-to use a deployed Kitaru server, connect first with `uv run kitaru login ...`
-(or `kitaru login ...`) and verify with `kitaru status`.
+Register a model alias and provide credentials:
+
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+```
+
+Then run:
+
+```bash
+python flow_with_llm.py
+```
+
+For the full credential setup walkthrough, see
+[Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls).
+
+## `flow_with_llm.py` — Tracked model calls with automatic cost tracking
+
+Makes two `kitaru.llm()` calls: one at flow scope (outline generation) and
+one inside a checkpoint (draft expansion). Each call automatically captures
+the prompt, the response, and usage metadata (model, tokens, cost, latency)
+as structured artifacts — no manual logging needed. The model alias
+(`"fast"`) resolves credentials from the secret you registered above.
 
 For the full catalog, see [../README.md](../README.md).
-
-| Example | Requires | What it demonstrates | Test |
-|---|---|---|---|
-| [flow_with_llm.py](flow_with_llm.py) | `uv sync --extra local` plus a model alias / provider credentials | Tracked model calls with captured metadata and credential resolution | [../../tests/test_phase12_llm_example.py](../../tests/test_phase12_llm_example.py) |
-
-For the credential setup walkthrough, see the hosted guide:
-[Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls).

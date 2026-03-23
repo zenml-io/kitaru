@@ -12,6 +12,12 @@ Demonstrates:
 
 ## Setup
 
+```bash
+cd examples/coding_agent
+uv sync --extra local       # Install dependencies (from repo root, or use pip)
+kitaru init                  # Initialize a Kitaru project in this directory
+```
+
 Register a model alias (one-time):
 
 ```bash
@@ -22,8 +28,7 @@ kitaru model register coding-agent --model anthropic/claude-sonnet-4-20250514 --
 ## Usage
 
 ```bash
-# Start the agent with a task
-uv run python agent.py "Create a Plotly population pyramid for South Korea"
+python agent.py "Create a Plotly population pyramid for South Korea"
 ```
 
 The agent works on the task, then calls `hand_back` with a summary and a question for you. You respond with a follow-up task or cancel the execution to stop.

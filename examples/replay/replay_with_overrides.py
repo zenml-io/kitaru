@@ -31,7 +31,7 @@ def publish(draft: str) -> str:
     return f"PUBLISHED: {draft}"
 
 
-@flow(image={"base_image": "strickvl/kitaru-dev:latest"})
+@flow
 def content_pipeline(topic: str) -> str:
     """Simple durable content pipeline used for replay demonstration."""
     notes = research(topic)

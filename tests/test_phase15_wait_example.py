@@ -1,7 +1,7 @@
 """Integration test for the wait/resume example workflow.
 
 This test drives the same flow and APIs programmatically so CI can validate
-the full wait → input → optional resume → result sequence without human
+the full wait -> input -> optional resume -> result sequence without human
 interaction.
 """
 
@@ -12,17 +12,32 @@ import time
 from contextlib import suppress
 
 import pytest
-from examples.execution_management.wait_and_resume import (
-    _find_pending_wait_for_topic,
-    _prime_zenml_runtime,
-    wait_for_approval_flow,
-)
+from examples.execution_management.wait_and_resume import wait_for_approval_flow
+from zenml.client import Client
 
 from kitaru.client import KitaruClient
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruStateError
 from kitaru.wait import _resolve_zenml_wait
 
 _WAIT_DISCOVERY_TIMEOUT_SECONDS = 900.0
+
+
+def _prime_zenml_runtime() -> None:
+    """Force ZenML's lazy store initialization before spawning threads."""
+    _ = Client().zen_store
+
+
+def _find_pending_wait(*, client: KitaruClient, topic: str) -> str | None:
+    """Return the exec_id for the flow run that has a pending wait matching topic."""
+    executions = client.executions.list(flow="wait_for_approval_flow", limit=20)
+    for execution in executions:
+        detailed = client.executions.get(execution.exec_id)
+        if detailed.pending_wait is None:
+            continue
+        if detailed.pending_wait.metadata.get("topic") != topic:
+            continue
+        return detailed.exec_id
+    return None
 
 
 def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
@@ -32,7 +47,7 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
     except KitaruFeatureNotAvailableError:
         pytest.skip("Installed ZenML build does not expose wait support yet.")
 
-    topic = "kitaru"
+    topic = "v1.0"
     client = KitaruClient()
     _prime_zenml_runtime()
 
@@ -59,11 +74,10 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
                     "Flow run failed before reaching a wait condition."
                 ) from state["error"]
             try:
-                found = _find_pending_wait_for_topic(client=client, topic=topic)
+                found = _find_pending_wait(client=client, topic=topic)
             except ValueError:
                 # ZenML step runs can briefly exist with step_configuration=None
                 # while the orchestrator thread is still populating the record.
-                # Treat as "not ready yet" and retry on the next poll cycle.
                 found = None
             if found is not None:
                 break
@@ -78,7 +92,7 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
 
         exec_id = found
 
-        # Resolve the wait using the new pending_waits API.
+        # Resolve the wait using the pending_waits API.
         pending = client.executions.pending_waits(exec_id)
         assert pending, f"No pending waits found for execution {exec_id}"
         execution_after_input = client.executions.input(
@@ -91,11 +105,6 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
         with suppress(KitaruStateError):
             client.executions.resume(exec_id)
     finally:
-        # Ensure the daemon thread is cleaned up so it doesn't contaminate
-        # the next test's ZenML singleton state on the same xdist worker.
-        # The 60s timeout covers the happy path (thread finishes after resume);
-        # on failure paths the thread is typically already dead or will be
-        # reaped as a daemon when the worker process exits.
         starter.join(timeout=60.0)
 
     assert not starter.is_alive(), "Background flow-start thread did not finish."
@@ -106,4 +115,4 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
 
     result = handle.wait()
     assert execution_after_input.status.value in {"running", "waiting", "completed"}
-    assert result == "PUBLISHED: Draft about kitaru."
+    assert result == "PUBLISHED: Draft about v1.0."

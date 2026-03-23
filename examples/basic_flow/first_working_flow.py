@@ -1,59 +1,35 @@
-"""Smallest end-to-end ``@flow`` + ``@checkpoint`` example."""
+"""Smallest end-to-end ``@flow`` + ``@checkpoint`` example.
+
+Two checkpoints, one flow — the minimum needed to get durable execution.
+If this flow crashes after ``gather_sources``, a replay skips it and
+resumes from ``summarize``.
+"""
 
 from kitaru import checkpoint, flow
 
 
 @checkpoint
-def fetch_data(url: str) -> str:
-    """Fetch source data.
-
-    Args:
-        url: Source URL.
-
-    Returns:
-        Mocked source content.
-    """
-    _ = url
-    return "some data"
+def gather_sources(topic: str) -> str:
+    """Collect raw material for a topic."""
+    return f"Source notes on {topic}: key trends, recent breakthroughs, open questions."
 
 
 @checkpoint
-def process_data(data: str) -> str:
-    """Transform source data.
-
-    Args:
-        data: Input data.
-
-    Returns:
-        Processed data.
-    """
-    return data.upper()
+def summarize(notes: str) -> str:
+    """Distill raw notes into a one-line summary."""
+    return f"Summary: {notes.split(':')[0].lower()} are evolving rapidly."
 
 
-@flow(image={"base_image": "strickvl/kitaru-dev:latest"})
-def my_agent(url: str) -> str:
-    """Run the example Kitaru workflow.
-
-    Args:
-        url: Source URL.
-
-    Returns:
-        Processed result.
-    """
-    data = fetch_data(url)
-    return process_data(data)
+@flow
+def research_agent(topic: str) -> str:
+    """Gather sources and summarize — the smallest durable agent."""
+    notes = gather_sources(topic)
+    return summarize(notes)
 
 
-def run_workflow(url: str = "https://example.com") -> str:
-    """Execute the example workflow and return its output.
-
-    Args:
-        url: Source URL.
-
-    Returns:
-        Workflow output.
-    """
-    return my_agent.run(url).wait()
+def run_workflow(topic: str = "renewable energy") -> str:
+    """Execute the workflow and return its output."""
+    return research_agent.run(topic).wait()
 
 
 def main() -> None:

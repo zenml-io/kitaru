@@ -275,7 +275,6 @@ def _make_display_name(tool_name: str, llm_name: Any, counter: int) -> str:
 @click.command(help="General-purpose interactive agent.")
 @click.argument("task")
 def main(task: str) -> None:
-    kitaru.configure(stack="kubernetes")
     coding_agent.run(task)
 
 
