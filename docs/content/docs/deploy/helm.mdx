@@ -1,0 +1,447 @@
+---
+title: Helm 
+description: Deploy the Kitaru server on Kubernetes using the Kitaru Helm chart
+---
+
+The Kitaru Helm chart wraps the
+[ZenML Helm chart](https://artifacthub.io/packages/helm/zenml/zenml) as a
+dependency, overriding defaults to use the Kitaru server image and
+Kitaru-specific environment variables. All ZenML server features — database
+migrations, secrets encryption, ingress, autoscaling — are available through
+the subchart. Server configuration goes under the `kitaru.server` key in your
+values file.
+
+## Prerequisites
+
+- A Kubernetes cluster (1.19+)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl) configured for
+  your cluster
+- [Helm](https://helm.sh/docs/intro/install/) 3.x installed
+- Optional but recommended for production: a MySQL 8.0+ database reachable from
+  the cluster
+
+## Quick start
+
+```bash
+helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
+  --version 0.2.0 \
+  --namespace kitaru \
+  --create-namespace
+```
+
+This starts a single Kitaru server pod with a local SQLite database persisted
+via a PersistentVolumeClaim.
+
+Once the pod is ready, port-forward and connect:
+
+```bash
+kubectl -n kitaru port-forward svc/kitaru-server-kitaru 8080:80
+kitaru login http://localhost:8080
+```
+
+Check the pod is healthy:
+
+```bash
+kubectl -n kitaru get pods
+kubectl -n kitaru logs deploy/kitaru-server-kitaru
+```
+
+## Configuration
+
+All configuration is done through a Helm values file. Create a
+`custom-values.yaml` with the settings you need (omit everything else to use
+defaults), then install or upgrade:
+
+```bash
+helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
+  --version 0.2.0 \
+  --namespace kitaru \
+  --create-namespace \
+  -f custom-values.yaml
+```
+
+Server settings go under `kitaru.server`. For the full list of available options,
+see the
+[ZenML Helm chart values](https://artifacthub.io/packages/helm/zenml/zenml?modal=values)
+— all options are available under the `kitaru.server` key.
+
+The sections below show what to put in your values file for common scenarios.
+
+## Persist your data
+
+### Default: SQLite with a PVC
+
+Out of the box, the chart creates a PersistentVolumeClaim that stores the SQLite
+database. Data survives pod restarts and redeployments.
+
+<Callout type="warn">
+  SQLite does not support concurrent writers. The chart forces `replicas: 1`
+  when no external database is configured.
+</Callout>
+
+### Using MySQL (recommended for production)
+
+For production, point the server at an external MySQL database. This removes the
+SQLite limitation and enables horizontal scaling.
+
+```yaml
+kitaru:
+  server:
+    database:
+      url: "mysql://kitaru_user:password@mysql-host:3306/kitaru"
+```
+
+The server runs database migrations automatically via a dedicated migration job
+on first startup and on every upgrade.
+
+<Callout type="warn">
+  Database names must not contain hyphens. Use underscores or plain alphanumeric
+  names (e.g. `kitaru`, not `kitaru-db`).
+</Callout>
+
+#### Keep the password out of values
+
+Instead of embedding the password in the URL, create a Kubernetes Secret and
+reference it:
+
+```bash
+kubectl -n kitaru create secret generic kitaru-db-password \
+  --from-literal=password=my-secret-password
+```
+
+```yaml
+kitaru:
+  server:
+    database:
+      url: "mysql://kitaru_user@mysql-host:3306/kitaru"
+      passwordSecretRef:
+        name: kitaru-db-password
+        key: password
+```
+
+#### MySQL with SSL
+
+```yaml
+kitaru:
+  server:
+    database:
+      url: "mysql://kitaru_user@mysql-host:3306/kitaru"
+      ssl: true
+      sslCa: "/path/to/ca.pem"
+      sslCert: "/path/to/client-cert.pem"
+      sslKey: "/path/to/client-key.pem"
+      sslVerifyServerCert: true
+```
+
+## Connect to the server
+
+After deployment, the Helm chart prints connection instructions. The method
+depends on your Service type.
+
+### Port-forward (default: ClusterIP)
+
+```bash
+kubectl -n kitaru port-forward svc/kitaru-server-kitaru 8080:80
+kitaru login http://localhost:8080
+```
+
+### LoadBalancer
+
+```yaml
+kitaru:
+  server:
+    service:
+      type: LoadBalancer
+```
+
+```bash
+export SERVICE_IP=$(kubectl -n kitaru get svc kitaru-server-kitaru \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+kitaru login http://$SERVICE_IP
+```
+
+### API key login (headless / CI)
+
+```bash
+kitaru login https://kitaru.example.com --api-key kat_abc123...
+```
+
+### Disconnect
+
+```bash
+kitaru logout
+```
+
+## Expose with Ingress
+
+To make the Kitaru server accessible outside the cluster via a hostname, enable
+Ingress. This section assumes you have an Ingress controller (e.g.
+[nginx-ingress](https://kubernetes.github.io/ingress-nginx/deploy/)) and
+optionally [cert-manager](https://cert-manager.io/) already running in your
+cluster.
+
+### Basic Ingress with TLS
+
+First, install cert-manager and nginx-ingress if you have not already:
+
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set installCRDs=true
+helm install nginx-ingress ingress-nginx/ingress-nginx \
+  --namespace nginx-ingress --create-namespace
+```
+
+Create a ClusterIssuer for Let's Encrypt:
+
+```bash
+cat <<EOF | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+  namespace: cert-manager
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: <your email address here>
+    privateKeySecretRef:
+      name: letsencrypt
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+EOF
+```
+
+Then deploy Kitaru with Ingress enabled:
+
+```yaml
+kitaru:
+  server:
+    serverURL: https://kitaru.example.com
+
+    ingress:
+      enabled: true
+      className: "nginx"
+      host: kitaru.example.com
+      annotations:
+        cert-manager.io/cluster-issuer: "letsencrypt"
+      tls:
+        enabled: true
+        secretName: kitaru-tls
+```
+
+<Callout type="info">
+  `serverURL` tells the server its own external address, used for browser-based
+  login redirects.
+</Callout>
+
+If you manage TLS certificates manually, create a Secret and reference it in
+`tls.secretName`:
+
+```bash
+kubectl -n kitaru create secret tls kitaru-tls \
+  --cert=path/to/tls.crt \
+  --key=path/to/tls.key
+```
+
+## Security
+
+### JWT secret key
+
+The chart auto-generates a random JWT signing key on first install and preserves
+it across upgrades. You do not need to set this for a single-replica deployment.
+
+For **multi-replica deployments**, all pods must share the same key:
+
+```bash
+openssl rand -hex 32
+```
+
+```yaml
+kitaru:
+  server:
+    auth:
+      jwtSecretKey: "<paste the generated key>"
+```
+
+### Secrets encryption
+
+Secrets stored by the Kitaru server live in the SQL database. By default they
+are **not encrypted**. To encrypt them at rest:
+
+```bash
+openssl rand -hex 32
+```
+
+```yaml
+kitaru:
+  server:
+    secretsStore:
+      enabled: true
+      type: sql
+      sql:
+        encryptionKey: "<paste the generated key>"
+```
+
+<Callout type="warn">
+  Keep this key safe — losing it means losing access to all stored secrets.
+</Callout>
+
+## Production example
+
+A complete production values file combining MySQL, Ingress with TLS, secrets
+encryption, resource limits, and autoscaling:
+
+```yaml
+kitaru:
+  server:
+    replicaCount: 2
+
+    serverURL: https://kitaru.example.com
+
+    debug: false
+
+    auth:
+      jwtSecretKey: "<openssl rand -hex 32>"
+
+    database:
+      url: "mysql://kitaru@mysql-host:3306/kitaru"
+      passwordSecretRef:
+        name: kitaru-db-password
+        key: password
+      ssl: true
+      sslCa: "/path/to/ca.pem"
+      sslVerifyServerCert: true
+
+    secretsStore:
+      enabled: true
+      type: sql
+      sql:
+        encryptionKey: "<openssl rand -hex 32>"
+
+    ingress:
+      enabled: true
+      className: "nginx"
+      host: kitaru.example.com
+      annotations:
+        cert-manager.io/cluster-issuer: "letsencrypt"
+      tls:
+        enabled: true
+        secretName: kitaru-tls
+
+    environment:
+      KITARU_DEBUG: "false"
+      KITARU_ANALYTICS_OPT_IN: "true"
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+```
+
+Install:
+
+```bash
+kubectl -n kitaru create secret generic kitaru-db-password \
+  --from-literal=password=my-secret-password
+
+helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
+  --version 0.2.0 \
+  --namespace kitaru \
+  --create-namespace \
+  -f production-values.yaml
+```
+
+## Upgrading
+
+```bash
+helm upgrade kitaru-server oci://public.ecr.aws/zenml/kitaru \
+  --version 0.2.0 \
+  -n kitaru -f custom-values.yaml
+```
+
+The JWT secret key is preserved automatically across upgrades. The server runs a
+database migration job before the new version starts.
+
+<Callout type="info">
+  Use a version-pinned image tag (e.g. `kitaru.server.image.tag: "0.2.0"`) that
+  matches your client SDK version to avoid API incompatibilities.
+</Callout>
+
+## Uninstalling
+
+```bash
+helm uninstall kitaru-server --namespace kitaru
+```
+
+The PVC created for SQLite persistence is **not** deleted automatically. To
+remove it:
+
+```bash
+kubectl -n kitaru delete pvc -l app.kubernetes.io/instance=kitaru-server
+```
+
+## Troubleshooting
+
+### Pod won't start or CrashLoopBackOff
+
+```bash
+kubectl -n kitaru logs deploy/kitaru-server-kitaru
+kubectl -n kitaru describe pod -l app.kubernetes.io/name=kitaru
+```
+
+Common causes:
+
+- Database connection refused (wrong host/port/credentials in
+  `kitaru.server.database.url`)
+- Database name contains hyphens (use underscores or plain alphanumeric names)
+- PVC pending — no storage class available or insufficient capacity
+  (`kubectl -n kitaru get pvc`)
+- Image pull error — wrong repository/tag or missing `imagePullSecrets`
+
+### DB migration job fails
+
+The chart runs a database migration job before starting the server. If it fails:
+
+```bash
+kubectl -n kitaru logs job/kitaru-server-db-migration
+```
+
+Common causes:
+
+- Database is unreachable or credentials are wrong
+- Insufficient database user privileges (needs `CREATE TABLE`, `ALTER TABLE`)
+
+### Login stalls or shows errors
+
+- Wait for the readiness probe to pass before attempting login. Check pod
+  status with `kubectl -n kitaru get pods`.
+- If the CLI keeps printing `authorization_pending`, the server may not be
+  fully initialized. Wait and retry.
+- Check `kubectl -n kitaru logs deploy/kitaru-server-kitaru` for error details.
+
+### Ingress returns 502/503
+
+- Confirm the server pod is healthy: `kubectl -n kitaru get pods`
+- Check the Ingress controller logs for upstream errors.
+- Verify `kitaru.server.ingress.host` matches your DNS record.
+- If using TLS, check that the TLS Secret exists and contains valid
+  certificate data: `kubectl -n kitaru describe secret kitaru-tls`
+
+## Related pages
+
+- [Docker deployment](/deploy/docker)

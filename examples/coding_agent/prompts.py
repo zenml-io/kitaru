@@ -1,4 +1,4 @@
-"""System prompts for the basic coding agent."""
+"""System prompts for the coding agent."""
 
 SYSTEM_PROMPT = """\
 You are a capable general-purpose agent. You can solve any task the user gives \

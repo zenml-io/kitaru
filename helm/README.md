@@ -24,10 +24,11 @@ To install the Kitaru chart directly from Amazon ECR, use the following command:
 
 ```bash
 # example command for version 0.2.0
-helm install kitaru-server oci://public.ecr.aws/zenml/kitaru --version 0.2.0
+helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
+  --namespace kitaru \
+  --create-namespace \
+  --version 0.2.0
 ```
-
-Note: Ensure you have OCI support enabled in your Helm client and that you are authenticated with Amazon ECR.
 
 This starts a Kitaru server with a local SQLite database persisted via a
 PersistentVolumeClaim. Once the pod is ready, port-forward and connect:
@@ -106,7 +107,7 @@ kubectl -n kitaru create secret generic kitaru-db-password \
 | `kitaru.server.image.repository` | `zenmldocker/kitaru` | Server image |
 | `kitaru.server.image.tag` | Chart version | Image tag |
 | `kitaru.server.serverURL` | — | External server URL (for login redirects) |
-| `kitaru.server.debug` | `true` | Enable debug logging |
+| `kitaru.server.debug` | `false` | Enable debug logging |
 | `kitaru.server.database.url` | — | External DB URL. SQLite if unset |
 | `kitaru.server.database.persistence.enabled` | `true` | Persist SQLite via PVC |
 | `kitaru.server.auth.jwtSecretKey` | auto-generated | JWT signing key |

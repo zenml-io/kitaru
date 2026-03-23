@@ -1,6 +1,6 @@
 {
   "title": "Agent Native",
-  "defaultOpen": true,
+  "defaultOpen": false,
   "pages": [
     "mcp-server",
     "claude-code-skill"

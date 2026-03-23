@@ -1,9 +1,7 @@
 {
-  "title": "Deployment & Compute",
-  "defaultOpen": true,
+  "title": "Agent Runtime (Stacks)",
+  "defaultOpen": false,
   "pages": [
-    "deploy-helm",
-    "stacks",
     "kubernetes-stacks",
     "vertex-stacks",
     "sagemaker-stacks",
