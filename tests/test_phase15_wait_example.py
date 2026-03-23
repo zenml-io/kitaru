@@ -3,6 +3,10 @@
 This test drives the same flow and APIs programmatically so CI can validate
 the full wait -> input -> optional resume -> result sequence without human
 interaction.
+
+The example has two wait points:
+1. A schemaless boolean gate ("approve_release") — resolved without a value
+2. A structured input wait ("release_details") — resolved with a ReleaseDetails dict
 """
 
 from __future__ import annotations
@@ -40,6 +44,35 @@ def _find_pending_wait(*, client: KitaruClient, topic: str) -> str | None:
     return None
 
 
+def _wait_for_pending_wait(
+    *,
+    client: KitaruClient,
+    topic: str,
+    state: dict[str, object],
+) -> str:
+    """Poll until the flow reaches a pending wait, return exec_id."""
+    deadline = time.time() + _WAIT_DISCOVERY_TIMEOUT_SECONDS
+    found = None
+    while time.time() < deadline:
+        if state["error"] is not None:
+            raise RuntimeError(
+                "Flow run failed before reaching a wait condition."
+            ) from state["error"]  # type: ignore[arg-type]
+        try:
+            found = _find_pending_wait(client=client, topic=topic)
+        except ValueError:
+            found = None
+        if found is not None:
+            return found
+        time.sleep(0.5)
+
+    raise TimeoutError(
+        f"Timed out after {_WAIT_DISCOVERY_TIMEOUT_SECONDS:.0f}s waiting for "
+        "execution to reach a pending wait. On remote stacks, first-run "
+        "image builds can take several minutes before the flow reaches wait()."
+    )
+
+
 def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
     """Verify wait input resumes the same execution and produces output."""
     try:
@@ -51,8 +84,6 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
     client = KitaruClient()
     _prime_zenml_runtime()
 
-    # Start the flow in a background thread (the example blocks the main
-    # thread, but we need the main thread free to drive input/resume).
     state: dict[str, object] = {"handle": None, "error": None}
 
     def _runner() -> None:
@@ -65,43 +96,31 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
     starter.start()
 
     try:
-        # Poll until the flow reaches its pending wait.
-        deadline = time.time() + _WAIT_DISCOVERY_TIMEOUT_SECONDS
-        found = None
-        while time.time() < deadline:
-            if state["error"] is not None:
-                raise RuntimeError(
-                    "Flow run failed before reaching a wait condition."
-                ) from state["error"]
-            try:
-                found = _find_pending_wait(client=client, topic=topic)
-            except ValueError:
-                # ZenML step runs can briefly exist with step_configuration=None
-                # while the orchestrator thread is still populating the record.
-                found = None
-            if found is not None:
-                break
-            time.sleep(0.5)
+        # --- Wait 1: schemaless approval gate ("approve_release") ---
+        exec_id = _wait_for_pending_wait(client=client, topic=topic, state=state)
 
-        if found is None:
-            raise TimeoutError(
-                f"Timed out after {_WAIT_DISCOVERY_TIMEOUT_SECONDS:.0f}s waiting for "
-                "execution to reach a pending wait. On remote stacks, first-run "
-                "image builds can take several minutes before the flow reaches wait()."
-            )
+        pending = client.executions.pending_waits(exec_id)
+        assert pending, f"No pending waits found for execution {exec_id}"
+        client.executions.input(
+            exec_id,
+            wait=pending[0].wait_id,
+            value=None,
+        )
 
-        exec_id = found
+        with suppress(KitaruStateError):
+            client.executions.resume(exec_id)
 
-        # Resolve the wait using the pending_waits API.
+        # --- Wait 2: structured input ("release_details") ---
+        exec_id = _wait_for_pending_wait(client=client, topic=topic, state=state)
+
         pending = client.executions.pending_waits(exec_id)
         assert pending, f"No pending waits found for execution {exec_id}"
         execution_after_input = client.executions.input(
             exec_id,
             wait=pending[0].wait_id,
-            value=True,
+            value={"notes": "Bug fixes", "major_version": 2},
         )
 
-        # Some backends auto-resume after input; others need an explicit resume.
         with suppress(KitaruStateError):
             client.executions.resume(exec_id)
     finally:
@@ -115,4 +134,4 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
 
     result = handle.wait()
     assert execution_after_input.status.value in {"running", "waiting", "completed"}
-    assert result == "PUBLISHED: Draft about v1.0."
+    assert result == "PUBLISHED v2: Draft about v1.0.\nNotes: Bug fixes"
