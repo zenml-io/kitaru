@@ -76,78 +76,6 @@
     letter-spacing: -0.01em;
   }
 
-  /* ── Card styles — identical to WhyKitaru ── */
-  .why-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
-    position: relative;
-    overflow: hidden;
-    transition: border-color 0.3s;
-  }
-
-  .why-card:hover {
-    border-color: var(--color-muted);
-  }
-
-  .card-glow {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), oklch(0.65 0.16 45 / 0.04), transparent 60%);
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.3s;
-    z-index: 1;
-  }
-
-  .why-card:hover .card-glow {
-    opacity: 1;
-  }
-
-  .why-card-image {
-    width: 100%;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface-warm, oklch(0.97 0.005 70));
-    min-height: 120px;
-  }
-
-  .why-card-placeholder {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    background: var(--color-surface-warm, oklch(0.97 0.005 70));
-  }
-
-  .why-card-image img {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
-    display: block;
-  }
-
-  .why-card-content {
-    position: relative;
-    z-index: 2;
-    padding: 24px 28px 28px;
-  }
-
-  .why-card h3 {
-    font-size: 1.05rem;
-    font-weight: 600;
-    margin-bottom: 8px;
-    letter-spacing: -0.01em;
-    line-height: 1.3;
-  }
-
-  .why-card p {
-    color: var(--color-secondary);
-    font-size: 0.85rem;
-    line-height: 1.6;
-    font-weight: 300;
-  }
-
   @media (max-width: 768px) {
     .problem-grid {
       grid-template-columns: 1fr;
@@ -156,15 +84,6 @@
 </style>
 
 <script>
-  document.querySelectorAll('.problem-section .why-card').forEach(card => {
-    card.addEventListener('mousemove', (e: MouseEvent) => {
-      const rect = (card as HTMLElement).getBoundingClientRect();
-      (card as HTMLElement).style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');
-      (card as HTMLElement).style.setProperty('--mouse-y', ((e.clientY - rect.top) / rect.height * 100) + '%');
-    });
-    card.addEventListener('mouseleave', () => {
-      (card as HTMLElement).style.setProperty('--mouse-x', '50%');
-      (card as HTMLElement).style.setProperty('--mouse-y', '50%');
-    });
-  });
+  import { setupCardGlow } from '../scripts/card-glow';
+  setupCardGlow('.problem-section .why-card');
 </script>

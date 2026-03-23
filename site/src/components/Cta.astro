@@ -363,13 +363,11 @@
         cW = dims.w;
         cH = dims.h;
         build();
+        setFont();
       }
 
       function drawOnce() {
         ctaCtx!.clearRect(0, 0, cW, cH);
-        ctaCtx!.font = `${FSIZE}px var(--font-mono), 'JetBrains Mono', monospace`;
-        ctaCtx!.textAlign = 'center';
-        ctaCtx!.textBaseline = 'middle';
 
         for (const cell of grid) {
           ctaCtx!.globalAlpha = 0.06;
@@ -379,6 +377,12 @@
         ctaCtx!.globalAlpha = 1;
       }
 
+      function setFont() {
+        ctaCtx!.font = `${FSIZE}px var(--font-mono), 'JetBrains Mono', monospace`;
+        ctaCtx!.textAlign = 'center';
+        ctaCtx!.textBaseline = 'middle';
+      }
+
       function loop(time: number) {
         if (document.hidden) {
           raf = requestAnimationFrame(loop);
@@ -386,33 +390,30 @@
         }
 
         ctaCtx!.clearRect(0, 0, cW, cH);
-        ctaCtx!.font = `${FSIZE}px var(--font-mono), 'JetBrains Mono', monospace`;
-        ctaCtx!.textAlign = 'center';
-        ctaCtx!.textBaseline = 'middle';
         ctaCtx!.fillStyle = 'rgb(241,120,41)';
 
         const t = time * 0.001;
 
         // Two wandering attractors — always running
         const { at1X, at1Y, at2X, at2Y } = getAttractorPositions(t, cW, cH);
+        const a2r = ATTRACT_R * 0.8;
 
         for (const cell of grid) {
-          let opacity = cell.base;
           let dx = 0;
           let dy = 0;
           let scale = 1;
 
           // Ambient breathing — punchy
           const breath = Math.sin(t * 0.8 + cell.phase) * 0.05;
-          opacity = cell.base + breath;
-          opacity = Math.max(0.05, Math.min(opacity, 0.28));
+          let opacity = Math.max(0.05, Math.min(cell.base + breath, 0.28));
 
           // Attractor 1 — ALWAYS active (primary)
           {
             const adx = cell.x - at1X;
             const ady = cell.y - at1Y;
-            const adist = Math.sqrt(adx * adx + ady * ady);
-            if (adist < ATTRACT_R) {
+            const adistSq = adx * adx + ady * ady;
+            if (adistSq < ATTRACT_R * ATTRACT_R) {
+              const adist = Math.sqrt(adistSq);
               const ratio = 1 - (adist / ATTRACT_R);
               const ease = ratio * ratio;
               opacity = opacity + (0.38 - opacity) * ease;
@@ -428,9 +429,10 @@
           {
             const adx = cell.x - at2X;
             const ady = cell.y - at2Y;
-            const adist = Math.sqrt(adx * adx + ady * ady);
-            if (adist < ATTRACT_R * 0.8) {
-              const ratio = 1 - (adist / (ATTRACT_R * 0.8));
+            const adistSq = adx * adx + ady * ady;
+            if (adistSq < a2r * a2r) {
+              const adist = Math.sqrt(adistSq);
+              const ratio = 1 - (adist / a2r);
               const ease = ratio * ratio;
               opacity = opacity + (0.32 - opacity) * ease * 0.6;
               if (adist > 0.1) {
@@ -445,9 +447,10 @@
           if (active) {
             const cdx = cell.x - mx;
             const cdy = cell.y - my;
-            const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
+            const cdistSq = cdx * cdx + cdy * cdy;
 
-            if (cdist < RADIUS) {
+            if (cdistSq < RADIUS * RADIUS) {
+              const cdist = Math.sqrt(cdistSq);
               const ratio = 1 - (cdist / RADIUS);
               const ease = ratio * ratio;
               opacity = opacity + (0.55 - opacity) * ease;
@@ -460,11 +463,15 @@
           }
 
           ctaCtx!.globalAlpha = Math.min(opacity, 0.60);
-          ctaCtx!.save();
-          ctaCtx!.translate(cell.x + dx, cell.y + dy);
-          if (scale !== 1) ctaCtx!.scale(scale, scale);
-          ctaCtx!.fillText(cell.char, 0, 0);
-          ctaCtx!.restore();
+          if (dx !== 0 || dy !== 0 || scale !== 1) {
+            ctaCtx!.save();
+            ctaCtx!.translate(cell.x + dx, cell.y + dy);
+            if (scale !== 1) ctaCtx!.scale(scale, scale);
+            ctaCtx!.fillText(cell.char, 0, 0);
+            ctaCtx!.restore();
+          } else {
+            ctaCtx!.fillText(cell.char, cell.x, cell.y);
+          }
         }
 
         ctaCtx!.globalAlpha = 1;

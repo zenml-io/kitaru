@@ -22,7 +22,7 @@
             </div>
             <span class="showcase-code-filename">agent.py</span>
           </div>
-          <pre class="showcase-code-pre" aria-label="Example Kitaru agent code"><code><span class="code-line"><span class="kw">import</span> kitaru</span>
+          <pre class="showcase-code-pre code-syntax" aria-label="Example Kitaru agent code"><code><span class="code-line"><span class="kw">import</span> kitaru</span>
 <span class="code-line"><span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint</span>
 <span class="code-line"> </span>
 <span class="code-line" data-primitive="configure">kitaru.<span class="fn">configure</span>(stack<span class="op">=</span><span class="str">"kubernetes"</span>)</span>
@@ -147,15 +147,6 @@
     color: var(--color-dark-text);
     -webkit-overflow-scrolling: touch;
   }
-
-  /* Syntax highlighting — matches Architecture */
-  .showcase-code-pre .kw { color: oklch(0.73 0.08 70); }
-  .showcase-code-pre .fn { color: oklch(0.68 0.12 50); }
-  .showcase-code-pre .str { color: oklch(0.72 0.1 155); }
-  .showcase-code-pre .var { color: var(--color-dark-text); }
-  .showcase-code-pre .op { color: oklch(0.72 0.02 65); }
-  .showcase-code-pre .dec { color: oklch(0.68 0.12 50); font-style: italic; }
-  .showcase-code-pre .cmt { color: oklch(0.67 0.015 60); font-style: italic; }
 
   /* Highlight lines */
   .code-line {

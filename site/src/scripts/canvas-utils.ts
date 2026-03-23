@@ -21,8 +21,18 @@ export function attachMouseTracker(
   onMove: (x: number, y: number) => void,
   onLeave: () => void
 ): () => void {
+  // Cache the rect and invalidate on resize/scroll to avoid per-mousemove layout reflow
+  let cachedRect: DOMRect | null = null;
+
+  function getRect(): DOMRect {
+    if (!cachedRect) cachedRect = canvas.getBoundingClientRect();
+    return cachedRect;
+  }
+
+  function invalidateRect() { cachedRect = null; }
+
   function update(clientX: number, clientY: number) {
-    const rect = canvas.getBoundingClientRect();
+    const rect = getRect();
     onMove(clientX - rect.left, clientY - rect.top);
   }
 
@@ -36,12 +46,16 @@ export function attachMouseTracker(
   section.addEventListener('touchmove', handleTouchMove, { passive: true });
   section.addEventListener('mouseleave', handleLeave);
   section.addEventListener('touchend', handleLeave);
+  window.addEventListener('resize', invalidateRect);
+  window.addEventListener('scroll', invalidateRect, { passive: true });
 
   return () => {
     section.removeEventListener('mousemove', handleMouseMove);
     section.removeEventListener('touchmove', handleTouchMove);
     section.removeEventListener('mouseleave', handleLeave);
     section.removeEventListener('touchend', handleLeave);
+    window.removeEventListener('resize', invalidateRect);
+    window.removeEventListener('scroll', invalidateRect);
   };
 }
 

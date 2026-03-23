@@ -202,8 +202,13 @@
 
 <script>
   const nav = document.getElementById('nav');
+  let wasScrolled = false;
   window.addEventListener('scroll', () => {
-    nav?.classList.toggle('scrolled', window.scrollY > 20);
+    const isScrolled = window.scrollY > 20;
+    if (isScrolled !== wasScrolled) {
+      wasScrolled = isScrolled;
+      nav?.classList.toggle('scrolled', isScrolled);
+    }
   }, { passive: true });
 
   // Mobile menu toggle

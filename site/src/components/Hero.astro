@@ -570,9 +570,9 @@
       {
         const adx = cell.x - at1X;
         const ady = cell.y - at1Y;
-        const adist = Math.sqrt(adx * adx + ady * ady);
-        if (adist < ATTRACTOR_RADIUS) {
-          const ratio = 1 - (adist / ATTRACTOR_RADIUS);
+        const adistSq = adx * adx + ady * ady;
+        if (adistSq < ATTRACTOR_RADIUS * ATTRACTOR_RADIUS) {
+          const ratio = 1 - (Math.sqrt(adistSq) / ATTRACTOR_RADIUS);
           const ease = ratio * ratio;
           opacity = opacity + (0.28 - opacity) * ease;
         }
@@ -582,9 +582,10 @@
       {
         const adx = cell.x - at2X;
         const ady = cell.y - at2Y;
-        const adist = Math.sqrt(adx * adx + ady * ady);
-        if (adist < ATTRACTOR_RADIUS * 0.8) {
-          const ratio = 1 - (adist / (ATTRACTOR_RADIUS * 0.8));
+        const adistSq = adx * adx + ady * ady;
+        const a2r = ATTRACTOR_RADIUS * 0.8;
+        if (adistSq < a2r * a2r) {
+          const ratio = 1 - (Math.sqrt(adistSq) / a2r);
           const ease = ratio * ratio;
           opacity = opacity + (0.22 - opacity) * ease * 0.6;
         }
@@ -594,9 +595,9 @@
       if (mouseActive) {
         const cdx = cell.x - mouseX;
         const cdy = cell.y - mouseY;
-        const cdist = Math.sqrt(cdx * cdx + cdy * cdy);
-        if (cdist < CURSOR_RADIUS) {
-          const ratio = 1 - (cdist / CURSOR_RADIUS);
+        const cdistSq = cdx * cdx + cdy * cdy;
+        if (cdistSq < CURSOR_RADIUS * CURSOR_RADIUS) {
+          const ratio = 1 - (Math.sqrt(cdistSq) / CURSOR_RADIUS);
           const ease = ratio * ratio;
           opacity = opacity + (0.35 - opacity) * ease;
         }

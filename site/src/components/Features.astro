@@ -190,21 +190,6 @@
     opacity: 0.15;
   }
 
-  /* Card hover glow — follows cursor */
-  .card-glow {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), oklch(0.65 0.16 45 / 0.04), transparent 60%);
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.3s;
-    z-index: 1;
-  }
-
-  .feature-card:hover .card-glow {
-    opacity: 1;
-  }
-
   /* ═══ Card inner grid — text left, visual flush right ═══ */
   .feature-card-inner {
     display: grid;
@@ -641,19 +626,8 @@
 </style>
 
 <script>
-  // ═══ Card hover glow tracking ═══
-  document.querySelectorAll<HTMLElement>('.feature-card').forEach(card => {
-    card.addEventListener('mousemove', (event) => {
-      const e = event as MouseEvent;
-      const rect = card.getBoundingClientRect();
-      card.style.setProperty('--mouse-x', ((e.clientX - rect.left) / rect.width * 100) + '%');
-      card.style.setProperty('--mouse-y', ((e.clientY - rect.top) / rect.height * 100) + '%');
-    });
-    card.addEventListener('mouseleave', () => {
-      card.style.setProperty('--mouse-x', '50%');
-      card.style.setProperty('--mouse-y', '50%');
-    });
-  });
+  import { setupCardGlow } from '../scripts/card-glow';
+  setupCardGlow('.feature-card');
 
   // ═══ Per-card animation system ═══
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -892,11 +866,15 @@
     let ticking = false;
     const controller = new AbortController();
 
-    function computeStickyLine(card: HTMLElement): number {
-      const topPx = Number.parseFloat(window.getComputedStyle(card).top);
-      if (!Number.isNaN(topPx)) return topPx;
-      return window.innerHeight * 0.15;
+    // Cache sticky top values — they're constant CSS values, only change on resize
+    let stickyTops: number[] = [];
+    function cacheStickyTops() {
+      stickyTops = Array.from(cards).map(card => {
+        const topPx = Number.parseFloat(window.getComputedStyle(card).top);
+        return Number.isNaN(topPx) ? window.innerHeight * 0.15 : topPx;
+      });
     }
+    cacheStickyTops();
 
     function updateActiveCard() {
       if (ticking) return;
@@ -908,7 +886,7 @@
         const firstCard = cards[0];
         if (!firstCard) return;
 
-        const stickyLine = computeStickyLine(firstCard);
+        const stickyLine = stickyTops[0] ?? window.innerHeight * 0.15;
         const sectionRect = section.getBoundingClientRect();
 
         // Section is not in view yet — allow 200px early trigger to match card buffer.
@@ -920,7 +898,7 @@
         // Select the highest-index card that has reached its sticky threshold.
         let nextIdx = -1;
         cards.forEach((card, idx) => {
-          const topPx = computeStickyLine(card);
+          const topPx = stickyTops[idx] ?? stickyLine;
           const rect = card.getBoundingClientRect();
           // Start animation early — when the card is within 200px of its sticky line
           if (rect.top <= topPx + 200) {
@@ -933,7 +911,7 @@
     }
 
     window.addEventListener('scroll', updateActiveCard, { passive: true, signal: controller.signal });
-    window.addEventListener('resize', updateActiveCard, { passive: true, signal: controller.signal });
+    window.addEventListener('resize', () => { cacheStickyTops(); updateActiveCard(); }, { passive: true, signal: controller.signal });
 
     // Initialize immediately for refresh/deep-link/restored scroll positions.
     updateActiveCard();
