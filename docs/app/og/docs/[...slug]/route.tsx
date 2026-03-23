@@ -11,7 +11,13 @@ export async function GET(_req: Request, { params }: RouteContext<'/og/docs/[...
   if (!page) notFound();
 
   return new ImageResponse(
-    <DefaultImage title={page.data.title} description={page.data.description} site="Kitaru" />,
+    <DefaultImage
+      title={page.data.title}
+      description={page.data.description}
+      site="Kitaru"
+      primaryColor="rgba(241, 120, 41, 0.3)"
+      primaryTextColor="rgb(241, 120, 41)"
+    />,
     {
       width: 1200,
       height: 630,
