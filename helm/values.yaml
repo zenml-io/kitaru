@@ -9,73 +9,92 @@
 
 kitaru:
 
+  # -- Server configuration
   server:
 
+    # -- Number of server pod replicas. When running >1 replica, ensure
+    # auth.jwtSecretKey is set explicitly so all pods share the same key.
     replicaCount: 1
 
+    # -- Container image settings
     image:
+      # -- Server image repository
       repository: zenmldocker/kitaru
+      # -- Image pull policy
       pullPolicy: Always
-      # Overrides the image tag whose default is the chart version.
+      # -- Overrides the image tag whose default is the chart appVersion
       tag:
 
-    # The URL where the Kitaru server API is reachable from outside the cluster.
-    # Used for browser-based login redirects and CLI connection instructions.
+    # -- The URL where the Kitaru server API is reachable from outside the
+    # cluster. Used for browser-based login redirects and CLI connection
+    # instructions. Example: "https://kitaru.example.com"
     serverURL:
 
+    # -- Enable debug logging on the server
     debug: false
 
-    # Flag to enable/disable the tracking process of the analytics
+    # -- Flag to enable/disable the tracking process of the analytics
     analyticsOptIn: false
 
+    # -- Authentication settings
     auth:
-      # OAuth2 password bearer
+      # -- Authentication type
       authType: OAUTH2_PASSWORD_BEARER
 
-      # JWT secret key for signing auth tokens. If not set, a random key is
+      # -- JWT secret key for signing auth tokens. If not set, a random key is
       # generated on first install and reused on upgrades. Set this explicitly
       # when running multiple replicas — all pods must share the same key.
       #
       # Generate one with: openssl rand -hex 32
       jwtSecretKey:
 
-    # Database configuration. If url is not set, a local SQLite database is
-    # used. Set url to a MySQL connection string for production use.
+    # -- Database configuration
+    # If url is not set, a local SQLite database is used and persisted via a
+    # PVC. Set url to a MySQL connection string for production use.
     database:
 
-      # Persist the SQLite database across pod restarts.
+      # -- Persist the SQLite database across pod restarts via a PVC.
       # Only relevant when no external database url is set.
       persistence:
+        # -- Enable SQLite persistence
         enabled: true
+        # -- PVC size for SQLite database
         size: 1Gi
+        # -- Storage class name. Empty string uses the cluster default.
         storageClassName: ""
 
-      # External database URL. When set, SQLite persistence is ignored and the
-      # server connects to this database instead.
+      # -- External database URL. When set, SQLite persistence is ignored and
+      # the server connects to this database instead.
       #
       # Example: "mysql://user:password@mysql-host:3306/kitaru"
+      #
+      # Prefer using passwordSecretRef below instead of embedding the password
+      # directly in the URL.
       url:
 
-      # Reference a Kubernetes Secret for the database password instead of
+      # -- Reference a Kubernetes Secret for the database password instead of
       # embedding it in the url.
       passwordSecretRef: {}
         # name: kitaru-db-password
         # key: password
 
-      # MySQL SSL options.
+      # -- MySQL SSL settings
       ssl: false
       sslCa: {}
       sslCert: {}
       sslKey: {}
       sslVerifyServerCert: false
 
-    # Secrets store settings. Secrets are stored in the SQL database by default.
+    # -- Secrets store settings
+    # Controls how Kitaru stores secrets (API keys, credentials, etc.).
     secretsStore:
+      # -- Enable the secrets store
       enabled: true
+      # -- Backend type. Options: sql, aws, gcp, azure, hashicorp, custom
       type: sql
 
       sql:
-        # Encryption key for secrets stored in the SQL database. Set this to
+        # -- Encryption key for secrets stored in the SQL database. Set this to
         # a random 32+ character hex string. If not set, secrets are stored
         # unencrypted.
         #
@@ -85,44 +104,85 @@ kitaru:
         # all stored secrets.
         encryptionKey:
 
-    # Extra environment variables to set on the server container.
+      # -- AWS Secrets Manager settings (when type: aws)
+      # aws:
+      #   region_name: us-east-1
+      #   aws_access_key_id: ""
+      #   aws_secret_access_key: ""
+
+      # -- GCP Secrets Manager settings (when type: gcp)
+      # gcp:
+      #   project_id: my-project
+
+      # -- Azure Key Vault settings (when type: azure)
+      # azure:
+      #   key_vault_name: my-vault
+
+    # -- Extra environment variables to set on the server container.
+    # Use this to pass additional configuration flags.
+    # Example:
+    #   KITARU_LOGGING_VERBOSITY: INFO
     environment: {}
 
-    # Extra secret environment variables. These are stored in a Kubernetes
-    # Secret and mounted as env vars.
+    # -- Extra secret environment variables. These are stored in a Kubernetes
+    # Secret and mounted as env vars. Use for sensitive values that should not
+    # appear in plain-text ConfigMaps.
     secretEnvironment: {}
 
+    # -- Service configuration
     service:
+      # -- Kubernetes service type (ClusterIP, NodePort, LoadBalancer)
       type: ClusterIP
+      # -- Service port
       port: 80
+      # -- Additional service annotations
       annotations: {}
 
+    # -- Ingress configuration
     ingress:
+      # -- Enable Ingress resource creation
       enabled: false
+      # -- Ingress class name
       className: "nginx"
+      # -- Additional ingress annotations
+      # Example annotations for cert-manager + nginx:
+      #   nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      #   cert-manager.io/cluster-issuer: "letsencrypt"
       annotations: {}
-        # nginx.ingress.kubernetes.io/ssl-redirect: "true"
-        # cert-manager.io/cluster-issuer: "letsencrypt"
+      # -- Hostname for the Ingress rule
       host:
+      # -- Path prefix
       path: /
+      # -- TLS settings
       tls:
+        # -- Enable TLS on the Ingress
         enabled: false
+        # -- Name of the Kubernetes Secret containing TLS certificate
         secretName: kitaru-tls-certs
 
+  # -- Service account configuration
   serviceAccount:
+    # -- Create a service account
     create: true
+    # -- Additional service account annotations (useful for IAM roles)
     annotations: {}
+    # -- Override the service account name. If not set, a name is generated
+    # using the release name.
     name: ""
 
+  # -- Additional pod annotations
   podAnnotations: {}
 
+  # -- Pod security context
   podSecurityContext:
     fsGroup: 1000
 
+  # -- Container security context
   securityContext:
     runAsNonRoot: true
     runAsUser: 1000
 
+  # -- CPU/memory resource requests and limits
   resources: {}
     # requests:
     #   cpu: 250m
@@ -131,15 +191,24 @@ kitaru:
     #   cpu: "1"
     #   memory: 2Gi
 
+  # -- Horizontal Pod Autoscaler configuration
   autoscaling:
+    # -- Enable HPA
     enabled: false
+    # -- Minimum number of replicas
     minReplicas: 1
+    # -- Maximum number of replicas
     maxReplicas: 5
+    # -- Target CPU utilization percentage
     targetCPUUtilizationPercentage: 80
+    # -- Target memory utilization percentage (uncomment to enable)
     # targetMemoryUtilizationPercentage: 80
 
+  # -- Node selector for pod scheduling
   nodeSelector: {}
 
+  # -- Tolerations for pod scheduling
   tolerations: []
 
+  # -- Affinity rules for pod scheduling
   affinity: {}

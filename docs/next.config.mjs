@@ -5,6 +5,7 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
   basePath: '/docs',
+  trailingSlash: true,
   serverExternalPackages: ['@takumi-rs/image-response'],
   output: 'export',
   images: { unoptimized: true },
