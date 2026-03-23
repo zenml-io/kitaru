@@ -109,6 +109,27 @@ jobs:
       - name: Stop server container
         if: always()
         run: docker rm -f kitaru-ci-server || true
+  wheel-packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.12'
+      - name: Download Kitaru UI
+        run: bash scripts/download-ui.sh
+      - name: Build wheel
+        run: uv build --wheel
+      - name: Verify Kitaru UI in wheel
+        run: |
+          set -euo pipefail
+          WHEEL=$(ls dist/*.whl)
+          python -m zipfile -l "$WHEEL" | grep -q "kitaru/_ui/dist/index.html" \
+            || { echo "::error::Kitaru UI index.html missing from wheel"; exit 1; }
+          python -m zipfile -l "$WHEEL" | grep -q "kitaru/_ui/bundle_manifest.json" \
+            || { echo "::error::Bundle manifest missing from wheel"; exit 1; }
+          UI_FILES=$(python -m zipfile -l "$WHEEL" | grep -c "kitaru/_ui/dist/")
+          echo "Kitaru UI verified: $UI_FILES asset files in $WHEEL"
   test:
     runs-on: ubuntu-latest
     strategy:

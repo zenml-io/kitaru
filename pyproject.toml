@@ -51,6 +51,12 @@ Repository = "https://github.com/zenml-io/kitaru"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+artifacts = [
+    "src/kitaru/_ui/dist/**",
+    "src/kitaru/_ui/bundle_manifest.json",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/kitaru", "src/kitaru_init_hook"]
 
