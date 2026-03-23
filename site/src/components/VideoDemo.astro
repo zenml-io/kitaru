@@ -91,11 +91,13 @@
     letter-spacing: 0.01em;
   }
 
-  /* YouTube iframe fills the container once loaded */
+  /* YouTube iframe fills the container once loaded; scaled wider to crop pillarbox bars */
   .video-container iframe {
     position: absolute;
-    inset: 0;
-    width: 100%;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 114%;
     height: 100%;
     border: none;
   }
@@ -143,14 +145,13 @@
   function launchVideo() {
     if (hasLaunched || !container || !placeholder) return;
     hasLaunched = true;
-    // TODO: Replace with Kitaru demo video ID before launch
-    const videoId = 'wEVwIkDvUPs';
+    const videoId = 'javCy_e3iwQ';
     const iframe = document.createElement('iframe');
     iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
     iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
     iframe.allowFullscreen = true;
     iframe.title = 'Kitaru demo video';
-    iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:none;';
+    iframe.style.cssText = 'position:absolute;top:0;left:50%;transform:translateX(-50%);width:114%;height:100%;border:none;';
     placeholder.remove();
     container.appendChild(iframe);
   }
