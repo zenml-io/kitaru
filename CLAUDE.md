@@ -209,6 +209,8 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
 | `KitaruClient.executions.replay()` | Implemented |
 | `kitaru init` (project initialization, creates `.kitaru/`) | Implemented |
+| `kitaru clean` (`project` / `global` / `all` — reset Kitaru state with dry-run, backup, and model registry protection) | Implemented |
+| Enhanced `kitaru info` (`--all`, `--all-packages`, `--packages`, `--file` — config provenance, connection sources, system info) | Implemented |
 
 ### Key design patterns
 

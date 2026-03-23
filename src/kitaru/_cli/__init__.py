@@ -33,12 +33,17 @@ executions_app = cyclopts.App(
     name="executions",
     help="Inspect and manage flow executions.",
 )
+clean_app = cyclopts.App(
+    name="clean",
+    help="Reset Kitaru state.",
+)
 
 app.command(log_store_app)
 app.command(stack_app)
 app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
+app.command(clean_app)
 
 
 @app.default
@@ -47,11 +52,20 @@ def main() -> None:
     app.help_print()
 
 
-from . import _executions, _init, _models, _secrets, _stacks, _status  # noqa: F401,E402
+from . import (  # noqa: F401,E402
+    _clean,
+    _executions,
+    _init,
+    _models,
+    _secrets,
+    _stacks,
+    _status,
+)
 
 __all__ = [
     "_UNKNOWN_VERSION",
     "app",
+    "clean_app",
     "executions_app",
     "log_store_app",
     "main",

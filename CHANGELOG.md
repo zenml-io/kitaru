@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `kitaru clean` command group with `project`, `global`, and `all` subcommands for resetting Kitaru state (with `--dry-run`, `--force`, `--yes` flags, auto-backup, model registry protection, and local server teardown)
+- Enhanced `kitaru info` with new flags (`--all`, `--all-packages`, `--packages`, `--file`) and multi-section output including config provenance, connection source breakdown, system info, ZenML version, and package inventory
+- `kitaru info --file` exports diagnostics to JSON or YAML with auto-masked sensitive values
+
 ## [0.2.1] - 2026-03-23
 
 ## [0.2.0] - 2026-03-20

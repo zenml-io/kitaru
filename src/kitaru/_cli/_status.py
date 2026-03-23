@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
@@ -291,9 +293,10 @@ def _status_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
 
 
 def _info_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
-    """Build the label/value pairs for the detailed info view."""
+    """Build the label/value pairs for the detailed info overview section."""
     rows = [
         ("SDK version", snapshot.sdk_version),
+        ("ZenML version", snapshot.zenml_version or "unavailable"),
         ("Connection", snapshot.connection),
         ("Connection target", snapshot.connection_target),
         ("Server URL", snapshot.server_url or "not connected"),
@@ -301,14 +304,99 @@ def _info_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
         ("Server database", snapshot.server_database or "unavailable"),
         ("Server deployment", snapshot.server_deployment_type or "unavailable"),
         ("Active user", snapshot.active_user or "unavailable"),
-        ("Active stack", snapshot.active_stack or "unavailable"),
-        ("Repository root", snapshot.repository_root or "not set"),
-        ("Config directory", snapshot.config_directory),
-        ("Local server", snapshot.local_server_status or "not started"),
     ]
+    if snapshot.active_project:
+        rows.append(("Active project", snapshot.active_project))
+    rows.extend(
+        [
+            ("Active stack", snapshot.active_stack or "unavailable"),
+            ("Repository root", snapshot.repository_root or "not set"),
+            ("Config directory", snapshot.config_directory),
+            ("Local server", snapshot.local_server_status or "not started"),
+        ]
+    )
+    if snapshot.log_store_status:
+        rows.append(("Log store", snapshot.log_store_status))
     if snapshot.project_override:
-        rows.append(("Project override", snapshot.project_override))
+        source = ""
+        if snapshot.connection_sources and "project" in snapshot.connection_sources:
+            source = f" ({snapshot.connection_sources['project']})"
+        rows.append(("Project override", f"{snapshot.project_override}{source}"))
     return rows
+
+
+def _config_provenance_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
+    """Build label/value rows for the config provenance section."""
+    rows: list[tuple[str, str]] = []
+    if snapshot.kitaru_global_config_path:
+        rows.append(("Kitaru global config", snapshot.kitaru_global_config_path))
+    if snapshot.zenml_global_config_path:
+        rows.append(("ZenML global config", snapshot.zenml_global_config_path))
+    if snapshot.local_stores_path:
+        rows.append(("Local stores", snapshot.local_stores_path))
+    if snapshot.repository_config_path:
+        rows.append(("Repository config", snapshot.repository_config_path))
+    return rows
+
+
+def _connection_source_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
+    """Build label/value rows for the connection source section."""
+    if not snapshot.connection_sources:
+        return []
+    return [(key, value) for key, value in snapshot.connection_sources.items()]
+
+
+def _system_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
+    """Build label/value rows for the system info section."""
+    rows: list[tuple[str, str]] = []
+    if snapshot.python_version:
+        rows.append(("Python version", snapshot.python_version))
+    if snapshot.system_info:
+        if "os" in snapshot.system_info:
+            rows.append(("OS", snapshot.system_info["os"]))
+        if "architecture" in snapshot.system_info:
+            rows.append(("Architecture", snapshot.system_info["architecture"]))
+    if snapshot.environment_type:
+        rows.append(("Environment type", snapshot.environment_type))
+    return rows
+
+
+def _package_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
+    """Build label/value rows for the packages section."""
+    if not snapshot.packages:
+        return []
+    return [(name, version) for name, version in snapshot.packages.items()]
+
+
+def _build_info_sections(snapshot: RuntimeSnapshot) -> list[SnapshotSection]:
+    """Build multi-section layout for the info command."""
+    sections = [SnapshotSection(title=None, rows=_info_rows(snapshot))]
+
+    provenance = _config_provenance_rows(snapshot)
+    if provenance:
+        sections.append(SnapshotSection(title="Config provenance", rows=provenance))
+
+    conn_sources = _connection_source_rows(snapshot)
+    if conn_sources:
+        sections.append(SnapshotSection(title="Connection source", rows=conn_sources))
+
+    if snapshot.environment:
+        sections.append(
+            SnapshotSection(
+                title="Environment",
+                rows=_environment_rows(snapshot.environment),
+            )
+        )
+
+    sys_rows = _system_rows(snapshot)
+    if sys_rows:
+        sections.append(SnapshotSection(title="System", rows=sys_rows))
+
+    pkg_rows = _package_rows(snapshot)
+    if pkg_rows:
+        sections.append(SnapshotSection(title="Packages", rows=pkg_rows))
+
+    return sections
 
 
 def _log_store_rows(snapshot: ResolvedLogStore) -> list[tuple[str, str]]:
@@ -721,21 +809,102 @@ def status(output: OutputFormatOption = "text") -> None:
     )
 
 
+def _write_info_file(
+    snapshot: RuntimeSnapshot,
+    file_path: str,
+) -> None:
+    """Write serialized snapshot to a file, inferring format from extension."""
+    path = Path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = serialize_runtime_snapshot(snapshot)
+    suffix = path.suffix.lower()
+
+    if suffix in (".yaml", ".yml"):
+        try:
+            from zenml.utils import yaml_utils
+
+            yaml_utils.write_yaml(str(path), data)
+        except ImportError:
+            import yaml  # type: ignore[import-untyped]
+
+            with open(path, "w") as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    else:
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+
+
 @app.command
-def info(output: OutputFormatOption = "text") -> None:
+def info(
+    *,
+    all: Annotated[
+        bool,
+        Parameter(
+            alias=["-a"],
+            help="Full diagnostic: include all packages and environment type.",
+        ),
+    ] = False,
+    all_packages: Annotated[
+        bool,
+        Parameter(help="Include all installed package versions."),
+    ] = False,
+    packages: Annotated[
+        tuple[str, ...],
+        Parameter(
+            alias=["-p"],
+            help="Include specific package versions (repeatable).",
+        ),
+    ] = (),
+    file: Annotated[
+        str | None,
+        Parameter(
+            alias=["-f"],
+            help="Export diagnostics to file (format from extension: .json, .yaml).",
+        ),
+    ] = None,
+    output: OutputFormatOption = "text",
+) -> None:
     """Show detailed environment information for the current setup."""
     output_format = _resolve_output_format(output)
-    snapshot = _facade_module()._build_runtime_snapshot()
+    command = "info"
+
+    include_packages = all or all_packages
+    package_names = None if include_packages else (list(packages) if packages else None)
+    include_environment_type = all
+
+    snapshot = _facade_module()._build_runtime_snapshot(
+        include_packages=include_packages,
+        package_names=package_names,
+        include_environment_type=include_environment_type,
+    )
+
+    if file is not None:
+        _write_info_file(snapshot, file)
+        if output_format == CLIOutputFormat.JSON:
+            file_format = (
+                "yaml" if Path(file).suffix.lower() in (".yaml", ".yml") else "json"
+            )
+            _emit_json_item(
+                command,
+                {"file": file, "format": file_format},
+                output=output_format,
+            )
+            return
+        _print_success(f"Diagnostics written to {file}")
+        return
+
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
-            "info",
+            command,
             serialize_runtime_snapshot(snapshot),
             output=output_format,
         )
         return
 
-    _emit_snapshot(
+    sections = _build_info_sections(snapshot)
+    _emit_snapshot_sections(
         "Kitaru info",
-        _info_rows(snapshot),
+        sections,
         _combine_warnings(snapshot.warning, snapshot.log_store_warning),
     )
