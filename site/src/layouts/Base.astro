@@ -4,11 +4,15 @@ import '../styles/global.css';
 interface Props {
   title?: string;
   description?: string;
+  ogImage?: string;
 }
 
+const DEFAULT_OG_IMAGE = 'https://assets.kitaru.ai/content/site/dee725d9/kitaru-og.png';
+
 const {
-  title = 'Kitaru — Durable Agent Infrastructure for Python',
-  description = 'One decorator gives you crash recovery, cost tracking, replay, and artifact comparison — without switching frameworks.'
+  title = 'Kitaru | Durable Agent Infrastructure for Python',
+  description = 'Open-source durable execution for Python agents. Checkpoint, replay, and deploy on any cloud — without rewriting your code.',
+  ogImage = DEFAULT_OG_IMAGE,
 } = Astro.props;
 ---
 
@@ -18,6 +22,7 @@ const {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="theme-color" content="#f8f6f3" />
   <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href} />
   <title>{title}</title>
   <meta name="description" content={description} />
@@ -25,18 +30,29 @@ const {
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
   <meta property="og:type" content="website" />
-  <meta property="og:image" content="https://kitaru.ai/og-image.png" />
+  <meta property="og:url" content={new URL(Astro.url.pathname, Astro.site).href} />
+  <meta property="og:image" content={ogImage} />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <slot name="head" />
+  <noscript><style>
+    [data-reveal], .feature-card, .why-card { opacity: 1 !important; transform: none !important; position: relative !important; top: auto !important; }
+  </style></noscript>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="preload"
+    as="style"
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap"
+  />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap"
     rel="stylesheet"
+    media="print"
+    onload="this.media='all'"
   />
 
   <script type="application/ld+json">
@@ -45,7 +61,7 @@ const {
     "@type": "Organization",
     "name": "Kitaru",
     "url": "https://kitaru.ai",
-    "description": "Durable agent infrastructure for Python. Run agents reliably with cost tracking, replay, and artifact comparison built in."
+    "description": "Open-source durable execution for Python agents. Checkpoint, replay, and deploy on any cloud — without rewriting your code."
   }
   </script>
   <!-- Plausible Analytics -->
@@ -66,5 +82,17 @@ const {
   <a href="#main-content" class="skip-link">Skip to content</a>
   <slot />
   <script src="../scripts/scroll-reveal.ts"></script>
+  <script is:inline>
+    console.log(
+      '%c@flow %c— durable execution for Python agents',
+      'color: #F17829; font-weight: bold; font-size: 14px;',
+      'color: inherit; font-size: 14px;'
+    );
+    console.log(
+      '%cpip install kitaru %c· https://github.com/zenml-io/kitaru',
+      'color: #F17829; font-family: monospace;',
+      'color: gray;'
+    );
+  </script>
 </body>
 </html>

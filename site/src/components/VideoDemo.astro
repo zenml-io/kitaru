@@ -1,0 +1,163 @@
+---
+// VideoDemo.astro — Dark video section with YouTube embed on play
+---
+
+<section class="dark-section video-section" id="demo">
+  <div class="video-wrapper" data-reveal>
+    <div class="video-container" id="videoContainer">
+      <div class="video-placeholder" id="videoPlaceholder">
+        <button class="video-play-btn" id="videoPlayBtn" aria-label="Watch the demo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M8 5.14v13.72a1 1 0 001.5.86l11.04-6.86a1 1 0 000-1.72L9.5 4.28a1 1 0 00-1.5.86z" fill="#fff"/>
+          </svg>
+        </button>
+        <span class="video-label">Watch the demo</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .video-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 80px clamp(24px, 5vw, 80px);
+  }
+
+  .video-wrapper {
+    width: 100%;
+    max-width: 900px;
+  }
+
+  .video-container {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    box-shadow:
+      0 4px 24px oklch(0 0 0 / 0.3),
+      0 0 0 1px oklch(1 0 0 / 0.06);
+  }
+
+  .video-placeholder {
+    width: 100%;
+    height: 100%;
+    background-color: oklch(0.16 0.015 60);
+    background-image:
+      linear-gradient(oklch(1 0 0 / 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(1 0 0 / 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .video-play-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 2px solid var(--color-accent);
+    background: oklch(0.65 0.16 45 / 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s;
+    animation: shimmer 3s ease-in-out infinite;
+  }
+
+  .video-play-btn:hover {
+    transform: scale(1.1);
+    background: oklch(0.65 0.16 45 / 0.2);
+  }
+
+  .video-play-btn:active {
+    transform: scale(0.95);
+  }
+
+  .video-play-btn svg {
+    margin-left: 0;
+  }
+
+  .video-label {
+    font-size: 0.82rem;
+    color: oklch(0.91 0.008 65 / 0.45);
+    letter-spacing: 0.01em;
+  }
+
+  /* YouTube iframe fills the container once loaded; scaled wider to crop pillarbox bars */
+  .video-container iframe {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 114%;
+    height: 100%;
+    border: none;
+  }
+
+  @media (max-width: 768px) {
+    .video-section {
+      padding: 60px 20px;
+    }
+
+    .video-play-btn {
+      width: 56px;
+      height: 56px;
+    }
+
+    .video-play-btn svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .video-label {
+      font-size: 0.75rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .video-section {
+      padding: 48px 16px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .video-play-btn {
+      animation: none;
+    }
+  }
+</style>
+
+<script>
+  const container = document.getElementById('videoContainer');
+  const placeholder = document.getElementById('videoPlaceholder');
+  const playBtn = document.getElementById('videoPlayBtn');
+
+  let hasLaunched = false;
+
+  function launchVideo() {
+    if (hasLaunched || !container || !placeholder) return;
+    hasLaunched = true;
+    const videoId = 'javCy_e3iwQ';
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
+    iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+    iframe.allowFullscreen = true;
+    iframe.title = 'Kitaru demo video';
+    iframe.style.cssText = 'position:absolute;top:0;left:50%;transform:translateX(-50%);width:114%;height:100%;border:none;';
+    placeholder.style.display = 'none';
+    container.appendChild(iframe);
+    iframe.onload = () => placeholder.remove();
+    iframe.onerror = () => { placeholder.style.display = ''; hasLaunched = false; };
+  }
+
+  playBtn?.addEventListener('click', launchVideo);
+  placeholder?.addEventListener('click', launchVideo);
+</script>

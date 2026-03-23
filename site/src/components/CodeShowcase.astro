@@ -1,0 +1,301 @@
+---
+// CodeShowcase.astro — "Show me the code" section with all 8 primitives + hover highlight
+---
+
+<section class="dark-section section-pad" id="code-showcase">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>SEE THE CODE</span>
+    <h2 class="section-title showcase-title" data-reveal data-reveal-delay="1">
+      Eight primitives. Full durability.
+    </h2>
+
+    <div class="showcase-grid">
+
+      <!-- Left: code window -->
+      <div class="showcase-code" data-reveal="fade-left" data-reveal-delay="2">
+        <div class="showcase-code-window">
+          <div class="showcase-code-header">
+            <div class="showcase-code-dots">
+              <span class="code-dot"></span>
+              <span class="code-dot"></span>
+              <span class="code-dot"></span>
+            </div>
+            <span class="showcase-code-filename">agent.py</span>
+          </div>
+          <pre class="showcase-code-pre code-syntax" aria-label="Example Kitaru agent code"><code><span class="code-line"><span class="kw">import</span> kitaru</span>
+<span class="code-line"><span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="configure">kitaru.<span class="fn">configure</span>(stack<span class="op">=</span><span class="str">"kubernetes"</span>)</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
+<span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">research</span>(topic: <span class="var">str</span>) <span class="op">-></span> <span class="var">dict</span>:</span>
+<span class="code-line" data-primitive="checkpoint">    results <span class="op">=</span> <span class="fn">search_web</span>(topic)</span>
+<span class="code-line" data-primitive="save">    kitaru.<span class="fn">save</span>(<span class="str">"sources"</span>, results)</span>
+<span class="code-line" data-primitive="checkpoint">    <span class="kw">return</span> <span class="fn">summarize</span>(results)</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="checkpoint"><span class="dec">@checkpoint</span></span>
+<span class="code-line" data-primitive="checkpoint"><span class="kw">def</span> <span class="fn">write_draft</span>(context: <span class="var">str</span>, prev_id: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:</span>
+<span class="code-line" data-primitive="load">    prior <span class="op">=</span> kitaru.<span class="fn">load</span>(prev_id, <span class="str">"sources"</span>)</span>
+<span class="code-line" data-primitive="llm">    <span class="kw">return</span> kitaru.<span class="fn">llm</span>(</span>
+<span class="code-line" data-primitive="llm">        <span class="str">"Draft a report on: "</span> <span class="op">+</span> context,</span>
+<span class="code-line" data-primitive="llm">        model<span class="op">=</span><span class="str">"gpt-4o"</span>,</span>
+<span class="code-line" data-primitive="llm">    )</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="flow"><span class="dec">@flow</span></span>
+<span class="code-line" data-primitive="flow"><span class="kw">def</span> <span class="fn">report_agent</span>(topic: <span class="var">str</span>, prev_id: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:</span>
+<span class="code-line">    data <span class="op">=</span> <span class="fn">research</span>(topic)</span>
+<span class="code-line">    draft <span class="op">=</span> <span class="fn">write_draft</span>(<span class="fn">str</span>(data), prev_id)</span>
+<span class="code-line" data-primitive="log">    kitaru.<span class="fn">log</span>(topic<span class="op">=</span>topic, words<span class="op">=</span><span class="fn">len</span>(draft.<span class="fn">split</span>()))</span>
+<span class="code-line"> </span>
+<span class="code-line" data-primitive="wait">    approved <span class="op">=</span> kitaru.<span class="fn">wait</span>(</span>
+<span class="code-line" data-primitive="wait">        schema<span class="op">=</span><span class="var">bool</span>, question<span class="op">=</span><span class="str">"Publish?"</span></span>
+<span class="code-line" data-primitive="wait">    )</span>
+<span class="code-line">    <span class="kw">if</span> approved:</span>
+<span class="code-line">        <span class="fn">publish</span>(draft)</span>
+<span class="code-line">    <span class="kw">return</span> draft</span></code></pre>
+        </div>
+      </div>
+
+      <!-- Right: annotation callouts -->
+      <div class="showcase-annotations" data-reveal="fade-right" data-reveal-delay="3">
+        <div class="annotation" data-highlight="flow">
+          <code class="annotation-label">@flow</code>
+          <p>Top-level orchestration boundary. Marks a function as a durable workflow.</p>
+        </div>
+        <div class="annotation" data-highlight="checkpoint">
+          <code class="annotation-label">@checkpoint</code>
+          <p>Persists output. Crash at step 3? Steps 1-2 never re-run.</p>
+        </div>
+        <div class="annotation" data-highlight="wait">
+          <code class="annotation-label">kitaru.wait()</code>
+          <p>Suspends the process. Resume when a human responds, 30s or 3 days later.</p>
+        </div>
+        <div class="annotation" data-highlight="llm">
+          <code class="annotation-label">kitaru.llm()</code>
+          <p>Resolves model alias, injects API key, logs cost automatically.</p>
+        </div>
+        <div class="annotation" data-highlight="log">
+          <code class="annotation-label">kitaru.log()</code>
+          <p>Structured metadata on every execution. Query it in the dashboard.</p>
+        </div>
+        <div class="annotation" data-highlight="save">
+          <code class="annotation-label">kitaru.save()</code>
+          <p>Persist any artifact by name inside a checkpoint.</p>
+        </div>
+        <div class="annotation" data-highlight="load">
+          <code class="annotation-label">kitaru.load()</code>
+          <p>Retrieve saved artifacts from any prior execution by ID.</p>
+        </div>
+        <div class="annotation" data-highlight="configure">
+          <code class="annotation-label">kitaru.configure()</code>
+          <p>Set stack, project, and runtime defaults. Zero config locally.</p>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+<style>
+  .showcase-title {
+    color: var(--color-dark-text);
+  }
+
+  .showcase-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 40px;
+    align-items: start;
+    margin-top: 40px;
+  }
+
+  /* Code window — reuses Architecture patterns */
+  .showcase-code-window {
+    background: oklch(0.16 0.015 60);
+    border: 1px solid oklch(1 0 0 / 0.08);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .showcase-code-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid oklch(1 0 0 / 0.06);
+  }
+
+  .showcase-code-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .showcase-code-filename {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: oklch(1 0 0 / 0.35);
+  }
+
+  .showcase-code-pre {
+    padding: 20px;
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.7;
+    color: var(--color-dark-text);
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Highlight lines */
+  .code-line {
+    transition: background 0.2s, opacity 0.2s;
+    border-radius: 3px;
+    padding: 0 4px;
+    margin: 0 -4px;
+  }
+
+  .code-line[data-primitive] {
+    cursor: default;
+  }
+
+  .code-line.highlighted {
+    background: oklch(0.65 0.16 45 / 0.12);
+  }
+
+  /* Dim non-highlighted lines when any highlight is active */
+  .showcase-code-pre.has-highlight .code-line:not(.highlighted) {
+    opacity: 0.35;
+  }
+
+  .showcase-code-pre.has-highlight .code-line.highlighted {
+    opacity: 1;
+  }
+
+  /* Dim non-active annotations when a highlight is active */
+  .showcase-annotations.has-highlight .annotation:not(.active) {
+    opacity: 0.4;
+  }
+
+  .showcase-annotations.has-highlight .annotation.active {
+    opacity: 1;
+  }
+
+  /* Annotations */
+  .showcase-annotations {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 16px;
+  }
+
+  .annotation {
+    padding: 14px 18px;
+    border-radius: 10px;
+    border: 1px solid oklch(1 0 0 / 0.08);
+    background: oklch(1 0 0 / 0.03);
+    cursor: default;
+    transition: border-color 0.2s, background 0.2s, opacity 0.2s;
+  }
+
+  .annotation:hover,
+  .annotation.active {
+    border-color: oklch(0.65 0.16 45 / 0.3);
+    background: oklch(0.65 0.16 45 / 0.06);
+  }
+
+  .annotation-label {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    margin-bottom: 4px;
+  }
+
+  .annotation p {
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: oklch(1 0 0 / 0.55);
+    margin: 0;
+  }
+
+  @media (max-width: 768px) {
+    .showcase-grid {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    .showcase-code-window::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 32px;
+      background: linear-gradient(90deg, transparent, oklch(0.16 0.015 60));
+      pointer-events: none;
+      border-radius: 0 12px 12px 0;
+    }
+
+    .showcase-code {
+      position: relative;
+    }
+
+    .showcase-code-pre {
+      font-size: 0.72rem;
+    }
+  }
+</style>
+
+<script>
+  const section = document.getElementById('code-showcase');
+  if (section) {
+    const annotations = section.querySelectorAll<HTMLElement>('.annotation');
+    const codeBlock = section.querySelector<HTMLElement>('.showcase-code-pre');
+    const annContainer = section.querySelector<HTMLElement>('.showcase-annotations');
+    if (codeBlock && annContainer) {
+      // Build lookup maps
+      const annByPrimitive = new Map<string, HTMLElement>();
+      annotations.forEach(ann => {
+        const p = ann.dataset.highlight;
+        if (p) annByPrimitive.set(p, ann);
+      });
+
+      function activate(primitive: string) {
+        codeBlock!.classList.add('has-highlight');
+        annContainer!.classList.add('has-highlight');
+        const ann = annByPrimitive.get(primitive);
+        if (ann) ann.classList.add('active');
+        codeBlock!.querySelectorAll<HTMLElement>(`.code-line[data-primitive="${primitive}"]`)
+          .forEach(l => l.classList.add('highlighted'));
+      }
+
+      function deactivate(primitive: string) {
+        codeBlock!.classList.remove('has-highlight');
+        annContainer!.classList.remove('has-highlight');
+        const ann = annByPrimitive.get(primitive);
+        if (ann) ann.classList.remove('active');
+        codeBlock!.querySelectorAll<HTMLElement>(`.code-line[data-primitive="${primitive}"]`)
+          .forEach(l => l.classList.remove('highlighted'));
+      }
+
+      // Annotation hover → highlight code lines
+      annotations.forEach(ann => {
+        const primitive = ann.dataset.highlight;
+        if (!primitive) return;
+        ann.addEventListener('mouseenter', () => activate(primitive));
+        ann.addEventListener('mouseleave', () => deactivate(primitive));
+      });
+
+      // Code line hover → highlight annotation
+      codeBlock.querySelectorAll<HTMLElement>('.code-line[data-primitive]').forEach(line => {
+        const primitive = line.dataset.primitive;
+        if (!primitive) return;
+        line.addEventListener('mouseenter', () => activate(primitive));
+        line.addEventListener('mouseleave', () => deactivate(primitive));
+      });
+    }
+  }
+</script>

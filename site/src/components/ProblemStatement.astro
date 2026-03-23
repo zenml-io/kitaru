@@ -1,0 +1,89 @@
+---
+// ProblemStatement.astro — "Why now" narrative between Hero and code showcase
+---
+
+<section class="section-pad problem-section">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>THE PROBLEM</span>
+    <h2 class="section-title problem-headline" data-reveal data-reveal-delay="1">
+      Your agents work. But they're trapped.
+    </h2>
+
+    <div class="problem-grid">
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="2">
+        <div class="card-glow"></div>
+        <div class="why-card-image">
+          <img src="https://assets.kitaru.ai/content/site/ffb15262/k-prob-1.avif" alt="Agents die when your laptop sleeps" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+        </div>
+        <div class="why-card-content">
+          <h3>They die when your laptop sleeps</h3>
+          <p>One crash, one timeout, or one closed lid and hours of LLM calls vanish. You start over from scratch.</p>
+        </div>
+      </div>
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="3">
+        <div class="card-glow"></div>
+        <div class="why-card-image">
+          <img src="https://assets.kitaru.ai/content/site/733ddc89/k-prob-2.avif" alt="Agents can't coordinate" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+        </div>
+        <div class="why-card-content">
+          <h3>They can't coordinate with other agents</h3>
+          <p>No pause, no resume, no human-in-the-loop. Every agent is a fire-and-forget black box.</p>
+        </div>
+      </div>
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="4">
+        <div class="card-glow"></div>
+        <div class="why-card-image">
+          <img src="https://assets.kitaru.ai/content/site/34944ab3/k-prob-3.avif" alt="Results vanish when agents crash" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+        </div>
+        <div class="why-card-content">
+          <h3>Their intermediate results vanish when they crash</h3>
+          <p>No checkpoints, no artifacts, no audit trail. When something goes wrong you have nothing to debug.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <p class="problem-conclusion" data-reveal data-reveal-delay="5">
+      Kitaru moves your agents from your machine to your infrastructure.
+    </p>
+  </div>
+</section>
+
+<style>
+  .problem-section {
+    background: var(--color-bg);
+  }
+
+  .problem-headline {
+    max-width: 700px;
+  }
+
+  .problem-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 48px;
+  }
+
+  .problem-conclusion {
+    margin-top: 40px;
+    font-size: clamp(1rem, 1.8vw, 1.15rem);
+    font-weight: 500;
+    color: var(--color-primary);
+    letter-spacing: -0.01em;
+  }
+
+  @media (max-width: 768px) {
+    .problem-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  import { setupCardGlow } from '../scripts/card-glow';
+  setupCardGlow('.problem-section .why-card');
+</script>
