@@ -11,9 +11,9 @@ When running remotely, use the CLI to provide input and resume:
     kitaru executions resume <exec_id>
 """
 
-import kitaru
 from pydantic import BaseModel
 
+import kitaru
 from kitaru import checkpoint, flow
 from kitaru.runtime import _get_current_execution_id
 
@@ -53,10 +53,14 @@ def wait_for_approval_flow(topic: str) -> str:
         question=f"Approve publishing release notes for {topic}?",
         timeout=3600,  # Compute is released after 1 hour; resume via CLI later
         metadata={"topic": topic},
-    ) # if user approves flow continues, if not flow is suspended
+    )  # if user approves flow continues, if not flow is suspended
 
     print("\nTo approve remotely, run in another terminal:")
-    print(f'  kitaru executions input {exec_id} --wait release_details --value \'{{"notes": "Bug fixes", "major_version": 2}}\'')
+    example_value = '\'{"notes": "Bug fixes", "major_version": 2}\''
+    print(
+        f"  kitaru executions input {exec_id}"
+        f" --wait release_details --value {example_value}"
+    )
     print(f"  kitaru executions resume {exec_id}")
     print("(Use --value false to reject.)\n")
 
