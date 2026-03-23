@@ -30,8 +30,6 @@ jobs:
   release:
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' && '' || 'pypi' }}
-    outputs:
-      version: ${{ steps.version_out.outputs.version }}
     steps:
       # --- Determine version and trigger mode ---
       - name: Set version from dispatch
@@ -48,9 +46,6 @@ jobs:
             echo "::error::Invalid version format: $VERSION (expected semver like 1.2.3 or 1.2.3-rc.1)"
             exit 1
           fi
-      - name: Record version for downstream jobs
-        id: version_out
-        run: echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Set Kitaru UI tag
         run: |
           INPUT_TAG="${{ github.event.inputs.kitaru-ui-tag }}"
@@ -230,6 +225,46 @@ jobs:
             org.opencontainers.image.source=https://github.com/zenml-io/kitaru
             org.opencontainers.image.licenses=Apache-2.0
 
+      # --- Helm chart ---
+      - name: Install Helm
+        uses: azure/setup-helm@5119fcb9089d432beecbf79bb2c7915207344b78  # v3.5
+        with:
+          version: v3.9.2
+      - name: Set Chart.yaml version
+        run: |
+          sed -i "s/^version: .*/version: \"$VERSION\"/" helm/Chart.yaml
+          grep '^version' helm/Chart.yaml
+      # charts/ and Chart.lock are not in git; resolve from Chart.yaml and pull
+      # the ZenML subchart from OCI before lint/package.
+      - name: Helm dependency update
+        run: helm dependency update ./helm
+      - name: Helm lint
+        run: helm lint ./helm
+      - name: Configure AWS credentials (Helm / ECR)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        uses: aws-actions/configure-aws-credentials@5fd3084fc36e372ff1fff382a39b10d03659f355  # v2
+        with:
+          role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
+          aws-region: us-east-1
+      - name: Login to Amazon ECR Public (Helm)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2
+        with:
+          mask-password: 'true'
+          registry-type: public
+      - name: Package Helm chart
+        run: helm package ./helm
+      - name: Push Helm chart to Amazon ECR Public
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        env:
+          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+          REGISTRY_ALIAS: zenml
+          REPOSITORY: kitaru
+        run: |-
+          helm push "${REPOSITORY}-${VERSION}.tgz" \
+            "oci://${REGISTRY}/${REGISTRY_ALIAS}"
+
       # --- Dry-run summary ---
       - name: Dry-run summary
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
@@ -245,12 +280,8 @@ jobs:
             echo "Built (not pushed): zenmldocker/kitaru:$VERSION"
             echo "Kitaru UI tag: $KITARU_UI_TAG"
             echo ""
+            echo "### Helm chart"
+            echo "Built (not pushed): kitaru-${VERSION}.tgz"
+            echo ""
             echo "No changes were pushed, published, or tagged."
           } >> "$GITHUB_STEP_SUMMARY"
-  publish-helm-chart:
-    needs: release
-    uses: ./.github/workflows/publish_helm_chart.yml
-    secrets: inherit
-    with:
-      version: ${{ needs.release.outputs.version }}
-      dry_run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
