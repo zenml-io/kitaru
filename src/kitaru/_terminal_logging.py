@@ -185,6 +185,20 @@ _DROP_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^\[ZML\d+\]\("),  # structured ZenML warnings ("[ZML002](USAGE) - ...")
     re.compile(r"^Uploading external artifact to "),
     re.compile(r"^Finished uploading external artifact "),
+    # Server lifecycle noise — Kitaru CLI prints its own messages for these
+    re.compile(r"^Deploying a local \w+ ZenML server\.$"),
+    re.compile(r"^Connecting to the local \w+ ZenML server "),
+    re.compile(r"^Connected to the local \w+ ZenML server "),
+    # .+ (not \w+): message includes the URL which has special chars
+    re.compile(r"^Disconnecting from the local .+ ZenML server\.$"),
+    re.compile(r"^Tearing down the local \w+ ZenML server\.$"),
+    re.compile(r"^Shutting down the local \w+ ZenML server\.$"),
+    re.compile(r"^Updated the global store configuration\.$"),
+    # Migration housekeeping — internal ZenML plumbing
+    re.compile(r"^Migrating the ZenML global configuration "),
+    re.compile(r"^Backing up the database before migration "),
+    re.compile(r"^Database successfully backed up to "),
+    re.compile(r"^Successfully cleaned up database dump file "),
 ]
 
 
