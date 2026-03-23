@@ -10,7 +10,7 @@ export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
       title: (props) => (
-        <a {...props} href="/docs">
+        <a {...props} href="/">
           <span className="nav-title inline-flex items-center gap-2">
             <svg
               width="24"

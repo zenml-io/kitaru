@@ -6,11 +6,12 @@
  * with Python-specific React components.
  *
  * Usage:
- *   node docs/scripts/convert-sdk-docs.mjs [input.json] [output-dir] [--base-url /docs]
+ *   node docs/scripts/convert-sdk-docs.mjs [input.json] [output-dir] [--base-url URL]
  *
  * Defaults:
  *   input:  docs/.generated/sdk-api.json
  *   output: docs/content/docs/reference/python/
+ *   base-url: "" (app-relative; Next.js basePath adds /docs at build time)
  *
  * Must be run from docs/ directory (or with docs/node_modules visible).
  */
@@ -26,7 +27,7 @@ const docsRoot = resolve(__dirname, "..");
 
 const args = process.argv.slice(2);
 const baseUrlIdx = args.indexOf("--base-url");
-const baseUrl = baseUrlIdx !== -1 ? args[baseUrlIdx + 1] : "/docs";
+const baseUrl = baseUrlIdx !== -1 ? args[baseUrlIdx + 1] : "";
 
 // Filter out --base-url and its value from positional args
 const positional = args.filter(
@@ -50,9 +51,41 @@ if (!existsSync(inputPath)) {
 const raw = await readFile(inputPath, "utf-8");
 const mod = JSON.parse(raw);
 
-console.log(`Converting ${mod.name} API to MDX...`);
-const files = convert(mod, { baseUrl: `${baseUrl}/reference/python` });
+const rootModule = mod.name;
+if (!rootModule) {
+  console.error("Error: input model has no top-level module name.");
+  process.exit(1);
+}
+
+const normalizedBase = baseUrl.replace(/\/+$/, "");
+const apiPrefix = `${normalizedBase}/reference/python`;
+
+console.log(`Converting ${rootModule} API to MDX...`);
+const files = convert(mod, { baseUrl: apiPrefix });
 console.log(`Generated ${files.length} MDX file(s)`);
+
+// fumadocs-python's convert() includes the root module name in generated
+// href values (e.g. /reference/python/kitaru/client/KitaruClient), but
+// write() strips it from file paths.  Align hrefs with file paths.
+const badPrefix = `${apiPrefix}/${rootModule}/`;
+const goodPrefix = `${apiPrefix}/`;
+let totalReplacements = 0;
+for (const file of files) {
+  const before = file.content;
+  file.content = file.content.replaceAll(badPrefix, goodPrefix);
+  if (file.content !== before) totalReplacements++;
+}
+console.log(`Normalized root-module prefix in ${totalReplacements} file(s)`);
+
+// Sanity check: no generated href should still contain the root module segment
+for (const file of files) {
+  if (file.content.includes(badPrefix)) {
+    console.error(
+      `Error: ${file.path} still contains '${badPrefix}' after normalization.`,
+    );
+    process.exit(1);
+  }
+}
 
 // Flatten singleton module directories into flat files before writing.
 // This prevents redundant sidebar nesting (e.g. "artifacts" → "artifacts").

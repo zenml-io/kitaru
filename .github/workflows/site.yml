@@ -74,7 +74,8 @@ jobs:
       - name: Check internal links
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --offline --root-dir site/dist --no-progress --verbose 'site/dist/**/*.html'
+          args: --offline --root-dir site/dist --no-progress --verbose --index-files
+            index.html 'site/dist/**/*.html'
           fail: true
           jobSummary: true
 
