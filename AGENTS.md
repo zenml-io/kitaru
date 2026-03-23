@@ -46,11 +46,18 @@ Use `uv` for Python dependency management and `just` as the command stack.
 
 - `uv sync`: install and sync dependencies
 - `uv sync --extra local`: install with local ZenML runtime components
-- `just check`: run all checks (format, lint, typecheck, typos, yaml, links)
-- **Always run `just check` after finishing any chunk of implementation work, and fix every reported issue before pausing or handing work off.**
-- `just test`: run full test suite
+
+**Core dev loop — these three commands handle the vast majority of development needs:**
+
+| Command | What it does | When to run |
+|---|---|---|
+| **`just check`** | All checks: format, lint, typecheck, typos, yaml, links | After every chunk of work, before commit/push |
+| **`just fix`** | Auto-fixes formatting, lint issues, yaml | When `just check` reports fixable issues — resolves most linting problems automatically |
+| **`just test`** | Full pytest suite | After code changes, before commit/push |
+
+**Typical loop:** write code → `just fix` → `just check` → `just test` → commit.
+
 - `just test tests/test_file.py::test_name`: run one test
-- `just fix`: auto-fix formatting, lint issues, and yaml
 - `just lint`: lint only
 - `just typecheck`: type check only
 - `just typos`: typo check only
