@@ -1,3 +1,7 @@
+# iCloud conflict duplicates (pattern: "filename 2.ext" or "filename 2")
+*[[:space:]]2.[!.]*
+*[[:space:]]2
+
 # Helm dependency artifacts (rebuilt via helm dep update)
 helm/charts/
 helm/Chart.lock
@@ -244,6 +248,9 @@ docker/kitaru-ui-dist/
 .claude/*
 !.claude/settings.json
 !.claude/skills/
+
+# Playwright MCP
+.playwright-mcp/
 
 # Bundled Kitaru UI (generated at build time by scripts/download-ui.sh)
 src/kitaru/_ui/dist/

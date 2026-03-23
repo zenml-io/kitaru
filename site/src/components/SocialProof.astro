@@ -1,0 +1,265 @@
+---
+// SocialProof.astro — Editorial heritage proof with dramatic stats
+---
+
+<section id="social-proof" class="social-proof-section">
+  <div class="social-proof-inner">
+    <h2 class="sr-only">Why teams trust Kitaru</h2>
+
+    <!-- Top: eyebrow + company row -->
+    <div class="sp-header" data-reveal>
+      <span class="section-eyebrow">TRUSTED IN PRODUCTION</span>
+      <div class="sp-companies">
+        <a class="sp-company" href="https://www.zenml.io/case-study/jetbrains" target="_blank" rel="noopener">JetBrains</a>
+        <span class="sp-sep" aria-hidden="true"></span>
+        <a class="sp-company" href="https://www.zenml.io/case-study/adeo-leroy-merlin" target="_blank" rel="noopener">Adeo</a>
+        <span class="sp-sep" aria-hidden="true"></span>
+        <a class="sp-company" href="https://www.zenml.io/case-study/brevo" target="_blank" rel="noopener">Brevo</a>
+      </div>
+    </div>
+
+    <!-- Hero tagline -->
+    <p class="sp-tagline" data-reveal data-reveal-delay="1">
+      Built on the same ZenML infrastructure running production ML at scale for 5+&nbsp;years.
+    </p>
+
+    <!-- Stats grid — dramatic oversized numbers -->
+    <div class="sp-stats">
+      <div class="sp-stat" data-reveal="scale-up" data-reveal-delay="2">
+        <div class="sp-stat-accent" aria-hidden="true"></div>
+        <span class="sp-stat-number" data-count-to="5" data-suffix="+">5+</span>
+        <span class="sp-stat-unit">years</span>
+        <span class="sp-stat-desc">of production ML orchestration under the hood</span>
+      </div>
+
+      <div class="sp-stat" data-reveal="scale-up" data-reveal-delay="3">
+        <div class="sp-stat-accent" aria-hidden="true"></div>
+        <span class="sp-stat-number sp-stat-text">Apache 2.0</span>
+        <span class="sp-stat-unit">license</span>
+        <span class="sp-stat-desc">Fully open source. No paid tiers. No gotchas.</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<style>
+  .social-proof-section {
+    background: var(--color-accent-light);
+    padding: 120px 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Subtle warm gradient overlay for depth */
+  .social-proof-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -10%;
+    width: 60%;
+    height: 100%;
+    background: radial-gradient(ellipse at 70% 30%, oklch(0.65 0.16 45 / 0.04) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .social-proof-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 clamp(24px, 5vw, 80px);
+    position: relative;
+  }
+
+  /* ── Header: eyebrow + companies ── */
+  .sp-header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .sp-companies {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .sp-company {
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-primary);
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  .sp-company:hover {
+    opacity: 0.7;
+  }
+
+  .sp-sep {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    flex-shrink: 0;
+  }
+
+  /* ── Tagline ── */
+  .sp-tagline {
+    font-size: clamp(26px, 3.5vw, 42px);
+    font-weight: 600;
+    color: var(--color-primary);
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    margin: 0 0 56px;
+    max-width: 720px;
+  }
+
+  /* ── Stats grid ── */
+  .sp-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: oklch(0.15 0.02 60 / 0.08);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .sp-stat {
+    background: var(--color-surface);
+    padding: 40px 36px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  .sp-stat-accent {
+    position: absolute;
+    top: 0;
+    left: 36px;
+    right: 36px;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-accent), oklch(0.68 0.08 55));
+    border-radius: 0 0 2px 2px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .sp-stat:hover .sp-stat-accent {
+    opacity: 1;
+  }
+
+  .sp-stat-number {
+    font-size: clamp(56px, 7vw, 80px);
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: var(--color-primary);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sp-stat-text {
+    font-size: clamp(36px, 4.5vw, 52px);
+    letter-spacing: -0.03em;
+  }
+
+  .sp-stat-unit {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-top: 4px;
+    margin-bottom: 16px;
+  }
+
+  .sp-stat-desc {
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--color-secondary);
+    font-weight: 300;
+    max-width: 280px;
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    .social-proof-section {
+      padding: 80px 0;
+    }
+
+    .sp-header {
+      gap: 12px;
+    }
+
+    .sp-tagline {
+      font-size: 22px;
+      line-height: 1.25;
+      margin-bottom: 40px;
+    }
+
+    .sp-stats {
+      grid-template-columns: 1fr;
+    }
+
+    .sp-stat {
+      padding: 32px 28px;
+    }
+
+    .sp-stat-number {
+      font-size: 52px;
+    }
+
+    .sp-stat-text {
+      font-size: 32px;
+    }
+
+    .sp-stat-accent {
+      left: 28px;
+      right: 28px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .social-proof-section { padding: 60px 0; }
+    .sp-tagline { font-size: 19px; margin-bottom: 32px; }
+    .sp-stat { padding: 24px 20px; }
+    .sp-stat-number { font-size: 44px; }
+    .sp-stat-text { font-size: 28px; }
+    .sp-stat-accent { left: 20px; right: 20px; }
+  }
+</style>
+
+<script>
+  // Count-up animation for stat numbers
+  const counters = document.querySelectorAll<HTMLElement>('.sp-stat-number[data-count-to]');
+  if (counters.length && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const el = entry.target as HTMLElement;
+        const target = parseInt(el.dataset.countTo ?? '0', 10);
+        const suffix = el.dataset.suffix ?? '';
+        const duration = 1200;
+        const start = performance.now();
+
+        function tick(now: number) {
+          const elapsed = now - start;
+          const progress = Math.min(elapsed / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          const current = Math.round(eased * target);
+          el.textContent = current + suffix;
+          if (progress < 1) requestAnimationFrame(tick);
+        }
+
+        requestAnimationFrame(tick);
+        observer.unobserve(el);
+      });
+    }, { threshold: 0.5 });
+
+    counters.forEach(el => observer.observe(el));
+  }
+</script>
