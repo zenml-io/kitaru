@@ -249,3 +249,5 @@ docker/kitaru-ui-dist/
 .codex/*
 !.codex/skills/
 AGENTS.override.md
+
+src/kitaru/_ui/

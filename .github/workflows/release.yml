@@ -123,6 +123,8 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: uv sync --frozen --extra mcp
+      - name: Download Kitaru UI
+        run: bash scripts/download-ui.sh
       - name: Check typos
         uses: crate-ci/typos@v1
       - name: Lint
