@@ -26,7 +26,7 @@ python flow_with_llm.py
 ```
 
 For the full credential setup walkthrough, see
-[Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls).
+[Tracked LLM Calls](https://kitaru.ai/docs/guides/llm-calls).
 
 ## `flow_with_llm.py` — Tracked model calls with automatic cost tracking
 

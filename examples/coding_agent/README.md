@@ -38,7 +38,7 @@ The agent works on the task, then calls `hand_back` with a summary and a questio
 
 ```bash
 # Send follow-up input
-kitaru executions input <exec_id> --wait follow_up_0 --value '{"message": "Now add a legend"}'
+kitaru executions input <exec_id> --value '{"message": "Now add a legend"}'
 kitaru executions resume <exec_id>
 
 # Cancel to stop

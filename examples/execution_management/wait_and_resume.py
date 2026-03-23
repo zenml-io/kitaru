@@ -1,7 +1,7 @@
 """Wait for input and continue the same execution.
 
 Demonstrates two wait patterns:
-1. A boolean gate (approve/reject) using the default schema
+1. A boolean gate (approve/reject) using ``schema=bool``
 2. A structured input wait using a Pydantic schema
 
 When running locally, Kitaru prompts for input directly in the terminal.
@@ -48,21 +48,21 @@ def wait_for_approval_flow(topic: str) -> str:
     print(f"  kitaru executions resume {exec_id}")
     print("(Use --value false to reject.)\n")
 
-    kitaru.wait(
+    approved = kitaru.wait(
         name="approve_release",
+        schema=bool,
         question=f"Approve publishing release notes for {topic}?",
         timeout=3600,  # Compute is released after 1 hour; resume via CLI later
         metadata={"topic": topic},
-    )  # if user approves flow continues, if not flow is suspended
-
-    print("\nTo approve remotely, run in another terminal:")
-    example_value = '\'{"notes": "Bug fixes", "major_version": 2}\''
-    print(
-        f"  kitaru executions input {exec_id}"
-        f" --wait release_details --value {example_value}"
     )
-    print(f"  kitaru executions resume {exec_id}")
-    print("(Use --value false to reject.)\n")
+
+    if approved is False:
+        return f"REJECTED: {topic}"
+
+    print("\nProvide release details remotely:")
+    example_value = '\'{"notes": "Bug fixes", "major_version": 2}\''
+    print(f"  kitaru executions input {exec_id} --value {example_value}")
+    print(f"  kitaru executions resume {exec_id}\n")
 
     details = kitaru.wait(
         name="release_details",
@@ -77,12 +77,13 @@ def wait_for_approval_flow(topic: str) -> str:
 
 def run_workflow(topic: str = "v1.0") -> str:
     """Execute the wait/resume workflow and return its output."""
-    return wait_for_approval_flow.run(topic)
+    return wait_for_approval_flow.run(topic).wait()
 
 
 def main() -> None:
     """Run the example as a script."""
-    run_workflow()
+    result = run_workflow()
+    print(f"\nResult: {result}")
 
 
 if __name__ == "__main__":

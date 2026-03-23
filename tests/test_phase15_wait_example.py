@@ -5,7 +5,7 @@ the full wait -> input -> optional resume -> result sequence without human
 interaction.
 
 The example has two wait points:
-1. A schemaless boolean gate ("approve_release") — resolved without a value
+1. A boolean gate ("approve_release") — resolved with True to approve
 2. A structured input wait ("release_details") — resolved with a ReleaseDetails dict
 """
 
@@ -17,18 +17,12 @@ from contextlib import suppress
 
 import pytest
 from examples.execution_management.wait_and_resume import wait_for_approval_flow
-from zenml.client import Client
 
 from kitaru.client import KitaruClient
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruStateError
 from kitaru.wait import _resolve_zenml_wait
 
 _WAIT_DISCOVERY_TIMEOUT_SECONDS = 900.0
-
-
-def _prime_zenml_runtime() -> None:
-    """Force ZenML's lazy store initialization before spawning threads."""
-    _ = Client().zen_store
 
 
 def _find_pending_wait(*, client: KitaruClient, topic: str) -> str | None:
@@ -82,7 +76,6 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
 
     topic = "v1.0"
     client = KitaruClient()
-    _prime_zenml_runtime()
 
     state: dict[str, object] = {"handle": None, "error": None}
 
@@ -96,7 +89,7 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
     starter.start()
 
     try:
-        # --- Wait 1: schemaless approval gate ("approve_release") ---
+        # --- Wait 1: boolean approval gate ("approve_release") ---
         exec_id = _wait_for_pending_wait(client=client, topic=topic, state=state)
 
         pending = client.executions.pending_waits(exec_id)
@@ -104,7 +97,7 @@ def test_phase15_wait_example_runs_end_to_end(primed_zenml) -> None:
         client.executions.input(
             exec_id,
             wait=pending[0].wait_id,
-            value=None,
+            value=True,
         )
 
         with suppress(KitaruStateError):
