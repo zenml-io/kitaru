@@ -4687,3 +4687,423 @@ def test_describe_local_server_handles_missing_local_backend() -> None:
         status = _describe_local_server()
 
     assert status == "unavailable (local runtime support not installed)"
+
+
+# ---------------------------------------------------------------------------
+# Clean command tests
+# ---------------------------------------------------------------------------
+
+
+class TestCleanHelp:
+    """Tests for clean command help and registration."""
+
+    def test_clean_appears_in_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """'clean' should appear in top-level --help."""
+        with pytest.raises(SystemExit) as exc_info:
+            app(["--help"])
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "clean" in output
+
+    def test_clean_help_shows_subcommands(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """'kitaru clean --help' should list project/global/all."""
+        with pytest.raises(SystemExit) as exc_info:
+            app(["clean", "--help"])
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "project" in output
+        assert "global" in output
+        assert "all" in output
+
+
+class TestCleanProject:
+    """Tests for kitaru clean project."""
+
+    def test_dry_run_no_project_errors(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Dry-run on clean project should error when no project found."""
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=None,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "project", "--dry-run"])
+        assert exc_info.value.code == 1
+        output = capsys.readouterr().err
+        assert "No Kitaru project found" in output
+
+    def test_dry_run_shows_preview(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """Dry-run should show what would be deleted."""
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("active_stack: default\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=tmp_path,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "project", "--dry-run"])
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "Would delete" in output
+        assert ".kitaru" in output
+
+    def test_dry_run_json_output(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """Dry-run JSON should emit a {command, item} envelope."""
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("active_stack: default\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=tmp_path,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "project", "--dry-run", "-o", "json"])
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        payload = json.loads(output)
+        assert payload["command"] == "clean.project"
+        assert payload["item"]["scope"] == "project"
+        assert payload["item"]["dry_run"] is True
+
+
+class TestCleanGlobal:
+    """Tests for kitaru clean global."""
+
+    def test_force_required_when_aliases_exist(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Should error when model registry has aliases and --force is missing."""
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+        (config_root / "kitaru.yaml").write_text("version: 1\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=None,
+            ),
+            patch(
+                "kitaru._cleanup._resolve_config_root",
+                return_value=config_root,
+            ),
+            patch(
+                "kitaru._cleanup._read_alias_count",
+                return_value=3,
+            ),
+            patch(
+                "kitaru._cleanup._describe_local_server_for_cleanup",
+                return_value=("not running", False),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "global", "--yes"])
+        assert exc_info.value.code == 1
+        output = capsys.readouterr().err
+        assert "3 aliases" in output
+        assert "--force" in output
+
+    def test_dry_run_shows_backup_path(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Dry-run should mention backup path if a DB exists."""
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+        db_dir = config_root / "local_stores" / "default_zen_store"
+        db_dir.mkdir(parents=True)
+        (db_dir / "zenml.db").write_text("fake db")
+        (config_root / "kitaru.yaml").write_text("version: 1\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=None,
+            ),
+            patch(
+                "kitaru._cleanup._resolve_config_root",
+                return_value=config_root,
+            ),
+            patch(
+                "kitaru._cleanup._read_alias_count",
+                return_value=0,
+            ),
+            patch(
+                "kitaru._cleanup._describe_local_server_for_cleanup",
+                return_value=("not running", False),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "global", "--dry-run"])
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "Backup" in output or "backup" in output
+
+
+class TestCleanAll:
+    """Tests for kitaru clean all."""
+
+    def test_all_skips_missing_project_silently(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """'clean all' should not error when no project exists."""
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+        (config_root / "kitaru.yaml").write_text("version: 1\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=None,
+            ),
+            patch(
+                "kitaru._cleanup._resolve_config_root",
+                return_value=config_root,
+            ),
+            patch(
+                "kitaru._cleanup._read_alias_count",
+                return_value=0,
+            ),
+            patch(
+                "kitaru._cleanup._describe_local_server_for_cleanup",
+                return_value=("not running", False),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "all", "--dry-run"])
+        assert exc_info.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# Enhanced info tests
+# ---------------------------------------------------------------------------
+
+
+def test_info_shows_zenml_version(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info` should show ZenML version."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        config_directory="/tmp/config",
+        zenml_version="0.72.0",
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "ZenML version: 0.72.0" in output
+
+
+def test_info_shows_config_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info` should show config provenance section."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+        kitaru_global_config_path="/tmp/config/kitaru.yaml",
+        zenml_global_config_path="/tmp/config/config.yaml",
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Config provenance" in output
+    assert "kitaru.yaml" in output
+
+
+def test_info_shows_connection_sources(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info` should show connection source breakdown."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        config_directory="/tmp/config",
+        connection_sources={
+            "server_url": "environment (KITARU_SERVER_URL)",
+            "auth_token": "global config",
+            "project": "repo-local config (.kitaru/)",
+        },
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Connection source" in output
+    assert "environment (KITARU_SERVER_URL)" in output
+
+
+def test_info_shows_system_info(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info` should show system section."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+        python_version="3.12.4",
+        system_info={"os": "macOS 15.1 (arm64)", "architecture": "arm64"},
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "System" in output
+    assert "Python version: 3.12.4" in output
+
+
+def test_info_all_includes_packages(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info --all` should show packages section."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+        python_version="3.12.4",
+        system_info={"os": "Linux", "architecture": "x86_64"},
+        environment_type="native",
+        packages={"kitaru": "0.3.0", "zenml": "0.72.0", "pydantic": "2.10.3"},
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--all"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Packages" in output
+    assert "pydantic: 2.10.3" in output
+
+
+def test_info_file_export_json(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """`kitaru info --file` should write JSON and report path."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+    )
+    export_path = tmp_path / "debug.json"
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--file", str(export_path)])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert str(export_path) in output
+    assert export_path.exists()
+    data = json.loads(export_path.read_text())
+    assert data["sdk_version"] == "0.3.0"
+
+
+def test_info_file_export_json_mode(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """`kitaru info --file -o json` should emit a JSON envelope about the file."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+    )
+    export_path = tmp_path / "debug.json"
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--file", str(export_path), "-o", "json"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["command"] == "info"
+    assert payload["item"]["file"] == str(export_path)
+    assert payload["item"]["format"] == "json"
+
+
+def test_info_shows_environment_and_log_store(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info` should include env vars and log store."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        config_directory="/tmp/config",
+        log_store_status="datadog (preferred)",
+        environment=[
+            ActiveEnvironmentVariable(
+                name="KITARU_SERVER_URL",
+                value="https://example.com",
+            ),
+        ],
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "KITARU_SERVER_URL" in output
+    assert "Log store: datadog" in output

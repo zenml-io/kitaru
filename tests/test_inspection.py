@@ -622,6 +622,19 @@ def test_serialize_runtime_snapshot_contract() -> None:
             {"name": "KITARU_SERVER_URL", "value": "https://example.com"},
             {"name": "KITARU_PROJECT", "value": "demo-project"},
         ],
+        "kitaru_global_config_path": None,
+        "zenml_global_config_path": None,
+        "local_stores_path": None,
+        "repository_config_path": None,
+        "uses_repo_local_config": False,
+        "connection_sources": None,
+        "active_project": None,
+        "active_project_source": None,
+        "python_version": None,
+        "system_info": None,
+        "environment_type": None,
+        "zenml_version": None,
+        "packages": None,
     }
 
 
