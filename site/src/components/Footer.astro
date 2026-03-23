@@ -56,3 +56,16 @@
     }
   }
 </style>
+
+<script>
+  const footerRing = document.querySelector('.footer-brand .logo-ring') as SVGElement | null;
+  if (footerRing) {
+    const footerObs = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        (footerRing as SVGElement).style.animationPlayState = entry.isIntersecting ? 'running' : 'paused';
+      });
+    }, { threshold: 0 });
+    footerObs.observe(footerRing.closest('.footer')!);
+    (footerRing as SVGElement).style.animationPlayState = 'paused';
+  }
+</script>
