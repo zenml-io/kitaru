@@ -192,7 +192,7 @@ def _apply_dashboard_patch(
             _safe_rmtree(backup_dir, "backup directory")
 
         logger.info(
-            "Kitaru UI %s installed into ZenML dashboard directory",
+            "Kitaru UI %s installed.",
             bundled_manifest.get("ui_version", "unknown"),
         )
     finally:
