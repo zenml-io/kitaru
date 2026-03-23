@@ -82,6 +82,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # --- Install uv (needed before version bump to regenerate lockfile) ---
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.12'
+
       # --- Bump version (dispatch only) ---
       - name: Bump version in pyproject.toml
         if: github.event_name == 'workflow_dispatch'
@@ -95,10 +101,13 @@ jobs:
           DATE=$(date +%Y-%m-%d)
           sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $DATE/" CHANGELOG.md
           echo "Updated CHANGELOG.md for $VERSION ($DATE)"
+      - name: Update lockfile
+        if: github.event_name == 'workflow_dispatch'
+        run: uv lock
       - name: Commit release changes
         if: github.event_name == 'workflow_dispatch'
         run: |
-          git add pyproject.toml CHANGELOG.md
+          git add pyproject.toml CHANGELOG.md uv.lock
           git commit -m "Release $VERSION"
 
       # --- Verify version matches (tag push only) ---
@@ -112,10 +121,6 @@ jobs:
           fi
 
       # --- Run CI checks ---
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          python-version: '3.12'
       - name: Install dependencies
         run: uv sync --frozen --extra mcp
       - name: Check typos
