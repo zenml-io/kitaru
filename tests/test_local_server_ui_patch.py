@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kitaru._local_server import (
+    _SENTINEL_DIR_NAME,
     _SENTINEL_FILE_NAME,
     _apply_dashboard_patch,
     _dashboard_needs_update,
@@ -43,9 +44,9 @@ def _create_dashboard(
     if with_index:
         (dashboard_dir / "index.html").write_text("<html>zenml</html>")
     if sentinel is not None:
-        sentinel_dir = dashboard_dir / ".kitaru-ui"
+        sentinel_dir = dashboard_dir / _SENTINEL_DIR_NAME
         sentinel_dir.mkdir(exist_ok=True)
-        with open(sentinel_dir / "bundle_manifest.json", "w") as f:
+        with open(sentinel_dir / _SENTINEL_FILE_NAME, "w") as f:
             json.dump(sentinel, f)
 
 
@@ -79,9 +80,9 @@ class TestLoadInstalledSentinel:
 
     def test_returns_none_when_malformed(self, tmp_path: Path) -> None:
         dashboard = tmp_path / "dashboard"
-        sentinel_dir = dashboard / ".kitaru-ui"
+        sentinel_dir = dashboard / _SENTINEL_DIR_NAME
         sentinel_dir.mkdir(parents=True)
-        (sentinel_dir / "bundle_manifest.json").write_text("not json")
+        (sentinel_dir / _SENTINEL_FILE_NAME).write_text("not json")
         assert _load_installed_sentinel(dashboard) is None
 
     def test_returns_none_when_wrong_schema_version(self, tmp_path: Path) -> None:
@@ -99,7 +100,7 @@ class TestLoadInstalledSentinel:
 
 
 # ---------------------------------------------------------------------------
-# _dashboard_needs_update (now takes bundled manifest as parameter)
+# _dashboard_needs_update
 # ---------------------------------------------------------------------------
 
 
@@ -133,7 +134,7 @@ class TestDashboardNeedsUpdate:
 
 
 # ---------------------------------------------------------------------------
-# _apply_dashboard_patch (now takes bundled manifest as parameter)
+# _apply_dashboard_patch
 # ---------------------------------------------------------------------------
 
 
@@ -184,6 +185,38 @@ class TestApplyDashboardPatch:
             pytest.raises(KitaruBackendError, match="assets are missing"),
         ):
             _apply_dashboard_patch(dashboard, _VALID_MANIFEST)
+
+    def test_restores_backup_on_rename_failure(self, tmp_path: Path) -> None:
+        """When the tmp→dashboard rename fails, the original dashboard is restored."""
+        bundled_dir = tmp_path / "bundled" / "dist"
+        bundled_dir.mkdir(parents=True)
+        (bundled_dir / "index.html").write_text("<html>kitaru</html>")
+
+        dashboard = tmp_path / "zen_server" / "dashboard"
+        _create_dashboard(dashboard)
+        original_content = (dashboard / "index.html").read_text()
+
+        original_rename = Path.rename
+
+        def failing_rename(self_path: Path, target: Path) -> Path:
+            # Fail only for the tmp → dashboard rename, not the
+            # backup → dashboard restore.  Distinguish by source name.
+            if "__kitaru_tmp__" in self_path.name:
+                raise OSError("Simulated rename failure")
+            return original_rename(self_path, target)
+
+        with (
+            patch(
+                "kitaru._local_server._resolve_bundled_ui_dir",
+                return_value=bundled_dir,
+            ),
+            patch.object(Path, "rename", failing_rename),
+            pytest.raises(OSError, match="Simulated rename failure"),
+        ):
+            _apply_dashboard_patch(dashboard, _VALID_MANIFEST)
+
+        assert dashboard.exists(), "Dashboard should be restored from backup"
+        assert (dashboard / "index.html").read_text() == original_content
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +274,36 @@ class TestEnsureKitaruDashboard:
             assert _ensure_kitaru_dashboard() is True
 
         assert (dashboard / "index.html").read_text() == "<html>kitaru</html>"
+
+    def test_wraps_unexpected_exceptions_in_backend_error(self) -> None:
+        """Non-KitaruBackendError exceptions are wrapped with guidance."""
+        with (
+            patch(
+                "kitaru._local_server._resolve_bundled_ui_dir",
+                return_value=Path("/fake/dist"),
+            ),
+            patch(
+                "kitaru._local_server._load_bundled_manifest",
+                return_value=_VALID_MANIFEST,
+            ),
+            patch(
+                "kitaru._local_server._resolve_zenml_dashboard_dir",
+                return_value=Path("/fake/dashboard"),
+            ),
+            patch(
+                "kitaru._local_server._dashboard_needs_update",
+                return_value=True,
+            ),
+            patch(
+                "kitaru._local_server._apply_dashboard_patch",
+                side_effect=PermissionError("read-only filesystem"),
+            ),
+            pytest.raises(KitaruBackendError, match="Could not patch") as exc_info,
+        ):
+            _ensure_kitaru_dashboard()
+
+        assert "read-only filesystem" in str(exc_info.value)
+        assert exc_info.value.__cause__ is not None
 
 
 # ---------------------------------------------------------------------------

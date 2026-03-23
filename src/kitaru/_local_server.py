@@ -53,6 +53,15 @@ class LocalServerStopResult:
 # ---------------------------------------------------------------------------
 
 
+def _safe_rmtree(path: Path, label: str) -> None:
+    """Remove a directory tree, logging a warning on failure."""
+    if path.exists():
+        try:
+            shutil.rmtree(path)
+        except OSError:
+            logger.warning("Could not remove %s %s", label, path)
+
+
 def _resolve_zenml_dashboard_dir() -> Path:
     """Locate ZenML's installed dashboard directory."""
     import zenml
@@ -79,13 +88,24 @@ def _load_manifest_json(path: Path) -> dict[str, Any] | None:
     try:
         with open(path) as f:
             data = json.load(f)
-        if not isinstance(data, dict):
-            return None
-        if data.get("schema_version") != _MANIFEST_SCHEMA_VERSION:
-            return None
-        return data
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError:
+        logger.warning("Manifest %s contains invalid JSON", path)
         return None
+    except OSError as exc:
+        logger.warning("Could not read manifest %s: %s", path, exc)
+        return None
+    if not isinstance(data, dict):
+        logger.warning("Manifest %s is not a JSON object", path)
+        return None
+    if data.get("schema_version") != _MANIFEST_SCHEMA_VERSION:
+        logger.warning(
+            "Manifest %s has unsupported schema version %s (expected %s)",
+            path,
+            data.get("schema_version"),
+            _MANIFEST_SCHEMA_VERSION,
+        )
+        return None
+    return data
 
 
 def _load_bundled_manifest() -> dict[str, Any] | None:
@@ -159,20 +179,24 @@ def _apply_dashboard_patch(
         try:
             tmp_dir.rename(dashboard_dir)
         except OSError:
+            logger.error(
+                "Failed to rename %s → %s; restoring backup",
+                tmp_dir,
+                dashboard_dir,
+            )
             if had_backup and backup_dir.exists():
                 backup_dir.rename(dashboard_dir)
             raise
 
-        if had_backup and backup_dir.exists():
-            shutil.rmtree(backup_dir, ignore_errors=True)
+        if had_backup:
+            _safe_rmtree(backup_dir, "backup directory")
 
         logger.info(
             "Kitaru UI %s installed into ZenML dashboard directory",
             bundled_manifest.get("ui_version", "unknown"),
         )
     finally:
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+        _safe_rmtree(tmp_dir, "temp directory")
 
 
 def _ensure_kitaru_dashboard() -> bool:
@@ -187,7 +211,10 @@ def _ensure_kitaru_dashboard() -> bool:
 
     bundled_manifest = _load_bundled_manifest()
     if bundled_manifest is None:
-        logger.debug("No bundled UI manifest found; skipping dashboard patch")
+        logger.warning(
+            "Bundled Kitaru UI files exist but manifest is missing or invalid; "
+            "skipping dashboard patch"
+        )
         return False
 
     dashboard_dir = _resolve_zenml_dashboard_dir()
@@ -399,8 +426,8 @@ def start_or_connect_local_server(
                     action="connected",
                 )
 
-            # Dashboard was just patched — restart so ZenML picks up
-            # the new files (root_static_files is cached at import time).
+            # Dashboard was just patched — restart so the server picks up
+            # the new files (dashboard paths are cached at server startup).
             try:
                 deployer.remove_server(timeout=timeout)
             except Exception as exc:
