@@ -1,10 +1,11 @@
 """General-purpose coding agent — Kitaru primitives + LiteLLM.
 
 An agent loop where each LLM call and tool execution is a visible
-checkpoint. The initial task is passed as a flow parameter. If the LLM
-needs clarification it calls ``ask_user``, which triggers
-``kitaru.wait()``. When done, it calls ``hand_back`` and waits for a
-follow-up instruction.
+checkpoint. When the LLM returns multiple tool calls, they are submitted
+in parallel via ``checkpoint.submit()``. The initial task is passed as a
+flow parameter. If the LLM needs clarification it calls ``ask_user``,
+which triggers ``kitaru.wait()``. When done, it calls ``hand_back`` and
+waits for a follow-up instruction.
 
 Usage::
 
@@ -185,13 +186,41 @@ def coding_agent(task: str) -> str:
 
         messages.append(response.to_message())
 
+        # Separate tool calls: regular ones can run in parallel,
+        # hand_back/ask_user need sequential handling (they block on user input).
+        parsed_calls: list[tuple[Any, dict[str, Any], str]] = []
         for tc in response.tool_calls:
             args = _parse_args(tc.function.arguments)
             display_name = _make_display_name(
                 tc.function.name, args.pop("_display_name", None), counter
             )
+            parsed_calls.append((tc, args, display_name))
+            counter += 1
 
-            # --- hand_back: task complete, wait for user follow-up ----------
+        _INTERACTIVE = ("hand_back", "ask_user")
+        regular = [
+            (tc, a, dn)
+            for tc, a, dn in parsed_calls
+            if tc.function.name not in _INTERACTIVE
+        ]
+        special = [
+            (tc, a, dn)
+            for tc, a, dn in parsed_calls
+            if tc.function.name in _INTERACTIVE
+        ]
+
+        # --- Submit regular tool calls in parallel --------------------------
+        futures = [
+            (tc, tool_call.submit(tc.function.name, args, cwd, id=display_name))
+            for tc, args, display_name in regular
+        ]
+        for tc, future in futures:
+            result: ToolCallResult = future.load()
+            msg = {"role": "tool", "tool_call_id": tc.id, "content": result.output}
+            messages.append(msg)
+
+        # --- Handle special tools sequentially ------------------------------
+        for tc, args, _dn in special:
             if tc.function.name == "hand_back":
                 summary = args.get("summary", "")
                 question = args.get("question", "What would you like to do next?")
@@ -210,10 +239,8 @@ def coding_agent(task: str) -> str:
                 messages.append(msg)
                 messages.append({"role": "user", "content": follow_up.message})
                 counter += 1
-                continue
 
-            # --- ask_user: needs clarification mid-task ---------------------
-            if tc.function.name == "ask_user":
+            elif tc.function.name == "ask_user":
                 question = args.get("question", "The agent needs your input:")
                 answer = kitaru.wait(
                     name=f"ask_{counter}",
@@ -224,15 +251,6 @@ def coding_agent(task: str) -> str:
                 msg = {"role": "tool", "tool_call_id": tc.id, "content": answer}
                 messages.append(msg)
                 counter += 1
-                continue
-
-            # --- Regular tool call ------------------------------------------
-            result: ToolCallResult = tool_call(
-                tc.function.name, args, cwd, id=display_name
-            ).load()
-            msg = {"role": "tool", "tool_call_id": tc.id, "content": result.output}
-            messages.append(msg)
-            counter += 1
 
     else:
         # Exhausted tool-call budget — ask for a summary

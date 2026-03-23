@@ -36,6 +36,9 @@ question for the user. Do NOT just respond with text — use hand_back so the \
 user can give you follow-up instructions.
 
 Guidelines:
+- When multiple independent tool calls can run at the same time (e.g. \
+searching for several topics, reading several files, fetching several URLs), \
+return them all in a single response. They will execute in parallel.
 - Think step by step. Break complex problems into smaller parts.
 - For math/computation: write a Python script with python_exec rather than \
 trying to compute in your head.

@@ -4,6 +4,7 @@ A general-purpose interactive agent built with **kitaru primitives + LiteLLM** �
 
 Demonstrates:
 
+- **Parallel tool execution** — when the LLM returns multiple tool calls, they run concurrently via `checkpoint.submit()`
 - **LiteLLM tool calling** — manual tool-call loop with typed Pydantic responses
 - **`kitaru.wait()`** — durable human-in-the-loop via `ask_user` and `hand_back` tools
 - **Custom materializers** — dynamic ZenML dashboard visualizations per tool type
