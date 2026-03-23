@@ -139,6 +139,20 @@ def _build_local_server_config(
     )
 
 
+def _patch_local_ui_static_files() -> None:
+    import shutil
+
+    import zenml
+
+    kitaru_ui_dir = Path(__file__).parent / "_ui"
+    zenml_dashboard_dir = Path(zenml.__file__).parent / "zen_server" / "dashboard"
+
+    if zenml_dashboard_dir.exists():
+        shutil.rmtree(zenml_dashboard_dir)
+
+    shutil.copytree(kitaru_ui_dir, zenml_dashboard_dir)
+
+
 def start_or_connect_local_server(
     *,
     port: int | None,
@@ -199,6 +213,7 @@ def start_or_connect_local_server(
         import os
 
         os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-api"
+        _patch_local_ui_static_files()
         deployed_server = deployer.deploy_server(config, timeout=timeout)
         deployer.connect_to_server()
     except Exception as exc:
