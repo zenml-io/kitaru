@@ -129,9 +129,32 @@ jobs:
       - name: Test
         run: uv run pytest --ignore=tests/mcp
 
+      # --- Bundle Kitaru UI ---
+      - name: Download Kitaru UI
+        run: bash scripts/download-ui.sh
+        env:
+          TAG: ${{ env.KITARU_UI_TAG }}
+
       # --- Build ---
       - name: Build package
         run: uv build
+      - name: Verify Kitaru UI in wheel
+        run: |
+          WHEEL=$(ls dist/*.whl)
+          python -c "
+          import zipfile, sys
+          names = zipfile.ZipFile('$WHEEL').namelist()
+          missing = []
+          if not any('_ui/dist/index.html' in n for n in names):
+              missing.append('kitaru/_ui/dist/index.html')
+          if not any('_ui/bundle_manifest.json' in n for n in names):
+              missing.append('kitaru/_ui/bundle_manifest.json')
+          if missing:
+              for m in missing:
+                  print(f'::error::{m} missing from wheel')
+              sys.exit(1)
+          print('Kitaru UI assets verified in $WHEEL')
+          "
       - name: List build artifacts
         run: ls -lh dist/
 

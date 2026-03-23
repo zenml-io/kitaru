@@ -37,6 +37,27 @@ def test_console_scripts_point_to_package_entrypoints() -> None:
     assert "force-include" not in wheel_target
 
 
+def test_ui_artifacts_configured_for_wheel_inclusion() -> None:
+    """Hatch build config should include gitignored UI assets via artifacts."""
+    pyproject = tomllib.loads(_PYPROJECT_PATH.read_text())
+
+    artifacts = pyproject["tool"]["hatch"]["build"].get("artifacts", [])
+    assert any("_ui/dist" in a for a in artifacts), (
+        "pyproject.toml must include _ui/dist in [tool.hatch.build] artifacts"
+    )
+    assert any("bundle_manifest.json" in a for a in artifacts), (
+        "pyproject.toml must include bundle_manifest.json in artifacts"
+    )
+
+
+def test_ui_package_scaffold_exists() -> None:
+    """The _ui package __init__.py must be tracked (not gitignored)."""
+    ui_init = (
+        Path(__file__).resolve().parents[1] / "src" / "kitaru" / "_ui" / "__init__.py"
+    )
+    assert ui_init.is_file(), f"Missing tracked file: {ui_init}"
+
+
 def test_cli_entrypoint_populates_version_before_dispatch() -> None:
     """The package CLI entrypoint should set the version before running the app."""
     import kitaru.cli as cli_module
