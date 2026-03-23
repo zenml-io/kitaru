@@ -25,7 +25,7 @@ from zenml.utils import io_utils, yaml_utils
 from kitaru._config._connection import _normalize_server_url
 from kitaru.errors import KitaruUsageError
 
-_KITARU_GLOBAL_CONFIG_FILENAME = "config.yaml"
+_KITARU_GLOBAL_CONFIG_FILENAME = "kitaru.yaml"
 FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
 
 if TYPE_CHECKING:
@@ -380,6 +380,26 @@ def image_settings_to_docker_settings(
     return DockerSettings(**docker_settings_kwargs)
 
 
+_SECRET_ENV_KEY_PATTERN = re.compile(
+    r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)",
+    re.IGNORECASE,
+)
+_REDACTED = "***"
+
+
+def _redact_image_environment(
+    image: ImageSettings | None,
+) -> ImageSettings | None:
+    """Return a copy of *image* with secret-looking environment values redacted."""
+    if image is None or not image.environment:
+        return image
+    redacted_env = {
+        k: (_REDACTED if _SECRET_ENV_KEY_PATTERN.search(k) else v)
+        for k, v in image.environment.items()
+    }
+    return image.model_copy(update={"environment": redacted_env})
+
+
 def build_frozen_execution_spec(
     *,
     resolved_execution: ResolvedExecutionConfig,
@@ -387,11 +407,29 @@ def build_frozen_execution_spec(
     connection: ResolvedConnectionConfig,
     model_registry: ModelRegistryConfig | None = None,
 ) -> FrozenExecutionSpec:
-    """Create a frozen execution-spec payload persisted with each run."""
+    """Create a frozen execution-spec payload persisted with each run.
+
+    Sensitive fields (auth tokens, secret-looking environment variables) are
+    stripped or redacted so that the persisted metadata never contains
+    plaintext secrets.
+    """
+    safe_connection = ResolvedConnectionConfig(
+        server_url=connection.server_url,
+        project=connection.project,
+    )
+    safe_flow_defaults = flow_defaults.model_copy(update={"auth_token": None})
+    safe_resolved_execution = resolved_execution.model_copy(
+        update={"image": _redact_image_environment(resolved_execution.image)},
+    )
+    safe_flow_defaults_image = _redact_image_environment(safe_flow_defaults.image)
+    if safe_flow_defaults_image is not safe_flow_defaults.image:
+        safe_flow_defaults = safe_flow_defaults.model_copy(
+            update={"image": safe_flow_defaults_image},
+        )
     return FrozenExecutionSpec(
-        resolved_execution=resolved_execution,
-        flow_defaults=flow_defaults,
-        connection=connection,
+        resolved_execution=safe_resolved_execution,
+        flow_defaults=safe_flow_defaults,
+        connection=safe_connection,
         model_registry=model_registry,
     )
 
@@ -422,6 +460,10 @@ def persist_frozen_execution_spec_impl(
             FROZEN_EXECUTION_SPEC_METADATA_KEY: frozen_execution_spec.model_dump(
                 mode="json",
                 exclude_none=True,
+                exclude={
+                    "connection": {"auth_token"},
+                    "flow_defaults": {"auth_token"},
+                },
             )
         },
         resources=[
@@ -443,11 +485,24 @@ def _kitaru_config_dir_impl(
     *,
     config_path_env_name: str,
     app_dir_getter: Callable[[str], str],
+    fallback_config_path_env_name: str | None = None,
 ) -> Path:
-    """Return the Kitaru-owned global config directory."""
+    """Return the Kitaru-owned global config directory.
+
+    Precedence:
+    1. ``KITARU_CONFIG_PATH`` (explicit user override)
+    2. ``ZENML_CONFIG_PATH`` (set by the init hook or a server subprocess)
+    3. ``click.get_app_dir("kitaru")`` (platform default)
+    """
     custom_dir = os.environ.get(config_path_env_name)
     if custom_dir:
         return Path(custom_dir)
+
+    if fallback_config_path_env_name:
+        fallback_dir = os.environ.get(fallback_config_path_env_name)
+        if fallback_dir:
+            return Path(fallback_dir)
+
     return Path(app_dir_getter("kitaru"))
 
 

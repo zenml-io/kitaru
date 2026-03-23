@@ -39,8 +39,11 @@ from kitaru.mcp.server import (
     kitaru_executions_retry,
     kitaru_executions_run,
     kitaru_stacks_list,
+    kitaru_start_local_server,
     kitaru_status,
+    kitaru_stop_local_server,
     manage_stack,
+    tracked_mcp_tool,
 )
 
 
@@ -629,6 +632,55 @@ def test_artifact_get_delegates_value_serialization_to_inspection(
     mock_serialize.assert_called_once_with(loaded_value)
     assert payload["value"] == "delegated"
     assert payload["value_type"] == "custom.Type"
+
+
+def test_start_local_server_returns_structured_payload() -> None:
+    """The MCP local-start tool should reuse the shared helper payload."""
+    with patch(
+        "kitaru.mcp.server.start_or_connect_local_server",
+        return_value=SimpleNamespace(
+            url="http://127.0.0.1:8383",
+            action="started",
+        ),
+    ) as mock_start:
+        payload = kitaru_start_local_server(port=9090, timeout=45)
+
+    mock_start.assert_called_once_with(port=9090, timeout=45)
+    assert payload == {
+        "mode": "local",
+        "url": "http://127.0.0.1:8383",
+        "action": "started",
+    }
+
+
+def test_stop_local_server_returns_structured_payload() -> None:
+    """The MCP local-stop tool should expose stop metadata."""
+    with patch(
+        "kitaru.mcp.server.stop_registered_local_server",
+        return_value=SimpleNamespace(
+            stopped=True,
+            url="http://127.0.0.1:8383",
+        ),
+    ) as mock_stop:
+        payload = kitaru_stop_local_server()
+
+    mock_stop.assert_called_once_with()
+    assert payload == {
+        "stopped": True,
+        "url": "http://127.0.0.1:8383",
+    }
+
+
+def test_start_local_server_propagates_failures() -> None:
+    """The MCP local-start tool should propagate lifecycle failures."""
+    with (
+        patch(
+            "kitaru.mcp.server.start_or_connect_local_server",
+            side_effect=RuntimeError("missing local deps"),
+        ),
+        pytest.raises(RuntimeError, match="missing local deps"),
+    ):
+        kitaru_start_local_server()
 
 
 def test_status_and_stack_tools_return_structured_payloads() -> None:
@@ -1699,3 +1751,77 @@ def test_manage_stack_rejects_irrelevant_flags() -> None:
 
     with pytest.raises(ValueError, match='only valid when action="create"'):
         manage_stack("delete", "dev", activate=False)
+
+
+# ── Per-tool analytics tracking ──────────────────────────────────────────────
+
+
+def test_tracked_mcp_tool_fires_success_event() -> None:
+    """tracked_mcp_tool decorator emits a success event after a successful operation."""
+
+    @tracked_mcp_tool
+    def _sample_tool() -> dict[str, str]:
+        return {"key": "value"}
+
+    with patch("kitaru.mcp.server.track") as mock_track:
+        result = _sample_tool()
+
+    assert result == {"key": "value"}
+    mock_track.assert_called_once_with(
+        "Kitaru MCP tool called",
+        {"tool_name": "_sample_tool", "success": True},
+    )
+
+
+def test_tracked_mcp_tool_fires_failure_event_and_reraises() -> None:
+    """tracked_mcp_tool decorator emits a failure event and re-raises on error."""
+
+    @tracked_mcp_tool
+    def _failing_tool() -> None:
+        raise RuntimeError("boom")
+
+    with (
+        patch("kitaru.mcp.server.track") as mock_track,
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        _failing_tool()
+
+    mock_track.assert_called_once_with(
+        "Kitaru MCP tool called",
+        {
+            "tool_name": "_failing_tool",
+            "success": False,
+            "error_type": "RuntimeError",
+        },
+    )
+
+
+def test_tracked_mcp_tool_preserves_function_name() -> None:
+    """tracked_mcp_tool should preserve the wrapped function's __name__."""
+
+    @tracked_mcp_tool
+    def kitaru_my_custom_tool() -> str:
+        return "ok"
+
+    with patch("kitaru.mcp.server.track") as mock_track:
+        kitaru_my_custom_tool()
+
+    mock_track.assert_called_once()
+    call_args = mock_track.call_args[0]
+    assert call_args[1]["tool_name"] == "kitaru_my_custom_tool"
+
+
+def test_tracked_mcp_tool_captures_concrete_error_type() -> None:
+    """The error_type metadata should reflect the actual exception class."""
+
+    @tracked_mcp_tool
+    def _value_error_tool() -> None:
+        raise ValueError("bad input")
+
+    with (
+        patch("kitaru.mcp.server.track") as mock_track,
+        pytest.raises(ValueError),
+    ):
+        _value_error_tool()
+
+    assert mock_track.call_args[0][1]["error_type"] == "ValueError"

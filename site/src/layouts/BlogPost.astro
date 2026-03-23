@@ -2,7 +2,15 @@
 import Base from './Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import TableOfContents from '../components/blog/TableOfContents.astro';
+import BlogBottomCTA from '../components/blog/BlogBottomCTA.astro';
 import { AUTHORS, CATEGORY_STYLES } from '../lib/blog';
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
 
 interface Props {
   title: string;
@@ -14,6 +22,7 @@ interface Props {
   image?: string;
   readTime: string;
   relatedPosts?: { href: string; title: string; author: string; readTime: string }[];
+  headings?: Heading[];
 }
 
 const {
@@ -26,6 +35,7 @@ const {
   image,
   readTime,
   relatedPosts = [],
+  headings = [],
 } = Astro.props;
 
 const formatted = new Intl.DateTimeFormat('en-US', {
@@ -95,27 +105,39 @@ const ogImageUrl = ogImage
         </div>
       )}
 
-      <!-- Body -->
+      <!-- Body + TOC sidebar -->
       <div class="blog-post-body-wrap">
+        <TableOfContents headings={headings} />
         <div class="blog-post-body" itemprop="articleBody">
           <slot />
         </div>
       </div>
     </article>
 
+    <!-- Bottom CTA — mirrors body-wrap flex layout to align with prose column -->
+    <div class="blog-prose-align">
+      <div class="blog-prose-align-spacer" aria-hidden="true"></div>
+      <div class="blog-prose-align-content">
+        <BlogBottomCTA />
+      </div>
+    </div>
+
     <!-- Related posts -->
     {relatedPosts.length > 0 && (
-      <section class="blog-related">
-        <h4 class="blog-related-heading">Continue reading</h4>
-        <div class="blog-related-grid">
-          {relatedPosts.map((rp) => (
-            <a class="blog-related-card" href={rp.href}>
-              <h5>{rp.title}</h5>
-              <span>{rp.author} &middot; {rp.readTime}</span>
-            </a>
-          ))}
-        </div>
-      </section>
+      <div class="blog-prose-align">
+        <div class="blog-prose-align-spacer" aria-hidden="true"></div>
+        <section class="blog-prose-align-content blog-related">
+          <h4 class="blog-related-heading">Continue reading</h4>
+          <div class="blog-related-grid">
+            {relatedPosts.map((rp) => (
+              <a class="blog-related-card" href={rp.href}>
+                <h5>{rp.title}</h5>
+                <span>{rp.author} &middot; {rp.readTime}</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      </div>
     )}
   </main>
   <Footer />
@@ -243,14 +265,21 @@ const ogImageUrl = ogImage
     border: 1px solid var(--color-border);
   }
 
-  /* ── Body ── */
+  /* ── Body + TOC wrapper ── */
   .blog-post-body-wrap {
-    max-width: 720px;
+    --toc-width: 220px;
+    --toc-gap: 48px;
+    max-width: 1060px;
     margin: 0 auto;
-    padding: 48px clamp(16px, 5vw, 80px) 60px;
+    padding: 48px clamp(16px, 5vw, 48px) 60px;
+    display: flex;
+    justify-content: center;
   }
 
   .blog-post-body {
+    max-width: 720px;
+    width: 100%;
+    min-width: 0;
     font-size: clamp(0.95rem, 2.5vw, 1.05rem);
     line-height: 1.75;
     color: var(--color-secondary);
@@ -262,6 +291,7 @@ const ogImageUrl = ogImage
     color: var(--color-primary);
     margin: 48px 0 16px;
     letter-spacing: -0.01em;
+    scroll-margin-top: 80px;
   }
 
   .blog-post-body :global(h3) {
@@ -308,7 +338,6 @@ const ogImageUrl = ogImage
     padding: 16px 20px;
     overflow-x: auto;
     margin: 24px -16px;
-    -webkit-overflow-scrolling: touch;
   }
 
   .blog-post-body :global(pre code) {
@@ -366,13 +395,41 @@ const ogImageUrl = ogImage
     background: var(--color-surface-warm);
   }
 
+  /* ── Prose-column alignment utility ── */
+  .blog-prose-align {
+    --toc-width: 220px;
+    --toc-gap: 48px;
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 0 clamp(16px, 5vw, 48px);
+    display: flex;
+    justify-content: center;
+  }
+
+  .blog-prose-align-spacer {
+    width: var(--toc-width);
+    flex-shrink: 0;
+    margin-right: var(--toc-gap);
+  }
+
+  .blog-prose-align-content {
+    max-width: 720px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  @media (max-width: 1100px) {
+    .blog-prose-align-spacer {
+      display: none;
+    }
+  }
+
   /* ── Related posts ── */
   .blog-related {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 0 clamp(16px, 5vw, 80px) 80px;
     border-top: 1px solid var(--color-border-light);
     padding-top: 40px;
+    padding-bottom: 80px;
+    margin-top: 48px;
   }
 
   .blog-related-heading {

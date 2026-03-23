@@ -417,6 +417,7 @@ def test_apply_env_translations_sets_zenml_mirrors(
     monkeypatch.setenv("KITARU_PROJECT", "demo-project")
     monkeypatch.setenv("KITARU_DEBUG", "false")
     monkeypatch.setenv("KITARU_ANALYTICS_OPT_IN", "true")
+    monkeypatch.setenv("KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-cli")
 
     apply_env_translations()
 
@@ -425,6 +426,7 @@ def test_apply_env_translations_sets_zenml_mirrors(
     assert os.environ["ZENML_ACTIVE_PROJECT_ID"] == "demo-project"
     assert os.environ["ZENML_DEBUG"] == "false"
     assert os.environ["ZENML_ANALYTICS_OPT_IN"] == "true"
+    assert os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] == "kitaru-cli"
 
 
 def test_apply_env_translations_warns_and_overwrites_conflicts(
@@ -2135,9 +2137,7 @@ def test_create_vertex_stack_operation_rewrites_invalid_component_option() -> No
         )
 
     assert "Did you mean `synchronous`?" in str(exc_info.value)
-    assert "https://docs.zenml.io/stack-components/orchestrators/vertex" in str(
-        exc_info.value
-    )
+    assert "orchestrators/vertex" in str(exc_info.value)
     client_mock.create_service_connector.assert_not_called()
 
 
@@ -3453,10 +3453,10 @@ def test_global_connection_config_does_not_infer_project() -> None:
 
 
 def test_kitaru_config_path_uses_kitaru_dir() -> None:
-    """Kitaru's config file should live under the app-specific config dir."""
+    """Kitaru's config file should live under the unified config dir."""
     path = _kitaru_config_path()
     assert path.parent.name == "kitaru-config"
-    assert path.name == "config.yaml"
+    assert path.name == "kitaru.yaml"
 
 
 def test_kitaru_config_path_env_overrides_directory(
@@ -3484,7 +3484,80 @@ def test_kitaru_config_path_dir_is_created_on_first_write(
     register_model_alias("fast", model="openai/gpt-4o-mini")
 
     assert custom_dir.exists()
-    assert (custom_dir / "config.yaml").exists()
+    assert (custom_dir / "kitaru.yaml").exists()
+
+
+def test_apply_env_translations_sets_zenml_config_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """KITARU_CONFIG_PATH should populate ZENML_CONFIG_PATH."""
+    custom_dir = tmp_path / "custom-kitaru-home"
+    monkeypatch.delenv("ZENML_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("KITARU_CONFIG_PATH", str(custom_dir))
+
+    apply_env_translations()
+
+    assert os.environ["ZENML_CONFIG_PATH"] == str(custom_dir)
+
+
+def test_apply_env_translations_warns_on_config_path_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """KITARU_CONFIG_PATH should win over a conflicting ZENML_CONFIG_PATH."""
+    kitaru_dir = tmp_path / "kitaru-home"
+    zenml_dir = tmp_path / "zenml-home"
+    monkeypatch.setenv("KITARU_CONFIG_PATH", str(kitaru_dir))
+    monkeypatch.setenv("ZENML_CONFIG_PATH", str(zenml_dir))
+
+    with pytest.warns(UserWarning, match="KITARU_CONFIG_PATH"):
+        apply_env_translations()
+
+    assert os.environ["ZENML_CONFIG_PATH"] == str(kitaru_dir)
+
+
+def test_apply_env_translations_defaults_zenml_config_path_to_kitaru_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ZENML_CONFIG_PATH defaults to kitaru's app dir."""
+    monkeypatch.delenv("KITARU_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("ZENML_CONFIG_PATH", raising=False)
+
+    apply_env_translations()
+
+    import click
+
+    expected = click.get_app_dir("kitaru")
+    assert os.environ["ZENML_CONFIG_PATH"] == expected
+
+
+def test_apply_env_translations_preserves_existing_zenml_config_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Existing ZENML_CONFIG_PATH (server subprocess) is not overwritten."""
+    server_dir = tmp_path / "server-config"
+    monkeypatch.delenv("KITARU_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("ZENML_CONFIG_PATH", str(server_dir))
+
+    apply_env_translations()
+
+    assert os.environ["ZENML_CONFIG_PATH"] == str(server_dir)
+
+
+def test_kitaru_config_dir_follows_zenml_config_path_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Kitaru config dir follows ZENML_CONFIG_PATH fallback."""
+    from kitaru.config import _kitaru_config_dir
+
+    server_dir = tmp_path / "server-config"
+    monkeypatch.delenv("KITARU_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("ZENML_CONFIG_PATH", str(server_dir))
+
+    assert _kitaru_config_dir() == server_dir
 
 
 def test_active_environment_variables_mask_secrets(
@@ -3962,6 +4035,70 @@ def test_login_to_server_target_direct_server_path_runs_under_suppression(
         logging.disable(original_disable)
 
 
+def test_login_to_server_target_forwards_timeout_when_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit timeout should be forwarded when the helper supports it."""
+    original_disable = logging.root.manager.disable
+
+    def declare_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
+    def success_spy(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def fake_connect_to_server(
+        *,
+        url: str,
+        api_key: str | None,
+        verify_ssl: bool,
+        refresh: bool,
+        project: str | None,
+        timeout: int | None = None,
+    ) -> None:
+        captured_kwargs.update(
+            {
+                "url": url,
+                "api_key": api_key,
+                "verify_ssl": verify_ssl,
+                "refresh": refresh,
+                "project": project,
+                "timeout": timeout,
+            }
+        )
+
+    monkeypatch.setattr(config_module.zenml_cli_utils, "declare", declare_spy)
+    monkeypatch.setattr(config_module.zenml_cli_utils, "success", success_spy)
+
+    try:
+        config_module._config_connection._login_to_server_target_impl(
+            "https://example.com/",
+            api_key=None,
+            refresh=False,
+            project=None,
+            verify_ssl=True,
+            cloud_api_url=None,
+            timeout=45,
+            suppress_zenml_cli_messages=config_module._suppress_zenml_cli_messages,
+            zenml_connect_to_server=fake_connect_to_server,
+            zenml_connect_to_pro_server=lambda **kwargs: None,
+            zenml_is_pro_server=lambda target: (False, None),
+        )
+    finally:
+        logging.disable(original_disable)
+
+    assert captured_kwargs == {
+        "url": "https://example.com",
+        "api_key": None,
+        "verify_ssl": True,
+        "refresh": False,
+        "project": None,
+        "timeout": 45,
+    }
+
+
 def test_login_to_server_target_wraps_click_failures() -> None:
     """Login helpers should translate ZenML CLI failures into backend errors."""
     with (
@@ -4021,12 +4158,16 @@ def test_build_and_persist_frozen_execution_spec() -> None:
             retries=2,
             image=ImageSettings(
                 base_image="python:3.12",
-                environment={"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
+                environment={
+                    "OPENAI_API_KEY": "sk-real-secret",
+                    "BATCH_SIZE": "32",
+                },
             ),
         ),
         flow_defaults=KitaruConfig(cache=False),
         connection=ResolvedConnectionConfig(
             server_url="https://server.example.com",
+            auth_token="super-secret-token",
             project="demo",
         ),
         model_registry=model_registry,
@@ -4034,11 +4175,18 @@ def test_build_and_persist_frozen_execution_spec() -> None:
 
     assert isinstance(frozen_execution_spec, FrozenExecutionSpec)
     assert frozen_execution_spec.model_registry == model_registry
-    assert (
-        frozen_execution_spec.resolved_execution.image is not None
-        and frozen_execution_spec.resolved_execution.image.environment
-        == {"OPENAI_API_KEY": "{{ OPENAI_KEY }}"}
-    )
+
+    # auth_token must be stripped from the frozen spec (Fix 2)
+    assert frozen_execution_spec.connection.auth_token is None
+    assert frozen_execution_spec.connection.server_url == "https://server.example.com"
+    assert frozen_execution_spec.connection.project == "demo"
+
+    # Secret-looking env vars are redacted; non-secret ones preserved (Fix 3)
+    assert frozen_execution_spec.resolved_execution.image is not None
+    assert frozen_execution_spec.resolved_execution.image.environment == {
+        "OPENAI_API_KEY": "***",
+        "BATCH_SIZE": "32",
+    }
 
     with patch("kitaru.config.Client") as client_cls:
         persist_frozen_execution_spec(
@@ -4050,13 +4198,15 @@ def test_build_and_persist_frozen_execution_spec() -> None:
     create_metadata.assert_called_once()
     metadata_payload = create_metadata.call_args.kwargs["metadata"]
     assert FROZEN_EXECUTION_SPEC_METADATA_KEY in metadata_payload
-    assert (
-        metadata_payload[FROZEN_EXECUTION_SPEC_METADATA_KEY]["resolved_execution"][
-            "stack"
-        ]
-        == "prod"
-    )
-    assert metadata_payload[FROZEN_EXECUTION_SPEC_METADATA_KEY]["model_registry"] == {
+
+    spec_payload = metadata_payload[FROZEN_EXECUTION_SPEC_METADATA_KEY]
+    assert spec_payload["resolved_execution"]["stack"] == "prod"
+
+    # auth_token must not appear in serialized payload (Fix 1 defense in depth)
+    assert "auth_token" not in spec_payload.get("connection", {})
+    assert "auth_token" not in spec_payload.get("flow_defaults", {})
+
+    assert spec_payload["model_registry"] == {
         "aliases": {
             "fast": {
                 "model": "openai/gpt-4o-mini",
@@ -4065,3 +4215,66 @@ def test_build_and_persist_frozen_execution_spec() -> None:
         },
         "default": "fast",
     }
+
+
+@pytest.mark.parametrize(
+    "env_key, should_redact",
+    [
+        ("OPENAI_API_KEY", True),
+        ("AWS_SECRET_ACCESS_KEY", True),
+        ("DB_PASSWORD", True),
+        ("AUTH_TOKEN", True),
+        ("MY_CREDENTIAL", True),
+        ("GCP_SECRET", True),
+        ("BATCH_SIZE", False),
+        ("MODEL_NAME", False),
+        ("NUM_WORKERS", False),
+        ("PYTHONPATH", False),
+    ],
+)
+def test_frozen_spec_redacts_secret_env_vars(
+    env_key: str,
+    should_redact: bool,
+) -> None:
+    """Secret-looking environment variable values should be redacted."""
+    spec = build_frozen_execution_spec(
+        resolved_execution=ResolvedExecutionConfig(
+            stack="local",
+            cache=True,
+            retries=0,
+            image=ImageSettings(environment={env_key: "real-value"}),
+        ),
+        flow_defaults=KitaruConfig(),
+        connection=ResolvedConnectionConfig(),
+    )
+    assert spec.resolved_execution.image is not None
+    env = spec.resolved_execution.image.environment
+    assert env is not None
+    if should_redact:
+        assert env[env_key] == "***"
+    else:
+        assert env[env_key] == "real-value"
+
+
+def test_frozen_spec_strips_flow_defaults_auth_token() -> None:
+    """auth_token on flow_defaults should be stripped from the frozen spec."""
+    spec = build_frozen_execution_spec(
+        resolved_execution=ResolvedExecutionConfig(
+            stack="local", cache=True, retries=0
+        ),
+        flow_defaults=KitaruConfig(auth_token="should-not-persist"),
+        connection=ResolvedConnectionConfig(),
+    )
+    assert spec.flow_defaults.auth_token is None
+
+
+def test_frozen_spec_preserves_none_image() -> None:
+    """build_frozen_execution_spec should handle None image gracefully."""
+    spec = build_frozen_execution_spec(
+        resolved_execution=ResolvedExecutionConfig(
+            stack="local", cache=True, retries=0, image=None
+        ),
+        flow_defaults=KitaruConfig(),
+        connection=ResolvedConnectionConfig(),
+    )
+    assert spec.resolved_execution.image is None

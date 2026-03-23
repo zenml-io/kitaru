@@ -7,7 +7,7 @@
 <h3 align="center">You build your agents. We make them durable.</h3>
 
 <p align="center">
-  Open-source durable execution for AI agents, built on <a href="https://zenml.io">ZenML</a>.
+  Kitaru (来る, "to arrive") — open-source agent infrastructure for Python. Any framework. Any cloud. Built on <a href="https://zenml.io">ZenML</a>.
 </p>
 
 <p align="center">
@@ -30,9 +30,10 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-Kitaru makes your AI agent workflows **persistent, replayable, and observable**.
-Add a few Python decorators to your existing code — no graph DSL, no framework
-lock-in — and get durable execution with a built-in dashboard out of the box.
+Your agent crashed at step 6. Kitaru replays from step 6 — not from scratch.
+Add two decorators to your existing Python agent and get crash recovery, human
+approval gates, cost tracking, and a full dashboard. No rewrite. No framework
+lock-in. No distributed systems overhead.
 
 ## Why Kitaru?
 
@@ -61,7 +62,7 @@ def writing_agent(topic: str) -> str:
 result = writing_agent.run("quantum computing").wait()
 ```
 
-### Deployment simplicity
+### Deployment flexibility
 
 No workers, no message queues, no distributed systems PhD required. Kitaru runs
 locally with zero config, and scales to production with a single server backed by
@@ -72,7 +73,11 @@ or AzureML — using Kitaru's **stack** abstraction.
 
 Every execution is observable from day one. See your agent runs, inspect
 checkpoint outputs, track LLM costs, and approve human-in-the-loop wait steps —
-all from a visual dashboard that ships with the Kitaru server.
+all from a visual dashboard that ships with the Kitaru server. The dashboard
+ships free, with the server, from day one.
+
+To start that server locally, run `kitaru login` after installing `kitaru[local]`.
+To connect to an existing remote server, run `kitaru login <server>`.
 
 ## Quick Start
 
@@ -88,18 +93,26 @@ Or with [uv](https://docs.astral.sh/uv/) (recommended):
 uv pip install kitaru
 ```
 
-### Optional: connect to an existing Kitaru server
+### Optional: start a local Kitaru server
 
-Flows run locally by default. If you already have a deployed Kitaru server and
-want this quick start to use it, connect first:
+Flows run locally by default with the base install. If you also want the local
+dashboard and REST API, install the local extra and then run bare `kitaru login`:
 
 ```bash
-kitaru login https://my-server.example.com
-# add --project <PROJECT> or other login flags if your setup requires them
+uv pip install "kitaru[local]"
+kitaru login
 kitaru status
 ```
 
-If you're just trying Kitaru locally, skip this step.
+### Optional: connect to an existing remote Kitaru server
+
+If you already have a deployed Kitaru server, connect to it explicitly:
+
+```bash
+kitaru login https://my-server.example.com
+# add --project <PROJECT> or other remote-login flags if your setup requires them
+kitaru status
+```
 
 ### Initialize your project
 

@@ -1,0 +1,11 @@
+{
+  "title": "Agent Runtime (Stacks)",
+  "defaultOpen": false,
+  "pages": [
+    "kubernetes-stacks",
+    "vertex-stacks",
+    "sagemaker-stacks",
+    "azureml-stacks",
+    "log-store"
+  ]
+}

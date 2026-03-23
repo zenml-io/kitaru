@@ -53,7 +53,7 @@ def hitl_tool(
     *,
     question: str | None = None,
     name: str | None = None,
-    schema: Any = bool,
+    schema: Any = None,
 ) -> Any:
     """Mark a PydanticAI tool for flow-level HITL waits when invoked."""
     _require_pydantic_ai()

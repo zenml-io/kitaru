@@ -7,7 +7,7 @@ export async function getStaticPaths() {
   const allPosts = await getCollection('blog', ({ data }) => !data.draft);
   const sorted = allPosts.sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
 
-  return sorted.map((post, idx) => {
+  return sorted.map((post) => {
     // Pick up to 2 related posts (next chronologically, wrapping around)
     const related = sorted
       .filter((p) => p.id !== post.id)
@@ -27,7 +27,7 @@ export async function getStaticPaths() {
 }
 
 const { post, related } = Astro.props;
-const { Content } = await render(post);
+const { Content, headings } = await render(post);
 const readTime = readingTime(post.body ?? '');
 ---
 
@@ -41,6 +41,7 @@ const readTime = readingTime(post.body ?? '');
   image={post.data.image}
   readTime={readTime}
   relatedPosts={related}
+  headings={headings}
 >
   <Content />
 </BlogPost>

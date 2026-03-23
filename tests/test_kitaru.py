@@ -129,6 +129,7 @@ class TestImplementedConnectionPrimitive:
             project="demo-project",
             verify_ssl=False,
             cloud_api_url=None,
+            timeout=None,
         )
 
     def test_connect_routes_pro_urls_to_managed_login(self) -> None:
@@ -254,7 +255,7 @@ class TestPlaceholderBehavior:
     def test_wait_delegates_to_zenml_wait(self) -> None:
         from kitaru.runtime import _flow_scope
 
-        mock_zenml_wait = Mock(return_value=True)
+        mock_zenml_wait = Mock(return_value=None)
 
         with (
             _flow_scope(name="flow_a"),
@@ -269,9 +270,9 @@ class TestPlaceholderBehavior:
                 metadata={"service": "api"},
             )
 
-        assert resolved is True
+        assert resolved is None
         mock_zenml_wait.assert_called_once_with(
-            schema=bool,
+            schema=None,
             question="Approve deploy?",
             timeout=600,
             metadata={"service": "api"},

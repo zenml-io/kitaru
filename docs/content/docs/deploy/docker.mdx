@@ -1,0 +1,343 @@
+---
+title: Docker
+description: Deploy the Kitaru server using Docker or Docker Compose
+---
+
+The Kitaru server container image is available at
+[`zenmldocker/kitaru`](https://hub.docker.com/r/zenmldocker/kitaru) and works
+with Docker, Docker Compose, or any container orchestration platform.
+
+## Quick start
+
+Start a server with sensible defaults:
+
+```bash
+docker run -d --name kitaru-server -p 8080:8080 zenmldocker/kitaru:latest
+```
+
+<Callout type="info">
+  Use a version-pinned tag (e.g. `zenmldocker/kitaru:0.2.0`) that matches your
+  client SDK version to avoid API incompatibilities.
+</Callout>
+
+The server initializes an internal SQLite database on first startup. Wait for
+the health endpoint before connecting:
+
+```bash
+until curl -fsS http://localhost:8080/health >/dev/null; do sleep 2; done
+```
+
+Then connect your local CLI:
+
+```bash
+kitaru login http://localhost:8080
+```
+
+This opens browser-based device authorization. After completing the flow,
+verify with:
+
+```bash
+kitaru status
+```
+
+### Headless activation
+
+The first time the server starts, you need to activate it by visiting the
+dashboard at `http://localhost:8080` and creating an initial admin user account.
+
+To skip this manual onboarding step (useful for automated or headless
+deployments), pass these environment variables:
+
+```bash
+docker run -d --name kitaru-server -p 8080:8080 \
+    -e ZENML_SERVER_AUTO_ACTIVATE=1 \
+    -e ZENML_DEFAULT_USER_NAME=admin \
+    -e ZENML_DEFAULT_USER_PASSWORD=password \
+    zenmldocker/kitaru:latest
+```
+
+<Callout type="warn">
+  If `ZENML_DEFAULT_USER_PASSWORD` is omitted, the admin account is created
+  with an **empty password** — only appropriate for local development.
+</Callout>
+
+<Callout type="info">
+  The server activation variables use `ZENML_*` names because the Kitaru server
+  uses ZenML's server runtime internally. These are server-side configuration
+  knobs, not user-facing SDK settings.
+</Callout>
+
+### Building from source
+
+If you are testing changes from a local checkout:
+
+<Tabs items={["just (recommended)", "Docker"]}>
+  <Tab value="just (recommended)">
+    ```bash
+    just DOCKER_REPO=kitaru-local DOCKER_TAG=dev server-image
+    ```
+  </Tab>
+  <Tab value="Docker">
+    ```bash
+    docker build -f docker/Dockerfile --target server -t kitaru-local:dev .
+    ```
+  </Tab>
+</Tabs>
+
+Then run it:
+
+```bash
+docker run -d --name kitaru-server -p 8080:8080 kitaru-local:dev
+```
+
+### Container management
+
+```bash
+docker logs kitaru-server          # View server logs
+docker logs kitaru-server -f       # Follow logs
+docker stop kitaru-server          # Stop
+docker start kitaru-server         # Restart
+docker rm kitaru-server            # Remove
+docker rm -f kitaru-server         # Force remove (stop + remove)
+```
+
+## Persist your data
+
+### Default (ephemeral)
+
+Without any volume mounts, the server stores everything inside the container:
+
+- **Metadata:** SQLite database
+- **Artifacts:** Local filesystem
+
+This data is **lost** when the container is removed (`docker rm`). It survives
+`docker stop` / `docker start`.
+
+### Persisting the SQLite database
+
+Mount a host directory or Docker volume at the default data path:
+
+<Tabs items={["Named volume", "Host directory"]}>
+  <Tab value="Named volume">
+    ```bash
+    docker run -d --name kitaru-server -p 8080:8080 \
+        -v kitaru-data:/zenml/.zenconfig/local_stores/default_zen_store \
+        zenmldocker/kitaru:latest
+    ```
+  </Tab>
+  <Tab value="Host directory">
+    ```bash
+    mkdir kitaru-data
+    docker run -d --name kitaru-server -p 8080:8080 \
+        --mount type=bind,source=$PWD/kitaru-data,target=/zenml/.zenconfig/local_stores/default_zen_store \
+        zenmldocker/kitaru:latest
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+  The path `/zenml/.zenconfig/local_stores/default_zen_store` is an internal
+  default inherited from the base image. It may change in a future release. For
+  production deployments, use an [external MySQL database](#using-mysql-recommended-for-production)
+  instead of relying on this path.
+</Callout>
+
+<Callout type="warn">
+  The container runs as UID 1000 (`zenml`). If using a bind mount, ensure the
+  host directory is writable by UID 1000: `chown -R 1000:1000 kitaru-data`
+</Callout>
+
+### Using MySQL (recommended for production)
+
+SQLite works well for development and single-user setups, but for production
+you should use MySQL:
+
+- Supports concurrent access from multiple server replicas
+- Better performance under load
+- Standard backup and HA tooling
+
+Start a MySQL container:
+
+```bash
+docker run -d --name kitaru-mysql \
+    -p 3306:3306 \
+    -e MYSQL_ROOT_PASSWORD=password \
+    -e MYSQL_DATABASE=kitaru \
+    -v kitaru-mysql:/var/lib/mysql \
+    mysql:8.0
+```
+
+Then start the Kitaru server pointing at it:
+
+```bash
+docker run -d --name kitaru-server -p 8080:8080 \
+    --add-host host.docker.internal:host-gateway \
+    --env ZENML_STORE_URL=mysql://root:password@host.docker.internal:3306/kitaru \
+    zenmldocker/kitaru:latest
+```
+
+The server automatically runs database migrations on first startup.
+
+<Callout type="info">
+  The database URL uses `ZENML_STORE_URL` because the Kitaru server uses
+  ZenML's server runtime internally. Future versions may provide a
+  `KITARU_DATABASE_URL` equivalent.
+</Callout>
+
+<Callout type="warn">
+  **Linux users:** The `--add-host host.docker.internal:host-gateway` flag is
+  required on Linux to make `host.docker.internal` resolve inside the
+  container. On macOS and Windows, Docker provides this automatically.
+</Callout>
+
+### Docker Compose (server + MySQL)
+
+A `docker-compose.yml` for a production-like setup:
+
+```yaml
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: kitaru
+    volumes:
+      - kitaru-mysql:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kitaru:
+    image: zenmldocker/kitaru:latest
+    ports:
+      - "8080:8080"
+    environment:
+      ZENML_STORE_URL: mysql://root:password@mysql:3306/kitaru
+      ZENML_SERVER_AUTO_ACTIVATE: "1"
+      ZENML_DEFAULT_USER_NAME: admin
+      ZENML_DEFAULT_USER_PASSWORD: "${KITARU_ADMIN_PASSWORD:-}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: on-failure
+
+volumes:
+  kitaru-mysql:
+```
+
+Create a `.env` file alongside the compose file:
+
+```bash
+KITARU_ADMIN_PASSWORD=your-secure-password
+```
+
+<Callout type="warn">
+  The `KITARU_ADMIN_PASSWORD` environment variable is optional here for
+  convenience. If not set, the admin account is created with an empty
+  password — not recommended for production.
+</Callout>
+
+Start:
+
+```bash
+docker compose up -d
+```
+
+Wait for health and connect:
+
+```bash
+until curl -fsS http://localhost:8080/health >/dev/null; do sleep 2; done
+kitaru login http://localhost:8080
+```
+
+Tear down:
+
+```bash
+docker compose down        # Stop containers (keep data)
+docker compose down -v     # Stop and delete volumes
+```
+
+## Connect to the server
+
+### Interactive login (browser-based)
+
+```bash
+kitaru login http://localhost:8080
+```
+
+The CLI opens a browser for device authorization. If the browser does not open
+automatically, copy/paste the printed URL.
+
+### API key login (headless / CI)
+
+```bash
+kitaru login https://kitaru.example.com --api-key kat_abc123...
+```
+
+### Environment variable bootstrap (Docker / CI)
+
+For containers or CI jobs that need to talk to the server without running
+`kitaru login`:
+
+```bash
+export KITARU_SERVER_URL=https://kitaru.example.com
+export KITARU_AUTH_TOKEN=kat_abc123...
+export KITARU_PROJECT=my-project
+```
+
+See [Configuration](/guides/configuration) for the full env-var reference and
+precedence rules.
+
+### Verify connection
+
+```bash
+kitaru status     # Compact view
+kitaru info       # Detailed view (shows server version, database type, deployment type)
+```
+
+### Disconnect
+
+```bash
+kitaru logout
+```
+
+## Troubleshooting
+
+### Server won't start
+
+Check container logs:
+
+```bash
+docker logs kitaru-server -f
+```
+
+Common causes:
+
+- Database connection refused (wrong host/port/credentials in `ZENML_STORE_URL`)
+- Port 8080 already in use (`docker: bind: address already in use`)
+- Insufficient permissions on mounted volumes (UID 1000 cannot write)
+
+### Login stalls or shows errors
+
+- Ensure the `/health` endpoint returns 200 before attempting login.
+- If the browser shows `{"detail":"An unexpected error occurred."}`, the
+  dashboard assets may be missing from the image. Rebuild from source or use a
+  newer image tag.
+- If the CLI keeps printing `authorization_pending`, the server may not be
+  fully initialized. Wait and retry.
+- Check `docker logs kitaru-server` for error details.
+
+### `host.docker.internal` not resolving (Linux)
+
+Add `--add-host host.docker.internal:host-gateway` to your `docker run`
+command, or use `extra_hosts` in Docker Compose.
+
+## Related pages
+
+- [Configuration](/guides/configuration)
+- [Stacks](/stacks)
+- [Kubernetes Stacks](/stacks/kubernetes-stacks)

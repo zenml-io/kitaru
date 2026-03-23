@@ -1,0 +1,92 @@
+---
+# Package and push the Kitaru Helm chart to AWS ECR Public (same pattern as ZenML OSS).
+# Invoked only from release.yml (or manually via workflow_dispatch for testing).
+name: Publish Helm Chart
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: >-
+          Semver without v prefix (e.g. 0.2.0); must match pyproject.toml and
+          the release (git tag is v0.2.0).
+        required: true
+        type: string
+      dry_run:
+        description: >-
+          Run helm dependency update, lint, and package only; skip AWS and push.
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver without v prefix (e.g. 0.2.0)
+        required: true
+        type: string
+      dry_run:
+        description: >-
+          Run helm dependency update, lint, and package only; skip AWS and push.
+        required: false
+        type: boolean
+        default: false
+concurrency:
+  group: publish-helm-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  publish_to_ecr:
+    name: Publish Helm Chart to ECR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: Set Chart.yaml version
+        run: |
+          sed -i "s/^version: .*/version: \"${{ inputs.version }}\"/" helm/Chart.yaml
+          grep '^version' helm/Chart.yaml
+      - name: Install Helm
+        uses: azure/setup-helm@5119fcb9089d432beecbf79bb2c7915207344b78  # v3.5
+        with:
+          version: v3.9.2
+      - name: Helm dependency update
+        run: helm dependency update ./helm
+      - name: Helm lint
+        run: helm lint ./helm
+      - name: Configure AWS credentials
+        if: ${{ !inputs.dry_run }}
+        uses: aws-actions/configure-aws-credentials@5fd3084fc36e372ff1fff382a39b10d03659f355  # v2
+        with:
+          role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
+          aws-region: us-east-1
+      - name: Login to Amazon ECR Public
+        if: ${{ !inputs.dry_run }}
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2
+        with:
+          mask-password: 'true'
+          registry-type: public
+      - name: Package Helm chart
+        run: helm package ./helm
+      - name: Push Helm chart to Amazon ECR Public
+        if: ${{ !inputs.dry_run }}
+        env:
+          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+          REGISTRY_ALIAS: zenml
+          REPOSITORY: kitaru
+        run: |-
+          helm push "${REPOSITORY}-${{ inputs.version }}.tgz" \
+            "oci://${REGISTRY}/${REGISTRY_ALIAS}"
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |-
+          {
+            echo "## Helm chart dry-run complete"
+            echo "Chart version: ${{ inputs.version }}"
+            echo ""
+            echo "### Packaged artifact (not pushed)"
+            ls -1 ./*.tgz 2>/dev/null || true
+            echo ""
+            echo "Skipped AWS credentials, ECR login, and helm push."
+          } >> "$GITHUB_STEP_SUMMARY"

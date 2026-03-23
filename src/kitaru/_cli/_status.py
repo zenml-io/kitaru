@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from typing import Annotated, Any
+from urllib.parse import urlparse
 
 from cyclopts import Parameter
 
@@ -37,6 +39,7 @@ from ._helpers import (
     _exit_with_error,
     _facade_module,
     _print_success,
+    _print_warning,
     _resolve_output_format,
 )
 
@@ -48,6 +51,8 @@ class LogoutResult:
     mode: str
     target: str | None = None
     local_fallback_available: bool | None = None
+    local_server_stopped: bool = False
+    local_server_url: str | None = None
 
     def __str__(self) -> str:
         """Render the legacy logout message string."""
@@ -66,10 +71,14 @@ class LogoutResult:
                 self.mode,
                 self.target,
                 self.local_fallback_available,
+                self.local_server_stopped,
+                self.local_server_url,
             ) == (
                 other.mode,
                 other.target,
                 other.local_fallback_available,
+                other.local_server_stopped,
+                other.local_server_url,
             )
         return NotImplemented
 
@@ -79,12 +88,8 @@ def _describe_local_server() -> str:
     return describe_local_server()
 
 
-def _ensure_no_auth_environment_overrides(
-    *,
-    command: str = "auth",
-    output: CLIOutputFormat = CLIOutputFormat.TEXT,
-) -> None:
-    """Fail early if auth environment variables would override the CLI."""
+def _active_auth_environment_overrides() -> list[str]:
+    """Return active auth environment variable overrides in display order."""
     present: list[str] = []
 
     if KITARU_SERVER_URL_ENV in os.environ:
@@ -101,15 +106,140 @@ def _ensure_no_auth_environment_overrides(
         if env_var in os.environ:
             present.append(env_var)
 
-    if present:
-        joined = ", ".join(present)
+    return present
+
+
+def _ensure_no_auth_environment_overrides(
+    *,
+    command: str = "auth",
+    output: CLIOutputFormat = CLIOutputFormat.TEXT,
+) -> None:
+    """Fail early if auth environment variables would override the CLI."""
+    present = _active_auth_environment_overrides()
+    if not present:
+        return
+
+    joined = ", ".join(present)
+    _exit_with_error(
+        command,
+        "Kitaru login/logout cannot override existing auth environment "
+        f"variables ({joined}). Unset them first, or rely on those "
+        "environment variables directly.",
+        output=output,
+    )
+
+
+def _emit_warning(
+    message: str,
+    *,
+    output: CLIOutputFormat,
+    detail: str | None = None,
+) -> None:
+    """Emit a non-fatal warning without breaking JSON stdout payloads."""
+    if output == CLIOutputFormat.JSON:
+        print(f"Warning: {message}", file=sys.stderr)
+        if detail:
+            print(f"  {detail}", file=sys.stderr)
+        return
+    _print_warning(message, detail)
+
+
+def _warn_for_auth_environment_overrides(*, output: CLIOutputFormat) -> None:
+    """Warn when auth env vars are active but local login will continue."""
+    present = _active_auth_environment_overrides()
+    if not present:
+        return
+
+    joined = ", ".join(present)
+    _emit_warning(
+        f"Auth environment variables are active ({joined}).",
+        output=output,
+        detail=(
+            "The local server will start, but runtime connections may still use "
+            "those environment variables."
+        ),
+    )
+
+
+def _validate_local_login_flags(
+    *,
+    api_key: str | None,
+    refresh: bool,
+    project: str | None,
+    no_verify_ssl: bool,
+    ssl_ca_cert: str | None,
+    command: str,
+    output: CLIOutputFormat,
+) -> None:
+    """Reject remote-only flags in local-login mode."""
+    invalid_options: list[tuple[bool, str]] = [
+        (api_key is not None, "--api-key"),
+        (refresh, "--refresh"),
+        (project is not None, "--project"),
+        (no_verify_ssl, "--no-verify-ssl"),
+        (ssl_ca_cert is not None, "--ssl-ca-cert"),
+    ]
+    for active, option in invalid_options:
+        if active:
+            _exit_with_error(
+                command,
+                f"{option} is only used when connecting to a remote server.",
+                output=output,
+            )
+
+
+def _validate_remote_login_flags(
+    *,
+    port: int | None,
+    command: str,
+    output: CLIOutputFormat,
+) -> None:
+    """Reject local-only flags in remote-login mode."""
+    if port is not None:
         _exit_with_error(
             command,
-            "Kitaru login/logout cannot override existing auth environment "
-            f"variables ({joined}). Unset them first, or rely on those "
-            "environment variables directly.",
+            "--port is only used for local server startup.",
             output=output,
         )
+
+
+def _is_localhost_url(url: str | None) -> bool:
+    """Return whether a URL points at localhost."""
+    if not url:
+        return False
+    return urlparse(url).hostname in {"127.0.0.1", "localhost", "::1"}
+
+
+def _login_payload_local(result: Any) -> dict[str, Any]:
+    """Serialize a local-login result for JSON output."""
+    return {"mode": "local", "url": result.url}
+
+
+def _login_payload_remote(url: str, project: str | None) -> dict[str, Any]:
+    """Serialize a remote-login result for JSON output."""
+    return {"mode": "remote", "url": url, "project": project}
+
+
+def _render_local_login_messages(result: Any) -> None:
+    """Render the text output for a successful local login."""
+    if result.action == "started":
+        _print_success("Starting local Kitaru server...")
+        _print_success(f"Server running at {result.url}")
+        _print_success("Connected to local Kitaru server.")
+        return
+
+    if result.action == "connected":
+        _print_success(f"Server already running at {result.url}")
+        _print_success("Connected to local Kitaru server.")
+        return
+
+    port = urlparse(result.url).port
+    if port is None:
+        _print_success("Restarting local Kitaru server...")
+    else:
+        _print_success(f"Restarting local Kitaru server on port {port}...")
+    _print_success(f"Server running at {result.url}")
+    _print_success("Connected to local Kitaru server.")
 
 
 def _clear_persisted_store_configuration(gc: Any) -> None:
@@ -210,17 +340,31 @@ def _logout_current_connection() -> LogoutResult:
     """Reset the active connection and clear current stored credentials."""
     facade = _facade_module()
     gc = facade.GlobalConfiguration()
+    connected_server_url = facade._get_connected_server_url()
+    was_connected_to_local_server = facade._connected_to_local_server()
+    stop_result = facade.stop_registered_local_server()
 
-    if facade._connected_to_local_server():
-        facade.LocalServerDeployer().remove_server()
-        return LogoutResult(mode="local_server")
+    if was_connected_to_local_server:
+        return LogoutResult(
+            mode="local_server",
+            local_server_stopped=stop_result.stopped,
+            local_server_url=stop_result.url,
+        )
 
     try:
         if gc.uses_local_store:
-            return LogoutResult(mode="local_store")
+            return LogoutResult(
+                mode="local_store",
+                local_server_stopped=stop_result.stopped,
+                local_server_url=stop_result.url,
+            )
         server_url = gc.store_configuration.url.rstrip("/")
     except ImportError:
-        return LogoutResult(mode="unavailable")
+        return LogoutResult(
+            mode="unavailable",
+            local_server_stopped=stop_result.stopped,
+            local_server_url=stop_result.url,
+        )
 
     local_fallback_available = True
     try:
@@ -229,18 +373,30 @@ def _logout_current_connection() -> LogoutResult:
         local_fallback_available = False
         _clear_persisted_store_configuration(gc)
 
+    if _is_localhost_url(server_url or connected_server_url):
+        return LogoutResult(
+            mode="local_server",
+            local_fallback_available=local_fallback_available,
+            local_server_stopped=stop_result.stopped,
+            local_server_url=stop_result.url or server_url,
+        )
+
     if server_url.startswith(("http://", "https://")):
         facade.get_credentials_store().clear_credentials(server_url)
         return LogoutResult(
             mode="remote_server",
             target=server_url,
             local_fallback_available=local_fallback_available,
+            local_server_stopped=stop_result.stopped,
+            local_server_url=stop_result.url,
         )
 
     return LogoutResult(
         mode="remote_store",
         target=server_url,
         local_fallback_available=local_fallback_available,
+        local_server_stopped=stop_result.stopped,
+        local_server_url=stop_result.url,
     )
 
 
@@ -250,28 +406,44 @@ def _logout_result_payload(result: LogoutResult) -> dict[str, Any]:
         "mode": result.mode,
         "target": result.target,
         "local_fallback_available": result.local_fallback_available,
+        "local_server_stopped": result.local_server_stopped,
     }
+
+
+def _stopped_local_server_message(url: str | None) -> str:
+    """Render the follow-up line when logout also stopped a local server."""
+    if url:
+        port = urlparse(url).port
+        if port is not None:
+            return f"Stopped local server (port {port})."
+    return "Stopped local server."
 
 
 def _logout_result_message(result: LogoutResult) -> str:
     """Render the legacy text message for a logout result."""
     if result.mode == "local_server":
         return "Logged out from the local Kitaru server."
-    if result.mode == "local_store":
-        return "Kitaru is already using its local default store."
-    if result.mode == "unavailable":
-        return (
+    elif result.mode == "local_store":
+        message = "Kitaru is already using its local default store."
+    elif result.mode == "unavailable":
+        message = (
             "Kitaru is not connected to a remote server, and local mode is "
             "unavailable in this environment."
         )
+    else:
+        suffix = ""
+        if result.local_fallback_available is False:
+            suffix = " (local fallback unavailable in this environment)"
+        if result.mode == "remote_server":
+            message = f"Logged out from Kitaru server: {result.target}{suffix}"
+        else:
+            message = f"Disconnected from store: {result.target}{suffix}"
 
-    suffix = ""
-    if result.local_fallback_available is False:
-        suffix = " (local fallback unavailable in this environment)"
-
-    if result.mode == "remote_server":
-        return f"Logged out from Kitaru server: {result.target}{suffix}"
-    return f"Disconnected from store: {result.target}{suffix}"
+    if result.local_server_stopped:
+        return "\n".join(
+            [message, _stopped_local_server_message(result.local_server_url)]
+        )
+    return message
 
 
 def _log_store_payload(snapshot: ResolvedLogStore) -> dict[str, Any]:
@@ -288,52 +460,102 @@ def _log_store_payload(snapshot: ResolvedLogStore) -> dict[str, Any]:
 @app.command
 def login(
     server: Annotated[
-        str,
+        str | None,
         Parameter(
             help=(
-                "Kitaru server URL, managed workspace name, or managed workspace ID."
-            ),
-            alias=["--url"],
+                "Kitaru server URL, managed workspace name, or managed "
+                "workspace ID. Omit to start a local server."
+            )
         ),
-    ],
+    ] = None,
+    *,
     api_key: Annotated[
         str | None,
-        Parameter(help="API key used to authenticate with the server."),
+        Parameter(help="API key for remote server authentication."),
     ] = None,
     refresh: Annotated[
         bool,
-        Parameter(help="Force a fresh authentication flow."),
+        Parameter(help="Force a fresh authentication flow (remote only)."),
     ] = False,
     project: Annotated[
         str | None,
-        Parameter(help="Project name or ID to activate after connecting."),
+        Parameter(help="Project to activate after connecting (remote only)."),
     ] = None,
     no_verify_ssl: Annotated[
         bool,
-        Parameter(help="Disable TLS certificate verification."),
+        Parameter(help="Disable TLS certificate verification (remote only)."),
     ] = False,
     ssl_ca_cert: Annotated[
         str | None,
-        Parameter(help="Path to a CA bundle used to verify the server."),
+        Parameter(help="Path to a CA bundle for server verification (remote only)."),
     ] = None,
-    cloud_api_url: Annotated[
-        str | None,
-        Parameter(
-            help=(
-                "Managed-cloud API URL used for staging or another custom "
-                "control plane."
-            ),
-            alias=["--pro-api-url"],
-        ),
+    port: Annotated[
+        int | None,
+        Parameter(help="Port for the local server (default: 8383)."),
     ] = None,
+    timeout: Annotated[
+        int,
+        Parameter(help="Timeout in seconds for server startup or connection."),
+    ] = 60,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Connect to a Kitaru server and persist the session globally."""
+    """Connect to a remote server, or start and connect to a local server."""
     command = "login"
     output_format = _resolve_output_format(output)
+    facade = _facade_module()
+    if server is None:
+        _validate_local_login_flags(
+            api_key=api_key,
+            refresh=refresh,
+            project=project,
+            no_verify_ssl=no_verify_ssl,
+            ssl_ca_cert=ssl_ca_cert,
+            command=command,
+            output=output_format,
+        )
+        _warn_for_auth_environment_overrides(output=output_format)
+
+        connected_server_url = facade._get_connected_server_url()
+        if (
+            connected_server_url
+            and not connected_server_url.startswith("sqlite:")
+            and not facade._connected_to_local_server()
+            and not _is_localhost_url(connected_server_url)
+        ):
+            _emit_warning(
+                f"Disconnecting from remote server: {connected_server_url}",
+                output=output_format,
+            )
+
+        result = run_with_cli_error_boundary(
+            lambda: facade.start_or_connect_local_server(
+                port=port,
+                timeout=timeout,
+            ),
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            handled_exceptions=(Exception,),
+        )
+
+        if output_format == CLIOutputFormat.JSON:
+            _emit_json_item(
+                command,
+                _login_payload_local(result),
+                output=output_format,
+            )
+            return
+
+        _render_local_login_messages(result)
+        return
+
+    _validate_remote_login_flags(
+        port=port,
+        command=command,
+        output=output_format,
+    )
     _ensure_no_auth_environment_overrides(command=command, output=output_format)
 
-    facade = _facade_module()
     run_with_cli_error_boundary(
         lambda: facade.login_to_server(
             server,
@@ -342,22 +564,19 @@ def login(
             project=project,
             no_verify_ssl=no_verify_ssl,
             ssl_ca_cert=ssl_ca_cert,
-            cloud_api_url=cloud_api_url,
+            timeout=timeout,
         ),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
-        handled_exceptions=(RuntimeError, ValueError),
+        handled_exceptions=(Exception,),
     )
 
     connected_server_url = facade._get_connected_server_url() or server.rstrip("/")
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
-            {
-                "url": connected_server_url,
-                "project": project,
-            },
+            _login_payload_remote(connected_server_url, project),
             output=output_format,
         )
         return
@@ -371,7 +590,13 @@ def logout(output: OutputFormatOption = "text") -> None:
     command = "logout"
     output_format = _resolve_output_format(output)
     _ensure_no_auth_environment_overrides(command=command, output=output_format)
-    result = _logout_current_connection()
+    result = run_with_cli_error_boundary(
+        _logout_current_connection,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+        handled_exceptions=(Exception,),
+    )
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,

@@ -1,8 +1,9 @@
 {
   "title": "Guides",
-  "defaultOpen": true,
+  "defaultOpen": false,
   "pages": [
     "configuration",
+    "containerization",
     "execution-management",
     "execution-logs",
     "replay-and-overrides",

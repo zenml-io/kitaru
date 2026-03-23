@@ -38,6 +38,7 @@ _EARLY_TEST_ENV_VARS = (
     "KITARU_CONFIG_PATH",
     "KITARU_DEBUG",
     "KITARU_ANALYTICS_OPT_IN",
+    "ZENML_CONFIG_PATH",
     "ZENML_ACTIVE_PROJECT_ID",
     "ZENML_DEBUG",
     "ZENML_ANALYTICS_OPT_IN",
@@ -78,15 +79,16 @@ from kitaru.config import (
 def isolated_zenml_global_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[Path]:
-    """Isolate ZenML and Kitaru config so tests never touch real user state."""
-    config_dir = tmp_path / ".zenml"
-    config_dir.mkdir()
+    """Isolate ZenML and Kitaru config so tests never touch real user state.
 
-    # Redirect Kitaru's own app config dir into tmp_path.
-    kitaru_home = tmp_path / "kitaru-config"
-    kitaru_home.mkdir(parents=True)
+    Mirrors the production init hook: both Kitaru and ZenML share a single
+    unified config directory.
+    """
+    config_dir = tmp_path / "kitaru-config"
+    config_dir.mkdir(parents=True)
+
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr("click.get_app_dir", lambda app_name: str(kitaru_home))
+    monkeypatch.setattr("click.get_app_dir", lambda app_name: str(config_dir))
 
     monkeypatch.setenv(ENV_ZENML_CONFIG_PATH, str(config_dir))
 

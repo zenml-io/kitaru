@@ -29,6 +29,7 @@ from kitaru._source_aliases import (
     build_pipeline_source_alias,
     callable_name,
 )
+from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ImageInput,
@@ -652,6 +653,7 @@ class _FlowDefinition:
             frozen_execution_spec=frozen_execution_spec,
         )
 
+        track(AnalyticsEvent.FLOW_REPLAYED, {"execution_id": str(replayed_run.id)})
         return FlowHandle(replayed_run)
 
     def _submit(

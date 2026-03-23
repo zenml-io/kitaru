@@ -1,9 +1,0 @@
-{
-  "title": "Infrastructure",
-  "defaultOpen": true,
-  "pages": [
-    "stack-selection",
-    "kubernetes-stacks",
-    "log-store"
-  ]
-}

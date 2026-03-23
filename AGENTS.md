@@ -91,6 +91,7 @@ Agent-facing commands should keep the shared `--output json` / `-o json` contrac
 - single-item commands emit `{command, item}`
 - list commands emit `{command, items, count}`
 - `kitaru executions logs --follow --output json` emits JSONL event objects instead of one final document
+- Document login consistently: bare `kitaru login` starts the local server, while `kitaru login <server>` is the remote-login path. Local server support requires the `kitaru[local]` extra.
 
 ## Testing Guidelines
 

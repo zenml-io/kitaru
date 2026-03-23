@@ -10,6 +10,8 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 
 **ZenML mapping:** `@flow` → `@pipeline(dynamic=True)`, `@checkpoint` → `@step`, `kitaru.log()` → `log_metadata()`, `kitaru.wait()` → new ZenML core work. `kitaru init` creates `.kitaru/` (not `.zen/`) as the local project marker via `ZENML_REPOSITORY_DIRECTORY_NAME`.
 
+**Unified config directory:** Kitaru and ZenML share a single config directory. The `kitaru_init_hook` sets `ZENML_CONFIG_PATH` to Kitaru's app dir (e.g. `~/.config/kitaru/` on Linux, `~/Library/Application Support/kitaru/` on macOS) so the database, credentials, local stores, and Kitaru's own `kitaru.yaml` all live together. `KITARU_CONFIG_PATH` overrides this for both. Server subprocesses that set `ZENML_CONFIG_PATH` directly are respected.
+
 ## Project layout
 
 ```
@@ -32,7 +34,10 @@ scripts/              # Doc generation + site merge scripts
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
-docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing stack)
+docker/               # Dockerfiles — see docker/CLAUDE.md for full architecture details
+  Dockerfile          # Production server (FROM zenmldocker/zenml-server + Kitaru + Kitaru UI)
+  Dockerfile.server-dev  # Dev server for local UI testing (local source + local UI dist)
+  Dockerfile.dev      # Flow-execution image for remote stacks (K8s, etc.)
 wrangler.toml         # Unified Cloudflare Worker deployment config
 design/               # Design docs, meeting notes (gitignored, never commit)
 ```
@@ -94,6 +99,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - Static hand-written MDX pages under `docs/content/docs/` are tracked and can be edited directly when behavior changes.
 - Generated reference output should still come from the existing generation scripts rather than manual edits.
 - Agent-facing CLI docs should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.
+- Login docs/guidance should treat bare `kitaru login` as local server startup and `kitaru login <server>` as remote login. Local server support requires the `kitaru[local]` extra.
 - Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
 - If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), not the generated `docs/content/docs/cli/*` output.
 - Current shipped stack-create types on the CLI/MCP surface are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. Advanced CLI/MCP stack creation also supports `--extra` / structured `extra` plus the remote-only `--async` / `async_mode` convenience flag. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only, so docs should keep that distinction explicit.
@@ -148,9 +154,11 @@ just site-build-only                  # Build landing page only (no docs merge)
 just site-build                       # Full unified build (generate + build + merge)
 
 # Docker
-just server-image                    # Build production server image (zenmldocker/kitaru:latest)
-just server-image TAG=v0.2.0         # Build with specific tag
+just server-image                              # Build production server image (zenmldocker/kitaru:latest)
+just DOCKER_TAG=v0.2.0 server-image            # Build with specific tag
+just UI_TAG=v0.1.0 server-image                # Build with specific Kitaru UI release
 just server-image-push               # Build + push to Docker Hub
+just server-dev-image                # Build dev server image (requires docker/kitaru-ui-dist/)
 
 # Manual deploy to Cloudflare
 unset CF_API_TOKEN CLOUDFLARE_API_TOKEN  # Clear stale tokens (use wrangler login credentials)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -92,6 +93,25 @@ def _suppress_zenml_cli_messages_impl(
         logging_module.disable(previous_disable_level)
 
 
+def _call_login_helper(
+    helper: Callable[..., None],
+    *,
+    timeout: int | None,
+    **kwargs: Any,
+) -> None:
+    """Call one ZenML login helper, passing timeout only when supported."""
+    if timeout is not None:
+        try:
+            signature = inspect.signature(helper)
+        except (TypeError, ValueError):
+            signature = None
+
+        if signature and "timeout" in signature.parameters:
+            kwargs["timeout"] = timeout
+
+    helper(**kwargs)
+
+
 def _login_to_server_target_impl(
     server: str,
     *,
@@ -100,6 +120,7 @@ def _login_to_server_target_impl(
     project: str | None = None,
     verify_ssl: bool | str = True,
     cloud_api_url: str | None = None,
+    timeout: int | None = None,
     suppress_zenml_cli_messages: Callable[[], Any],
     zenml_connect_to_server: Callable[..., None],
     zenml_connect_to_pro_server: Callable[..., None],
@@ -112,7 +133,9 @@ def _login_to_server_target_impl(
         with suppress_zenml_cli_messages():
             if _is_server_url(normalized_target):
                 if cloud_api_url:
-                    zenml_connect_to_pro_server(
+                    _call_login_helper(
+                        zenml_connect_to_pro_server,
+                        timeout=timeout,
                         pro_server=normalized_target,
                         api_key=api_key,
                         refresh=refresh,
@@ -126,7 +149,9 @@ def _login_to_server_target_impl(
                     normalized_target
                 )
                 if server_is_pro:
-                    zenml_connect_to_pro_server(
+                    _call_login_helper(
+                        zenml_connect_to_pro_server,
+                        timeout=timeout,
                         pro_server=normalized_target,
                         api_key=api_key,
                         refresh=refresh,
@@ -136,7 +161,9 @@ def _login_to_server_target_impl(
                     )
                     return
 
-                zenml_connect_to_server(
+                _call_login_helper(
+                    zenml_connect_to_server,
+                    timeout=timeout,
                     url=normalized_target,
                     api_key=api_key,
                     verify_ssl=verify_ssl,
@@ -145,7 +172,9 @@ def _login_to_server_target_impl(
                 )
                 return
 
-            zenml_connect_to_pro_server(
+            _call_login_helper(
+                zenml_connect_to_pro_server,
+                timeout=timeout,
                 pro_server=normalized_target,
                 api_key=api_key,
                 refresh=refresh,

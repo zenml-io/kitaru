@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 from zenml.client import Client
@@ -63,6 +64,7 @@ from kitaru._cli._helpers import (
     _is_input_interactive,
     _is_interactive,
     _print_success,
+    _print_warning,
     _render_plain_snapshot,
     _render_plain_snapshot_sections,
     _render_rich_snapshot,
@@ -130,6 +132,12 @@ from kitaru._cli._status import (
     status,
 )
 from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
+from kitaru._local_server import (
+    LocalServerConnectionResult,
+    LocalServerStopResult,
+    start_or_connect_local_server,
+    stop_registered_local_server,
+)
 from kitaru._version import resolve_installed_version
 from kitaru.client import Execution, ExecutionStatus, KitaruClient, LogEntry
 from kitaru.config import (
@@ -170,6 +178,14 @@ def _apply_runtime_version() -> None:
 
 def cli() -> None:
     """Entry point for the `kitaru` console script."""
+    from kitaru.analytics import AnalyticsEvent, set_source, track
+
+    set_source("cli")
+    # Touch zen_store to mark GlobalConfiguration as initialized before
+    # any analytics calls.  Without this, AnalyticsContext.__enter__()
+    # sees is_initialized=False and silently skips all tracking.
+    GlobalConfiguration().zen_store  # noqa: B018
+    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(sys.argv[1:2]) or "help"})
     _apply_runtime_version()
     app()
 
@@ -188,7 +204,9 @@ __all__ = [
     "ExecutionStatus",
     "GlobalConfiguration",
     "KitaruClient",
+    "LocalServerConnectionResult",
     "LocalServerDeployer",
+    "LocalServerStopResult",
     "LogEntry",
     "LogoutResult",
     "OutputFormatOption",
@@ -249,6 +267,7 @@ __all__ = [
     "_parse_json_value",
     "_parse_secret_assignments",
     "_print_success",
+    "_print_warning",
     "_prompt_interactive_action",
     "_prompt_interactive_value",
     "_render_interactive_wait_candidate",
@@ -315,7 +334,9 @@ __all__ = [
     "show_",
     "show__",
     "stack_app",
+    "start_or_connect_local_server",
     "status",
+    "stop_registered_local_server",
     "time",
     "use",
 ]

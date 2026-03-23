@@ -1,0 +1,20 @@
+apiVersion: v2
+name: kitaru
+version: "0.2.0"
+description: "Kitaru: Durable execution for AI agents."
+keywords:
+  - kitaru
+  - ai
+  - agents
+  - durable-execution
+  - workflows
+home: https://kitaru.ai
+sources:
+  - https://github.com/zenml-io/kitaru
+icon: https://kitaru.ai/kitaru-logo.svg
+
+dependencies:
+  - name: zenml
+    version: "0.94.1"
+    repository: "oci://public.ecr.aws/zenml"
+    alias: kitaru
