@@ -25,17 +25,6 @@ verifySupported() {
   fi
 }
 
-# checkGitIgnore checks if the dashboard directories are ignored by Git
-checkGitIgnore() {
-  if [ -f ".gitignore" ]; then
-    if grep -q -E "(^|\/)dashboard($|\/)" ".gitignore" || grep -q -E "(^|\/)src\/zenml\/zen_server\/dashboard($|\/)" ".gitignore"; then
-      echo "Error: The '/dashboard' or 'src/zenml/zen_server/dashboard' directory is ignored by Git."
-      echo "Please remove the corresponding entries from the .gitignore file to proceed with the installation."
-      exit 1
-    fi
-  fi
-}
-
 # checkTagProvided checks whether TAG has provided as an environment variable
 # so we can skip checkLatestVersion
 checkTagProvided() {
@@ -59,7 +48,7 @@ checkLatestVersion() {
 downloadFile() {
   local archive_name=$1
   DOWNLOAD_URL="$REPO_URL/releases/download/$TAG/$archive_name"
-  TMP_ROOT="$(mktemp -dt zenml-dashboard-XXXXXX)"
+  TMP_ROOT="$(mktemp -dt kitaru-ui-XXXXXX)"
   TMP_FILE="$TMP_ROOT/$archive_name"
   if type "curl" > /dev/null; then
     curl -SsL "$DOWNLOAD_URL" -o "$TMP_FILE"
@@ -160,7 +149,6 @@ done
 set +u
 
 verifySupported
-checkGitIgnore
 checkTagProvided || checkLatestVersion
 if [[ -n "$TAG" ]]; then
   downloadFile "kitaru-ui.tar.gz"
