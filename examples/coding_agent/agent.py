@@ -9,7 +9,7 @@ follow-up instruction.
 Usage::
 
     cd examples/coding_agent
-    uv run python -m flow "Create a plotly chart"
+    uv run python agent.py "Create a plotly chart"
 
 Or supply follow-up input via the CLI::
 
@@ -117,8 +117,11 @@ def tool_call(
         try:
             full_content = (Path(cwd) / arguments["path"]).read_text()
             _save_html_artifact(arguments["path"], full_content)
-        except Exception:
-            pass
+        except Exception as exc:
+            kitaru.log(
+                artifact_warning=f"Could not save full file artifact for "
+                f"{arguments['path']}: {type(exc).__name__}: {exc}"
+            )
 
     # Persist any new files the tool created (HTML, CSV, PNG, etc.)
     save_generated_files(cwd, files_before)
@@ -202,7 +205,6 @@ def coding_agent(task: str) -> str:
                     question=question,
                 )
                 if follow_up.is_finished:
-                    results.append(summary)
                     return "\n\n---\n\n".join(results)
                 msg = {"role": "tool", "tool_call_id": tc.id, "content": summary}
                 messages.append(msg)

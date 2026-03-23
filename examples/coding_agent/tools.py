@@ -218,7 +218,6 @@ def web_fetch(cwd: str, url: str, max_chars: int = _MAX_CHARS) -> HTMLString:
 
 def web_search(cwd: str, query: str) -> MarkdownString:
     """Search the web using a text query (via DuckDuckGo HTML)."""
-    import re
     from urllib.parse import quote_plus
 
     search_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
@@ -545,12 +544,16 @@ def save_generated_files(cwd: str, before: set[str]) -> None:
 
                 data = base64.b64encode(path.read_bytes()).decode()
                 mime = "image/svg+xml" if ext == ".svg" else f"image/{ext.lstrip('.')}"
-                if ext == ".jpeg":
+                if ext in {".jpg", ".jpeg"}:
                     mime = "image/jpeg"
                 tag = f'<img src="data:{mime};base64,{data}" style="max-width:100%">'
                 kitaru.save(path.name, HTMLString(tag))
             elif ext in _TEXT_EXTENSIONS:
                 content = path.read_text(errors="replace")
                 kitaru.save(path.name, _TEXT_EXTENSIONS[ext](content))
-        except Exception:
+        except Exception as exc:
+            kitaru.log(
+                artifact_warning=f"Could not save generated file {path.name}: "
+                f"{type(exc).__name__}: {exc}"
+            )
             continue
