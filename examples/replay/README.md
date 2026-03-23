@@ -7,8 +7,13 @@ only the suffix you care about.
 
 ```bash
 cd examples/replay
-uv sync --extra local       # Install dependencies (from repo root, or use pip)
-kitaru init                  # Initialize a Kitaru project in this directory
+uv pip install 'kitaru[local]'   # Install Kitaru with local runtime
+kitaru init                      # Initialize a Kitaru project in this directory
+```
+
+Then run:
+
+```bash
 python replay_with_overrides.py
 ```
 
@@ -23,7 +28,7 @@ For the full catalog, see [../README.md](../README.md).
 Runs a three-step content pipeline (research → write draft → publish), then
 replays from `write_draft` while swapping the research checkpoint's cached
 output for edited notes. Checkpoints before the replay point return their
-cached results — no tokens wasted re-running `research`. Only `write_draft`
+cached results — no work wasted re-running `research`. Only `write_draft`
 and `publish` re-execute with the new input.
 
 This is the core value of durable execution: fix a mistake at step 3 without

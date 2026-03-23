@@ -7,8 +7,13 @@ durability and observability around it — no rewrite needed.
 
 ```bash
 cd examples/pydantic_ai_agent
-uv sync --extra local --extra pydantic-ai   # Install dependencies
+uv pip install 'kitaru[local,pydantic-ai]'   # Install Kitaru with local runtime + PydanticAI
 kitaru init                                  # Initialize a Kitaru project
+```
+
+Then run:
+
+```bash
 python pydantic_ai_adapter.py
 ```
 

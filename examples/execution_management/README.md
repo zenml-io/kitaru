@@ -8,7 +8,7 @@ how you interact with them programmatically.
 
 ```bash
 cd examples/execution_management
-uv sync --extra local       # Install dependencies (from repo root, or use pip)
+uv pip install 'kitaru[local]'   # Install Kitaru with local runtime
 kitaru init                  # Initialize a Kitaru project in this directory
 python <module_name>.py      # Run any example
 ```
@@ -35,15 +35,26 @@ python client_execution_management.py
 
 ### `wait_and_resume.py` — Pause for human input, resume later
 
-Demonstrates `kitaru.wait()` — a durable suspension point that releases
-compute while waiting for input. The flow drafts a release note, then
-pauses for human approval before publishing. When running interactively,
-you are prompted inline. When running remotely (or after a timeout), the
-example prints fallback CLI commands so you can provide input and resume
-from a separate terminal:
+Demonstrates two `kitaru.wait()` patterns — durable suspension points
+that release compute while waiting for input:
+
+1. **Boolean gate** — approve or reject publication of a draft release note
+2. **Structured input** — provide release notes and a major version number
+   via a Pydantic schema
+
+Both waits include timeouts: once the timeout expires, compute is
+released and the execution can be resumed later via the CLI. When
+running interactively, you are prompted inline. When running remotely
+(or after a timeout), use the CLI to provide input and resume:
 
 ```bash
+# Boolean approval
 kitaru executions input <exec_id> --value true
+kitaru executions resume <exec_id>
+
+# Structured input (Pydantic schema)
+kitaru executions input <exec_id> --wait release_details \
+  --value '{"notes": "Bug fixes", "major_version": 2}'
 kitaru executions resume <exec_id>
 ```
 

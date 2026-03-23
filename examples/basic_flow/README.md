@@ -7,7 +7,7 @@ introduces a single concept — start at the top and work down.
 
 ```bash
 cd examples/basic_flow
-uv sync --extra local       # Install dependencies (from repo root, or use pip)
+uv pip install 'kitaru[local]'   # Install Kitaru with local runtime
 kitaru init                  # Initialize a Kitaru project in this directory
 python <module_name>.py      # Run any example
 ```

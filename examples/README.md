@@ -30,11 +30,15 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 
 ## Install the extras you need
 
+```bash
+uv venv && source .venv/bin/activate   # Create and activate a virtual environment
+```
+
 | Goal | Install command |
 |---|---|
-| Core workflow, execution, replay, configuration, and LLM examples | `uv sync --extra local` |
-| PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
-| MCP query tools example | `uv sync --extra local --extra mcp` |
+| Core workflow, execution, replay, configuration, and LLM examples | `uv pip install 'kitaru[local]'` |
+| PydanticAI adapter example | `uv pip install 'kitaru[local,pydantic-ai]'` |
+| MCP query tools example | `uv pip install 'kitaru[local,mcp]'` |
 
 ## How the examples are organized
 

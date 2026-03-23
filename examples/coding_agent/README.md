@@ -14,7 +14,7 @@ Demonstrates:
 
 ```bash
 cd examples/coding_agent
-uv sync --extra local       # Install dependencies (from repo root, or use pip)
+uv pip install 'kitaru[local]'   # Install Kitaru with local runtime
 kitaru init                  # Initialize a Kitaru project in this directory
 ```
 

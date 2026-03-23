@@ -8,8 +8,13 @@ Cursor.
 
 ```bash
 cd examples/mcp
-uv sync --extra local --extra mcp   # Install dependencies
+uv pip install 'kitaru[local,mcp]'   # Install Kitaru with local runtime + MCP
 kitaru init                          # Initialize a Kitaru project
+```
+
+Then run:
+
+```bash
 python mcp_query_tools.py
 ```
 
