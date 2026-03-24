@@ -20,6 +20,7 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 - **Run the smallest possible durable flow:** `examples/basic_flow/first_working_flow.py`
 - **See structured metadata logging:** `examples/basic_flow/flow_with_logging.py`
 - **Persist and reload artifacts:** `examples/basic_flow/flow_with_artifacts.py`
+- **Run checkpoints in isolated containers with fan-out:** `examples/basic_flow/flow_with_checkpoint_runtime.py`
 - **Inspect and manage past executions:** `examples/execution_management/client_execution_management.py`
 - **Pause for human input and resume later:** `examples/execution_management/wait_and_resume.py`
 - **Replay from a checkpoint with overrides:** `examples/replay/replay_with_overrides.py`
@@ -55,6 +56,7 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 | [Structured logging](basic_flow/flow_with_logging.py) | `uv run examples/basic_flow/flow_with_logging.py` | `uv sync --extra local` | `kitaru.log()` metadata at both flow and checkpoint scope | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/test_phase7_logging_example.py](../tests/test_phase7_logging_example.py) |
 | [Artifacts](basic_flow/flow_with_artifacts.py) | `uv run examples/basic_flow/flow_with_artifacts.py` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://kitaru.ai/docs/getting-started/artifacts) | [tests/test_phase8_artifacts_example.py](../tests/test_phase8_artifacts_example.py) |
 | [Configuration](basic_flow/flow_with_configuration.py) | `uv run examples/basic_flow/flow_with_configuration.py` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://kitaru.ai/docs/getting-started/configuration) | [tests/test_phase10_configuration_example.py](../tests/test_phase10_configuration_example.py) |
+| [Checkpoint runtime](basic_flow/flow_with_checkpoint_runtime.py) | `uv run examples/basic_flow/flow_with_checkpoint_runtime.py` | `uv sync --extra local` | `@checkpoint(runtime="isolated")` with `.submit()` fan-out | [Checkpoints](https://kitaru.ai/docs/concepts/checkpoints) | — |
 
 ## Execution lifecycle and recovery
 

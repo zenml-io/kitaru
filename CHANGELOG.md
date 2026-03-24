@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `@checkpoint(runtime="isolated")` parameter for running individual checkpoints in separate containers on remote orchestrators (Kubernetes, Vertex, SageMaker, AzureML); accepts `"inline"`, `"isolated"`, or `StepRuntime` enum values with early validation
+
 ### Changed
 - Replace LiteLLM dependency with direct OpenAI and Anthropic SDK support
   - `openai` and `anthropic` are now optional extras: `pip install kitaru[openai]`, `pip install kitaru[anthropic]`, or `pip install kitaru[llm]` for both
