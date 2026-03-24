@@ -185,14 +185,14 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
 }
 
 export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
-  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
+  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false, antialias: false });
   if (!gl) return null;
 
   let program = createProgram(gl);
   if (!program) return null;
 
   const DPR = Math.min(window.devicePixelRatio || 1, 2);
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // Uniform locations
   let uTime: WebGLUniformLocation | null;
@@ -209,7 +209,7 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
   cacheLocations();
 
   // Empty VAO required by WebGL2
-  const vao = gl.createVertexArray();
+  let vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
 
   // Blending for alpha
@@ -267,6 +267,7 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
     program = createProgram(gl!);
     if (!program) return;
     cacheLocations();
+    vao = gl!.createVertexArray();
     gl!.bindVertexArray(vao);
     gl!.enable(gl!.BLEND);
     gl!.blendFunc(gl!.SRC_ALPHA, gl!.ONE_MINUS_SRC_ALPHA);
@@ -288,6 +289,7 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
 
   // Listen for reduced-motion preference changes
   window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
+    reducedMotion = e.matches;
     if (e.matches) {
       cancelAnimationFrame(animId);
       animId = 0;
