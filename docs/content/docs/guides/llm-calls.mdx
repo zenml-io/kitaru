@@ -7,7 +7,7 @@ description: Use kitaru.llm() with model aliases, transported runtime config, an
 
 - prompt artifact capture
 - response artifact capture
-- usage/cost/latency metadata logging
+- usage/latency metadata logging
 
 <Callout type="info">
   If you want the full setup path from stored credentials to an actual flow run,
@@ -24,7 +24,7 @@ When you call `kitaru.llm()`, Kitaru resolves the model in this order:
 3. the default alias from the effective model registry in the current environment
 
 If `KITARU_DEFAULT_MODEL` matches a registered alias, Kitaru resolves that
-alias. Otherwise it treats the value as a raw LiteLLM model string.
+alias. Otherwise it treats the value as a raw provider/model string.
 
 When you submit or replay a flow, Kitaru automatically transports your local
 model registry into the execution environment. That means remote runs can still
@@ -57,16 +57,31 @@ kitaru model list
   for adding aliases or overriding matching ones.
 </Callout>
 
+## Supported providers
+
+Built-in runtime support covers:
+
+- `openai/*` — OpenAI models (requires `kitaru[openai]`)
+- `anthropic/*` — Anthropic models (requires `kitaru[anthropic]`)
+- `ollama/*` — local Ollama models (requires `kitaru[openai]`, no API key needed)
+- `openrouter/*` — OpenRouter meta-router (requires `kitaru[openai]`)
+
+Ollama and OpenRouter use the OpenAI-compatible API, so they share the
+`kitaru[openai]` extra — no additional packages needed.
+
 ## Credential resolution order
 
-For known providers such as OpenAI, Anthropic, and Gemini, Kitaru resolves
-credentials in this order:
+For built-in providers that require credentials (OpenAI, Anthropic,
+OpenRouter), Kitaru resolves credentials in this order:
 
 1. provider credentials already present in the environment
 2. the secret linked to the resolved alias
 3. otherwise, fail with a setup error
 
 That means environment variables win over a linked secret for known providers.
+
+Ollama does not require credentials (local server). Use `OLLAMA_HOST` to
+point to a non-default server address (default: `http://localhost:11434`).
 
 ### Environment-backed setup
 
@@ -142,21 +157,30 @@ alongside a message list, Kitaru prepends a system message automatically.
 ## When to use `kitaru.llm()` vs your own client
 
 `kitaru.llm()` is designed for simple text-in/text-out model calls. It handles
-credential resolution, prompt/response capture, and cost tracking automatically.
+credential resolution, prompt/response capture, and usage tracking automatically.
+Built-in runtime support covers `openai/*`, `anthropic/*`, `ollama/*`, and
+`openrouter/*` models.
+
+<Callout type="info">
+  `kitaru.llm()` requires a provider SDK to be installed. Install with
+  `pip install kitaru[openai]` (also covers Ollama and OpenRouter),
+  `pip install kitaru[anthropic]`, or `pip install kitaru[llm]` for both.
+</Callout>
 
 For advanced patterns — tool calling, structured outputs, streaming, vision
-inputs, or multi-turn conversation management — use your LLM client directly
+inputs, or multi-turn conversation management — use your provider SDK directly
 inside a `@checkpoint`. You still get durable checkpointing and replay; you
 just manage the model interaction yourself:
 
 ```python
-from litellm import completion
+from openai import OpenAI
 from kitaru import checkpoint
 
 @checkpoint
 def agent_step(messages: list[dict]) -> str:
-    resp = completion(
-        model="openai/gpt-4o-mini",
+    client = OpenAI()
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
         messages=messages,
         tools=[...],  # tool calling, structured output, etc.
     )
@@ -168,7 +192,7 @@ For a full example of a tool-calling agent built this way, see
 
 <Callout type="info">
   Tool calling and structured output support for `kitaru.llm()` is on the
-  roadmap. For now, use your preferred LLM client inside checkpoints for
+  roadmap. For now, use your provider SDK directly inside checkpoints for
   these patterns.
 </Callout>
 
@@ -185,13 +209,12 @@ Each `kitaru.llm()` call records:
 - response artifacts
 - token usage
 - latency
-- cost metadata when available
 - credential source metadata (`environment` or `secret`)
 
 ## Example in this repository
 
 ```bash
-uv sync --extra local
+uv sync --extra local --extra llm
 
 # Register an alias (with or without a linked secret) before running the example.
 uv run kitaru model register fast --model openai/gpt-4o-mini

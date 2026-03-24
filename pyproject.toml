@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.2.1"
+version = "0.3.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -19,13 +19,22 @@ classifiers = [
 ]
 dependencies = [
     "cyclopts>=3.0",
-    "litellm>=1.75.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
     "zenml[local]>=0.94.1",
 ]
 
 [project.optional-dependencies]
+openai = [
+    "openai>=1.0.0,<2",
+]
+anthropic = [
+    "anthropic>=0.40.0,<1",
+]
+llm = [
+    "kitaru[openai]",
+    "kitaru[anthropic]",
+]
 local = [
     "zenml[server]>=0.94.1",
 ]
@@ -73,6 +82,8 @@ dev = [
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
     "pydantic-ai-slim>=0.2.0",
+    "openai>=1.0.0,<2",
+    "anthropic>=0.40.0,<1",
 ]
 
 [tool.ruff]

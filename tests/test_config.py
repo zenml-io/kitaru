@@ -1023,6 +1023,19 @@ def test_empty_env_default_model_raises_clear_error(
         resolve_model_selection(None)
 
 
+def test_resolve_model_selection_passes_through_providerless_string() -> None:
+    """Config resolution stays permissive for bare model strings without a prefix.
+
+    The runtime backend in kitaru.llm() enforces provider support — config
+    should not. This locks in the boundary between the config and runtime layers.
+    """
+    selection = resolve_model_selection("gpt-4o-mini")
+
+    assert selection.alias is None
+    assert selection.resolved_model == "gpt-4o-mini"
+    assert selection.secret is None
+
+
 def test_resolve_model_selection_requires_default_or_explicit_model() -> None:
     """`kitaru.llm(model=None)` should fail without a configured default alias."""
     with pytest.raises(KitaruUsageError, match="No model alias is configured"):

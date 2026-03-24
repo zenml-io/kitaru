@@ -1,4 +1,4 @@
-"""General-purpose coding agent — Kitaru primitives + LiteLLM.
+"""General-purpose coding agent — Kitaru primitives + direct provider SDKs.
 
 An agent loop where each LLM call and tool execution is a visible
 checkpoint. When the LLM returns multiple tool calls, they are submitted
@@ -27,13 +27,10 @@ from typing import Any
 
 import click
 import materializers as _materializers  # noqa: F401 — registers custom materializers
-from litellm import completion
-from llm import MAX_TOOL_ROUNDS, MODEL
+from llm import MAX_TOOL_ROUNDS, MODEL, complete_agent_turn
 from models import (
     FollowUp,
     LLMResponse,
-    ToolCallFunction,
-    ToolCallRequest,
     ToolCallResult,
 )
 from prompts import SYSTEM_PROMPT
@@ -42,7 +39,6 @@ from zenml.types import HTMLString
 
 import kitaru
 from kitaru import checkpoint, flow
-from kitaru.llm import _extract_usage
 
 _WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
 
@@ -56,10 +52,9 @@ _WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
 def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
     """Single LLM completion — tracked as a checkpoint."""
     started_at = time.perf_counter()
-    response = completion(model=MODEL, messages=messages, tools=ALL_TOOLS)
+    response, usage = complete_agent_turn(messages, tools=ALL_TOOLS)
     latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
-    usage = _extract_usage(response)
     kitaru.log(
         llm_usage={
             k: v
@@ -69,27 +64,12 @@ def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
                 "tokens_input": usage.prompt_tokens,
                 "tokens_output": usage.completion_tokens,
                 "total_tokens": usage.total_tokens,
-                "cost_usd": usage.cost_usd,
             }.items()
             if v is not None
         }
     )
 
-    msg = response.choices[0].message
-    tool_calls = None
-    if getattr(msg, "tool_calls", None):
-        tool_calls = [
-            ToolCallRequest(
-                id=tc.id,
-                function=ToolCallFunction(
-                    name=tc.function.name,
-                    arguments=tc.function.arguments,
-                ),
-            )
-            for tc in msg.tool_calls
-        ]
-
-    return LLMResponse(role=msg.role, content=msg.content, tool_calls=tool_calls)
+    return response
 
 
 @checkpoint(type="tool_call")
@@ -149,7 +129,7 @@ def _save_html_artifact(name: str, code: str) -> None:
 
 @flow(
     image={
-        "requirements": ["litellm"],
+        "requirements": ["openai", "anthropic"],
         "apt_packages": ["curl", "ca-certificates"],
     },
 )
