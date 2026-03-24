@@ -154,7 +154,10 @@ def upload_one(
         str(local_path),
         bucket,
         key,
-        ExtraArgs={"ContentType": content_type},
+        ExtraArgs={
+            "ContentType": content_type,
+            "CacheControl": "public, max-age=31536000, immutable",
+        },
     )
     print(f"  URL: {public_url}")
     return public_url
