@@ -35,6 +35,7 @@ _MOCK_RESPONSE_ENV = "KITARU_LLM_MOCK_RESPONSE"
 _ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
 _OLLAMA_HOST_ENV = "OLLAMA_HOST"
 _OLLAMA_DEFAULT_HOST = "http://localhost:11434"
+_OLLAMA_DUMMY_API_KEY = "ollama"  # Ollama needs no auth; prevents OpenAI SDK env lookup
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 _SUPPORTED_PROVIDERS = ("openai", "anthropic", "ollama", "openrouter")
@@ -138,7 +139,7 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
             f"Model `{resolved_model}` does not include a provider prefix. "
             "The built-in kitaru.llm() runtime requires a provider-qualified "
             "model string like `openai/gpt-4o-mini`, "
-            "`anthropic/claude-sonnet-4-20250514`, or `ollama/llama3.2`. "
+            "`anthropic/claude-sonnet-4-20250514`, or `ollama/qwen3.5`. "
             "If you registered an alias, make sure it resolves to a "
             "provider/model string. For other providers, call the SDK "
             "directly inside a @checkpoint."
@@ -595,32 +596,24 @@ def _execute_llm_call(request: _LLMRequest) -> str:
                 max_tokens=request.max_tokens,
                 env_overlay=env_overlay,
             )
-        elif target.provider == "ollama":
-            ollama_host = os.environ.get(_OLLAMA_HOST_ENV, _OLLAMA_DEFAULT_HOST)
-            base_url = ollama_host.rstrip("/") + "/v1"
+        elif target.provider in ("ollama", "openrouter"):
+            if target.provider == "ollama":
+                ollama_host = os.environ.get(_OLLAMA_HOST_ENV, _OLLAMA_DEFAULT_HOST)
+                compat_base_url = ollama_host.rstrip("/") + "/v1"
+                compat_api_key: str | None = _OLLAMA_DUMMY_API_KEY
+            else:
+                compat_base_url = _OPENROUTER_BASE_URL
+                key_name = _MODEL_PROVIDER_HINTS["openrouter"][0]
+                compat_api_key = env_overlay.get(key_name) or os.environ.get(key_name)
             result = _call_openai(
                 model=target.provider_model,
                 messages=messages,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
                 env_overlay=env_overlay,
-                base_url=base_url,
-                api_key="ollama",
-                provider_label="ollama",
-            )
-        elif target.provider == "openrouter":
-            openrouter_api_key = env_overlay.get(
-                "OPENROUTER_API_KEY"
-            ) or os.environ.get("OPENROUTER_API_KEY")
-            result = _call_openai(
-                model=target.provider_model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-                env_overlay=env_overlay,
-                base_url=_OPENROUTER_BASE_URL,
-                api_key=openrouter_api_key,
-                provider_label="openrouter",
+                base_url=compat_base_url,
+                api_key=compat_api_key,
+                provider_label=target.provider,
             )
         else:
             raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
