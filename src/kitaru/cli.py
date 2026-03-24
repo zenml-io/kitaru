@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import time
 
@@ -191,18 +192,29 @@ def _apply_runtime_version() -> None:
     app.version = _sdk_version()
 
 
+def _invoked_command_name() -> str:
+    """Extract the top-level command token from sys.argv for analytics."""
+    return " ".join(sys.argv[1:2]) or "help"
+
+
 def cli() -> None:
-    """Entry point for the `kitaru` console script."""
+    """Entry point for the `kitaru` console script.
+
+    Analytics tracking is deferred to a ``finally`` block so that command
+    dispatch is never blocked by a slow or unreachable store connection.
+    Commands that naturally initialize the store during execution still
+    get tracked; local-only commands silently skip analytics.
+    """
     from kitaru.analytics import AnalyticsEvent, set_source, track
 
     set_source("cli")
-    # Touch zen_store to mark GlobalConfiguration as initialized before
-    # any analytics calls.  Without this, AnalyticsContext.__enter__()
-    # sees is_initialized=False and silently skips all tracking.
-    GlobalConfiguration().zen_store  # noqa: B018
-    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(sys.argv[1:2]) or "help"})
     _apply_runtime_version()
-    app()
+    command = _invoked_command_name()
+    try:
+        app()
+    finally:
+        with contextlib.suppress(Exception):
+            track(AnalyticsEvent.CLI_INVOKED, {"command": command})
 
 
 __all__ = [
@@ -268,6 +280,7 @@ __all__ = [
     "_format_timestamp",
     "_get_connected_server_url",
     "_info_rows",
+    "_invoked_command_name",
     "_is_input_interactive",
     "_is_interactive",
     "_list_accessible_secrets",

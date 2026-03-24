@@ -6,6 +6,7 @@ import contextlib
 import importlib.metadata
 import os
 import platform
+import socket
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, is_dataclass
@@ -173,6 +174,33 @@ def _legacy_runner_env_warning() -> str | None:
     return "`KITARU_RUNNER` was renamed to `KITARU_STACK`; update your environment."
 
 
+def _can_fast_connect_to_rest_store(
+    url: str,
+    *,
+    timeout_seconds: float = 0.5,
+) -> bool:
+    """Single TCP connect to check whether a REST store URL is reachable.
+
+    Returns False on any connection error, DNS failure, or timeout.
+    This avoids the long urllib3 retry/backoff that RestZenStore uses.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        return False
+
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout_seconds)
+        sock.close()
+    except OSError:
+        return False
+    return True
+
+
 def log_store_mismatch_details(
     preferred: ResolvedLogStore,
 ) -> tuple[str | None, str | None]:
@@ -296,7 +324,10 @@ def _collect_config_provenance(
     )
 
 
-def _collect_connection_sources() -> dict[str, str]:
+def _collect_connection_sources(
+    *,
+    allow_client_probe: bool = True,
+) -> dict[str, str]:
     """Build a per-parameter source breakdown for the current connection."""
     from kitaru._env import (
         KITARU_AUTH_TOKEN_ENV,
@@ -331,6 +362,8 @@ def _collect_connection_sources() -> dict[str, str]:
         sources["project"] = f"environment ({KITARU_PROJECT_ENV})"
     elif runtime_conn.project:
         sources["project"] = "runtime override (kitaru.configure)"
+    elif not allow_client_probe:
+        sources["project"] = "global config"
     else:
         try:
             client = Client()
@@ -417,10 +450,12 @@ def build_runtime_snapshot(
         snapshot.packages = packages
         return snapshot
 
+    is_local_server = connected_to_local_server_safe()
+
     if uses_local_store:
         connection = "local database"
         server_url = None
-    elif connected_to_local_server_safe():
+    elif is_local_server:
         connection = "local Kitaru server"
         server_url = store_cfg.url
     else:
@@ -442,9 +477,19 @@ def build_runtime_snapshot(
         packages=packages,
     )
 
+    # Decide whether Client() is safe to use without a long retry wait.
+    # Local stores and confirmed-running local servers are always safe.
+    # For remote REST stores, do a fast TCP probe to avoid the 30+s
+    # urllib3 retry/backoff that RestZenStore uses when the server is down.
+    allow_client_probe = uses_local_store or is_local_server
+    if not allow_client_probe and server_url:
+        allow_client_probe = _can_fast_connect_to_rest_store(server_url)
+
     # Connection source breakdown
     with contextlib.suppress(Exception):
-        snapshot.connection_sources = _collect_connection_sources()
+        snapshot.connection_sources = _collect_connection_sources(
+            allow_client_probe=allow_client_probe,
+        )
 
     if uses_stale_local_server_url(server_url, snapshot.local_server_status):
         snapshot.warning = combine_warnings(
@@ -463,6 +508,16 @@ def build_runtime_snapshot(
         snapshot.project_override = project_env
     elif runtime_conn.project:
         snapshot.project_override = runtime_conn.project
+
+    if not allow_client_probe:
+        snapshot.warning = combine_warnings(
+            (
+                "Configured Kitaru server is unreachable; "
+                "showing persisted configuration only."
+            ),
+            _legacy_runner_env_warning(),
+        )
+        return snapshot
 
     try:
         client = Client()

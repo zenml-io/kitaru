@@ -693,6 +693,10 @@ def test_build_runtime_snapshot_appends_legacy_warning_for_stale_local_server(
         patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
         patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
         patch(
+            "kitaru.inspection._can_fast_connect_to_rest_store",
+            return_value=False,
+        ),
+        patch(
             "kitaru.inspection.describe_local_server",
             return_value="registered but unavailable (daemon: stopped)",
         ),
@@ -735,6 +739,10 @@ def test_build_runtime_snapshot_populates_log_store_mismatch_details() -> None:
     with (
         patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
         patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch(
+            "kitaru.inspection._can_fast_connect_to_rest_store",
+            return_value=True,
+        ),
         patch("kitaru.inspection.describe_local_server", return_value="not started"),
         patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
         patch(
@@ -789,6 +797,10 @@ def test_build_runtime_snapshot_returns_early_when_log_store_resolution_fails(
     with (
         patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
         patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch(
+            "kitaru.inspection._can_fast_connect_to_rest_store",
+            return_value=True,
+        ),
         patch("kitaru.inspection.describe_local_server", return_value="not started"),
         patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
         patch(
@@ -815,6 +827,125 @@ def test_build_runtime_snapshot_returns_early_when_log_store_resolution_fails(
         "Unable to resolve Kitaru log-store preference: bad config"
     )
     assert "`KITARU_RUNNER` was renamed to `KITARU_STACK`" not in snapshot.warning
+
+
+def test_build_runtime_snapshot_skips_client_when_rest_probe_fails() -> None:
+    """Unreachable REST server returns degraded snapshot without blocking."""
+    fake_gc = SimpleNamespace(
+        uses_local_store=False,
+        store_configuration=SimpleNamespace(url="http://10.0.0.1:8383"),
+        config_directory="/tmp/fake-kitaru-config",
+    )
+
+    with (
+        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch(
+            "kitaru.inspection._can_fast_connect_to_rest_store",
+            return_value=False,
+        ),
+        patch(
+            "kitaru.inspection.describe_local_server",
+            return_value="not started",
+        ),
+        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+        patch(
+            "kitaru.inspection.Client",
+            side_effect=AssertionError("Client should not be instantiated"),
+        ),
+    ):
+        snapshot = build_runtime_snapshot()
+
+    assert snapshot.sdk_version == "1.2.3"
+    assert snapshot.connection == "remote Kitaru server"
+    assert snapshot.server_url == "http://10.0.0.1:8383"
+    assert snapshot.warning is not None
+    assert "unreachable" in snapshot.warning
+    assert "persisted configuration only" in snapshot.warning
+    # Server-dependent fields should be unpopulated
+    assert snapshot.active_user is None
+    assert snapshot.active_stack is None
+    assert snapshot.server_version is None
+    assert snapshot.log_store_status is None
+
+
+def test_build_runtime_snapshot_allows_client_when_rest_probe_succeeds() -> None:
+    """Healthy REST server probe allows full Client() usage."""
+    fake_gc = SimpleNamespace(
+        uses_local_store=False,
+        store_configuration=SimpleNamespace(url="https://kitaru.example.com"),
+        config_directory="/tmp/fake-kitaru-config",
+    )
+    fake_client = SimpleNamespace(
+        active_user=SimpleNamespace(name="bob"),
+        active_stack_model=SimpleNamespace(name="default"),
+        root=None,
+        zen_store=SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.5.0",
+                database_type="sqlite",
+                deployment_type="local",
+            )
+        ),
+    )
+
+    with (
+        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch(
+            "kitaru.inspection._can_fast_connect_to_rest_store",
+            return_value=True,
+        ),
+        patch("kitaru.inspection.describe_local_server", return_value="not started"),
+        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+        patch(
+            "kitaru.inspection._read_runtime_connection_config",
+            return_value=SimpleNamespace(project=None),
+        ),
+        patch("kitaru.inspection.Client", return_value=fake_client),
+        patch(
+            "kitaru.inspection.resolve_log_store",
+            return_value=ResolvedLogStore(
+                backend="artifact-store",
+                endpoint=None,
+                api_key=None,
+                source="default",
+            ),
+        ),
+    ):
+        snapshot = build_runtime_snapshot()
+
+    assert snapshot.active_user == "bob"
+    assert snapshot.active_stack == "default"
+    assert snapshot.server_version == "0.5.0"
+    assert snapshot.warning is None
+
+
+def test_can_fast_connect_to_rest_store_returns_false_for_closed_port() -> None:
+    """TCP probe returns False when no server is listening."""
+    from kitaru.inspection import _can_fast_connect_to_rest_store
+
+    # Use a port that's almost certainly not listening
+    assert (
+        _can_fast_connect_to_rest_store("http://127.0.0.1:19999", timeout_seconds=0.1)
+        is False
+    )
+
+
+def test_can_fast_connect_to_rest_store_handles_malformed_url() -> None:
+    """TCP probe returns False for URLs without a hostname."""
+    from kitaru.inspection import _can_fast_connect_to_rest_store
+
+    assert _can_fast_connect_to_rest_store("not-a-url") is False
+    assert _can_fast_connect_to_rest_store("") is False
 
 
 def test_serialize_log_entry_contract() -> None:
