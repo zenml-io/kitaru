@@ -40,11 +40,12 @@ const {
     [data-reveal], .feature-card, .why-card { opacity: 1 !important; transform: none !important; position: relative !important; top: auto !important; }
   </style></noscript>
 
-  <!-- Preconnect third-party origins -->
-  <link rel="preconnect" href="https://cdn.segment.com" />
+  <!-- Preconnect origins used during initial load -->
   <link rel="preconnect" href="https://plausible.io" />
-  <link rel="preconnect" href="https://b2bjsstore.s3.us-west-2.amazonaws.com" />
   <link rel="preconnect" href="https://assets.kitaru.ai" />
+  <!-- DNS-prefetch only for deferred analytics (full preconnect would idle-timeout) -->
+  <link rel="dns-prefetch" href="https://cdn.segment.com" />
+  <link rel="dns-prefetch" href="https://b2bjsstore.s3.us-west-2.amazonaws.com" />
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -95,7 +96,7 @@ const {
       }("Z6PVLHP07Q6R");
     }
     if ('requestIdleCallback' in window) {
-      requestIdleCallback(__loadAnalytics);
+      requestIdleCallback(__loadAnalytics, { timeout: 3000 });
     } else {
       setTimeout(__loadAnalytics, 2000);
     }

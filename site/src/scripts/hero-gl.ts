@@ -1,5 +1,5 @@
 // hero-gl.ts — WebGL2 fragment shader for hero dot-grid landscape animation.
-// Replaces Canvas 2D worker: all dot computation runs on the GPU in a single draw call.
+// Replaces Canvas 2D: all dot computation runs on the GPU in a single draw call.
 
 const VERT = /* glsl */ `#version 300 es
 // Fullscreen triangle from gl_VertexID — no vertex buffers needed
@@ -13,9 +13,12 @@ const FRAG = /* glsl */ `#version 300 es
 precision mediump float;
 
 uniform float uTime;
-uniform vec2  uResolution;
-uniform vec2  uMouse;
+uniform vec2  uResolution;   // CSS pixels
+uniform float uDPR;          // device pixel ratio
+uniform vec2  uMouse;        // CSS pixels
 uniform float uMouseActive;
+uniform vec2  uAttractor1;   // pre-computed on CPU (CSS pixels)
+uniform vec2  uAttractor2;
 
 out vec4 fragColor;
 
@@ -31,21 +34,22 @@ float ssmooth(float a, float b, float t) {
 }
 
 void main() {
-  // Grid parameters (match Canvas 2D: 10px spacing, 2px dot radius)
-  float spacing = 10.0;
-  float dotRadius = 2.0;
+  // Convert physical framebuffer coords to CSS pixel space so all
+  // constants (spacing, radii) are DPR-independent and match the
+  // old Canvas 2D implementation.
+  vec2 pos = gl_FragCoord.xy / uDPR;
+  pos.y = uResolution.y - pos.y;
 
-  vec2 uv = gl_FragCoord.xy / uResolution;
-  // Flip Y: shader Y=0 is bottom, we want top-down like Canvas
-  uv.y = 1.0 - uv.y;
-  vec2 pos = uv * uResolution;
+  // Grid parameters — 6 CSS-px spacing, 2 CSS-px dot radius (matches Canvas 2D)
+  float spacing = 6.0;
+  float dotRadius = 2.0;
 
   // Grid cell
   vec2 cell = floor(pos / spacing);
   vec2 cellCenter = (cell + 0.5) * spacing;
   float dist = length(pos - cellCenter);
 
-  // Discard pixels outside dot radius
+  // Early discard for pixels outside dot radius
   if (dist > dotRadius) discard;
 
   // Normalized row position (0=top, 1=bottom)
@@ -101,13 +105,9 @@ void main() {
   float breath = sin(uTime * 0.6 + phase) * 0.03;
   float opacity = base + breath;
 
-  // Attractor 1 (Lissajous, computed in shader)
-  vec2 at1 = vec2(
-    uResolution.x * 0.5 + sin(uTime * 0.25) * uResolution.x * 0.42,
-    uResolution.y * 0.5 + cos(uTime * 0.18) * uResolution.y * 0.38
-  );
-  float at1Dist = length(cellCenter - at1);
+  // Attractor 1 — Lissajous glow (position pre-computed on CPU)
   float at1R = 260.0;
+  float at1Dist = length(cellCenter - uAttractor1);
   if (at1Dist < at1R) {
     float ratio = 1.0 - at1Dist / at1R;
     float ease = ratio * ratio;
@@ -115,12 +115,8 @@ void main() {
   }
 
   // Attractor 2
-  vec2 at2 = vec2(
-    uResolution.x * 0.5 + cos(uTime * 0.15) * uResolution.x * 0.35,
-    uResolution.y * 0.5 + sin(uTime * 0.22) * uResolution.y * 0.32
-  );
-  float at2R = 260.0 * 0.8;
-  float at2Dist = length(cellCenter - at2);
+  float at2R = 208.0;
+  float at2Dist = length(cellCenter - uAttractor2);
   if (at2Dist < at2R) {
     float ratio = 1.0 - at2Dist / at2R;
     float ease = ratio * ratio;
@@ -167,7 +163,8 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
   const vs = compileShader(gl, gl.VERTEX_SHADER, VERT);
   const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAG);
   if (!vs || !fs) return null;
-  const prog = gl.createProgram()!;
+  const prog = gl.createProgram();
+  if (!prog) return null;
   gl.attachShader(prog, vs);
   gl.attachShader(prog, fs);
   gl.linkProgram(prog);
@@ -197,14 +194,20 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
   // Uniform locations
   let uTime: WebGLUniformLocation | null;
   let uResolution: WebGLUniformLocation | null;
+  let uDPR_loc: WebGLUniformLocation | null;
   let uMouse: WebGLUniformLocation | null;
   let uMouseActive: WebGLUniformLocation | null;
+  let uAttractor1: WebGLUniformLocation | null;
+  let uAttractor2: WebGLUniformLocation | null;
 
   function cacheLocations() {
     uTime = gl!.getUniformLocation(program!, 'uTime');
     uResolution = gl!.getUniformLocation(program!, 'uResolution');
+    uDPR_loc = gl!.getUniformLocation(program!, 'uDPR');
     uMouse = gl!.getUniformLocation(program!, 'uMouse');
     uMouseActive = gl!.getUniformLocation(program!, 'uMouseActive');
+    uAttractor1 = gl!.getUniformLocation(program!, 'uAttractor1');
+    uAttractor2 = gl!.getUniformLocation(program!, 'uAttractor2');
   }
   cacheLocations();
 
@@ -238,12 +241,26 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
 
   function render(time: number) {
     if (destroyed) return;
+    const t = time * 0.001;
+    const w = canvas.width / DPR;
+    const h = canvas.height / DPR;
+
     gl!.useProgram(program);
-    // Pass logical resolution (physical / DPR) so shader spacing matches CSS pixels
-    gl!.uniform1f(uTime, time * 0.001);
-    gl!.uniform2f(uResolution, canvas.width / DPR, canvas.height / DPR);
+    gl!.uniform1f(uTime, t);
+    gl!.uniform2f(uResolution, w, h);
+    gl!.uniform1f(uDPR_loc, DPR);
     gl!.uniform2f(uMouse, mouseX, mouseY);
     gl!.uniform1f(uMouseActive, mouseActiveVal);
+
+    // Compute attractor Lissajous positions on CPU (avoids per-fragment trig)
+    gl!.uniform2f(uAttractor1,
+      w * 0.5 + Math.sin(t * 0.25) * w * 0.42,
+      h * 0.5 + Math.cos(t * 0.18) * h * 0.38
+    );
+    gl!.uniform2f(uAttractor2,
+      w * 0.5 + Math.cos(t * 0.15) * w * 0.35,
+      h * 0.5 + Math.sin(t * 0.22) * h * 0.32
+    );
 
     gl!.clearColor(0, 0, 0, 0);
     gl!.clear(gl!.COLOR_BUFFER_BIT);
