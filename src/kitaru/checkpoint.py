@@ -13,7 +13,7 @@ from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 
 from zenml.config.retry_config import StepRetryConfig
-from zenml.enums import StepType
+from zenml.enums import StepRuntime, StepType
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
@@ -94,6 +94,39 @@ def _to_step_type(checkpoint_type: str | None) -> StepType | None:
     return _KNOWN_STEP_TYPES.get(checkpoint_type)
 
 
+_KNOWN_STEP_RUNTIMES: dict[str, StepRuntime] = {
+    "inline": StepRuntime.INLINE,
+    "isolated": StepRuntime.ISOLATED,
+}
+_RUNTIME_OPTIONS = ", ".join(_KNOWN_STEP_RUNTIMES)
+
+
+def _runtime_error(value: object) -> KitaruUsageError:
+    return KitaruUsageError(
+        f"Unsupported checkpoint runtime {value!r}. "
+        f"Expected one of: {_RUNTIME_OPTIONS}."
+    )
+
+
+def _normalize_runtime(runtime: StepRuntime | str | None) -> StepRuntime | None:
+    """Validate and normalize checkpoint runtime input.
+
+    Accepts ``None``, a :class:`StepRuntime` enum member, or a case-insensitive
+    string (``"inline"`` / ``"isolated"``).
+    """
+    if runtime is None:
+        return None
+    if isinstance(runtime, StepRuntime):
+        return runtime
+    if not isinstance(runtime, str):
+        raise _runtime_error(runtime)
+    normalized = runtime.strip().lower()
+    resolved = _KNOWN_STEP_RUNTIMES.get(normalized)
+    if resolved is None:
+        raise _runtime_error(runtime)
+    return resolved
+
+
 def _wrap_entrypoint(
     func: Callable[..., Any],
     *,
@@ -140,11 +173,13 @@ class _CheckpointDefinition:
         *,
         retries: int,
         checkpoint_type: str | None,
+        runtime: StepRuntime | str | None,
     ) -> None:
         """Initialize a Kitaru checkpoint wrapper."""
         self._func = func
         self._checkpoint_type = checkpoint_type
         self._default_retries = _normalize_retries(retries)
+        self._runtime = _normalize_runtime(runtime)
 
         wrapped_entrypoint = _wrap_entrypoint(
             func,
@@ -162,6 +197,7 @@ class _CheckpointDefinition:
             retry=_to_retry_config(self._default_retries),
             extra=_build_checkpoint_extra(checkpoint_type),
             step_type=_to_step_type(checkpoint_type),
+            runtime=self._runtime,
         )(wrapped_entrypoint)
         _register_checkpoint_source_alias(
             func=func,
@@ -244,6 +280,7 @@ def checkpoint(
     *,
     retries: int = 0,
     type: str | None = None,
+    runtime: str | None = None,
 ) -> Callable[[Callable[..., Any]], _CheckpointDefinition]: ...
 
 
@@ -252,6 +289,7 @@ def checkpoint(
     *,
     retries: int = 0,
     type: str | None = None,
+    runtime: str | None = None,
 ) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]:
     """Mark a function as a durable checkpoint.
 
@@ -265,10 +303,18 @@ def checkpoint(
         @checkpoint(retries=3, type="llm_call")
         def my_step(): ...
 
+        @checkpoint(runtime="isolated")
+        def heavy_step(): ...
+
     Args:
         func: Optional function for bare decorator use.
         retries: Number of checkpoint-level retries on failure.
         type: Checkpoint type for dashboard visualization.
+        runtime: Execution runtime for this checkpoint. Accepts ``"inline"``
+            or ``"isolated"`` (case-insensitive). When set to ``"isolated"``,
+            the checkpoint runs in its own container on remote orchestrators
+            that support it. ``None`` (the default) lets the orchestrator
+            decide.
 
     Returns:
         The wrapped checkpoint object or a decorator that returns it.
@@ -280,6 +326,7 @@ def checkpoint(
             target,
             retries=retries,
             checkpoint_type=checkpoint_type,
+            runtime=runtime,
         )
 
     if func is not None:

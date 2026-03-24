@@ -215,6 +215,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 - **Flows are top-level orchestration boundaries** — direct flow calls are blocked; start executions with `.run()`
 - **Nested checkpoint calls are blocked in the current MVP implementation**
 - **Concurrency** uses `.submit()` + `.result()` (ZenML futures), not a dedicated primitive
+- **Isolated runtime** via `@checkpoint(runtime="isolated")` runs a checkpoint in its own container on remote orchestrators; locally it falls back to inline
 - **Replay** works by re-running the flow from the top: checkpoints before the replay point return cached outputs; checkpoints at/after the replay point re-execute
 - **Artifact overrides** let you swap a checkpoint's cached output during replay
 

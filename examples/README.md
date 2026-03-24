@@ -20,6 +20,7 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 - **Run the smallest possible durable flow:** `examples/basic_flow/first_working_flow.py`
 - **See structured metadata logging:** `examples/basic_flow/flow_with_logging.py`
 - **Persist and reload artifacts:** `examples/basic_flow/flow_with_artifacts.py`
+- **Run checkpoints in isolated containers with fan-out:** `examples/basic_flow/flow_with_checkpoint_runtime.py`
 - **Inspect and manage past executions:** `examples/execution_management/client_execution_management.py`
 - **Pause for human input and resume later:** `examples/execution_management/wait_and_resume.py`
 - **Replay from a checkpoint with overrides:** `examples/replay/replay_with_overrides.py`
@@ -32,7 +33,8 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 
 | Goal | Install command |
 |---|---|
-| Core workflow, execution, replay, configuration, and LLM examples | `uv sync --extra local` |
+| Core workflow, execution, replay, and configuration examples | `uv sync --extra local` |
+| LLM examples (tracked `kitaru.llm()` calls) | `uv sync --extra local --extra llm` |
 | PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
 | MCP query tools example | `uv sync --extra local --extra mcp` |
 
@@ -43,7 +45,7 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 - [replay/README.md](replay/README.md) — replay from a checkpoint boundary with targeted overrides
 - [llm/README.md](llm/README.md) — tracked `kitaru.llm()` calls inside flows
 - [pydantic_ai_agent/README.md](pydantic_ai_agent/README.md) — wrap a PydanticAI agent with Kitaru observability
-- [coding_agent/README.md](coding_agent/README.md) — full coding agent with LiteLLM tool calling, HITL, and custom materializers
+- [coding_agent/README.md](coding_agent/README.md) — full coding agent with provider SDK tool calling, HITL, and custom materializers
 - [mcp/README.md](mcp/README.md) — inspect flows with the Kitaru MCP server
 
 ## Core workflow basics
@@ -54,6 +56,7 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 | [Structured logging](basic_flow/flow_with_logging.py) | `uv run examples/basic_flow/flow_with_logging.py` | `uv sync --extra local` | `kitaru.log()` metadata at both flow and checkpoint scope | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/test_phase7_logging_example.py](../tests/test_phase7_logging_example.py) |
 | [Artifacts](basic_flow/flow_with_artifacts.py) | `uv run examples/basic_flow/flow_with_artifacts.py` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://kitaru.ai/docs/getting-started/artifacts) | [tests/test_phase8_artifacts_example.py](../tests/test_phase8_artifacts_example.py) |
 | [Configuration](basic_flow/flow_with_configuration.py) | `uv run examples/basic_flow/flow_with_configuration.py` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://kitaru.ai/docs/getting-started/configuration) | [tests/test_phase10_configuration_example.py](../tests/test_phase10_configuration_example.py) |
+| [Checkpoint runtime](basic_flow/flow_with_checkpoint_runtime.py) | `uv run examples/basic_flow/flow_with_checkpoint_runtime.py` | `uv sync --extra local` | `@checkpoint(runtime="isolated")` with `.submit()` fan-out | [Checkpoints](https://kitaru.ai/docs/concepts/checkpoints) | — |
 
 ## Execution lifecycle and recovery
 
@@ -69,7 +72,7 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 |---|---|---|---|---|---|
 | [Tracked LLM calls](llm/flow_with_llm.py) | `uv run examples/llm/flow_with_llm.py` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | [tests/test_phase12_llm_example.py](../tests/test_phase12_llm_example.py) |
 | [PydanticAI adapter](pydantic_ai_agent/pydantic_ai_adapter.py) | `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py` | `uv sync --extra local --extra pydantic-ai` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](https://kitaru.ai/docs/getting-started/pydantic-ai-adapter) | [tests/test_phase17_pydantic_ai_example.py](../tests/test_phase17_pydantic_ai_example.py) |
-| [Coding agent](coding_agent/agent.py) | `cd examples/coding_agent && uv run python agent.py "Your task"` | `uv sync --extra local` + model alias / provider credentials | Full agent loop with LiteLLM tool calling, `kitaru.wait()` HITL, custom materializers, and artifact persistence | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | — |
+| [Coding agent](coding_agent/agent.py) | `cd examples/coding_agent && uv run python agent.py "Your task"` | `uv sync --extra local` + model alias / provider credentials | Full agent loop with provider SDK tool calling, `kitaru.wait()` HITL, custom materializers, and artifact persistence | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | — |
 | [MCP query tools](mcp/mcp_query_tools.py) | `uv run examples/mcp/mcp_query_tools.py` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/mcp/test_phase19_mcp_example.py](../tests/mcp/test_phase19_mcp_example.py) |
 
 ## Recommended learning path

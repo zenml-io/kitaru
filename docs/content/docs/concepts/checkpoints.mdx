@@ -93,8 +93,44 @@ def call_model(prompt: str) -> str:
 |---|---|---|
 | `retries` | `0` | Automatic retries on checkpoint failure |
 | `type` | `None` | A label for UI visualization (e.g. `"llm_call"`, `"tool_call"`) |
+| `runtime` | `None` | Execution runtime: `"inline"` or `"isolated"` (see below) |
 
 Like flow options, `retries` must be non-negative.
+
+### Isolated runtime
+
+By default, checkpoints run **inline** — in the same process or thread as the
+flow. Set `runtime="isolated"` to run a checkpoint in its own container on
+remote orchestrators that support it (Kubernetes, Vertex, SageMaker, AzureML):
+
+```python
+@checkpoint(runtime="isolated")
+def heavy_computation(data: str) -> str:
+    ...
+```
+
+This applies to every execution of the checkpoint, whether called directly or
+submitted concurrently with `.submit()`:
+
+```python
+@flow
+def parallel_agent(items: list[str]) -> list[str]:
+    # Each submission runs in its own container when runtime="isolated"
+    futures = [heavy_computation.submit(item) for item in items]
+    return [f.result() for f in futures]
+```
+
+<Callout type="info">
+  `runtime` controls **where** a checkpoint runs (same process vs. separate
+  container). `.submit()` controls **when** — it enables concurrency. The two
+  are independent: you can use `.submit()` without isolation, or isolation
+  without `.submit()`.
+</Callout>
+
+<Callout type="warn">
+  If the active orchestrator does not support isolated steps, the runtime is
+  silently downgraded to inline with a warning. Local stacks always run inline.
+</Callout>
 
 When retries are enabled, Kitaru records each failed attempt before the final
 checkpoint outcome. You can inspect this history through

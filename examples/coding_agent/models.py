@@ -35,7 +35,7 @@ class LLMResponse(BaseModel):
         return bool(self.tool_calls)
 
     def to_message(self) -> dict[str, Any]:
-        """Convert to a dict suitable for the LiteLLM messages list."""
+        """Convert to a dict suitable for the canonical internal message list."""
         msg: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.has_tool_calls:
             msg["tool_calls"] = [tc.model_dump() for tc in self.tool_calls]  # type: ignore[union-attr]
