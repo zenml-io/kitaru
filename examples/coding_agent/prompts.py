@@ -53,4 +53,3 @@ specific pages.
 - Run verification commands after making changes.
 - Report what you did, key results, and where any output files were saved.\
 """
-
