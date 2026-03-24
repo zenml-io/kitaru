@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-24
+
 ### Added
 - `@checkpoint(runtime="isolated")` parameter for running individual checkpoints in separate containers on remote orchestrators (Kubernetes, Vertex, SageMaker, AzureML); accepts `"inline"`, `"isolated"`, or `StepRuntime` enum values with early validation
 
