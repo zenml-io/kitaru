@@ -49,17 +49,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   docker-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       ZENML_SERVER_TAG: 0.94.1
       KITARU_UI_TAG: latest
     steps:
       - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
       - name: Build server image
-        run: >-
-          docker build -f docker/Dockerfile --target server
-          --build-arg ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
-          --build-arg KITARU_UI_TAG=${{ env.KITARU_UI_TAG }}
-          -t kitaru-ci-server .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: server
+          build-args: |
+            ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
+            KITARU_UI_TAG=${{ env.KITARU_UI_TAG }}
+          tags: kitaru-ci-server
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Start server container
         run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 kitaru-ci-server
       - name: Wait for health endpoint
