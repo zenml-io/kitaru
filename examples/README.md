@@ -38,6 +38,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 |---|---|
 | Core workflow, execution, replay, configuration, and LLM examples | `uv pip install 'kitaru[local]'` |
 | PydanticAI adapter example | `uv pip install 'kitaru[local,pydantic-ai]'` |
+| Coding agent example | `uv pip install 'kitaru[local]'` + model alias / provider credentials |
 | MCP query tools example | `uv pip install 'kitaru[local,mcp]'` |
 
 ## How the examples are organized
@@ -55,26 +56,26 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | Example | What it demonstrates | Docs |
 |---|---|---|
 | [Basic flow](basic_flow/first_working_flow.py) | The smallest end-to-end `@flow` + `@checkpoint` workflow | [Quickstart](https://kitaru.ai/docs/getting-started/quickstart) |
-| [Structured logging](basic_flow/flow_with_logging.py) | `kitaru.log()` metadata at both flow and checkpoint scope | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) |
-| [Artifacts](basic_flow/flow_with_artifacts.py) | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://kitaru.ai/docs/getting-started/artifacts) |
-| [Configuration](basic_flow/flow_with_configuration.py) | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://kitaru.ai/docs/getting-started/configuration) |
+| [Structured logging](basic_flow/flow_with_logging.py) | `kitaru.log()` metadata at both flow and checkpoint scope | [Execution Management](https://kitaru.ai/docs/guides/execution-management) |
+| [Artifacts](basic_flow/flow_with_artifacts.py) | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://kitaru.ai/docs/guides/artifacts) |
+| [Configuration](basic_flow/flow_with_configuration.py) | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://kitaru.ai/docs/guides/configuration) |
 
 ## Execution lifecycle and recovery
 
 | Example | What it demonstrates | Docs |
 |---|---|---|
-| [Execution management](execution_management/client_execution_management.py) | `KitaruClient` for listing runs, reading details, and loading artifacts | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) |
-| [Wait and resume](execution_management/wait_and_resume.py) | `kitaru.wait()` — pause for human input, resume later | [Wait and Resume](https://kitaru.ai/docs/getting-started/wait-and-resume) |
-| [Replay with overrides](replay/replay_with_overrides.py) | Replay from a checkpoint boundary while overriding selected inputs | [Replay and Overrides](https://kitaru.ai/docs/getting-started/replay-and-overrides) |
+| [Execution management](execution_management/client_execution_management.py) | `KitaruClient` for listing runs, reading details, and loading artifacts | [Execution Management](https://kitaru.ai/docs/guides/execution-management) |
+| [Wait and resume](execution_management/wait_and_resume.py) | `kitaru.wait()` — pause for human input, resume later | [Wait and Resume](https://kitaru.ai/docs/guides/wait-and-resume) |
+| [Replay with overrides](replay/replay_with_overrides.py) | Replay from a checkpoint boundary while overriding selected inputs | [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) |
 
 ## LLMs and agent integrations
 
 | Example | What it demonstrates | Docs |
 |---|---|---|
-| [Tracked LLM calls](llm/flow_with_llm.py) | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) |
-| [PydanticAI adapter](pydantic_ai_agent/pydantic_ai_adapter.py) | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](https://kitaru.ai/docs/getting-started/pydantic-ai-adapter) |
-| [Coding agent](coding_agent/agent.py) | Full agent loop with LiteLLM tool calling, HITL, and artifact persistence | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) |
-| [MCP query tools](mcp/mcp_query_tools.py) | Query executions and artifacts through the Kitaru MCP server | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) |
+| [Tracked LLM calls](llm/flow_with_llm.py) | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](https://kitaru.ai/docs/guides/llm-calls) |
+| [PydanticAI adapter](pydantic_ai_agent/pydantic_ai_adapter.py) | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter) |
+| [Coding agent](coding_agent/agent.py) | Full agent loop with LiteLLM tool calling, HITL, and artifact persistence | [Tracked LLM Calls](https://kitaru.ai/docs/guides/llm-calls) |
+| [MCP query tools](mcp/mcp_query_tools.py) | Query executions and artifacts through the Kitaru MCP server | [Execution Management](https://kitaru.ai/docs/guides/execution-management) |
 
 ## Recommended learning path
 

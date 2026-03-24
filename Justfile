@@ -148,5 +148,7 @@ site-build:
     @just site-build-only
     @printf '\n─── Merge Docs into Site ────────────────────────\n'
     bash scripts/merge_site.sh
+    @printf '\n─── Check Internal Links ───────────────────────\n'
+    lychee --offline --root-dir site/dist 'site/dist/**/*.html'
     @printf '\n─────────────────────────────────────────────────\n'
     @printf 'Unified site built at site/dist/\n'

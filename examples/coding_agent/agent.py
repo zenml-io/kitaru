@@ -10,12 +10,11 @@ waits for a follow-up instruction.
 Usage::
 
     cd examples/coding_agent
-    uv run python agent.py "Create a plotly chart"
+    python agent.py "Create a plotly chart"
 
 Or supply follow-up input via the CLI::
 
-    kitaru executions input <exec-id> \
-        --wait ask_0 --value "use population data"
+    kitaru executions input <exec-id> --value "use population data"
     kitaru executions resume <exec-id>
 """
 

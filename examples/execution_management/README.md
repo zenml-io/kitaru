@@ -53,8 +53,7 @@ kitaru executions input <exec_id> --value true
 kitaru executions resume <exec_id>
 
 # Structured input (Pydantic schema)
-kitaru executions input <exec_id> --wait release_details \
-  --value '{"notes": "Bug fixes", "major_version": 2}'
+kitaru executions input <exec_id> --value '{"notes": "Bug fixes", "major_version": 2}'
 kitaru executions resume <exec_id>
 ```
 
