@@ -11,6 +11,8 @@ container.  Locally, the runtime hint is ignored and checkpoints execute
 inline via threads — so this example works anywhere.
 """
 
+import time
+
 from kitaru import checkpoint, flow
 
 
@@ -45,31 +47,28 @@ def parallel_transform(items: list[str]) -> list[str]:
     return [f.result() for f in futures]
 
 
-def run_workflow(
-    items: list[str] | None = None,
-) -> tuple[str, list[str]]:
+def run_workflow(items: list[str] | None = None) -> str:
     """Execute the parallel-transform workflow.
 
     Args:
         items: Items to process.  Defaults to a small sample list.
 
     Returns:
-        Tuple of (execution_id, ordered results).
+        The execution ID.
     """
     if items is None:
         items = ["alpha", "bravo", "charlie"]
 
     handle = parallel_transform.run(items)
-    result = handle.wait()
-    return handle.exec_id, result
+    while not handle.status.is_finished:
+        time.sleep(1)
+    return handle.exec_id
 
 
 def main() -> None:
     """Run the example as a script."""
-    execution_id, results = run_workflow()
+    execution_id = run_workflow()
     print(f"Execution ID: {execution_id}")
-    for item in results:
-        print(f"  {item}")
 
 
 if __name__ == "__main__":
