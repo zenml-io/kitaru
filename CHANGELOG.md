@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - `cost_usd` metadata field is now omitted (direct provider SDKs do not include cost data)
 
 ### Removed
-- `litellm` core dependency (removed due to PyPI supply chain compromise in versions 1.82.7–1.82.8)
+- `litellm` core dependency (removed due to [PyPI supply chain compromise](https://github.com/BerriAI/litellm/issues/24512) in versions 1.82.7–1.82.8)
 
 ## [0.2.1] - 2026-03-23
 
