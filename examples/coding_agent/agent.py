@@ -129,7 +129,7 @@ def _save_html_artifact(name: str, code: str) -> None:
 
 @flow(
     image={
-        "requirements": ["anthropic"],
+        "requirements": ["openai", "anthropic"],
         "apt_packages": ["curl", "ca-certificates"],
     },
 )

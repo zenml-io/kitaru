@@ -421,7 +421,7 @@ def list_model_aliases() -> list[ModelAliasEntry]:
 
 
 def resolve_model_selection(model: str | None) -> ResolvedModelSelection:
-    """Resolve an explicit/default model input to a concrete provider/model string."""
+    """Resolve an explicit/default model input to a concrete model string."""
     return _config_models.resolve_model_selection(
         model,
         read_global_config=_read_kitaru_global_config,

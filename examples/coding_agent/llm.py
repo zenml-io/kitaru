@@ -160,6 +160,11 @@ def _messages_to_anthropic(
                 anthropic_msgs.append({"role": "user", "content": [tool_result_block]})
             continue
 
+        raise KitaruUsageError(
+            f"Unsupported message role `{role}`. "
+            "Supported roles: system, user, assistant, tool."
+        )
+
     system = "\n\n".join(system_parts) if system_parts else None
     return system, anthropic_msgs
 
