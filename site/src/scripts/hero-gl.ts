@@ -1,5 +1,5 @@
 // hero-gl.ts — WebGL2 fragment shader for hero dot-grid landscape animation.
-// Replaces Canvas 2D: all dot computation runs on the GPU in a single draw call.
+// All dot computation runs on the GPU in a single draw call.
 
 const VERT = /* glsl */ `#version 300 es
 // Fullscreen triangle from gl_VertexID — no vertex buffers needed
@@ -40,7 +40,7 @@ void main() {
   vec2 pos = gl_FragCoord.xy / uDPR;
   pos.y = uResolution.y - pos.y;
 
-  // Grid parameters — 6 CSS-px spacing, 2 CSS-px dot radius (matches Canvas 2D)
+  // Grid parameters — 6 CSS-px spacing, 2 CSS-px dot radius
   float spacing = 6.0;
   float dotRadius = 2.0;
 
@@ -183,13 +183,20 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
 
 export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false, antialias: false });
-  if (!gl) return null;
+  if (!gl) {
+    console.warn('[hero-gl] WebGL2 context not available');
+    return null;
+  }
 
   let program = createProgram(gl);
-  if (!program) return null;
+  if (!program) {
+    console.warn('[hero-gl] Failed to create shader program');
+    return null;
+  }
 
   const DPR = Math.min(window.devicePixelRatio || 1, 2);
-  let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const motionMql = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let reducedMotion = motionMql.matches;
 
   // Uniform locations
   let uTime: WebGLUniformLocation | null;
@@ -273,16 +280,20 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
     }
   }
 
-  // Context loss/restore
-  canvas.addEventListener('webglcontextlost', (e) => {
+  // Context loss/restore — named handlers for cleanup in destroy()
+  function handleContextLost(e: Event) {
     e.preventDefault();
     cancelAnimationFrame(animId);
     animId = 0;
-  });
+  }
 
-  canvas.addEventListener('webglcontextrestored', () => {
+  function handleContextRestored() {
     program = createProgram(gl!);
-    if (!program) return;
+    if (!program) {
+      console.warn('[hero-gl] Shader program recreation failed after context restore');
+      canvas.style.display = 'none';
+      return;
+    }
     cacheLocations();
     vao = gl!.createVertexArray();
     gl!.bindVertexArray(vao);
@@ -294,18 +305,9 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
     } else {
       render(0);
     }
-  });
-
-  // Initial size + first frame
-  sizeCanvas();
-  if (reducedMotion) {
-    render(0);
-  } else {
-    animId = requestAnimationFrame(render);
   }
 
-  // Listen for reduced-motion preference changes
-  window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
+  function handleMotionChange(e: MediaQueryListEvent) {
     reducedMotion = e.matches;
     if (e.matches) {
       cancelAnimationFrame(animId);
@@ -314,7 +316,26 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
     } else if (visible && animId === 0) {
       animId = requestAnimationFrame(render);
     }
-  });
+  }
+
+  canvas.addEventListener('webglcontextlost', handleContextLost);
+  canvas.addEventListener('webglcontextrestored', handleContextRestored);
+
+  // Feature-detect addEventListener vs deprecated addListener (older Safari/webviews)
+  if ('addEventListener' in motionMql) {
+    motionMql.addEventListener('change', handleMotionChange);
+  } else {
+    // @ts-expect-error — addListener is deprecated but needed for older Safari
+    motionMql.addListener(handleMotionChange);
+  }
+
+  // Initial size + first frame
+  sizeCanvas();
+  if (reducedMotion) {
+    render(0);
+  } else {
+    animId = requestAnimationFrame(render);
+  }
 
   return {
     setMouse(x: number, y: number, active: boolean) {
@@ -339,6 +360,14 @@ export function initHeroGL(canvas: HTMLCanvasElement): HeroGLController | null {
       destroyed = true;
       cancelAnimationFrame(animId);
       animId = 0;
+      canvas.removeEventListener('webglcontextlost', handleContextLost);
+      canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+      if ('removeEventListener' in motionMql) {
+        motionMql.removeEventListener('change', handleMotionChange);
+      } else {
+        // @ts-expect-error — removeListener is deprecated but matches addListener
+        motionMql.removeListener(handleMotionChange);
+      }
       gl!.deleteVertexArray(vao);
       if (program) gl!.deleteProgram(program);
     },

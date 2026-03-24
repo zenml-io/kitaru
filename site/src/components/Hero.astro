@@ -1,5 +1,5 @@
 ---
-// Hero.astro — Centered hero with ASCII canvas + mesh gradient background
+// Hero.astro — Centered hero with dot-grid canvas + mesh gradient background
 ---
 
 <section class="hero-section" id="hero">
@@ -357,7 +357,8 @@
 
   @media (prefers-reduced-motion: reduce) {
     .mesh-blob,
-    .hero-accent {
+    .hero-accent,
+    .pulse-dot::after {
       animation: none;
     }
 
@@ -387,7 +388,7 @@
 </script>
 
 <script>
-  // ─── ASCII Canvas Background — WebGL2 fragment shader ───
+  // ─── Dot-grid background — WebGL2 fragment shader ───
   import { attachMouseTracker, attachResizeHandler } from '../scripts/canvas-utils';
   import { initHeroGL } from '../scripts/hero-gl';
 
@@ -397,21 +398,30 @@
     const controller = initHeroGL(canvas);
 
     if (!controller) {
-      // No WebGL2 — hide canvas, mesh gradient blobs remain visible
+      // No WebGL2 — hide canvas, mesh gradient blobs remain as visual fallback
       canvas.style.display = 'none';
     } else {
-      attachMouseTracker(
+      const cleanupMouse = attachMouseTracker(
         section,
         canvas,
         (x, y) => controller.setMouse(x, y, true),
         () => controller.setMouse(-9999, -9999, false)
       );
 
-      new IntersectionObserver((entries) => {
+      const observer = new IntersectionObserver((entries) => {
         controller.setVisible(entries[0].isIntersecting);
-      }, { threshold: 0 }).observe(section);
+      }, { threshold: 0 });
+      observer.observe(section);
 
-      attachResizeHandler(() => controller.resize());
+      const cleanupResize = attachResizeHandler(() => controller.resize());
+
+      // Unified teardown (available for future client-side transitions / HMR)
+      (canvas as any).__heroCleanup = () => {
+        cleanupMouse();
+        cleanupResize();
+        observer.disconnect();
+        controller.destroy();
+      };
     }
   }
 </script>
