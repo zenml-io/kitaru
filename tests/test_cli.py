@@ -4667,6 +4667,10 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
     with (
         patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
         patch("kitaru.inspection.connected_to_local_server", return_value=False),
+        patch(
+            "kitaru.inspection._can_fast_connect_to_rest_store",
+            return_value=False,
+        ),
         patch("kitaru.inspection.get_local_server", return_value=fake_local_server),
         patch(
             "kitaru.inspection.Client",

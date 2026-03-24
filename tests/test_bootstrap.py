@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import importlib.metadata
+import sys
 import tomllib
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 _PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
@@ -75,7 +78,55 @@ def test_cli_entrypoint_populates_version_before_dispatch() -> None:
             "app",
             side_effect=lambda *args, **kwargs: events.append("app"),
         ),
+        patch(
+            "kitaru.analytics.track", side_effect=lambda *a, **k: events.append("track")
+        ),
     ):
         cli_module.cli()
 
-    assert events == ["version", "app"]
+    assert events == ["version", "app", "track"]
+
+
+def test_cli_entrypoint_tracks_analytics_even_on_system_exit() -> None:
+    """Analytics tracking fires in the finally block even when app() raises."""
+    import kitaru.cli as cli_module
+
+    events: list[str] = []
+
+    with (
+        patch.object(
+            cli_module,
+            "_apply_runtime_version",
+            side_effect=lambda: events.append("version"),
+        ),
+        patch.object(
+            cli_module,
+            "app",
+            side_effect=SystemExit(0),
+        ),
+        patch(
+            "kitaru.analytics.track", side_effect=lambda *a, **k: events.append("track")
+        ),
+        pytest.raises(SystemExit),
+    ):
+        cli_module.cli()
+
+    assert "track" in events
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["kitaru", "status", "--all"], "status"),
+        (["kitaru", "--help"], "--help"),
+        (["kitaru"], "help"),
+    ],
+)
+def test_invoked_command_name_extracts_first_arg(
+    argv: list[str], expected: str
+) -> None:
+    """_invoked_command_name should return the first CLI token or 'help'."""
+    from kitaru.cli import _invoked_command_name
+
+    with patch.object(sys, "argv", argv):
+        assert _invoked_command_name() == expected
