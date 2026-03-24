@@ -47,7 +47,7 @@ class AgentModelConfig:
     """Resolved model config for the coding agent."""
 
     resolved_model: str
-    provider: Literal["openai", "anthropic"]
+    provider: Literal["openai", "anthropic", "ollama", "openrouter"]
     provider_model: str
     env_overlay: dict[str, str]
 

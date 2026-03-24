@@ -51,7 +51,7 @@ def register(
     model: Annotated[
         str,
         Parameter(
-            help=("Provider-qualified model identifier (e.g. openai/gpt-4o-mini).")
+            help="Provider/model identifier (e.g. openai/gpt-4o-mini, ollama/llama3.2)."
         ),
     ],
     secret: Annotated[

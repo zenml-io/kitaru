@@ -1,7 +1,9 @@
 """LLM call primitive for tracked model interactions.
 
 `kitaru.llm()` wraps one provider SDK completion call with Kitaru tracking.
-Built-in runtime support covers ``openai/*`` and ``anthropic/*`` models.
+Built-in runtime support covers ``openai/*``, ``anthropic/*``, ``ollama/*``,
+and ``openrouter/*`` models. Ollama and OpenRouter use the OpenAI-compatible
+API and require the ``openai`` package (``pip install kitaru[openai]``).
 """
 
 import os
@@ -31,10 +33,17 @@ from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_cal
 _LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @flow."
 _MOCK_RESPONSE_ENV = "KITARU_LLM_MOCK_RESPONSE"
 _ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
+_OLLAMA_HOST_ENV = "OLLAMA_HOST"
+_OLLAMA_DEFAULT_HOST = "http://localhost:11434"
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+_SUPPORTED_PROVIDERS = ("openai", "anthropic", "ollama", "openrouter")
 
 _MODEL_PROVIDER_HINTS: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
+    "ollama": (),
     "openai": ("OPENAI_API_KEY",),
+    "openrouter": ("OPENROUTER_API_KEY",),
 }
 
 
@@ -63,7 +72,7 @@ class _LLMRequest(BaseModel):
 class _ProviderTarget:
     """Parsed routing result for a resolved model string."""
 
-    provider: Literal["openai", "anthropic"]
+    provider: Literal["openai", "anthropic", "ollama", "openrouter"]
     provider_model: str
     resolved_model: str
 
@@ -128,8 +137,8 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
         raise KitaruUsageError(
             f"Model `{resolved_model}` does not include a provider prefix. "
             "The built-in kitaru.llm() runtime requires a provider-qualified "
-            "model string like `openai/gpt-4o-mini` or "
-            "`anthropic/claude-sonnet-4-20250514`. "
+            "model string like `openai/gpt-4o-mini`, "
+            "`anthropic/claude-sonnet-4-20250514`, or `ollama/llama3.2`. "
             "If you registered an alias, make sure it resolves to a "
             "provider/model string. For other providers, call the SDK "
             "directly inside a @checkpoint."
@@ -145,11 +154,12 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
             "provider prefix."
         )
 
-    if provider not in ("openai", "anthropic"):
+    if provider not in _SUPPORTED_PROVIDERS:
+        supported = ", ".join(f"`{p}/*`" for p in _SUPPORTED_PROVIDERS)
         raise KitaruUsageError(
             f"Provider `{provider}` (from model `{resolved_model}`) is not "
             "supported by the built-in kitaru.llm() runtime. "
-            "Built-in support covers `openai/*` and `anthropic/*`. "
+            f"Built-in support covers {supported}. "
             "For other providers, call the SDK directly inside a @checkpoint."
         )
 
@@ -310,13 +320,20 @@ def _call_openai(
     temperature: float | None,
     max_tokens: int | None,
     env_overlay: Mapping[str, str],
+    base_url: str | None = None,
+    api_key: str | None = None,
+    provider_label: str = "openai",
 ) -> _ProviderCallResult:
-    """Execute one OpenAI Chat Completions call."""
+    """Execute one OpenAI-compatible Chat Completions call.
+
+    Used directly for OpenAI, and with ``base_url``/``api_key`` overrides
+    for Ollama and OpenRouter.
+    """
     try:
         from openai import OpenAI
     except ImportError:
         raise KitaruUsageError(
-            f"Model 'openai/{model}' requires the openai package. "
+            f"Model '{provider_label}/{model}' requires the openai package. "
             "Install with: pip install kitaru[openai]"
         ) from None
 
@@ -326,14 +343,20 @@ def _call_openai(
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
+    client_kwargs: dict[str, Any] = {}
+    if base_url is not None:
+        client_kwargs["base_url"] = base_url
+    if api_key is not None:
+        client_kwargs["api_key"] = api_key
+
     with _temporary_env(env_overlay):
-        client = OpenAI()
+        client = OpenAI(**client_kwargs)
         try:
             response = client.chat.completions.create(**kwargs)
         except Exception as exc:
             raise KitaruBackendError(
-                f"kitaru.llm() failed while calling OpenAI for model "
-                f"`openai/{model}`: {exc}"
+                f"kitaru.llm() failed while calling {provider_label} for "
+                f"model `{provider_label}/{model}`: {exc}"
             ) from exc
 
     return _ProviderCallResult(
@@ -564,7 +587,7 @@ def _execute_llm_call(request: _LLMRequest) -> str:
                 max_tokens=request.max_tokens,
                 env_overlay=env_overlay,
             )
-        else:
+        elif target.provider == "anthropic":
             result = _call_anthropic(
                 model=target.provider_model,
                 messages=messages,
@@ -572,6 +595,35 @@ def _execute_llm_call(request: _LLMRequest) -> str:
                 max_tokens=request.max_tokens,
                 env_overlay=env_overlay,
             )
+        elif target.provider == "ollama":
+            ollama_host = os.environ.get(_OLLAMA_HOST_ENV, _OLLAMA_DEFAULT_HOST)
+            base_url = ollama_host.rstrip("/") + "/v1"
+            result = _call_openai(
+                model=target.provider_model,
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                env_overlay=env_overlay,
+                base_url=base_url,
+                api_key="ollama",
+                provider_label="ollama",
+            )
+        elif target.provider == "openrouter":
+            openrouter_api_key = env_overlay.get(
+                "OPENROUTER_API_KEY"
+            ) or os.environ.get("OPENROUTER_API_KEY")
+            result = _call_openai(
+                model=target.provider_model,
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                env_overlay=env_overlay,
+                base_url=_OPENROUTER_BASE_URL,
+                api_key=openrouter_api_key,
+                provider_label="openrouter",
+            )
+        else:
+            raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
         latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
     response_text = result.response_text

@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Replace LiteLLM dependency with direct OpenAI and Anthropic SDK support
   - `openai` and `anthropic` are now optional extras: `pip install kitaru[openai]`, `pip install kitaru[anthropic]`, or `pip install kitaru[llm]` for both
   - `kitaru.llm()` public API is unchanged; lazy imports raise a clear `KitaruUsageError` with install guidance if the required SDK is not installed
-  - Built-in runtime support now covers `openai/*` and `anthropic/*` models; other providers can be used directly inside `@checkpoint`
+  - Built-in runtime support now covers `openai/*`, `anthropic/*`, `ollama/*`, and `openrouter/*` models; other providers can be used directly inside `@checkpoint`
+  - Ollama and OpenRouter use the OpenAI-compatible API (no new dependencies, reuse `kitaru[openai]`)
   - Model alias resolution, credential handling, and artifact/metadata persistence are unchanged
   - `cost_usd` metadata field is now omitted (direct provider SDKs do not include cost data)
 

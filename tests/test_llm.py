@@ -111,6 +111,18 @@ class TestParseProviderTarget:
         assert target.provider == "anthropic"
         assert target.provider_model == "claude-sonnet-4-20250514"
 
+    def test_ollama_model(self) -> None:
+        target = _parse_provider_target("ollama/llama3.2")
+        assert target.provider == "ollama"
+        assert target.provider_model == "llama3.2"
+        assert target.resolved_model == "ollama/llama3.2"
+
+    def test_openrouter_model_with_nested_provider(self) -> None:
+        target = _parse_provider_target("openrouter/anthropic/claude-sonnet-4-20250514")
+        assert target.provider == "openrouter"
+        assert target.provider_model == "anthropic/claude-sonnet-4-20250514"
+        assert target.resolved_model == "openrouter/anthropic/claude-sonnet-4-20250514"
+
     def test_providerless_model_raises(self) -> None:
         with pytest.raises(KitaruUsageError, match="provider prefix"):
             _parse_provider_target("gpt-4o-mini")
@@ -255,6 +267,224 @@ def test_llm_executes_anthropic_with_system_separation_and_tracking() -> None:
     assert logged_payload["tokens_output"] == 15
     assert logged_payload["total_tokens"] == 20
     assert "cost_usd" not in logged_payload
+
+
+# ---------------------------------------------------------------------------
+# Ollama call path
+# ---------------------------------------------------------------------------
+
+
+def test_llm_executes_ollama_via_openai_compatible_path() -> None:
+    """Ollama should route through _call_openai with base_url and dummy api_key."""
+    execution_id, checkpoint_id = _flow_checkpoint_scope()
+    fake_result = _ProviderCallResult(
+        response_text="ollama response",
+        usage=_LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+        patch(
+            "kitaru.llm.resolve_model_selection",
+            return_value=ResolvedModelSelection(
+                requested_model="ollama/llama3.2",
+                alias=None,
+                resolved_model="ollama/llama3.2",
+                secret=None,
+            ),
+        ),
+        patch(
+            "kitaru.llm._resolve_credential_overlay", return_value=({}, "environment")
+        ),
+        patch("kitaru.llm._call_openai", return_value=fake_result) as mock_call,
+        patch("kitaru.llm.save"),
+        patch("kitaru.llm.log"),
+    ):
+        output = llm("hello", model="ollama/llama3.2", name="ollama_call")
+
+    assert output == "ollama response"
+    mock_call.assert_called_once()
+    call_kwargs = mock_call.call_args.kwargs
+    assert "localhost:11434/v1" in call_kwargs["base_url"]
+    assert call_kwargs["api_key"] == "ollama"
+    assert call_kwargs["provider_label"] == "ollama"
+    assert call_kwargs["model"] == "llama3.2"
+
+
+def test_ollama_respects_custom_host_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OLLAMA_HOST should override the default base URL."""
+    execution_id, checkpoint_id = _flow_checkpoint_scope()
+    monkeypatch.setenv("OLLAMA_HOST", "http://remote-gpu:11434")
+    fake_result = _ProviderCallResult(
+        response_text="ok",
+        usage=_LLMUsage(),
+    )
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+        patch(
+            "kitaru.llm.resolve_model_selection",
+            return_value=ResolvedModelSelection(
+                requested_model="ollama/llama3.2",
+                alias=None,
+                resolved_model="ollama/llama3.2",
+                secret=None,
+            ),
+        ),
+        patch(
+            "kitaru.llm._resolve_credential_overlay", return_value=({}, "environment")
+        ),
+        patch("kitaru.llm._call_openai", return_value=fake_result) as mock_call,
+        patch("kitaru.llm.save"),
+        patch("kitaru.llm.log"),
+    ):
+        llm("hello", model="ollama/llama3.2", name="test")
+
+    assert mock_call.call_args.kwargs["base_url"] == "http://remote-gpu:11434/v1"
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter call path
+# ---------------------------------------------------------------------------
+
+
+def test_llm_executes_openrouter_via_openai_compatible_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenRouter should route through _call_openai with base_url and API key."""
+    execution_id, checkpoint_id = _flow_checkpoint_scope()
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-test-key")
+    fake_result = _ProviderCallResult(
+        response_text="openrouter response",
+        usage=_LLMUsage(prompt_tokens=5, completion_tokens=10, total_tokens=15),
+    )
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+        patch(
+            "kitaru.llm.resolve_model_selection",
+            return_value=ResolvedModelSelection(
+                requested_model="openrouter/anthropic/claude-sonnet-4-20250514",
+                alias=None,
+                resolved_model="openrouter/anthropic/claude-sonnet-4-20250514",
+                secret=None,
+            ),
+        ),
+        patch(
+            "kitaru.llm._resolve_credential_overlay", return_value=({}, "environment")
+        ),
+        patch("kitaru.llm._call_openai", return_value=fake_result) as mock_call,
+        patch("kitaru.llm.save"),
+        patch("kitaru.llm.log"),
+    ):
+        output = llm(
+            "hello",
+            model="openrouter/anthropic/claude-sonnet-4-20250514",
+            name="or_call",
+        )
+
+    assert output == "openrouter response"
+    mock_call.assert_called_once()
+    call_kwargs = mock_call.call_args.kwargs
+    assert call_kwargs["base_url"] == "https://openrouter.ai/api/v1"
+    assert call_kwargs["api_key"] == "or-test-key"
+    assert call_kwargs["provider_label"] == "openrouter"
+    assert call_kwargs["model"] == "anthropic/claude-sonnet-4-20250514"
+
+
+# ---------------------------------------------------------------------------
+# Credential resolution for new providers
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_credential_overlay_skips_credential_check_for_ollama(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ollama should not require any API key."""
+    overlay, source = _resolve_credential_overlay(
+        ResolvedModelSelection(
+            requested_model="ollama/llama3.2",
+            alias=None,
+            resolved_model="ollama/llama3.2",
+            secret=None,
+        )
+    )
+    assert overlay == {}
+    assert source == "environment"
+
+
+def test_resolve_credential_overlay_requires_openrouter_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenRouter should fail if OPENROUTER_API_KEY is missing and no secret."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    with pytest.raises(KitaruRuntimeError, match="No provider credentials found"):
+        _resolve_credential_overlay(
+            ResolvedModelSelection(
+                requested_model="openrouter/openai/gpt-4o",
+                alias=None,
+                resolved_model="openrouter/openai/gpt-4o",
+                secret=None,
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
+# Missing SDK import guard for Ollama/OpenRouter
+# ---------------------------------------------------------------------------
+
+
+def test_llm_raises_clear_error_when_openai_not_installed_for_ollama(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing openai package should give install guidance for ollama models."""
+    execution_id, checkpoint_id = _flow_checkpoint_scope()
+    monkeypatch.setitem(sys.modules, "openai", None)
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+        patch(
+            "kitaru.llm.resolve_model_selection",
+            return_value=ResolvedModelSelection(
+                requested_model="ollama/llama3.2",
+                alias=None,
+                resolved_model="ollama/llama3.2",
+                secret=None,
+            ),
+        ),
+        patch(
+            "kitaru.llm._resolve_credential_overlay", return_value=({}, "environment")
+        ),
+        pytest.raises(KitaruUsageError, match=r"kitaru\[openai\]"),
+    ):
+        llm("hello", model="ollama/llama3.2", name="test_call")
 
 
 # ---------------------------------------------------------------------------

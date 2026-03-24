@@ -137,6 +137,8 @@ Execution settings:
 - `KITARU_DEFAULT_MODEL` sets the default model for `kitaru.llm()` when no
   explicit `model=` argument is provided.
 - `KITARU_LLM_MOCK_RESPONSE` remains available for tests and demos.
+- `OLLAMA_HOST` sets the Ollama server address for `ollama/*` models
+  (default: `http://localhost:11434`).
 
 `KITARU_DEFAULT_MODEL` first tries local alias lookup. If the value is not a
 registered alias, Kitaru passes it straight through as a raw provider/model
