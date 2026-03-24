@@ -7,7 +7,7 @@ description: Use kitaru.llm() with model aliases, transported runtime config, an
 
 - prompt artifact capture
 - response artifact capture
-- usage/cost/latency metadata logging
+- usage/latency metadata logging
 
 <Callout type="info">
   If you want the full setup path from stored credentials to an actual flow run,
@@ -24,7 +24,7 @@ When you call `kitaru.llm()`, Kitaru resolves the model in this order:
 3. the default alias from the effective model registry in the current environment
 
 If `KITARU_DEFAULT_MODEL` matches a registered alias, Kitaru resolves that
-alias. Otherwise it treats the value as a raw LiteLLM model string.
+alias. Otherwise it treats the value as a raw provider/model string.
 
 When you submit or replay a flow, Kitaru automatically transports your local
 model registry into the execution environment. That means remote runs can still
@@ -59,7 +59,7 @@ kitaru model list
 
 ## Credential resolution order
 
-For known providers such as OpenAI, Anthropic, and Gemini, Kitaru resolves
+For the built-in providers (OpenAI and Anthropic), Kitaru resolves
 credentials in this order:
 
 1. provider credentials already present in the environment
@@ -142,21 +142,29 @@ alongside a message list, Kitaru prepends a system message automatically.
 ## When to use `kitaru.llm()` vs your own client
 
 `kitaru.llm()` is designed for simple text-in/text-out model calls. It handles
-credential resolution, prompt/response capture, and cost tracking automatically.
+credential resolution, prompt/response capture, and usage tracking automatically.
+Built-in runtime support covers `openai/*` and `anthropic/*` models.
+
+<Callout type="info">
+  `kitaru.llm()` requires a provider SDK to be installed. Install with
+  `pip install kitaru[openai]`, `pip install kitaru[anthropic]`, or
+  `pip install kitaru[llm]` for both.
+</Callout>
 
 For advanced patterns — tool calling, structured outputs, streaming, vision
-inputs, or multi-turn conversation management — use your LLM client directly
+inputs, or multi-turn conversation management — use your provider SDK directly
 inside a `@checkpoint`. You still get durable checkpointing and replay; you
 just manage the model interaction yourself:
 
 ```python
-from litellm import completion
+from openai import OpenAI
 from kitaru import checkpoint
 
 @checkpoint
 def agent_step(messages: list[dict]) -> str:
-    resp = completion(
-        model="openai/gpt-4o-mini",
+    client = OpenAI()
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
         messages=messages,
         tools=[...],  # tool calling, structured output, etc.
     )
@@ -168,7 +176,7 @@ For a full example of a tool-calling agent built this way, see
 
 <Callout type="info">
   Tool calling and structured output support for `kitaru.llm()` is on the
-  roadmap. For now, use your preferred LLM client inside checkpoints for
+  roadmap. For now, use your provider SDK directly inside checkpoints for
   these patterns.
 </Callout>
 
@@ -185,7 +193,6 @@ Each `kitaru.llm()` call records:
 - response artifacts
 - token usage
 - latency
-- cost metadata when available
 - credential source metadata (`environment` or `secret`)
 
 ## Example in this repository

@@ -277,7 +277,7 @@ def resolve_model_selection(
     default_model_env_name: str = KITARU_DEFAULT_MODEL_ENV,
     normalize_model_alias: Callable[[str], str] = _normalize_model_alias,
 ) -> ResolvedModelSelection:
-    """Resolve an explicit/default model input to a concrete LiteLLM model."""
+    """Resolve an explicit/default model input to a concrete provider/model string."""
     env = os.environ if environ is None else environ
     registry, transported_registry = _load_and_merge_registries(
         read_global_config=read_global_config,

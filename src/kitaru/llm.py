@@ -1,6 +1,7 @@
 """LLM call primitive for tracked model interactions.
 
-`kitaru.llm()` wraps one LiteLLM completion call with Kitaru tracking.
+`kitaru.llm()` wraps one provider SDK completion call with Kitaru tracking.
+Built-in runtime support covers ``openai/*`` and ``anthropic/*`` models.
 """
 
 import os
@@ -8,9 +9,9 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
-from litellm import completion
 from pydantic import BaseModel, ConfigDict
 from zenml.client import Client
 
@@ -29,30 +30,20 @@ from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_cal
 
 _LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @flow."
 _MOCK_RESPONSE_ENV = "KITARU_LLM_MOCK_RESPONSE"
+_ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
+
 _MODEL_PROVIDER_HINTS: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
-    "azure": ("AZURE_API_KEY", "AZURE_OPENAI_API_KEY"),
-    "bedrock": (
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-    ),
-    "cohere": ("COHERE_API_KEY",),
-    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
-    "groq": ("GROQ_API_KEY",),
-    "mistral": ("MISTRAL_API_KEY",),
     "openai": ("OPENAI_API_KEY",),
-    "xai": ("XAI_API_KEY",),
 }
 
 
 class _LLMUsage(BaseModel):
-    """Normalized usage/cost details returned by LiteLLM."""
+    """Normalized usage details from a provider SDK response."""
 
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
-    cost_usd: float | None = None
 
 
 class _LLMRequest(BaseModel):
@@ -68,6 +59,28 @@ class _LLMRequest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
+@dataclass(frozen=True)
+class _ProviderTarget:
+    """Parsed routing result for a resolved model string."""
+
+    provider: Literal["openai", "anthropic"]
+    provider_model: str
+    resolved_model: str
+
+
+@dataclass(frozen=True)
+class _ProviderCallResult:
+    """Normalized boundary between provider SDK response and Kitaru persistence."""
+
+    response_text: str
+    usage: _LLMUsage
+
+
+# ---------------------------------------------------------------------------
+# Name normalization
+# ---------------------------------------------------------------------------
+
+
 def _normalize_call_name(name: str | None) -> str:
     """Normalize optional user call names into ID-safe call names."""
     if name is None:
@@ -81,8 +94,13 @@ def _normalize_call_name(name: str | None) -> str:
     return normalized_name
 
 
+# ---------------------------------------------------------------------------
+# Provider routing
+# ---------------------------------------------------------------------------
+
+
 def _provider_name(model: str) -> str | None:
-    """Extract the provider prefix from a LiteLLM model identifier."""
+    """Extract the provider prefix from a provider/model identifier."""
     if "/" not in model:
         return None
 
@@ -97,6 +115,54 @@ def _provider_credential_keys(model: str) -> tuple[str, ...] | None:
     if provider is None:
         return None
     return _MODEL_PROVIDER_HINTS.get(provider)
+
+
+def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
+    """Parse a resolved model string into a provider routing target.
+
+    Raises:
+        KitaruUsageError: If the model string has no provider prefix or the
+            provider is not supported by the built-in runtime.
+    """
+    if "/" not in resolved_model:
+        raise KitaruUsageError(
+            f"Model `{resolved_model}` does not include a provider prefix. "
+            "The built-in kitaru.llm() runtime requires a provider-qualified "
+            "model string like `openai/gpt-4o-mini` or "
+            "`anthropic/claude-sonnet-4-20250514`. "
+            "If you registered an alias, make sure it resolves to a "
+            "provider/model string. For other providers, call the SDK "
+            "directly inside a @checkpoint."
+        )
+
+    provider, _, model_name = resolved_model.partition("/")
+    provider = provider.strip().lower()
+    model_name = model_name.strip()
+
+    if not model_name:
+        raise KitaruUsageError(
+            f"Model `{resolved_model}` has an empty model name after the "
+            "provider prefix."
+        )
+
+    if provider not in ("openai", "anthropic"):
+        raise KitaruUsageError(
+            f"Provider `{provider}` (from model `{resolved_model}`) is not "
+            "supported by the built-in kitaru.llm() runtime. "
+            "Built-in support covers `openai/*` and `anthropic/*`. "
+            "For other providers, call the SDK directly inside a @checkpoint."
+        )
+
+    return _ProviderTarget(
+        provider=provider,  # type: ignore[arg-type]
+        provider_model=model_name,
+        resolved_model=resolved_model,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credential resolution
+# ---------------------------------------------------------------------------
 
 
 def _read_secret_values(secret_name: str) -> dict[str, str]:
@@ -171,12 +237,17 @@ def _resolve_credential_overlay(
     return _read_secret_values(selection.secret), "secret"
 
 
+# ---------------------------------------------------------------------------
+# Message normalization
+# ---------------------------------------------------------------------------
+
+
 def _normalize_messages(
     prompt: str | list[dict[str, Any]],
     *,
     system: str | None,
 ) -> list[dict[str, Any]]:
-    """Normalize string/chat prompt input into LiteLLM message format."""
+    """Normalize string/chat prompt input into a canonical message list."""
     messages: list[dict[str, Any]] = []
 
     if system is not None:
@@ -209,14 +280,146 @@ def _normalize_messages(
     return messages
 
 
-def _extract_response_text(raw_response: Any) -> str:
-    """Extract the text response from a LiteLLM completion response."""
+# ---------------------------------------------------------------------------
+# Provider SDK helpers (lazy imports)
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _temporary_env(additions: Mapping[str, str]) -> Any:
+    """Temporarily add/override environment variables for one call."""
+    previous_values: dict[str, str | None] = {}
+    for key, value in additions.items():
+        previous_values[key] = os.environ.get(key)
+        os.environ[key] = value
+
+    try:
+        yield
+    finally:
+        for key, previous in previous_values.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+
+
+def _call_openai(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float | None,
+    max_tokens: int | None,
+    env_overlay: Mapping[str, str],
+) -> _ProviderCallResult:
+    """Execute one OpenAI Chat Completions call."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise KitaruUsageError(
+            f"Model 'openai/{model}' requires the openai package. "
+            "Install with: pip install kitaru[openai]"
+        ) from None
+
+    kwargs: dict[str, Any] = {"model": model, "messages": messages}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+
+    with _temporary_env(env_overlay):
+        client = OpenAI()
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"kitaru.llm() failed while calling OpenAI for model "
+                f"`openai/{model}`: {exc}"
+            ) from exc
+
+    return _ProviderCallResult(
+        response_text=_extract_response_text_openai(response),
+        usage=_extract_usage_openai(response),
+    )
+
+
+def _call_anthropic(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float | None,
+    max_tokens: int | None,
+    env_overlay: Mapping[str, str],
+) -> _ProviderCallResult:
+    """Execute one Anthropic Messages API call."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        raise KitaruUsageError(
+            f"Model 'anthropic/{model}' requires the anthropic package. "
+            "Install with: pip install kitaru[anthropic]"
+        ) from None
+
+    # Separate system messages from the conversation
+    system_parts: list[str] = []
+    anthropic_messages: list[dict[str, Any]] = []
+    seen_non_system = False
+    for msg in messages:
+        if msg["role"] == "system":
+            if seen_non_system:
+                raise KitaruUsageError(
+                    "System messages must appear at the beginning of the "
+                    "message list. Anthropic does not support interleaved "
+                    "system messages."
+                )
+            system_parts.append(msg["content"])
+        else:
+            seen_non_system = True
+            anthropic_messages.append(msg)
+
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": anthropic_messages,
+        "max_tokens": max_tokens
+        if max_tokens is not None
+        else _ANTHROPIC_DEFAULT_MAX_TOKENS,
+    }
+    if system_parts:
+        kwargs["system"] = "\n\n".join(system_parts)
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+
+    with _temporary_env(env_overlay):
+        client = Anthropic()
+        try:
+            response = client.messages.create(**kwargs)
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"kitaru.llm() failed while calling Anthropic for model "
+                f"`anthropic/{model}`: {exc}"
+            ) from exc
+
+    return _ProviderCallResult(
+        response_text=_extract_response_text_anthropic(response),
+        usage=_extract_usage_anthropic(response),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Response parsing (provider-aware)
+# ---------------------------------------------------------------------------
+
+
+def _extract_response_text_openai(raw_response: Any) -> str:
+    """Extract text from an OpenAI Chat Completions response."""
     choices = getattr(raw_response, "choices", None)
     if choices is None and isinstance(raw_response, Mapping):
         choices = raw_response.get("choices")
 
     if not isinstance(choices, Sequence) or not choices:
-        raise KitaruRuntimeError("LiteLLM returned no response choices.")
+        raise KitaruRuntimeError(
+            "OpenAI returned no response choices. kitaru.llm() is a "
+            "text-only primitive."
+        )
     first_choice = choices[0]
     if isinstance(first_choice, Mapping):
         message = first_choice.get("message")
@@ -243,94 +446,136 @@ def _extract_response_text(raw_response: Any) -> str:
         if text_parts:
             return "\n".join(text_parts)
 
-    raise KitaruRuntimeError("LiteLLM returned an unsupported response content format.")
-
-
-def _extract_usage(raw_response: Any) -> _LLMUsage:
-    """Extract usage/cost values from a LiteLLM completion response."""
-    usage_payload = getattr(raw_response, "usage", None)
-
-    def _read_int(key: str) -> int | None:
-        raw_value: Any
-        if isinstance(usage_payload, Mapping):
-            raw_value = usage_payload.get(key)
-        else:
-            raw_value = getattr(usage_payload, key, None)
-
-        if raw_value is None:
-            return None
-
-        try:
-            return int(raw_value)
-        except (TypeError, ValueError):
-            return None
-
-    cost_usd: float | None = None
-    hidden_params = getattr(raw_response, "_hidden_params", None)
-    if isinstance(hidden_params, Mapping):
-        raw_cost = hidden_params.get("response_cost")
-        if raw_cost is not None:
-            try:
-                cost_usd = float(raw_cost)
-            except (TypeError, ValueError):
-                cost_usd = None
-
-    return _LLMUsage(
-        prompt_tokens=_read_int("prompt_tokens"),
-        completion_tokens=_read_int("completion_tokens"),
-        total_tokens=_read_int("total_tokens"),
-        cost_usd=cost_usd,
+    raise KitaruRuntimeError(
+        "OpenAI returned no text content. kitaru.llm() is a text-only "
+        "primitive — for tool calling or structured output, call the "
+        "provider SDK directly inside a @checkpoint."
     )
 
 
-@contextmanager
-def _temporary_env(additions: Mapping[str, str]) -> Any:
-    """Temporarily add/override environment variables for one call."""
-    previous_values: dict[str, str | None] = {}
-    for key, value in additions.items():
-        previous_values[key] = os.environ.get(key)
-        os.environ[key] = value
+def _extract_response_text_anthropic(raw_response: Any) -> str:
+    """Extract text from an Anthropic Messages response."""
+    content = getattr(raw_response, "content", None)
+    if content is None and isinstance(raw_response, Mapping):
+        content = raw_response.get("content")
 
+    if not isinstance(content, Sequence) or not content:
+        raise KitaruRuntimeError(
+            "Anthropic returned no response content. kitaru.llm() is a "
+            "text-only primitive."
+        )
+
+    text_parts: list[str] = []
+    for block in content:
+        block_type: str | None = None
+        block_text: str | None = None
+        if isinstance(block, Mapping):
+            block_type = block.get("type")
+            block_text = block.get("text")
+        else:
+            block_type = getattr(block, "type", None)
+            block_text = getattr(block, "text", None)
+
+        if block_type == "text" and isinstance(block_text, str) and block_text:
+            text_parts.append(block_text)
+
+    if text_parts:
+        return "\n".join(text_parts)
+
+    raise KitaruRuntimeError(
+        "Anthropic returned no text content. kitaru.llm() is a text-only "
+        "primitive — for tool calling or structured output, call the "
+        "provider SDK directly inside a @checkpoint."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Usage extraction (provider-aware)
+# ---------------------------------------------------------------------------
+
+
+def _read_usage_int(usage_payload: Any, key: str) -> int | None:
+    """Read an integer field from a usage payload (Mapping or object)."""
+    if usage_payload is None:
+        return None
+    raw_value: Any
+    if isinstance(usage_payload, Mapping):
+        raw_value = usage_payload.get(key)
+    else:
+        raw_value = getattr(usage_payload, key, None)
+    if raw_value is None:
+        return None
     try:
-        yield
-    finally:
-        for key, previous in previous_values.items():
-            if previous is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = previous
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_usage_openai(raw_response: Any) -> _LLMUsage:
+    """Extract usage from an OpenAI Chat Completions response."""
+    usage = getattr(raw_response, "usage", None)
+    return _LLMUsage(
+        prompt_tokens=_read_usage_int(usage, "prompt_tokens"),
+        completion_tokens=_read_usage_int(usage, "completion_tokens"),
+        total_tokens=_read_usage_int(usage, "total_tokens"),
+    )
+
+
+def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
+    """Extract usage from an Anthropic Messages response."""
+    usage = getattr(raw_response, "usage", None)
+    input_tokens = _read_usage_int(usage, "input_tokens")
+    output_tokens = _read_usage_int(usage, "output_tokens")
+    total = None
+    if input_tokens is not None and output_tokens is not None:
+        total = input_tokens + output_tokens
+    return _LLMUsage(
+        prompt_tokens=input_tokens,
+        completion_tokens=output_tokens,
+        total_tokens=total,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Core execution
+# ---------------------------------------------------------------------------
 
 
 def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
     model_selection = resolve_model_selection(request.model)
     messages = _normalize_messages(request.prompt, system=request.system)
-    env_overlay, credential_source = _resolve_credential_overlay(model_selection)
 
-    completion_kwargs: dict[str, Any] = {
-        "model": model_selection.resolved_model,
-        "messages": messages,
-    }
-    if request.temperature is not None:
-        completion_kwargs["temperature"] = request.temperature
-    if request.max_tokens is not None:
-        completion_kwargs["max_tokens"] = request.max_tokens
+    # Mock short-circuit: skip credential resolution and provider SDK entirely
     if (mock_response := os.environ.get(_MOCK_RESPONSE_ENV)) is not None:
-        completion_kwargs["mock_response"] = mock_response
+        result = _ProviderCallResult(response_text=mock_response, usage=_LLMUsage())
+        env_overlay: dict[str, str] = {}
+        credential_source = "environment"
+        latency_ms = 0.0
+    else:
+        env_overlay, credential_source = _resolve_credential_overlay(model_selection)
+        target = _parse_provider_target(model_selection.resolved_model)
+        started_at = time.perf_counter()
+        if target.provider == "openai":
+            result = _call_openai(
+                model=target.provider_model,
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                env_overlay=env_overlay,
+            )
+        else:
+            result = _call_anthropic(
+                model=target.provider_model,
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                env_overlay=env_overlay,
+            )
+        latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
-    started_at = time.perf_counter()
-    try:
-        with _temporary_env(env_overlay):
-            raw_response = completion(**completion_kwargs)
-    except Exception as exc:
-        raise KitaruBackendError(
-            "kitaru.llm() failed while calling the provider backend "
-            f"for model `{model_selection.resolved_model}`: {exc}"
-        ) from exc
-    latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
-
-    response_text = _extract_response_text(raw_response)
-    usage = _extract_usage(raw_response)
+    response_text = result.response_text
+    usage = result.usage
 
     _safe_save(
         f"{request.call_name}_prompt",
@@ -354,7 +599,6 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         "tokens_input": usage.prompt_tokens,
         "tokens_output": usage.completion_tokens,
         "total_tokens": usage.total_tokens,
-        "cost_usd": usage.cost_usd,
     }
     filtered_metadata = {
         key: value for key, value in llm_metadata.items() if value is not None
@@ -383,7 +627,8 @@ def llm(
 
     Args:
         prompt: User prompt text or a chat-style message list.
-        model: Model alias or concrete LiteLLM model identifier.
+        model: Model alias or provider/model identifier
+            (e.g. ``openai/gpt-4o-mini``).
         system: Optional system prompt.
         temperature: Optional sampling temperature.
         max_tokens: Optional maximum response tokens.
@@ -394,9 +639,10 @@ def llm(
 
     Raises:
         KitaruContextError: If called outside a flow.
-        KitaruUsageError: If prompt or model input is invalid.
-        KitaruRuntimeError: If credentials or LiteLLM response content are invalid.
-        KitaruBackendError: If secret retrieval fails.
+        KitaruUsageError: If prompt, model input, or provider is invalid,
+            or if the required provider SDK is not installed.
+        KitaruRuntimeError: If credentials or response content are invalid.
+        KitaruBackendError: If secret retrieval or the provider call fails.
     """
     if not _is_inside_flow():
         raise KitaruContextError(_LLM_OUTSIDE_FLOW_ERROR)

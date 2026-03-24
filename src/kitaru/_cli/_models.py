@@ -51,7 +51,7 @@ def register(
     model: Annotated[
         str,
         Parameter(
-            help="Concrete LiteLLM model identifier (for example openai/gpt-4o-mini)."
+            help=("Provider-qualified model identifier (e.g. openai/gpt-4o-mini).")
         ),
     ],
     secret: Annotated[

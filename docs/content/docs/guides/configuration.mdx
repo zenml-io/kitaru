@@ -139,7 +139,7 @@ Execution settings:
 - `KITARU_LLM_MOCK_RESPONSE` remains available for tests and demos.
 
 `KITARU_DEFAULT_MODEL` first tries local alias lookup. If the value is not a
-registered alias, Kitaru passes it straight through as a raw LiteLLM model
+registered alias, Kitaru passes it straight through as a raw provider/model
 string. This lookup happens before Kitaru falls back to the locally configured
 default alias.
 
