@@ -14,7 +14,7 @@
   /* Text hierarchy */
   --color-primary: oklch(0.13 0.015 60);
   --color-secondary: oklch(0.49 0.015 55);
-  --color-muted: oklch(0.67 0.015 60);
+  --color-muted: oklch(0.55 0.015 60);
 
   /* Accents */
   --color-accent: oklch(0.65 0.16 45);
@@ -145,13 +145,12 @@ body::before {
   to { transform: rotate(360deg); }
 }
 @keyframes pausePulse {
-  0%, 100% { box-shadow: 0 0 0 0 oklch(0.73 0.12 80 / 0.25); }
-  50% { box-shadow: 0 0 0 8px oklch(0.73 0.12 80 / 0); }
+  0%, 100% { outline: 2px solid oklch(0.73 0.12 80 / 0.25); outline-offset: 0; }
+  50% { outline: 2px solid oklch(0.73 0.12 80 / 0); outline-offset: 8px; }
 }
 @keyframes shimmer {
-  0% { box-shadow: 0 0 0 0 oklch(0.65 0.16 45 / 0.3); }
-  50% { box-shadow: 0 0 20px 4px oklch(0.65 0.16 45 / 0.15); }
-  100% { box-shadow: 0 0 0 0 oklch(0.65 0.16 45 / 0.3); }
+  0%, 100% { outline: 3px solid oklch(0.65 0.16 45 / 0.3); outline-offset: 0; }
+  50% { outline: 3px solid oklch(0.65 0.16 45 / 0.08); outline-offset: 6px; }
 }
 /* Shared code window dots (used in Architecture and CodeShowcase) */
 .code-dot {
@@ -399,7 +398,7 @@ body::before {
     animation: none;
   }
 
-  .pulse-dot {
+  .pulse-dot::after {
     animation: none;
   }
 

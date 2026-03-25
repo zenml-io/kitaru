@@ -1,5 +1,5 @@
 ---
-// Hero.astro — Centered hero with ASCII canvas + mesh gradient background
+// Hero.astro — Centered hero with dot-grid canvas + mesh gradient background
 ---
 
 <section class="hero-section" id="hero">
@@ -151,17 +151,27 @@
   }
 
   .pulse-dot {
+    position: relative;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background: var(--color-accent);
-    animation: pulse-dot 2s ease-in-out infinite;
     flex-shrink: 0;
   }
 
-  @keyframes pulse-dot {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.65 0.16 45 / 0.4); }
-    50% { opacity: 0.7; box-shadow: 0 0 0 6px oklch(0.65 0.16 45 / 0); }
+  .pulse-dot::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    background: oklch(0.65 0.16 45 / 0.4);
+    animation: pulse-ring 2s ease-in-out infinite;
+    z-index: -1;
+  }
+
+  @keyframes pulse-ring {
+    0%, 100% { transform: scale(0.6); opacity: 1; }
+    50% { transform: scale(1.8); opacity: 0; }
   }
 
   .hero-headline {
@@ -346,9 +356,9 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .pulse-dot,
     .mesh-blob,
-    .hero-accent {
+    .hero-accent,
+    .pulse-dot::after {
       animation: none;
     }
 
@@ -378,270 +388,40 @@
 </script>
 
 <script>
-  // ─── ASCII Canvas Background — Landscape zones ───
-  import { sizeCanvasToParent, attachMouseTracker, attachResizeHandler, getAttractorPositions } from '../scripts/canvas-utils';
+  // ─── Dot-grid background — WebGL2 fragment shader ───
+  import { attachMouseTracker, attachResizeHandler } from '../scripts/canvas-utils';
+  import { initHeroGL } from '../scripts/hero-gl';
 
-  (function initHeroCanvas() {
   const canvas = document.querySelector<HTMLCanvasElement>('.ascii-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (canvas) {
+    const section = canvas.closest('section')!;
+    const controller = initHeroGL(canvas);
 
-  const GRID_SPACING = 6;
-  const DOT_RADIUS = 2;
-  const CURSOR_RADIUS = 220;
-  const ATTRACTOR_RADIUS = 260;
-  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    if (!controller) {
+      // No WebGL2 — hide canvas, mesh gradient blobs remain as visual fallback
+      canvas.style.display = 'none';
+    } else {
+      const cleanupMouse = attachMouseTracker(
+        section,
+        canvas,
+        (x, y) => controller.setMouse(x, y, true),
+        () => controller.setMouse(-9999, -9999, false)
+      );
 
-  // Landscape tuning
-  const RIDGE_BASE = 0.72;
-  const RIDGE_AMP = [0.06, 0.03, 0.015];
-  const CLOUD_BAND = 0.12;
-  const CLOUD_THRESHOLD = 0.45;
-  const CENTER_SUPPRESS = 0.45;
+      const observer = new IntersectionObserver((entries) => {
+        controller.setVisible(entries[0].isIntersecting);
+      }, { threshold: 0 });
+      observer.observe(section);
 
-  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const cleanupResize = attachResizeHandler(() => controller.resize());
 
-  type Zone = 'sky' | 'cloud' | 'mountain';
-
-  interface CharCell {
-    x: number;
-    y: number;
-    phase: number;
-    baseOpacity: number;
-    r: number;
-    g: number;
-    b: number;
-    zone: Zone;
-    colorStr: string;
-  }
-
-  let cells: CharCell[] = [];
-  let mouseX = -9999;
-  let mouseY = -9999;
-  let mouseActive = false;
-  let animId = 0;
-  let isVisible = true;
-  let canvasW = 0;
-  let canvasH = 0;
-
-  // Procedural ridgeline — 3 layered sine waves per column
-  function ridgelineAt(col: number, totalCols: number): number {
-    const nx = col / totalCols;
-    return RIDGE_BASE
-      + Math.sin(nx * Math.PI * 2.3 + 0.8) * RIDGE_AMP[0]
-      + Math.sin(nx * Math.PI * 5.1 + 2.1) * RIDGE_AMP[1]
-      + Math.sin(nx * Math.PI * 11.7 + 4.3) * RIDGE_AMP[2];
-  }
-
-  // Cloud clumpiness via cheap sine noise
-  function cloudNoise(col: number, row: number): number {
-    return (Math.sin(col * 0.7 + row * 1.3) * 0.5 + 0.5)
-      * (Math.cos(col * 1.1 - row * 0.9 + 2.7) * 0.5 + 0.5);
-  }
-
-  // Linear interpolation helper
-  function lerp(a: number, b: number, t: number): number {
-    return a + (b - a) * t;
-  }
-
-  function buildGrid() {
-    cells = [];
-    canvasW = canvas!.width / DPR;
-    canvasH = canvas!.height / DPR;
-    const cols = Math.ceil(canvasW / GRID_SPACING) + 1;
-    const rows = Math.ceil(canvasH / GRID_SPACING) + 1;
-    const cx = canvasW / 2;
-    const cy = canvasH / 2;
-
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const x = c * GRID_SPACING;
-        const y = r * GRID_SPACING;
-        const ny = r / rows; // normalized Y (0 = top, 1 = bottom)
-        const ridge = ridgelineAt(c, cols);
-        const cloudTop = ridge - CLOUD_BAND;
-
-        // Zone classification
-        let zone: Zone;
-        let cr: number, cg: number, cb: number;
-        let base: number;
-
-        // Smooth blend: 0 = pure sky, 1 = pure mountain
-        const FADE_BAND = 0.06;
-        const blendCenter = (cloudTop + ridge) / 2;
-        const blendHalf = Math.max((ridge - cloudTop) / 2 + FADE_BAND, 0.01);
-        const rawBlend = (ny - blendCenter + blendHalf) / (blendHalf * 2);
-        const cb2 = Math.max(0, Math.min(rawBlend, 1));
-        const blend = cb2 * cb2 * (3 - 2 * cb2); // smoothstep
-
-        // Sky: warm peach
-        const skyT = Math.min(ny / Math.max(cloudTop, 0.01), 1);
-        const skyR = lerp(248, 240, skyT);
-        const skyG = lerp(220, 195, skyT);
-        const skyB = lerp(195, 170, skyT);
-
-        // Mountain: warm peach-orange → burnt orange (brand-aligned)
-        const mtnDepth = Math.min(Math.max(0, (ny - ridge) / Math.max(1 - ridge, 0.01)), 1);
-        const mtnR = lerp(238, 200, mtnDepth);
-        const mtnG = lerp(150, 105, mtnDepth);
-        const mtnB = lerp(90, 55, mtnDepth);
-
-        cr = Math.round(lerp(skyR, mtnR, blend));
-        cg = Math.round(lerp(skyG, mtnG, blend));
-        cb = Math.round(lerp(skyB, mtnB, blend));
-
-        // High contrast: nearly invisible sky, bold mountains
-        const skyBase = 0.02 + Math.random() * 0.02;
-        const mtnBase = 0.25 + Math.random() * 0.10;
-        base = lerp(skyBase, mtnBase, blend);
-
-        if (blend < 0.3) {
-          zone = 'sky';
-        } else if (blend > 0.7) {
-          zone = 'mountain';
-        } else {
-          zone = 'cloud';
-        }
-
-        // Center suppression — smooth radial fade for text readability
-        const dist = Math.sqrt((x - cx) ** 2 + ((y - cy) * 1.4) ** 2); // elliptical, wider than tall
-        const innerR = Math.min(cx, cy) * 0.2;
-        const outerR = Math.min(cx, cy) * 0.55;
-        if (dist < outerR) {
-          const t = Math.max(0, (dist - innerR) / (outerR - innerR));
-          const fade = t * t; // ease-in: fully suppressed at center, smooth ramp out
-          base *= CENTER_SUPPRESS + (1 - CENTER_SUPPRESS) * fade;
-        }
-
-        cells.push({
-          x,
-          y,
-          phase: Math.random() * Math.PI * 2,
-          baseOpacity: base,
-          r: cr,
-          g: cg,
-          b: cb,
-          zone,
-          colorStr: `rgb(${cr},${cg},${cb})`,
-        });
-      }
+      // Unified teardown (available for future client-side transitions / HMR)
+      (canvas as any).__heroCleanup = () => {
+        cleanupMouse();
+        cleanupResize();
+        observer.disconnect();
+        controller.destroy();
+      };
     }
   }
-
-  function resize() {
-    const dims = sizeCanvasToParent(canvas!, ctx!, DPR);
-    canvasW = dims.w;
-    canvasH = dims.h;
-    buildGrid();
-  }
-
-  function drawStatic() {
-    ctx!.clearRect(0, 0, canvasW, canvasH);
-
-    for (const cell of cells) {
-      ctx!.globalAlpha = cell.baseOpacity;
-      ctx!.fillStyle = cell.colorStr;
-      ctx!.beginPath();
-      ctx!.arc(cell.x, cell.y, DOT_RADIUS, 0, Math.PI * 2);
-      ctx!.fill();
-    }
-    ctx!.globalAlpha = 1;
-  }
-
-  function animate(time: number) {
-    if (document.hidden) {
-      animId = requestAnimationFrame(animate);
-      return;
-    }
-
-    ctx!.clearRect(0, 0, canvasW, canvasH);
-
-    const t = time * 0.001;
-
-    // Two wandering attractors — always running, Lissajous paths at different speeds
-    const { at1X, at1Y, at2X, at2Y } = getAttractorPositions(t, canvasW, canvasH);
-
-    for (const cell of cells) {
-      // Ambient breathing — gentle opacity pulse
-      const breath = Math.sin(t * 0.6 + cell.phase) * 0.03;
-      let opacity = cell.baseOpacity + breath;
-
-      // Attractor 1 — wandering glow (opacity only)
-      {
-        const adx = cell.x - at1X;
-        const ady = cell.y - at1Y;
-        const adistSq = adx * adx + ady * ady;
-        if (adistSq < ATTRACTOR_RADIUS * ATTRACTOR_RADIUS) {
-          const ratio = 1 - (Math.sqrt(adistSq) / ATTRACTOR_RADIUS);
-          const ease = ratio * ratio;
-          opacity = opacity + (0.28 - opacity) * ease;
-        }
-      }
-
-      // Attractor 2 — secondary wandering glow (opacity only)
-      {
-        const adx = cell.x - at2X;
-        const ady = cell.y - at2Y;
-        const adistSq = adx * adx + ady * ady;
-        const a2r = ATTRACTOR_RADIUS * 0.8;
-        if (adistSq < a2r * a2r) {
-          const ratio = 1 - (Math.sqrt(adistSq) / a2r);
-          const ease = ratio * ratio;
-          opacity = opacity + (0.22 - opacity) * ease * 0.6;
-        }
-      }
-
-      // Cursor interaction — opacity boost only
-      if (mouseActive) {
-        const cdx = cell.x - mouseX;
-        const cdy = cell.y - mouseY;
-        const cdistSq = cdx * cdx + cdy * cdy;
-        if (cdistSq < CURSOR_RADIUS * CURSOR_RADIUS) {
-          const ratio = 1 - (Math.sqrt(cdistSq) / CURSOR_RADIUS);
-          const ease = ratio * ratio;
-          opacity = opacity + (0.35 - opacity) * ease;
-        }
-      }
-
-      ctx!.globalAlpha = Math.max(0.02, Math.min(opacity, 0.35));
-      ctx!.fillStyle = cell.colorStr;
-      ctx!.beginPath();
-      ctx!.arc(cell.x, cell.y, DOT_RADIUS, 0, Math.PI * 2);
-      ctx!.fill();
-    }
-
-    ctx!.globalAlpha = 1;
-    animId = isVisible ? requestAnimationFrame(animate) : 0;
-  }
-
-  // Mouse tracking
-  attachMouseTracker(
-    canvas.closest('section')!,
-    canvas,
-    (x, y) => { mouseX = x; mouseY = y; mouseActive = true; },
-    () => { mouseActive = false; }
-  );
-
-  // Init
-  resize();
-
-  const heroObs = new IntersectionObserver((entries) => {
-    isVisible = entries[0].isIntersecting;
-    if (isVisible && !prefersReducedMotion && animId === 0) animId = requestAnimationFrame(animate);
-    else if (!isVisible) { cancelAnimationFrame(animId); animId = 0; }
-  }, { threshold: 0 });
-  heroObs.observe(canvas!.closest('section')!);
-
-  if (prefersReducedMotion) {
-    drawStatic();
-  } else {
-    animId = requestAnimationFrame(animate);
-  }
-
-  attachResizeHandler(() => {
-    resize();
-    if (prefersReducedMotion) drawStatic();
-  });
-  })();
 </script>
