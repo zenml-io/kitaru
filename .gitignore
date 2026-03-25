@@ -256,6 +256,9 @@ docker/kitaru-ui-dist/
 src/kitaru/_ui/dist/
 src/kitaru/_ui/bundle_manifest.json
 
+# Durable harness example outputs
+examples/durable_harness/outputs/
+
 # Codex
 .codex/*
 !.codex/skills/
