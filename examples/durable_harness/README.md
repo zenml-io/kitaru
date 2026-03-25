@@ -1,7 +1,7 @@
 # Durable Harness
 
 A planner-builder-evaluator harness built with **Kitaru primitives** — inspired
-by Anthropic's ["Harness design for long-running application development"](https://www.anthropic.com/engineering/harness-design)
+by Anthropic's ["Harness design for long-running application development"](https://www.anthropic.com/engineering/harness-design-long-running-apps)
 (March 2026), rebuilt with crash recovery, replay, and human-in-the-loop gates.
 
 Demonstrates:
