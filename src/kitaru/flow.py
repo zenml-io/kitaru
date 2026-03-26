@@ -44,6 +44,7 @@ from kitaru.config import (
     resolve_connection_config,
     resolve_execution_config,
 )
+from kitaru.engines.zenml.snapshots import execution_graph_from_run
 from kitaru.errors import (
     FailureOrigin,
     KitaruBackendError,
@@ -589,7 +590,7 @@ class _FlowDefinition:
             ) from exc
 
         replay_plan = build_replay_plan(
-            run=original_run,
+            snapshot=execution_graph_from_run(original_run),
             from_=from_,
             overrides=overrides,
             flow_inputs=flow_inputs,
