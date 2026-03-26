@@ -34,6 +34,7 @@ from kitaru.errors import KitaruContextError, KitaruStateError
 from kitaru.runtime import (
     _get_current_checkpoint_id,
     _get_current_execution_id,
+    _get_current_runtime_session,
     _is_inside_checkpoint,
     _is_inside_flow,
 )
@@ -82,6 +83,16 @@ def _resolve_log_target() -> tuple[RunMetadataResource, UUID | None]:
     raise KitaruContextError(_LOG_OUTSIDE_FLOW_ERROR)
 
 
+def _log_via_zenml(metadata: dict[str, Any]) -> None:
+    """Attach structured metadata via the ZenML backend."""
+    resource, publisher_step_id = _resolve_log_target()
+    Client().create_run_metadata(
+        metadata=metadata,
+        resources=[resource],
+        publisher_step_id=publisher_step_id,
+    )
+
+
 def log(**kwargs: Any) -> None:
     """Attach structured metadata to the current checkpoint or execution.
 
@@ -101,9 +112,11 @@ def log(**kwargs: Any) -> None:
         KitaruContextError: If called outside a flow.
         KitaruStateError: If runtime scope IDs are missing/invalid.
     """
-    resource, publisher_step_id = _resolve_log_target()
-    Client().create_run_metadata(
-        metadata=kwargs,
-        resources=[resource],
-        publisher_step_id=publisher_step_id,
-    )
+    if not _is_inside_flow():
+        raise KitaruContextError(_LOG_OUTSIDE_FLOW_ERROR)
+
+    session = _get_current_runtime_session()
+    if session is not None:
+        session.log_metadata(kwargs)
+        return
+    _log_via_zenml(kwargs)

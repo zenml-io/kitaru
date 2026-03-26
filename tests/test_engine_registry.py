@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kitaru.engines._protocols import ExecutionEngineBackend
+from kitaru.engines._protocols import ExecutionEngineBackend, RuntimeSession
 from kitaru.engines._registry import (
     _DEFAULT_ENGINE_NAME,
     _reset_engine_backend_cache,
@@ -94,6 +94,17 @@ class TestGetEngineBackend:
         """The ZenML backend should support checkpoint definition creation."""
         backend = get_engine_backend()
         assert callable(backend.create_checkpoint_definition)
+
+    def test_backend_has_create_runtime_session(self) -> None:
+        """The ZenML backend should support runtime session creation."""
+        backend = get_engine_backend()
+        assert callable(backend.create_runtime_session)
+
+    def test_runtime_session_satisfies_protocol(self) -> None:
+        """The returned session should satisfy the RuntimeSession protocol."""
+        backend = get_engine_backend()
+        session = backend.create_runtime_session()
+        assert isinstance(session, RuntimeSession)
 
 
 class TestDefaultEngineName:

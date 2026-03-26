@@ -9,6 +9,7 @@ from kitaru.engines._protocols import (
     EngineCheckpointDefinition,
     EngineFlowDefinition,
     ExecutionEngineBackend,
+    RuntimeSession,
 )
 from kitaru.engines._registry import (
     available_engine_names,
@@ -28,6 +29,7 @@ __all__ = [
     "EngineFlowDefinition",
     "ExecutionEngineBackend",
     "ExecutionGraphSnapshot",
+    "RuntimeSession",
     "available_engine_names",
     "get_engine_backend",
     "resolve_engine_name",

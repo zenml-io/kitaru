@@ -1,10 +1,11 @@
 """Engine backend protocol definitions.
 
 These protocols define the contract that each backend engine must satisfy.
-``ExecutionEngineBackend`` covers snapshot mapping and definition creation;
-``EngineFlowDefinition`` and ``EngineCheckpointDefinition`` cover the
-backend-neutral wrappers that ``flow.py`` and ``checkpoint.py`` store
-after definition creation.
+``ExecutionEngineBackend`` covers snapshot mapping, definition creation,
+and runtime session creation; ``EngineFlowDefinition`` and
+``EngineCheckpointDefinition`` cover the backend-neutral wrappers that
+``flow.py`` and ``checkpoint.py`` store after definition creation;
+``RuntimeSession`` covers in-flow primitive dispatch (wait, save, load, log).
 """
 
 from __future__ import annotations
@@ -111,11 +112,53 @@ class EngineCheckpointDefinition(Protocol):
 
 
 @runtime_checkable
-class ExecutionEngineBackend(Protocol):
-    """Backend that manages flow/checkpoint definitions and snapshots.
+class RuntimeSession(Protocol):
+    """Backend-owned runtime session for in-flow primitive dispatch.
 
-    Each backend implements this to create backend-native definitions
-    and to convert native run objects into ``ExecutionGraphSnapshot``.
+    Each backend returns an implementation from ``create_runtime_session``.
+    The session is installed by ``_flow_scope()`` and used by ``wait()``,
+    ``save()``, ``load()``, and ``log()`` to dispatch to the active backend.
+    """
+
+    def wait(
+        self,
+        *,
+        schema: Any = None,
+        name: str | None = None,
+        question: str | None = None,
+        timeout: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> Any:
+        """Suspend the flow until input is provided."""
+        ...
+
+    def save_artifact(
+        self,
+        name: str,
+        value: Any,
+        *,
+        type: str,
+        tags: list[str] | None = None,
+    ) -> None:
+        """Persist a named artifact inside the current checkpoint."""
+        ...
+
+    def load_artifact(self, exec_id: str, name: str) -> Any:
+        """Load a named artifact from a previous execution."""
+        ...
+
+    def log_metadata(self, metadata: dict[str, Any]) -> None:
+        """Attach structured metadata to the current checkpoint or execution."""
+        ...
+
+
+@runtime_checkable
+class ExecutionEngineBackend(Protocol):
+    """Backend that manages flow/checkpoint definitions, snapshots, and sessions.
+
+    Each backend implements this to create backend-native definitions,
+    convert native run objects into ``ExecutionGraphSnapshot``, and
+    provide runtime sessions for in-flow primitive dispatch.
     """
 
     @property
@@ -139,3 +182,5 @@ class ExecutionEngineBackend(Protocol):
         checkpoint_type: str | None,
         runtime: Any,
     ) -> EngineCheckpointDefinition: ...
+
+    def create_runtime_session(self) -> RuntimeSession: ...

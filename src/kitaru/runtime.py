@@ -10,13 +10,16 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.steps.step_context import StepContext
 
 from kitaru._source_aliases import normalize_flow_name as _shared_normalize_flow_name
 from kitaru.errors import KitaruFeatureNotAvailableError
+
+if TYPE_CHECKING:
+    from kitaru.engines._protocols import RuntimeSession
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,10 @@ _CURRENT_FLOW_SCOPE: ContextVar[_FlowScope | None] = ContextVar(
 )
 _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
     "kitaru_current_checkpoint_scope",
+    default=None,
+)
+_CURRENT_RUNTIME_SESSION: ContextVar[RuntimeSession | None] = ContextVar(
+    "kitaru_current_runtime_session",
     default=None,
 )
 _LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", default=0)
@@ -97,7 +104,12 @@ def _flow_scope(
     name: str | None,
     execution_id: str | None = None,
 ) -> Iterator[None]:
-    """Set flow runtime scope for the active execution context."""
+    """Set flow runtime scope for the active execution context.
+
+    When no runtime session is active, installs one from the current engine
+    backend. The session is removed when this scope exits (only if this scope
+    installed it — nested scopes reuse the existing session).
+    """
     resolved_execution_id = (
         execution_id if execution_id is not None else _get_zenml_execution_id()
     )
@@ -105,9 +117,20 @@ def _flow_scope(
         _FlowScope(name=name, execution_id=resolved_execution_id)
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
+
+    # Install a runtime session when none is active yet.
+    session_token = None
+    if _CURRENT_RUNTIME_SESSION.get() is None:
+        from kitaru.engines import get_engine_backend
+
+        session = get_engine_backend().create_runtime_session()
+        session_token = _CURRENT_RUNTIME_SESSION.set(session)
+
     try:
         yield
     finally:
+        if session_token is not None:
+            _CURRENT_RUNTIME_SESSION.reset(session_token)
         _LLM_CALL_COUNTER.reset(llm_counter_token)
         _CURRENT_FLOW_SCOPE.reset(flow_token)
 
@@ -176,6 +199,11 @@ def _get_current_checkpoint() -> _CheckpointScope | None:
 def _is_inside_checkpoint() -> bool:
     """Check whether code is currently running inside a checkpoint."""
     return _get_current_checkpoint() is not None
+
+
+def _get_current_runtime_session() -> RuntimeSession | None:
+    """Get the currently active runtime session, if any."""
+    return _CURRENT_RUNTIME_SESSION.get()
 
 
 def _get_current_execution_id() -> str | None:

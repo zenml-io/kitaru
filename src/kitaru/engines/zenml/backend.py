@@ -173,6 +173,58 @@ class ZenMLCheckpointDefinition:
         return self._step.product(*args, after=after, **kwargs)
 
 
+# -- Runtime session -----------------------------------------------------------
+
+
+class ZenMLRuntimeSession:
+    """ZenML-backed runtime session for in-flow primitive dispatch.
+
+    Each method delegates to a helper in the corresponding primitive module
+    via method-local imports, preserving existing test patch points.
+    """
+
+    def wait(
+        self,
+        *,
+        schema: Any = None,
+        name: str | None = None,
+        question: str | None = None,
+        timeout: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> Any:
+        from kitaru.wait import _wait_via_zenml
+
+        return _wait_via_zenml(
+            schema=schema,
+            name=name,
+            question=question,
+            timeout=timeout,
+            metadata=metadata,
+        )
+
+    def save_artifact(
+        self,
+        name: str,
+        value: Any,
+        *,
+        type: str,
+        tags: list[str] | None = None,
+    ) -> None:
+        from kitaru.artifacts import _save_via_zenml
+
+        _save_via_zenml(name, value, type=type, tags=tags)
+
+    def load_artifact(self, exec_id: str, name: str) -> Any:
+        from kitaru.artifacts import _load_via_zenml
+
+        return _load_via_zenml(exec_id, name)
+
+    def log_metadata(self, metadata: dict[str, Any]) -> None:
+        from kitaru.logging import _log_via_zenml
+
+        _log_via_zenml(metadata)
+
+
 # -- Backend class -------------------------------------------------------------
 
 
@@ -212,3 +264,6 @@ class ZenMLExecutionEngineBackend:
             runtime=runtime,
         )(entrypoint)
         return ZenMLCheckpointDefinition(step_obj)
+
+    def create_runtime_session(self) -> ZenMLRuntimeSession:
+        return ZenMLRuntimeSession()
