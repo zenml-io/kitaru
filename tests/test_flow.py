@@ -429,7 +429,7 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
         patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
-        patch("kitaru.flow.execution_graph_from_run"),
+        patch("kitaru.flow.get_engine_backend"),
     ):
         client_instance = client_cls.return_value
         client_instance.active_stack_model.id = "old-stack-id"
@@ -492,7 +492,7 @@ def test_replay_resolves_config_with_invocation_stack_override() -> None:
                 step_input_overrides={},
             ),
         ),
-        patch("kitaru.flow.execution_graph_from_run"),
+        patch("kitaru.flow.get_engine_backend"),
     ):
         client_instance = client_cls.return_value
         client_instance.active_stack_model.id = "old-stack-id"
