@@ -163,7 +163,7 @@ class TestDaprBackend:
         assert defn.retry_policy is not None
         assert defn.retry_policy.max_attempts == 3
 
-    def test_checkpoint_definition_call_raises(self) -> None:
+    def test_checkpoint_definition_call_requires_session(self) -> None:
         backend = DaprExecutionEngineBackend()
         defn = backend.create_checkpoint_definition(
             entrypoint=lambda: None,
@@ -172,10 +172,10 @@ class TestDaprBackend:
             checkpoint_type=None,
             runtime=None,
         )
-        with pytest.raises(KitaruFeatureNotAvailableError, match="not yet"):
+        with pytest.raises(KitaruRuntimeError, match="orchestrator"):
             defn.call()
 
-    def test_checkpoint_definition_submit_raises(self) -> None:
+    def test_checkpoint_definition_submit_requires_session(self) -> None:
         backend = DaprExecutionEngineBackend()
         defn = backend.create_checkpoint_definition(
             entrypoint=lambda: None,
@@ -184,7 +184,7 @@ class TestDaprBackend:
             checkpoint_type=None,
             runtime=None,
         )
-        with pytest.raises(KitaruFeatureNotAvailableError, match="not yet"):
+        with pytest.raises(KitaruRuntimeError, match="orchestrator"):
             defn.submit()
 
     def test_checkpoint_stores_in_registry(self) -> None:

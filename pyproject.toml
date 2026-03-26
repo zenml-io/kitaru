@@ -144,13 +144,19 @@ include = ["src/kitaru/engines/dapr/store.py"]
 unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
-include = ["src/kitaru/engines/dapr/backend.py"]
+include = ["src/kitaru/engines/dapr/backend.py", "src/kitaru/engines/dapr/interpreter.py"]
 
 [tool.ty.overrides.rules]
 unresolved-attribute = "ignore"
 
 [[tool.ty.overrides]]
-include = ["tests/test_dapr_store.py", "tests/test_dapr_backend.py"]
+include = ["src/kitaru/engines/dapr/interpreter.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+include = ["tests/test_dapr_store.py", "tests/test_dapr_backend.py", "tests/test_dapr_interpreter.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"

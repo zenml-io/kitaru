@@ -164,11 +164,6 @@ _PHASE8_FLOW_MSG = (
     "Dapr flow execution is not yet implemented. "
     "This will be available in a future Kitaru release."
 )
-_PHASE8_CHECKPOINT_MSG = (
-    "Dapr checkpoint invocation methods (call/submit/map/product) are not "
-    "yet implemented. The Dapr workflow interpreter will wire these in a "
-    "future Kitaru release."
-)
 
 
 def _classify_exception_origin(exc: BaseException, tb_text: str) -> FailureOrigin:
@@ -413,6 +408,17 @@ class DaprRuntimeSession:
         timeout: int,
         metadata: dict[str, Any] | None = None,
     ) -> Any:
+        from kitaru.engines.dapr.interpreter import _CURRENT_ORCHESTRATOR_SESSION
+
+        orchestrator = _CURRENT_ORCHESTRATOR_SESSION.get()
+        if orchestrator is not None:
+            return orchestrator.wait_for_input(
+                schema=schema,
+                name=name,
+                question=question,
+                timeout=timeout,
+                metadata=metadata,
+            )
         raise KitaruFeatureNotAvailableError(
             "kitaru.wait() inside Dapr activities is not yet implemented. "
             "Wait orchestration will be available in a future release."
@@ -485,8 +491,19 @@ class DaprRuntimeSession:
         return value
 
     def log_metadata(self, metadata: dict[str, Any]) -> None:
-        """Merge metadata into the checkpoint or execution via the ledger."""
+        """Merge metadata into the checkpoint or execution via the ledger.
+
+        When called from inside the orchestrator flow body (not inside an
+        activity), buffers metadata for later flush. When called from
+        inside an activity, writes directly to the ledger.
+        """
+        from kitaru.engines.dapr.interpreter import _CURRENT_ORCHESTRATOR_SESSION
         from kitaru.runtime import _is_inside_checkpoint
+
+        orchestrator = _CURRENT_ORCHESTRATOR_SESSION.get()
+        if orchestrator is not None and _CURRENT_ACTIVITY_BINDING.get() is None:
+            orchestrator.buffer_metadata(metadata)
+            return
 
         binding = _CURRENT_ACTIVITY_BINDING.get()
         if binding is None:
@@ -597,17 +614,64 @@ class DaprCheckpointDefinition:
         activity.__qualname__ = self._registration_name
         return activity
 
-    def call(self, *args: Any, **kwargs: Any) -> Any:
-        raise KitaruFeatureNotAvailableError(_PHASE8_CHECKPOINT_MSG)
+    def _get_orchestrator_session(self) -> Any:
+        """Retrieve the active orchestrator session or raise."""
+        from kitaru.engines.dapr.interpreter import _CURRENT_ORCHESTRATOR_SESSION
 
-    def submit(self, *args: Any, **kwargs: Any) -> Any:
-        raise KitaruFeatureNotAvailableError(_PHASE8_CHECKPOINT_MSG)
+        session = _CURRENT_ORCHESTRATOR_SESSION.get()
+        if session is None:
+            raise KitaruRuntimeError(
+                "Dapr checkpoint methods require an active orchestrator "
+                "session. Ensure the checkpoint is called inside a Dapr "
+                "flow execution."
+            )
+        return session
 
-    def map(self, *args: Any, **kwargs: Any) -> Any:
-        raise KitaruFeatureNotAvailableError(_PHASE8_CHECKPOINT_MSG)
+    def call(
+        self, *args: Any, id: str | None = None, after: Any = None, **kwargs: Any
+    ) -> Any:
+        session = self._get_orchestrator_session()
+        return session.call_checkpoint(
+            checkpoint_name=self._registration_name,
+            checkpoint_type=self._checkpoint_type,
+            retry_policy=self._retry_policy,
+            args=args,
+            kwargs=kwargs,
+            call_id=id,
+        )
 
-    def product(self, *args: Any, **kwargs: Any) -> Any:
-        raise KitaruFeatureNotAvailableError(_PHASE8_CHECKPOINT_MSG)
+    def submit(
+        self, *args: Any, id: str | None = None, after: Any = None, **kwargs: Any
+    ) -> Any:
+        session = self._get_orchestrator_session()
+        return session.submit_checkpoint(
+            checkpoint_name=self._registration_name,
+            checkpoint_type=self._checkpoint_type,
+            retry_policy=self._retry_policy,
+            args=args,
+            kwargs=kwargs,
+            call_id=id,
+        )
+
+    def map(self, *args: Any, after: Any = None, **kwargs: Any) -> Any:
+        session = self._get_orchestrator_session()
+        return session.map_checkpoint(
+            checkpoint_name=self._registration_name,
+            checkpoint_type=self._checkpoint_type,
+            retry_policy=self._retry_policy,
+            mapped_args=args,
+            kwargs=kwargs,
+        )
+
+    def product(self, *args: Any, after: Any = None, **kwargs: Any) -> Any:
+        session = self._get_orchestrator_session()
+        return session.product_checkpoint(
+            checkpoint_name=self._registration_name,
+            checkpoint_type=self._checkpoint_type,
+            retry_policy=self._retry_policy,
+            product_args=args,
+            kwargs=kwargs,
+        )
 
 
 # ---------------------------------------------------------------------------

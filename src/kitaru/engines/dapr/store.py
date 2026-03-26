@@ -223,6 +223,10 @@ class ExecutionLedgerStore(Protocol):
         self, exec_id: str, call_id: str, metadata: dict[str, Any]
     ) -> None: ...
 
+    def replace_execution(
+        self, exec_id: str, record: ExecutionLedgerRecord
+    ) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # Concrete implementation
@@ -330,6 +334,10 @@ class DaprExecutionLedgerStore:
         except json.JSONDecodeError:
             return ()
         return tuple(ids)
+
+    def replace_execution(self, exec_id: str, record: ExecutionLedgerRecord) -> None:
+        """Overwrite an execution record wholesale (for finalization)."""
+        self._cas_update_execution(exec_id, lambda _: record)
 
     # -- Nested mutations ---------------------------------------------------
 
