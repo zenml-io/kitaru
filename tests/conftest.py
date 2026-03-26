@@ -37,6 +37,7 @@ _EARLY_TEST_ENV_VARS = (
     "KITARU_MODEL_REGISTRY",
     "KITARU_CONFIG_PATH",
     "KITARU_DEBUG",
+    "KITARU_ENGINE",
     "KITARU_ANALYTICS_OPT_IN",
     "ZENML_CONFIG_PATH",
     "ZENML_ACTIVE_PROJECT_ID",
@@ -73,6 +74,7 @@ from kitaru.config import (
     KITARU_STACK_ENV,
     _reset_runtime_configuration,
 )
+from kitaru.engines._registry import _reset_engine_backend_cache
 
 
 @pytest.fixture(autouse=True)
@@ -125,9 +127,11 @@ def isolated_zenml_global_config(
     ):
         monkeypatch.delenv(env_name, raising=False)
     monkeypatch.delenv("KITARU_RUNNER", raising=False)
+    monkeypatch.delenv("KITARU_ENGINE", raising=False)
 
     _reset_runtime_configuration()
     _reset_env_applied()
+    _reset_engine_backend_cache()
 
     # xdist workers lack __main__.__file__, which ZenML needs for source root
     main = sys.modules.get("__main__")
@@ -145,6 +149,7 @@ def isolated_zenml_global_config(
     GlobalConfiguration._reset_instance()
     _reset_runtime_configuration()
     _reset_env_applied()
+    _reset_engine_backend_cache()
 
 
 @pytest.fixture()

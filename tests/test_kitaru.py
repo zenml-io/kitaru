@@ -66,6 +66,7 @@ class TestPublicExports:
             "FailureOrigin",
             "FlowHandle",
             "ImageSettings",
+            "KitaruArtifactFuture",
             "KitaruBackendError",
             "KitaruClient",
             "KitaruConfig",
@@ -75,8 +76,10 @@ class TestPublicExports:
             "KitaruExecutionError",
             "KitaruFeatureNotAvailableError",
             "KitaruLogRetrievalError",
+            "KitaruMapFuture",
             "KitaruRuntimeError",
             "KitaruStateError",
+            "KitaruStepFuture",
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",
@@ -224,7 +227,7 @@ class TestPlaceholderBehavior:
         assert not hasattr(wrapped, "start")
 
     def test_checkpoint_returns_callable_with_submit(self) -> None:
-        with patch("kitaru.checkpoint.step") as step_factory:
+        with patch("kitaru.engines.zenml.backend.step") as step_factory:
             zenml_step = object()
             step_factory.return_value = lambda func: zenml_step
             wrapped = kitaru.checkpoint(lambda: None)

@@ -87,6 +87,7 @@ from kitaru.errors import (
     KitaruWaitValidationError,
 )
 from kitaru.flow import FlowHandle, flow
+from kitaru.futures import KitaruArtifactFuture, KitaruMapFuture, KitaruStepFuture
 from kitaru.llm import llm
 from kitaru.logging import log
 from kitaru.wait import wait
@@ -95,6 +96,7 @@ __all__ = [
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",
+    "KitaruArtifactFuture",
     "KitaruBackendError",
     "KitaruClient",
     "KitaruConfig",
@@ -104,8 +106,10 @@ __all__ = [
     "KitaruExecutionError",
     "KitaruFeatureNotAvailableError",
     "KitaruLogRetrievalError",
+    "KitaruMapFuture",
     "KitaruRuntimeError",
     "KitaruStateError",
+    "KitaruStepFuture",
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",

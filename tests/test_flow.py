@@ -194,7 +194,9 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
     zenml_decorator = MagicMock(return_value=base_pipeline)
 
     with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator) as pipeline_mock,
+        patch(
+            "kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator
+        ) as pipeline_mock,
         patch(
             "kitaru.flow.resolve_execution_config",
             return_value=_resolved_execution(),
@@ -236,7 +238,7 @@ def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
 
     alias = "__kitaru_pipeline_source_my_example_flow"
 
-    with patch("kitaru.flow.pipeline", return_value=zenml_decorator):
+    with patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator):
         flow(my_example_flow)
 
     wrapped_entrypoint = zenml_decorator.call_args.args[0]
@@ -252,7 +254,7 @@ def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
 def test_direct_call_raises_usage_error() -> None:
     zenml_decorator = MagicMock(return_value=MagicMock())
 
-    with patch("kitaru.flow.pipeline", return_value=zenml_decorator):
+    with patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator):
         wrapped = flow(lambda x: x)
 
     with pytest.raises(KitaruUsageError, match="Direct flow calls are not supported"):
@@ -270,7 +272,7 @@ def test_run_restores_previous_stack_if_submission_fails() -> None:
     client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
 
     with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator),
         patch("kitaru.flow.Client", return_value=client_mock),
         patch(
             "kitaru.flow.resolve_execution_config",
@@ -298,7 +300,7 @@ def test_run_allows_submission_when_other_compilation_context_is_active() -> Non
     zenml_decorator = MagicMock(return_value=base_pipeline)
 
     with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator),
         patch(
             "zenml.pipelines.compilation_context.PipelineCompilationContext.is_active",
             return_value=True,
@@ -327,7 +329,7 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
     frozen_spec = object()
 
     with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator),
         patch(
             "kitaru.flow.resolve_execution_config",
             return_value=_resolved_execution(stack="resolved-stack", cache=False),
@@ -379,7 +381,7 @@ def test_run_resolves_config_with_decorator_stack_when_invocation_omits_it() -> 
     zenml_decorator = MagicMock(return_value=base_pipeline)
 
     with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator),
         patch(
             "kitaru.flow.resolve_execution_config",
             return_value=_resolved_execution(stack="decorator-stack"),
@@ -417,7 +419,7 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
     )
 
     with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator),
         patch("kitaru.flow.Client") as client_cls,
         patch(
             "kitaru.flow.resolve_execution_config",
@@ -429,6 +431,7 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
         patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+        patch("kitaru.engines.zenml.backend._snapshot_mapper"),
     ):
         client_instance = client_cls.return_value
         client_instance.active_stack_model.id = "old-stack-id"
@@ -473,7 +476,7 @@ def test_replay_resolves_config_with_invocation_stack_override() -> None:
     zenml_decorator = MagicMock(return_value=base_pipeline)
 
     with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator),
         patch("kitaru.flow.Client") as client_cls,
         patch(
             "kitaru.flow.resolve_execution_config",
@@ -491,6 +494,7 @@ def test_replay_resolves_config_with_invocation_stack_override() -> None:
                 step_input_overrides={},
             ),
         ),
+        patch("kitaru.engines.zenml.backend._snapshot_mapper"),
     ):
         client_instance = client_cls.return_value
         client_instance.active_stack_model.id = "old-stack-id"
@@ -510,7 +514,7 @@ def test_replay_validates_connection_before_loading_source_run() -> None:
     zenml_decorator = MagicMock(return_value=base_pipeline)
 
     with (
-        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.engines.zenml.backend.pipeline", return_value=zenml_decorator),
         patch(
             "kitaru.flow.resolve_connection_config",
             side_effect=KitaruUsageError("Set KITARU_PROJECT"),
