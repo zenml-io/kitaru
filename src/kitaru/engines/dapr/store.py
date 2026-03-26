@@ -215,6 +215,14 @@ class ExecutionLedgerStore(Protocol):
 
     def load_artifact(self, artifact_id: str) -> tuple[ArtifactRecord, Any]: ...
 
+    def merge_execution_metadata(
+        self, exec_id: str, metadata: dict[str, Any]
+    ) -> None: ...
+
+    def merge_checkpoint_metadata(
+        self, exec_id: str, call_id: str, metadata: dict[str, Any]
+    ) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # Concrete implementation
@@ -341,6 +349,24 @@ class DaprExecutionLedgerStore:
     def upsert_wait(self, exec_id: str, wait: WaitRecord) -> None:
         """Insert or replace a wait record by wait_id."""
         self._cas_update_execution(exec_id, lambda rec: _upsert_wait_record(rec, wait))
+
+    # -- Metadata merge -----------------------------------------------------
+
+    def merge_execution_metadata(self, exec_id: str, metadata: dict[str, Any]) -> None:
+        """Recursively merge metadata into the execution record."""
+        self._cas_update_execution(
+            exec_id,
+            lambda rec: replace(rec, metadata=_deep_merge(rec.metadata, metadata)),
+        )
+
+    def merge_checkpoint_metadata(
+        self, exec_id: str, call_id: str, metadata: dict[str, Any]
+    ) -> None:
+        """Recursively merge metadata into a checkpoint call record."""
+        self._cas_update_execution(
+            exec_id,
+            lambda rec: _merge_checkpoint_meta(rec, call_id, metadata),
+        )
 
     # -- Artifact persistence -----------------------------------------------
 
@@ -490,8 +516,15 @@ _T = TypeVar("_T")
 def _upsert_by_id(items: tuple[_T, ...], new: _T, *, id_attr: str) -> tuple[_T, ...]:
     """Replace or append an item by a unique ID field, preserving insertion order."""
     new_id = getattr(new, id_attr)
-    updated = [new if getattr(item, id_attr) == new_id else item for item in items]
-    if not any(getattr(item, id_attr) == new_id for item in items):
+    found = False
+    updated: list[_T] = []
+    for item in items:
+        if getattr(item, id_attr) == new_id:
+            updated.append(new)
+            found = True
+        else:
+            updated.append(item)
+    if not found:
         updated.append(new)
     return tuple(updated)
 
@@ -554,6 +587,41 @@ def _upsert_wait_record(
         record,
         waits=_upsert_by_id(record.waits, wait, id_attr="wait_id"),
     )
+
+
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge overlay into base. Non-dict values are replaced."""
+    result = dict(base)
+    for key, value in overlay.items():
+        existing = result.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            result[key] = _deep_merge(existing, value)
+        else:
+            result[key] = value
+    return result
+
+
+def _merge_checkpoint_meta(
+    record: ExecutionLedgerRecord, call_id: str, metadata: dict[str, Any]
+) -> ExecutionLedgerRecord:
+    """Merge metadata into a checkpoint call within an execution record."""
+    updated_checkpoints: list[CheckpointCallRecord] = []
+    found = False
+
+    for cp in record.checkpoints:
+        if cp.call_id == call_id:
+            found = True
+            merged = _deep_merge(cp.metadata, metadata)
+            updated_checkpoints.append(replace(cp, metadata=merged))
+        else:
+            updated_checkpoints.append(cp)
+
+    if not found:
+        raise KitaruStateError(
+            f"Cannot merge metadata on unknown checkpoint call {call_id!r}."
+        )
+
+    return replace(record, checkpoints=tuple(updated_checkpoints))
 
 
 def _register_artifact(

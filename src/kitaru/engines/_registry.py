@@ -39,8 +39,29 @@ def _load_zenml_backend() -> ExecutionEngineBackend:
     return backend_cls()
 
 
+def _load_dapr_backend() -> ExecutionEngineBackend:
+    """Lazily import the Dapr backend module and instantiate it."""
+    try:
+        module = importlib.import_module("kitaru.engines.dapr.backend")
+    except ImportError as exc:
+        raise KitaruRuntimeError(
+            "Failed to load the Dapr engine backend. "
+            "Ensure kitaru is installed with: pip install kitaru[dapr]"
+        ) from exc
+
+    backend_cls = getattr(module, "DaprExecutionEngineBackend", None)
+    if backend_cls is None:
+        raise KitaruRuntimeError(
+            "Dapr engine module is missing 'DaprExecutionEngineBackend'. "
+            "This is a Kitaru internal error — please report it."
+        )
+
+    return backend_cls()
+
+
 _BACKEND_LOADERS: dict[str, Callable[[], ExecutionEngineBackend]] = {
     "zenml": _load_zenml_backend,
+    "dapr": _load_dapr_backend,
 }
 
 _BACKEND_CACHE: dict[str, ExecutionEngineBackend] = {}

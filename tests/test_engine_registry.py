@@ -46,11 +46,18 @@ class TestResolveEngineName:
         with pytest.raises(KitaruUsageError, match="'zenml'"):
             resolve_engine_name("invalid")
 
+    def test_dapr_resolves_via_env(self) -> None:
+        assert resolve_engine_name(environ={"KITARU_ENGINE": "dapr"}) == "dapr"
+
 
 class TestAvailableEngineNames:
     def test_zenml_is_available(self) -> None:
         names = available_engine_names()
         assert "zenml" in names
+
+    def test_dapr_is_available(self) -> None:
+        names = available_engine_names()
+        assert "dapr" in names
 
     def test_returns_tuple(self) -> None:
         assert isinstance(available_engine_names(), tuple)
@@ -136,3 +143,28 @@ class TestLazyImport:
         backend = get_engine_backend("zenml")
         assert backend.name == "zenml"
         assert "kitaru.engines.zenml.backend" in sys.modules
+
+    def test_dapr_backend_loaded_lazily(self) -> None:
+        """Accessing the Dapr backend should import the backend module."""
+        import sys
+
+        _reset_engine_backend_cache()
+        backend = get_engine_backend("dapr")
+        assert backend.name == "dapr"
+        assert "kitaru.engines.dapr.backend" in sys.modules
+        _reset_engine_backend_cache()
+
+    def test_dapr_backend_satisfies_protocol(self) -> None:
+        """The Dapr backend should satisfy the ExecutionEngineBackend protocol."""
+        _reset_engine_backend_cache()
+        backend = get_engine_backend("dapr")
+        assert isinstance(backend, ExecutionEngineBackend)
+        _reset_engine_backend_cache()
+
+    def test_dapr_runtime_session_satisfies_protocol(self) -> None:
+        """The Dapr session should satisfy RuntimeSession protocol."""
+        _reset_engine_backend_cache()
+        backend = get_engine_backend("dapr")
+        session = backend.create_runtime_session()
+        assert isinstance(session, RuntimeSession)
+        _reset_engine_backend_cache()

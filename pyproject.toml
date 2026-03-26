@@ -143,7 +143,19 @@ include = ["src/kitaru/engines/dapr/store.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+[[tool.ty.overrides]]
+include = ["src/kitaru/engines/dapr/backend.py"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+
+[[tool.ty.overrides]]
+include = ["tests/test_dapr_store.py", "tests/test_dapr_backend.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-vv -n auto"
-pythonpath = ["scripts"]
+pythonpath = ["scripts", "tests"]

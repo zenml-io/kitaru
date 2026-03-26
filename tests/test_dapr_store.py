@@ -2,7 +2,7 @@
 
 Uses an in-memory fake _StateStoreAPI to test store logic without
 a Dapr sidecar. Covers import boundaries, CRUD, idempotency,
-artifact serialization, and CAS retry behavior.
+artifact serialization, metadata merge, and CAS retry behavior.
 """
 
 from __future__ import annotations
@@ -12,10 +12,16 @@ import json
 import sys
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 import pytest
 
+from _dapr_fakes import FakeStateStore
+from _dapr_fakes import make_store as _make_store
+from _dapr_fakes import sample_artifact as _sample_artifact
+from _dapr_fakes import sample_attempt as _sample_attempt
+from _dapr_fakes import sample_checkpoint as _sample_checkpoint
+from _dapr_fakes import sample_record as _sample_record
+from _dapr_fakes import sample_wait as _sample_wait
 from kitaru.engines.dapr.models import (
     ArtifactRecord,
     CheckpointAttemptRecord,
@@ -29,7 +35,6 @@ from kitaru.engines.dapr.store import (
     ETagConflict,
     _decode_envelope,
     _serialize_value,
-    _StateItem,
 )
 from kitaru.errors import (
     FailureOrigin,
@@ -37,144 +42,6 @@ from kitaru.errors import (
     KitaruRuntimeError,
     KitaruStateError,
 )
-
-# ---------------------------------------------------------------------------
-# In-memory fake state store
-# ---------------------------------------------------------------------------
-
-
-class FakeStateStore:
-    """In-memory _StateStoreAPI for testing without a Dapr sidecar.
-
-    Tracks etags and can inject a configurable number of conflicts.
-    """
-
-    def __init__(self, *, conflict_keys: set[str] | None = None) -> None:
-        self._data: dict[tuple[str, str], tuple[bytes, str]] = {}
-        self._etag_counter = 0
-        self._conflict_keys = conflict_keys or set()
-        self._conflict_count: dict[str, int] = {}
-
-    def _next_etag(self) -> str:
-        self._etag_counter += 1
-        return str(self._etag_counter)
-
-    def get(self, *, store_name: str, key: str) -> _StateItem:
-        entry = self._data.get((store_name, key))
-        if entry is None:
-            return _StateItem(data=None, etag=None)
-        return _StateItem(data=entry[0], etag=entry[1])
-
-    def put(
-        self,
-        *,
-        store_name: str,
-        key: str,
-        data: bytes,
-        etag: str | None = None,
-    ) -> str | None:
-        existing = self._data.get((store_name, key))
-
-        # Simulate conflict for configured keys on CAS writes (once per key)
-        if key in self._conflict_keys and etag is not None:
-            already_conflicted = self._conflict_count.get(key, 0)
-            if already_conflicted == 0:
-                self._conflict_count[key] = 1
-                raise ETagConflict(f"Simulated conflict on {key!r}")
-
-        # Etag check
-        if etag is not None:
-            if existing is None:
-                raise ETagConflict(f"Key {key!r} does not exist for etag write")
-            if existing[1] != etag:
-                raise ETagConflict(
-                    f"Etag mismatch for {key!r}: expected {existing[1]!r}, got {etag!r}"
-                )
-
-        new_etag = self._next_etag()
-        self._data[(store_name, key)] = (data, new_etag)
-        return new_etag
-
-
-def _make_store(
-    *,
-    project: str = "test-project",
-    conflict_keys: set[str] | None = None,
-    inline_threshold: int = 262_144,
-    max_retries: int = 5,
-) -> tuple[DaprExecutionLedgerStore, FakeStateStore]:
-    fake = FakeStateStore(conflict_keys=conflict_keys)
-    store = DaprExecutionLedgerStore(
-        project=project,
-        ledger_store_name="test-ledger",
-        state_api=fake,
-        artifact_inline_threshold_bytes=inline_threshold,
-        max_write_retries=max_retries,
-    )
-    return store, fake
-
-
-def _sample_record(
-    exec_id: str | None = None,
-    project: str = "test-project",
-    **kwargs: Any,
-) -> ExecutionLedgerRecord:
-    return ExecutionLedgerRecord(
-        exec_id=exec_id or str(uuid4()),
-        project=project,
-        **kwargs,
-    )
-
-
-def _sample_checkpoint(
-    call_id: str | None = None,
-    name: str = "my_checkpoint",
-    **kwargs: Any,
-) -> CheckpointCallRecord:
-    kwargs.setdefault("invocation_id", str(uuid4()))
-    return CheckpointCallRecord(
-        call_id=call_id or str(uuid4()),
-        name=name,
-        **kwargs,
-    )
-
-
-def _sample_attempt(
-    attempt_id: str | None = None,
-    attempt_number: int = 1,
-    **kwargs: Any,
-) -> CheckpointAttemptRecord:
-    kwargs.setdefault("status", "running")
-    return CheckpointAttemptRecord(
-        attempt_id=attempt_id or str(uuid4()),
-        attempt_number=attempt_number,
-        **kwargs,
-    )
-
-
-def _sample_wait(
-    wait_id: str | None = None,
-    name: str = "approval",
-    **kwargs: Any,
-) -> WaitRecord:
-    return WaitRecord(
-        wait_id=wait_id or str(uuid4()),
-        name=name,
-        **kwargs,
-    )
-
-
-def _sample_artifact(
-    artifact_id: str | None = None,
-    name: str = "output",
-    **kwargs: Any,
-) -> ArtifactRecord:
-    return ArtifactRecord(
-        artifact_id=artifact_id or str(uuid4()),
-        name=name,
-        **kwargs,
-    )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Import boundary tests
@@ -729,3 +596,75 @@ class TestCASRetry:
         cp = _sample_checkpoint(call_id="c1")
         with pytest.raises(KitaruBackendError, match="retries"):
             store.upsert_checkpoint_call("e1", cp)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Metadata merge tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestMetadataMerge:
+    def test_merge_execution_metadata_adds_new_keys(self) -> None:
+        store, _ = _make_store()
+        record = _sample_record(exec_id="e1", metadata={"a": 1})
+        store.create_execution(record)
+
+        store.merge_execution_metadata("e1", {"b": 2})
+
+        updated = store.get_execution("e1")
+        assert updated.metadata == {"a": 1, "b": 2}
+
+    def test_merge_execution_metadata_overwrites_scalar(self) -> None:
+        store, _ = _make_store()
+        record = _sample_record(exec_id="e1", metadata={"a": 1})
+        store.create_execution(record)
+
+        store.merge_execution_metadata("e1", {"a": 99})
+
+        updated = store.get_execution("e1")
+        assert updated.metadata == {"a": 99}
+
+    def test_merge_execution_metadata_deep_merges_dicts(self) -> None:
+        store, _ = _make_store()
+        record = _sample_record(exec_id="e1", metadata={"nested": {"x": 1, "y": 2}})
+        store.create_execution(record)
+
+        store.merge_execution_metadata("e1", {"nested": {"y": 99, "z": 3}})
+
+        updated = store.get_execution("e1")
+        assert updated.metadata == {"nested": {"x": 1, "y": 99, "z": 3}}
+
+    def test_merge_checkpoint_metadata_adds_new_keys(self) -> None:
+        store, _ = _make_store()
+        record = _sample_record(exec_id="e1")
+        store.create_execution(record)
+        cp = _sample_checkpoint(call_id="c1", metadata={"model": "gpt-4"})
+        store.upsert_checkpoint_call("e1", cp)
+
+        store.merge_checkpoint_metadata("e1", "c1", {"tokens": 100})
+
+        updated = store.get_execution("e1")
+        assert updated.checkpoints[0].metadata == {
+            "model": "gpt-4",
+            "tokens": 100,
+        }
+
+    def test_merge_checkpoint_metadata_deep_merges(self) -> None:
+        store, _ = _make_store()
+        record = _sample_record(exec_id="e1")
+        store.create_execution(record)
+        cp = _sample_checkpoint(call_id="c1", metadata={"usage": {"input": 10}})
+        store.upsert_checkpoint_call("e1", cp)
+
+        store.merge_checkpoint_metadata("e1", "c1", {"usage": {"output": 20}})
+
+        updated = store.get_execution("e1")
+        assert updated.checkpoints[0].metadata == {"usage": {"input": 10, "output": 20}}
+
+    def test_merge_checkpoint_metadata_missing_call_raises(self) -> None:
+        store, _ = _make_store()
+        record = _sample_record(exec_id="e1")
+        store.create_execution(record)
+
+        with pytest.raises(KitaruStateError, match="unknown checkpoint"):
+            store.merge_checkpoint_metadata("e1", "missing", {"a": 1})
