@@ -25,6 +25,11 @@ from kitaru._source_aliases import (
     callable_name,
 )
 from kitaru.errors import KitaruContextError, KitaruUsageError
+from kitaru.futures import (
+    KitaruMapFuture,
+    KitaruStepFuture,
+    unwrap_kitaru_futures,
+)
 from kitaru.runtime import (
     _checkpoint_scope,
     _flow_scope,
@@ -237,7 +242,12 @@ class _CheckpointDefinition:
     ) -> Any:
         """Call the checkpoint with context guardrails."""
         self._assert_call_allowed()
-        return self._step(*args, id=id, after=after, **kwargs)
+        return self._step(
+            *unwrap_kitaru_futures(args),
+            id=id,
+            after=unwrap_kitaru_futures(after),
+            **unwrap_kitaru_futures(kwargs),
+        )
 
     def submit(
         self,
@@ -245,30 +255,46 @@ class _CheckpointDefinition:
         id: str | None = None,
         after: Any | Sequence[Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> KitaruStepFuture:
         """Submit the checkpoint concurrently inside a running flow."""
         self._assert_submit_allowed()
-        return self._step.submit(*args, id=id, after=after, **kwargs)
+        native = self._step.submit(
+            *unwrap_kitaru_futures(args),
+            id=id,
+            after=unwrap_kitaru_futures(after),
+            **unwrap_kitaru_futures(kwargs),
+        )
+        return KitaruStepFuture(native)
 
     def map(
         self,
         *args: Any,
         after: Any | Sequence[Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> KitaruMapFuture:
         """Map checkpoint invocations inside a running flow."""
         self._assert_submit_allowed()
-        return self._step.map(*args, after=after, **kwargs)
+        native = self._step.map(
+            *unwrap_kitaru_futures(args),
+            after=unwrap_kitaru_futures(after),
+            **unwrap_kitaru_futures(kwargs),
+        )
+        return KitaruMapFuture(native)
 
     def product(
         self,
         *args: Any,
         after: Any | Sequence[Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> KitaruMapFuture:
         """Map checkpoint invocations as a cartesian product in a running flow."""
         self._assert_submit_allowed()
-        return self._step.product(*args, after=after, **kwargs)
+        native = self._step.product(
+            *unwrap_kitaru_futures(args),
+            after=unwrap_kitaru_futures(after),
+            **unwrap_kitaru_futures(kwargs),
+        )
+        return KitaruMapFuture(native)
 
 
 @overload

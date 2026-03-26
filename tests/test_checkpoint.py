@@ -15,6 +15,7 @@ from zenml.enums import StepRuntime, StepType
 
 from kitaru.checkpoint import checkpoint
 from kitaru.errors import KitaruContextError, KitaruUsageError
+from kitaru.futures import KitaruMapFuture, KitaruStepFuture
 from kitaru.runtime import (
     _flow_scope,
     _get_current_checkpoint,
@@ -56,10 +57,12 @@ class _FakeStep:
         return self.submit_result
 
     def map(self, *args: Any, after: Any = None, **kwargs: Any) -> object:
-        return ("map", args, after, kwargs)
+        self.map_args = (args, {"after": after, **kwargs})
+        return SimpleNamespace(futures=[], _method="map")
 
     def product(self, *args: Any, after: Any = None, **kwargs: Any) -> object:
-        return ("product", args, after, kwargs)
+        self.product_args = (args, {"after": after, **kwargs})
+        return SimpleNamespace(futures=[], _method="product")
 
 
 def _build_checkpoint(
@@ -327,10 +330,10 @@ def test_submit_rejects_nested_checkpoint_calls() -> None:
         wrapped.submit("payload")
 
 
-def test_submit_returns_zenml_future_object() -> None:
+def test_submit_returns_kitaru_step_future() -> None:
     wrapped, captured = _build_checkpoint(lambda: "ok")
-    expected_future = object()
-    captured["step"].submit_result = expected_future
+    expected_native = object()
+    captured["step"].submit_result = expected_native
 
     with _zenml_contexts(
         step_active=False,
@@ -339,11 +342,57 @@ def test_submit_returns_zenml_future_object() -> None:
     ):
         returned_future = wrapped.submit("payload", id="checkpoint-1")
 
-    assert returned_future is expected_future
+    assert isinstance(returned_future, KitaruStepFuture)
+    assert returned_future._native is expected_native
     assert captured["step"].submit_args == (
         ("payload",),
         {"id": "checkpoint-1", "after": None},
     )
+
+
+def test_map_returns_kitaru_map_future() -> None:
+    wrapped, captured = _build_checkpoint(lambda: "ok")
+
+    with _zenml_contexts(
+        step_active=False,
+        dynamic_run_active=True,
+        flow_active=True,
+    ):
+        returned = wrapped.map(["a", "b"])
+
+    assert isinstance(returned, KitaruMapFuture)
+    assert captured["step"].map_args is not None
+
+
+def test_product_returns_kitaru_map_future() -> None:
+    wrapped, captured = _build_checkpoint(lambda: "ok")
+
+    with _zenml_contexts(
+        step_active=False,
+        dynamic_run_active=True,
+        flow_active=True,
+    ):
+        returned = wrapped.product(["a"], ["b"])
+
+    assert isinstance(returned, KitaruMapFuture)
+    assert captured["step"].product_args is not None
+
+
+def test_submit_unwraps_kitaru_futures_in_after() -> None:
+    wrapped, captured = _build_checkpoint(lambda: "ok")
+    native_dep = object()
+    dep_future = KitaruStepFuture(native_dep)
+
+    with _zenml_contexts(
+        step_active=False,
+        dynamic_run_active=True,
+        flow_active=True,
+    ):
+        wrapped.submit("data", after=dep_future)
+
+    assert captured["step"].submit_args is not None
+    _, kwargs = captured["step"].submit_args
+    assert kwargs["after"] is native_dep
 
 
 def test_checkpoint_runtime_scope_is_set_while_user_code_runs() -> None:
