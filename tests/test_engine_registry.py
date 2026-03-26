@@ -83,8 +83,17 @@ class TestGetEngineBackend:
     def test_execution_graph_from_run_delegates_to_zenml(self) -> None:
         """The ZenML backend should delegate to the real snapshot mapper."""
         backend = get_engine_backend()
-        # Verify the method exists and is callable
         assert callable(backend.execution_graph_from_run)
+
+    def test_backend_has_create_flow_definition(self) -> None:
+        """The ZenML backend should support flow definition creation."""
+        backend = get_engine_backend()
+        assert callable(backend.create_flow_definition)
+
+    def test_backend_has_create_checkpoint_definition(self) -> None:
+        """The ZenML backend should support checkpoint definition creation."""
+        backend = get_engine_backend()
+        assert callable(backend.create_checkpoint_definition)
 
 
 class TestDefaultEngineName:
@@ -108,11 +117,11 @@ class TestLazyImport:
         # haven't called get_engine_backend() yet
         assert "kitaru.engines._registry" in sys.modules
 
-    def test_zenml_snapshots_loaded_on_backend_access(self) -> None:
-        """Accessing the ZenML backend should import the snapshot module."""
+    def test_zenml_backend_loaded_on_backend_access(self) -> None:
+        """Accessing the ZenML backend should import the backend module."""
         import sys
 
         _reset_engine_backend_cache()
         backend = get_engine_backend("zenml")
         assert backend.name == "zenml"
-        assert "kitaru.engines.zenml.snapshots" in sys.modules
+        assert "kitaru.engines.zenml.backend" in sys.modules

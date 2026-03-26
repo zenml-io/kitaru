@@ -96,7 +96,7 @@ def _build_checkpoint(
 
         return _decorate
 
-    with patch("kitaru.checkpoint.step", side_effect=_fake_step):
+    with patch("kitaru.engines.zenml.backend.step", side_effect=_fake_step):
         wrapped = checkpoint(retries=retries, type=checkpoint_type, runtime=runtime)(
             func
         )

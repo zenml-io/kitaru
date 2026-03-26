@@ -11,55 +11,32 @@ import importlib
 import os
 import threading
 from collections.abc import Callable, Mapping
-from typing import Any
 
 from kitaru._env import KITARU_ENGINE_ENV
 from kitaru.engines._protocols import ExecutionEngineBackend
-from kitaru.engines._types import ExecutionGraphSnapshot
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 _DEFAULT_ENGINE_NAME = "zenml"
 
 
-class _SnapshotOnlyBackend:
-    """Minimal backend wrapper that delegates to an existing mapper function."""
-
-    __slots__ = ("_mapper", "_name")
-
-    def __init__(
-        self,
-        name: str,
-        mapper: Callable[[Any], ExecutionGraphSnapshot],
-    ) -> None:
-        self._name = name
-        self._mapper = mapper
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    def execution_graph_from_run(self, run: Any) -> ExecutionGraphSnapshot:
-        return self._mapper(run)
-
-
 def _load_zenml_backend() -> ExecutionEngineBackend:
-    """Lazily import the ZenML snapshot mapper and wrap it."""
+    """Lazily import the ZenML backend module and instantiate it."""
     try:
-        module = importlib.import_module("kitaru.engines.zenml.snapshots")
+        module = importlib.import_module("kitaru.engines.zenml.backend")
     except ImportError as exc:
         raise KitaruRuntimeError(
             "Failed to load the ZenML engine backend. "
             "Ensure kitaru is installed with ZenML support."
         ) from exc
 
-    mapper = getattr(module, "execution_graph_from_run", None)
-    if mapper is None:
+    backend_cls = getattr(module, "ZenMLExecutionEngineBackend", None)
+    if backend_cls is None:
         raise KitaruRuntimeError(
-            "ZenML engine module is missing 'execution_graph_from_run'. "
+            "ZenML engine module is missing 'ZenMLExecutionEngineBackend'. "
             "This is a Kitaru internal error — please report it."
         )
 
-    return _SnapshotOnlyBackend(name="zenml", mapper=mapper)
+    return backend_cls()
 
 
 _BACKEND_LOADERS: dict[str, Callable[[], ExecutionEngineBackend]] = {
