@@ -44,6 +44,10 @@ pydantic-ai = [
 mcp = [
     "mcp>=1.19.0,<1.20.0",
 ]
+dapr = [
+    "dapr-ext-workflow>=1.15.0",
+    "cloudpickle>=3.0",
+]
 
 [project.scripts]
 kitaru = "kitaru.cli:cli"
@@ -129,6 +133,12 @@ unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
 include = ["scripts/r2-upload.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+include = ["src/kitaru/engines/dapr/store.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
