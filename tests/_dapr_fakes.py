@@ -8,6 +8,8 @@ without a Dapr sidecar.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +18,7 @@ from kitaru.engines.dapr.models import (
     CheckpointAttemptRecord,
     CheckpointCallRecord,
     ExecutionLedgerRecord,
+    LogRecord,
     WaitRecord,
 )
 from kitaru.engines.dapr.store import (
@@ -186,3 +189,75 @@ def sample_artifact(
         name=name,
         **kwargs,
     )
+
+
+def sample_log(
+    message: str = "hello",
+    **kwargs: Any,
+) -> LogRecord:
+    return LogRecord(message=message, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Fake workflow client
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FakeWorkflowState:
+    """In-memory workflow state for testing."""
+
+    instance_id: str
+    runtime_status: str = "running"
+    created_at: datetime | None = None
+    last_updated_at: datetime | None = None
+
+
+class FakeWorkflowClient:
+    """In-memory workflow client for testing without a Dapr sidecar."""
+
+    def __init__(self) -> None:
+        self.states: dict[str, FakeWorkflowState] = {}
+        self.events: list[tuple[str, str, Any]] = []
+        self.terminated: list[str] = []
+        self.resumed: list[str] = []
+        self.scheduled: list[dict[str, Any]] = []
+
+    def get_workflow_state(self, instance_id: str) -> FakeWorkflowState:
+        if instance_id not in self.states:
+            raise LookupError(f"Workflow {instance_id!r} not found")
+        return self.states[instance_id]
+
+    def raise_workflow_event(
+        self, instance_id: str, event_name: str, data: Any
+    ) -> None:
+        self.events.append((instance_id, event_name, data))
+
+    def terminate_workflow(self, instance_id: str) -> None:
+        self.terminated.append(instance_id)
+        if instance_id in self.states:
+            self.states[instance_id].runtime_status = "terminated"
+
+    def resume_workflow(self, instance_id: str) -> None:
+        self.resumed.append(instance_id)
+
+    def schedule_new_workflow(
+        self,
+        workflow_name: str,
+        *,
+        input: Any,
+        instance_id: str | None = None,
+    ) -> str:
+        exec_id = instance_id or str(uuid4())
+        self.scheduled.append(
+            {
+                "workflow_name": workflow_name,
+                "input": input,
+                "instance_id": exec_id,
+            }
+        )
+        self.states[exec_id] = FakeWorkflowState(
+            instance_id=exec_id,
+            runtime_status="pending",
+        )
+        return exec_id

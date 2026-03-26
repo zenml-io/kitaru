@@ -403,6 +403,10 @@ class _ExecutionsAPI:
         limit: int | None = None,
     ) -> builtins.list[LogEntry]:
         """Fetch runtime log entries for an execution."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().get_logs(
+                exec_id, checkpoint=checkpoint, source=source, limit=limit
+            )
         normalized_source = _normalize_log_source(source)
         if limit is not None and limit < 1:
             raise KitaruUsageError("`limit` must be >= 1 when provided.")
@@ -475,6 +479,8 @@ class _ExecutionsAPI:
 
     def pending_waits(self, exec_id: str) -> builtins.list[PendingWait]:
         """List all pending wait conditions for an execution."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().get_pending_waits(exec_id)
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         conditions = _list_pending_wait_conditions(
             run=run,
@@ -528,6 +534,10 @@ class _ExecutionsAPI:
 
     def input(self, exec_id: str, *, wait: str, value: Any) -> Execution:
         """Provide input to a waiting execution."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().resolve_wait(
+                exec_id, self._client_ref, wait=wait, value=value
+            )
         return self._resolve_wait_condition(
             exec_id,
             wait=wait,
@@ -537,6 +547,10 @@ class _ExecutionsAPI:
 
     def abort_wait(self, exec_id: str, *, wait: str) -> Execution:
         """Abort a pending wait condition on an execution."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().abort_wait(
+                exec_id, self._client_ref, wait=wait
+            )
         return self._resolve_wait_condition(
             exec_id,
             wait=wait,
@@ -545,6 +559,10 @@ class _ExecutionsAPI:
 
     def retry(self, exec_id: str) -> Execution:
         """Retry a failed execution as same-execution recovery."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().retry_execution(
+                exec_id, self._client_ref
+            )
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         run_status_value = str(getattr(run.status, "value", run.status))
         if run_status_value != ZenMLExecutionStatus.FAILED.value:
@@ -562,6 +580,10 @@ class _ExecutionsAPI:
 
     def resume(self, exec_id: str) -> Execution:
         """Resume a paused execution after all waits are resolved."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().resume_execution(
+                exec_id, self._client_ref
+            )
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         pending_conditions = _list_pending_wait_conditions(
             run=run,
@@ -595,6 +617,14 @@ class _ExecutionsAPI:
         **flow_inputs: Any,
     ) -> Execution:
         """Replay an execution from a checkpoint boundary."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().replay_execution(
+                exec_id,
+                self._client_ref,
+                from_=from_,
+                overrides=overrides,
+                flow_inputs=flow_inputs or None,
+            )
         source_run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
 
         run_status_value = str(getattr(source_run.status, "value", source_run.status))
@@ -672,6 +702,10 @@ class _ExecutionsAPI:
 
     def get(self, exec_id: str) -> Execution:
         """Get and map one execution by ID."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().get_execution(
+                exec_id, self._client_ref, include_details=True
+            )
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         return _map_execution(run=run, client=self._client_ref, include_details=True)
 
@@ -683,10 +717,15 @@ class _ExecutionsAPI:
         limit: int | None = None,
     ) -> builtins.list[Execution]:
         """List executions with optional flow/status filters."""
-        status_filter = _coerce_status_filter(status)
-
         if limit is not None and limit < 1:
             raise KitaruUsageError("`limit` must be >= 1 when provided.")
+
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().list_executions(
+                self._client_ref, flow=flow, status=status, limit=limit
+            )
+
+        status_filter = _coerce_status_filter(status)
 
         results: list[Execution] = []
         page = 1
@@ -746,6 +785,10 @@ class _ExecutionsAPI:
 
     def cancel(self, exec_id: str) -> Execution:
         """Cancel an execution if supported by the backend state."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().cancel_execution(
+                exec_id, self._client_ref
+            )
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         stop_run(run=run, graceful=False)
         return self.get(exec_id)
@@ -790,6 +833,10 @@ class _ArtifactsAPI:
 
     def get(self, artifact_id: str) -> ArtifactRef:
         """Get one artifact by ID."""
+        if self._client_ref._uses_dapr():
+            return self._client_ref._get_dapr_adapter().get_artifact_ref(
+                artifact_id, self._client_ref
+            )
         artifact = self._client_ref._get_artifact_version(
             artifact_id,
             hydrate=True,
@@ -850,6 +897,7 @@ class KitaruClient:
 
         resolved_connection = resolve_connection_config(validate_for_use=True)
         self._project = resolved_connection.project
+        self._dapr_adapter: Any = None
 
         self.executions = _ExecutionsAPI(self)
         self.artifacts = _ArtifactsAPI(self)
@@ -894,6 +942,33 @@ class KitaruClient:
             raise KitaruBackendError(
                 f"Failed to load artifact '{artifact_id}': {exc}"
             ) from exc
+
+    def _uses_dapr(self) -> bool:
+        """Return True if the active engine backend is Dapr."""
+        try:
+            return get_engine_backend().name == "dapr"
+        except Exception:
+            return False
+
+    def _get_dapr_adapter(self) -> Any:
+        """Return or create the Dapr client adapter."""
+        if self._dapr_adapter is None:
+            from kitaru.engines.dapr.client import DaprClientAdapter
+            from kitaru.engines.dapr.store import DaprExecutionLedgerStore
+
+            store = DaprExecutionLedgerStore.from_dapr_client(
+                project=self._project or "default",
+                ledger_store_name="statestore",
+            )
+            self._dapr_adapter = DaprClientAdapter(store=store)
+        return self._dapr_adapter
+
+    def _load_artifact_value(self, artifact_id: str) -> Any:
+        """Load an artifact value through the appropriate backend."""
+        if self._uses_dapr():
+            return self._get_dapr_adapter().load_artifact_value(artifact_id)
+        artifact = self._get_artifact_version(artifact_id, hydrate=True)
+        return artifact.load()
 
 
 __all__ = [

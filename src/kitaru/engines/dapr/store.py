@@ -22,6 +22,7 @@ from kitaru.engines.dapr.models import (
     CheckpointAttemptRecord,
     CheckpointCallRecord,
     ExecutionLedgerRecord,
+    LogRecord,
     WaitRecord,
 )
 from kitaru.errors import KitaruBackendError, KitaruRuntimeError, KitaruStateError
@@ -185,6 +186,14 @@ def _blob_key(artifact_id: str) -> str:
     return f"kitaru.artifact_blob.{artifact_id}"
 
 
+def _exec_input_key(project: str, exec_id: str) -> str:
+    return f"kitaru.exec_input.{project}.{exec_id}"
+
+
+def _exec_input_blob_key(exec_id: str) -> str:
+    return f"kitaru.exec_input_blob.{exec_id}"
+
+
 # ---------------------------------------------------------------------------
 # Store protocol
 # ---------------------------------------------------------------------------
@@ -226,6 +235,12 @@ class ExecutionLedgerStore(Protocol):
     def replace_execution(
         self, exec_id: str, record: ExecutionLedgerRecord
     ) -> None: ...
+
+    def store_execution_input(self, exec_id: str, payload: Any) -> None: ...
+
+    def load_execution_input(self, exec_id: str) -> Any: ...
+
+    def append_log_entry(self, exec_id: str, log: LogRecord) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +353,67 @@ class DaprExecutionLedgerStore:
     def replace_execution(self, exec_id: str, record: ExecutionLedgerRecord) -> None:
         """Overwrite an execution record wholesale (for finalization)."""
         self._cas_update_execution(exec_id, lambda _: record)
+
+    # -- Execution input persistence ----------------------------------------
+
+    def store_execution_input(self, exec_id: str, payload: Any) -> None:
+        """Persist original flow start input for retry/replay."""
+        envelope, large_blob = _encode_envelope(
+            payload,
+            artifact_id=f"__exec_input__{exec_id}",
+            inline_threshold=self._inline_threshold,
+        )
+        input_state = {"envelope": envelope}
+        key = _exec_input_key(self._project, exec_id)
+        self._state_api.put(
+            store_name=self._ledger_store,
+            key=key,
+            data=json.dumps(input_state).encode(),
+        )
+        if large_blob is not None:
+            blob_key = _exec_input_blob_key(exec_id)
+            self._state_api.put(
+                store_name=self._ledger_store,
+                key=blob_key,
+                data=large_blob,
+            )
+
+    def load_execution_input(self, exec_id: str) -> Any:
+        """Load original flow start input for retry/replay."""
+        key = _exec_input_key(self._project, exec_id)
+        item = self._state_api.get(store_name=self._ledger_store, key=key)
+        if item.data is None:
+            raise KitaruRuntimeError(
+                f"Execution input for {exec_id!r} not found in store."
+            )
+        try:
+            input_state = json.loads(item.data)
+        except json.JSONDecodeError as exc:
+            raise KitaruRuntimeError(
+                f"Corrupt execution input for {exec_id!r}: {exc}"
+            ) from exc
+
+        envelope = input_state["envelope"]
+        large_blob: bytes | None = None
+        blob_ref = envelope.get("blob_ref")
+        if blob_ref is not None:
+            blob_item = self._state_api.get(store_name=self._ledger_store, key=blob_ref)
+            if blob_item.data is None:
+                raise KitaruRuntimeError(
+                    f"Execution input blob for {exec_id!r} not found."
+                )
+            large_blob = blob_item.data
+
+        return _decode_envelope(envelope, large_blob)
+
+    # -- Log persistence ----------------------------------------------------
+
+    def append_log_entry(self, exec_id: str, log: LogRecord) -> None:
+        """Append a log entry to the execution record."""
+        self._cas_update_execution(
+            exec_id,
+            lambda rec: replace(rec, logs=(*rec.logs, log)),
+        )
 
     # -- Nested mutations ---------------------------------------------------
 
