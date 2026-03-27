@@ -12,11 +12,11 @@ the Dapr SDK at module level.
 from __future__ import annotations
 
 import itertools
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from kitaru.engines.dapr.backend import (
@@ -125,6 +125,17 @@ class ReplaySeed:
     seeded_results: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class FlowIterationOutcome:
+    """Result of one replay iteration through a flow function."""
+
+    kind: Literal["completed", "suspended", "unresolved_futures"]
+    result: Any | None = None
+    suspend: FlowSuspendRequested | None = None
+    unresolved: tuple[_ScheduledFuture, ...] = ()
+    buffered_metadata: tuple[dict[str, Any], ...] = ()
+
+
 # ---------------------------------------------------------------------------
 # Scheduled future tracking
 # ---------------------------------------------------------------------------
@@ -169,6 +180,7 @@ class DaprOrchestratorSession:
         "_resolved_values",
         "_resolved_waits",
         "_scheduled_futures",
+        "_step_input_overrides",
         "_store",
         "_wait_occurrence",
         "exec_id",
@@ -182,11 +194,16 @@ class DaprOrchestratorSession:
         flow_name: str | None,
         store: ExecutionLedgerStore,
         replay_seed: ReplaySeed | None = None,
+        step_input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         self.exec_id = exec_id
         self.flow_name = flow_name
         self._store = store
         self._replay_seed = replay_seed
+        self._step_input_overrides = {
+            call_id: dict(overrides)
+            for call_id, overrides in (step_input_overrides or {}).items()
+        }
 
         # Persistent across replay iterations
         self._resolved_values: dict[str, Any] = {}
@@ -227,6 +244,19 @@ class DaprOrchestratorSession:
         self._wait_occurrence += 1
         return wait_id
 
+    def _apply_step_input_override(
+        self,
+        *,
+        call_id: str,
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        overrides = self._step_input_overrides.get(call_id)
+        if not overrides:
+            return kwargs
+        merged = dict(kwargs)
+        merged.update(overrides)
+        return merged
+
     # -- Divergence detection -----------------------------------------------
 
     def _check_divergence(self, op_index: int, fingerprint: _OpFingerprint) -> None:
@@ -263,6 +293,10 @@ class DaprOrchestratorSession:
         Otherwise raises ``FlowSuspendRequested``.
         """
         resolved_call_id = self._deterministic_call_id(checkpoint_name, call_id)
+        resolved_kwargs = self._apply_step_input_override(
+            call_id=resolved_call_id,
+            kwargs=kwargs,
+        )
         op_index = self.next_op_index()
 
         fingerprint = _OpFingerprint(
@@ -289,7 +323,7 @@ class DaprOrchestratorSession:
                 checkpoint_type=checkpoint_type,
                 call_id=resolved_call_id,
                 args=args,
-                kwargs=kwargs,
+                kwargs=resolved_kwargs,
                 retry_policy=retry_policy,
             ),
         )
@@ -308,6 +342,10 @@ class DaprOrchestratorSession:
     ) -> DaprNativeStepFuture:
         """Schedule a checkpoint for concurrent execution, return a future."""
         resolved_call_id = self._deterministic_call_id(checkpoint_name, call_id)
+        resolved_kwargs = self._apply_step_input_override(
+            call_id=resolved_call_id,
+            kwargs=kwargs,
+        )
         op_index = self.next_op_index()
 
         fingerprint = _OpFingerprint(
@@ -339,7 +377,7 @@ class DaprOrchestratorSession:
             checkpoint_name=checkpoint_name,
             checkpoint_type=checkpoint_type,
             args=args,
-            kwargs=kwargs,
+            kwargs=resolved_kwargs,
             retry_policy=retry_policy,
         )
         return DaprNativeStepFuture(
@@ -494,6 +532,10 @@ class DaprOrchestratorSession:
             for f in self._scheduled_futures.values()
             if f.call_id not in self._resolved_values
         ]
+
+    def get_scheduled_future(self, call_id: str) -> _ScheduledFuture | None:
+        """Look up a scheduled future by call_id."""
+        return self._scheduled_futures.get(call_id)
 
     def record_resolution(self, call_id: str, value: Any) -> None:
         self._resolved_values[call_id] = value
@@ -703,6 +745,59 @@ WaitResolver = Callable[[_WaitSuspendPayload], Any]
 _MAX_INTERPRETER_ITERATIONS = 500
 
 
+def run_flow_iteration(
+    *,
+    flow_func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    session: DaprOrchestratorSession,
+) -> FlowIterationOutcome:
+    """Run one replay iteration without resolving suspends."""
+    from kitaru.engines.dapr.backend import DaprRuntimeSession
+    from kitaru.runtime import _CURRENT_RUNTIME_SESSION, _flow_scope
+
+    session.reset_for_replay()
+
+    session_obj = DaprRuntimeSession()
+    session_token = _CURRENT_RUNTIME_SESSION.set(session_obj)
+    orchestrator_token = _CURRENT_ORCHESTRATOR_SESSION.set(session)
+
+    try:
+        with ExitStack() as scope_stack:
+            scope_stack.enter_context(_dapr_flow_dispatch_scope())
+            scope_stack.enter_context(
+                _flow_scope(
+                    name=session.flow_name,
+                    execution_id=session.exec_id,
+                )
+            )
+            result = flow_func(*args, **kwargs)
+    except FlowSuspendRequested as suspend:
+        return FlowIterationOutcome(
+            kind="suspended",
+            suspend=suspend,
+            buffered_metadata=tuple(session.drain_metadata()),
+        )
+    finally:
+        _CURRENT_ORCHESTRATOR_SESSION.reset(orchestrator_token)
+        _CURRENT_RUNTIME_SESSION.reset(session_token)
+
+    unresolved = session.unresolved_future_specs()
+    if unresolved:
+        return FlowIterationOutcome(
+            kind="unresolved_futures",
+            result=result,
+            unresolved=tuple(unresolved),
+            buffered_metadata=tuple(session.drain_metadata()),
+        )
+
+    return FlowIterationOutcome(
+        kind="completed",
+        result=result,
+        buffered_metadata=tuple(session.drain_metadata()),
+    )
+
+
 def interpret_flow(
     *,
     flow_func: Callable[..., Any],
@@ -719,47 +814,32 @@ def interpret_flow(
     Wait suspensions are resolved by calling ``wait_resolver``.
     After the flow completes, flushes pending futures and metadata.
     """
-    from kitaru.engines.dapr.backend import DaprRuntimeSession
-    from kitaru.runtime import (
-        _CURRENT_RUNTIME_SESSION,
-        _flow_scope,
-    )
-
     for _iteration in range(_MAX_INTERPRETER_ITERATIONS):
-        session.reset_for_replay()
+        outcome = run_flow_iteration(
+            flow_func=flow_func,
+            args=args,
+            kwargs=kwargs,
+            session=session,
+        )
 
-        session_obj = DaprRuntimeSession()
-        session_token = _CURRENT_RUNTIME_SESSION.set(session_obj)
-        orchestrator_token = _CURRENT_ORCHESTRATOR_SESSION.set(session)
+        if outcome.buffered_metadata:
+            merged: dict[str, Any] = {}
+            for meta in outcome.buffered_metadata:
+                merged.update(meta)
+            session._store.merge_execution_metadata(session.exec_id, merged)
 
-        try:
-            with ExitStack() as scope_stack:
-                scope_stack.enter_context(_dapr_flow_dispatch_scope())
-                scope_stack.enter_context(
-                    _flow_scope(
-                        name=session.flow_name,
-                        execution_id=session.exec_id,
-                    )
-                )
-                result = flow_func(*args, **kwargs)
-
-        except FlowSuspendRequested as suspend:
+        if outcome.kind == "suspended":
+            assert outcome.suspend is not None
             _handle_suspend(
                 session=session,
-                suspend=suspend,
+                suspend=outcome.suspend,
                 activity_executor=activity_executor,
                 wait_resolver=wait_resolver,
             )
             continue
 
-        finally:
-            _CURRENT_ORCHESTRATOR_SESSION.reset(orchestrator_token)
-            _CURRENT_RUNTIME_SESSION.reset(session_token)
-
-        # Flow completed — flush unresolved futures
-        unresolved = session.unresolved_future_specs()
-        if unresolved:
-            for spec in unresolved:
+        if outcome.kind == "unresolved_futures":
+            for spec in outcome.unresolved:
                 _execute_and_record(
                     session=session,
                     spec=spec,
@@ -767,15 +847,7 @@ def interpret_flow(
                 )
             continue
 
-        # Flush buffered metadata in a single store write
-        buffered = session.drain_metadata()
-        if buffered:
-            merged: dict[str, Any] = {}
-            for meta in buffered:
-                merged.update(meta)
-            session._store.merge_execution_metadata(session.exec_id, merged)
-
-        return result
+        return outcome.result
 
     raise KitaruRuntimeError(
         f"Interpreter exceeded {_MAX_INTERPRETER_ITERATIONS} iterations. "

@@ -30,6 +30,7 @@ from kitaru.engines.dapr.interpreter import (
     _OpFingerprint,
     _WaitSuspendPayload,
     interpret_flow,
+    run_flow_iteration,
 )
 from kitaru.engines.dapr.store import ExecutionLedgerStore
 from kitaru.errors import KitaruDivergenceError
@@ -350,6 +351,70 @@ class TestSessionReplaySeed:
                 args=(),
                 kwargs={},
             )
+
+
+class TestRunFlowIteration:
+    def test_completed_iteration_returns_result_and_metadata(self) -> None:
+        session, _store = _make_session()
+
+        def my_flow() -> str:
+            session.buffer_metadata({"phase": "done"})
+            return "ok"
+
+        outcome = run_flow_iteration(
+            flow_func=my_flow,
+            args=(),
+            kwargs={},
+            session=session,
+        )
+        assert outcome.kind == "completed"
+        assert outcome.result == "ok"
+        assert list(outcome.buffered_metadata) == [{"phase": "done"}]
+
+    def test_suspended_iteration_returns_suspend_object(self) -> None:
+        session, _store = _make_session()
+
+        def my_flow() -> Any:
+            return session.call_checkpoint(
+                checkpoint_name="step_a",
+                checkpoint_type=None,
+                retry_policy=None,
+                args=(1,),
+                kwargs={},
+            )
+
+        outcome = run_flow_iteration(
+            flow_func=my_flow,
+            args=(),
+            kwargs={},
+            session=session,
+        )
+        assert outcome.kind == "suspended"
+        assert outcome.suspend is not None
+        assert outcome.suspend.kind == "checkpoint"
+
+    def test_step_input_overrides_apply_to_checkpoint_kwargs(self) -> None:
+        store, _fake = make_store()
+        exec_id = str(uuid4())
+        store.create_execution(sample_record(exec_id=exec_id))
+        session = DaprOrchestratorSession(
+            exec_id=exec_id,
+            flow_name="my_flow",
+            store=store,
+            step_input_overrides={"step_a:0": {"temperature": 0.1}},
+        )
+
+        with pytest.raises(FlowSuspendRequested) as exc_info:
+            session.call_checkpoint(
+                checkpoint_name="step_a",
+                checkpoint_type=None,
+                retry_policy=None,
+                args=(),
+                kwargs={"temperature": 0.8, "prompt": "hello"},
+            )
+
+        payload = exc_info.value.payload
+        assert payload.kwargs == {"temperature": 0.1, "prompt": "hello"}
 
 
 # ---------------------------------------------------------------------------

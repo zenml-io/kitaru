@@ -33,6 +33,7 @@ from kitaru.engines.dapr.models import (
     INTERNAL_ARTIFACT_FLAG,
     FailureRecord,
     LogRecord,
+    decode_transport_value,
 )
 from kitaru.errors import (
     KitaruFeatureNotAvailableError,
@@ -379,7 +380,9 @@ class TestWaitResolution:
         adapter.resolve_wait("exec-1", client, wait="approval", value="yes")
 
         assert len(wf_client.events) == 1
-        assert wf_client.events[0] == ("exec-1", "w1", "yes")
+        instance_id, event_name, payload = wf_client.events[0]
+        assert (instance_id, event_name) == ("exec-1", "w1")
+        assert decode_transport_value(payload["__kitaru_transport"]) == "yes"
 
     def test_abort_sends_abort_envelope(self) -> None:
         wf_client = FakeWorkflowClient()
@@ -527,7 +530,9 @@ class TestRetryExecution:
         assert len(wf_client.scheduled) == 1
         scheduled = wf_client.scheduled[0]
         assert scheduled["workflow_name"] == "test_flow"
-        assert scheduled["input"]["original_exec_id"] == "exec-1"
+        assert scheduled["input"]["exec_id"] == result.exec_id
+        stored_input = store.load_execution_input(result.exec_id)
+        assert stored_input["original_exec_id"] == "exec-1"
         assert result.original_exec_id == "exec-1"
 
 
@@ -593,7 +598,8 @@ class TestReplayExecution:
         adapter.replay_execution("exec-1", client, from_="step_b")
 
         assert len(wf_client.scheduled) == 1
-        payload = wf_client.scheduled[0]["input"]
+        new_exec_id = wf_client.scheduled[0]["instance_id"]
+        payload = store.load_execution_input(new_exec_id)
         assert payload["original_exec_id"] == "exec-1"
         assert payload["replay_seed"]["source_exec_id"] == "exec-1"
         assert "step_a:0" in payload["replay_seed"]["seeded_results"]

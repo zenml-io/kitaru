@@ -44,16 +44,19 @@ class FakeStateStore:
         self._etag_counter = 0
         self._conflict_keys = conflict_keys or set()
         self._conflict_count: dict[str, int] = {}
+        self._lock = threading.RLock()
 
     def _next_etag(self) -> str:
-        self._etag_counter += 1
-        return str(self._etag_counter)
+        with self._lock:
+            self._etag_counter += 1
+            return str(self._etag_counter)
 
     def get(self, *, store_name: str, key: str) -> _StateItem:
-        entry = self._data.get((store_name, key))
-        if entry is None:
-            return _StateItem(data=None, etag=None)
-        return _StateItem(data=entry[0], etag=entry[1])
+        with self._lock:
+            entry = self._data.get((store_name, key))
+            if entry is None:
+                return _StateItem(data=None, etag=None)
+            return _StateItem(data=entry[0], etag=entry[1])
 
     def put(
         self,
@@ -63,27 +66,29 @@ class FakeStateStore:
         data: bytes,
         etag: str | None = None,
     ) -> str | None:
-        existing = self._data.get((store_name, key))
+        with self._lock:
+            existing = self._data.get((store_name, key))
 
-        # Simulate conflict for configured keys on CAS writes (once per key)
-        if key in self._conflict_keys and etag is not None:
-            already_conflicted = self._conflict_count.get(key, 0)
-            if already_conflicted == 0:
-                self._conflict_count[key] = 1
-                raise ETagConflict(f"Simulated conflict on {key!r}")
+            # Simulate conflict for configured keys on CAS writes (once per key)
+            if key in self._conflict_keys and etag is not None:
+                already_conflicted = self._conflict_count.get(key, 0)
+                if already_conflicted == 0:
+                    self._conflict_count[key] = 1
+                    raise ETagConflict(f"Simulated conflict on {key!r}")
 
-        # Etag check
-        if etag is not None:
-            if existing is None:
-                raise ETagConflict(f"Key {key!r} does not exist for etag write")
-            if existing[1] != etag:
-                raise ETagConflict(
-                    f"Etag mismatch for {key!r}: expected {existing[1]!r}, got {etag!r}"
-                )
+            # Etag check
+            if etag is not None:
+                if existing is None:
+                    raise ETagConflict(f"Key {key!r} does not exist for etag write")
+                if existing[1] != etag:
+                    raise ETagConflict(
+                        f"Etag mismatch for {key!r}: "
+                        f"expected {existing[1]!r}, got {etag!r}"
+                    )
 
-        new_etag = self._next_etag()
-        self._data[(store_name, key)] = (data, new_etag)
-        return new_etag
+            new_etag = self._next_etag()
+            self._data[(store_name, key)] = (data, new_etag)
+            return new_etag
 
 
 # ---------------------------------------------------------------------------
@@ -229,13 +234,11 @@ class FakeWorkflowClient:
         self.scheduled: list[dict[str, Any]] = []
         self._condition = threading.Condition()
 
-    def get_workflow_state(self, instance_id: str) -> FakeWorkflowState:
-        if instance_id not in self.states:
-            raise LookupError(f"Workflow {instance_id!r} not found")
-        return self.states[instance_id]
+    def get_workflow_state(self, instance_id: str) -> FakeWorkflowState | None:
+        return self.states.get(instance_id)
 
     def raise_workflow_event(
-        self, instance_id: str, event_name: str, data: Any
+        self, instance_id: str, event_name: str, data: Any = None
     ) -> None:
         with self._condition:
             self.events.append((instance_id, event_name, data))
@@ -306,3 +309,54 @@ class FakeWorkflowClient:
             runtime_status="pending",
         )
         return exec_id
+
+
+class FakeRuntimeHost:
+    """Recording fake runtime host for backend and harness tests."""
+
+    def __init__(self, *, workflow_client: FakeWorkflowClient | None = None) -> None:
+        self.workflow_client = workflow_client or FakeWorkflowClient()
+        self.started = False
+        self.shutdown_called = False
+        self.registered_flows: list[str] = []
+        self.registered_activities: list[str] = []
+        self.scheduled: list[dict[str, Any]] = []
+        self.fail_registration = False
+        self.fail_schedule_with: BaseException | None = None
+
+    def ensure_started(self) -> None:
+        self.started = True
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
+        self.started = False
+
+    def workflow_client_if_started(self) -> FakeWorkflowClient | None:
+        return self.workflow_client if self.started else None
+
+    def ensure_flow_registered(self, name: str, definition: Any) -> None:
+        if self.fail_registration:
+            raise RuntimeError(f"failed to register flow {name}")
+        if name not in self.registered_flows:
+            self.registered_flows.append(name)
+
+    def ensure_checkpoint_registered(self, name: str, definition: Any) -> None:
+        if self.fail_registration:
+            raise RuntimeError(f"failed to register activity {name}")
+        if name not in self.registered_activities:
+            self.registered_activities.append(name)
+
+    def schedule_execution(self, *, workflow_name: str, exec_id: str) -> None:
+        if self.fail_schedule_with is not None:
+            raise self.fail_schedule_with
+        self.scheduled.append(
+            {
+                "workflow_name": workflow_name,
+                "exec_id": exec_id,
+            }
+        )
+        self.workflow_client.schedule_new_workflow(
+            workflow_name,
+            input={"exec_id": exec_id},
+            instance_id=exec_id,
+        )

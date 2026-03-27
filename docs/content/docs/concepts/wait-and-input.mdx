@@ -130,8 +130,11 @@ explicitly resume the execution:
   **Dapr backend:** `timeout` is recorded as metadata for observability but
   does not affect Dapr's native workflow suspension. The Dapr workflow engine
   suspends indefinitely until input is provided — there is no runner poll loop
-  to exit. Resume semantics are the same: provide input, then the workflow
-  continues automatically.
+  to exit. Input is delivered as a Dapr workflow event. If a worker process is
+  still connected, the workflow usually continues automatically after you
+  provide input. If that original process has exited, restart your worker under
+  `dapr run` and the workflow can continue from the stored wait state. See
+  [Dapr Engine](/deploy/dapr-engine).
 </Callout>
 
 ## Wait parameters

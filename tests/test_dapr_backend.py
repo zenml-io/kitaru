@@ -17,6 +17,7 @@ from zenml.enums import StepRuntime
 
 from _dapr_fakes import (
     FakeActivityRegistrar,
+    FakeRuntimeHost,
     make_store,
     sample_record,
 )
@@ -142,6 +143,8 @@ class TestDaprBackend:
         backend = DaprExecutionEngineBackend()
         store, _ = make_store()
         backend.bind_ledger_store_provider(lambda: store)
+        host = FakeRuntimeHost()
+        backend.bind_runtime_host(host)
 
         defn = backend.create_flow_definition(
             entrypoint=lambda x: x,
@@ -158,6 +161,13 @@ class TestDaprBackend:
         assert record.workflow_name == "my_flow"
         assert record.status == "pending"
         assert record.created_at is not None
+        assert host.started
+        assert host.scheduled == [
+            {
+                "workflow_name": "my_flow",
+                "exec_id": handle.exec_id,
+            }
+        ]
 
         # Verify execution input was persisted (tuples become lists via JSON)
         input_data = store.load_execution_input(handle.exec_id)
@@ -168,6 +178,7 @@ class TestDaprBackend:
         backend = DaprExecutionEngineBackend()
         store, _ = make_store()
         backend.bind_ledger_store_provider(lambda: store)
+        backend.bind_runtime_host(FakeRuntimeHost())
 
         defn = backend.create_flow_definition(
             entrypoint=lambda: None,

@@ -9,7 +9,6 @@ provides live workflow status when available.
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -33,12 +32,17 @@ from kitaru.engines._types import (
     ExecutionGraphSnapshot,
 )
 from kitaru.engines.dapr.models import (
+    DAPR_ABORT_RESOLUTION_KEY,
+    DAPR_ABORT_RESOLUTION_VALUE,
     DAPR_METADATA_NAMESPACE,
+    DAPR_TRANSPORT_EVENT_KEY,
     FLOW_RESULT_ARTIFACT_ID_KEY,
     INTERNAL_ARTIFACT_FLAG,
     CheckpointCallRecord,
     ExecutionLedgerRecord,
     FailureRecord,
+    WorkflowStartPayload,
+    encode_transport_value,
 )
 from kitaru.engines.dapr.store import ExecutionLedgerStore
 from kitaru.errors import (
@@ -72,7 +76,7 @@ class WorkflowStateLike(Protocol):
 class WorkflowClientLike(Protocol):
     """Minimal contract for Dapr workflow client operations."""
 
-    def get_workflow_state(self, instance_id: str) -> WorkflowStateLike: ...
+    def get_workflow_state(self, instance_id: str) -> WorkflowStateLike | None: ...
 
     def raise_workflow_event(
         self, instance_id: str, event_name: str, data: Any
@@ -104,6 +108,36 @@ _DAPR_STATUS_MAP: dict[str, ExecutionStatus] = {
 }
 
 
+def _normalize_workflow_status(raw: Any) -> str | None:
+    """Normalize workflow status values across SDK object and enum shapes."""
+    if raw is None:
+        return None
+
+    candidate = getattr(raw, "runtime_status", raw)
+
+    if hasattr(candidate, "value"):
+        value = candidate.value
+        if isinstance(value, str):
+            candidate = value
+    if not isinstance(candidate, str) and hasattr(candidate, "name"):
+        name = candidate.name
+        if isinstance(name, str):
+            candidate = name
+
+    if not isinstance(candidate, str):
+        candidate = str(candidate)
+
+    normalized = candidate.strip().lower()
+    if not normalized:
+        return None
+    aliases = {
+        "started": "running",
+        "cancelled": "terminated",
+        "canceled": "terminated",
+    }
+    return aliases.get(normalized, normalized)
+
+
 def _to_dapr_public_status(
     *,
     ledger_status: str | None,
@@ -114,16 +148,23 @@ def _to_dapr_public_status(
     if has_pending_waits:
         return ExecutionStatus.WAITING
 
-    raw = (workflow_status or ledger_status or "pending").lower()
-
-    if raw == "suspended":
+    normalized_workflow = _normalize_workflow_status(workflow_status)
+    if normalized_workflow == "suspended":
         return ExecutionStatus.RUNNING
+    if normalized_workflow is not None:
+        mapped = _DAPR_STATUS_MAP.get(normalized_workflow)
+        if mapped is not None:
+            return mapped
 
-    mapped = _DAPR_STATUS_MAP.get(raw)
-    if mapped is not None:
-        return mapped
+    normalized_ledger = _normalize_workflow_status(ledger_status)
+    if normalized_ledger == "suspended":
+        return ExecutionStatus.RUNNING
+    if normalized_ledger is not None:
+        mapped = _DAPR_STATUS_MAP.get(normalized_ledger)
+        if mapped is not None:
+            return mapped
 
-    raise KitaruRuntimeError(f"Unsupported Dapr workflow status: {raw!r}.")
+    return ExecutionStatus.RUNNING
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +339,7 @@ class DaprClientAdapter:
             return None
         try:
             state = self._workflow_client.get_workflow_state(exec_id)
-            return state.runtime_status
+            return _normalize_workflow_status(state)
         except LookupError:
             return None
         except Exception as exc:
@@ -451,18 +492,11 @@ class DaprClientAdapter:
         assert record.workflow_name is not None
         new_exec_id = str(uuid4())
 
-        if self._workflow_client is not None:
-            try:
-                new_exec_id = self._workflow_client.schedule_new_workflow(
-                    record.workflow_name,
-                    input=payload,
-                    instance_id=new_exec_id,
-                )
-            except Exception as exc:
-                raise KitaruBackendError(
-                    f"Failed to schedule {operation} for execution "
-                    f"'{source_exec_id}': {exc}"
-                ) from exc
+        if self._workflow_client is None:
+            raise KitaruBackendError(
+                f"No Dapr workflow client is available to {operation} execution "
+                f"'{source_exec_id}'."
+            )
 
         new_record = ExecutionLedgerRecord(
             exec_id=new_exec_id,
@@ -474,8 +508,34 @@ class DaprClientAdapter:
             original_exec_id=source_exec_id,
             frozen_execution_spec=frozen_spec,
         )
-        with contextlib.suppress(Exception):
-            self._store.create_execution(new_record)
+        self._store.create_execution(new_record)
+        self._store.store_execution_input(new_exec_id, payload)
+
+        try:
+            self._workflow_client.schedule_new_workflow(
+                record.workflow_name,
+                input=WorkflowStartPayload(exec_id=new_exec_id).to_dict(),
+                instance_id=new_exec_id,
+            )
+        except Exception as exc:
+            failure_time = datetime.now(UTC)
+            failed_record = replace(
+                self._store.get_execution(new_exec_id),
+                status="failed",
+                ended_at=failure_time,
+                updated_at=failure_time,
+                status_reason=str(exc),
+                failure=FailureRecord(
+                    message=str(exc) or type(exc).__name__,
+                    exception_type=type(exc).__name__,
+                    origin=FailureOrigin.BACKEND,
+                ),
+            )
+            self._store.replace_execution(new_exec_id, failed_record)
+            raise KitaruBackendError(
+                f"Failed to schedule {operation} for execution "
+                f"'{source_exec_id}': {exc}"
+            ) from exc
 
         return self._map_execution(
             new_record,
@@ -580,7 +640,11 @@ class DaprClientAdapter:
 
         for w in record.waits:
             if w.wait_id == selected.wait_id:
-                updated_wait = replace(w, status=ledger_status)
+                updated_wait = replace(
+                    w,
+                    status=ledger_status,
+                    resolved_at=datetime.now(UTC),
+                )
                 self._store.upsert_wait(exec_id, updated_wait)
                 break
 
@@ -599,7 +663,12 @@ class DaprClientAdapter:
             exec_id,
             client,
             wait=wait,
-            event_payload=value,
+            event_payload={
+                DAPR_TRANSPORT_EVENT_KEY: encode_transport_value(
+                    value,
+                    label=f"wait input for {wait}",
+                ).to_dict()
+            },
             ledger_status="resolved",
             operation="resolve",
         )
@@ -616,7 +685,7 @@ class DaprClientAdapter:
             exec_id,
             client,
             wait=wait,
-            event_payload={"__kitaru_resolution": "abort"},
+            event_payload={DAPR_ABORT_RESOLUTION_KEY: DAPR_ABORT_RESOLUTION_VALUE},
             ledger_status="aborted",
             operation="abort",
         )
@@ -655,7 +724,11 @@ class DaprClientAdapter:
             )
 
         workflow_status = self._workflow_status(exec_id)
-        raw_status = (workflow_status or record.status or "").lower()
+        raw_status = (
+            _normalize_workflow_status(workflow_status)
+            or _normalize_workflow_status(record.status)
+            or ""
+        )
 
         if raw_status != "suspended":
             raise KitaruStateError(

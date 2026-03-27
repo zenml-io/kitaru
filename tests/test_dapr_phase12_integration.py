@@ -55,11 +55,10 @@ class _FlowWrapper:
         return self._definition.run(args=args, kwargs=kwargs)
 
 
-class _FakeClient:  # type: ignore[type-var]
+class _FakeClient:
     """Minimal stand-in for KitaruClient in adapter calls.
 
     Duck-types the subset of KitaruClient that DaprClientAdapter uses.
-    ty correctly flags this as not being a KitaruClient — that is intentional.
     """
 
     def __init__(self, harness: DaprPhase12Harness) -> None:
@@ -574,7 +573,7 @@ class TestCrossExecutionReplay:
         assert replayed.original_exec_id == src_exec_id
 
         assert len(harness.workflow_client.scheduled) > 0
-        payload = harness.workflow_client.scheduled[-1]["input"]
+        payload = harness.store.load_execution_input(replayed.exec_id)
         assert "replay_seed" in payload
         assert payload["replay_seed"]["source_exec_id"] == src_exec_id
         assert payload["replay_seed"]["seeded_results"]["add_ten:0"] == 15

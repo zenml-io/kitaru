@@ -35,10 +35,12 @@ from kitaru.engines.dapr.models import (
     ArtifactRecord,
     LogRecord,
     WaitRecord,
+    decode_transport_value,
 )
 from kitaru.engines.dapr.store import DaprExecutionLedgerStore
 from tests._dapr_fakes import (
     FakeActivityRegistrar,
+    FakeRuntimeHost,
     FakeWorkflowClient,
     FakeWorkflowState,
     make_store,
@@ -110,6 +112,11 @@ class LedgerBackedWaitController:
             entered_at=now,
         )
         self._store.upsert_wait(self._exec_id, wait_record)
+        record = self._store.get_execution(self._exec_id)
+        self._store.replace_execution(
+            self._exec_id,
+            replace(record, status="suspended", updated_at=now),
+        )
 
         if self._exec_id in self._workflow_client.states:
             self._workflow_client.states[self._exec_id].runtime_status = "suspended"
@@ -119,6 +126,8 @@ class LedgerBackedWaitController:
             payload.wait_id,
             timeout=self._default_timeout,
         )
+        if isinstance(data, dict) and "__kitaru_transport" in data:
+            data = decode_transport_value(data["__kitaru_transport"])
 
         resolved_at = datetime.now(UTC)
 
@@ -129,6 +138,11 @@ class LedgerBackedWaitController:
             resolved_at=resolved_at,
         )
         self._store.upsert_wait(self._exec_id, updated)
+        record = self._store.get_execution(self._exec_id)
+        self._store.replace_execution(
+            self._exec_id,
+            replace(record, status="running", updated_at=resolved_at),
+        )
 
         if self._exec_id in self._workflow_client.states:
             self._workflow_client.states[self._exec_id].runtime_status = "running"
@@ -149,6 +163,8 @@ class DaprPhase12Harness:
         self.workflow_client = FakeWorkflowClient()
         self.backend = DaprExecutionEngineBackend()
         self.backend.bind_ledger_store_provider(lambda: self.store)
+        self.runtime_host = FakeRuntimeHost(workflow_client=self.workflow_client)
+        self.backend.bind_runtime_host(self.runtime_host)
         self.adapter = DaprClientAdapter(
             store=self.store,
             workflow_client=self.workflow_client,

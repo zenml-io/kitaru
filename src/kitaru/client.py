@@ -954,13 +954,24 @@ class KitaruClient:
         """Return or create the Dapr client adapter."""
         if self._dapr_adapter is None:
             from kitaru.engines.dapr.client import DaprClientAdapter
-            from kitaru.engines.dapr.store import DaprExecutionLedgerStore
+            from kitaru.engines.dapr.runtime import create_dapr_workflow_client
 
-            store = DaprExecutionLedgerStore.from_dapr_client(
-                project=self._project or "default",
-                ledger_store_name="statestore",
+            backend = cast(Any, get_engine_backend())
+            store = backend.get_store()
+            host = (
+                backend.get_runtime_host()
+                if hasattr(backend, "get_runtime_host")
+                else None
             )
-            self._dapr_adapter = DaprClientAdapter(store=store)
+            workflow_client = (
+                host.workflow_client_if_started() if host is not None else None
+            )
+            if workflow_client is None:
+                workflow_client = create_dapr_workflow_client()
+            self._dapr_adapter = DaprClientAdapter(
+                store=store,
+                workflow_client=workflow_client,
+            )
         return self._dapr_adapter
 
     def _load_artifact_value(self, artifact_id: str) -> Any:

@@ -625,6 +625,29 @@ class DaprFlowDefinition:
             },
         )
 
+        try:
+            host = self._backend.get_runtime_host()
+            host.ensure_flow_registered(self._registration_name, self)
+            host.ensure_started()
+            host.schedule_execution(
+                workflow_name=self._registration_name,
+                exec_id=exec_id,
+            )
+        except Exception as exc:
+            failure_time = datetime.now(UTC)
+            failed_record = replace(
+                store.get_execution(exec_id),
+                status="failed",
+                ended_at=failure_time,
+                updated_at=failure_time,
+                status_reason=str(exc),
+                failure=_build_failure_record(exc),
+            )
+            store.replace_execution(exec_id, failed_record)
+            raise KitaruBackendError(
+                f"Failed to schedule Dapr workflow for execution {exec_id!r}: {exc}"
+            ) from exc
+
         return DaprFlowRunHandle(exec_id=exec_id)
 
     def replay(self, **kwargs: Any) -> Any:
@@ -759,6 +782,7 @@ class DaprExecutionEngineBackend:
         self._checkpoint_definitions: dict[str, DaprCheckpointDefinition] = {}
         self._flow_definitions: dict[str, DaprFlowDefinition] = {}
         self._ledger_store_provider: Callable[[], ExecutionLedgerStore] | None = None
+        self._runtime_host: Any | None = None
         self._lock = threading.RLock()
 
     @property
@@ -829,6 +853,9 @@ class DaprExecutionEngineBackend:
         defn = DaprFlowDefinition(entrypoint, registration_name, backend=self)
         with self._lock:
             self._flow_definitions[registration_name] = defn
+            host = self._runtime_host
+        if host is not None:
+            host.ensure_flow_registered(registration_name, defn)
         return defn
 
     def get_flow_definitions(self) -> dict[str, DaprFlowDefinition]:
@@ -863,6 +890,9 @@ class DaprExecutionEngineBackend:
         )
         with self._lock:
             self._checkpoint_definitions[registration_name] = defn
+            host = self._runtime_host
+        if host is not None:
+            host.ensure_checkpoint_registered(registration_name, defn)
         return defn
 
     def create_runtime_session(self) -> DaprRuntimeSession:
@@ -875,6 +905,20 @@ class DaprExecutionEngineBackend:
         """Set the store provider used by activity callables."""
         with self._lock:
             self._ledger_store_provider = provider
+
+    def get_runtime_host(self) -> Any:
+        """Return the backend-owned Dapr runtime host."""
+        with self._lock:
+            if self._runtime_host is None:
+                from kitaru.engines.dapr.runtime import DaprRuntimeHost
+
+                self._runtime_host = DaprRuntimeHost(backend=self)
+            return self._runtime_host
+
+    def bind_runtime_host(self, host: Any | None) -> None:
+        """Bind or clear a runtime host, primarily for tests."""
+        with self._lock:
+            self._runtime_host = host
 
     def register_checkpoint_activities(
         self,

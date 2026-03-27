@@ -98,7 +98,12 @@ decorator default applies.
   either raises `KitaruFeatureNotAvailableError`. `cache` is accepted but
   ignored (checkpoints always re-execute). `retries` sets a default retry
   count inherited by checkpoints that do not specify their own. `@flow.replay()`
-  is not yet available; use `KitaruClient.executions.replay()` instead.
+  is not yet available; use `KitaruClient.executions.replay()` instead. Run
+  Dapr-backed flows under `dapr run ... -- uv run ...`: the Dapr sidecar is a
+  separate process, while Kitaru starts the workflow worker lazily inside your
+  Python process on the first `.run()`. Keep that process alive while you want
+  the worker to keep serving workflow work. See
+  [Dapr Engine](/deploy/dapr-engine).
 </Callout>
 
 For `stack`, the full precedence chain is:

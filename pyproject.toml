@@ -144,19 +144,19 @@ include = ["src/kitaru/engines/dapr/store.py"]
 unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
-include = ["src/kitaru/engines/dapr/backend.py", "src/kitaru/engines/dapr/interpreter.py", "src/kitaru/engines/dapr/client.py"]
+include = ["src/kitaru/engines/dapr/backend.py", "src/kitaru/engines/dapr/interpreter.py", "src/kitaru/engines/dapr/client.py", "src/kitaru/engines/dapr/runtime.py"]
 
 [tool.ty.overrides.rules]
 unresolved-attribute = "ignore"
 
 [[tool.ty.overrides]]
-include = ["src/kitaru/engines/dapr/interpreter.py", "src/kitaru/engines/dapr/client.py"]
+include = ["src/kitaru/engines/dapr/interpreter.py", "src/kitaru/engines/dapr/client.py", "src/kitaru/engines/dapr/runtime.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
-include = ["tests/test_dapr_store.py", "tests/test_dapr_backend.py", "tests/test_dapr_interpreter.py", "tests/test_dapr_client.py", "tests/test_dapr_phase12_integration.py", "tests/_dapr_harness.py", "tests/_dapr_fakes.py"]
+include = ["tests/test_dapr_store.py", "tests/test_dapr_backend.py", "tests/test_dapr_interpreter.py", "tests/test_dapr_client.py", "tests/test_dapr_phase12_integration.py", "tests/test_dapr_runtime_host.py", "tests/_dapr_harness.py", "tests/_dapr_fakes.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"

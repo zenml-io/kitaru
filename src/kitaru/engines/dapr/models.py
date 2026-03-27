@@ -7,11 +7,14 @@ and mappers without the ``kitaru[dapr]`` extra installed.
 
 from __future__ import annotations
 
+import base64
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
-from kitaru.errors import FailureOrigin
+from kitaru.errors import FailureOrigin, KitaruRuntimeError
 
 # ---------------------------------------------------------------------------
 # Shared constants for internal flow-result artifact persistence
@@ -22,6 +25,10 @@ FLOW_RESULT_ARTIFACT_ID_KEY = "flow_result_artifact_id"
 INTERNAL_ARTIFACT_FLAG = "kitaru_internal"
 FLOW_RESULT_ARTIFACT_NAME = "__flow_result__"
 FLOW_RESULT_SAVE_TYPE = "flow_output"
+DAPR_TRANSPORT_MAX_BYTES = 1_048_576
+DAPR_TRANSPORT_EVENT_KEY = "__kitaru_transport"
+DAPR_ABORT_RESOLUTION_KEY = "__kitaru_resolution"
+DAPR_ABORT_RESOLUTION_VALUE = "abort"
 
 # ---------------------------------------------------------------------------
 # Datetime helpers
@@ -41,6 +48,213 @@ def _iso_to_dt(value: str | None) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt
+
+
+def _coerce_mapping(data: Mapping[str, Any] | dict[str, Any]) -> dict[str, Any]:
+    return dict(data)
+
+
+@dataclass(frozen=True)
+class TransportEnvelope:
+    """JSON-safe wrapper for values crossing the Dapr transport boundary."""
+
+    serializer: Literal["json", "cloudpickle"]
+    data_b64: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "serializer": self.serializer,
+            "data_b64": self.data_b64,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any] | dict[str, Any]) -> TransportEnvelope:
+        payload = _coerce_mapping(data)
+        return cls(
+            serializer=payload["serializer"],
+            data_b64=payload["data_b64"],
+        )
+
+
+def encode_transport_value(
+    value: Any,
+    *,
+    max_bytes: int = DAPR_TRANSPORT_MAX_BYTES,
+    label: str,
+) -> TransportEnvelope:
+    """Encode a Python value for Dapr workflow/activity/event transport."""
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        value = value.model_dump(mode="json")
+
+    serializer: Literal["json", "cloudpickle"]
+    try:
+        blob = json.dumps(value).encode()
+        serializer = "json"
+    except (TypeError, ValueError):
+        import cloudpickle
+
+        blob = cloudpickle.dumps(value)
+        serializer = "cloudpickle"
+
+    data_b64 = base64.b64encode(blob).decode()
+    # base64 output is pure ASCII, so len(str) == len(bytes)
+    if len(data_b64) > max_bytes:
+        raise KitaruRuntimeError(
+            f"Dapr transport payload for {label!r} exceeds {max_bytes} bytes."
+        )
+    return TransportEnvelope(serializer=serializer, data_b64=data_b64)
+
+
+def decode_transport_value(
+    envelope: TransportEnvelope | Mapping[str, Any],
+) -> Any:
+    """Decode a Dapr transport envelope back into its Python value."""
+    env = (
+        envelope
+        if isinstance(envelope, TransportEnvelope)
+        else TransportEnvelope.from_dict(envelope)
+    )
+    blob = base64.b64decode(env.data_b64)
+    if env.serializer == "json":
+        return json.loads(blob)
+    if env.serializer == "cloudpickle":
+        import cloudpickle
+
+        return cloudpickle.loads(blob)
+    raise KitaruRuntimeError(f"Unknown Dapr transport serializer {env.serializer!r}.")
+
+
+@dataclass(frozen=True)
+class WorkflowStartPayload:
+    """Small workflow-start payload that points the worker at ledger input."""
+
+    exec_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"exec_id": self.exec_id}
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any] | dict[str, Any]
+    ) -> WorkflowStartPayload:
+        payload = _coerce_mapping(data)
+        return cls(exec_id=payload["exec_id"])
+
+
+@dataclass(frozen=True)
+class CheckpointActivityPayload:
+    """Workflow-to-activity transport payload for a checkpoint invocation."""
+
+    exec_id: str
+    flow_name: str | None
+    call_id: str
+    invocation_id: str
+    checkpoint_name: str
+    checkpoint_type: str | None = None
+    args: TransportEnvelope = field(
+        default_factory=lambda: TransportEnvelope(serializer="json", data_b64="W10=")
+    )
+    kwargs: TransportEnvelope = field(
+        default_factory=lambda: TransportEnvelope(serializer="json", data_b64="e30=")
+    )
+    attempt_number: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    original_call_id: str | None = None
+    upstream_call_ids: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "exec_id": self.exec_id,
+            "flow_name": self.flow_name,
+            "call_id": self.call_id,
+            "invocation_id": self.invocation_id,
+            "checkpoint_name": self.checkpoint_name,
+            "checkpoint_type": self.checkpoint_type,
+            "args": self.args.to_dict(),
+            "kwargs": self.kwargs.to_dict(),
+            "attempt_number": self.attempt_number,
+            "metadata": self.metadata,
+            "original_call_id": self.original_call_id,
+            "upstream_call_ids": list(self.upstream_call_ids),
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any] | dict[str, Any]
+    ) -> CheckpointActivityPayload:
+        payload = _coerce_mapping(data)
+        return cls(
+            exec_id=payload["exec_id"],
+            flow_name=payload.get("flow_name"),
+            call_id=payload["call_id"],
+            invocation_id=payload["invocation_id"],
+            checkpoint_name=payload["checkpoint_name"],
+            checkpoint_type=payload.get("checkpoint_type"),
+            args=TransportEnvelope.from_dict(payload["args"]),
+            kwargs=TransportEnvelope.from_dict(payload["kwargs"]),
+            attempt_number=payload.get("attempt_number"),
+            metadata=payload.get("metadata", {}),
+            original_call_id=payload.get("original_call_id"),
+            upstream_call_ids=tuple(payload.get("upstream_call_ids", ())),
+        )
+
+
+@dataclass(frozen=True)
+class CheckpointActivityResultPayload:
+    """Small activity result payload returned to the workflow history."""
+
+    call_id: str
+    output_artifact_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "call_id": self.call_id,
+            "output_artifact_id": self.output_artifact_id,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any] | dict[str, Any]
+    ) -> CheckpointActivityResultPayload:
+        payload = _coerce_mapping(data)
+        return cls(
+            call_id=payload["call_id"],
+            output_artifact_id=payload["output_artifact_id"],
+        )
+
+
+@dataclass(frozen=True)
+class FinalizeExecutionPayload:
+    """Internal payload for terminal execution persistence."""
+
+    exec_id: str
+    status: Literal["completed", "failed"]
+    ended_at: str
+    result: TransportEnvelope | None = None
+    failure: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "exec_id": self.exec_id,
+            "status": self.status,
+            "ended_at": self.ended_at,
+            "result": self.result.to_dict() if self.result is not None else None,
+            "failure": self.failure,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any] | dict[str, Any]
+    ) -> FinalizeExecutionPayload:
+        payload = _coerce_mapping(data)
+        result = payload.get("result")
+        return cls(
+            exec_id=payload["exec_id"],
+            status=payload["status"],
+            ended_at=payload["ended_at"],
+            result=TransportEnvelope.from_dict(result) if result is not None else None,
+            failure=payload.get("failure"),
+        )
 
 
 # ---------------------------------------------------------------------------
