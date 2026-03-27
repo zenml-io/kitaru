@@ -81,13 +81,16 @@ class TestImportBoundary:
         mod = importlib.import_module("kitaru.engines.dapr.backend")
         assert hasattr(mod, "DaprExecutionEngineBackend")
 
-    def test_get_engine_backend_dapr_works_without_sdk(self) -> None:
+    def test_get_engine_backend_dapr_works_without_sdk(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """get_engine_backend('dapr') should not require Dapr SDK."""
         from kitaru.engines._registry import (
             _reset_engine_backend_cache,
             get_engine_backend,
         )
 
+        monkeypatch.setenv("KITARU_ENABLE_EXPERIMENTAL_DAPR", "1")
         _reset_engine_backend_cache()
         backend = get_engine_backend("dapr")
         assert backend.name == "dapr"

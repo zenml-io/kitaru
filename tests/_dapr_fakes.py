@@ -1,12 +1,13 @@
 """Shared in-memory fakes for Dapr engine tests.
 
-Provides ``FakeStateStore`` (an in-memory ``_StateStoreAPI``) and
-``FakeActivityRegistrar`` for testing Dapr store and backend logic
-without a Dapr sidecar.
+Provides ``FakeStateStore`` (an in-memory ``_StateStoreAPI``),
+``FakeActivityRegistrar``, and ``FakeWorkflowClient`` for testing
+Dapr store and backend logic without a Dapr sidecar.
 """
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -214,7 +215,11 @@ class FakeWorkflowState:
 
 
 class FakeWorkflowClient:
-    """In-memory workflow client for testing without a Dapr sidecar."""
+    """In-memory workflow client for testing without a Dapr sidecar.
+
+    Thread-safe: ``raise_workflow_event`` notifies any thread blocked
+    in ``wait_for_event``, used by wait-resolution integration tests.
+    """
 
     def __init__(self) -> None:
         self.states: dict[str, FakeWorkflowState] = {}
@@ -222,6 +227,7 @@ class FakeWorkflowClient:
         self.terminated: list[str] = []
         self.resumed: list[str] = []
         self.scheduled: list[dict[str, Any]] = []
+        self._condition = threading.Condition()
 
     def get_workflow_state(self, instance_id: str) -> FakeWorkflowState:
         if instance_id not in self.states:
@@ -231,7 +237,46 @@ class FakeWorkflowClient:
     def raise_workflow_event(
         self, instance_id: str, event_name: str, data: Any
     ) -> None:
-        self.events.append((instance_id, event_name, data))
+        with self._condition:
+            self.events.append((instance_id, event_name, data))
+            self._condition.notify_all()
+
+    def wait_for_event(
+        self,
+        instance_id: str,
+        event_name: str,
+        *,
+        timeout: float = 5.0,
+    ) -> Any:
+        """Block until an event matching (instance_id, event_name) arrives.
+
+        Consumes the matched event from the queue and returns its data.
+        Raises ``TimeoutError`` if the event does not arrive in time.
+        """
+
+        def _has_match() -> bool:
+            return any(
+                iid == instance_id and ename == event_name
+                for iid, ename, _ in self.events
+            )
+
+        def _consume_match() -> Any:
+            for i, (iid, ename, data) in enumerate(self.events):
+                if iid == instance_id and ename == event_name:
+                    self.events.pop(i)
+                    return data
+            raise LookupError("No matching event found")
+
+        with self._condition:
+            if _has_match():
+                return _consume_match()
+
+            if not self._condition.wait_for(_has_match, timeout=timeout):
+                raise TimeoutError(
+                    f"Timed out waiting for event {event_name!r} "
+                    f"on workflow {instance_id!r}"
+                )
+            return _consume_match()
 
     def terminate_workflow(self, instance_id: str) -> None:
         self.terminated.append(instance_id)

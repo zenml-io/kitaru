@@ -10,13 +10,16 @@ from __future__ import annotations
 import importlib
 import os
 import threading
+import warnings
 from collections.abc import Callable, Mapping
 
-from kitaru._env import KITARU_ENGINE_ENV
+from kitaru._env import KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, KITARU_ENGINE_ENV
 from kitaru.engines._protocols import ExecutionEngineBackend
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 _DEFAULT_ENGINE_NAME = "zenml"
+_EXPERIMENTAL_ENGINES: frozenset[str] = frozenset({"dapr"})
+_EXPERIMENTAL_WARNING_EMITTED: set[str] = set()
 
 
 def _load_zenml_backend() -> ExecutionEngineBackend:
@@ -104,6 +107,47 @@ def resolve_engine_name(
     return name
 
 
+def _is_env_truthy(value: str | None) -> bool:
+    """Return True if an env var value is truthy (1/true/t/yes/y/on)."""
+    if not value:
+        return False
+    return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _enforce_experimental_opt_in(
+    name: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> None:
+    """Require explicit opt-in for experimental engines.
+
+    Raises ``KitaruUsageError`` if the engine is experimental and the
+    opt-in env var is not set. Emits a ``UserWarning`` once per process
+    when opt-in is present.
+    """
+    if name not in _EXPERIMENTAL_ENGINES:
+        return
+
+    env = environ if environ is not None else os.environ
+    enabled = _is_env_truthy(env.get(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV))
+
+    if not enabled:
+        raise KitaruUsageError(
+            f"The '{name}' execution engine is experimental and requires "
+            f"explicit opt-in. Set {KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV}=1 "
+            "to enable it."
+        )
+
+    if name not in _EXPERIMENTAL_WARNING_EMITTED:
+        _EXPERIMENTAL_WARNING_EMITTED.add(name)
+        warnings.warn(
+            f"The '{name}' execution engine is experimental and may change "
+            "without notice. It is intended for evaluation only.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
 def get_engine_backend(
     name: str | None = None,
     *,
@@ -120,6 +164,9 @@ def get_engine_backend(
         if resolved in _BACKEND_CACHE:
             return _BACKEND_CACHE[resolved]
 
+        # Gate experimental engines only on first load, not on cache hits.
+        _enforce_experimental_opt_in(resolved, environ=environ)
+
         loader = _BACKEND_LOADERS[resolved]
         backend = loader()
         _BACKEND_CACHE[resolved] = backend
@@ -127,6 +174,7 @@ def get_engine_backend(
 
 
 def _reset_engine_backend_cache() -> None:
-    """Clear the backend cache. Intended for test isolation only."""
+    """Clear the backend cache and warning state. Intended for test isolation."""
     with _CACHE_LOCK:
         _BACKEND_CACHE.clear()
+        _EXPERIMENTAL_WARNING_EMITTED.clear()

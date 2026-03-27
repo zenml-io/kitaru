@@ -30,12 +30,17 @@ from kitaru_init_hook import (
     apply_env_translations,
 )
 
+# Kitaru-internal env var for experimental Dapr backend opt-in.
+# Not in kitaru_init_hook because it is not needed during ZenML bootstrap.
+KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV = "KITARU_ENABLE_EXPERIMENTAL_DAPR"
+
 __all__ = [
     "KITARU_ANALYTICS_OPT_IN_ENV",
     "KITARU_AUTH_TOKEN_ENV",
     "KITARU_CONFIG_PATH_ENV",
     "KITARU_DEBUG_ENV",
     "KITARU_DEFAULT_ANALYTICS_SOURCE_ENV",
+    "KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV",
     "KITARU_ENGINE_ENV",
     "KITARU_MODEL_REGISTRY_ENV",
     "KITARU_PROJECT_ENV",

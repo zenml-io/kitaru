@@ -38,6 +38,7 @@ _EARLY_TEST_ENV_VARS = (
     "KITARU_CONFIG_PATH",
     "KITARU_DEBUG",
     "KITARU_ENGINE",
+    "KITARU_ENABLE_EXPERIMENTAL_DAPR",
     "KITARU_ANALYTICS_OPT_IN",
     "ZENML_CONFIG_PATH",
     "ZENML_ACTIVE_PROJECT_ID",
@@ -55,7 +56,13 @@ _SRC_PATH = str(Path(__file__).resolve().parent.parent / "src")
 if _SRC_PATH not in sys.path:
     sys.path.insert(0, _SRC_PATH)
 
-from kitaru._env import _reset_applied as _reset_env_applied
+from kitaru._env import (
+    KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV,
+    KITARU_ENGINE_ENV,
+)
+from kitaru._env import (
+    _reset_applied as _reset_env_applied,
+)
 from kitaru.config import (
     KITARU_ANALYTICS_OPT_IN_ENV,
     KITARU_AUTH_TOKEN_ENV,
@@ -127,7 +134,8 @@ def isolated_zenml_global_config(
     ):
         monkeypatch.delenv(env_name, raising=False)
     monkeypatch.delenv("KITARU_RUNNER", raising=False)
-    monkeypatch.delenv("KITARU_ENGINE", raising=False)
+    monkeypatch.delenv(KITARU_ENGINE_ENV, raising=False)
+    monkeypatch.delenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, raising=False)
 
     _reset_runtime_configuration()
     _reset_env_applied()
@@ -162,3 +170,19 @@ def primed_zenml() -> None:
     keeping them free of ZenML bootstrap is what makes xdist parallelism fast.
     """
     _ = Client().zen_store
+
+
+@pytest.fixture()
+def experimental_dapr_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None]:
+    """Enable the experimental Dapr engine for the duration of a test.
+
+    Sets ``KITARU_ENGINE=dapr`` and ``KITARU_ENABLE_EXPERIMENTAL_DAPR=1``
+    and resets the backend cache before and after.
+    """
+    _reset_engine_backend_cache()
+    monkeypatch.setenv(KITARU_ENGINE_ENV, "dapr")
+    monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, "1")
+    yield
+    _reset_engine_backend_cache()
