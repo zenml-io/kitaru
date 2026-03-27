@@ -16,7 +16,6 @@ from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 
 from zenml.client import Client
-from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
 from kitaru._source_aliases import (
@@ -34,7 +33,6 @@ from kitaru.config import (
     _read_env_model_registry,
     _read_model_registry_config,
     build_frozen_execution_spec,
-    persist_frozen_execution_spec,
     resolve_connection_config,
     resolve_execution_config,
 )
@@ -349,26 +347,84 @@ def _raise_for_unsuccessful_run(run: PipelineRunResponse) -> None:
     )
 
 
-class FlowHandle:
-    """Handle for a running or finished flow execution."""
+_DAPR_FINISHED_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
-    def __init__(self, run: PipelineRunResponse) -> None:
+
+def _raise_for_unsuccessful_dapr_execution(execution: Any) -> None:
+    """Raise a typed Kitaru execution error from a Dapr Execution model."""
+    status_value = execution.status.value
+    details = [f"Execution {execution.exec_id} finished with status '{status_value}'."]
+
+    if execution.status_reason:
+        details.append(execution.status_reason)
+
+    traceback_text: str | None = None
+    failure = execution.failure
+    if failure is not None:
+        if failure.message and failure.message not in details:
+            details.append(failure.message)
+        traceback_text = failure.traceback
+        failure_origin = failure.origin
+    else:
+        failure_origin = FailureOrigin.UNKNOWN
+
+    traceback_tail = traceback_last_line(traceback_text)
+    if traceback_tail and traceback_tail not in details:
+        details.append(traceback_tail)
+
+    if failure_origin == FailureOrigin.UNKNOWN:
+        failure_origin = classify_failure_origin(
+            status_reason=execution.status_reason,
+            traceback=traceback_text,
+            default=FailureOrigin.UNKNOWN,
+        )
+
+    raise execution_error_from_failure(
+        " ".join(details),
+        exec_id=execution.exec_id,
+        status=execution.status.value,
+        origin=failure_origin,
+    )
+
+
+class FlowHandle:
+    """Handle for a running or finished flow execution.
+
+    Supports both ZenML (``PipelineRunResponse``) and Dapr
+    (``DaprFlowRunHandle``) backends. The backend is detected
+    automatically from the object passed to the constructor.
+    """
+
+    def __init__(self, run_or_handle: Any) -> None:
         """Initialize a flow handle.
 
         Args:
-            run: Initial pipeline run response.
+            run_or_handle: A ZenML ``PipelineRunResponse`` or a
+                ``DaprFlowRunHandle``.
         """
-        self._run = run
-        self._run_id = run.id
+        from kitaru.engines.dapr.backend import DaprFlowRunHandle
+
+        if isinstance(run_or_handle, DaprFlowRunHandle):
+            self._backend_kind = "dapr"
+            self._exec_id = run_or_handle.exec_id
+            self._run: PipelineRunResponse | None = None
+            self._cached_dapr_client: Any = None
+        else:
+            self._backend_kind = "zenml"
+            self._run = run_or_handle
+            self._exec_id = str(run_or_handle.id)
+            self._cached_dapr_client = None
 
     @property
     def exec_id(self) -> str:
         """Execution identifier for this flow run."""
-        return str(self._run_id)
+        return self._exec_id
 
     @property
-    def status(self) -> ExecutionStatus:
-        """Current execution status."""
+    def status(self) -> Any:
+        """Current execution status (backend-specific enum)."""
+        if self._backend_kind == "dapr":
+            return self._dapr_get_execution().status
         return self._refresh().status
 
     def wait(self) -> Any:
@@ -381,6 +437,9 @@ class FlowHandle:
         Returns:
             The flow return value.
         """
+        if self._backend_kind == "dapr":
+            return self._dapr_wait()
+
         while True:
             run = self._refresh()
             if run.status.is_finished:
@@ -400,6 +459,9 @@ class FlowHandle:
         Returns:
             The flow return value.
         """
+        if self._backend_kind == "dapr":
+            return self._dapr_get()
+
         run = self._refresh()
         if not run.status.is_finished:
             raise KitaruStateError(
@@ -409,18 +471,65 @@ class FlowHandle:
             _raise_for_unsuccessful_run(run)
         return _extract_flow_result(run)
 
+    # -- ZenML internals ----------------------------------------------------
+
     def _refresh(self) -> PipelineRunResponse:
         """Refresh the cached run model from the server."""
         try:
             self._run = Client().get_pipeline_run(
-                self._run_id,
+                self._exec_id,
                 allow_name_prefix_match=False,
             )
         except Exception as exc:
             raise KitaruBackendError(
-                f"Failed to refresh execution {self._run_id}: {exc}"
+                f"Failed to refresh execution {self._exec_id}: {exc}"
             ) from exc
+        assert self._run is not None
         return self._run
+
+    # -- Dapr internals -----------------------------------------------------
+
+    def _dapr_client(self) -> Any:
+        if self._cached_dapr_client is None:
+            from kitaru.client import KitaruClient
+
+            self._cached_dapr_client = KitaruClient()
+        return self._cached_dapr_client
+
+    def _dapr_get_execution(self) -> Any:
+        """Fetch the current Dapr execution state."""
+        try:
+            return self._dapr_client().executions.get(self._exec_id)
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to refresh execution {self._exec_id}: {exc}"
+            ) from exc
+
+    def _dapr_wait(self) -> Any:
+        """Poll a Dapr execution until it finishes and return the result."""
+        from kitaru._client._models import ExecutionStatus as DaprStatus
+
+        while True:
+            execution = self._dapr_get_execution()
+            if execution.status.value in _DAPR_FINISHED_STATUSES:
+                if execution.status == DaprStatus.COMPLETED:
+                    return self._dapr_client()._load_execution_result(self._exec_id)
+                _raise_for_unsuccessful_dapr_execution(execution)
+            time.sleep(1)
+
+    def _dapr_get(self) -> Any:
+        """Get the Dapr execution result without waiting."""
+        from kitaru._client._models import ExecutionStatus as DaprStatus
+
+        execution = self._dapr_get_execution()
+        if execution.status.value not in _DAPR_FINISHED_STATUSES:
+            raise KitaruStateError(
+                f"Execution {self._exec_id} is still running "
+                f"(status: {execution.status.value})."
+            )
+        if execution.status == DaprStatus.COMPLETED:
+            return self._dapr_client()._load_execution_result(self._exec_id)
+        _raise_for_unsuccessful_dapr_execution(execution)
 
 
 class _FlowDefinition:
@@ -588,6 +697,7 @@ class _FlowDefinition:
                     steps_to_skip=replay_plan.steps_to_skip,
                     input_overrides=replay_plan.input_overrides or None,
                     step_input_overrides=replay_plan.step_input_overrides or None,
+                    frozen_execution_spec=frozen_execution_spec,
                 )
             except Exception as exc:
                 failure_origin = classify_failure_origin(
@@ -608,11 +718,6 @@ class _FlowDefinition:
 
         if replayed_run is None:
             raise KitaruRuntimeError("Replay did not produce a pipeline run.")
-
-        persist_frozen_execution_spec(
-            run_id=replayed_run.id,
-            frozen_execution_spec=frozen_execution_spec,
-        )
 
         track(AnalyticsEvent.FLOW_REPLAYED, {"execution_id": str(replayed_run.id)})
         return FlowHandle(replayed_run)
@@ -655,15 +760,12 @@ class _FlowDefinition:
                 cache=resolved_execution.cache,
                 retries=_normalize_retries(resolved_execution.retries),
                 image=transport_image,
+                frozen_execution_spec=frozen_execution_spec,
             )
 
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
-        persist_frozen_execution_spec(
-            run_id=run.id,
-            frozen_execution_spec=frozen_execution_spec,
-        )
         return FlowHandle(run)
 
 

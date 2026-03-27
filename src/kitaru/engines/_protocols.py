@@ -39,6 +39,7 @@ class EngineFlowDefinition(Protocol):
         cache: bool,
         retries: int,
         image: Any,
+        frozen_execution_spec: Any = None,
     ) -> Any:
         """Execute the flow with the given options."""
         ...
@@ -53,6 +54,7 @@ class EngineFlowDefinition(Protocol):
         steps_to_skip: set[str],
         input_overrides: dict[str, Any] | None,
         step_input_overrides: dict[str, dict[str, Any]] | None,
+        frozen_execution_spec: Any = None,
     ) -> Any:
         """Replay a prior execution from a checkpoint boundary."""
         ...

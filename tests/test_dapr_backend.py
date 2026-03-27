@@ -23,6 +23,7 @@ from kitaru.engines.dapr.backend import (
     DaprCheckpointDefinition,
     DaprExecutionEngineBackend,
     DaprFlowDefinition,
+    DaprFlowRunHandle,
     DaprRuntimeSession,
     _manual_artifact_id,
     _run_checkpoint_activity,
@@ -131,14 +132,49 @@ class TestDaprBackend:
         )
         assert isinstance(defn, DaprFlowDefinition)
 
-    def test_flow_definition_run_raises(self) -> None:
+    def test_flow_definition_run_creates_record_and_returns_handle(self) -> None:
         backend = DaprExecutionEngineBackend()
+        store, _ = make_store()
+        backend.bind_ledger_store_provider(lambda: store)
+
+        defn = backend.create_flow_definition(
+            entrypoint=lambda x: x,
+            registration_name="my_flow",
+        )
+        handle = defn.run(args=(42,), kwargs={"key": "val"})
+
+        assert isinstance(handle, DaprFlowRunHandle)
+        assert handle.exec_id
+
+        # Verify ledger record was created
+        record = store.get_execution(handle.exec_id)
+        assert record.flow_name == "my_flow"
+        assert record.workflow_name == "my_flow"
+        assert record.status == "pending"
+        assert record.created_at is not None
+
+        # Verify execution input was persisted (tuples become lists via JSON)
+        input_data = store.load_execution_input(handle.exec_id)
+        assert input_data["args"] == [42]
+        assert input_data["kwargs"] == {"key": "val"}
+
+    def test_flow_definition_run_persists_frozen_spec(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        store, _ = make_store()
+        backend.bind_ledger_store_provider(lambda: store)
+
         defn = backend.create_flow_definition(
             entrypoint=lambda: None,
             registration_name="my_flow",
         )
-        with pytest.raises(KitaruFeatureNotAvailableError, match="not yet"):
-            defn.run()
+
+        class FakeSpec:
+            def model_dump(self, mode: str = "python") -> dict[str, Any]:
+                return {"stack": "local", "retries": 0}
+
+        handle = defn.run(frozen_execution_spec=FakeSpec())
+        record = store.get_execution(handle.exec_id)
+        assert record.frozen_execution_spec == {"stack": "local", "retries": 0}
 
     def test_flow_definition_replay_raises(self) -> None:
         backend = DaprExecutionEngineBackend()
@@ -148,6 +184,19 @@ class TestDaprBackend:
         )
         with pytest.raises(KitaruFeatureNotAvailableError, match="not yet"):
             defn.replay()
+
+    def test_flow_definition_stores_in_registry(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        backend.create_flow_definition(
+            entrypoint=lambda: None,
+            registration_name="flow_a",
+        )
+        backend.create_flow_definition(
+            entrypoint=lambda: None,
+            registration_name="flow_b",
+        )
+        defns = backend.get_flow_definitions()
+        assert set(defns.keys()) == {"flow_a", "flow_b"}
 
     def test_create_checkpoint_definition(self) -> None:
         backend = DaprExecutionEngineBackend()

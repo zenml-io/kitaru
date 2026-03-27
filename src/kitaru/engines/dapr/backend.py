@@ -160,11 +160,6 @@ def _manual_artifact_id(call_id: str, name: str) -> str:
 # Activity wrapper
 # ---------------------------------------------------------------------------
 
-_PHASE8_FLOW_MSG = (
-    "Dapr flow execution is not yet implemented. "
-    "This will be available in a future Kitaru release."
-)
-
 
 def _classify_exception_origin(exc: BaseException, tb_text: str) -> FailureOrigin:
     """Classify a caught exception into a FailureOrigin."""
@@ -538,24 +533,93 @@ def _checkpoint_name_matches(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class DaprFlowRunHandle:
+    """Lightweight handle returned by DaprFlowDefinition.run().
+
+    Carries the execution ID so FlowHandle can poll via KitaruClient.
+    """
+
+    exec_id: str
+
+
 class DaprFlowDefinition:
-    """Flow definition placeholder — real execution deferred to Phase 8."""
+    """Flow definition backed by the Dapr execution engine."""
 
-    __slots__ = ("_entrypoint", "_registration_name")
+    __slots__ = ("_backend", "_entrypoint", "_registration_name")
 
-    def __init__(self, entrypoint: Callable[..., Any], registration_name: str) -> None:
+    def __init__(
+        self,
+        entrypoint: Callable[..., Any],
+        registration_name: str,
+        *,
+        backend: DaprExecutionEngineBackend,
+    ) -> None:
         self._entrypoint = entrypoint
         self._registration_name = registration_name
+        self._backend = backend
 
     @property
     def source_object(self) -> Any:
         return self._entrypoint
 
-    def run(self, **kwargs: Any) -> Any:
-        raise KitaruFeatureNotAvailableError(_PHASE8_FLOW_MSG)
+    def run(
+        self,
+        *,
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+        cache: bool = True,
+        retries: int = 0,
+        image: Any = None,
+        frozen_execution_spec: Any = None,
+    ) -> DaprFlowRunHandle:
+        """Create a Dapr execution record and return a handle."""
+        from uuid import uuid4
+
+        from kitaru.engines.dapr.models import ExecutionLedgerRecord
+
+        run_kwargs = kwargs or {}
+        exec_id = str(uuid4())
+        now = datetime.now(UTC)
+
+        store = self._backend.get_store()
+
+        spec_dict = None
+        if frozen_execution_spec is not None:
+            spec_dict = (
+                frozen_execution_spec.model_dump(mode="json")
+                if hasattr(frozen_execution_spec, "model_dump")
+                else frozen_execution_spec
+            )
+
+        record = ExecutionLedgerRecord(
+            exec_id=exec_id,
+            project=self._backend.resolve_project(),
+            flow_name=self._registration_name,
+            workflow_name=self._registration_name,
+            status="pending",
+            created_at=now,
+            updated_at=now,
+            frozen_execution_spec=spec_dict,
+        )
+        store.create_execution(record)
+
+        store.store_execution_input(
+            exec_id,
+            {
+                "args": args,
+                "kwargs": run_kwargs,
+                "frozen_execution_spec": spec_dict,
+            },
+        )
+
+        return DaprFlowRunHandle(exec_id=exec_id)
 
     def replay(self, **kwargs: Any) -> Any:
-        raise KitaruFeatureNotAvailableError(_PHASE8_FLOW_MSG)
+        raise KitaruFeatureNotAvailableError(
+            "Dapr flow replay via @flow.replay() is not yet implemented. "
+            "Use KitaruClient.executions.replay() instead."
+        )
 
 
 class DaprCheckpointDefinition:
@@ -684,6 +748,7 @@ class DaprExecutionEngineBackend:
 
     def __init__(self) -> None:
         self._checkpoint_definitions: dict[str, DaprCheckpointDefinition] = {}
+        self._flow_definitions: dict[str, DaprFlowDefinition] = {}
         self._ledger_store_provider: Callable[[], ExecutionLedgerStore] | None = None
         self._lock = threading.RLock()
 
@@ -696,13 +761,49 @@ class DaprExecutionEngineBackend:
             "Execution graph mapping for Dapr is not yet implemented."
         )
 
+    def get_store(self) -> ExecutionLedgerStore:
+        """Return a ledger store, auto-creating a default if needed."""
+        with self._lock:
+            if self._ledger_store_provider is not None:
+                return self._ledger_store_provider()
+
+            # Lazy default: create from Dapr client (inside lock to avoid races)
+            from kitaru.engines.dapr.store import DaprExecutionLedgerStore
+
+            store = DaprExecutionLedgerStore.from_dapr_client(
+                project=self.resolve_project(),
+                ledger_store_name="statestore",
+            )
+            self._ledger_store_provider = lambda: store
+            return store
+
+    def resolve_project(self) -> str:
+        """Best-effort project name resolution."""
+        try:
+            from kitaru.config import resolve_connection_config
+
+            conn = resolve_connection_config(validate_for_use=False)
+            if conn and conn.project:
+                return conn.project
+        except Exception:
+            pass
+        return "default"
+
     def create_flow_definition(
         self,
         *,
         entrypoint: Callable[..., Any],
         registration_name: str,
     ) -> DaprFlowDefinition:
-        return DaprFlowDefinition(entrypoint, registration_name)
+        defn = DaprFlowDefinition(entrypoint, registration_name, backend=self)
+        with self._lock:
+            self._flow_definitions[registration_name] = defn
+        return defn
+
+    def get_flow_definitions(self) -> dict[str, DaprFlowDefinition]:
+        """Return a snapshot of registered flow definitions."""
+        with self._lock:
+            return dict(self._flow_definitions)
 
     def create_checkpoint_definition(
         self,

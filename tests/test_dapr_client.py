@@ -28,11 +28,15 @@ from kitaru.engines.dapr.client import (
     _to_dapr_public_status,
 )
 from kitaru.engines.dapr.models import (
+    DAPR_METADATA_NAMESPACE,
+    FLOW_RESULT_ARTIFACT_ID_KEY,
+    INTERNAL_ARTIFACT_FLAG,
     FailureRecord,
     LogRecord,
 )
 from kitaru.errors import (
     KitaruFeatureNotAvailableError,
+    KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
 )
@@ -792,3 +796,131 @@ class TestStoreExtensions:
         )
         roundtripped = LogRecord.from_dict(log.to_dict())
         assert roundtripped == log
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Execution result loading
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestExecutionResultLoading:
+    def test_load_execution_result_returns_value(self) -> None:
+        adapter, store, _ = _make_adapter()
+        record = sample_record(
+            exec_id="e1",
+            metadata={
+                DAPR_METADATA_NAMESPACE: {
+                    FLOW_RESULT_ARTIFACT_ID_KEY: "e1:flow_result",
+                },
+            },
+        )
+        store.create_execution(record)
+
+        result_art = sample_artifact(
+            artifact_id="e1:flow_result",
+            name="__flow_result__",
+            save_type="flow_output",
+            metadata={INTERNAL_ARTIFACT_FLAG: True},
+        )
+        store.store_artifact("e1", result_art, {"answer": 42})
+
+        result = adapter.load_execution_result("e1")
+        assert result == {"answer": 42}
+
+    def test_load_execution_result_raises_when_metadata_missing(self) -> None:
+        adapter, store, _ = _make_adapter()
+        record = sample_record(exec_id="e1", metadata={})
+        store.create_execution(record)
+
+        with pytest.raises(KitaruRuntimeError, match="flow result metadata"):
+            adapter.load_execution_result("e1")
+
+    def test_load_execution_result_raises_when_no_kitaru_namespace(self) -> None:
+        adapter, store, _ = _make_adapter()
+        record = sample_record(exec_id="e1", metadata={"other": "data"})
+        store.create_execution(record)
+
+        with pytest.raises(KitaruRuntimeError, match="flow result metadata"):
+            adapter.load_execution_result("e1")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Internal artifact filtering
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestInternalArtifactFiltering:
+    def test_internal_artifacts_hidden_from_execution(self) -> None:
+        adapter, store, _ = _make_adapter()
+
+        public_art = sample_artifact(
+            artifact_id="a1",
+            name="user_data",
+            save_type="manual",
+            producing_call_id="cp1",
+        )
+        internal_art = sample_artifact(
+            artifact_id="e1:flow_result",
+            name="__flow_result__",
+            save_type="flow_output",
+            metadata={INTERNAL_ARTIFACT_FLAG: True},
+        )
+
+        record = sample_record(
+            exec_id="e1",
+            status="completed",
+            checkpoints=(
+                sample_checkpoint(
+                    call_id="cp1",
+                    name="my_step",
+                    status="completed",
+                    artifacts=(public_art,),
+                ),
+            ),
+            artifacts=(public_art, internal_art),
+        )
+        store.create_execution(record)
+        store.store_artifact("e1", public_art, "user_value")
+        store.store_artifact("e1", internal_art, "flow_result_value")
+
+        client = _FakeKitaruClient()
+        execution = adapter.get_execution("e1", client, include_details=True)
+
+        # Internal artifact should be filtered out
+        artifact_ids = [a.artifact_id for a in execution.artifacts]
+        assert "a1" in artifact_ids
+        assert "e1:flow_result" not in artifact_ids
+
+    def test_internal_artifacts_hidden_from_checkpoint(self) -> None:
+        adapter, store, _ = _make_adapter()
+
+        internal_art = sample_artifact(
+            artifact_id="int-art",
+            name="__flow_result__",
+            metadata={INTERNAL_ARTIFACT_FLAG: True},
+        )
+        public_art = sample_artifact(
+            artifact_id="pub-art",
+            name="output",
+        )
+
+        record = sample_record(
+            exec_id="e1",
+            checkpoints=(
+                sample_checkpoint(
+                    call_id="cp1",
+                    name="my_step",
+                    status="completed",
+                    artifacts=(internal_art, public_art),
+                ),
+            ),
+        )
+        store.create_execution(record)
+
+        client = _FakeKitaruClient()
+        execution = adapter.get_execution("e1", client, include_details=True)
+
+        cp_artifacts = execution.checkpoints[0].artifacts
+        artifact_ids = [a.artifact_id for a in cp_artifacts]
+        assert "pub-art" in artifact_ids
+        assert "int-art" not in artifact_ids

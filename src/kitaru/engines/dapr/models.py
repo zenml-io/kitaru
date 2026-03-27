@@ -14,6 +14,16 @@ from typing import Any
 from kitaru.errors import FailureOrigin
 
 # ---------------------------------------------------------------------------
+# Shared constants for internal flow-result artifact persistence
+# ---------------------------------------------------------------------------
+
+DAPR_METADATA_NAMESPACE = "kitaru"
+FLOW_RESULT_ARTIFACT_ID_KEY = "flow_result_artifact_id"
+INTERNAL_ARTIFACT_FLAG = "kitaru_internal"
+FLOW_RESULT_ARTIFACT_NAME = "__flow_result__"
+FLOW_RESULT_SAVE_TYPE = "flow_output"
+
+# ---------------------------------------------------------------------------
 # Datetime helpers
 # ---------------------------------------------------------------------------
 

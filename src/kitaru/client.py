@@ -970,6 +970,14 @@ class KitaruClient:
         artifact = self._get_artifact_version(artifact_id, hydrate=True)
         return artifact.load()
 
+    def _load_execution_result(self, exec_id: str) -> Any:
+        """Load the top-level flow result for a Dapr execution."""
+        if self._uses_dapr():
+            return self._get_dapr_adapter().load_execution_result(exec_id)
+        raise KitaruFeatureNotAvailableError(
+            "Execution result loading is only available for the Dapr backend."
+        )
+
 
 __all__ = [
     "ArtifactRef",

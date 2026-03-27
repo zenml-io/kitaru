@@ -33,6 +33,9 @@ from kitaru.engines._types import (
     ExecutionGraphSnapshot,
 )
 from kitaru.engines.dapr.models import (
+    DAPR_METADATA_NAMESPACE,
+    FLOW_RESULT_ARTIFACT_ID_KEY,
+    INTERNAL_ARTIFACT_FLAG,
     CheckpointCallRecord,
     ExecutionLedgerRecord,
     FailureRecord,
@@ -255,6 +258,16 @@ def _ledger_to_execution_graph(
 
 
 # ---------------------------------------------------------------------------
+# Internal artifact helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_internal_artifact(metadata: dict[str, Any]) -> bool:
+    """Return True if the artifact is internal (flow-result plumbing)."""
+    return metadata.get(INTERNAL_ARTIFACT_FLAG) is True
+
+
+# ---------------------------------------------------------------------------
 # DaprClientAdapter
 # ---------------------------------------------------------------------------
 
@@ -322,6 +335,7 @@ class DaprClientAdapter:
                 _client=client,
             )
             for a in cp.artifacts
+            if not _is_internal_artifact(a.metadata)
         ]
 
         failure = _map_ledger_failure(cp.failure)
@@ -386,7 +400,9 @@ class DaprClientAdapter:
                         artifacts.append(artifact)
             # Also include execution-level artifacts not tied to a checkpoint
             for a in record.artifacts:
-                if a.artifact_id not in seen_ids:
+                if a.artifact_id not in seen_ids and not _is_internal_artifact(
+                    a.metadata
+                ):
                     seen_ids.add(a.artifact_id)
                     artifacts.append(
                         ArtifactRef(
@@ -888,5 +904,18 @@ class DaprClientAdapter:
 
     def load_artifact_value(self, artifact_id: str) -> Any:
         """Load and return an artifact value from the Dapr store."""
+        _, value = self._store.load_artifact(artifact_id)
+        return value
+
+    def load_execution_result(self, exec_id: str) -> Any:
+        """Load the persisted top-level flow result for a completed execution."""
+        record = self._store.get_execution(exec_id)
+        kitaru_meta = record.metadata.get(DAPR_METADATA_NAMESPACE, {})
+        artifact_id = kitaru_meta.get(FLOW_RESULT_ARTIFACT_ID_KEY)
+        if artifact_id is None:
+            raise KitaruRuntimeError(
+                f"Execution '{exec_id}' completed without persisted "
+                "flow result metadata."
+            )
         _, value = self._store.load_artifact(artifact_id)
         return value
