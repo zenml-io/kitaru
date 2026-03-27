@@ -33,6 +33,7 @@ from kitaru.config import (
     _read_env_model_registry,
     _read_model_registry_config,
     build_frozen_execution_spec,
+    detect_explicit_execution_overrides,
     resolve_connection_config,
     resolve_execution_config,
 )
@@ -570,6 +571,7 @@ class _FlowDefinition:
         aliasable_entrypoint.__qualname__ = source_alias
 
         backend = get_engine_backend()
+        self._backend = backend
         self._engine_definition = backend.create_flow_definition(
             entrypoint=wrapped_entrypoint,
             registration_name=registration_name,
@@ -649,6 +651,9 @@ class _FlowDefinition:
         Returns:
             A handle for the replayed execution.
         """
+        # Fail early if the backend does not support flow-level replay
+        self._backend.validate_flow_replay_support()
+
         resolved_connection = resolve_connection_config(validate_for_use=True)
 
         try:
@@ -739,6 +744,13 @@ class _FlowDefinition:
         Returns:
             A handle for the started execution.
         """
+        # Validate backend capabilities before any side effects
+        explicit = detect_explicit_execution_overrides(
+            decorator_overrides=self._decorator_config,
+            invocation_overrides=invocation_overrides,
+        )
+        self._backend.validate_flow_run_options(explicit)
+
         resolved_execution = resolve_execution_config(
             decorator_overrides=self._decorator_config,
             invocation_overrides=invocation_overrides,

@@ -87,6 +87,7 @@ KitaruConfig = _config_core.KitaruConfig
 ResolvedExecutionConfig = _config_core.ResolvedExecutionConfig
 ResolvedConnectionConfig = _config_core.ResolvedConnectionConfig
 ActiveEnvironmentVariable = _config_core.ActiveEnvironmentVariable
+ExplicitOverrides = _config_core.ExplicitOverrides
 FrozenExecutionSpec = _config_execution_spec.FrozenExecutionSpec
 
 LogStoreOverride = _config_log_store.LogStoreOverride
@@ -221,6 +222,23 @@ def resolve_execution_config(
         invocation_overrides=invocation_overrides,
         start_dir=start_dir,
         read_global_execution_config=_read_global_execution_config,
+        read_project_config=_read_project_config,
+        read_execution_env_config=_read_execution_env_config,
+        read_runtime_execution_config=_read_runtime_execution_config,
+    )
+
+
+def detect_explicit_execution_overrides(
+    *,
+    decorator_overrides: KitaruConfig | None = None,
+    invocation_overrides: KitaruConfig | None = None,
+    start_dir: Path | None = None,
+) -> ExplicitOverrides:
+    """Detect which execution options were explicitly set by the user."""
+    return _config_env.detect_explicit_execution_overrides_impl(
+        decorator_overrides=decorator_overrides,
+        invocation_overrides=invocation_overrides,
+        start_dir=start_dir,
         read_project_config=_read_project_config,
         read_execution_env_config=_read_execution_env_config,
         read_runtime_execution_config=_read_runtime_execution_config,

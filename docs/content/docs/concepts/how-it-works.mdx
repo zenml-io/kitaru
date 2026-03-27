@@ -85,6 +85,26 @@ credentials brokered by the server to access storage directly.
 | Client | Observe executions, provide input, replay, cancel | Your machine — SDK, CLI, UI, or MCP |
 | Storage | Persists all data | Local filesystem, S3, GCS, Azure Blob |
 
+## Dapr backend differences
+
+When running with the experimental Dapr backend instead of the default ZenML
+backend, the architecture differs:
+
+- **Agent runtime:** A Dapr workflow worker manages execution. Checkpoints run
+  as Dapr activities in the same worker process (no separate pods).
+- **State storage:** Execution state is stored in a Dapr state store (e.g.
+  Redis) rather than the Kitaru/ZenML server database.
+- **Unsupported options:** `stack` and `image` are not available. `cache` is
+  accepted but ignored. `@flow.replay()` is not yet implemented (use
+  `KitaruClient.executions.replay()` instead).
+- **Determinism:** The Dapr backend uses a deterministic workflow interpreter —
+  code between checkpoints must be deterministic for replay correctness.
+
+See individual concept pages for backend-specific callouts on
+[flows](/concepts/flows), [checkpoints](/concepts/checkpoints),
+[wait](/concepts/wait-and-input), and the
+[execution model](/concepts/execution-model).
+
 ## Next steps
 
 - [Stacks](/stacks) — how compute, storage, and container

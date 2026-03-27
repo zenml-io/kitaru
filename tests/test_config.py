@@ -21,6 +21,7 @@ from zenml.exceptions import EntityExistsError
 from zenml.utils import io_utils, yaml_utils
 
 import kitaru.config as config_module
+from kitaru._config._env import detect_explicit_execution_overrides_impl
 from kitaru._env import apply_env_translations
 from kitaru.config import (
     FROZEN_EXECUTION_SPEC_METADATA_KEY,
@@ -37,6 +38,7 @@ from kitaru.config import (
     KITARU_STACK_ENV,
     AzureMLStackSpec,
     CloudProvider,
+    ExplicitOverrides,
     FrozenExecutionSpec,
     ImageSettings,
     KitaruConfig,
@@ -4291,3 +4293,67 @@ def test_frozen_spec_preserves_none_image() -> None:
         connection=ResolvedConnectionConfig(),
     )
     assert spec.resolved_execution.image is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ExplicitOverrides detection
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _empty_config(*_args: Any, **_kwargs: Any) -> KitaruConfig:
+    return KitaruConfig()
+
+
+class TestExplicitOverrides:
+    def _detect(self, **kwargs: Any) -> ExplicitOverrides:
+        """Shorthand: fills in empty-config readers when not overridden."""
+        kwargs.setdefault("read_project_config", _empty_config)
+        kwargs.setdefault("read_execution_env_config", _empty_config)
+        kwargs.setdefault("read_runtime_execution_config", _empty_config)
+        return detect_explicit_execution_overrides_impl(**kwargs)
+
+    def test_no_explicit_overrides(self) -> None:
+        assert self._detect() == ExplicitOverrides()
+
+    def test_decorator_stack_detected(self) -> None:
+        result = self._detect(decorator_overrides=KitaruConfig(stack="prod"))
+        assert result.stack is True
+        assert result.image is False
+
+    def test_invocation_image_detected(self) -> None:
+        result = self._detect(
+            invocation_overrides=KitaruConfig(
+                image=ImageSettings(base_image="python:3.12")
+            ),
+        )
+        assert result.image is True
+        assert result.stack is False
+
+    def test_env_cache_detected(self) -> None:
+        result = self._detect(
+            read_execution_env_config=lambda: KitaruConfig(cache=False),
+        )
+        assert result.cache is True
+
+    def test_runtime_stack_detected(self) -> None:
+        result = self._detect(
+            read_runtime_execution_config=lambda: KitaruConfig(stack="staging"),
+        )
+        assert result.stack is True
+
+    def test_project_config_image_detected(self) -> None:
+        result = self._detect(
+            read_project_config=lambda _sd=None: KitaruConfig(
+                image=ImageSettings(base_image="my-image:latest")
+            ),
+        )
+        assert result.image is True
+
+    def test_multiple_overrides_all_detected(self) -> None:
+        result = self._detect(
+            decorator_overrides=KitaruConfig(stack="prod"),
+            invocation_overrides=KitaruConfig(cache=True),
+        )
+        assert result.stack is True
+        assert result.cache is True
+        assert result.image is False

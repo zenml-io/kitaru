@@ -26,6 +26,7 @@ from kitaru.engines.dapr.backend import DaprFlowRunHandle
 from kitaru.errors import (
     FailureOrigin,
     KitaruExecutionError,
+    KitaruFeatureNotAvailableError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -1014,3 +1015,84 @@ class TestDaprFlowHandle:
         assert exc_info.value.exec_id == "dapr-fail-1"
         assert exc_info.value.status == "failed"
         assert exc_info.value.failure_origin == FailureOrigin.USER_CODE
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dapr capability gating via flow
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestDaprCapabilityGating:
+    """Verify capability gating fires through the flow submission path."""
+
+    def test_submit_with_explicit_stack_raises_on_dapr(self) -> None:
+        """@flow.run(stack=...) should raise on Dapr backend."""
+        mock_backend = MagicMock()
+        mock_backend.validate_flow_run_options.side_effect = (
+            KitaruFeatureNotAvailableError("stack not supported")
+        )
+        mock_backend.create_flow_definition.return_value = MagicMock(
+            source_object=lambda: None
+        )
+
+        with (
+            patch("kitaru.flow.get_engine_backend", return_value=mock_backend),
+            patch(
+                "kitaru.flow.detect_explicit_execution_overrides",
+                return_value=MagicMock(stack=True, image=False, cache=False),
+            ),
+        ):
+            my_flow = flow(lambda: None)
+
+        with pytest.raises(KitaruFeatureNotAvailableError, match="stack"):
+            my_flow.run()
+
+    def test_submit_without_explicit_overrides_passes(self) -> None:
+        """@flow.run() with no explicit overrides should not raise."""
+        mock_backend = MagicMock()
+        mock_defn = MagicMock(source_object=lambda: None)
+        mock_defn.run.return_value = DaprFlowRunHandle(exec_id="x")
+        mock_backend.create_flow_definition.return_value = mock_defn
+
+        with patch("kitaru.flow.get_engine_backend", return_value=mock_backend):
+            my_flow = flow(lambda: None)
+
+        with (
+            patch("kitaru.flow.resolve_execution_config") as mock_resolve,
+            patch("kitaru.flow.resolve_connection_config"),
+            patch("kitaru.flow._prepare_model_registry_transport") as mock_transport,
+            patch("kitaru.flow.build_frozen_execution_spec"),
+            patch(
+                "kitaru.flow.detect_explicit_execution_overrides",
+                return_value=MagicMock(stack=False, image=False, cache=False),
+            ),
+        ):
+            mock_resolve.return_value = ResolvedExecutionConfig(
+                stack=None, image=None, cache=True, retries=0
+            )
+            mock_transport.return_value = (None, MagicMock(aliases={}))
+            my_flow.run()
+
+        mock_backend.validate_flow_run_options.assert_called_once()
+
+    def test_replay_with_dapr_backend_raises_before_zenml_client(self) -> None:
+        """@flow.replay() on Dapr should fail before Client().get_pipeline_run()."""
+        mock_backend = MagicMock()
+        mock_backend.validate_flow_replay_support.side_effect = (
+            KitaruFeatureNotAvailableError("replay not supported")
+        )
+        mock_backend.create_flow_definition.return_value = MagicMock(
+            source_object=lambda: None
+        )
+
+        with patch("kitaru.flow.get_engine_backend", return_value=mock_backend):
+            my_flow = flow(lambda: None)
+
+        with (
+            patch("kitaru.flow.Client") as mock_client_cls,
+            pytest.raises(KitaruFeatureNotAvailableError, match="replay"),
+        ):
+            my_flow.replay("exec-1", from_="checkpoint_a")
+
+        # Client() should never have been called
+        mock_client_cls.assert_not_called()

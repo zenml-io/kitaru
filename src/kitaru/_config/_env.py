@@ -12,6 +12,7 @@ from typing import Any, TypeVar
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
 
 from kitaru._config._core import (
+    ExplicitOverrides,
     KitaruConfig,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
@@ -321,3 +322,32 @@ def resolve_connection_config_impl(
         validate_connection_config_for_use(resolved)
 
     return resolved
+
+
+def detect_explicit_execution_overrides_impl(
+    *,
+    decorator_overrides: KitaruConfig | None = None,
+    invocation_overrides: KitaruConfig | None = None,
+    start_dir: Path | None = None,
+    read_project_config: Callable[[Path | None], KitaruConfig],
+    read_execution_env_config: Callable[[], KitaruConfig],
+    read_runtime_execution_config: Callable[[], KitaruConfig],
+) -> ExplicitOverrides:
+    """Detect which execution options were explicitly set by the user.
+
+    Checks all config layers *except* the global execution default (active
+    ZenML stack) — that layer is implicit and should not trigger capability
+    gating.
+    """
+    layers = [
+        read_project_config(start_dir),
+        read_execution_env_config(),
+        read_runtime_execution_config(),
+        decorator_overrides or KitaruConfig(),
+        invocation_overrides or KitaruConfig(),
+    ]
+    return ExplicitOverrides(
+        stack=any(layer.stack is not None for layer in layers),
+        image=any(layer.image is not None for layer in layers),
+        cache=any(layer.cache is not None for layer in layers),
+    )

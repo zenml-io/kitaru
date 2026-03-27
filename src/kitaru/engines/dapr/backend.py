@@ -12,14 +12,19 @@ file does not import the Dapr SDK at module level.
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 import traceback
+import warnings
 from collections.abc import Callable
 from contextlib import ExitStack
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from kitaru._config._core import ExplicitOverrides
 
 from kitaru.engines._types import ExecutionGraphSnapshot
 from kitaru.engines.dapr.models import (
@@ -38,6 +43,13 @@ from kitaru.errors import (
     KitaruStateError,
     classify_failure_origin,
     traceback_exception_type,
+)
+
+logger = logging.getLogger(__name__)
+
+_DAPR_REPLAY_NOT_AVAILABLE_MSG = (
+    "Dapr flow replay via @flow.replay() is not yet implemented. "
+    "Use KitaruClient.executions.replay() instead."
 )
 
 # ---------------------------------------------------------------------------
@@ -616,10 +628,7 @@ class DaprFlowDefinition:
         return DaprFlowRunHandle(exec_id=exec_id)
 
     def replay(self, **kwargs: Any) -> Any:
-        raise KitaruFeatureNotAvailableError(
-            "Dapr flow replay via @flow.replay() is not yet implemented. "
-            "Use KitaruClient.executions.replay() instead."
-        )
+        raise KitaruFeatureNotAvailableError(_DAPR_REPLAY_NOT_AVAILABLE_MSG)
 
 
 class DaprCheckpointDefinition:
@@ -756,6 +765,28 @@ class DaprExecutionEngineBackend:
     def name(self) -> str:
         return "dapr"
 
+    def validate_flow_run_options(self, overrides: ExplicitOverrides) -> None:
+        """Reject unsupported options and warn about ignored ones."""
+        unsupported: list[str] = []
+        if overrides.stack:
+            unsupported.append("stack")
+        if overrides.image:
+            unsupported.append("image")
+        if unsupported:
+            names = ", ".join(unsupported)
+            raise KitaruFeatureNotAvailableError(
+                f"The Dapr backend does not support: {names}. "
+                "Remove these settings or switch to the ZenML backend."
+            )
+        if overrides.cache:
+            logger.debug(
+                "Dapr backend ignores cache settings; "
+                "checkpoints always re-execute on each run."
+            )
+
+    def validate_flow_replay_support(self) -> None:
+        raise KitaruFeatureNotAvailableError(_DAPR_REPLAY_NOT_AVAILABLE_MSG)
+
     def execution_graph_from_run(self, run: Any) -> ExecutionGraphSnapshot:
         raise KitaruFeatureNotAvailableError(
             "Execution graph mapping for Dapr is not yet implemented."
@@ -814,6 +845,15 @@ class DaprExecutionEngineBackend:
         checkpoint_type: str | None,
         runtime: Any,
     ) -> DaprCheckpointDefinition:
+        from zenml.enums import StepRuntime
+
+        if runtime == StepRuntime.ISOLATED:
+            warnings.warn(
+                f"Checkpoint '{registration_name}': runtime='isolated' is "
+                "ignored by the Dapr backend in the current MVP. The "
+                "checkpoint will run inline in the workflow worker process.",
+                stacklevel=2,
+            )
         defn = DaprCheckpointDefinition(
             entrypoint=entrypoint,
             registration_name=registration_name,

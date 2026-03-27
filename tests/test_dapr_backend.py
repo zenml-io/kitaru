@@ -8,16 +8,19 @@ dispatch, and activity registration via fake registrar.
 from __future__ import annotations
 
 import importlib
+import warnings
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from zenml.enums import StepRuntime
 
 from _dapr_fakes import (
     FakeActivityRegistrar,
     make_store,
     sample_record,
 )
+from kitaru._config._core import ExplicitOverrides
 from kitaru.engines.dapr.backend import (
     DaprCheckpointActivityRequest,
     DaprCheckpointDefinition,
@@ -637,3 +640,82 @@ class TestDaprRuntimeSession:
         session = DaprRuntimeSession()
         with pytest.raises(KitaruRuntimeError, match="outside"):
             session.log_metadata({"a": 1})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Capability gating tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestCapabilityGating:
+    def test_no_overrides_passes_validation(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        backend.validate_flow_run_options(ExplicitOverrides())
+
+    def test_explicit_stack_raises(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        with pytest.raises(KitaruFeatureNotAvailableError, match="stack"):
+            backend.validate_flow_run_options(ExplicitOverrides(stack=True))
+
+    def test_explicit_image_raises(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        with pytest.raises(KitaruFeatureNotAvailableError, match="image"):
+            backend.validate_flow_run_options(ExplicitOverrides(image=True))
+
+    def test_explicit_stack_and_image_both_in_error(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        with pytest.raises(
+            KitaruFeatureNotAvailableError, match=r"stack.*image|image.*stack"
+        ):
+            backend.validate_flow_run_options(ExplicitOverrides(stack=True, image=True))
+
+    def test_explicit_cache_logs_debug_warning(self, caplog: Any) -> None:
+        backend = DaprExecutionEngineBackend()
+        with caplog.at_level("DEBUG", logger="kitaru.engines.dapr.backend"):
+            backend.validate_flow_run_options(ExplicitOverrides(cache=True))
+        assert "cache" in caplog.text.lower()
+
+    def test_cache_without_stack_or_image_does_not_raise(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        # Should not raise — cache is just a debug warning
+        backend.validate_flow_run_options(ExplicitOverrides(cache=True))
+
+    def test_replay_support_raises(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        with pytest.raises(KitaruFeatureNotAvailableError, match="replay"):
+            backend.validate_flow_replay_support()
+
+    def test_isolated_runtime_warning(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        with pytest.warns(UserWarning, match="isolated.*ignored"):
+            backend.create_checkpoint_definition(
+                entrypoint=lambda: None,
+                registration_name="step",
+                retries=0,
+                checkpoint_type=None,
+                runtime=StepRuntime.ISOLATED,
+            )
+
+    def test_inline_runtime_no_warning(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            backend.create_checkpoint_definition(
+                entrypoint=lambda: None,
+                registration_name="step",
+                retries=0,
+                checkpoint_type=None,
+                runtime=StepRuntime.INLINE,
+            )
+
+    def test_none_runtime_no_warning(self) -> None:
+        backend = DaprExecutionEngineBackend()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            backend.create_checkpoint_definition(
+                entrypoint=lambda: None,
+                registration_name="step",
+                retries=0,
+                checkpoint_type=None,
+                runtime=None,
+            )

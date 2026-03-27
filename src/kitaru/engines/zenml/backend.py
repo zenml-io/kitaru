@@ -8,7 +8,10 @@ is lazily imported by the engine registry on first backend access — importing
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from kitaru._config._core import ExplicitOverrides
 
 from zenml.config.constants import DOCKER_SETTINGS_KEY
 from zenml.config.docker_settings import DockerSettings
@@ -251,6 +254,12 @@ class ZenMLExecutionEngineBackend:
     @property
     def name(self) -> str:
         return "zenml"
+
+    def validate_flow_run_options(self, overrides: ExplicitOverrides) -> None:
+        pass
+
+    def validate_flow_replay_support(self) -> None:
+        pass
 
     def execution_graph_from_run(self, run: Any) -> ExecutionGraphSnapshot:
         return _snapshot_mapper(run)
