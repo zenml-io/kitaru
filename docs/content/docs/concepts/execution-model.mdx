@@ -97,6 +97,14 @@ def always_fresh(url: str) -> str:
 handle = my_agent.run("https://example.com", cache=False)
 ```
 
+<Callout type="info">
+  **Dapr backend:** The `cache` setting is accepted but currently ignored.
+  The Dapr workflow engine does not provide cross-execution result reuse —
+  checkpoints always re-execute on each run. Within a single execution, the
+  deterministic workflow interpreter ensures completed checkpoints return
+  cached results on replay.
+</Callout>
+
 ## Related guides
 
 - Learn how to revisit a durable run with

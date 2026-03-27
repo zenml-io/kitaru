@@ -86,11 +86,7 @@ class ArtifactRef:
 
     def load(self) -> Any:
         """Load and materialize this artifact value."""
-        artifact = self._client._get_artifact_version(
-            self.artifact_id,
-            hydrate=True,
-        )
-        return artifact.load()
+        return self._client._load_artifact_value(self.artifact_id)
 
 
 @dataclass(frozen=True)

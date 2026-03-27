@@ -1,0 +1,164 @@
+---
+title: Dapr Engine
+description: Run Kitaru flows with the experimental Dapr workflow backend
+---
+
+Kitaru includes an **experimental Dapr execution engine**. It swaps the default
+ZenML-backed runtime for a Dapr workflow runtime + Dapr state store.
+
+The short version:
+
+1. Install the `dapr` extra
+2. Start a Dapr sidecar with `dapr run`
+3. Enable the engine with `KITARU_ENGINE=dapr` and
+   `KITARU_ENABLE_EXPERIMENTAL_DAPR=1`
+4. Keep that Python process alive while you want workflows to make progress
+
+## Install dependencies
+
+```bash
+uv add "kitaru[dapr]"
+# or: pip install "kitaru[dapr]"
+```
+
+You also need the Dapr CLI and a local sidecar setup:
+
+```bash
+dapr --version
+```
+
+If you have not initialized Dapr locally yet:
+
+```bash
+dapr init
+```
+
+## Required state store setup
+
+The Dapr engine needs a Dapr state store component, and for durable workflows it
+must be configured as an actor state store.
+
+If you use the default local Redis setup created by `dapr init`, check that the
+component contains:
+
+```yaml
+metadata:
+  - name: actorStateStore
+    value: "true"
+```
+
+In the default local setup this is usually under `~/.dapr/components/statestore.yaml`.
+
+## Enable the engine
+
+Set these environment variables before you run your flow script:
+
+```bash
+export KITARU_ENGINE=dapr
+export KITARU_ENABLE_EXPERIMENTAL_DAPR=1
+```
+
+## Minimal example
+
+```python
+from kitaru import checkpoint, flow
+
+@checkpoint
+def greet(name: str) -> str:
+    return f"hello {name}"
+
+@flow
+def my_flow(name: str) -> str:
+    return greet(name)
+
+if __name__ == "__main__":
+    handle = my_flow.run(name="world")
+    print(handle.exec_id)
+    print(handle.wait())
+```
+
+## Run it with Dapr
+
+Run the script under `dapr run` so the sidecar is already available before the
+first `flow.run()` call:
+
+```bash
+KITARU_ENGINE=dapr \
+KITARU_ENABLE_EXPERIMENTAL_DAPR=1 \
+ dapr run \
+   --app-id my-kitaru-worker \
+   --resources-path ~/.dapr/components \
+   -- uv run python examples/my_flow.py
+```
+
+## What actually happens
+
+Here is the concrete chain of events:
+
+1. `dapr run` starts the sidecar, then launches your Python process.
+2. Your script calls `my_flow.run(...)`.
+3. Kitaru creates an execution ledger record and stores the original flow input.
+4. Kitaru lazily starts a Dapr workflow worker **inside that same Python process**.
+5. Kitaru schedules a Dapr workflow instance using the execution ID as the
+   workflow instance ID.
+6. The workflow replays the flow body deterministically, runs checkpoints as
+   Dapr activities, and writes state/artifacts to the Dapr-backed ledger.
+
+A useful mental picture is: **the sidecar is the post office; your Python
+process is both the workflow author and the worker who keeps showing up to pick
+up the next envelope.** If the worker goes home, the envelopes remain durable,
+but no new work gets done until the worker comes back.
+
+## Wait / input behavior
+
+`kitaru.wait()` maps to a Dapr workflow external event.
+
+- If the worker process is still alive, sending input usually lets the workflow
+  continue automatically.
+- If that original process has exited, the event is still durable, but you need
+  to start a worker process again under `dapr run` so the workflow can continue.
+
+Example from Python:
+
+```python
+import kitaru
+
+client = kitaru.KitaruClient()
+client.executions.input("<exec-id>", wait="approval", value=True)
+```
+
+## Retry and replay
+
+- `KitaruClient.executions.retry(...)` creates a new execution record, stores the
+  original flow inputs again, and schedules a fresh Dapr workflow instance.
+- `KitaruClient.executions.replay(...)` does the same, but also seeds skipped
+  checkpoint outputs into the replay payload.
+- `@flow.replay()` is still not available on the Dapr engine.
+
+## Current limitations
+
+The Dapr engine is still experimental. Right now:
+
+- `stack` is not supported
+- `image` is not supported
+- `cache` is accepted but ignored
+- `@flow.replay()` is not implemented
+- flow code between checkpoints must stay deterministic
+- very large Dapr-bound payloads (checkpoint args, wait inputs, final flow
+  return values) can fail; keep big durable data in artifacts instead
+
+## Practical tips
+
+- Import your flow and checkpoint modules before the first Dapr `.run()` call.
+  The runtime host registers what it knows at startup.
+- Use one long-lived worker process for local development rather than starting a
+  new Python process for every small interaction.
+- When debugging, think in two pieces:
+  - **sidecar problems** = Dapr connectivity / components
+  - **worker problems** = your Python process / flow code
+
+## Related pages
+
+- [How It Works](/concepts/how-it-works)
+- [Flows](/concepts/flows)
+- [Wait, Input, and Resume](/concepts/wait-and-input)

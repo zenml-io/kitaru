@@ -126,6 +126,17 @@ explicitly resume the execution:
   response. After timeout, the input can still be provided at any time.
 </Callout>
 
+<Callout type="info">
+  **Dapr backend:** `timeout` is recorded as metadata for observability but
+  does not affect Dapr's native workflow suspension. The Dapr workflow engine
+  suspends indefinitely until input is provided — there is no runner poll loop
+  to exit. Input is delivered as a Dapr workflow event. If a worker process is
+  still connected, the workflow usually continues automatically after you
+  provide input. If that original process has exited, restart your worker under
+  `dapr run` and the workflow can continue from the stored wait state. See
+  [Dapr Engine](/deploy/dapr-engine).
+</Callout>
+
 ## Wait parameters
 
 | Parameter | Default | What it does |

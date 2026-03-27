@@ -85,6 +85,37 @@ credentials brokered by the server to access storage directly.
 | Client | Observe executions, provide input, replay, cancel | Your machine — SDK, CLI, UI, or MCP |
 | Storage | Persists all data | Local filesystem, S3, GCS, Azure Blob |
 
+## Dapr backend differences
+
+When running with the experimental Dapr backend instead of the default ZenML
+backend, the architecture differs:
+
+- **Agent runtime:** You run your script under a Dapr sidecar (`dapr run ...`).
+  On the first `flow.run()`, Kitaru lazily starts a Dapr workflow worker inside
+  the same Python process. Checkpoints run as Dapr activities in that worker
+  process (no separate pods).
+- **State storage:** Execution state is stored in a Dapr state store (e.g.
+  Redis) rather than the Kitaru/ZenML server database.
+- **Submission path:** `flow.run()` creates the execution ledger record, stores
+  the original flow inputs, and schedules a Dapr workflow instance using the
+  execution ID as the workflow instance ID.
+- **Client path:** `KitaruClient` talks to the same Dapr state store and Dapr
+  workflow API for status checks, wait input, retry, replay, and cancellation.
+- **Unsupported options:** `stack` and `image` are not available. `cache` is
+  accepted but ignored. `@flow.replay()` is not yet implemented (use
+  `KitaruClient.executions.replay()` instead).
+- **Determinism:** The Dapr backend uses a deterministic workflow interpreter —
+  code between checkpoints must be deterministic for replay correctness.
+- **Process lifecycle:** Kitaru does not start or manage the sidecar for you.
+  The sidecar must already be running, and the Python worker process must stay
+  alive while you want workflows to keep making progress.
+
+See individual concept pages for backend-specific callouts on
+[flows](/concepts/flows), [checkpoints](/concepts/checkpoints),
+[wait](/concepts/wait-and-input), and the
+[execution model](/concepts/execution-model). For the concrete local setup, see
+[Dapr Engine](/deploy/dapr-engine).
+
 ## Next steps
 
 - [Stacks](/stacks) — how compute, storage, and container

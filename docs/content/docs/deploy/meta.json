@@ -2,6 +2,7 @@
   "title": "Server Deployment",
   "defaultOpen": false,
   "pages": [
+    "dapr-engine",
     "docker",
     "helm"
   ]

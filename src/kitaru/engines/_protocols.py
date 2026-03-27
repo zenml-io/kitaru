@@ -2,8 +2,8 @@
 
 These protocols define the contract that each backend engine must satisfy.
 ``ExecutionEngineBackend`` covers snapshot mapping, definition creation,
-and runtime session creation; ``EngineFlowDefinition`` and
-``EngineCheckpointDefinition`` cover the backend-neutral wrappers that
+runtime session creation, and capability validation; ``EngineFlowDefinition``
+and ``EngineCheckpointDefinition`` cover the backend-neutral wrappers that
 ``flow.py`` and ``checkpoint.py`` store after definition creation;
 ``RuntimeSession`` covers in-flow primitive dispatch (wait, save, load, log).
 """
@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from kitaru._config._core import ExplicitOverrides
 
 from kitaru.engines._types import ExecutionGraphSnapshot
 
@@ -39,6 +41,7 @@ class EngineFlowDefinition(Protocol):
         cache: bool,
         retries: int,
         image: Any,
+        frozen_execution_spec: Any = None,
     ) -> Any:
         """Execute the flow with the given options."""
         ...
@@ -53,6 +56,7 @@ class EngineFlowDefinition(Protocol):
         steps_to_skip: set[str],
         input_overrides: dict[str, Any] | None,
         step_input_overrides: dict[str, dict[str, Any]] | None,
+        frozen_execution_spec: Any = None,
     ) -> Any:
         """Replay a prior execution from a checkpoint boundary."""
         ...
@@ -163,6 +167,22 @@ class ExecutionEngineBackend(Protocol):
 
     @property
     def name(self) -> str: ...
+
+    def validate_flow_run_options(self, overrides: ExplicitOverrides) -> None:
+        """Validate execution options before flow submission.
+
+        Backends may reject unsupported explicit options or emit warnings.
+        """
+        ...
+
+    def validate_flow_replay_support(self) -> None:
+        """Validate that the backend supports flow-level replay.
+
+        Backends that do not support ``@flow.replay()`` should raise
+        ``KitaruFeatureNotAvailableError`` here so the caller fails before
+        any backend-specific replay setup.
+        """
+        ...
 
     def execution_graph_from_run(self, run: Any) -> ExecutionGraphSnapshot: ...
 

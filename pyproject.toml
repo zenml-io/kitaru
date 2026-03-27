@@ -44,6 +44,10 @@ pydantic-ai = [
 mcp = [
     "mcp>=1.19.0,<1.20.0",
 ]
+dapr = [
+    "dapr-ext-workflow>=1.15.0",
+    "cloudpickle>=3.0",
+]
 
 [project.scripts]
 kitaru = "kitaru.cli:cli"
@@ -133,7 +137,33 @@ include = ["scripts/r2-upload.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+[[tool.ty.overrides]]
+include = ["src/kitaru/engines/dapr/store.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+include = ["src/kitaru/engines/dapr/backend.py", "src/kitaru/engines/dapr/interpreter.py", "src/kitaru/engines/dapr/client.py", "src/kitaru/engines/dapr/runtime.py"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+
+[[tool.ty.overrides]]
+include = ["src/kitaru/engines/dapr/interpreter.py", "src/kitaru/engines/dapr/client.py", "src/kitaru/engines/dapr/runtime.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+include = ["tests/test_dapr_store.py", "tests/test_dapr_backend.py", "tests/test_dapr_interpreter.py", "tests/test_dapr_client.py", "tests/test_dapr_phase12_integration.py", "tests/test_dapr_runtime_host.py", "tests/_dapr_harness.py", "tests/_dapr_fakes.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+invalid-argument-type = "ignore"
+unresolved-attribute = "ignore"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-vv -n auto"
-pythonpath = ["scripts"]
+pythonpath = ["scripts", "tests"]

@@ -14,6 +14,7 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
+from kitaru._client._models import ExecutionStatus as DaprExecutionStatus
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ImageSettings,
@@ -21,8 +22,11 @@ from kitaru.config import (
     ModelRegistryConfig,
     ResolvedExecutionConfig,
 )
+from kitaru.engines.dapr.backend import DaprFlowRunHandle
 from kitaru.errors import (
     FailureOrigin,
+    KitaruExecutionError,
+    KitaruFeatureNotAvailableError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -203,7 +207,7 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.config.persist_frozen_execution_spec"),
     ):
         wrapped = flow(lambda x: x)
         handle = wrapped.run(123)
@@ -280,7 +284,7 @@ def test_run_restores_previous_stack_if_submission_fails() -> None:
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.config.persist_frozen_execution_spec"),
         pytest.raises(RuntimeError, match="submission failed"),
     ):
         wrapped = flow(lambda: None)
@@ -311,7 +315,7 @@ def test_run_allows_submission_when_other_compilation_context_is_active() -> Non
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.config.persist_frozen_execution_spec"),
     ):
         wrapped = flow(lambda: None)
         handle = wrapped.run()
@@ -340,7 +344,7 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
             return_value=frozen_spec,
         ) as build_frozen_spec_mock,
         patch(
-            "kitaru.flow.persist_frozen_execution_spec"
+            "kitaru.config.persist_frozen_execution_spec"
         ) as persist_frozen_execution_spec_mock,
         patch("kitaru.flow.Client") as client_cls,
     ):
@@ -388,7 +392,7 @@ def test_run_resolves_config_with_decorator_stack_when_invocation_omits_it() -> 
         ) as resolve_execution_config_mock,
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.config.persist_frozen_execution_spec"),
         patch("kitaru.flow.Client") as client_cls,
     ):
         client_cls.return_value.active_stack_model.id = "old-stack-id"
@@ -429,7 +433,7 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
             "kitaru.flow.resolve_connection_config", return_value=object()
         ) as resolve_connection_mock,
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        patch("kitaru.config.persist_frozen_execution_spec") as persist_mock,
         patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
         patch("kitaru.engines.zenml.backend._snapshot_mapper"),
     ):
@@ -484,7 +488,7 @@ def test_replay_resolves_config_with_invocation_stack_override() -> None:
         ) as resolve_execution_config_mock,
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.config.persist_frozen_execution_spec"),
         patch(
             "kitaru.flow.build_replay_plan",
             return_value=ReplayPlan(
@@ -864,3 +868,231 @@ def test_execution_id_lookup_requires_active_kitaru_scope() -> None:
         return_value=SimpleNamespace(run=SimpleNamespace(id="exec-raw-context")),
     ):
         assert _get_current_execution_id() is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dapr FlowHandle tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _dapr_execution_stub(
+    exec_id: str = "dapr-exec-1",
+    *,
+    status: DaprExecutionStatus = DaprExecutionStatus.RUNNING,
+    status_reason: str | None = None,
+    failure: SimpleNamespace | None = None,
+) -> SimpleNamespace:
+    """Build a lightweight stub matching the Execution dataclass shape."""
+    return SimpleNamespace(
+        exec_id=exec_id,
+        status=status,
+        status_reason=status_reason,
+        failure=failure,
+    )
+
+
+class TestDaprFlowHandle:
+    def test_handle_has_exec_id(self) -> None:
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-123"))
+        assert handle.exec_id == "dapr-123"
+
+    def test_status_returns_dapr_execution_status(self) -> None:
+        stub = _dapr_execution_stub(status=DaprExecutionStatus.WAITING)
+        mock_client = MagicMock()
+        mock_client.executions.get.return_value = stub
+
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-123"))
+        with patch("kitaru.flow.FlowHandle._dapr_client", return_value=mock_client):
+            assert handle.status == DaprExecutionStatus.WAITING
+
+    def test_wait_polls_until_complete(self) -> None:
+        running = _dapr_execution_stub(status=DaprExecutionStatus.RUNNING)
+        completed = _dapr_execution_stub(status=DaprExecutionStatus.COMPLETED)
+
+        mock_client = MagicMock()
+        mock_client.executions.get.side_effect = [running, completed]
+        mock_client._load_execution_result.return_value = 42
+
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-123"))
+        with (
+            patch("kitaru.flow.FlowHandle._dapr_client", return_value=mock_client),
+            patch("kitaru.flow.time.sleep") as sleep_mock,
+        ):
+            result = handle.wait()
+
+        assert result == 42
+        sleep_mock.assert_called_once_with(1)
+        mock_client._load_execution_result.assert_called_once_with("dapr-123")
+
+    def test_wait_raises_on_failure(self) -> None:
+        failed = _dapr_execution_stub(
+            status=DaprExecutionStatus.FAILED,
+            status_reason="checkpoint blew up",
+            failure=SimpleNamespace(
+                message="ValueError: boom",
+                traceback="Traceback\nValueError: boom",
+                origin=FailureOrigin.USER_CODE,
+            ),
+        )
+        mock_client = MagicMock()
+        mock_client.executions.get.return_value = failed
+
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-123"))
+        with (
+            patch("kitaru.flow.FlowHandle._dapr_client", return_value=mock_client),
+            pytest.raises(KitaruExecutionError, match="checkpoint blew up"),
+        ):
+            handle.wait()
+
+    def test_wait_raises_on_cancelled(self) -> None:
+        cancelled = _dapr_execution_stub(status=DaprExecutionStatus.CANCELLED)
+        mock_client = MagicMock()
+        mock_client.executions.get.return_value = cancelled
+
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-123"))
+        with (
+            patch("kitaru.flow.FlowHandle._dapr_client", return_value=mock_client),
+            pytest.raises(KitaruExecutionError, match="cancelled"),
+        ):
+            handle.wait()
+
+    def test_get_returns_result_when_completed(self) -> None:
+        completed = _dapr_execution_stub(status=DaprExecutionStatus.COMPLETED)
+        mock_client = MagicMock()
+        mock_client.executions.get.return_value = completed
+        mock_client._load_execution_result.return_value = {"answer": 42}
+
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-123"))
+        with patch("kitaru.flow.FlowHandle._dapr_client", return_value=mock_client):
+            result = handle.get()
+
+        assert result == {"answer": 42}
+
+    def test_get_raises_when_still_running(self) -> None:
+        running = _dapr_execution_stub(status=DaprExecutionStatus.RUNNING)
+        mock_client = MagicMock()
+        mock_client.executions.get.return_value = running
+
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-123"))
+        with (
+            patch("kitaru.flow.FlowHandle._dapr_client", return_value=mock_client),
+            pytest.raises(KitaruStateError, match="still running"),
+        ):
+            handle.get()
+
+    def test_get_raises_when_waiting(self) -> None:
+        waiting = _dapr_execution_stub(status=DaprExecutionStatus.WAITING)
+        mock_client = MagicMock()
+        mock_client.executions.get.return_value = waiting
+
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-123"))
+        with (
+            patch("kitaru.flow.FlowHandle._dapr_client", return_value=mock_client),
+            pytest.raises(KitaruStateError, match="still running"),
+        ):
+            handle.get()
+
+    def test_get_raises_with_typed_error_on_failure(self) -> None:
+        failed = _dapr_execution_stub(
+            exec_id="dapr-fail-1",
+            status=DaprExecutionStatus.FAILED,
+            failure=SimpleNamespace(
+                message="user code error",
+                traceback="Traceback\nValueError: boom",
+                origin=FailureOrigin.USER_CODE,
+            ),
+        )
+        mock_client = MagicMock()
+        mock_client.executions.get.return_value = failed
+
+        handle = FlowHandle(DaprFlowRunHandle(exec_id="dapr-fail-1"))
+        with (
+            patch("kitaru.flow.FlowHandle._dapr_client", return_value=mock_client),
+            pytest.raises(KitaruExecutionError) as exc_info,
+        ):
+            handle.get()
+
+        assert exc_info.value.exec_id == "dapr-fail-1"
+        assert exc_info.value.status == "failed"
+        assert exc_info.value.failure_origin == FailureOrigin.USER_CODE
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dapr capability gating via flow
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestDaprCapabilityGating:
+    """Verify capability gating fires through the flow submission path."""
+
+    def test_submit_with_explicit_stack_raises_on_dapr(self) -> None:
+        """@flow.run(stack=...) should raise on Dapr backend."""
+        mock_backend = MagicMock()
+        mock_backend.validate_flow_run_options.side_effect = (
+            KitaruFeatureNotAvailableError("stack not supported")
+        )
+        mock_backend.create_flow_definition.return_value = MagicMock(
+            source_object=lambda: None
+        )
+
+        with (
+            patch("kitaru.flow.get_engine_backend", return_value=mock_backend),
+            patch(
+                "kitaru.flow.detect_explicit_execution_overrides",
+                return_value=MagicMock(stack=True, image=False, cache=False),
+            ),
+        ):
+            my_flow = flow(lambda: None)
+
+        with pytest.raises(KitaruFeatureNotAvailableError, match="stack"):
+            my_flow.run()
+
+    def test_submit_without_explicit_overrides_passes(self) -> None:
+        """@flow.run() with no explicit overrides should not raise."""
+        mock_backend = MagicMock()
+        mock_defn = MagicMock(source_object=lambda: None)
+        mock_defn.run.return_value = DaprFlowRunHandle(exec_id="x")
+        mock_backend.create_flow_definition.return_value = mock_defn
+
+        with patch("kitaru.flow.get_engine_backend", return_value=mock_backend):
+            my_flow = flow(lambda: None)
+
+        with (
+            patch("kitaru.flow.resolve_execution_config") as mock_resolve,
+            patch("kitaru.flow.resolve_connection_config"),
+            patch("kitaru.flow._prepare_model_registry_transport") as mock_transport,
+            patch("kitaru.flow.build_frozen_execution_spec"),
+            patch(
+                "kitaru.flow.detect_explicit_execution_overrides",
+                return_value=MagicMock(stack=False, image=False, cache=False),
+            ),
+        ):
+            mock_resolve.return_value = ResolvedExecutionConfig(
+                stack=None, image=None, cache=True, retries=0
+            )
+            mock_transport.return_value = (None, MagicMock(aliases={}))
+            my_flow.run()
+
+        mock_backend.validate_flow_run_options.assert_called_once()
+
+    def test_replay_with_dapr_backend_raises_before_zenml_client(self) -> None:
+        """@flow.replay() on Dapr should fail before Client().get_pipeline_run()."""
+        mock_backend = MagicMock()
+        mock_backend.validate_flow_replay_support.side_effect = (
+            KitaruFeatureNotAvailableError("replay not supported")
+        )
+        mock_backend.create_flow_definition.return_value = MagicMock(
+            source_object=lambda: None
+        )
+
+        with patch("kitaru.flow.get_engine_backend", return_value=mock_backend):
+            my_flow = flow(lambda: None)
+
+        with (
+            patch("kitaru.flow.Client") as mock_client_cls,
+            pytest.raises(KitaruFeatureNotAvailableError, match="replay"),
+        ):
+            my_flow.replay("exec-1", from_="checkpoint_a")
+
+        # Client() should never have been called
+        mock_client_cls.assert_not_called()

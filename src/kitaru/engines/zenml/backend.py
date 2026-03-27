@@ -8,7 +8,10 @@ is lazily imported by the engine registry on first backend access — importing
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from kitaru._config._core import ExplicitOverrides
 
 from zenml.config.constants import DOCKER_SETTINGS_KEY
 from zenml.config.docker_settings import DockerSettings
@@ -95,6 +98,17 @@ class ZenMLFlowDefinition:
             settings=_build_settings(image),
         )
 
+    @staticmethod
+    def _persist_spec(run: Any, frozen_execution_spec: Any) -> None:
+        """Persist frozen execution spec on a successful run if provided."""
+        if run is not None and frozen_execution_spec is not None:
+            from kitaru.config import persist_frozen_execution_spec
+
+            persist_frozen_execution_spec(
+                run_id=run.id,
+                frozen_execution_spec=frozen_execution_spec,
+            )
+
     def run(
         self,
         *,
@@ -103,8 +117,11 @@ class ZenMLFlowDefinition:
         cache: bool,
         retries: int,
         image: ImageSettings | None,
+        frozen_execution_spec: Any = None,
     ) -> Any:
-        return self._configured(cache, retries, image)(*args, **kwargs)
+        run = self._configured(cache, retries, image)(*args, **kwargs)
+        self._persist_spec(run, frozen_execution_spec)
+        return run
 
     def replay(
         self,
@@ -116,14 +133,17 @@ class ZenMLFlowDefinition:
         steps_to_skip: set[str],
         input_overrides: dict[str, Any] | None,
         step_input_overrides: dict[str, dict[str, Any]] | None,
+        frozen_execution_spec: Any = None,
     ) -> Any:
-        return self._configured(cache, retries, image).replay(
+        run = self._configured(cache, retries, image).replay(
             pipeline_run=source_run_id,
             skip=steps_to_skip,
             skip_successful_steps=False,
             input_overrides=input_overrides,
             step_input_overrides=step_input_overrides,
         )
+        self._persist_spec(run, frozen_execution_spec)
+        return run
 
 
 class ZenMLCheckpointDefinition:
@@ -234,6 +254,12 @@ class ZenMLExecutionEngineBackend:
     @property
     def name(self) -> str:
         return "zenml"
+
+    def validate_flow_run_options(self, overrides: ExplicitOverrides) -> None:
+        pass
+
+    def validate_flow_replay_support(self) -> None:
+        pass
 
     def execution_graph_from_run(self, run: Any) -> ExecutionGraphSnapshot:
         return _snapshot_mapper(run)

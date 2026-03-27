@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
+from kitaru._env import KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV
 from kitaru.engines._protocols import ExecutionEngineBackend, RuntimeSession
 from kitaru.engines._registry import (
     _DEFAULT_ENGINE_NAME,
@@ -46,11 +49,18 @@ class TestResolveEngineName:
         with pytest.raises(KitaruUsageError, match="'zenml'"):
             resolve_engine_name("invalid")
 
+    def test_dapr_resolves_via_env(self) -> None:
+        assert resolve_engine_name(environ={"KITARU_ENGINE": "dapr"}) == "dapr"
+
 
 class TestAvailableEngineNames:
     def test_zenml_is_available(self) -> None:
         names = available_engine_names()
         assert "zenml" in names
+
+    def test_dapr_is_available(self) -> None:
+        names = available_engine_names()
+        assert "dapr" in names
 
     def test_returns_tuple(self) -> None:
         assert isinstance(available_engine_names(), tuple)
@@ -136,3 +146,114 @@ class TestLazyImport:
         backend = get_engine_backend("zenml")
         assert backend.name == "zenml"
         assert "kitaru.engines.zenml.backend" in sys.modules
+
+    def test_dapr_backend_loaded_lazily(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Accessing the Dapr backend should import the backend module."""
+        import sys
+
+        monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, "1")
+        _reset_engine_backend_cache()
+        backend = get_engine_backend("dapr")
+        assert backend.name == "dapr"
+        assert "kitaru.engines.dapr.backend" in sys.modules
+        _reset_engine_backend_cache()
+
+    def test_dapr_backend_satisfies_protocol(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Dapr backend should satisfy the ExecutionEngineBackend protocol."""
+        monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, "1")
+        _reset_engine_backend_cache()
+        backend = get_engine_backend("dapr")
+        assert isinstance(backend, ExecutionEngineBackend)
+        _reset_engine_backend_cache()
+
+    def test_dapr_runtime_session_satisfies_protocol(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Dapr session should satisfy RuntimeSession protocol."""
+        monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, "1")
+        _reset_engine_backend_cache()
+        backend = get_engine_backend("dapr")
+        session = backend.create_runtime_session()
+        assert isinstance(session, RuntimeSession)
+        _reset_engine_backend_cache()
+
+
+class TestExperimentalDaprGating:
+    """Verify experimental opt-in gating for the Dapr engine."""
+
+    def test_dapr_without_opt_in_raises(self) -> None:
+        with pytest.raises(KitaruUsageError, match="experimental"):
+            get_engine_backend("dapr")
+
+    def test_dapr_with_opt_in_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, "1")
+        _reset_engine_backend_cache()
+        backend = get_engine_backend("dapr")
+        assert backend.name == "dapr"
+        _reset_engine_backend_cache()
+
+    def test_dapr_warns_once_per_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, "1")
+        _reset_engine_backend_cache()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            get_engine_backend("dapr")
+            get_engine_backend("dapr")
+
+        dapr_warnings = [w for w in caught if "experimental" in str(w.message)]
+        assert len(dapr_warnings) == 1
+        _reset_engine_backend_cache()
+
+    def test_warning_reset_by_cache_clear(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, "1")
+        _reset_engine_backend_cache()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            get_engine_backend("dapr")
+
+        first = [w for w in caught if "experimental" in str(w.message)]
+        assert len(first) == 1
+
+        _reset_engine_backend_cache()
+
+        with warnings.catch_warnings(record=True) as caught2:
+            warnings.simplefilter("always")
+            get_engine_backend("dapr")
+
+        second = [w for w in caught2 if "experimental" in str(w.message)]
+        assert len(second) == 1
+        _reset_engine_backend_cache()
+
+    def test_zenml_engine_unaffected_by_gating(self) -> None:
+        backend = get_engine_backend("zenml")
+        assert backend.name == "zenml"
+
+    @pytest.mark.parametrize("value", ["true", "True", "YES", "on", "1"])
+    def test_truthy_values_enable_dapr(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, value)
+        _reset_engine_backend_cache()
+        backend = get_engine_backend("dapr")
+        assert backend.name == "dapr"
+        _reset_engine_backend_cache()
+
+    @pytest.mark.parametrize("value", ["0", "false", "no", "off", ""])
+    def test_falsy_values_block_dapr(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv(KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV, value)
+        _reset_engine_backend_cache()
+        with pytest.raises(KitaruUsageError, match="experimental"):
+            get_engine_backend("dapr")
+        _reset_engine_backend_cache()
+
+    def test_error_message_mentions_env_var(self) -> None:
+        with pytest.raises(KitaruUsageError, match=KITARU_ENABLE_EXPERIMENTAL_DAPR_ENV):
+            get_engine_backend("dapr")

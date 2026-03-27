@@ -132,6 +132,8 @@ def parallel_agent(items: list[str]) -> list[str]:
 <Callout type="warn">
   If the active orchestrator does not support isolated steps, the runtime is
   silently downgraded to inline with a warning. Local stacks always run inline.
+  **Dapr backend:** `runtime="isolated"` is ignored in the current MVP — all
+  checkpoints run inline in the workflow worker process.
 </Callout>
 
 When retries are enabled, Kitaru records each failed attempt before the final
@@ -160,6 +162,13 @@ all retries, the flow fails.
 
 For retrying the **entire flow** (not just a single checkpoint), see the
 [`retries` option on flows](/concepts/flows#runtime-options).
+
+<Callout type="info">
+  **Dapr backend:** Checkpoint retries are mapped to Dapr's native retry
+  policy. When a checkpoint omits `retries`, it inherits the flow-level
+  `retries` value as its default. Explicitly setting `retries=0` on a
+  checkpoint disables retries even if the flow specifies a non-zero default.
+</Callout>
 
 ### Resuming after failure
 

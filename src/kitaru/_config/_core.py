@@ -187,6 +187,20 @@ class ActiveEnvironmentVariable:
     value: str
 
 
+@dataclass(frozen=True)
+class ExplicitOverrides:
+    """Tracks which execution options were explicitly set by the user.
+
+    "Explicit" means any config source other than the global execution
+    default (active ZenML stack).  Layers checked: pyproject, env vars,
+    ``kitaru.configure()``, decorator, and invocation overrides.
+    """
+
+    stack: bool = False
+    image: bool = False
+    cache: bool = False
+
+
 class FrozenExecutionSpec(BaseModel):
     """Versioned execution-spec snapshot persisted with each run."""
 

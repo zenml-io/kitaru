@@ -41,6 +41,30 @@ from kitaru.runtime import (
     _is_inside_flow,
 )
 
+
+def _dapr_dispatch_not_available() -> bool:
+    return False
+
+
+# Lazy import to avoid circular dependency — checked at runtime only
+_dapr_dispatch_check: Callable[[], bool] | None = None
+
+
+def _is_dapr_dispatch_allowed() -> bool:
+    """Check if Dapr orchestrator flow dispatch is active."""
+    global _dapr_dispatch_check
+    if _dapr_dispatch_check is None:
+        try:
+            from kitaru.engines.dapr.interpreter import (
+                _is_dapr_flow_dispatch_allowed,
+            )
+
+            _dapr_dispatch_check = _is_dapr_flow_dispatch_allowed
+        except ImportError:
+            _dapr_dispatch_check = _dapr_dispatch_not_available
+    return _dapr_dispatch_check()
+
+
 _CHECKPOINT_OUTSIDE_FLOW_ERROR = "Checkpoints can only run inside a @flow."
 _CHECKPOINT_NESTED_ERROR = (
     "Nested checkpoint calls are not supported in the Kitaru MVP."
@@ -195,12 +219,18 @@ class _CheckpointDefinition:
         if DynamicPipelineRunContext.is_active() and _is_inside_flow():
             return
 
+        if _is_dapr_dispatch_allowed() and _is_inside_flow():
+            return
+
         raise KitaruContextError(_CHECKPOINT_OUTSIDE_FLOW_ERROR)
 
     def _assert_submit_allowed(self) -> None:
         """Validate that checkpoint submission is legal in the current context."""
         if StepContext.is_active():
             raise KitaruContextError(_CHECKPOINT_NESTED_ERROR)
+
+        if _is_dapr_dispatch_allowed() and _is_inside_flow():
+            return
 
         if not DynamicPipelineRunContext.is_active() or not _is_inside_flow():
             raise KitaruContextError(_CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR)
