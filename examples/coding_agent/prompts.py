@@ -33,6 +33,9 @@ ALWAYS include this block — scripts without it WILL fail for any non-stdlib im
 - If a tool returns an error, report the error honestly. Do NOT claim the \
 environment is restricted — diagnose the specific failure and try a \
 different approach.
+- If you see parse errors, execution errors, or recovery hints in the \
+conversation, adjust arguments or strategy and continue — do not loop on \
+the same failing call.
 - When you need clarification or a decision from the user, call ask_user with \
 a clear question. Do NOT guess — ask.
 - When you have completed a task, ALWAYS call hand_back with a summary and a \

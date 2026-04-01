@@ -16,10 +16,16 @@ Or supply follow-up input via the CLI::
 
     kitaru executions input <exec-id> --value "use population data"
     kitaru executions resume <exec-id>
+
+Optional env (see also ``llm.py``): ``CODING_AGENT_TOOL_TRANSIENT_RETRIES`` (default
+``2``) for transient network failures during tool execution; LLM backoff and
+recovery rounds are controlled by ``CODING_AGENT_LLM_MAX_RETRIES``,
+``CODING_AGENT_LLM_RECOVERY_ROUNDS``, etc.
 """
 
 import html
 import json
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -27,7 +33,7 @@ from typing import Any
 
 import click
 import materializers as _materializers  # noqa: F401 — registers custom materializers
-from llm import MAX_TOOL_ROUNDS, MODEL, complete_agent_turn
+from llm import MAX_TOOL_ROUNDS, MODEL, complete_agent_turn_resilient
 from models import (
     FollowUp,
     LLMResponse,
@@ -42,6 +48,49 @@ from kitaru import checkpoint, flow
 
 _WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
 
+_TOOL_TRANSIENT_RETRIES: int = max(
+    1, int(os.environ.get("CODING_AGENT_TOOL_TRANSIENT_RETRIES", "2"))
+)
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Return True for network-ish failures that may succeed on retry."""
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return True
+    name = type(exc).__name__
+    if "Timeout" in name or "Connection" in name:
+        return True
+    mod = type(exc).__module__
+    if mod.startswith(("httpx", "httpcore", "urllib3", "requests")):
+        return name in (
+            "ConnectError",
+            "ReadTimeout",
+            "ConnectTimeout",
+            "RemoteProtocolError",
+            "ProtocolError",
+        )
+    return False
+
+
+def _dispatch_tool_with_retries(
+    cwd: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> Any:
+    """Run ``dispatch_tool`` with a few retries on transient failures."""
+    last: Exception | None = None
+    for attempt in range(_TOOL_TRANSIENT_RETRIES):
+        try:
+            return dispatch_tool(cwd, tool_name, arguments)
+        except Exception as exc:
+            last = exc
+            if attempt < _TOOL_TRANSIENT_RETRIES - 1 and _is_transient_error(exc):
+                time.sleep(min(2**attempt, 8))
+                continue
+            raise
+    assert last is not None
+    raise last
+
 
 # ---------------------------------------------------------------------------
 # Checkpoints
@@ -52,7 +101,7 @@ _WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
 def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
     """Single LLM completion — tracked as a checkpoint."""
     started_at = time.perf_counter()
-    response, usage = complete_agent_turn(messages, tools=ALL_TOOLS)
+    response, usage = complete_agent_turn_resilient(messages, tools=ALL_TOOLS)
     latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
     kitaru.log(
@@ -90,7 +139,19 @@ def tool_call(
     if tool_name == "python_exec" and "code" in arguments:
         _save_html_artifact("script.py", arguments["code"])
 
-    raw_result = dispatch_tool(cwd, tool_name, arguments)
+    try:
+        raw_result = _dispatch_tool_with_retries(cwd, tool_name, arguments)
+    except Exception as exc:
+        kitaru.log(
+            tool_exception=tool_name,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return ToolCallResult(
+            tool_name=tool_name,
+            output=(
+                f"[tool error after retries: {type(exc).__name__}] {exc}"
+            ),
+        )
 
     # Save full file content as a browsable artifact (LLM only sees truncated)
     if tool_name == "read_file" and "path" in arguments:
@@ -129,8 +190,8 @@ def _save_html_artifact(name: str, code: str) -> None:
 
 @flow(
     image={
-        "requirements": ["openai", "anthropic"],
-        "apt_packages": ["curl", "ca-certificates"],
+        "requirements": ["openai", "anthropic", "kitaru>=0.3.0"],
+        "apt_packages": ["curl", "ca-certificates"]
     },
 )
 def coding_agent(task: str) -> str:
@@ -165,18 +226,26 @@ def coding_agent(task: str) -> str:
 
         messages.append(response.to_message())
 
-        # Separate tool calls: regular ones can run in parallel,
-        # hand_back/ask_user need sequential handling (they block on user input).
+        _INTERACTIVE = ("hand_back", "ask_user")
         parsed_calls: list[tuple[Any, dict[str, Any], str]] = []
         for tc in response.tool_calls:
-            args = _parse_args(tc.function.arguments)
+            args, parse_err = _parse_tool_arguments(tc.function.arguments)
+            if parse_err:
+                kitaru.log(tool_parse_error=tc.function.name, detail=parse_err)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": parse_err,
+                    }
+                )
+                continue
             display_name = _make_display_name(
                 tc.function.name, args.pop("_display_name", None), counter
             )
-            parsed_calls.append((tc, args, display_name))
             counter += 1
+            parsed_calls.append((tc, args, display_name))
 
-        _INTERACTIVE = ("hand_back", "ask_user")
         regular = [
             (tc, a, dn)
             for tc, a, dn in parsed_calls
@@ -188,13 +257,24 @@ def coding_agent(task: str) -> str:
             if tc.function.name in _INTERACTIVE
         ]
 
-        # --- Submit regular tool calls in parallel --------------------------
         futures = [
             (tc, tool_call.submit(tc.function.name, args, cwd, id=display_name))
             for tc, args, display_name in regular
         ]
         for tc, future in futures:
-            result: ToolCallResult = future.load()
+            try:
+                result: ToolCallResult = future.load()
+            except Exception as exc:
+                kitaru.log(
+                    tool_checkpoint_error=tc.function.name,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                result = ToolCallResult(
+                    tool_name=tc.function.name,
+                    output=(
+                        f"[execution error: {type(exc).__name__}] {exc}"
+                    ),
+                )
             msg = {"role": "tool", "tool_call_id": tc.id, "content": result.output}
             messages.append(msg)
 
@@ -206,11 +286,16 @@ def coding_agent(task: str) -> str:
                 results.append(summary)
                 kitaru.log(phase="hand_back")
 
+                kitaru.log(follow_up_prompt=question)
                 follow_up: FollowUp = kitaru.wait(
-                    name=f"follow_up_{counter}",
+                    name=None,
                     timeout=600,
                     schema=FollowUp,
-                    question=question,
+                    question=(
+                        "Follow-up or finish "
+                        "(see execution logs for the agent's prompt)."
+                    ),
+                    metadata={},
                 )
                 if follow_up.is_finished:
                     return "\n\n---\n\n".join(results)
@@ -221,11 +306,15 @@ def coding_agent(task: str) -> str:
 
             elif tc.function.name == "ask_user":
                 question = args.get("question", "The agent needs your input:")
+                kitaru.log(ask_user_prompt=question)
                 answer = kitaru.wait(
-                    name=f"ask_{counter}",
+                    name=None,
                     timeout=600,
                     schema=str,
-                    question=question,
+                    question=(
+                        "Input requested (see execution logs for the question text)."
+                    ),
+                    metadata={},
                 )
                 msg = {"role": "tool", "tool_call_id": tc.id, "content": answer}
                 messages.append(msg)
@@ -250,11 +339,15 @@ def coding_agent(task: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _parse_args(raw: str) -> dict[str, Any]:
+def _parse_tool_arguments(raw: str) -> tuple[dict[str, Any], str | None]:
+    """Parse tool JSON; on failure return ``({}, error_message)`` for self-heal."""
+    stripped = raw.strip()
+    if not stripped:
+        return {}, None
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
+        return json.loads(stripped), None
+    except json.JSONDecodeError as exc:
+        return {}, f"Invalid JSON in tool arguments: {exc}"
 
 
 def _make_display_name(tool_name: str, llm_name: Any, counter: int) -> str:
