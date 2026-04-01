@@ -148,9 +148,7 @@ def tool_call(
         )
         return ToolCallResult(
             tool_name=tool_name,
-            output=(
-                f"[tool error after retries: {type(exc).__name__}] {exc}"
-            ),
+            output=(f"[tool error after retries: {type(exc).__name__}] {exc}"),
         )
 
     # Save full file content as a browsable artifact (LLM only sees truncated)
@@ -191,7 +189,7 @@ def _save_html_artifact(name: str, code: str) -> None:
 @flow(
     image={
         "requirements": ["openai", "anthropic", "kitaru>=0.3.0"],
-        "apt_packages": ["curl", "ca-certificates"]
+        "apt_packages": ["curl", "ca-certificates"],
     },
 )
 def coding_agent(task: str) -> str:
@@ -271,9 +269,7 @@ def coding_agent(task: str) -> str:
                 )
                 result = ToolCallResult(
                     tool_name=tc.function.name,
-                    output=(
-                        f"[execution error: {type(exc).__name__}] {exc}"
-                    ),
+                    output=(f"[execution error: {type(exc).__name__}] {exc}"),
                 )
             msg = {"role": "tool", "tool_call_id": tc.id, "content": result.output}
             messages.append(msg)
