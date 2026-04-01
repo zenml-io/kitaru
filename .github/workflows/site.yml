@@ -31,19 +31,21 @@ jobs:
     env:
       HAS_CF_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       # --- Generate docs content (Python-only generators) ---
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
       - run: uv sync --frozen
       - run: uv run python scripts/generate_cli_docs.py
       - run: uv run python scripts/generate_changelog_docs.py
 
       # --- Build docs (Node) ---
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288  # v5
         with:
           version: latest
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6
         with:
           node-version-file: docs/.node-version
           cache: pnpm
@@ -72,7 +74,7 @@ jobs:
 
       # --- Check internal links in built output ---
       - name: Check internal links
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411  # v2
         with:
           args: --offline --root-dir site/dist --no-progress --verbose --index-files
             index.html 'site/dist/**/*.html'
@@ -83,7 +85,7 @@ jobs:
       - name: Deploy production
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
           == 'workflow_dispatch'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -96,7 +98,7 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
           == github.repository && env.HAS_CF_SECRETS == 'true'
         id: preview
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -106,7 +108,7 @@ jobs:
       # --- Sticky PR comment with preview URL ---
       - name: Comment preview URL
         if: steps.preview.outcome == 'success'
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987  # v3
         with:
           header: site-preview
           message: |
@@ -124,7 +126,7 @@ jobs:
     steps:
       - name: Delete preview Worker
         continue-on-error: true
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
