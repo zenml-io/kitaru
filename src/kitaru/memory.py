@@ -84,22 +84,14 @@ class MemoryEntry(BaseModel):
 
 @dataclass(frozen=True)
 class _MemoryScope:
-    """Resolved runtime memory scope for the current call."""
+    """Resolved or configured memory scope."""
 
     scope: str
     scope_type: _MemoryScopeType
 
 
-@dataclass(frozen=True)
-class _ConfiguredMemoryScope:
-    """User-configured memory scope default."""
-
-    scope: str
-    scope_type: _MemoryScopeType
-
-
-_RUNTIME_MEMORY_SCOPE_DEFAULT: _ConfiguredMemoryScope | None = None
-_CURRENT_MEMORY_SCOPE: ContextVar[_ConfiguredMemoryScope | None] = ContextVar(
+_RUNTIME_MEMORY_SCOPE_DEFAULT: _MemoryScope | None = None
+_CURRENT_MEMORY_SCOPE: ContextVar[_MemoryScope | None] = ContextVar(
     "kitaru_current_memory_scope",
     default=None,
 )
@@ -170,7 +162,7 @@ def _resolve_configured_scope(
     scope: str | None,
     *,
     scope_type: _MemoryScopeType | None,
-) -> _ConfiguredMemoryScope:
+) -> _MemoryScope:
     """Resolve validated configuration input into a configured scope."""
     normalized_scope = (
         _validate_memory_identifier(scope, kind="scope") if scope is not None else None
@@ -180,7 +172,7 @@ def _resolve_configured_scope(
     )
 
     if normalized_scope is not None:
-        return _ConfiguredMemoryScope(
+        return _MemoryScope(
             scope=normalized_scope,
             scope_type=normalized_scope_type or "namespace",
         )
@@ -203,7 +195,7 @@ def _resolve_configured_scope(
         )
 
     if normalized_scope_type == "flow":
-        return _ConfiguredMemoryScope(
+        return _MemoryScope(
             scope=_implicit_flow_memory_scope("configure").scope,
             scope_type="flow",
         )
@@ -214,7 +206,7 @@ def _resolve_configured_scope(
             "kitaru.memory.configure(scope_type='execution') requires an "
             "active execution ID inside @flow."
         )
-    return _ConfiguredMemoryScope(
+    return _MemoryScope(
         scope=_validate_memory_identifier(execution_id, kind="scope"),
         scope_type="execution",
     )
@@ -233,10 +225,7 @@ def _resolve_memory_scope_for_operation(api_name: str) -> _MemoryScope:
 
     configured_scope = _CURRENT_MEMORY_SCOPE.get()
     if configured_scope is not None:
-        return _MemoryScope(
-            scope=configured_scope.scope,
-            scope_type=configured_scope.scope_type,
-        )
+        return configured_scope
 
     return _implicit_flow_memory_scope(api_name)
 

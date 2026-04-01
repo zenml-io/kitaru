@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -95,19 +95,6 @@ def _memory_entry(
         artifact_id=artifact_id or str(uuid4()),
         execution_id=execution_id,
     )
-
-
-@pytest.fixture(autouse=True)
-def _reset_memory_scope_configuration() -> Iterator[None]:
-    """Reset process-local and flow-local memory scope state between tests."""
-    original_default = memory._RUNTIME_MEMORY_SCOPE_DEFAULT
-    token = memory._CURRENT_MEMORY_SCOPE.set(None)
-    memory._RUNTIME_MEMORY_SCOPE_DEFAULT = None
-    try:
-        yield
-    finally:
-        memory._RUNTIME_MEMORY_SCOPE_DEFAULT = original_default
-        memory._CURRENT_MEMORY_SCOPE.reset(token)
 
 
 @pytest.mark.parametrize(

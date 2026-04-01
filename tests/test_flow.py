@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 import threading
-from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, call, patch
@@ -57,19 +56,6 @@ def _resolved_execution(
         cache=cache,
         retries=retries,
     )
-
-
-@pytest.fixture(autouse=True)
-def _reset_memory_scope_configuration() -> Iterator[None]:
-    """Reset process-local and flow-local memory scope state between tests."""
-    original_default = memory._RUNTIME_MEMORY_SCOPE_DEFAULT
-    token = memory._CURRENT_MEMORY_SCOPE.set(None)
-    memory._RUNTIME_MEMORY_SCOPE_DEFAULT = None
-    try:
-        yield
-    finally:
-        memory._RUNTIME_MEMORY_SCOPE_DEFAULT = original_default
-        memory._CURRENT_MEMORY_SCOPE.reset(token)
 
 
 def _empty_registry_payload() -> str:
