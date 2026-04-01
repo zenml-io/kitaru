@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
       - name: Spelling checker
         uses: crate-ci/typos@2361394247a38536a5f2376a05181ca001dd9e26  # v1.17.0
         with:
