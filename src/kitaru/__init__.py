@@ -22,7 +22,8 @@ Example::
 Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
-  ``save()``, ``load()``, ``wait()``, ``llm()``, ``connect()``,
+  ``save()``, ``load()``, ``wait()``, ``llm()``,
+  ``memory.set/get/list/history/delete()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
   ``delete_stack()``), model alias helpers via CLI
@@ -50,6 +51,8 @@ install_terminal_log_intercept()
 import os
 
 from kitaru.analytics import set_source
+
+from . import memory
 
 _default_analytics_source = os.environ.get(
     "KITARU_DEFAULT_ANALYTICS_SOURCE", "kitaru-python"
@@ -121,6 +124,7 @@ __all__ = [
     "llm",
     "load",
     "log",
+    "memory",
     "save",
     "use_stack",
     "wait",
