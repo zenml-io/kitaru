@@ -54,6 +54,7 @@ from kitaru.errors import (
     execution_error_from_failure,
     traceback_last_line,
 )
+from kitaru.memory import _memory_scope_session
 from kitaru.replay import build_replay_plan
 from kitaru.runtime import _flow_scope
 
@@ -114,7 +115,7 @@ def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
 
     @wraps(func)
     def _wrapped(*args: Any, **kwargs: Any) -> Any:
-        with _flow_scope(name=flow_name):
+        with _flow_scope(name=flow_name), _memory_scope_session():
             return func(*args, **kwargs)
 
     return _wrapped

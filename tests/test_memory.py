@@ -1,8 +1,8 @@
-"""Tests for `kitaru.memory` flow-scoped memory behavior."""
+"""Tests for `kitaru.memory` configurable-scope memory behavior."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -13,7 +13,7 @@ import pytest
 from zenml.enums import ArtifactType
 
 from kitaru import memory
-from kitaru.errors import KitaruContextError, KitaruUsageError
+from kitaru.errors import KitaruContextError, KitaruStateError, KitaruUsageError
 from kitaru.memory import (
     MemoryEntry,
     _delete_impl,
@@ -67,7 +67,7 @@ def _memory_artifact(
 
 
 def _flow_memory_scope(name: str = "demo_flow") -> _MemoryScope:
-    """Return a BE-1 flow-scoped memory scope for impl tests."""
+    """Return a flow-scoped memory scope for impl tests."""
     return _MemoryScope(scope=name, scope_type="flow")
 
 
@@ -95,6 +95,19 @@ def _memory_entry(
         artifact_id=artifact_id or str(uuid4()),
         execution_id=execution_id,
     )
+
+
+@pytest.fixture(autouse=True)
+def _reset_memory_scope_configuration() -> Iterator[None]:
+    """Reset process-local and flow-local memory scope state between tests."""
+    original_default = memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+    token = memory._CURRENT_MEMORY_SCOPE.set(None)
+    memory._RUNTIME_MEMORY_SCOPE_DEFAULT = None
+    try:
+        yield
+    finally:
+        memory._RUNTIME_MEMORY_SCOPE_DEFAULT = original_default
+        memory._CURRENT_MEMORY_SCOPE.reset(token)
 
 
 @pytest.mark.parametrize(
@@ -131,6 +144,23 @@ def test_memory_apis_reject_checkpoint_context(call: Callable[[], object]) -> No
         call()
 
 
+def test_memory_configure_outside_flow_sets_process_default() -> None:
+    memory.configure(scope="repo_seed")
+
+    assert memory._RUNTIME_MEMORY_SCOPE_DEFAULT is not None
+    assert memory._RUNTIME_MEMORY_SCOPE_DEFAULT.scope == "repo_seed"
+    assert memory._RUNTIME_MEMORY_SCOPE_DEFAULT.scope_type == "namespace"
+
+
+def test_memory_configure_rejects_checkpoint_context() -> None:
+    with (
+        _flow_scope(name="demo_flow"),
+        _checkpoint_scope(name="demo_checkpoint", checkpoint_type=None),
+        pytest.raises(KitaruContextError, match=r"@checkpoint"),
+    ):
+        memory.configure(scope="repo_seed")
+
+
 @pytest.mark.parametrize("bad_key", ["", " ", "bad:key", "bad key"])
 def test_memory_set_rejects_invalid_keys_before_dispatch(bad_key: str) -> None:
     with (
@@ -149,6 +179,44 @@ def test_memory_rejects_invalid_flow_name_as_scope() -> None:
         pytest.raises(KitaruUsageError, match="Memory scope"),
     ):
         memory.list()
+
+
+def test_memory_configure_rejects_invalid_scope_before_dispatch() -> None:
+    with (
+        _flow_scope(name="demo_flow"),
+        patch("kitaru.memory._memory_list_step") as memory_list_step,
+        pytest.raises(KitaruUsageError, match="Memory scope"),
+    ):
+        memory.configure(scope="bad:scope")
+        memory.list()
+
+    memory_list_step.assert_not_called()
+
+
+def test_memory_configure_requires_scope_or_scope_type() -> None:
+    with pytest.raises(
+        KitaruUsageError,
+        match=r"requires `scope=` or `scope_type=`",
+    ):
+        memory.configure()
+
+
+def test_memory_configure_namespace_scope_type_requires_explicit_scope() -> None:
+    with pytest.raises(KitaruUsageError, match=r"requires an explicit `scope=`"):
+        memory.configure(scope_type="namespace")
+
+
+def test_memory_configure_rejects_invalid_scope_type() -> None:
+    with pytest.raises(KitaruUsageError, match="Memory scope_type"):
+        memory.configure(scope="repo_seed", scope_type="bogus")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("scope_type", ["flow", "execution"])
+def test_memory_configure_cannot_infer_flowish_scope_outside_flow(
+    scope_type: str,
+) -> None:
+    with pytest.raises(KitaruContextError, match=r"inside a @flow"):
+        memory.configure(scope_type=scope_type)  # type: ignore[arg-type]
 
 
 def test_memory_set_dispatches_to_synthetic_step() -> None:
@@ -229,6 +297,132 @@ def test_memory_delete_dispatches_to_synthetic_step() -> None:
 
     assert result == fake_entry
     memory_delete_step.assert_called_once_with("demo_flow", "flow", "prefs")
+
+
+def test_memory_configure_sets_namespace_scope_for_subsequent_calls() -> None:
+    fake_entries = [_memory_entry(scope="my_repo", scope_type="namespace")]
+
+    with (
+        _flow_scope(name="demo_flow"),
+        patch("kitaru.memory._memory_set_step") as memory_set_step,
+        patch(
+            "kitaru.memory._memory_get_step",
+            return_value={"theme": "dark"},
+        ) as memory_get_step,
+        patch(
+            "kitaru.memory._memory_list_step",
+            return_value=fake_entries,
+        ) as memory_list_step,
+        patch(
+            "kitaru.memory._memory_history_step",
+            return_value=fake_entries,
+        ) as memory_history_step,
+        patch(
+            "kitaru.memory._memory_delete_step",
+            return_value=fake_entries[0],
+        ) as memory_delete_step,
+    ):
+        memory.configure(scope="my_repo")
+        memory.set("prefs", {"theme": "dark"})
+        assert memory.get("prefs") == {"theme": "dark"}
+        assert memory.list() == fake_entries
+        assert memory.history("prefs") == fake_entries
+        assert memory.delete("prefs") == fake_entries[0]
+
+    memory_set_step.assert_called_once_with(
+        "my_repo",
+        "namespace",
+        "prefs",
+        {"theme": "dark"},
+    )
+    memory_get_step.assert_called_once_with("my_repo", "namespace", "prefs", None)
+    memory_list_step.assert_called_once_with("my_repo", "namespace")
+    memory_history_step.assert_called_once_with("my_repo", "namespace", "prefs")
+    memory_delete_step.assert_called_once_with("my_repo", "namespace", "prefs")
+
+
+def test_memory_configure_scope_type_flow_uses_current_flow_name() -> None:
+    fake_entries = [_memory_entry(scope="demo_flow", scope_type="flow")]
+
+    with (
+        _flow_scope(name="demo_flow"),
+        patch(
+            "kitaru.memory._memory_list_step",
+            return_value=fake_entries,
+        ) as memory_list_step,
+    ):
+        memory.configure(scope_type="flow")
+        result = memory.list()
+
+    assert result == fake_entries
+    memory_list_step.assert_called_once_with("demo_flow", "flow")
+
+
+def test_memory_configure_scope_type_execution_uses_execution_id() -> None:
+    fake_entries = [_memory_entry(scope="exec-123", scope_type="execution")]
+
+    with (
+        _flow_scope(name="demo_flow", execution_id="exec-123"),
+        patch(
+            "kitaru.memory._memory_list_step",
+            return_value=fake_entries,
+        ) as memory_list_step,
+    ):
+        memory.configure(scope_type="execution")
+        result = memory.list()
+
+    assert result == fake_entries
+    memory_list_step.assert_called_once_with("exec-123", "execution")
+
+
+def test_memory_configure_execution_scope_requires_execution_id() -> None:
+    with (
+        _flow_scope(name="demo_flow"),
+        pytest.raises(KitaruStateError, match="active execution ID"),
+    ):
+        memory.configure(scope_type="execution")
+
+
+def test_memory_configure_outside_flow_seeds_later_flow_session() -> None:
+    fake_entries = [_memory_entry(scope="repo_seed", scope_type="namespace")]
+    memory.configure(scope="repo_seed")
+
+    with (
+        _flow_scope(name="demo_flow"),
+        memory._memory_scope_session(),
+        patch(
+            "kitaru.memory._memory_list_step",
+            return_value=fake_entries,
+        ) as memory_list_step,
+    ):
+        result = memory.list()
+
+    assert result == fake_entries
+    memory_list_step.assert_called_once_with("repo_seed", "namespace")
+
+
+def test_memory_configure_inside_flow_overrides_process_default_without_mutation() -> (
+    None
+):
+    memory.configure(scope="repo_seed")
+
+    with (
+        _flow_scope(name="first_flow"),
+        memory._memory_scope_session(),
+        patch("kitaru.memory._memory_list_step", return_value=[]) as memory_list_step,
+    ):
+        memory.configure(scope="repo_override")
+        memory.list()
+
+    with (
+        _flow_scope(name="second_flow"),
+        memory._memory_scope_session(),
+        patch("kitaru.memory._memory_list_step", return_value=[]) as memory_list_step_2,
+    ):
+        memory.list()
+
+    memory_list_step.assert_called_once_with("repo_override", "namespace")
+    memory_list_step_2.assert_called_once_with("repo_seed", "namespace")
 
 
 def test_set_impl_persists_expected_artifact_contract() -> None:

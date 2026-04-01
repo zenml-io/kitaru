@@ -23,7 +23,7 @@ Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``,
-  ``memory.set/get/list/history/delete()``, ``connect()``,
+  ``memory.configure/set/get/list/history/delete()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
   ``delete_stack()``), model alias helpers via CLI

@@ -1,4 +1,4 @@
-"""Flow-scoped memory primitives backed by ZenML artifact versions.
+"""Configurable memory primitives backed by ZenML artifact versions.
 
 The public API is exposed as a module namespace:
 
@@ -9,16 +9,20 @@ The public API is exposed as a module namespace:
         memory.set("preferences", {"theme": "dark"})
         prefs = memory.get("preferences")
 
-Phase BE-1 intentionally keeps memory narrow:
+Current status:
 - allowed in the flow body
 - forbidden inside ``@checkpoint``
-- outside-flow support deferred to a later phase
+- configurable scope defaults via ``memory.configure(...)``
+- outside-flow reads/writes deferred to a later phase
 """
 
 from __future__ import annotations
 
 import builtins
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, cast
@@ -39,7 +43,12 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
 )
-from kitaru.runtime import _get_current_flow, _is_inside_checkpoint, _is_inside_flow
+from kitaru.runtime import (
+    _get_current_execution_id,
+    _get_current_flow,
+    _is_inside_checkpoint,
+    _is_inside_flow,
+)
 
 # The public API defines ``list()`` which shadows ``builtins.list``.
 # Alias the builtin so type annotations resolve correctly under ty.
@@ -54,6 +63,7 @@ _MEMORY_DELETED_METADATA_KEY = "kitaru_memory_deleted"
 _MEMORY_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._\-/]+$")
 _MEMORY_PAGE_SIZE = 100
 _MEMORY_STEP_EXTRA_PREFIX = {"kitaru": {"boundary": "memory"}}
+_MemoryScopeType = Literal["namespace", "flow", "execution"]
 
 
 class MemoryEntry(BaseModel):
@@ -77,7 +87,22 @@ class _MemoryScope:
     """Resolved runtime memory scope for the current call."""
 
     scope: str
-    scope_type: Literal["flow"]
+    scope_type: _MemoryScopeType
+
+
+@dataclass(frozen=True)
+class _ConfiguredMemoryScope:
+    """User-configured memory scope default."""
+
+    scope: str
+    scope_type: _MemoryScopeType
+
+
+_RUNTIME_MEMORY_SCOPE_DEFAULT: _ConfiguredMemoryScope | None = None
+_CURRENT_MEMORY_SCOPE: ContextVar[_ConfiguredMemoryScope | None] = ContextVar(
+    "kitaru_current_memory_scope",
+    default=None,
+)
 
 
 def _validate_memory_identifier(
@@ -100,8 +125,22 @@ def _validate_memory_identifier(
     return normalized
 
 
-def _require_memory_flow_context(api_name: str) -> _MemoryScope:
-    """Resolve the active flow-derived memory scope for a public API call."""
+def _validate_memory_scope_type(
+    scope_type: str,
+    *,
+    error_type: type[KitaruError] = KitaruUsageError,
+) -> _MemoryScopeType:
+    """Validate and normalize a memory scope type."""
+    normalized = str(scope_type).strip().lower()
+    if normalized not in {"namespace", "flow", "execution"}:
+        raise error_type(
+            "Memory scope_type must be one of 'namespace', 'flow', or 'execution'."
+        )
+    return cast(_MemoryScopeType, normalized)
+
+
+def _require_memory_boundary(api_name: str) -> None:
+    """Enforce shared public memory context restrictions."""
     qualified_name = f"kitaru.memory.{api_name}()"
 
     if _is_inside_checkpoint():
@@ -110,11 +149,10 @@ def _require_memory_flow_context(api_name: str) -> _MemoryScope:
             "Move memory operations to the flow body."
         )
 
-    if not _is_inside_flow():
-        raise KitaruContextError(
-            f"{qualified_name} can only be called inside a @flow. "
-            "Outside-flow memory support is not available yet."
-        )
+
+def _implicit_flow_memory_scope(api_name: str) -> _MemoryScope:
+    """Resolve the implicit flow-name-backed memory scope."""
+    qualified_name = f"kitaru.memory.{api_name}()"
 
     flow_scope = _get_current_flow()
     if flow_scope is None or flow_scope.name is None:
@@ -128,6 +166,91 @@ def _require_memory_flow_context(api_name: str) -> _MemoryScope:
     )
 
 
+def _resolve_configured_scope(
+    scope: str | None,
+    *,
+    scope_type: _MemoryScopeType | None,
+) -> _ConfiguredMemoryScope:
+    """Resolve validated configuration input into a configured scope."""
+    normalized_scope = (
+        _validate_memory_identifier(scope, kind="scope") if scope is not None else None
+    )
+    normalized_scope_type = (
+        _validate_memory_scope_type(scope_type) if scope_type is not None else None
+    )
+
+    if normalized_scope is not None:
+        return _ConfiguredMemoryScope(
+            scope=normalized_scope,
+            scope_type=normalized_scope_type or "namespace",
+        )
+
+    if normalized_scope_type is None:
+        raise KitaruUsageError(
+            "kitaru.memory.configure() requires `scope=` or `scope_type=`."
+        )
+
+    if normalized_scope_type == "namespace":
+        raise KitaruUsageError(
+            "kitaru.memory.configure(scope_type='namespace') requires "
+            "an explicit `scope=` value."
+        )
+
+    if not _is_inside_flow():
+        raise KitaruContextError(
+            "kitaru.memory.configure() can only infer flow or execution scopes "
+            "inside a @flow. Provide an explicit `scope=` outside flows."
+        )
+
+    if normalized_scope_type == "flow":
+        return _ConfiguredMemoryScope(
+            scope=_implicit_flow_memory_scope("configure").scope,
+            scope_type="flow",
+        )
+
+    execution_id = _get_current_execution_id()
+    if execution_id is None:
+        raise KitaruStateError(
+            "kitaru.memory.configure(scope_type='execution') requires an "
+            "active execution ID inside @flow."
+        )
+    return _ConfiguredMemoryScope(
+        scope=_validate_memory_identifier(execution_id, kind="scope"),
+        scope_type="execution",
+    )
+
+
+def _resolve_memory_scope_for_operation(api_name: str) -> _MemoryScope:
+    """Resolve the effective memory scope for a public API call."""
+    qualified_name = f"kitaru.memory.{api_name}()"
+    _require_memory_boundary(api_name)
+
+    if not _is_inside_flow():
+        raise KitaruContextError(
+            f"{qualified_name} can only be called inside a @flow. "
+            "Outside-flow memory support is not available yet."
+        )
+
+    configured_scope = _CURRENT_MEMORY_SCOPE.get()
+    if configured_scope is not None:
+        return _MemoryScope(
+            scope=configured_scope.scope,
+            scope_type=configured_scope.scope_type,
+        )
+
+    return _implicit_flow_memory_scope(api_name)
+
+
+@contextmanager
+def _memory_scope_session() -> Iterator[None]:
+    """Snapshot the current process-local memory default for one flow run."""
+    token = _CURRENT_MEMORY_SCOPE.set(_RUNTIME_MEMORY_SCOPE_DEFAULT)
+    try:
+        yield
+    finally:
+        _CURRENT_MEMORY_SCOPE.reset(token)
+
+
 def _coerce_memory_scope(scope: str, scope_type: str) -> _MemoryScope:
     """Reconstruct a validated memory scope inside synthetic memory steps."""
     normalized_scope = _validate_memory_identifier(
@@ -135,15 +258,13 @@ def _coerce_memory_scope(scope: str, scope_type: str) -> _MemoryScope:
         kind="scope",
         error_type=KitaruRuntimeError,
     )
-    normalized_scope_type = str(scope_type).strip().lower()
-    if normalized_scope_type != "flow":
-        raise KitaruRuntimeError(
-            "BE-1 synthetic memory steps only support flow-scoped memory, "
-            f"got scope_type={scope_type!r}."
-        )
+    normalized_scope_type = _validate_memory_scope_type(
+        scope_type,
+        error_type=KitaruRuntimeError,
+    )
     return _MemoryScope(
         scope=normalized_scope,
-        scope_type=cast(Literal["flow"], normalized_scope_type),
+        scope_type=normalized_scope_type,
     )
 
 
@@ -523,17 +644,36 @@ def _memory_delete_step(
     return _delete_impl(_coerce_memory_scope(scope, scope_type), key)
 
 
+def configure(
+    scope: str | None = None,
+    *,
+    scope_type: _MemoryScopeType | None = None,
+) -> None:
+    """Configure the active memory scope for subsequent flow-body operations."""
+    global _RUNTIME_MEMORY_SCOPE_DEFAULT
+
+    _require_memory_boundary("configure")
+    configured_scope = _resolve_configured_scope(scope, scope_type=scope_type)
+
+    if _is_inside_flow():
+        _CURRENT_MEMORY_SCOPE.set(configured_scope)
+    else:
+        _RUNTIME_MEMORY_SCOPE_DEFAULT = configured_scope
+
+    return None
+
+
 def set(key: str, value: Any) -> None:
-    """Persist a new version of a flow-scoped memory key."""
-    scope = _require_memory_flow_context("set")
+    """Persist a new version of a memory key in the active scope."""
+    scope = _resolve_memory_scope_for_operation("set")
     normalized_key = _validate_memory_identifier(key, kind="key")
     _memory_set_step(scope.scope, scope.scope_type, normalized_key, value)
     return None
 
 
 def get(key: str, *, version: int | None = None) -> Any | None:
-    """Return the current value for a flow-scoped memory key, if present."""
-    scope = _require_memory_flow_context("get")
+    """Return the current value for a memory key in the active scope."""
+    scope = _resolve_memory_scope_for_operation("get")
     normalized_key = _validate_memory_identifier(key, kind="key")
     if version is not None and version < 1:
         raise KitaruUsageError("Memory version must be >= 1.")
@@ -541,23 +681,23 @@ def get(key: str, *, version: int | None = None) -> Any | None:
 
 
 def list() -> _list[MemoryEntry]:
-    """List the latest active memory entries for the current flow scope."""
-    scope = _require_memory_flow_context("list")
+    """List the latest active memory entries for the active scope."""
+    scope = _resolve_memory_scope_for_operation("list")
     return _memory_list_step(scope.scope, scope.scope_type)
 
 
 def history(key: str) -> _list[MemoryEntry]:
     """Return all versions of a memory key, including tombstones."""
-    scope = _require_memory_flow_context("history")
+    scope = _resolve_memory_scope_for_operation("history")
     normalized_key = _validate_memory_identifier(key, kind="key")
     return _memory_history_step(scope.scope, scope.scope_type, normalized_key)
 
 
 def delete(key: str) -> MemoryEntry | None:
-    """Soft-delete a flow-scoped memory key by writing a tombstone version."""
-    scope = _require_memory_flow_context("delete")
+    """Soft-delete a memory key by writing a tombstone version."""
+    scope = _resolve_memory_scope_for_operation("delete")
     normalized_key = _validate_memory_identifier(key, kind="key")
     return _memory_delete_step(scope.scope, scope.scope_type, normalized_key)
 
 
-__all__ = ["MemoryEntry", "delete", "get", "history", "list", "set"]
+__all__ = ["MemoryEntry", "configure", "delete", "get", "history", "list", "set"]
