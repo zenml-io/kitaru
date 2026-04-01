@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru.memory.set/get/list/history/delete()` now require an explicit configured scope outside flows and raise `KitaruStateError` with setup guidance when no outside-flow scope has been configured
 - In-flow memory reads and writes continue to run through private non-cacheable synthetic ZenML memory steps, while checkpoint-context restrictions remain unchanged (`memory.*` is still forbidden inside `@checkpoint`)
 
+### Fixed
+- Memory artifact version queries now use the correct `desc:version_number` sort order (was `version_number:desc`)
+
 ## [0.3.0] - 2026-03-24
 
 ### Added

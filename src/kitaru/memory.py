@@ -62,6 +62,7 @@ _MEMORY_SCOPE_TYPE_METADATA_KEY = "kitaru_memory_scope_type"
 _MEMORY_DELETED_METADATA_KEY = "kitaru_memory_deleted"
 _MEMORY_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._\-/]+$")
 _MEMORY_PAGE_SIZE = 100
+_MEMORY_VERSION_SORT = "desc:version_number"
 _MEMORY_STEP_EXTRA_PREFIX = {"kitaru": {"boundary": "memory"}}
 _MemoryScopeType = Literal["namespace", "flow", "execution"]
 
@@ -403,7 +404,7 @@ def _paginate_artifact_versions(
         page=1,
         size=_MEMORY_PAGE_SIZE,
         hydrate=True,
-        sort_by="desc:version_number",
+        sort_by=_MEMORY_VERSION_SORT,
         **kwargs,
     )
     items = [*page.items]
@@ -412,7 +413,7 @@ def _paginate_artifact_versions(
             page=page.index + 1,
             size=_MEMORY_PAGE_SIZE,
             hydrate=True,
-            sort_by="desc:version_number",
+            sort_by=_MEMORY_VERSION_SORT,
             **kwargs,
         )
         items.extend(page.items)
@@ -454,7 +455,7 @@ def _get_impl(
             page=1,
             size=1,
             hydrate=True,
-            sort_by="desc:version_number",
+            sort_by=_MEMORY_VERSION_SORT,
         )
         artifacts = page.items
     except KitaruError:
@@ -540,7 +541,7 @@ def _delete_impl(scope: _MemoryScope, key: str) -> MemoryEntry | None:
             page=1,
             size=1,
             hydrate=True,
-            sort_by="desc:version_number",
+            sort_by=_MEMORY_VERSION_SORT,
         )
         if not page.items:
             return None
@@ -564,7 +565,7 @@ def _delete_impl(scope: _MemoryScope, key: str) -> MemoryEntry | None:
             page=1,
             size=1,
             hydrate=True,
-            sort_by="desc:version_number",
+            sort_by=_MEMORY_VERSION_SORT,
         )
         if not tombstone_page.items:
             raise KitaruRuntimeError(
