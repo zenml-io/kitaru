@@ -11,7 +11,6 @@ on:
       - docs/**
       - scripts/generate_*.py
       - scripts/merge_site.sh
-      - src/kitaru/**
       - CHANGELOG.md
       - wrangler.toml
       - .github/workflows/site.yml
