@@ -6,6 +6,9 @@ ZENML_SERVER_TAG := "0.94.1"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
+# Set to "linux/amd64,linux/arm64" for multi-arch builds (requires QEMU + buildx).
+# Leave empty (default) to build for the native platform only.
+DOCKER_PLATFORM := ""
 
 # List available recipes
 default:
@@ -91,17 +94,37 @@ dev-image REPO="strickvl/kitaru-dev":
 #   just UI_TAG=v0.1.0 server-image            # specific UI release
 #   just DOCKER_TAG=v0.2.0 server-image        # specific image tag
 server-image:
-    docker build -f docker/Dockerfile --target server \
-        --build-arg ZENML_SERVER_TAG={{ ZENML_SERVER_TAG }} \
-        --build-arg KITARU_UI_TAG={{ UI_TAG }} \
-        -t kitaru-server .
-    docker tag kitaru-server {{ DOCKER_REPO }}:{{ DOCKER_TAG }}
-    @printf 'Server image built: {{ DOCKER_REPO }}:{{ DOCKER_TAG }}\n'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    platform="{{ DOCKER_PLATFORM }}"
+    if [ -n "$platform" ]; then
+        docker buildx build -f docker/Dockerfile --target server \
+            --platform "$platform" \
+            --build-arg ZENML_SERVER_TAG={{ ZENML_SERVER_TAG }} \
+            --build-arg KITARU_UI_TAG={{ UI_TAG }} \
+            -t {{ DOCKER_REPO }}:{{ DOCKER_TAG }} \
+            --push .
+        printf 'Multi-arch server image pushed: {{ DOCKER_REPO }}:{{ DOCKER_TAG }} (%s)\n' "$platform"
+    else
+        docker build -f docker/Dockerfile --target server \
+            --build-arg ZENML_SERVER_TAG={{ ZENML_SERVER_TAG }} \
+            --build-arg KITARU_UI_TAG={{ UI_TAG }} \
+            -t kitaru-server .
+        docker tag kitaru-server {{ DOCKER_REPO }}:{{ DOCKER_TAG }}
+        printf 'Server image built: {{ DOCKER_REPO }}:{{ DOCKER_TAG }}\n'
+    fi
 
-# Build and push production server image
+# Build and push production server image.
+# Multi-arch builds (DOCKER_PLATFORM set) push during build; this is a no-op then.
 server-image-push: server-image
-    docker push {{ DOCKER_REPO }}:{{ DOCKER_TAG }}
-    @printf 'Server image pushed: {{ DOCKER_REPO }}:{{ DOCKER_TAG }}\n'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "{{ DOCKER_PLATFORM }}" ]; then
+        docker push {{ DOCKER_REPO }}:{{ DOCKER_TAG }}
+        printf 'Server image pushed: {{ DOCKER_REPO }}:{{ DOCKER_TAG }}\n'
+    else
+        printf 'Multi-arch image already pushed during build.\n'
+    fi
 
 # Build dev server image for local UI testing.
 # Requires docker/kitaru-ui-dist/ to exist (copy from kitaru-ui/dist/).
