@@ -71,6 +71,32 @@ def _flow_memory_scope(name: str = "demo_flow") -> _MemoryScope:
     return _MemoryScope(scope=name, scope_type="flow")
 
 
+def _memory_entry(
+    *,
+    key: str = "prefs",
+    value_type: str = "dict",
+    version: int = 1,
+    scope: str = "demo_flow",
+    scope_type: str = "flow",
+    created_at: datetime | None = None,
+    is_deleted: bool = False,
+    artifact_id: str | None = None,
+    execution_id: str | None = None,
+) -> MemoryEntry:
+    """Build a ``MemoryEntry`` with sensible defaults for tests."""
+    return MemoryEntry(
+        key=key,
+        value_type=value_type,
+        version=version,
+        scope=scope,
+        scope_type=scope_type,
+        created_at=created_at or datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+        is_deleted=is_deleted,
+        artifact_id=artifact_id or str(uuid4()),
+        execution_id=execution_id,
+    )
+
+
 @pytest.mark.parametrize(
     "call",
     [
@@ -158,19 +184,7 @@ def test_memory_get_dispatches_to_synthetic_step() -> None:
 
 
 def test_memory_list_dispatches_to_synthetic_step() -> None:
-    fake_entries = [
-        MemoryEntry(
-            key="prefs",
-            value_type="dict",
-            version=2,
-            scope="demo_flow",
-            scope_type="flow",
-            created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
-            is_deleted=False,
-            artifact_id=str(uuid4()),
-            execution_id=None,
-        )
-    ]
+    fake_entries = [_memory_entry(version=2)]
 
     with (
         _flow_scope(name="demo_flow"),
@@ -186,19 +200,7 @@ def test_memory_list_dispatches_to_synthetic_step() -> None:
 
 
 def test_memory_history_dispatches_to_synthetic_step() -> None:
-    fake_entries = [
-        MemoryEntry(
-            key="prefs",
-            value_type="dict",
-            version=3,
-            scope="demo_flow",
-            scope_type="flow",
-            created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
-            is_deleted=True,
-            artifact_id=str(uuid4()),
-            execution_id=None,
-        )
-    ]
+    fake_entries = [_memory_entry(version=3, is_deleted=True)]
 
     with (
         _flow_scope(name="demo_flow"),
@@ -214,17 +216,7 @@ def test_memory_history_dispatches_to_synthetic_step() -> None:
 
 
 def test_memory_delete_dispatches_to_synthetic_step() -> None:
-    fake_entry = MemoryEntry(
-        key="prefs",
-        value_type="dict",
-        version=3,
-        scope="demo_flow",
-        scope_type="flow",
-        created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
-        is_deleted=True,
-        artifact_id=str(uuid4()),
-        execution_id=None,
-    )
+    fake_entry = _memory_entry(version=3, is_deleted=True)
 
     with (
         _flow_scope(name="demo_flow"),
@@ -289,6 +281,7 @@ def test_get_impl_returns_latest_value() -> None:
     assert call_kwargs["artifact"] == "kitaru_mem:demo_flow:prefs"
     assert call_kwargs["sort_by"] == "version_number:desc"
     assert call_kwargs["hydrate"] is True
+    assert call_kwargs["size"] == 1
 
 
 def test_get_impl_returns_requested_version() -> None:
@@ -505,6 +498,10 @@ def test_delete_impl_writes_tombstone_and_returns_entry() -> None:
     assert result.version == 2
     assert result.is_deleted is True
     assert result.execution_id == str(tombstone.producer_pipeline_run_id)
+    # Two list calls: existence check + tombstone re-fetch (both size=1).
+    assert client_mock.list_artifact_versions.call_count == 2
+    for call in client_mock.list_artifact_versions.call_args_list:
+        assert call.kwargs["size"] == 1
 
 
 def test_delete_impl_returns_existing_tombstone_when_key_already_deleted() -> None:

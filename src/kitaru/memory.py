@@ -17,6 +17,7 @@ Phase BE-1 intentionally keeps memory narrow:
 
 from __future__ import annotations
 
+import builtins
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -39,6 +40,10 @@ from kitaru.errors import (
     KitaruUsageError,
 )
 from kitaru.runtime import _get_current_flow, _is_inside_checkpoint, _is_inside_flow
+
+# The public API defines ``list()`` which shadows ``builtins.list``.
+# Alias the builtin so type annotations resolve correctly under ty.
+_list = builtins.list
 
 _MEMORY_ARTIFACT_PREFIX = "kitaru_mem"
 _MEMORY_TAG_MARKER = "kitaru:memory"
@@ -157,7 +162,7 @@ def _memory_key_tag(key: str) -> str:
     return f"{_MEMORY_TAG_KEY_PREFIX}{key}"
 
 
-def _memory_tags(scope: str, key: str) -> list[str]:
+def _memory_tags(scope: str, key: str) -> _list[str]:
     """Build the storage tags for a memory artifact version."""
     return [
         _MEMORY_TAG_MARKER,
@@ -239,11 +244,7 @@ def _infer_value_type(artifact: ArtifactVersionResponse) -> str:
     import_path = getattr(artifact.data_type, "import_path", None)
     if isinstance(import_path, str) and import_path.strip():
         return import_path.rsplit(".", maxsplit=1)[-1]
-
-    try:
-        return type(artifact.load()).__name__
-    except Exception:
-        return "unknown"
+    return "unknown"
 
 
 def _artifact_to_memory_entry(artifact: ArtifactVersionResponse) -> MemoryEntry:
@@ -267,8 +268,8 @@ def _artifact_to_memory_entry(artifact: ArtifactVersionResponse) -> MemoryEntry:
 
 
 def _sort_memory_artifacts(
-    artifacts: list[ArtifactVersionResponse],
-) -> list[ArtifactVersionResponse]:
+    artifacts: _list[ArtifactVersionResponse],
+) -> _list[ArtifactVersionResponse]:
     """Sort artifact versions newest-first with deterministic tie-breakers."""
     return sorted(
         artifacts,
@@ -284,7 +285,7 @@ def _sort_memory_artifacts(
 def _paginate_artifact_versions(
     client: Client,
     **kwargs: Any,
-) -> list[ArtifactVersionResponse]:
+) -> _list[ArtifactVersionResponse]:
     """Collect all artifact-version pages for a query."""
     page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
         page=1,
@@ -320,8 +321,7 @@ def _set_impl(scope: _MemoryScope, key: str, value: Any) -> None:
         raise
     except Exception as exc:
         raise KitaruBackendError(
-            "Failed to set memory key "
-            f"{key!r} in scope {scope.scope!r}: {exc}"
+            f"Failed to set memory key {key!r} in scope {scope.scope!r}: {exc}"
         ) from exc
 
 
@@ -333,23 +333,29 @@ def _get_impl(
     """Read a memory key inside a synthetic memory step."""
     try:
         client = Client()
-        artifacts = _paginate_artifact_versions(
-            client,
-            artifact=_memory_artifact_name(scope.scope, key),
+        artifact_name = _memory_artifact_name(scope.scope, key)
+        # Only the newest version is needed — fetch a single page of size 1
+        # instead of paginating all versions.
+        page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
+            artifact=artifact_name,
             version=version,
+            page=1,
+            size=1,
+            hydrate=True,
+            sort_by="version_number:desc",
         )
+        artifacts = page.items
     except KitaruError:
         raise
     except Exception as exc:
         raise KitaruBackendError(
-            "Failed to get memory key "
-            f"{key!r} in scope {scope.scope!r}: {exc}"
+            f"Failed to get memory key {key!r} in scope {scope.scope!r}: {exc}"
         ) from exc
 
     if not artifacts:
         return None
 
-    selected = _sort_memory_artifacts(artifacts)[0]
+    selected = artifacts[0]
     if _is_deleted_artifact(selected):
         return None
 
@@ -357,12 +363,11 @@ def _get_impl(
         return selected.load()
     except Exception as exc:
         raise KitaruBackendError(
-            "Failed to load memory key "
-            f"{key!r} in scope {scope.scope!r}: {exc}"
+            f"Failed to load memory key {key!r} in scope {scope.scope!r}: {exc}"
         ) from exc
 
 
-def _list_impl(scope: _MemoryScope) -> list[MemoryEntry]:
+def _list_impl(scope: _MemoryScope) -> _list[MemoryEntry]:
     """List the latest active memory entries inside a synthetic memory step."""
     try:
         client = Client()
@@ -389,7 +394,7 @@ def _list_impl(scope: _MemoryScope) -> list[MemoryEntry]:
     return sorted(entries, key=lambda entry: entry.key)
 
 
-def _history_impl(scope: _MemoryScope, key: str) -> list[MemoryEntry]:
+def _history_impl(scope: _MemoryScope, key: str) -> _list[MemoryEntry]:
     """Return all versions of a memory key inside a synthetic memory step."""
     try:
         client = Client()
@@ -417,11 +422,18 @@ def _delete_impl(scope: _MemoryScope, key: str) -> MemoryEntry | None:
 
     try:
         client = Client()
-        current_versions = _paginate_artifact_versions(client, artifact=artifact_name)
-        if not current_versions:
+        # Check if the key exists and whether it's already deleted.
+        page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
+            artifact=artifact_name,
+            page=1,
+            size=1,
+            hydrate=True,
+            sort_by="version_number:desc",
+        )
+        if not page.items:
             return None
 
-        latest_current = _sort_memory_artifacts(current_versions)[0]
+        latest_current = page.items[0]
         if _is_deleted_artifact(latest_current):
             return _artifact_to_memory_entry(latest_current)
 
@@ -433,26 +445,32 @@ def _delete_impl(scope: _MemoryScope, key: str) -> MemoryEntry | None:
             user_metadata=_memory_metadata(scope_type=scope.scope_type, deleted=True),
         )
 
-        latest_versions = _paginate_artifact_versions(client, artifact=artifact_name)
-        if not latest_versions:
+        # Re-fetch the tombstone so the response includes producer linkage
+        # that ZenML writes *after* create_artifact_version returns.
+        tombstone_page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
+            artifact=artifact_name,
+            page=1,
+            size=1,
+            hydrate=True,
+            sort_by="version_number:desc",
+        )
+        if not tombstone_page.items:
             raise KitaruRuntimeError(
                 f"Memory delete for key {key!r} in scope {scope.scope!r} "
                 "did not produce a readable tombstone version."
             )
-        return _artifact_to_memory_entry(_sort_memory_artifacts(latest_versions)[0])
+        return _artifact_to_memory_entry(tombstone_page.items[0])
     except KitaruError:
         raise
     except Exception as exc:
         raise KitaruBackendError(
-            "Failed to delete memory key "
-            f"{key!r} in scope {scope.scope!r}: {exc}"
+            f"Failed to delete memory key {key!r} in scope {scope.scope!r}: {exc}"
         ) from exc
 
 
 def _memory_step(*, name: str, operation: str):
     """Build a private synthetic ZenML step for one memory operation."""
     extra = {
-        **_MEMORY_STEP_EXTRA_PREFIX,
         "kitaru": {
             **_MEMORY_STEP_EXTRA_PREFIX["kitaru"],
             "operation": operation,
@@ -484,13 +502,13 @@ def _memory_get_step(
 
 
 @_memory_step(name="kitaru_memory_list", operation="list")
-def _memory_list_step(scope: str, scope_type: str) -> list[MemoryEntry]:
+def _memory_list_step(scope: str, scope_type: str) -> _list[MemoryEntry]:
     """Synthetic non-cacheable step for `memory.list()`."""
     return _list_impl(_coerce_memory_scope(scope, scope_type))
 
 
 @_memory_step(name="kitaru_memory_history", operation="history")
-def _memory_history_step(scope: str, scope_type: str, key: str) -> list[MemoryEntry]:
+def _memory_history_step(scope: str, scope_type: str, key: str) -> _list[MemoryEntry]:
     """Synthetic non-cacheable step for `memory.history()`."""
     return _history_impl(_coerce_memory_scope(scope, scope_type), key)
 
@@ -522,13 +540,13 @@ def get(key: str, *, version: int | None = None) -> Any | None:
     return _memory_get_step(scope.scope, scope.scope_type, normalized_key, version)
 
 
-def list() -> list[MemoryEntry]:
+def list() -> _list[MemoryEntry]:
     """List the latest active memory entries for the current flow scope."""
     scope = _require_memory_flow_context("list")
     return _memory_list_step(scope.scope, scope.scope_type)
 
 
-def history(key: str) -> list[MemoryEntry]:
+def history(key: str) -> _list[MemoryEntry]:
     """Return all versions of a memory key, including tombstones."""
     scope = _require_memory_flow_context("history")
     normalized_key = _validate_memory_identifier(key, kind="key")
