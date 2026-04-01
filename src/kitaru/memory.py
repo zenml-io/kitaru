@@ -13,7 +13,7 @@ Current status:
 - allowed in the flow body
 - forbidden inside ``@checkpoint``
 - configurable scope defaults via ``memory.configure(...)``
-- outside-flow reads/writes deferred to a later phase
+- outside-flow reads/writes supported after ``memory.configure(scope=...)``
 """
 
 from __future__ import annotations
@@ -217,17 +217,19 @@ def _resolve_memory_scope_for_operation(api_name: str) -> _MemoryScope:
     qualified_name = f"kitaru.memory.{api_name}()"
     _require_memory_boundary(api_name)
 
-    if not _is_inside_flow():
-        raise KitaruContextError(
-            f"{qualified_name} can only be called inside a @flow. "
-            "Outside-flow memory support is not available yet."
-        )
+    if _is_inside_flow():
+        configured_scope = _CURRENT_MEMORY_SCOPE.get()
+        if configured_scope is not None:
+            return configured_scope
+        return _implicit_flow_memory_scope(api_name)
 
-    configured_scope = _CURRENT_MEMORY_SCOPE.get()
-    if configured_scope is not None:
-        return configured_scope
+    if _RUNTIME_MEMORY_SCOPE_DEFAULT is not None:
+        return _RUNTIME_MEMORY_SCOPE_DEFAULT
 
-    return _implicit_flow_memory_scope(api_name)
+    raise KitaruStateError(
+        f"{qualified_name} outside a @flow requires an explicit scope. "
+        "Call kitaru.memory.configure(scope=...) first."
+    )
 
 
 @contextmanager
@@ -401,7 +403,7 @@ def _paginate_artifact_versions(
         page=1,
         size=_MEMORY_PAGE_SIZE,
         hydrate=True,
-        sort_by="version_number:desc",
+        sort_by="desc:version_number",
         **kwargs,
     )
     items = [*page.items]
@@ -410,7 +412,7 @@ def _paginate_artifact_versions(
             page=page.index + 1,
             size=_MEMORY_PAGE_SIZE,
             hydrate=True,
-            sort_by="version_number:desc",
+            sort_by="desc:version_number",
             **kwargs,
         )
         items.extend(page.items)
@@ -418,7 +420,7 @@ def _paginate_artifact_versions(
 
 
 def _set_impl(scope: _MemoryScope, key: str, value: Any) -> None:
-    """Persist a new version of a memory key inside a synthetic memory step."""
+    """Persist a new version of a memory key for the resolved scope."""
     try:
         save_artifact(
             data=value,
@@ -440,7 +442,7 @@ def _get_impl(
     key: str,
     version: int | None = None,
 ) -> Any | None:
-    """Read a memory key inside a synthetic memory step."""
+    """Read a memory key for the resolved scope."""
     try:
         client = Client()
         artifact_name = _memory_artifact_name(scope.scope, key)
@@ -452,7 +454,7 @@ def _get_impl(
             page=1,
             size=1,
             hydrate=True,
-            sort_by="version_number:desc",
+            sort_by="desc:version_number",
         )
         artifacts = page.items
     except KitaruError:
@@ -478,7 +480,7 @@ def _get_impl(
 
 
 def _list_impl(scope: _MemoryScope) -> _list[MemoryEntry]:
-    """List the latest active memory entries inside a synthetic memory step."""
+    """List the latest active memory entries for the resolved scope."""
     try:
         client = Client()
         artifacts = _paginate_artifact_versions(
@@ -505,7 +507,7 @@ def _list_impl(scope: _MemoryScope) -> _list[MemoryEntry]:
 
 
 def _history_impl(scope: _MemoryScope, key: str) -> _list[MemoryEntry]:
-    """Return all versions of a memory key inside a synthetic memory step."""
+    """Return all versions of a memory key for the resolved scope."""
     try:
         client = Client()
         artifacts = _paginate_artifact_versions(
@@ -527,7 +529,7 @@ def _history_impl(scope: _MemoryScope, key: str) -> _list[MemoryEntry]:
 
 
 def _delete_impl(scope: _MemoryScope, key: str) -> MemoryEntry | None:
-    """Soft-delete a memory key inside a synthetic memory step."""
+    """Soft-delete a memory key for the resolved scope."""
     artifact_name = _memory_artifact_name(scope.scope, key)
 
     try:
@@ -538,7 +540,7 @@ def _delete_impl(scope: _MemoryScope, key: str) -> MemoryEntry | None:
             page=1,
             size=1,
             hydrate=True,
-            sort_by="version_number:desc",
+            sort_by="desc:version_number",
         )
         if not page.items:
             return None
@@ -562,7 +564,7 @@ def _delete_impl(scope: _MemoryScope, key: str) -> MemoryEntry | None:
             page=1,
             size=1,
             hydrate=True,
-            sort_by="version_number:desc",
+            sort_by="desc:version_number",
         )
         if not tombstone_page.items:
             raise KitaruRuntimeError(
@@ -638,7 +640,12 @@ def configure(
     *,
     scope_type: _MemoryScopeType | None = None,
 ) -> None:
-    """Configure the active memory scope for subsequent flow-body operations."""
+    """Configure the active memory scope for subsequent memory operations.
+
+    Inside a flow this updates the flow-local scope for later ``memory.*`` calls.
+    Outside a flow this stores a process-local default that is used immediately by
+    outside-flow memory operations and also seeds later flow runs.
+    """
     global _RUNTIME_MEMORY_SCOPE_DEFAULT
 
     _require_memory_boundary("configure")
@@ -653,40 +660,61 @@ def configure(
 
 
 def set(key: str, value: Any) -> None:
-    """Persist a new version of a memory key in the active scope."""
+    """Persist a new version of a memory key in the active scope.
+
+    Inside a flow, this dispatches through a synthetic non-cacheable ZenML step so
+    the write happens at runtime. Outside a flow, it writes directly to the
+    artifact store using the configured process-local scope.
+    """
     scope = _resolve_memory_scope_for_operation("set")
     normalized_key = _validate_memory_identifier(key, kind="key")
-    _memory_set_step(scope.scope, scope.scope_type, normalized_key, value)
+    if _is_inside_flow():
+        _memory_set_step(scope.scope, scope.scope_type, normalized_key, value)
+    else:
+        _set_impl(scope, normalized_key, value)
     return None
 
 
 def get(key: str, *, version: int | None = None) -> Any | None:
-    """Return the current value for a memory key in the active scope."""
+    """Return the current value for a memory key in the active scope.
+
+    Inside a flow, reads run through a synthetic non-cacheable ZenML step so the
+    lookup happens at runtime. Outside a flow, reads query the artifact store
+    directly using the configured process-local scope.
+    """
     scope = _resolve_memory_scope_for_operation("get")
     normalized_key = _validate_memory_identifier(key, kind="key")
     if version is not None and version < 1:
         raise KitaruUsageError("Memory version must be >= 1.")
-    return _memory_get_step(scope.scope, scope.scope_type, normalized_key, version)
+    if _is_inside_flow():
+        return _memory_get_step(scope.scope, scope.scope_type, normalized_key, version)
+    return _get_impl(scope, normalized_key, version)
 
 
 def list() -> _list[MemoryEntry]:
     """List the latest active memory entries for the active scope."""
     scope = _resolve_memory_scope_for_operation("list")
-    return _memory_list_step(scope.scope, scope.scope_type)
+    if _is_inside_flow():
+        return _memory_list_step(scope.scope, scope.scope_type)
+    return _list_impl(scope)
 
 
 def history(key: str) -> _list[MemoryEntry]:
     """Return all versions of a memory key, including tombstones."""
     scope = _resolve_memory_scope_for_operation("history")
     normalized_key = _validate_memory_identifier(key, kind="key")
-    return _memory_history_step(scope.scope, scope.scope_type, normalized_key)
+    if _is_inside_flow():
+        return _memory_history_step(scope.scope, scope.scope_type, normalized_key)
+    return _history_impl(scope, normalized_key)
 
 
 def delete(key: str) -> MemoryEntry | None:
     """Soft-delete a memory key by writing a tombstone version."""
     scope = _resolve_memory_scope_for_operation("delete")
     normalized_key = _validate_memory_identifier(key, kind="key")
-    return _memory_delete_step(scope.scope, scope.scope_type, normalized_key)
+    if _is_inside_flow():
+        return _memory_delete_step(scope.scope, scope.scope_type, normalized_key)
+    return _delete_impl(scope, normalized_key)
 
 
 __all__ = ["MemoryEntry", "configure", "delete", "get", "history", "list", "set"]

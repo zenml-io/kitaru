@@ -387,6 +387,7 @@ def serialize_checkpoint_call(checkpoint: CheckpointCall) -> dict[str, Any]:
     return {
         "call_id": checkpoint.call_id,
         "name": checkpoint.name,
+        "checkpoint_type": checkpoint.checkpoint_type,
         "status": checkpoint.status.value,
         "started_at": to_jsonable(checkpoint.started_at, fallback_repr=True),
         "ended_at": to_jsonable(checkpoint.ended_at, fallback_repr=True),

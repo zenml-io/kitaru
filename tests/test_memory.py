@@ -107,8 +107,13 @@ def _memory_entry(
         lambda: memory.delete("prefs"),
     ],
 )
-def test_memory_apis_require_flow_context(call: Callable[[], object]) -> None:
-    with pytest.raises(KitaruContextError, match=r"inside a @flow"):
+def test_memory_apis_require_configured_scope_outside_flow(
+    call: Callable[[], object],
+) -> None:
+    with pytest.raises(
+        KitaruStateError,
+        match=r"requires an explicit scope.*memory\.configure\(scope=\.\.\.\)",
+    ):
         call()
 
 
@@ -224,6 +229,25 @@ def test_memory_set_dispatches_to_synthetic_step() -> None:
     )
 
 
+def test_memory_set_outside_flow_dispatches_to_direct_impl() -> None:
+    payload = {"language": "en", "theme": "dark"}
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch("kitaru.memory._set_impl") as set_impl,
+        patch("kitaru.memory._memory_set_step") as memory_set_step,
+    ):
+        result = memory.set("user_preferences", payload)
+
+    assert result is None
+    set_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "user_preferences",
+        payload,
+    )
+    memory_set_step.assert_not_called()
+
+
 def test_memory_get_dispatches_to_synthetic_step() -> None:
     with (
         _flow_scope(name="demo_flow"),
@@ -236,6 +260,27 @@ def test_memory_get_dispatches_to_synthetic_step() -> None:
 
     assert result == {"theme": "dark"}
     memory_get_step.assert_called_once_with("demo_flow", "flow", "prefs", 2)
+
+
+def test_memory_get_outside_flow_dispatches_to_direct_impl() -> None:
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._get_impl",
+            return_value={"theme": "dark"},
+        ) as get_impl,
+        patch("kitaru.memory._memory_get_step") as memory_get_step,
+    ):
+        result = memory.get("prefs", version=2)
+
+    assert result == {"theme": "dark"}
+    get_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "prefs",
+        2,
+    )
+    memory_get_step.assert_not_called()
 
 
 def test_memory_list_dispatches_to_synthetic_step() -> None:
@@ -254,6 +299,26 @@ def test_memory_list_dispatches_to_synthetic_step() -> None:
     memory_list_step.assert_called_once_with("demo_flow", "flow")
 
 
+def test_memory_list_outside_flow_dispatches_to_direct_impl() -> None:
+    fake_entries = [_memory_entry(scope="repo_seed", scope_type="namespace")]
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._list_impl",
+            return_value=fake_entries,
+        ) as list_impl,
+        patch("kitaru.memory._memory_list_step") as memory_list_step,
+    ):
+        result = memory.list()
+
+    assert result == fake_entries
+    list_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace")
+    )
+    memory_list_step.assert_not_called()
+
+
 def test_memory_history_dispatches_to_synthetic_step() -> None:
     fake_entries = [_memory_entry(version=3, is_deleted=True)]
 
@@ -270,6 +335,27 @@ def test_memory_history_dispatches_to_synthetic_step() -> None:
     memory_history_step.assert_called_once_with("demo_flow", "flow", "prefs")
 
 
+def test_memory_history_outside_flow_dispatches_to_direct_impl() -> None:
+    fake_entries = [_memory_entry(scope="repo_seed", scope_type="namespace")]
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._history_impl",
+            return_value=fake_entries,
+        ) as history_impl,
+        patch("kitaru.memory._memory_history_step") as memory_history_step,
+    ):
+        result = memory.history("prefs")
+
+    assert result == fake_entries
+    history_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "prefs",
+    )
+    memory_history_step.assert_not_called()
+
+
 def test_memory_delete_dispatches_to_synthetic_step() -> None:
     fake_entry = _memory_entry(version=3, is_deleted=True)
 
@@ -284,6 +370,32 @@ def test_memory_delete_dispatches_to_synthetic_step() -> None:
 
     assert result == fake_entry
     memory_delete_step.assert_called_once_with("demo_flow", "flow", "prefs")
+
+
+def test_memory_delete_outside_flow_dispatches_to_direct_impl() -> None:
+    fake_entry = _memory_entry(
+        scope="repo_seed",
+        scope_type="namespace",
+        version=2,
+        is_deleted=True,
+    )
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._delete_impl",
+            return_value=fake_entry,
+        ) as delete_impl,
+        patch("kitaru.memory._memory_delete_step") as memory_delete_step,
+    ):
+        result = memory.delete("prefs")
+
+    assert result == fake_entry
+    delete_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "prefs",
+    )
+    memory_delete_step.assert_not_called()
 
 
 def test_memory_configure_sets_namespace_scope_for_subsequent_calls() -> None:
@@ -412,6 +524,47 @@ def test_memory_configure_inside_flow_overrides_process_default_without_mutation
     memory_list_step_2.assert_called_once_with("repo_seed", "namespace")
 
 
+def test_memory_outside_flow_public_roundtrip_uses_detached_artifacts(
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+
+    memory.configure(scope="repo_seed")
+
+    memory.set("prefs", {"theme": "dark"})
+    assert memory.get("prefs") == {"theme": "dark"}
+
+    listed = memory.list()
+    assert len(listed) == 1
+    assert listed[0].key == "prefs"
+    assert listed[0].scope == "repo_seed"
+    assert listed[0].scope_type == "namespace"
+    assert listed[0].version == 1
+    assert listed[0].execution_id is None
+    assert listed[0].is_deleted is False
+
+    initial_history = memory.history("prefs")
+    assert [entry.version for entry in initial_history] == [1]
+    assert [entry.is_deleted for entry in initial_history] == [False]
+    assert all(entry.execution_id is None for entry in initial_history)
+
+    deleted = memory.delete("prefs")
+    assert deleted is not None
+    assert deleted.scope == "repo_seed"
+    assert deleted.scope_type == "namespace"
+    assert deleted.version == 2
+    assert deleted.is_deleted is True
+    assert deleted.execution_id is None
+
+    assert memory.get("prefs") is None
+    assert memory.list() == []
+
+    final_history = memory.history("prefs")
+    assert [entry.version for entry in final_history] == [2, 1]
+    assert [entry.is_deleted for entry in final_history] == [True, False]
+    assert all(entry.execution_id is None for entry in final_history)
+
+
 def test_set_impl_persists_expected_artifact_contract() -> None:
     payload = {"language": "en", "theme": "dark"}
 
@@ -460,7 +613,7 @@ def test_get_impl_returns_latest_value() -> None:
     latest.load.assert_called_once_with()
     call_kwargs = client_mock.list_artifact_versions.call_args.kwargs
     assert call_kwargs["artifact"] == "kitaru_mem:demo_flow:prefs"
-    assert call_kwargs["sort_by"] == "version_number:desc"
+    assert call_kwargs["sort_by"] == "desc:version_number"
     assert call_kwargs["hydrate"] is True
     assert call_kwargs["size"] == 1
 

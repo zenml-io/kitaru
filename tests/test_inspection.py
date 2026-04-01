@@ -149,6 +149,7 @@ def _sample_checkpoint_call() -> CheckpointCall:
     return CheckpointCall(
         call_id="call-1",
         name="research",
+        checkpoint_type="tool_call",
         status=ExecutionStatus.FAILED,
         started_at=datetime(2026, 3, 14, 10, 0, tzinfo=UTC),
         ended_at=datetime(2026, 3, 14, 10, 10, tzinfo=UTC),
@@ -334,6 +335,7 @@ def test_serialize_checkpoint_call_contract() -> None:
     assert payload == {
         "call_id": "call-1",
         "name": "research",
+        "checkpoint_type": "tool_call",
         "status": "failed",
         "started_at": "2026-03-14T10:00:00+00:00",
         "ended_at": "2026-03-14T10:10:00+00:00",
@@ -451,6 +453,7 @@ def test_serialize_execution_contract() -> None:
     }
     assert payload["original_exec_id"] == "kr-100"
     assert payload["checkpoints"][0]["name"] == "research"
+    assert payload["checkpoints"][0]["checkpoint_type"] == "tool_call"
     assert payload["artifacts"][0]["name"] == "final_summary"
     assert payload["pending_wait"]["wait_id"] == "wait-1"
 
