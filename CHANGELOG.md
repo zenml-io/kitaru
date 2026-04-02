@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Public memory operations now work outside flows after `kitaru.memory.configure(scope=...)`, enabling seeding and inspection from plain scripts while reusing the same durable artifact-backed storage contract
 - `KitaruClient.memories` typed memory namespace for `get/list/history/set/delete` operations by explicit scope
 - Shared memory transport helpers and serializers (`kitaru._interface_memory`, `kitaru.inspection.serialize_memory_*`) so future CLI and MCP surfaces can reuse one payload/validation layer instead of re-implementing memory semantics
+- Runnable memory example under `examples/memory/flow_with_memory.py` showing outside-flow seeding, in-flow `kitaru.memory` usage, and explicit-scope inspection via `KitaruClient.memories`
 
 ### Changed
 - `kitaru.memory.set/get/list/history/delete()` now require an explicit configured scope outside flows and raise `KitaruStateError` with setup guidance when no outside-flow scope has been configured

@@ -20,6 +20,7 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 - **Run the smallest possible durable flow:** `examples/basic_flow/first_working_flow.py`
 - **See structured metadata logging:** `examples/basic_flow/flow_with_logging.py`
 - **Persist and reload artifacts:** `examples/basic_flow/flow_with_artifacts.py`
+- **Seed, inspect, and evolve durable memory:** `examples/memory/flow_with_memory.py`
 - **Run checkpoints in isolated containers with fan-out:** `examples/basic_flow/flow_with_checkpoint_runtime.py`
 - **Inspect and manage past executions:** `examples/execution_management/client_execution_management.py`
 - **Pause for human input and resume later:** `examples/execution_management/wait_and_resume.py`
@@ -41,6 +42,7 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 ## How the examples are organized
 
 - [basic_flow/README.md](basic_flow/README.md) — smallest flows, logging, artifacts, and runtime configuration
+- [memory/README.md](memory/README.md) — durable memory seeding, scope switching, and inspection
 - [execution_management/README.md](execution_management/README.md) — inspect executions, resolve waits, and resume work
 - [replay/README.md](replay/README.md) — replay from a checkpoint boundary with targeted overrides
 - [llm/README.md](llm/README.md) — tracked `kitaru.llm()` calls inside flows
@@ -57,6 +59,12 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 | [Artifacts](basic_flow/flow_with_artifacts.py) | `uv run examples/basic_flow/flow_with_artifacts.py` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://kitaru.ai/docs/getting-started/artifacts) | [tests/test_phase8_artifacts_example.py](../tests/test_phase8_artifacts_example.py) |
 | [Configuration](basic_flow/flow_with_configuration.py) | `uv run examples/basic_flow/flow_with_configuration.py` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://kitaru.ai/docs/getting-started/configuration) | [tests/test_phase10_configuration_example.py](../tests/test_phase10_configuration_example.py) |
 | [Checkpoint runtime](basic_flow/flow_with_checkpoint_runtime.py) | `uv run examples/basic_flow/flow_with_checkpoint_runtime.py` | `uv sync --extra local` | `@checkpoint(runtime="isolated")` with `.submit()` fan-out | [Checkpoints](https://kitaru.ai/docs/concepts/checkpoints) | — |
+
+## Durable shared state
+
+| Example | Run | Requires | What it demonstrates | Docs | Test |
+|---|---|---|---|---|---|
+| [Memory](memory/flow_with_memory.py) | `uv run examples/memory/flow_with_memory.py` | `uv sync --extra local` | Outside-flow seeding, in-flow `kitaru.memory`, and explicit-scope inspection with `KitaruClient.memories` | [Use Memory](https://kitaru.ai/docs/guides/memory) | [tests/test_phase20_memory_example.py](../tests/test_phase20_memory_example.py) |
 
 ## Execution lifecycle and recovery
 
@@ -82,13 +90,14 @@ If you are new to Kitaru, this is the smoothest path:
 1. `uv run examples/basic_flow/first_working_flow.py`
 2. `uv run examples/basic_flow/flow_with_logging.py`
 3. `uv run examples/basic_flow/flow_with_artifacts.py`
-4. `uv run examples/execution_management/client_execution_management.py`
-5. `uv run examples/execution_management/wait_and_resume.py`
-6. `uv run examples/replay/replay_with_overrides.py`
-7. `uv run examples/llm/flow_with_llm.py`
-8. `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py`
-9. `cd examples/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
-10. `uv run examples/mcp/mcp_query_tools.py`
+4. `uv run examples/memory/flow_with_memory.py`
+5. `uv run examples/execution_management/client_execution_management.py`
+6. `uv run examples/execution_management/wait_and_resume.py`
+7. `uv run examples/replay/replay_with_overrides.py`
+8. `uv run examples/llm/flow_with_llm.py`
+9. `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py`
+10. `cd examples/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
+11. `uv run examples/mcp/mcp_query_tools.py`
 
 If you prefer the hosted docs view, start with the
 [Examples page](https://kitaru.ai/docs/getting-started/examples).

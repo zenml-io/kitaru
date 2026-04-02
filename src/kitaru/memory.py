@@ -16,8 +16,6 @@ Current status:
 - outside-flow reads/writes supported after ``memory.configure(scope=...)``
 """
 
-from __future__ import annotations
-
 import builtins
 import re
 from collections.abc import Callable, Iterator
@@ -855,8 +853,13 @@ def _memory_get_step(
     scope_type: str,
     key: str,
     version: int | None = None,
-) -> Any | None:
-    """Synthetic non-cacheable step for `memory.get()`."""
+) -> Any:
+    """Synthetic non-cacheable step for `memory.get()`.
+
+    Return type is ``Any`` (not ``Any | None``) because ZenML step
+    introspection does not reliably handle union return types for
+    materializer selection on synthetic memory steps.
+    """
     return _get_impl(_coerce_memory_scope(scope, scope_type), key, version)
 
 
@@ -877,8 +880,13 @@ def _memory_delete_step(
     scope: str,
     scope_type: str,
     key: str,
-) -> MemoryEntry | None:
-    """Synthetic non-cacheable step for `memory.delete()`."""
+) -> Any:
+    """Synthetic non-cacheable step for `memory.delete()`.
+
+    Return type is ``Any`` (not ``MemoryEntry | None``) because ZenML
+    step introspection does not reliably handle union return types for
+    materializer selection on synthetic memory steps.
+    """
     return _delete_impl(_coerce_memory_scope(scope, scope_type), key)
 
 
