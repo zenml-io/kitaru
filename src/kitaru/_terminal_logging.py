@@ -199,6 +199,12 @@ _DROP_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^Backing up the database before migration "),
     re.compile(r"^Database successfully backed up to "),
     re.compile(r"^Successfully cleaned up database dump file "),
+    # Resume noise — config-change warnings for already-completed steps
+    # (tolerates upstream typo "the the" and future correction)
+    re.compile(
+        r"^Configuration for step `.+?` changed since the (?:the )?"
+        r"orchestration environment was restarted\."
+    ),
 ]
 
 
