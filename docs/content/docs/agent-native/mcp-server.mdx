@@ -1,6 +1,6 @@
 ---
 title: MCP Server
-description: Query and manage Kitaru executions through Model Context Protocol tools
+description: Query and manage Kitaru executions, artifacts, and memory through Model Context Protocol tools
 ---
 
 Kitaru ships an MCP server so assistants can query and manage executions with
@@ -79,6 +79,14 @@ Artifact tools:
 - `kitaru_artifacts_list`
 - `kitaru_artifacts_get`
 
+Memory tools:
+
+- `kitaru_memory_list`
+- `kitaru_memory_get`
+- `kitaru_memory_set`
+- `kitaru_memory_delete`
+- `kitaru_memory_history`
+
 Connection tools:
 
 - `kitaru_start_local_server`
@@ -127,6 +135,25 @@ execution targets that stack.
 
 To provision or clean up a local stack, use `manage_stack(action="create", name="local-dev")`
 or `manage_stack(action="delete", name="local-dev", force=True)`.
+
+## Memory tools
+
+The memory tools give assistants direct structured access to Kitaru's durable
+key-value memory store.
+
+- `scope` is required on every memory tool
+- `version` is available only on `kitaru_memory_get`
+- `scope_type` is available only on `kitaru_memory_set`
+
+Typical memory query/update flow:
+
+1. `kitaru_memory_list(scope="repo_docs")`
+2. `kitaru_memory_get(key="style/release_notes", scope="repo_docs")`
+3. `kitaru_memory_set(key="style/release_notes", value={"tone": "concise"}, scope="repo_docs", scope_type="namespace")`
+4. `kitaru_memory_history(key="style/release_notes", scope="repo_docs")`
+
+Use these tools when an assistant needs durable shared state without parsing CLI
+output or inventing its own scratchpad format.
 
 ## Authentication and context
 

@@ -16,8 +16,6 @@ Current status:
 - outside-flow reads/writes supported after ``memory.configure(scope=...)``
 """
 
-from __future__ import annotations
-
 import builtins
 import re
 from collections.abc import Callable, Iterator
@@ -79,6 +77,16 @@ class MemoryEntry(BaseModel):
     is_deleted: bool
     artifact_id: str
     execution_id: str | None
+
+    model_config = ConfigDict(frozen=True)
+
+
+class MemoryScopeInfo(BaseModel):
+    """Summary of one discovered memory scope."""
+
+    scope: str
+    scope_type: str
+    entry_count: int
 
     model_config = ConfigDict(frozen=True)
 
@@ -704,6 +712,47 @@ def _list_impl(
     return sorted(entries, key=lambda entry: entry.key)
 
 
+def _list_scopes_impl(
+    *,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
+) -> _list[MemoryScopeInfo]:
+    """Discover all memory scopes with entry counts."""
+    try:
+        client = _resolve_memory_client_factory(client_factory)()
+        artifacts = _paginate_artifact_versions(
+            client,
+            tags=[_MEMORY_TAG_MARKER],
+            **_memory_query_kwargs(project=project),
+        )
+    except KitaruError:
+        raise
+    except Exception as exc:
+        raise KitaruBackendError(f"Failed to discover memory scopes: {exc}") from exc
+
+    # Group the latest version per artifact name, then aggregate by scope.
+    latest_by_artifact: dict[str, ArtifactVersionResponse] = {}
+    for artifact in _sort_memory_artifacts(artifacts):
+        latest_by_artifact.setdefault(artifact.name, artifact)
+
+    scope_stats: dict[str, tuple[str, int]] = {}
+    for artifact in latest_by_artifact.values():
+        if _is_deleted_artifact(artifact):
+            continue
+        scope, _key = _parse_memory_artifact_identity(artifact.name)
+        scope_type = _resolve_scope_type(artifact)
+        prev_type, prev_count = scope_stats.get(scope, (scope_type, 0))
+        scope_stats[scope] = (prev_type, prev_count + 1)
+
+    return sorted(
+        [
+            MemoryScopeInfo(scope=scope, scope_type=scope_type, entry_count=count)
+            for scope, (scope_type, count) in scope_stats.items()
+        ],
+        key=lambda info: info.scope,
+    )
+
+
 def _history_impl(
     scope: _MemoryScope,
     key: str,
@@ -804,8 +853,13 @@ def _memory_get_step(
     scope_type: str,
     key: str,
     version: int | None = None,
-) -> Any | None:
-    """Synthetic non-cacheable step for `memory.get()`."""
+) -> Any:
+    """Synthetic non-cacheable step for `memory.get()`.
+
+    Return type is ``Any`` (not ``Any | None``) because ZenML step
+    introspection does not reliably handle union return types for
+    materializer selection on synthetic memory steps.
+    """
     return _get_impl(_coerce_memory_scope(scope, scope_type), key, version)
 
 
@@ -826,8 +880,13 @@ def _memory_delete_step(
     scope: str,
     scope_type: str,
     key: str,
-) -> MemoryEntry | None:
-    """Synthetic non-cacheable step for `memory.delete()`."""
+) -> Any:
+    """Synthetic non-cacheable step for `memory.delete()`.
+
+    Return type is ``Any`` (not ``MemoryEntry | None``) because ZenML
+    step introspection does not reliably handle union return types for
+    materializer selection on synthetic memory steps.
+    """
     return _delete_impl(_coerce_memory_scope(scope, scope_type), key)
 
 

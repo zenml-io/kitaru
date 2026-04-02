@@ -45,6 +45,7 @@ Add these primitives to any Python agent code — no rewrites required.
 - **Human-in-the-loop:** Add [`kitaru.wait()`](/guides/wait-and-resume) and let agents hand off to a human while compute is released — resume minutes or months later
 - **Tracked LLM calls:** Use [`kitaru.llm()`](/guides/llm-calls) and every call gets automatic secret resolution, prompt/response capture, and cost tracking
 - **Persistent data:** [`kitaru.save()` / `kitaru.load()`](/guides/artifacts) let agents store and retrieve files, objects, and results across executions
+- **Durable memory:** [`kitaru.memory`](/guides/memory) stores versioned key-value state you can seed, inspect, and reuse across executions
 - **Structured observability:** [`kitaru.log()`](/concepts/logging) attaches key-value metadata to any checkpoint or flow for debugging and the UI
 - **Runtime configuration:** [`kitaru.configure()`](/guides/configuration) sets your model, log store, and stack defaults in one call
 - **Execution management:** [`KitaruClient`](/guides/execution-management) lets you inspect, replay, retry, resume, and cancel any execution from code or CLI
@@ -76,6 +77,11 @@ Add these primitives to any Python agent code — no rewrites required.
     title="Execution Management"
     description="Inspect runs, replay, retry, resume, and fetch logs"
     href="/guides/execution-management"
+  />
+  <Card
+    title="Memory"
+    description="Seed and inspect durable key-value state across Python, CLI, and MCP"
+    href="/guides/memory"
   />
   <Card
     title="Wait, Input, and Resume"

@@ -44,6 +44,7 @@ kitaru status
 | Start with the smallest runnable flow | `basic_flow/` | `python first_working_flow.py` |
 | See structured metadata logging | `basic_flow/` | `python flow_with_logging.py` |
 | Persist and reload data across executions | `basic_flow/` | `python flow_with_artifacts.py` |
+| Seed and inspect durable memory across scopes | `memory/` | `python flow_with_memory.py` |
 | Set runtime configuration defaults | `basic_flow/` | `python flow_with_configuration.py` |
 | Inspect and manage past executions | `execution_management/` | `python client_execution_management.py` |
 | Pause for human input and resume later | `execution_management/` | `python wait_and_resume.py` |
@@ -67,6 +68,12 @@ python first_working_flow.py
 | `basic_flow/flow_with_logging.py` | `kitaru.log()` metadata at flow and checkpoint scope | [Logging](/concepts/logging) |
 | `basic_flow/flow_with_artifacts.py` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](/guides/artifacts) |
 | `basic_flow/flow_with_configuration.py` | `kitaru.configure()` defaults, overrides, and frozen specs | [Configuration](/guides/configuration) |
+
+## Durable shared state
+
+| Example | Demonstrates | Related docs |
+|---|---|---|
+| `memory/flow_with_memory.py` | Outside-flow seeding, in-flow `kitaru.memory`, and explicit-scope inspection with `KitaruClient.memories` | [Use Memory](/guides/memory) |
 
 ## Execution lifecycle and recovery
 
@@ -96,9 +103,10 @@ If you are learning Kitaru from scratch:
 1. `basic_flow/first_working_flow.py` — [Quickstart](/getting-started/quickstart)
 2. `basic_flow/flow_with_logging.py` — [Logging](/concepts/logging)
 3. `basic_flow/flow_with_artifacts.py` — [Artifacts](/guides/artifacts)
-4. `execution_management/client_execution_management.py` — [Execution Management](/guides/execution-management)
-5. `execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
-6. `replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
-7. `llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
-8. `pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
-9. `mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)
+4. `memory/flow_with_memory.py` — [Use Memory](/guides/memory)
+5. `execution_management/client_execution_management.py` — [Execution Management](/guides/execution-management)
+6. `execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
+7. `replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
+8. `llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
+9. `pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
+10. `mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)

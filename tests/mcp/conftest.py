@@ -21,10 +21,11 @@ from kitaru.errors import FailureOrigin
 
 @pytest.fixture
 def mock_kitaru_client() -> MagicMock:
-    """Mocked `KitaruClient` with executions/artifacts namespaces."""
+    """Mocked `KitaruClient` with executions/artifacts/memories namespaces."""
     client = MagicMock()
     client.executions = MagicMock()
     client.artifacts = MagicMock()
+    client.memories = MagicMock()
     return client
 
 

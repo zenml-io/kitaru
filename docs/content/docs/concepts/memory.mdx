@@ -1,0 +1,124 @@
+---
+title: Memory
+description: Versioned durable key-value state for flows, scripts, CLI, and MCP
+---
+
+Kitaru memory gives you **durable key-value state** that lives beyond a single
+execution.
+
+Use it when your agent needs to remember things like:
+
+- user preferences
+- repository conventions
+- previously discovered facts
+- long-lived workflow state that should not be passed through every function call
+
+Unlike checkpoint outputs, memory is looked up by **key + scope**, not by an execution ID.
+
+## Memory vs artifacts
+
+Think of the two storage features like two kinds of containers:
+
+- **Artifacts** are labeled boxes tied to a particular execution or checkpoint.
+  You fetch them later by saying, in effect, "give me the box from that run."
+- **Memory** is a labeled shelf. You put a value under a stable key and later
+  ask for "the current value on the `preferences/theme` shelf."
+
+Use [`kitaru.save()` / `kitaru.load()`](/guides/artifacts) when you want
+explicit execution-linked artifacts. Use memory when you want durable shared
+state that can be updated over time.
+
+## Scope model
+
+Every memory entry lives inside a **scope**. A scope is just a string name plus
+optional `scope_type` classification metadata.
+
+| Scope type | Typical use | Example |
+|---|---|---|
+| `namespace` | Shared durable state across many executions | `customer_profiles` |
+| `flow` | State associated with one flow name | `research_agent` |
+| `execution` | State isolated to one execution | `3d1d8d7f-...` |
+
+Inside a `@flow`, Kitaru defaults to the flow name as the active scope when you
+have not configured one explicitly. Outside a flow, you must configure a scope
+first with `memory.configure(scope=...)`.
+
+```python
+from kitaru import memory
+
+memory.configure(scope="customer_profiles", scope_type="namespace")
+memory.set("user_42/theme", "dark")
+```
+
+<Callout type="info">
+  Memory keys and scopes may contain letters, numbers, `.`, `_`, `-`, and `/`.
+  Colons are not allowed.
+</Callout>
+
+## Versioning and tombstones
+
+Memory is **versioned**. Each write creates a new version.
+
+```python
+memory.set("status", "draft")
+memory.set("status", "approved")
+```
+
+If the latest version is not deleted, that latest version is the current value.
+If the latest version is a tombstone, the key has no current value even though
+older versions still exist in history.
+
+Deletes are **soft deletes**, not hard purges. When you call `memory.delete(key)`,
+Kitaru writes a new hidden tombstone version instead of erasing history.
+
+That means:
+
+- `memory.get(key)` returns `None` when the newest version is deleted
+- `memory.list()` hides deleted keys
+- `memory.history(key)` still shows older versions and tombstones
+
+This is useful for audit trails and future rollback/forking patterns.
+
+## Where memory calls are allowed
+
+| Context | `memory.get/list/history` | `memory.set/delete` | Notes |
+|---|---|---|---|
+| Flow body | Yes | Yes | Uses the active flow/configured scope |
+| Inside `@checkpoint` | No | No | Raises `KitaruContextError` |
+| Outside a flow | Yes, after `memory.configure(...)` | Yes, after `memory.configure(...)` | Good for seeding and scripting |
+
+The checkpoint restriction is intentional. Memory is a flow-level coordination
+primitive, not a checkpoint-local storage API.
+
+## Replay caveats
+
+Memory is durable and auditable, but its replay semantics are intentionally
+conservative in the current release.
+
+- A replayed run may read a **newer** memory value than the original run saw.
+- Replaying code that writes memory creates **new versions** again.
+- Memory is therefore **not marketed as fully replay-deterministic** today.
+
+The safe mental model is: memory is shared durable state, not a frozen snapshot
+of past reads and writes.
+
+## Public surfaces
+
+Kitaru exposes memory through several surfaces:
+
+- `kitaru.memory` inside Python code
+- `KitaruClient.memories` for explicit-scope inspection and administration
+- `kitaru memory ...` on the CLI
+- `kitaru_memory_*` MCP tools for assistants
+
+The Python module API uses the currently configured scope. The client, CLI, and
+MCP surfaces require or expose explicit scope values more directly.
+
+See [Use Memory](/guides/memory) for concrete examples across all four.
+
+## Next steps
+
+- Follow the step-by-step [Memory guide](/guides/memory)
+- Compare memory with [Artifacts](/guides/artifacts)
+- Browse the generated [Python memory reference](/reference/python/memory)
+- Inspect the generated [CLI memory reference](/cli/memory)
