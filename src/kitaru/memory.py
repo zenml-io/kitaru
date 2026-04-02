@@ -16,11 +16,9 @@ Current status:
 - outside-flow reads/writes supported after ``memory.configure(scope=...)``
 """
 
-from __future__ import annotations
-
 import builtins
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -83,6 +81,16 @@ class MemoryEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class MemoryScopeInfo(BaseModel):
+    """Summary of one discovered memory scope."""
+
+    scope: str
+    scope_type: str
+    entry_count: int
+
+    model_config = ConfigDict(frozen=True)
+
+
 @dataclass(frozen=True)
 class _MemoryScope:
     """Resolved or configured memory scope."""
@@ -101,8 +109,8 @@ _CURRENT_MEMORY_SCOPE: ContextVar[_MemoryScope | None] = ContextVar(
 def _validate_memory_identifier(
     value: str,
     *,
-    kind: Literal["key", "scope"],
-    error_type: type[KitaruError] = KitaruUsageError,
+    kind: Literal["key", "scope", "prefix"],
+    error_type: type[Exception] = KitaruUsageError,
 ) -> str:
     """Validate and normalize a memory key or scope identifier."""
     normalized = value.strip()
@@ -121,7 +129,7 @@ def _validate_memory_identifier(
 def _validate_memory_scope_type(
     scope_type: str,
     *,
-    error_type: type[KitaruError] = KitaruUsageError,
+    error_type: type[Exception] = KitaruUsageError,
 ) -> _MemoryScopeType:
     """Validate and normalize a memory scope type."""
     normalized = str(scope_type).strip().lower()
@@ -130,6 +138,19 @@ def _validate_memory_scope_type(
             "Memory scope_type must be one of 'namespace', 'flow', or 'execution'."
         )
     return cast(_MemoryScopeType, normalized)
+
+
+def _validate_memory_version(
+    version: int | None,
+    *,
+    error_type: type[Exception] = KitaruUsageError,
+) -> int | None:
+    """Validate and normalize an optional memory version number."""
+    if version is None:
+        return None
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise error_type("Memory version must be an integer >= 1.")
+    return version
 
 
 def _require_memory_boundary(api_name: str) -> None:
@@ -241,6 +262,29 @@ def _memory_scope_session() -> Iterator[None]:
         yield
     finally:
         _CURRENT_MEMORY_SCOPE.reset(token)
+
+
+@contextmanager
+def _temporary_active_project(
+    client: Client,
+    project: str | None,
+) -> Iterator[None]:
+    """Temporarily activate a project while performing a direct memory write."""
+    if not project:
+        yield
+        return
+
+    active_project = client.active_project
+    active_project_id = str(active_project.id)
+    if project in {active_project_id, active_project.name}:
+        yield
+        return
+
+    client.set_active_project(project)
+    try:
+        yield
+    finally:
+        client.set_active_project(active_project_id)
 
 
 def _coerce_memory_scope(scope: str, scope_type: str) -> _MemoryScope:
@@ -420,15 +464,165 @@ def _paginate_artifact_versions(
     return items
 
 
-def _set_impl(scope: _MemoryScope, key: str, value: Any) -> None:
-    """Persist a new version of a memory key for the resolved scope."""
+def _memory_query_kwargs(
+    *,
+    project: str | None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Attach optional project scoping to a ZenML memory query."""
+    if project is not None:
+        kwargs["project"] = project
+    return kwargs
+
+
+def _fetch_memory_artifact(
+    client: Client,
+    scope: _MemoryScope,
+    key: str,
+    version: int | None = None,
+    *,
+    project: str | None = None,
+) -> ArtifactVersionResponse | None:
+    """Fetch one memory artifact version for a scope/key/version query."""
+    page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
+        **_memory_query_kwargs(
+            project=project,
+            artifact=_memory_artifact_name(scope.scope, key),
+            version=version,
+            page=1,
+            size=1,
+            hydrate=True,
+            sort_by=_MEMORY_VERSION_SORT,
+        )
+    )
+    if not page.items:
+        return None
+    return page.items[0]
+
+
+def _fetch_exact_artifact_version(
+    client: Client,
+    artifact_id: str,
+    *,
+    project: str | None = None,
+) -> ArtifactVersionResponse:
+    """Re-fetch one artifact version by exact ID after a write."""
     try:
-        save_artifact(
+        return client.get_artifact_version(
+            name_id_or_prefix=artifact_id,
+            hydrate=True,
+            **_memory_query_kwargs(project=project),
+        )
+    except Exception as exc:
+        raise KitaruRuntimeError(
+            "Memory write succeeded but the created artifact version could not "
+            f"be reloaded by exact ID {artifact_id!r}: {exc}"
+        ) from exc
+
+
+def _save_memory_artifact(
+    *,
+    client: Client,
+    scope: _MemoryScope,
+    key: str,
+    value: Any,
+    deleted: bool,
+    scope_type: str,
+    project: str | None = None,
+) -> ArtifactVersionResponse:
+    """Persist a memory artifact version and reload the exact created version."""
+    with _temporary_active_project(client, project):
+        created = save_artifact(
             data=value,
             name=_memory_artifact_name(scope.scope, key),
             artifact_type=ArtifactType.DATA,
             tags=_memory_tags(scope.scope, key),
-            user_metadata=_memory_metadata(scope_type=scope.scope_type, deleted=False),
+            user_metadata=_memory_metadata(scope_type=scope_type, deleted=deleted),
+        )
+    return _fetch_exact_artifact_version(
+        client,
+        str(created.id),
+        project=project,
+    )
+
+
+def _resolve_memory_client_factory(
+    client_factory: Callable[[], Client] | None,
+) -> Callable[[], Client]:
+    """Resolve an optional client factory lazily for test patchability."""
+    return Client if client_factory is None else client_factory
+
+
+def _get_entry_impl(
+    scope: _MemoryScope,
+    key: str,
+    version: int | None = None,
+    *,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
+) -> MemoryEntry | None:
+    """Return the selected memory entry metadata for a scope/key/version."""
+    try:
+        client = _resolve_memory_client_factory(client_factory)()
+        selected = _fetch_memory_artifact(
+            client,
+            scope,
+            key,
+            version,
+            project=project,
+        )
+    except KitaruError:
+        raise
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to get memory key {key!r} in scope {scope.scope!r}: {exc}"
+        ) from exc
+
+    if selected is None or _is_deleted_artifact(selected):
+        return None
+    return _artifact_to_memory_entry(selected)
+
+
+def _set_entry_impl(
+    scope: _MemoryScope,
+    key: str,
+    value: Any,
+    *,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
+) -> MemoryEntry:
+    """Persist a new version of a memory key and return its metadata entry."""
+    try:
+        client = _resolve_memory_client_factory(client_factory)()
+        latest_current = _fetch_memory_artifact(
+            client,
+            scope,
+            key,
+            project=project,
+        )
+        resolved_scope_type = scope.scope_type
+        if latest_current is not None:
+            existing_scope_type = _validate_memory_scope_type(
+                _resolve_scope_type(latest_current),
+                error_type=KitaruRuntimeError,
+            )
+            if existing_scope_type != scope.scope_type:
+                raise KitaruUsageError(
+                    "Memory scope_type mismatch for existing key "
+                    f"{key!r} in scope {scope.scope!r}: existing history uses "
+                    f"{existing_scope_type!r}, but this write requested "
+                    f"{scope.scope_type!r}."
+                )
+            resolved_scope_type = existing_scope_type
+
+        created = _save_memory_artifact(
+            client=client,
+            scope=scope,
+            key=key,
+            value=value,
+            deleted=False,
+            scope_type=resolved_scope_type,
+            project=project,
         )
     except KitaruError:
         raise
@@ -437,27 +631,33 @@ def _set_impl(scope: _MemoryScope, key: str, value: Any) -> None:
             f"Failed to set memory key {key!r} in scope {scope.scope!r}: {exc}"
         ) from exc
 
+    return _artifact_to_memory_entry(created)
+
+
+def _set_impl(scope: _MemoryScope, key: str, value: Any) -> None:
+    """Persist a new version of a memory key for the resolved scope."""
+    _set_entry_impl(scope, key, value)
+    return None
+
 
 def _get_impl(
     scope: _MemoryScope,
     key: str,
     version: int | None = None,
+    *,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
 ) -> Any | None:
     """Read a memory key for the resolved scope."""
     try:
-        client = Client()
-        artifact_name = _memory_artifact_name(scope.scope, key)
-        # Only the newest version is needed — fetch a single page of size 1
-        # instead of paginating all versions.
-        page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
-            artifact=artifact_name,
-            version=version,
-            page=1,
-            size=1,
-            hydrate=True,
-            sort_by=_MEMORY_VERSION_SORT,
+        client = _resolve_memory_client_factory(client_factory)()
+        selected = _fetch_memory_artifact(
+            client,
+            scope,
+            key,
+            version,
+            project=project,
         )
-        artifacts = page.items
     except KitaruError:
         raise
     except Exception as exc:
@@ -465,11 +665,7 @@ def _get_impl(
             f"Failed to get memory key {key!r} in scope {scope.scope!r}: {exc}"
         ) from exc
 
-    if not artifacts:
-        return None
-
-    selected = artifacts[0]
-    if _is_deleted_artifact(selected):
+    if selected is None or _is_deleted_artifact(selected):
         return None
 
     try:
@@ -480,13 +676,20 @@ def _get_impl(
         ) from exc
 
 
-def _list_impl(scope: _MemoryScope) -> _list[MemoryEntry]:
+def _list_impl(
+    scope: _MemoryScope,
+    *,
+    prefix: str | None = None,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
+) -> _list[MemoryEntry]:
     """List the latest active memory entries for the resolved scope."""
     try:
-        client = Client()
+        client = _resolve_memory_client_factory(client_factory)()
         artifacts = _paginate_artifact_versions(
             client,
             tags=[_MEMORY_TAG_MARKER, _memory_scope_tag(scope.scope)],
+            **_memory_query_kwargs(project=project),
         )
     except KitaruError:
         raise
@@ -504,16 +707,66 @@ def _list_impl(scope: _MemoryScope) -> _list[MemoryEntry]:
         for artifact in latest_by_artifact.values()
         if not _is_deleted_artifact(artifact)
     ]
+    if prefix is not None:
+        entries = [entry for entry in entries if entry.key.startswith(prefix)]
     return sorted(entries, key=lambda entry: entry.key)
 
 
-def _history_impl(scope: _MemoryScope, key: str) -> _list[MemoryEntry]:
+def _list_scopes_impl(
+    *,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
+) -> _list[MemoryScopeInfo]:
+    """Discover all memory scopes with entry counts."""
+    try:
+        client = _resolve_memory_client_factory(client_factory)()
+        artifacts = _paginate_artifact_versions(
+            client,
+            tags=[_MEMORY_TAG_MARKER],
+            **_memory_query_kwargs(project=project),
+        )
+    except KitaruError:
+        raise
+    except Exception as exc:
+        raise KitaruBackendError(f"Failed to discover memory scopes: {exc}") from exc
+
+    # Group the latest version per artifact name, then aggregate by scope.
+    latest_by_artifact: dict[str, ArtifactVersionResponse] = {}
+    for artifact in _sort_memory_artifacts(artifacts):
+        latest_by_artifact.setdefault(artifact.name, artifact)
+
+    scope_stats: dict[str, tuple[str, int]] = {}
+    for artifact in latest_by_artifact.values():
+        if _is_deleted_artifact(artifact):
+            continue
+        scope, _key = _parse_memory_artifact_identity(artifact.name)
+        scope_type = _resolve_scope_type(artifact)
+        prev_type, prev_count = scope_stats.get(scope, (scope_type, 0))
+        scope_stats[scope] = (prev_type, prev_count + 1)
+
+    return sorted(
+        [
+            MemoryScopeInfo(scope=scope, scope_type=scope_type, entry_count=count)
+            for scope, (scope_type, count) in scope_stats.items()
+        ],
+        key=lambda info: info.scope,
+    )
+
+
+def _history_impl(
+    scope: _MemoryScope,
+    key: str,
+    *,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
+) -> _list[MemoryEntry]:
     """Return all versions of a memory key for the resolved scope."""
     try:
-        client = Client()
+        client = _resolve_memory_client_factory(client_factory)()
         artifacts = _paginate_artifact_versions(
             client,
             artifact=_memory_artifact_name(scope.scope, key),
+            **_memory_query_kwargs(project=project),
         )
     except KitaruError:
         raise
@@ -529,50 +782,41 @@ def _history_impl(scope: _MemoryScope, key: str) -> _list[MemoryEntry]:
     ]
 
 
-def _delete_impl(scope: _MemoryScope, key: str) -> MemoryEntry | None:
+def _delete_impl(
+    scope: _MemoryScope,
+    key: str,
+    *,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
+) -> MemoryEntry | None:
     """Soft-delete a memory key for the resolved scope."""
-    artifact_name = _memory_artifact_name(scope.scope, key)
-
     try:
-        client = Client()
-        # Check if the key exists and whether it's already deleted.
-        page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
-            artifact=artifact_name,
-            page=1,
-            size=1,
-            hydrate=True,
-            sort_by=_MEMORY_VERSION_SORT,
+        client = _resolve_memory_client_factory(client_factory)()
+        latest_current = _fetch_memory_artifact(
+            client,
+            scope,
+            key,
+            project=project,
         )
-        if not page.items:
+        if latest_current is None:
             return None
 
-        latest_current = page.items[0]
         if _is_deleted_artifact(latest_current):
             return _artifact_to_memory_entry(latest_current)
 
-        save_artifact(
-            data=None,
-            name=artifact_name,
-            artifact_type=ArtifactType.DATA,
-            tags=_memory_tags(scope.scope, key),
-            user_metadata=_memory_metadata(scope_type=scope.scope_type, deleted=True),
+        tombstone = _save_memory_artifact(
+            client=client,
+            scope=scope,
+            key=key,
+            value=None,
+            deleted=True,
+            scope_type=_validate_memory_scope_type(
+                _resolve_scope_type(latest_current),
+                error_type=KitaruRuntimeError,
+            ),
+            project=project,
         )
-
-        # Re-fetch the tombstone so the response includes producer linkage
-        # that ZenML writes *after* create_artifact_version returns.
-        tombstone_page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
-            artifact=artifact_name,
-            page=1,
-            size=1,
-            hydrate=True,
-            sort_by=_MEMORY_VERSION_SORT,
-        )
-        if not tombstone_page.items:
-            raise KitaruRuntimeError(
-                f"Memory delete for key {key!r} in scope {scope.scope!r} "
-                "did not produce a readable tombstone version."
-            )
-        return _artifact_to_memory_entry(tombstone_page.items[0])
+        return _artifact_to_memory_entry(tombstone)
     except KitaruError:
         raise
     except Exception as exc:
@@ -609,8 +853,13 @@ def _memory_get_step(
     scope_type: str,
     key: str,
     version: int | None = None,
-) -> Any | None:
-    """Synthetic non-cacheable step for `memory.get()`."""
+) -> Any:
+    """Synthetic non-cacheable step for `memory.get()`.
+
+    Return type is ``Any`` (not ``Any | None``) because ZenML step
+    introspection does not reliably handle union return types for
+    materializer selection on synthetic memory steps.
+    """
     return _get_impl(_coerce_memory_scope(scope, scope_type), key, version)
 
 
@@ -631,8 +880,13 @@ def _memory_delete_step(
     scope: str,
     scope_type: str,
     key: str,
-) -> MemoryEntry | None:
-    """Synthetic non-cacheable step for `memory.delete()`."""
+) -> Any:
+    """Synthetic non-cacheable step for `memory.delete()`.
+
+    Return type is ``Any`` (not ``MemoryEntry | None``) because ZenML
+    step introspection does not reliably handle union return types for
+    materializer selection on synthetic memory steps.
+    """
     return _delete_impl(_coerce_memory_scope(scope, scope_type), key)
 
 
@@ -685,11 +939,15 @@ def get(key: str, *, version: int | None = None) -> Any | None:
     """
     scope = _resolve_memory_scope_for_operation("get")
     normalized_key = _validate_memory_identifier(key, kind="key")
-    if version is not None and version < 1:
-        raise KitaruUsageError("Memory version must be >= 1.")
+    normalized_version = _validate_memory_version(version)
     if _is_inside_flow():
-        return _memory_get_step(scope.scope, scope.scope_type, normalized_key, version)
-    return _get_impl(scope, normalized_key, version)
+        return _memory_get_step(
+            scope.scope,
+            scope.scope_type,
+            normalized_key,
+            normalized_version,
+        )
+    return _get_impl(scope, normalized_key, normalized_version)
 
 
 def list() -> _list[MemoryEntry]:

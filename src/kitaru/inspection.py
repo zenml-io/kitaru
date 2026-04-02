@@ -42,6 +42,7 @@ from kitaru.config import (
     list_active_kitaru_environment_variables,
     resolve_log_store,
 )
+from kitaru.memory import MemoryEntry, MemoryScopeInfo
 
 
 @dataclass
@@ -368,6 +369,40 @@ def serialize_artifact_value(value: Any) -> dict[str, Any]:
             "value_format": "repr",
             "value_type": value_type,
         }
+
+
+def serialize_memory_entry(entry: MemoryEntry) -> dict[str, Any]:
+    """Serialize typed memory-entry metadata for transport layers."""
+    return {
+        "key": entry.key,
+        "value_type": entry.value_type,
+        "version": entry.version,
+        "scope": entry.scope,
+        "scope_type": entry.scope_type,
+        "created_at": to_jsonable(entry.created_at, fallback_repr=True),
+        "is_deleted": entry.is_deleted,
+        "artifact_id": entry.artifact_id,
+        "execution_id": entry.execution_id,
+    }
+
+
+def serialize_memory_history(history: Sequence[MemoryEntry]) -> list[dict[str, Any]]:
+    """Serialize a memory history sequence."""
+    return [serialize_memory_entry(entry) for entry in history]
+
+
+def serialize_memory_scope_info(info: MemoryScopeInfo) -> dict[str, Any]:
+    """Serialize a discovered memory scope for transport layers."""
+    return {
+        "scope": info.scope,
+        "scope_type": info.scope_type,
+        "entry_count": info.entry_count,
+    }
+
+
+def serialize_memory_value(value: Any) -> dict[str, Any]:
+    """Serialize a loaded memory value using the shared artifact-value rules."""
+    return serialize_artifact_value(value)
 
 
 def serialize_checkpoint_attempt(attempt: CheckpointAttempt) -> dict[str, Any]:

@@ -1,5 +1,5 @@
 {
   "title": "Core Concepts",
   "defaultOpen": false,
-  "pages": ["flows", "checkpoints", "wait-and-input", "logging", "execution-model", "how-it-works"]
+  "pages": ["flows", "checkpoints", "memory", "wait-and-input", "logging", "execution-model", "how-it-works"]
 }
