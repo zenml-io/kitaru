@@ -37,7 +37,6 @@ from ._tracking import get_current_tracker, normalize_agent_name, tracker_scope
 
 
 def _track_adapter_run(
-    agent_name: str | None,
     *,
     method: str,
     error: BaseException | None = None,
@@ -46,7 +45,6 @@ def _track_adapter_run(
     from kitaru.analytics import AnalyticsEvent, track
 
     metadata: dict[str, Any] = {
-        "agent_name": agent_name,
         "method": method,
         "status": "failed" if error is not None else "completed",
     }
@@ -367,9 +365,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     event_stream_handler=wrapped_handler,
                 )
         except BaseException as exc:
-            _track_adapter_run(self._name, method="run", error=exc)
+            _track_adapter_run(method="run", error=exc)
             raise
-        _track_adapter_run(self._name, method="run")
+        _track_adapter_run(method="run")
         return result
 
     def run_sync(
@@ -413,9 +411,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 event_stream_handler=wrapped_handler,
             )
         except BaseException as exc:
-            _track_adapter_run(self._name, method="run_sync", error=exc)
+            _track_adapter_run(method="run_sync", error=exc)
             raise
-        _track_adapter_run(self._name, method="run_sync")
+        _track_adapter_run(method="run_sync")
         return result
 
     @asynccontextmanager
@@ -476,4 +474,4 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                             )
                         }
                     )
-                _track_adapter_run(self._name, method="iter", error=iter_error)
+                _track_adapter_run(method="iter", error=iter_error)

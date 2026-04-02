@@ -25,6 +25,7 @@ from kitaru.config import (
 from kitaru.errors import (
     FailureOrigin,
     KitaruBackendError,
+    KitaruExecutionError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -891,7 +892,7 @@ def test_submit_emits_flow_submitted_event() -> None:
 
     track_mock.assert_called_once_with(
         AnalyticsEvent.FLOW_SUBMITTED,
-        {"flow_name": "<lambda>", "execution_id": str(run.id)},
+        {"execution_id": str(run.id)},
     )
 
 
@@ -1152,3 +1153,38 @@ def test_flow_handle_terminal_event_emitted_only_once() -> None:
         handle.get()
 
     track_mock.assert_called_once()
+
+
+def test_flow_handle_wait_still_raises_when_classify_fails() -> None:
+    """If _classify_run_failure crashes, user should still see their real error."""
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        run_id=run_id,
+        status_reason="user error",
+        traceback="Traceback\nValueError: boom",
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track") as track_mock,
+        patch(
+            "kitaru.flow._classify_run_failure",
+            side_effect=RuntimeError("unexpected shape"),
+        ),
+        pytest.raises(KitaruExecutionError, match="finished with status"),
+    ):
+        handle.wait()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_TERMINAL,
+        {
+            "execution_id": str(run_id),
+            "status": "failed",
+            "failure_origin": FailureOrigin.UNKNOWN.value,
+        },
+    )

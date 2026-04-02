@@ -527,7 +527,6 @@ class _ExecutionsAPI:
             AnalyticsEvent.WAIT_RESOLVED,
             {
                 "execution_id": exec_id,
-                "wait_name": getattr(condition, "name", None),
                 "resolution": resolution,
             },
         )

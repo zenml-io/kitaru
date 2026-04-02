@@ -1894,7 +1894,6 @@ def test_input_emits_wait_resolved_event() -> None:
         AnalyticsEvent.WAIT_RESOLVED,
         {
             "execution_id": str(run_id),
-            "wait_name": "approve_deploy",
             "resolution": "continue",
         },
     )
@@ -1945,7 +1944,6 @@ def test_abort_wait_emits_wait_resolved_event() -> None:
         AnalyticsEvent.WAIT_RESOLVED,
         {
             "execution_id": str(run_id),
-            "wait_name": "approve_deploy",
             "resolution": "abort",
         },
     )

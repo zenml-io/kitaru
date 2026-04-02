@@ -4783,7 +4783,6 @@ class TestCLIAnalytics:
         track_mock.assert_called_once_with(
             AnalyticsEvent.SECRET_UPSERTED,
             {
-                "secret_name": "openai-creds",
                 "operation": "created",
                 "key_count": 1,
             },

@@ -180,7 +180,7 @@ def set_(
     output_format = _resolve_output_format(output)
     facade = _facade_module()
 
-    def _set_secret() -> tuple[SecretResponse, str]:
+    def _set_secret() -> tuple[SecretResponse, str, int]:
         parsed_assignments = _parse_secret_assignments(assignments)
         client = facade.Client()
 
@@ -198,9 +198,9 @@ def set_(
                 add_or_update_values=parsed_assignments,
             )
             action = "Updated"
-        return secret, action
+        return secret, action, len(parsed_assignments)
 
-    secret, action = run_with_cli_error_boundary(
+    secret, action, key_count = run_with_cli_error_boundary(
         _set_secret,
         command=command,
         output=output_format,
@@ -212,9 +212,8 @@ def set_(
     track(
         AnalyticsEvent.SECRET_UPSERTED,
         {
-            "secret_name": name,
             "operation": action.lower(),
-            "key_count": len(assignments),
+            "key_count": key_count,
         },
     )
 

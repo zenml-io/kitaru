@@ -352,13 +352,21 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     return tuple(values)
 
 
-def _classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
-    """Classify the failure origin for an unsuccessful run without raising."""
+def _extract_run_failure_context(
+    run: PipelineRunResponse,
+) -> tuple[str | None, str | None]:
+    """Return (status_reason, traceback_text) from a run response."""
     run_body = run.get_body() if hasattr(run, "get_body") else run
     status_reason = getattr(run_body, "status_reason", None)
     traceback_text: str | None = None
     if run.exception_info is not None:
         traceback_text = run.exception_info.traceback
+    return status_reason, traceback_text
+
+
+def _classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
+    """Classify the failure origin for an unsuccessful run without raising."""
+    status_reason, traceback_text = _extract_run_failure_context(run)
     default_origin = (
         FailureOrigin.USER_CODE if traceback_text is not None else FailureOrigin.UNKNOWN
     )
@@ -369,24 +377,32 @@ def _classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
     )
 
 
-def _raise_for_unsuccessful_run(run: PipelineRunResponse) -> None:
+def _safe_classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
+    """Classify failure origin, defaulting to UNKNOWN on unexpected errors."""
+    try:
+        return _classify_run_failure(run)
+    except Exception:
+        return FailureOrigin.UNKNOWN
+
+
+def _raise_for_unsuccessful_run(
+    run: PipelineRunResponse,
+    *,
+    failure_origin: FailureOrigin | None = None,
+) -> None:
     """Raise a typed Kitaru execution error with run failure context."""
     details = [f"Execution {run.id} finished with status '{run.status.value}'."]
 
-    run_body = run.get_body() if hasattr(run, "get_body") else run
-    status_reason = getattr(run_body, "status_reason", None)
+    status_reason, traceback_text = _extract_run_failure_context(run)
     if status_reason:
         details.append(status_reason)
-
-    traceback_text: str | None = None
-    if run.exception_info is not None:
-        traceback_text = run.exception_info.traceback
 
     traceback_tail = traceback_last_line(traceback_text)
     if traceback_tail:
         details.append(traceback_tail)
 
-    failure_origin = _classify_run_failure(run)
+    if failure_origin is None:
+        failure_origin = _safe_classify_run_failure(run)
     raise execution_error_from_failure(
         " ".join(details),
         exec_id=str(run.id),
@@ -450,10 +466,9 @@ class FlowHandle:
             run = self._refresh()
             if run.status.is_finished:
                 if not run.status.is_successful:
-                    self._track_terminal_once(
-                        run, failure_origin=_classify_run_failure(run)
-                    )
-                    _raise_for_unsuccessful_run(run)
+                    origin = _safe_classify_run_failure(run)
+                    self._track_terminal_once(run, failure_origin=origin)
+                    _raise_for_unsuccessful_run(run, failure_origin=origin)
                 self._track_terminal_once(run)
                 return _extract_flow_result(run)
             time.sleep(1)
@@ -475,8 +490,9 @@ class FlowHandle:
                 f"Execution {run.id} is still running (status: {run.status.value})."
             )
         if not run.status.is_successful:
-            self._track_terminal_once(run, failure_origin=_classify_run_failure(run))
-            _raise_for_unsuccessful_run(run)
+            origin = _safe_classify_run_failure(run)
+            self._track_terminal_once(run, failure_origin=origin)
+            _raise_for_unsuccessful_run(run, failure_origin=origin)
         self._track_terminal_once(run)
         return _extract_flow_result(run)
 
@@ -525,7 +541,6 @@ class _FlowDefinition:
 
         wrapped_entrypoint = _wrap_flow_entrypoint(func)
         func_name = callable_name(func)
-        self._flow_name = func_name
         registration_name = build_pipeline_registration_name(func_name)
         source_alias = build_pipeline_source_alias(func_name)
         aliasable_entrypoint = cast(Any, wrapped_entrypoint)
@@ -656,7 +671,6 @@ class _FlowDefinition:
         )
 
         replay_metadata = {
-            "flow_name": self._flow_name,
             "source_execution_id": str(original_run.id),
             "from_checkpoint": from_,
             "replay_path": "flow_wrapper",
@@ -762,7 +776,6 @@ class _FlowDefinition:
         track(
             AnalyticsEvent.FLOW_SUBMITTED,
             {
-                "flow_name": self._flow_name,
                 "execution_id": str(run.id),
             },
         )

@@ -429,8 +429,6 @@ def register_model_alias(
     track(
         AnalyticsEvent.MODEL_ALIAS_REGISTERED,
         {
-            "alias": result.alias,
-            "model": result.model,
             "has_secret": result.secret is not None,
             "is_default": result.is_default,
         },
@@ -597,7 +595,6 @@ def _create_stack_operation(
     track(
         AnalyticsEvent.STACK_CREATED,
         {
-            "stack_name": name,
             "stack_type": stack_type.value,
             "activate_requested": activate,
         },
@@ -697,7 +694,6 @@ def use_stack(name_or_id: str) -> StackInfo:
     track(
         AnalyticsEvent.STACK_ACTIVATED,
         {
-            "stack_name": result.name,
             "stack_id": str(result.id),
         },
     )

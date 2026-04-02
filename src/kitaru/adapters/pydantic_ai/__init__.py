@@ -53,7 +53,6 @@ def wrap(
     track(
         AnalyticsEvent.PYDANTIC_AI_WRAPPED,
         {
-            "agent_name": wrapped.name,
             "toolset_count": len(wrapped.toolsets),
         },
     )

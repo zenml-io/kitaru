@@ -51,15 +51,15 @@ def test_track_passes_metadata_through_unchanged() -> None:
     )
 
 
-def test_new_event_canonical_strings() -> None:
-    """Phase 1 event members should carry the expected canonical strings."""
+def test_flow_lifecycle_event_canonical_strings() -> None:
+    """Flow-lifecycle events should carry the expected canonical strings."""
     assert AnalyticsEvent.FLOW_SUBMITTED == "Kitaru flow submitted"
     assert AnalyticsEvent.REPLAY_REQUESTED == "Kitaru flow replay requested"
     assert AnalyticsEvent.REPLAY_FAILED == "Kitaru flow replay failed"
 
 
-def test_phase2_event_canonical_strings() -> None:
-    """Phase 2 core-funnel events should carry the expected canonical strings."""
+def test_core_funnel_event_canonical_strings() -> None:
+    """Core-funnel events should carry the expected canonical strings."""
     assert AnalyticsEvent.PROJECT_INITIALIZED == "Kitaru project initialized"
     assert AnalyticsEvent.LOGIN_COMPLETED == "Kitaru login completed"
     assert AnalyticsEvent.LOCAL_SERVER_STARTED == "Kitaru local server started"
@@ -72,8 +72,8 @@ def test_phase2_event_canonical_strings() -> None:
     assert AnalyticsEvent.EXECUTION_CANCELLED == "Kitaru execution cancelled"
 
 
-def test_phase3_event_canonical_strings() -> None:
-    """Phase 3 feature-adoption events should carry expected canonical strings."""
+def test_feature_adoption_event_canonical_strings() -> None:
+    """Feature-adoption events should carry the expected canonical strings."""
     assert AnalyticsEvent.LLM_CALLED == "Kitaru LLM called"
     assert AnalyticsEvent.ARTIFACT_SAVED == "Kitaru artifact saved"
     assert AnalyticsEvent.ARTIFACT_LOADED == "Kitaru artifact loaded"
@@ -84,8 +84,8 @@ def test_phase3_event_canonical_strings() -> None:
     assert AnalyticsEvent.LOG_STORE_CONFIGURED == "Kitaru log store configured"
 
 
-def test_phase4_event_canonical_strings() -> None:
-    """Phase 4 adapter events should carry expected canonical strings."""
+def test_adapter_event_canonical_strings() -> None:
+    """Adapter events should carry the expected canonical strings."""
     assert AnalyticsEvent.PYDANTIC_AI_WRAPPED == "Kitaru PydanticAI wrapped"
     assert AnalyticsEvent.PYDANTIC_AI_RUN_COMPLETED == "Kitaru PydanticAI run completed"
 
@@ -130,6 +130,27 @@ def test_cli_entrypoint_tracks_single_command() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.CLI_INVOKED,
         {"command": "status"},
+    )
+
+
+def test_cli_entrypoint_excludes_positional_arg_from_command() -> None:
+    """Single-command verbs with positional args should not leak user data."""
+    with (
+        patch("kitaru.analytics.set_source"),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        patch("kitaru.cli.GlobalConfiguration") as gc_mock,
+        patch("kitaru.cli._apply_runtime_version"),
+        patch("kitaru.cli.app"),
+        patch("sys.argv", ["kitaru", "login", "https://my-server.example.com"]),
+    ):
+        gc_mock.return_value = MagicMock()
+        from kitaru.cli import cli
+
+        cli()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CLI_INVOKED,
+        {"command": "login"},
     )
 
 

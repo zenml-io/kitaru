@@ -228,7 +228,6 @@ def save(
     track(
         AnalyticsEvent.ARTIFACT_SAVED,
         {
-            "name": name,
             "artifact_type": artifact_type,
             "tag_count": len(tags) if tags else 0,
         },
@@ -294,7 +293,6 @@ def load(exec_id: str, name: str) -> Any:
         AnalyticsEvent.ARTIFACT_LOADED,
         {
             "source_execution_id": exec_id,
-            "requested_name": name,
             "artifact_id": str(selected.id),
             "save_type": selected.save_type.value,
         },
