@@ -13,6 +13,7 @@ from functools import wraps
 from typing import Any, Literal, TypeVar
 
 import kitaru._interface_executions as execution_interface
+import kitaru._interface_memory as memory_interface
 import kitaru._interface_stacks as stack_interface
 import kitaru.client as client_api
 import kitaru.inspection as inspection
@@ -255,6 +256,87 @@ def kitaru_executions_replay(
         }
 
     return run_with_mcp_error_boundary(_replay_execution)
+
+
+@tracked_mcp_tool
+def kitaru_memory_list(
+    scope: str,
+    prefix: str | None = None,
+) -> list[dict[str, Any]]:
+    """List memory entries for one explicit scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.list_memory_payload(
+            client_api.KitaruClient(),
+            scope=scope,
+            prefix=prefix,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_get(
+    key: str,
+    scope: str,
+    version: int | None = None,
+) -> dict[str, Any] | None:
+    """Get one memory value from one explicit scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.get_memory_payload(
+            client_api.KitaruClient(),
+            key=key,
+            scope=scope,
+            version=version,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_set(
+    key: str,
+    value: Any,
+    scope: str,
+    scope_type: str | None = None,
+) -> dict[str, Any]:
+    """Write one memory value into one explicit scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.set_memory_payload(
+            client_api.KitaruClient(),
+            key=key,
+            value=value,
+            scope=scope,
+            scope_type=scope_type,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_delete(
+    key: str,
+    scope: str,
+) -> dict[str, Any] | None:
+    """Soft-delete one memory key from one explicit scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.delete_memory_payload(
+            client_api.KitaruClient(),
+            key=key,
+            scope=scope,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_history(
+    key: str,
+    scope: str,
+) -> list[dict[str, Any]]:
+    """Show all versions for one memory key in one explicit scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.history_memory_payload(
+            client_api.KitaruClient(),
+            key=key,
+            scope=scope,
+        )
+    )
 
 
 @tracked_mcp_tool

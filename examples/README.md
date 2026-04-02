@@ -17,17 +17,18 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 
 ## Start here if you want to...
 
-- **Run the smallest possible durable flow:** `basic_flow/first_working_flow.py`
-- **See structured metadata logging:** `basic_flow/flow_with_logging.py`
-- **Persist and reload artifacts:** `basic_flow/flow_with_artifacts.py`
-- **Run checkpoints in isolated containers with fan-out:** `basic_flow/flow_with_checkpoint_runtime.py`
-- **Inspect and manage past executions:** `execution_management/client_execution_management.py`
-- **Pause for human input and resume later:** `execution_management/wait_and_resume.py`
-- **Replay from a checkpoint with overrides:** `replay/replay_with_overrides.py`
-- **Track a model call inside a flow:** `llm/flow_with_llm.py`
-- **Wrap an existing PydanticAI agent:** `pydantic_ai_agent/pydantic_ai_adapter.py`
-- **Build a full coding agent with tool calling and HITL:** `coding_agent/agent.py`
-- **Explore Kitaru through MCP tools:** `mcp/mcp_query_tools.py`
+- **Run the smallest possible durable flow:** `examples/basic_flow/first_working_flow.py`
+- **See structured metadata logging:** `examples/basic_flow/flow_with_logging.py`
+- **Persist and reload artifacts:** `examples/basic_flow/flow_with_artifacts.py`
+- **Seed, inspect, and evolve durable memory:** `examples/memory/flow_with_memory.py`
+- **Run checkpoints in isolated containers with fan-out:** `examples/basic_flow/flow_with_checkpoint_runtime.py`
+- **Inspect and manage past executions:** `examples/execution_management/client_execution_management.py`
+- **Pause for human input and resume later:** `examples/execution_management/wait_and_resume.py`
+- **Replay from a checkpoint with overrides:** `examples/replay/replay_with_overrides.py`
+- **Track a model call inside a flow:** `examples/llm/flow_with_llm.py`
+- **Wrap an existing PydanticAI agent:** `examples/pydantic_ai_agent/pydantic_ai_adapter.py`
+- **Build a full coding agent with tool calling and HITL:** `examples/coding_agent/agent.py`
+- **Explore Kitaru through MCP tools:** `examples/mcp/mcp_query_tools.py`
 
 ## Install the extras you need
 
@@ -45,13 +46,14 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 
 ## How the examples are organized
 
-- [basic_flow/](basic_flow/README.md) — smallest flows, logging, artifacts, and runtime configuration
-- [execution_management/](execution_management/README.md) — inspect executions, resolve waits, and resume work
-- [replay/](replay/README.md) — replay from a checkpoint boundary with targeted overrides
-- [llm/](llm/README.md) — tracked `kitaru.llm()` calls inside flows
-- [pydantic_ai_agent/](pydantic_ai_agent/README.md) — wrap a PydanticAI agent with Kitaru observability
-- [coding_agent/](coding_agent/README.md) — full coding agent with provider SDK tool calling, HITL, and custom materializers
-- [mcp/](mcp/README.md) — inspect flows with the Kitaru MCP server
+- [basic_flow/README.md](basic_flow/README.md) — smallest flows, logging, artifacts, and runtime configuration
+- [memory/README.md](memory/README.md) — durable memory seeding, scope switching, and inspection
+- [execution_management/README.md](execution_management/README.md) — inspect executions, resolve waits, and resume work
+- [replay/README.md](replay/README.md) — replay from a checkpoint boundary with targeted overrides
+- [llm/README.md](llm/README.md) — tracked `kitaru.llm()` calls inside flows
+- [pydantic_ai_agent/README.md](pydantic_ai_agent/README.md) — wrap a PydanticAI agent with Kitaru observability
+- [coding_agent/README.md](coding_agent/README.md) — full coding agent with provider SDK tool calling, HITL, and custom materializers
+- [mcp/README.md](mcp/README.md) — inspect flows with the Kitaru MCP server
 
 ## Core workflow basics
 
@@ -62,6 +64,12 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | [Artifacts](basic_flow/flow_with_artifacts.py) | `uv run examples/basic_flow/flow_with_artifacts.py` | `uv sync --extra local` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](https://kitaru.ai/docs/getting-started/artifacts) | [tests/test_phase8_artifacts_example.py](../tests/test_phase8_artifacts_example.py) |
 | [Configuration](basic_flow/flow_with_configuration.py) | `uv run examples/basic_flow/flow_with_configuration.py` | `uv sync --extra local` | `kitaru.configure()` defaults, overrides, and frozen execution specs | [Configuration](https://kitaru.ai/docs/getting-started/configuration) | [tests/test_phase10_configuration_example.py](../tests/test_phase10_configuration_example.py) |
 | [Checkpoint runtime](basic_flow/flow_with_checkpoint_runtime.py) | `uv run examples/basic_flow/flow_with_checkpoint_runtime.py` | `uv sync --extra local` | `@checkpoint(runtime="isolated")` with `.submit()` fan-out | [Checkpoints](https://kitaru.ai/docs/concepts/checkpoints) | — |
+
+## Durable shared state
+
+| Example | Run | Requires | What it demonstrates | Docs | Test |
+|---|---|---|---|---|---|
+| [Memory](memory/flow_with_memory.py) | `uv run examples/memory/flow_with_memory.py` | `uv sync --extra local` | Outside-flow seeding, in-flow `kitaru.memory`, and explicit-scope inspection with `KitaruClient.memories` | [Use Memory](https://kitaru.ai/docs/guides/memory) | [tests/test_phase20_memory_example.py](../tests/test_phase20_memory_example.py) |
 
 ## Execution lifecycle and recovery
 
@@ -84,16 +92,17 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 
 If you are new to Kitaru, this is the smoothest path:
 
-1. `cd basic_flow && kitaru init && python first_working_flow.py`
-2. `python flow_with_logging.py`
-3. `python flow_with_artifacts.py`
-4. `cd ../execution_management && kitaru init && python client_execution_management.py`
-5. `python wait_and_resume.py`
-6. `cd ../replay && kitaru init && python replay_with_overrides.py`
-7. `cd ../llm && kitaru init && python flow_with_llm.py`
-8. `cd ../pydantic_ai_agent && kitaru init && python pydantic_ai_adapter.py`
-9. `cd ../coding_agent && kitaru init && python agent.py "Your task"` *(full agent with tools + HITL)*
-10. `cd ../mcp && kitaru init && python mcp_query_tools.py`
+1. `uv run examples/basic_flow/first_working_flow.py`
+2. `uv run examples/basic_flow/flow_with_logging.py`
+3. `uv run examples/basic_flow/flow_with_artifacts.py`
+4. `uv run examples/memory/flow_with_memory.py`
+5. `uv run examples/execution_management/client_execution_management.py`
+6. `uv run examples/execution_management/wait_and_resume.py`
+7. `uv run examples/replay/replay_with_overrides.py`
+8. `uv run examples/llm/flow_with_llm.py`
+9. `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py`
+10. `cd examples/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
+11. `uv run examples/mcp/mcp_query_tools.py`
 
 If you prefer the hosted docs view, start with the
 [Examples page](https://kitaru.ai/docs/getting-started/examples).
