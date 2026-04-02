@@ -98,6 +98,7 @@ client.memories.set(
 entries = client.memories.list(scope="repo_docs")
 latest = client.memories.get("team/default_model", scope="repo_docs")
 history = client.memories.history("team/default_model", scope="repo_docs")
+scopes = client.memories.scopes()
 ```
 
 The client API is the best fit for admin utilities because every call makes the

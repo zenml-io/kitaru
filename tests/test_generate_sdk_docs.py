@@ -65,6 +65,22 @@ class TestExportedNames:
         }
         assert _exported_names(data) == {"flow", "checkpoint"}
 
+    def test_returns_none_when_no_all_attribute(self) -> None:
+        data: dict = {"attributes": [{"name": "VERSION", "value": "'1.0'"}]}
+        assert _exported_names(data) is None
+
+    def test_returns_none_for_non_string_value(self) -> None:
+        data = {"attributes": [{"name": "__all__", "value": 42}]}
+        assert _exported_names(data) is None
+
+    def test_returns_none_for_syntax_error_value(self) -> None:
+        data = {"attributes": [{"name": "__all__", "value": "[not valid"}]}
+        assert _exported_names(data) is None
+
+    def test_returns_none_for_non_list_literal(self) -> None:
+        data = {"attributes": [{"name": "__all__", "value": "('a', 'b')"}]}
+        assert _exported_names(data) is None
+
 
 class TestFilterModule:
     """Tests for module filtering logic."""
