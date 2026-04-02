@@ -386,14 +386,7 @@ def _raise_for_unsuccessful_run(run: PipelineRunResponse) -> None:
     if traceback_tail:
         details.append(traceback_tail)
 
-    default_origin = (
-        FailureOrigin.USER_CODE if traceback_text is not None else FailureOrigin.UNKNOWN
-    )
-    failure_origin = classify_failure_origin(
-        status_reason=status_reason,
-        traceback=traceback_text,
-        default=default_origin,
-    )
+    failure_origin = _classify_run_failure(run)
     raise execution_error_from_failure(
         " ".join(details),
         exec_id=str(run.id),
