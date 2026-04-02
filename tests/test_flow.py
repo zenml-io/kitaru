@@ -14,6 +14,7 @@ from zenml.config.docker_settings import DockerSettings
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
+from kitaru.analytics import AnalyticsEvent
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ImageSettings,
@@ -23,6 +24,8 @@ from kitaru.config import (
 )
 from kitaru.errors import (
     FailureOrigin,
+    KitaruBackendError,
+    KitaruExecutionError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -860,3 +863,328 @@ def test_execution_id_lookup_requires_active_kitaru_scope() -> None:
         return_value=SimpleNamespace(run=SimpleNamespace(id="exec-raw-context")),
     ):
         assert _get_current_execution_id() is None
+
+
+# ── Analytics instrumentation tests ──────────────────────────────────────────
+
+
+def test_submit_emits_flow_submitted_event() -> None:
+    """_submit should emit FLOW_SUBMITTED after successful run creation."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_SUBMITTED,
+        {"execution_id": str(run.id)},
+    )
+
+
+def test_submit_does_not_emit_when_run_is_none() -> None:
+    """FLOW_SUBMITTED should NOT fire when the pipeline returns None."""
+    configured_pipeline = MagicMock(return_value=None)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(KitaruRuntimeError, match="did not produce"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    track_mock.assert_not_called()
+
+
+def test_replay_success_emits_requested_and_replayed_events() -> None:
+    """Successful replay should emit REPLAY_REQUESTED then FLOW_REPLAYED."""
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch(
+            "kitaru.flow.build_replay_plan",
+            return_value=ReplayPlan(
+                original_run_id=str(source_run.id),
+                steps_to_skip=set(),
+                input_overrides={},
+                step_input_overrides={},
+            ),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = source_run
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write")
+
+    assert track_mock.call_count == 2
+    requested_call = track_mock.call_args_list[0]
+    assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
+    assert requested_call.args[1]["replay_path"] == "flow_wrapper"
+    assert requested_call.args[1]["from_checkpoint"] == "write"
+
+    replayed_call = track_mock.call_args_list[1]
+    assert replayed_call.args[0] == AnalyticsEvent.FLOW_REPLAYED
+    assert replayed_call.args[1]["execution_id"] == str(replayed_run.id)
+
+
+def test_replay_failure_emits_requested_then_failed_events() -> None:
+    """Failed replay should emit REPLAY_REQUESTED then REPLAY_FAILED."""
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.side_effect = RuntimeError("backend crash")
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch(
+            "kitaru.flow.build_replay_plan",
+            return_value=ReplayPlan(
+                original_run_id=str(source_run.id),
+                steps_to_skip=set(),
+                input_overrides={},
+                step_input_overrides={},
+            ),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(KitaruBackendError, match="backend crash"),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = source_run
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write")
+
+    assert track_mock.call_count == 2
+    requested_call = track_mock.call_args_list[0]
+    assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
+
+    failed_call = track_mock.call_args_list[1]
+    assert failed_call.args[0] == AnalyticsEvent.REPLAY_FAILED
+    assert failed_call.args[1]["error_type"] == "RuntimeError"
+    assert "failure_origin" in failed_call.args[1]
+
+
+def test_replay_none_run_emits_replay_failed_with_runtime_origin() -> None:
+    """Replay returning None should emit REPLAY_FAILED with runtime origin."""
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = None
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch(
+            "kitaru.flow.build_replay_plan",
+            return_value=ReplayPlan(
+                original_run_id=str(source_run.id),
+                steps_to_skip=set(),
+                input_overrides={},
+                step_input_overrides={},
+            ),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(KitaruRuntimeError, match="did not produce"),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = source_run
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write")
+
+    assert track_mock.call_count == 2
+    failed_call = track_mock.call_args_list[1]
+    assert failed_call.args[0] == AnalyticsEvent.REPLAY_FAILED
+    assert failed_call.args[1]["error_type"] == "KitaruRuntimeError"
+    assert failed_call.args[1]["failure_origin"] == FailureOrigin.RUNTIME.value
+
+
+def test_flow_handle_wait_emits_flow_terminal_on_success() -> None:
+    """FlowHandle.wait() should emit FLOW_TERMINAL when run completes."""
+    run_id = uuid4()
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = finished
+
+    handle = FlowHandle(_as_pipeline_run(finished))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        handle.wait()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_TERMINAL,
+        {"execution_id": str(run_id), "status": "completed"},
+    )
+
+
+def test_flow_handle_wait_emits_flow_terminal_on_failure() -> None:
+    """FlowHandle.wait() should emit FLOW_TERMINAL with failure_origin on failure."""
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        run_id=run_id,
+        status_reason="user error",
+        traceback="Traceback\nValueError: boom",
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(KitaruUserCodeError),
+    ):
+        handle.wait()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_TERMINAL,
+        {
+            "execution_id": str(run_id),
+            "status": "failed",
+            "failure_origin": FailureOrigin.USER_CODE.value,
+        },
+    )
+
+
+def test_flow_handle_get_emits_flow_terminal_on_success() -> None:
+    """FlowHandle.get() should emit FLOW_TERMINAL once."""
+    run_id = uuid4()
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 99)],
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = finished
+
+    handle = FlowHandle(_as_pipeline_run(finished))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        handle.get()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_TERMINAL,
+        {"execution_id": str(run_id), "status": "completed"},
+    )
+
+
+def test_flow_handle_terminal_event_emitted_only_once() -> None:
+    """Repeated wait()/get() calls on same handle should emit FLOW_TERMINAL once."""
+    run_id = uuid4()
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = finished
+
+    handle = FlowHandle(_as_pipeline_run(finished))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        handle.wait()
+        handle.get()
+
+    track_mock.assert_called_once()
+
+
+def test_flow_handle_wait_still_raises_when_classify_fails() -> None:
+    """If _classify_run_failure crashes, user should still see their real error."""
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        run_id=run_id,
+        status_reason="user error",
+        traceback="Traceback\nValueError: boom",
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track") as track_mock,
+        patch(
+            "kitaru.flow._classify_run_failure",
+            side_effect=RuntimeError("unexpected shape"),
+        ),
+        pytest.raises(KitaruExecutionError, match="finished with status"),
+    ):
+        handle.wait()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_TERMINAL,
+        {
+            "execution_id": str(run_id),
+            "status": "failed",
+            "failure_origin": FailureOrigin.UNKNOWN.value,
+        },
+    )

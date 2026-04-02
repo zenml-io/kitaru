@@ -223,6 +223,16 @@ def save(
         user_metadata={"kitaru_artifact_type": artifact_type},
     )
 
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.ARTIFACT_SAVED,
+        {
+            "artifact_type": artifact_type,
+            "tag_count": len(tags) if tags else 0,
+        },
+    )
+
 
 def load(exec_id: str, name: str) -> Any:
     """Load a named artifact from a previous execution.
@@ -275,4 +285,17 @@ def load(exec_id: str, name: str) -> Any:
 
     selected = matches[0].artifact
     selected_hydrated = client.get_artifact_version(selected.id, hydrate=True)
-    return selected_hydrated.load()
+    loaded_value = selected_hydrated.load()
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.ARTIFACT_LOADED,
+        {
+            "source_execution_id": exec_id,
+            "artifact_id": str(selected.id),
+            "save_type": selected.save_type.value,
+        },
+    )
+
+    return loaded_value

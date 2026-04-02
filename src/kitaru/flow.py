@@ -352,31 +352,57 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     return tuple(values)
 
 
-def _raise_for_unsuccessful_run(run: PipelineRunResponse) -> None:
-    """Raise a typed Kitaru execution error with run failure context."""
-    details = [f"Execution {run.id} finished with status '{run.status.value}'."]
-
+def _extract_run_failure_context(
+    run: PipelineRunResponse,
+) -> tuple[str | None, str | None]:
+    """Return (status_reason, traceback_text) from a run response."""
     run_body = run.get_body() if hasattr(run, "get_body") else run
     status_reason = getattr(run_body, "status_reason", None)
-    if status_reason:
-        details.append(status_reason)
-
     traceback_text: str | None = None
     if run.exception_info is not None:
         traceback_text = run.exception_info.traceback
+    return status_reason, traceback_text
+
+
+def _classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
+    """Classify the failure origin for an unsuccessful run without raising."""
+    status_reason, traceback_text = _extract_run_failure_context(run)
+    default_origin = (
+        FailureOrigin.USER_CODE if traceback_text is not None else FailureOrigin.UNKNOWN
+    )
+    return classify_failure_origin(
+        status_reason=status_reason,
+        traceback=traceback_text,
+        default=default_origin,
+    )
+
+
+def _safe_classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
+    """Classify failure origin, defaulting to UNKNOWN on unexpected errors."""
+    try:
+        return _classify_run_failure(run)
+    except Exception:
+        return FailureOrigin.UNKNOWN
+
+
+def _raise_for_unsuccessful_run(
+    run: PipelineRunResponse,
+    *,
+    failure_origin: FailureOrigin | None = None,
+) -> None:
+    """Raise a typed Kitaru execution error with run failure context."""
+    details = [f"Execution {run.id} finished with status '{run.status.value}'."]
+
+    status_reason, traceback_text = _extract_run_failure_context(run)
+    if status_reason:
+        details.append(status_reason)
 
     traceback_tail = traceback_last_line(traceback_text)
     if traceback_tail:
         details.append(traceback_tail)
 
-    default_origin = (
-        FailureOrigin.USER_CODE if traceback_text is not None else FailureOrigin.UNKNOWN
-    )
-    failure_origin = classify_failure_origin(
-        status_reason=status_reason,
-        traceback=traceback_text,
-        default=default_origin,
-    )
+    if failure_origin is None:
+        failure_origin = _safe_classify_run_failure(run)
     raise execution_error_from_failure(
         " ".join(details),
         exec_id=str(run.id),
@@ -396,6 +422,7 @@ class FlowHandle:
         """
         self._run = run
         self._run_id = run.id
+        self._terminal_event_emitted = False
 
     @property
     def exec_id(self) -> str:
@@ -406,6 +433,24 @@ class FlowHandle:
     def status(self) -> ExecutionStatus:
         """Current execution status."""
         return self._refresh().status
+
+    def _track_terminal_once(
+        self,
+        run: PipelineRunResponse,
+        *,
+        failure_origin: FailureOrigin | None = None,
+    ) -> None:
+        """Emit FLOW_TERMINAL at most once per handle instance."""
+        if self._terminal_event_emitted:
+            return
+        self._terminal_event_emitted = True
+        metadata: dict[str, Any] = {
+            "execution_id": str(run.id),
+            "status": run.status.value,
+        }
+        if failure_origin is not None:
+            metadata["failure_origin"] = failure_origin.value
+        track(AnalyticsEvent.FLOW_TERMINAL, metadata)
 
     def wait(self) -> Any:
         """Block until execution finishes and return its result.
@@ -421,7 +466,10 @@ class FlowHandle:
             run = self._refresh()
             if run.status.is_finished:
                 if not run.status.is_successful:
-                    _raise_for_unsuccessful_run(run)
+                    origin = _safe_classify_run_failure(run)
+                    self._track_terminal_once(run, failure_origin=origin)
+                    _raise_for_unsuccessful_run(run, failure_origin=origin)
+                self._track_terminal_once(run)
                 return _extract_flow_result(run)
             time.sleep(1)
 
@@ -442,7 +490,10 @@ class FlowHandle:
                 f"Execution {run.id} is still running (status: {run.status.value})."
             )
         if not run.status.is_successful:
-            _raise_for_unsuccessful_run(run)
+            origin = _safe_classify_run_failure(run)
+            self._track_terminal_once(run, failure_origin=origin)
+            _raise_for_unsuccessful_run(run, failure_origin=origin)
+        self._track_terminal_once(run)
         return _extract_flow_result(run)
 
     def _refresh(self) -> PipelineRunResponse:
@@ -619,6 +670,13 @@ class _FlowDefinition:
             settings=_build_settings(transport_image),
         )
 
+        replay_metadata = {
+            "source_execution_id": str(original_run.id),
+            "from_checkpoint": from_,
+            "replay_path": "flow_wrapper",
+        }
+        track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+
         with _temporary_active_stack(resolved_execution.stack):
             try:
                 replayed_run = configured_pipeline.replay(
@@ -634,6 +692,14 @@ class _FlowDefinition:
                     traceback=None,
                     default=FailureOrigin.BACKEND,
                 )
+                track(
+                    AnalyticsEvent.REPLAY_FAILED,
+                    {
+                        **replay_metadata,
+                        "error_type": type(exc).__name__,
+                        "failure_origin": failure_origin.value,
+                    },
+                )
                 if failure_origin == FailureOrigin.DIVERGENCE:
                     raise execution_error_from_failure(
                         f"Replay diverged for execution '{exec_id}': {exc}",
@@ -646,6 +712,14 @@ class _FlowDefinition:
                 ) from exc
 
         if replayed_run is None:
+            track(
+                AnalyticsEvent.REPLAY_FAILED,
+                {
+                    **replay_metadata,
+                    "error_type": "KitaruRuntimeError",
+                    "failure_origin": FailureOrigin.RUNTIME.value,
+                },
+            )
             raise KitaruRuntimeError("Replay did not produce a pipeline run.")
 
         persist_frozen_execution_spec(
@@ -699,6 +773,12 @@ class _FlowDefinition:
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
+        track(
+            AnalyticsEvent.FLOW_SUBMITTED,
+            {
+                "execution_id": str(run.id),
+            },
+        )
         persist_frozen_execution_spec(
             run_id=run.id,
             frozen_execution_spec=frozen_execution_spec,

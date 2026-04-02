@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Analytics instrumentation across all SDK surfaces: flow lifecycle (submit, terminal, replay), execution management (retry, resume, cancel, wait), CLI commands (init, login, secrets), local server lifecycle, feature adoption (LLM, artifacts, stacks, model aliases, log store), and PydanticAI adapter tracking
+
 ### Changed
 - Rewritten examples: realistic research-agent metaphor in basic flow, two-wait pattern (boolean gate + Pydantic schema) in wait/resume, parallel tool submission in coding agent, and consistent "Getting Started" READMEs across all example groups
+- CLI command tracking now uses an allowlist of known multi-word commands to avoid leaking positional arguments (URLs, paths) into analytics
 
 ## [0.3.0] - 2026-03-24
 

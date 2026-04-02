@@ -180,7 +180,7 @@ def set_(
     output_format = _resolve_output_format(output)
     facade = _facade_module()
 
-    def _set_secret() -> tuple[SecretResponse, str]:
+    def _set_secret() -> tuple[SecretResponse, str, int]:
         parsed_assignments = _parse_secret_assignments(assignments)
         client = facade.Client()
 
@@ -198,13 +198,23 @@ def set_(
                 add_or_update_values=parsed_assignments,
             )
             action = "Updated"
-        return secret, action
+        return secret, action, len(parsed_assignments)
 
-    secret, action = run_with_cli_error_boundary(
+    secret, action, key_count = run_with_cli_error_boundary(
         _set_secret,
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
+    )
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.SECRET_UPSERTED,
+        {
+            "operation": action.lower(),
+            "key_count": key_count,
+        },
     )
 
     if output_format == CLIOutputFormat.JSON:

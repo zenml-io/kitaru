@@ -176,6 +176,11 @@ def _apply_runtime_version() -> None:
     app.version = _sdk_version()
 
 
+_MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
+    {"executions", "secrets", "log-store", "stack", "model"}
+)
+
+
 def cli() -> None:
     """Entry point for the `kitaru` console script."""
     from kitaru.analytics import AnalyticsEvent, set_source, track
@@ -185,7 +190,14 @@ def cli() -> None:
     # any analytics calls.  Without this, AnalyticsContext.__enter__()
     # sees is_initialized=False and silently skips all tracking.
     GlobalConfiguration().zen_store  # noqa: B018
-    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(sys.argv[1:2]) or "help"})
+    args = sys.argv[1:]
+    if not args:
+        command = "help"
+    elif len(args) >= 2 and args[0] in _MULTI_TOKEN_COMMANDS:
+        command = f"{args[0]} {args[1]}"
+    else:
+        command = args[0]
+    track(AnalyticsEvent.CLI_INVOKED, {"command": command})
     _apply_runtime_version()
     app()
 

@@ -21,10 +21,42 @@ class AnalyticsEvent(StrEnum):
     and ZenML's ``track(event=...)``.
     """
 
+    # Entry surfaces
     CLI_INVOKED = "Kitaru CLI invoked"
     MCP_SERVER_STARTED = "Kitaru MCP server started"
     MCP_TOOL_CALLED = "Kitaru MCP tool called"
+    PROJECT_INITIALIZED = "Kitaru project initialized"
+    LOGIN_COMPLETED = "Kitaru login completed"
+    LOCAL_SERVER_STARTED = "Kitaru local server started"
+    LOCAL_SERVER_STOPPED = "Kitaru local server stopped"
+
+    # Flow lifecycle
+    FLOW_SUBMITTED = "Kitaru flow submitted"
+    FLOW_TERMINAL = "Kitaru flow terminal"
     FLOW_REPLAYED = "Kitaru flow replayed"
+    REPLAY_REQUESTED = "Kitaru flow replay requested"
+    REPLAY_FAILED = "Kitaru flow replay failed"
+
+    # Execution management
+    WAIT_CREATED = "Kitaru wait created"
+    WAIT_RESOLVED = "Kitaru wait resolved"
+    EXECUTION_RETRIED = "Kitaru execution retried"
+    EXECUTION_RESUMED = "Kitaru execution resumed"
+    EXECUTION_CANCELLED = "Kitaru execution cancelled"
+
+    # Feature adoption
+    LLM_CALLED = "Kitaru LLM called"
+    ARTIFACT_SAVED = "Kitaru artifact saved"
+    ARTIFACT_LOADED = "Kitaru artifact loaded"
+    SECRET_UPSERTED = "Kitaru secret upserted"
+    STACK_CREATED = "Kitaru stack created"
+    STACK_ACTIVATED = "Kitaru stack activated"
+    MODEL_ALIAS_REGISTERED = "Kitaru model alias registered"
+    LOG_STORE_CONFIGURED = "Kitaru log store configured"
+
+    # Adapter
+    PYDANTIC_AI_WRAPPED = "Kitaru PydanticAI wrapped"
+    PYDANTIC_AI_RUN_COMPLETED = "Kitaru PydanticAI run completed"
 
 
 def set_source(suffix_or_source: str) -> None:
