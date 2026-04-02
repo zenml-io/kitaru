@@ -3,78 +3,81 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
-from typing import Any, cast
 from uuid import uuid4
 
 import pytest
-from zenml.models import PipelineRunResponse
 
+from kitaru.engines._types import (
+    CheckpointGraphNode,
+    CheckpointInputBinding,
+    ExecutionGraphSnapshot,
+)
 from kitaru.errors import KitaruStateError, KitaruUsageError
 from kitaru.replay import build_replay_plan
 
 
-def _input_spec(step_name: str, output_name: str) -> Any:
-    return SimpleNamespace(step_name=step_name, output_name=output_name)
+def _binding(
+    input_name: str, upstream_id: str, output_name: str
+) -> CheckpointInputBinding:
+    return CheckpointInputBinding(
+        input_name=input_name,
+        upstream_invocation_id=upstream_id,
+        upstream_output_name=output_name,
+    )
 
 
-def _step(
+def _node(
     *,
     name: str,
     invocation_id: str,
     started_at: datetime,
-    upstream_steps: list[str] | None = None,
-    inputs_v2: dict[str, list[Any]] | None = None,
-) -> Any:
-    return SimpleNamespace(
-        id=uuid4(),
+    upstream: list[str] | None = None,
+    input_bindings: list[CheckpointInputBinding] | None = None,
+    output_names: list[str] | None = None,
+) -> CheckpointGraphNode:
+    return CheckpointGraphNode(
+        call_id=str(uuid4()),
+        invocation_id=invocation_id,
         name=name,
+        upstream_invocation_ids=tuple(upstream or []),
+        input_bindings=tuple(input_bindings or []),
+        output_names=tuple(output_names or ["output"]),
         start_time=started_at,
         end_time=started_at + timedelta(seconds=1),
-        spec=SimpleNamespace(
-            invocation_id=invocation_id,
-            upstream_steps=upstream_steps or [],
-            inputs_v2=inputs_v2 or {},
-        ),
-        outputs={"output": [object()]},
-        regular_outputs={"output": object()},
     )
 
 
-def _run(*steps: Any) -> PipelineRunResponse:
-    return cast(
-        PipelineRunResponse,
-        SimpleNamespace(
-            id=uuid4(),
-            steps={step.name: step for step in steps},
-        ),
+def _snapshot(*nodes: CheckpointGraphNode) -> ExecutionGraphSnapshot:
+    return ExecutionGraphSnapshot(
+        exec_id=str(uuid4()),
+        checkpoints=nodes,
     )
 
 
 def test_build_replay_plan_skips_steps_before_checkpoint_selector() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    fetch = _step(
+    fetch = _node(
         name="fetch",
         invocation_id="fetch",
         started_at=t0,
     )
-    write = _step(
+    write = _node(
         name="write",
         invocation_id="write",
         started_at=t0 + timedelta(seconds=10),
-        upstream_steps=["fetch"],
-        inputs_v2={"research": [_input_spec("fetch", "output")]},
+        upstream=["fetch"],
+        input_bindings=[_binding("research", "fetch", "output")],
     )
-    publish = _step(
+    publish = _node(
         name="publish",
         invocation_id="publish",
         started_at=t0 + timedelta(seconds=20),
-        upstream_steps=["write"],
-        inputs_v2={"draft": [_input_spec("write", "output")]},
+        upstream=["write"],
+        input_bindings=[_binding("draft", "write", "output")],
     )
 
     plan = build_replay_plan(
-        run=_run(fetch, write, publish),
+        snapshot=_snapshot(fetch, write, publish),
         from_="write",
     )
 
@@ -86,28 +89,28 @@ def test_build_replay_plan_skips_steps_before_checkpoint_selector() -> None:
 def test_checkpoint_override_anchors_frontier_at_source_step() -> None:
     """Checkpoint override frontier should use source.index, not consumer."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    fetch = _step(
+    fetch = _node(
         name="fetch",
         invocation_id="fetch",
         started_at=t0,
     )
-    write = _step(
+    write = _node(
         name="write",
         invocation_id="write",
         started_at=t0 + timedelta(seconds=10),
-        upstream_steps=["fetch"],
-        inputs_v2={"research": [_input_spec("fetch", "output")]},
+        upstream=["fetch"],
+        input_bindings=[_binding("research", "fetch", "output")],
     )
-    publish = _step(
+    publish = _node(
         name="publish",
         invocation_id="publish",
         started_at=t0 + timedelta(seconds=20),
-        upstream_steps=["write"],
-        inputs_v2={"draft": [_input_spec("write", "output")]},
+        upstream=["write"],
+        input_bindings=[_binding("draft", "write", "output")],
     )
 
     plan = build_replay_plan(
-        run=_run(fetch, write, publish),
+        snapshot=_snapshot(fetch, write, publish),
         from_="publish",
         overrides={"checkpoint.fetch": "edited research"},
     )
@@ -121,31 +124,31 @@ def test_checkpoint_override_anchors_frontier_at_source_step() -> None:
 def test_skip_override_disjointness_is_enforced() -> None:
     """Steps with input overrides must not appear in steps_to_skip."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
-    fetch = _step(
+    fetch = _node(
         name="fetch",
         invocation_id="fetch",
         started_at=t0,
     )
-    transform = _step(
+    transform = _node(
         name="transform",
         invocation_id="transform",
         started_at=t0 + timedelta(seconds=5),
-        upstream_steps=["fetch"],
-        inputs_v2={"data": [_input_spec("fetch", "output")]},
+        upstream=["fetch"],
+        input_bindings=[_binding("data", "fetch", "output")],
     )
-    train = _step(
+    train = _node(
         name="train",
         invocation_id="train",
         started_at=t0 + timedelta(seconds=10),
-        upstream_steps=["transform"],
-        inputs_v2={"features": [_input_spec("transform", "output")]},
+        upstream=["transform"],
+        input_bindings=[_binding("features", "transform", "output")],
     )
 
     # from_="train" means skip fetch and transform.
     # But checkpoint.transform overrides inject into train, and the frontier
     # from source.index (transform=1) should keep transform out of skip.
     plan = build_replay_plan(
-        run=_run(fetch, transform, train),
+        snapshot=_snapshot(fetch, transform, train),
         from_="train",
         overrides={"checkpoint.transform": "new features"},
     )
@@ -165,21 +168,21 @@ def test_dag_ordering_not_timestamp_ordering() -> None:
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
 
     # validate starts first in wall clock, but depends on extract
-    extract = _step(
+    extract = _node(
         name="extract",
         invocation_id="extract",
         started_at=t0 + timedelta(seconds=5),
     )
-    validate = _step(
+    validate = _node(
         name="validate",
         invocation_id="validate",
         started_at=t0,  # earlier timestamp!
-        upstream_steps=["extract"],
-        inputs_v2={"data": [_input_spec("extract", "output")]},
+        upstream=["extract"],
+        input_bindings=[_binding("data", "extract", "output")],
     )
 
     plan = build_replay_plan(
-        run=_run(extract, validate),
+        snapshot=_snapshot(extract, validate),
         from_="validate",
     )
 
@@ -191,29 +194,29 @@ def test_parallel_branches_ordered_deterministically() -> None:
     """Parallel branches (no dependency) should get a deterministic order."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
 
-    branch_a = _step(
+    branch_a = _node(
         name="branch_a",
         invocation_id="branch_a",
         started_at=t0 + timedelta(seconds=10),
     )
-    branch_b = _step(
+    branch_b = _node(
         name="branch_b",
         invocation_id="branch_b",
         started_at=t0,
     )
-    merge = _step(
+    merge = _node(
         name="merge",
         invocation_id="merge",
         started_at=t0 + timedelta(seconds=20),
-        upstream_steps=["branch_a", "branch_b"],
-        inputs_v2={
-            "a": [_input_spec("branch_a", "output")],
-            "b": [_input_spec("branch_b", "output")],
-        },
+        upstream=["branch_a", "branch_b"],
+        input_bindings=[
+            _binding("a", "branch_a", "output"),
+            _binding("b", "branch_b", "output"),
+        ],
     )
 
     plan = build_replay_plan(
-        run=_run(branch_a, branch_b, merge),
+        snapshot=_snapshot(branch_a, branch_b, merge),
         from_="merge",
     )
 
@@ -223,7 +226,7 @@ def test_parallel_branches_ordered_deterministically() -> None:
 
 def test_wait_overrides_are_rejected() -> None:
     """Wait overrides should raise a clear error."""
-    step = _step(
+    node = _node(
         name="fetch",
         invocation_id="fetch",
         started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
@@ -231,14 +234,14 @@ def test_wait_overrides_are_rejected() -> None:
 
     with pytest.raises(KitaruUsageError, match="not supported in replay"):
         build_replay_plan(
-            run=_run(step),
+            snapshot=_snapshot(node),
             from_="fetch",
             overrides={"wait.approve": True},
         )
 
 
 def test_build_replay_plan_rejects_invalid_override_prefix() -> None:
-    step = _step(
+    node = _node(
         name="fetch",
         invocation_id="fetch",
         started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
@@ -246,14 +249,14 @@ def test_build_replay_plan_rejects_invalid_override_prefix() -> None:
 
     with pytest.raises(KitaruUsageError, match="Override keys must start"):
         build_replay_plan(
-            run=_run(step),
+            snapshot=_snapshot(node),
             from_="fetch",
             overrides={"artifact.fetch": "x"},
         )
 
 
 def test_build_replay_plan_rejects_unknown_selector() -> None:
-    step = _step(
+    node = _node(
         name="fetch",
         invocation_id="fetch",
         started_at=datetime(2026, 3, 9, 10, 0, tzinfo=UTC),
@@ -261,6 +264,6 @@ def test_build_replay_plan_rejects_unknown_selector() -> None:
 
     with pytest.raises(KitaruStateError, match="Unknown checkpoint selector"):
         build_replay_plan(
-            run=_run(step),
+            snapshot=_snapshot(node),
             from_="unknown",
         )

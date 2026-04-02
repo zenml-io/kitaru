@@ -55,18 +55,20 @@ def parallel_agent(urls: list[str]) -> list[str]:
     return [f.result() for f in futures]
 ```
 
-`.submit()` returns a future-like object. Call `.result()` on it to get the
-checkpoint's return value. This is the primary fan-out pattern in Kitaru.
+`.submit()` returns a `KitaruStepFuture`. Call `.result()` on it to get the
+checkpoint's output. This is the primary fan-out pattern in Kitaru.
 
 <Callout type="info">
-  The object returned by `.submit()` is a runtime future — use `.result()` to
-  collect the value. You can submit multiple checkpoints and collect their
-  results later for fan-out / fan-in patterns.
+  `.submit()` returns a `KitaruStepFuture` — call `.result()` to collect the
+  output, or `.running()` to check if the checkpoint is still in progress.
+  Submit multiple checkpoints and collect their results later for fan-out /
+  fan-in patterns.
 </Callout>
 
 ### Additional concurrent helpers
 
-Kitaru also provides `.map()` and `.product()` for batch concurrent execution:
+Kitaru also provides `.map()` and `.product()` for batch concurrent execution.
+Both return a `KitaruMapFuture`:
 
 ```python
 # .map() — apply checkpoint to each element of an iterable
@@ -76,8 +78,8 @@ results = fetch_data.map(["url1", "url2", "url3"])
 results = my_checkpoint.product(["a", "b"], [1, 2])
 ```
 
-These are convenience wrappers over concurrent submission. See the
-[API reference](/reference/python/checkpoint) for detailed signatures.
+Iterate a `KitaruMapFuture` to get individual `KitaruStepFuture` instances, or
+call `.result()` to collect all outputs at once.
 
 ## Decorator options
 

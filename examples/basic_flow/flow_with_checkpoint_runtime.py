@@ -2,8 +2,8 @@
 
 This example demonstrates:
 - ``@checkpoint(runtime="isolated")`` to request isolated container execution
-- ``.submit()`` for concurrent fan-out across multiple inputs
-- ``.result()`` to collect ordered results
+- ``.submit()`` for concurrent fan-out (returns ``KitaruStepFuture``)
+- ``.result()`` to collect ordered results from each future
 
 When run on a remote orchestrator that supports isolated steps (Kubernetes,
 Vertex, SageMaker, AzureML), each submitted checkpoint runs in its own

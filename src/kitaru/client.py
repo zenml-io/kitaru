@@ -84,6 +84,7 @@ from kitaru.config import (
     resolve_connection_config,
     resolve_log_store,
 )
+from kitaru.engines import get_engine_backend
 from kitaru.errors import (
     FailureOrigin,
     KitaruBackendError,
@@ -631,7 +632,7 @@ class _ExecutionsAPI:
 
         replay_pipeline = _resolve_pipeline_for_replay(source_run)
         replay_plan = build_replay_plan(
-            run=source_run,
+            snapshot=get_engine_backend().execution_graph_from_run(source_run),
             from_=from_,
             overrides=overrides,
             flow_inputs=flow_inputs,

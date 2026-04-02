@@ -12,19 +12,23 @@ from contextlib import ExitStack
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 
-from zenml.config.retry_config import StepRetryConfig
-from zenml.enums import StepRuntime, StepType
+from zenml.enums import StepRuntime
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
-from zenml.steps.step_decorator import step
 
 from kitaru._source_aliases import (
     build_checkpoint_registration_name,
     build_checkpoint_source_alias,
     callable_name,
 )
+from kitaru.engines import get_engine_backend
 from kitaru.errors import KitaruContextError, KitaruUsageError
+from kitaru.futures import (
+    KitaruMapFuture,
+    KitaruStepFuture,
+    unwrap_kitaru_futures,
+)
 from kitaru.runtime import (
     _checkpoint_scope,
     _flow_scope,
@@ -50,13 +54,13 @@ def _register_checkpoint_source_alias(
     *,
     func: Callable[..., Any],
     alias: str,
-    step_obj: Any,
+    source_object: Any,
 ) -> None:
-    """Register the ZenML step object under a module-level alias."""
+    """Register the backend checkpoint object under a module-level alias."""
     module = sys.modules.get(func.__module__)
     if module is None:
         return
-    setattr(module, alias, step_obj)
+    setattr(module, alias, source_object)
 
 
 def _normalize_retries(retries: int) -> int:
@@ -64,34 +68,6 @@ def _normalize_retries(retries: int) -> int:
     if retries < 0:
         raise KitaruUsageError("Checkpoint retries must be >= 0.")
     return retries
-
-
-def _to_retry_config(retries: int) -> StepRetryConfig | None:
-    """Convert retry count to ZenML retry config."""
-    if retries == 0:
-        return None
-    return StepRetryConfig(max_retries=retries)
-
-
-def _build_checkpoint_extra(checkpoint_type: str | None) -> dict[str, Any]:
-    """Build namespaced step metadata for dashboard rendering."""
-    payload: dict[str, Any] = {"boundary": "checkpoint"}
-    if checkpoint_type is not None:
-        payload["type"] = checkpoint_type
-    return {"kitaru": payload}
-
-
-_KNOWN_STEP_TYPES: dict[str, StepType] = {
-    "llm_call": StepType.LLM_CALL,
-    "tool_call": StepType.TOOL_CALL,
-}
-
-
-def _to_step_type(checkpoint_type: str | None) -> StepType | None:
-    """Map well-known checkpoint types to ZenML's StepType enum."""
-    if checkpoint_type is None:
-        return None
-    return _KNOWN_STEP_TYPES.get(checkpoint_type)
 
 
 _KNOWN_STEP_RUNTIMES: dict[str, StepRuntime] = {
@@ -192,17 +168,18 @@ class _CheckpointDefinition:
         aliasable_entrypoint.__name__ = source_alias
         aliasable_entrypoint.__qualname__ = source_alias
 
-        self._step = step(
-            name=registration_name,
-            retry=_to_retry_config(self._default_retries),
-            extra=_build_checkpoint_extra(checkpoint_type),
-            step_type=_to_step_type(checkpoint_type),
+        backend = get_engine_backend()
+        self._engine_definition = backend.create_checkpoint_definition(
+            entrypoint=wrapped_entrypoint,
+            registration_name=registration_name,
+            retries=self._default_retries,
+            checkpoint_type=checkpoint_type,
             runtime=self._runtime,
-        )(wrapped_entrypoint)
+        )
         _register_checkpoint_source_alias(
             func=func,
             alias=source_alias,
-            step_obj=self._step,
+            source_object=self._engine_definition.source_object,
         )
 
         update_wrapper(self, func)
@@ -237,7 +214,12 @@ class _CheckpointDefinition:
     ) -> Any:
         """Call the checkpoint with context guardrails."""
         self._assert_call_allowed()
-        return self._step(*args, id=id, after=after, **kwargs)
+        return self._engine_definition.call(
+            *unwrap_kitaru_futures(args),
+            id=id,
+            after=unwrap_kitaru_futures(after),
+            **unwrap_kitaru_futures(kwargs),
+        )
 
     def submit(
         self,
@@ -245,30 +227,46 @@ class _CheckpointDefinition:
         id: str | None = None,
         after: Any | Sequence[Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> KitaruStepFuture:
         """Submit the checkpoint concurrently inside a running flow."""
         self._assert_submit_allowed()
-        return self._step.submit(*args, id=id, after=after, **kwargs)
+        native = self._engine_definition.submit(
+            *unwrap_kitaru_futures(args),
+            id=id,
+            after=unwrap_kitaru_futures(after),
+            **unwrap_kitaru_futures(kwargs),
+        )
+        return KitaruStepFuture(native)
 
     def map(
         self,
         *args: Any,
         after: Any | Sequence[Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> KitaruMapFuture:
         """Map checkpoint invocations inside a running flow."""
         self._assert_submit_allowed()
-        return self._step.map(*args, after=after, **kwargs)
+        native = self._engine_definition.map(
+            *unwrap_kitaru_futures(args),
+            after=unwrap_kitaru_futures(after),
+            **unwrap_kitaru_futures(kwargs),
+        )
+        return KitaruMapFuture(native)
 
     def product(
         self,
         *args: Any,
         after: Any | Sequence[Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> KitaruMapFuture:
         """Map checkpoint invocations as a cartesian product in a running flow."""
         self._assert_submit_allowed()
-        return self._step.product(*args, after=after, **kwargs)
+        native = self._engine_definition.product(
+            *unwrap_kitaru_futures(args),
+            after=unwrap_kitaru_futures(after),
+            **unwrap_kitaru_futures(kwargs),
+        )
+        return KitaruMapFuture(native)
 
 
 @overload

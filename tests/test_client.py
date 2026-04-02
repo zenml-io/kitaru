@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1092,6 +1093,13 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
         __kitaru_pipeline_source_sample_flow=replay_pipeline,
     )
 
+    _real_import = importlib.import_module
+
+    def _selective_import(name: str, package: str | None = None) -> object:
+        if name == "example.flow_module":
+            return replay_module
+        return _real_import(name, package)
+
     with (
         patch(
             "kitaru.client.resolve_connection_config",
@@ -1102,7 +1110,10 @@ def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
             "kitaru.client._resolve_flow_for_replay",
             side_effect=KitaruRuntimeError("no replay flow"),
         ),
-        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+        patch(
+            "kitaru.client.importlib.import_module",
+            side_effect=_selective_import,
+        ),
     ):
         client_mock = client_cls.return_value
         client_mock.get_pipeline_run.side_effect = [

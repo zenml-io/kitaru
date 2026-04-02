@@ -47,6 +47,7 @@ from kitaru.errors import (
 from kitaru.runtime import (
     _get_current_checkpoint_id,
     _get_current_execution_id,
+    _get_current_runtime_session,
     _is_inside_checkpoint,
 )
 
@@ -190,6 +191,23 @@ def _format_match(match: _ArtifactMatch) -> str:
     )
 
 
+def _save_via_zenml(
+    name: str,
+    value: Any,
+    *,
+    type: str,
+    tags: list[str] | None = None,
+) -> None:
+    """Persist a named artifact via the ZenML backend."""
+    save_artifact(
+        data=value,
+        name=name,
+        artifact_type=ArtifactType.DATA,
+        tags=tags,
+        user_metadata={"kitaru_artifact_type": type},
+    )
+
+
 def save(
     name: str,
     value: Any,
@@ -215,33 +233,15 @@ def save(
     _require_checkpoint_scope("save")
     artifact_type = _normalize_artifact_type(type)
 
-    save_artifact(
-        data=value,
-        name=name,
-        artifact_type=ArtifactType.DATA,
-        tags=tags,
-        user_metadata={"kitaru_artifact_type": artifact_type},
-    )
+    session = _get_current_runtime_session()
+    if session is not None:
+        session.save_artifact(name, value, type=artifact_type, tags=tags)
+        return
+    _save_via_zenml(name, value, type=artifact_type, tags=tags)
 
 
-def load(exec_id: str, name: str) -> Any:
-    """Load a named artifact from a previous execution.
-
-    Args:
-        exec_id: The execution ID to load from.
-        name: The artifact name to retrieve.
-
-    Returns:
-        The materialized artifact value.
-
-    Raises:
-        KitaruContextError: If called outside a checkpoint.
-        KitaruStateError: If runtime scope is invalid.
-        KitaruRuntimeError: If lookup is not found or ambiguous.
-        KitaruUsageError: If `exec_id` is not a valid UUID.
-    """
-    _require_checkpoint_scope("load")
-
+def _load_via_zenml(exec_id: str, name: str) -> Any:
+    """Load a named artifact via the ZenML backend."""
     try:
         target_execution_id = UUID(exec_id)
     except ValueError as exc:
@@ -276,3 +276,27 @@ def load(exec_id: str, name: str) -> Any:
     selected = matches[0].artifact
     selected_hydrated = client.get_artifact_version(selected.id, hydrate=True)
     return selected_hydrated.load()
+
+
+def load(exec_id: str, name: str) -> Any:
+    """Load a named artifact from a previous execution.
+
+    Args:
+        exec_id: The execution ID to load from.
+        name: The artifact name to retrieve.
+
+    Returns:
+        The materialized artifact value.
+
+    Raises:
+        KitaruContextError: If called outside a checkpoint.
+        KitaruStateError: If runtime scope is invalid.
+        KitaruRuntimeError: If lookup is not found or ambiguous.
+        KitaruUsageError: If `exec_id` is not a valid UUID.
+    """
+    _require_checkpoint_scope("load")
+
+    session = _get_current_runtime_session()
+    if session is not None:
+        return session.load_artifact(exec_id, name)
+    return _load_via_zenml(exec_id, name)

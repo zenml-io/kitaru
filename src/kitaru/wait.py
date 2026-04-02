@@ -20,7 +20,11 @@ from kitaru.errors import (
     KitaruContextError,
     KitaruFeatureNotAvailableError,
 )
-from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow
+from kitaru.runtime import (
+    _get_current_runtime_session,
+    _is_inside_checkpoint,
+    _is_inside_flow,
+)
 
 _WAIT_OUTSIDE_FLOW_ERROR = "wait() can only run inside a @flow."
 _WAIT_INSIDE_CHECKPOINT_ERROR = (
@@ -54,6 +58,25 @@ def _resolve_zenml_wait() -> Callable[..., Any]:
 
     raise KitaruFeatureNotAvailableError(
         "kitaru.wait() requires a ZenML build that includes wait support."
+    )
+
+
+def _wait_via_zenml(
+    *,
+    schema: Any = None,
+    name: str | None = None,
+    question: str | None = None,
+    timeout: int,
+    metadata: dict[str, Any] | None = None,
+) -> Any:
+    """Execute a wait via the ZenML backend."""
+    zenml_wait = _resolve_zenml_wait()
+    return zenml_wait(
+        schema=schema,
+        question=question,
+        timeout=timeout,
+        metadata=metadata,
+        name=name,
     )
 
 
@@ -96,12 +119,20 @@ def wait(
         raise KitaruContextError(_WAIT_INSIDE_CHECKPOINT_ERROR)
 
     resolved_timeout = _DEFAULT_WAIT_TIMEOUT_SECONDS if timeout is None else timeout
-    zenml_wait = _resolve_zenml_wait()
-    resolved_value = zenml_wait(
+
+    session = _get_current_runtime_session()
+    if session is not None:
+        return session.wait(
+            schema=schema,
+            name=name,
+            question=question,
+            timeout=resolved_timeout,
+            metadata=metadata,
+        )
+    return _wait_via_zenml(
         schema=schema,
+        name=name,
         question=question,
         timeout=resolved_timeout,
         metadata=metadata,
-        name=name,
     )
-    return resolved_value

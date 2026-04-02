@@ -16,13 +16,8 @@ from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 
 from zenml.client import Client
-from zenml.config.constants import DOCKER_SETTINGS_KEY
-from zenml.config.docker_settings import DockerSettings
-from zenml.config.retry_config import StepRetryConfig
 from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
-from zenml.pipelines.pipeline_decorator import pipeline
-from zenml.pipelines.pipeline_definition import Pipeline
 
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
@@ -39,11 +34,11 @@ from kitaru.config import (
     _read_env_model_registry,
     _read_model_registry_config,
     build_frozen_execution_spec,
-    image_settings_to_docker_settings,
     persist_frozen_execution_spec,
     resolve_connection_config,
     resolve_execution_config,
 )
+from kitaru.engines import get_engine_backend
 from kitaru.errors import (
     FailureOrigin,
     KitaruBackendError,
@@ -88,23 +83,23 @@ def _register_pipeline_source_alias(
     *,
     func: Callable[..., Any],
     alias: str,
-    pipeline_obj: Pipeline,
+    source_object: Any,
 ) -> None:
-    """Register the ZenML pipeline object under a module-level alias.
+    """Register the backend flow object under a module-level alias.
 
-    ZenML dynamic runs reload pipelines from their source import path. Kitaru
-    wraps ZenML pipelines, so we expose the underlying pipeline object under a
-    dedicated alias and point source resolution there.
+    Backend engines reload flow definitions from their source import path.
+    We expose the underlying backend object under a dedicated alias
+    and point source resolution there.
 
     Args:
         func: User flow function.
         alias: Module-level alias name.
-        pipeline_obj: Underlying ZenML pipeline object.
+        source_object: Backend-native flow object.
     """
     module = sys.modules.get(func.__module__)
     if module is None:
         return
-    setattr(module, alias, pipeline_obj)
+    setattr(module, alias, source_object)
 
 
 def _wrap_flow_entrypoint(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -135,37 +130,6 @@ def _normalize_retries(retries: int) -> int:
     if retries < 0:
         raise KitaruUsageError("Flow retries must be >= 0.")
     return retries
-
-
-def _to_retry_config(retries: int) -> StepRetryConfig | None:
-    """Convert a retry count to ZenML retry config.
-
-    Args:
-        retries: Retry count.
-
-    Returns:
-        A ZenML retry config, or `None` when retries are disabled.
-    """
-    if retries == 0:
-        return None
-    return StepRetryConfig(max_retries=retries)
-
-
-def _build_settings(
-    image: ImageSettings | None,
-) -> dict[str, DockerSettings]:
-    """Build ZenML settings payload for flow execution.
-
-    Kitaru is always included in the Docker requirements so that remote
-    containers have the SDK available at runtime.
-
-    Args:
-        image: Optional image configuration.
-
-    Returns:
-        Pipeline settings dictionary.
-    """
-    return {DOCKER_SETTINGS_KEY: image_settings_to_docker_settings(image)}
 
 
 def _inject_model_registry_env(
@@ -496,14 +460,15 @@ class _FlowDefinition:
         aliasable_entrypoint.__name__ = source_alias
         aliasable_entrypoint.__qualname__ = source_alias
 
-        self._pipeline: Pipeline = pipeline(
-            dynamic=True,
-            name=registration_name,
-        )(wrapped_entrypoint)
+        backend = get_engine_backend()
+        self._engine_definition = backend.create_flow_definition(
+            entrypoint=wrapped_entrypoint,
+            registration_name=registration_name,
+        )
         _register_pipeline_source_alias(
             func=func,
             alias=source_alias,
-            pipeline_obj=self._pipeline,
+            source_object=self._engine_definition.source_object,
         )
         update_wrapper(self, func)
 
@@ -589,7 +554,7 @@ class _FlowDefinition:
             ) from exc
 
         replay_plan = build_replay_plan(
-            run=original_run,
+            snapshot=get_engine_backend().execution_graph_from_run(original_run),
             from_=from_,
             overrides=overrides,
             flow_inputs=flow_inputs,
@@ -613,18 +578,14 @@ class _FlowDefinition:
             connection=resolved_connection,
             model_registry=effective_model_registry,
         )
-        configured_pipeline = self._pipeline.with_options(
-            enable_cache=resolved_execution.cache,
-            retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
-            settings=_build_settings(transport_image),
-        )
-
         with _temporary_active_stack(resolved_execution.stack):
             try:
-                replayed_run = configured_pipeline.replay(
-                    pipeline_run=original_run.id,
-                    skip=replay_plan.steps_to_skip,
-                    skip_successful_steps=False,
+                replayed_run = self._engine_definition.replay(
+                    source_run_id=original_run.id,
+                    cache=resolved_execution.cache,
+                    retries=_normalize_retries(resolved_execution.retries),
+                    image=transport_image,
+                    steps_to_skip=replay_plan.steps_to_skip,
                     input_overrides=replay_plan.input_overrides or None,
                     step_input_overrides=replay_plan.step_input_overrides or None,
                 )
@@ -687,14 +648,14 @@ class _FlowDefinition:
             connection=resolved_connection,
             model_registry=effective_model_registry,
         )
-        configured_pipeline = self._pipeline.with_options(
-            enable_cache=resolved_execution.cache,
-            retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
-            settings=_build_settings(transport_image),
-        )
-
         with _temporary_active_stack(resolved_execution.stack):
-            run = configured_pipeline(*args, **kwargs)
+            run = self._engine_definition.run(
+                args=args,
+                kwargs=kwargs,
+                cache=resolved_execution.cache,
+                retries=_normalize_retries(resolved_execution.retries),
+                image=transport_image,
+            )
 
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
