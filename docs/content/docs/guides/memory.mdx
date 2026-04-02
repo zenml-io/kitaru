@@ -1,0 +1,197 @@
+---
+title: Use Memory
+description: Seed, read, update, inspect, and delete durable memory across Python, client, CLI, and MCP
+---
+
+Memory is Kitaru's durable key-value store for long-lived agent state.
+
+If artifacts are boxes you fetch from a specific past run, memory is the shared
+cabinet where you keep the latest durable facts under stable keys.
+
+## Choose the right surface
+
+All memory surfaces talk to the same stored data, but they do not expose the
+exact same controls.
+
+| Surface | Scope input | Version support | Prefix support | Notes |
+|---|---|---|---|---|
+| `kitaru.memory` | Implicit via `memory.configure(...)` or active flow | `get(version=...)` | No | Best inside Python flows and scripts |
+| `KitaruClient.memories` | Explicit `scope=` on every call | Yes | Yes on `list` | Best for admin/inspection code |
+| CLI | `--scope` required | No | No | Best for shell inspection and quick edits |
+| MCP | `scope` required | Yes on `get` | Yes on `list` | Best for assistant/tool use |
+
+<Callout type="info">
+  The module-level `kitaru.memory` API does not take per-call `scope=`
+  arguments. You configure the active scope once, then call `set()`, `get()`,
+  `list()`, `history()`, and `delete()` against that scope.
+</Callout>
+
+## Use memory inside a flow
+
+Inside a flow, Kitaru defaults to the flow name as the active memory scope when
+you have not configured one explicitly.
+
+```python
+from kitaru import checkpoint, flow, memory
+
+@checkpoint
+def increment_runs(previous_runs: int | None) -> int:
+    return (previous_runs or 0) + 1
+
+@flow
+def research_agent(topic: str) -> None:
+    previous_runs = memory.get("stats/run_count")
+    updated_runs = increment_runs(previous_runs)
+    memory.set("stats/run_count", updated_runs)
+    memory.set("last_topic", topic)
+```
+
+The important detail is that in-flow `memory.get()`, `memory.list()`,
+`memory.history()`, and `memory.delete()` behave like runtime step outputs, not
+eager Python values. Keep the memory calls in the flow body, then pass those
+results into checkpoints when you need normal Python logic.
+
+If you want a different scope, configure it first:
+
+```python
+from kitaru import flow, memory
+
+@flow
+def support_agent(customer_id: str, issue: str) -> None:
+    memory.configure(scope=f"customer/{customer_id}", scope_type="namespace")
+    memory.set("latest_issue", issue)
+```
+
+## Seed memory outside a flow
+
+Outside a flow, you must configure a scope before using the module-level API.
+
+```python
+from kitaru import memory
+
+memory.configure(scope="repo_docs", scope_type="namespace")
+memory.set("style/release_notes", {
+    "tone": "concise",
+    "format": "bullets",
+})
+
+style = memory.get("style/release_notes")
+print(style)
+```
+
+This is useful for:
+
+- seeding memory from scripts
+- patching stored state by hand
+- writing migration or setup utilities
+
+## Inspect memory with `KitaruClient`
+
+Use `KitaruClient.memories` when you want explicit-scope programmatic control.
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+
+client.memories.set(
+    "team/default_model",
+    {"alias": "fast"},
+    scope="repo_docs",
+    scope_type="namespace",
+)
+
+entries = client.memories.list(scope="repo_docs")
+latest = client.memories.get("team/default_model", scope="repo_docs")
+history = client.memories.history("team/default_model", scope="repo_docs")
+scopes = client.memories.scopes()
+```
+
+The client API is the best fit for admin utilities because every call makes the
+scope explicit.
+
+## Read and update memory from the CLI
+
+The CLI surface mirrors the same storage, but it always requires `--scope`.
+
+```bash
+kitaru memory scopes
+kitaru memory list --scope repo_docs
+kitaru memory get style/release_notes --scope repo_docs
+kitaru memory set style/release_notes '{"tone":"concise"}' --scope repo_docs --scope-type namespace
+kitaru memory history style/release_notes --scope repo_docs
+kitaru memory delete style/release_notes --scope repo_docs
+```
+
+Two details matter here:
+
+- `kitaru memory set` parses the value as JSON when possible
+- the CLI `get` command reads the latest value only; it does not expose a version flag
+
+## Read and update memory from MCP
+
+Assistants can use the MCP server's structured memory tools:
+
+- `kitaru_memory_list(scope, prefix=None)`
+- `kitaru_memory_get(key, scope, version=None)`
+- `kitaru_memory_set(key, value, scope, scope_type=None)`
+- `kitaru_memory_delete(key, scope)`
+- `kitaru_memory_history(key, scope)`
+
+A typical sequence looks like this:
+
+1. `kitaru_memory_list(scope="repo_docs")`
+2. `kitaru_memory_get(key="style/release_notes", scope="repo_docs")`
+3. `kitaru_memory_set(key="style/release_notes", value={"tone": "concise"}, scope="repo_docs", scope_type="namespace")`
+
+Use MCP when an assistant needs to inspect or update durable state without
+shelling out to the CLI.
+
+## Delete a key and inspect history
+
+Deletes are soft deletes, so you can still inspect what happened.
+
+```python
+from kitaru import memory
+
+memory.configure(scope="repo_docs", scope_type="namespace")
+memory.set("draft/status", "draft")
+memory.set("draft/status", "approved")
+memory.delete("draft/status")
+
+print(memory.get("draft/status"))          # None
+print(memory.history("draft/status"))      # includes versions + tombstone
+```
+
+That sequence tells a concrete story:
+
+1. the key existed
+2. it changed over time
+3. the latest version became a tombstone
+4. history still preserves the earlier states
+
+## Restrictions to remember
+
+- Memory is allowed in flow bodies
+- Memory is forbidden inside `@checkpoint`
+- Outside a flow, configure the scope first with `memory.configure(...)`
+- Replay may observe newer values and replays of writes create new versions
+
+## Runnable example
+
+If you want one script that tells the whole story, run
+`examples/memory/flow_with_memory.py`.
+
+It demonstrates:
+
+- outside-flow namespace seeding with `kitaru.memory`
+- in-flow reads, writes, deletes, history, and scope switching
+- explicit namespace, flow, and execution inspection with `KitaruClient.memories`
+
+## Reference pages
+
+- [Memory concept](/concepts/memory)
+- [Python memory reference](/reference/python/memory)
+- [KitaruClient reference](/reference/python/client/KitaruClient)
+- [CLI memory reference](/cli/memory)
+- [MCP server guide](/agent-native/mcp-server)

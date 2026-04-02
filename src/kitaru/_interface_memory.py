@@ -46,6 +46,14 @@ def normalize_memory_scope_type(
     return _validate_memory_scope_type(candidate, error_type=ValueError)
 
 
+def scopes_memory_payload(
+    client: KitaruClient,
+) -> list[dict[str, Any]]:
+    """Build serialized payloads for all discovered memory scopes."""
+    scopes = client.memories.scopes()
+    return [inspection.serialize_memory_scope_info(info) for info in scopes]
+
+
 def get_memory_payload(
     client: KitaruClient,
     *,
