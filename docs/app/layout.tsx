@@ -58,6 +58,7 @@ export default function Layout({ children }: LayoutProps<'/'>) {
         />
       </head>
       <body className="flex flex-col min-h-screen">
+        <img referrerPolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=ce7012ba-8b28-4529-8614-c7bafaf20f72" alt="" aria-hidden="true" width="1" height="1" style={{position:'absolute'}} />
         <Provider>{children}</Provider>
       </body>
     </html>

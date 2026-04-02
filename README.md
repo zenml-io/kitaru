@@ -183,3 +183,5 @@ all PRs should target it.
 ## License
 
 [Apache 2.0](LICENSE)
+
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=633f1c0b-9a82-47af-8a6c-251a150bcc16" alt="" />
