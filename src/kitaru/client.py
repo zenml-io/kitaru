@@ -19,7 +19,7 @@ import importlib
 import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from typing import Any, Literal, Protocol, cast, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from pydantic import ValidationError
 from zenml.client import Client
@@ -103,6 +103,7 @@ from kitaru.memory import (
     _history_impl,
     _list_impl,
     _MemoryScope,
+    _MemoryScopeType,
     _set_entry_impl,
     _validate_memory_identifier,
     _validate_memory_scope_type,
@@ -889,7 +890,7 @@ class _MemoriesAPI:
         value: Any,
         *,
         scope: str,
-        scope_type: Literal["namespace", "flow", "execution"] = "namespace",
+        scope_type: _MemoryScopeType = "namespace",
     ) -> MemoryEntry:
         """Persist a memory value and return the created metadata entry."""
         return _set_entry_impl(

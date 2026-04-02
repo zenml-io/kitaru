@@ -531,15 +531,9 @@ def _save_memory_artifact(
             tags=_memory_tags(scope.scope, key),
             user_metadata=_memory_metadata(scope_type=scope_type, deleted=deleted),
         )
-    artifact_id = getattr(created, "id", None)
-    if artifact_id is None:
-        raise KitaruRuntimeError(
-            "Memory write did not return an artifact version ID, so the exact "
-            "created version could not be reloaded."
-        )
     return _fetch_exact_artifact_version(
         client,
-        str(artifact_id),
+        str(created.id),
         project=project,
     )
 

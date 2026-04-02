@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 import kitaru.inspection as inspection
 from kitaru.client import KitaruClient
 from kitaru.memory import (
+    _MemoryScopeType,
     _validate_memory_identifier,
     _validate_memory_scope_type,
     _validate_memory_version,
 )
-
-_MemoryScopeType = Literal["namespace", "flow", "execution"]
 
 
 def normalize_memory_scope(scope: str) -> str:
