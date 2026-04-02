@@ -24,7 +24,10 @@ class AnalyticsEvent(StrEnum):
     CLI_INVOKED = "Kitaru CLI invoked"
     MCP_SERVER_STARTED = "Kitaru MCP server started"
     MCP_TOOL_CALLED = "Kitaru MCP tool called"
+    FLOW_SUBMITTED = "Kitaru flow submitted"
     FLOW_REPLAYED = "Kitaru flow replayed"
+    REPLAY_REQUESTED = "Kitaru flow replay requested"
+    REPLAY_FAILED = "Kitaru flow replay failed"
 
 
 def set_source(suffix_or_source: str) -> None:

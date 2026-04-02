@@ -490,6 +490,7 @@ class _FlowDefinition:
 
         wrapped_entrypoint = _wrap_flow_entrypoint(func)
         func_name = callable_name(func)
+        self._flow_name = func_name
         registration_name = build_pipeline_registration_name(func_name)
         source_alias = build_pipeline_source_alias(func_name)
         aliasable_entrypoint = cast(Any, wrapped_entrypoint)
@@ -619,6 +620,14 @@ class _FlowDefinition:
             settings=_build_settings(transport_image),
         )
 
+        replay_metadata = {
+            "flow_name": self._flow_name,
+            "source_execution_id": str(original_run.id),
+            "from_checkpoint": from_,
+            "replay_path": "flow_wrapper",
+        }
+        track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+
         with _temporary_active_stack(resolved_execution.stack):
             try:
                 replayed_run = configured_pipeline.replay(
@@ -634,6 +643,14 @@ class _FlowDefinition:
                     traceback=None,
                     default=FailureOrigin.BACKEND,
                 )
+                track(
+                    AnalyticsEvent.REPLAY_FAILED,
+                    {
+                        **replay_metadata,
+                        "error_type": type(exc).__name__,
+                        "failure_origin": failure_origin.value,
+                    },
+                )
                 if failure_origin == FailureOrigin.DIVERGENCE:
                     raise execution_error_from_failure(
                         f"Replay diverged for execution '{exec_id}': {exc}",
@@ -646,6 +663,14 @@ class _FlowDefinition:
                 ) from exc
 
         if replayed_run is None:
+            track(
+                AnalyticsEvent.REPLAY_FAILED,
+                {
+                    **replay_metadata,
+                    "error_type": "KitaruRuntimeError",
+                    "failure_origin": FailureOrigin.RUNTIME.value,
+                },
+            )
             raise KitaruRuntimeError("Replay did not produce a pipeline run.")
 
         persist_frozen_execution_spec(
@@ -699,6 +724,13 @@ class _FlowDefinition:
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
+        track(
+            AnalyticsEvent.FLOW_SUBMITTED,
+            {
+                "flow_name": self._flow_name,
+                "execution_id": str(run.id),
+            },
+        )
         persist_frozen_execution_spec(
             run_id=run.id,
             frozen_execution_spec=frozen_execution_spec,

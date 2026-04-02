@@ -14,6 +14,7 @@ from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.models import PipelineRunResponse, StepRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 
+from kitaru.analytics import AnalyticsEvent
 from kitaru.client import ExecutionStatus, KitaruClient
 from kitaru.config import (
     FrozenExecutionSpec,
@@ -1498,3 +1499,212 @@ def test_logs_return_empty_list_when_backend_reports_no_entries() -> None:
         entries = client.executions.logs(str(run.id))
 
     assert entries == []
+
+
+# ── Replay analytics instrumentation tests ───────────────────────────────────
+
+
+def test_replay_fallback_emits_requested_and_replayed_events() -> None:
+    """Successful fallback replay should emit REPLAY_REQUESTED then FLOW_REPLAYED."""
+    fetch_step = _DummyStep(
+        name="fetch",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    fetch_step.spec = SimpleNamespace(
+        invocation_id="fetch",
+        upstream_steps=[],
+        inputs_v2={},
+    )
+    write_step = _DummyStep(
+        name="write",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    write_step.spec = SimpleNamespace(
+        invocation_id="write",
+        upstream_steps=["fetch"],
+        inputs_v2={},
+    )
+
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        steps={fetch_step.name: fetch_step, write_step.name: write_step},
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    replayed_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="sample_flow",
+    )
+
+    replay_pipeline = SimpleNamespace(
+        replay=MagicMock(return_value=_as_pipeline_run(replayed_run))
+    )
+    replay_module = SimpleNamespace(
+        __kitaru_pipeline_source_sample_flow=replay_pipeline,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no replay flow"),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(source_run),
+            _as_pipeline_run(replayed_run),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.replay(str(source_run.id), from_="write")
+
+    assert track_mock.call_count == 2
+    requested_call = track_mock.call_args_list[0]
+    assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
+    assert requested_call.args[1]["replay_path"] == "pipeline_fallback"
+    assert requested_call.args[1]["from_checkpoint"] == "write"
+
+    replayed_call = track_mock.call_args_list[1]
+    assert replayed_call.args[0] == AnalyticsEvent.FLOW_REPLAYED
+    assert replayed_call.args[1]["execution_id"] == str(replayed_run.id)
+
+
+def test_replay_fallback_failure_emits_requested_then_failed() -> None:
+    """Failed fallback replay should emit REPLAY_REQUESTED then REPLAY_FAILED."""
+    fetch_step = _DummyStep(
+        name="fetch",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    fetch_step.spec = SimpleNamespace(
+        invocation_id="fetch",
+        upstream_steps=[],
+        inputs_v2={},
+    )
+    write_step = _DummyStep(
+        name="write",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={"output": []},
+    )
+    write_step.spec = SimpleNamespace(
+        invocation_id="write",
+        upstream_steps=["fetch"],
+        inputs_v2={},
+    )
+
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        steps={fetch_step.name: fetch_step, write_step.name: write_step},
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+
+    replay_pipeline = SimpleNamespace(
+        replay=MagicMock(side_effect=RuntimeError("backend crash"))
+    )
+    replay_module = SimpleNamespace(
+        __kitaru_pipeline_source_sample_flow=replay_pipeline,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch(
+            "kitaru.client._resolve_flow_for_replay",
+            side_effect=KitaruRuntimeError("no replay flow"),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+        pytest.raises(Exception, match="backend crash"),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(source_run)
+
+        client = KitaruClient()
+        client.executions.replay(str(source_run.id), from_="write")
+
+    assert track_mock.call_count == 2
+    requested_call = track_mock.call_args_list[0]
+    assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
+
+    failed_call = track_mock.call_args_list[1]
+    assert failed_call.args[0] == AnalyticsEvent.REPLAY_FAILED
+    assert failed_call.args[1]["error_type"] == "RuntimeError"
+    assert "failure_origin" in failed_call.args[1]
+
+
+def test_replay_delegate_does_not_emit_fallback_analytics() -> None:
+    """Delegated replay (via flow wrapper) should NOT emit analytics from client."""
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    replayed_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="sample_flow",
+    )
+
+    replay_handle = SimpleNamespace(exec_id=str(replayed_run.id))
+    replay_flow = SimpleNamespace(replay=MagicMock(return_value=replay_handle))
+    replay_module = SimpleNamespace(
+        sample_flow=replay_flow,
+        __kitaru_pipeline_source_sample_flow=object(),
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.importlib.import_module", return_value=replay_module),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(source_run),
+            _as_pipeline_run(replayed_run),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.replay(str(source_run.id), from_="write")
+
+    track_mock.assert_not_called()

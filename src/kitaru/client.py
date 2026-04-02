@@ -637,6 +637,13 @@ class _ExecutionsAPI:
             flow_inputs=flow_inputs,
         )
 
+        replay_metadata: dict[str, Any] = {
+            "source_execution_id": str(source_run.id),
+            "from_checkpoint": from_,
+            "replay_path": "pipeline_fallback",
+        }
+        track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+
         try:
             replayed_run = replay_pipeline.replay(
                 pipeline_run=source_run.id,
@@ -651,6 +658,14 @@ class _ExecutionsAPI:
                 traceback=None,
                 default=FailureOrigin.BACKEND,
             )
+            track(
+                AnalyticsEvent.REPLAY_FAILED,
+                {
+                    **replay_metadata,
+                    "error_type": type(exc).__name__,
+                    "failure_origin": failure_origin.value,
+                },
+            )
             if failure_origin == FailureOrigin.DIVERGENCE:
                 raise execution_error_from_failure(
                     f"Replay divergence detected for execution '{exec_id}': {exc}",
@@ -664,6 +679,14 @@ class _ExecutionsAPI:
 
         replayed_exec_id = str(getattr(replayed_run, "id", ""))
         if not replayed_exec_id:
+            track(
+                AnalyticsEvent.REPLAY_FAILED,
+                {
+                    **replay_metadata,
+                    "error_type": "KitaruRuntimeError",
+                    "failure_origin": FailureOrigin.RUNTIME.value,
+                },
+            )
             raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
 
         track(AnalyticsEvent.FLOW_REPLAYED, {"execution_id": replayed_exec_id})
