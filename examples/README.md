@@ -3,17 +3,17 @@
 Welcome — this folder is the fastest way to see what Kitaru feels like in real
 code.
 
-Examples are grouped into topic-focused Python subpackages. Run any example
-with:
+Each example group lives in its own directory. To run any example:
 
 ```bash
-uv run examples/<group>/<module_name>.py
+cd examples/<group>
+kitaru init                  # One-time: initialize a Kitaru project
+python <module_name>.py      # Run the example
 ```
 
 Examples use your current Kitaru connection context. If you want them to use a
-deployed Kitaru server, connect first with `uv run kitaru login ...` (or
-`kitaru login ...` in a pip-managed environment) and confirm with
-`kitaru status`. If you are just trying Kitaru locally, run them as-is.
+deployed Kitaru server, connect first with `kitaru login <server>` and confirm
+with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 
 ## Start here if you want to...
 
@@ -32,11 +32,16 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 
 ## Install the extras you need
 
+```bash
+uv venv && source .venv/bin/activate   # Create and activate a virtual environment
+```
+
 | Goal | Install command |
 |---|---|
 | Core workflow, execution, replay, and configuration examples | `uv sync --extra local` |
 | LLM examples (tracked `kitaru.llm()` calls) | `uv sync --extra local --extra llm` |
 | PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
+| Coding agent example | `uv sync --extra local` + model alias / provider credentials |
 | MCP query tools example | `uv sync --extra local --extra mcp` |
 
 ## How the examples are organized
@@ -68,11 +73,11 @@ deployed Kitaru server, connect first with `uv run kitaru login ...` (or
 
 ## Execution lifecycle and recovery
 
-| Example | Run | Requires | What it demonstrates | Docs | Test |
-|---|---|---|---|---|---|
-| [Execution management](execution_management/client_execution_management.py) | `uv run examples/execution_management/client_execution_management.py` | `uv sync --extra local` | `KitaruClient` for listing runs, reading details, and loading artifacts | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/test_phase11_client_example.py](../tests/test_phase11_client_example.py) |
-| [Wait and resume](execution_management/wait_and_resume.py) | `uv run examples/execution_management/wait_and_resume.py` | `uv sync --extra local` | `kitaru.wait()` with inline local prompt or fallback CLI input/resume | [Wait and Resume](https://kitaru.ai/docs/getting-started/wait-and-resume) | [tests/test_phase15_wait_example.py](../tests/test_phase15_wait_example.py) |
-| [Replay with overrides](replay/replay_with_overrides.py) | `uv run examples/replay/replay_with_overrides.py` | `uv sync --extra local` | Replay from a checkpoint boundary while overriding selected inputs | [Replay and Overrides](https://kitaru.ai/docs/getting-started/replay-and-overrides) | [tests/test_phase16_replay_example.py](../tests/test_phase16_replay_example.py) |
+| Example | What it demonstrates | Docs |
+|---|---|---|
+| [Execution management](execution_management/client_execution_management.py) | `KitaruClient` for listing runs, reading details, and loading artifacts | [Execution Management](https://kitaru.ai/docs/guides/execution-management) |
+| [Wait and resume](execution_management/wait_and_resume.py) | `kitaru.wait()` — pause for human input, resume later | [Wait and Resume](https://kitaru.ai/docs/guides/wait-and-resume) |
+| [Replay with overrides](replay/replay_with_overrides.py) | Replay from a checkpoint boundary while overriding selected inputs | [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) |
 
 ## LLMs and agent integrations
 
