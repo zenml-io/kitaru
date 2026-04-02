@@ -32,18 +32,24 @@ Inside a flow, Kitaru defaults to the flow name as the active memory scope when
 you have not configured one explicitly.
 
 ```python
-from kitaru import flow, memory
+from kitaru import checkpoint, flow, memory
+
+@checkpoint
+def increment_runs(previous_runs: int | None) -> int:
+    return (previous_runs or 0) + 1
 
 @flow
-def research_agent(topic: str) -> str:
-    runs = memory.get("stats/run_count") or 0
-    memory.set("stats/run_count", runs + 1)
-
+def research_agent(topic: str) -> None:
+    previous_runs = memory.get("stats/run_count")
+    updated_runs = increment_runs(previous_runs)
+    memory.set("stats/run_count", updated_runs)
     memory.set("last_topic", topic)
-    return f"Stored topic: {topic}"
 ```
 
-That is the simplest path when you want memory scoped to the flow itself.
+The important detail is that in-flow `memory.get()`, `memory.list()`,
+`memory.history()`, and `memory.delete()` behave like runtime step outputs, not
+eager Python values. Keep the memory calls in the flow body, then pass those
+results into checkpoints when you need normal Python logic.
 
 If you want a different scope, configure it first:
 
@@ -170,6 +176,17 @@ That sequence tells a concrete story:
 - Memory is forbidden inside `@checkpoint`
 - Outside a flow, configure the scope first with `memory.configure(...)`
 - Replay may observe newer values and replays of writes create new versions
+
+## Runnable example
+
+If you want one script that tells the whole story, run
+`examples/memory/flow_with_memory.py`.
+
+It demonstrates:
+
+- outside-flow namespace seeding with `kitaru.memory`
+- in-flow reads, writes, deletes, history, and scope switching
+- explicit namespace, flow, and execution inspection with `KitaruClient.memories`
 
 ## Reference pages
 
