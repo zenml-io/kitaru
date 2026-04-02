@@ -1049,3 +1049,106 @@ def test_replay_none_run_emits_replay_failed_with_runtime_origin() -> None:
     assert failed_call.args[0] == AnalyticsEvent.REPLAY_FAILED
     assert failed_call.args[1]["error_type"] == "KitaruRuntimeError"
     assert failed_call.args[1]["failure_origin"] == FailureOrigin.RUNTIME.value
+
+
+def test_flow_handle_wait_emits_flow_terminal_on_success() -> None:
+    """FlowHandle.wait() should emit FLOW_TERMINAL when run completes."""
+    run_id = uuid4()
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = finished
+
+    handle = FlowHandle(_as_pipeline_run(finished))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        handle.wait()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_TERMINAL,
+        {"execution_id": str(run_id), "status": "completed"},
+    )
+
+
+def test_flow_handle_wait_emits_flow_terminal_on_failure() -> None:
+    """FlowHandle.wait() should emit FLOW_TERMINAL with failure_origin on failure."""
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        run_id=run_id,
+        status_reason="user error",
+        traceback="Traceback\nValueError: boom",
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(KitaruUserCodeError),
+    ):
+        handle.wait()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_TERMINAL,
+        {
+            "execution_id": str(run_id),
+            "status": "failed",
+            "failure_origin": FailureOrigin.USER_CODE.value,
+        },
+    )
+
+
+def test_flow_handle_get_emits_flow_terminal_on_success() -> None:
+    """FlowHandle.get() should emit FLOW_TERMINAL once."""
+    run_id = uuid4()
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 99)],
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = finished
+
+    handle = FlowHandle(_as_pipeline_run(finished))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        handle.get()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_TERMINAL,
+        {"execution_id": str(run_id), "status": "completed"},
+    )
+
+
+def test_flow_handle_terminal_event_emitted_only_once() -> None:
+    """Repeated wait()/get() calls on same handle should emit FLOW_TERMINAL once."""
+    run_id = uuid4()
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = finished
+
+    handle = FlowHandle(_as_pipeline_run(finished))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        handle.wait()
+        handle.get()
+
+    track_mock.assert_called_once()

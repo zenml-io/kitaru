@@ -58,6 +58,38 @@ def test_new_event_canonical_strings() -> None:
     assert AnalyticsEvent.REPLAY_FAILED == "Kitaru flow replay failed"
 
 
+def test_phase2_event_canonical_strings() -> None:
+    """Phase 2 core-funnel events should carry the expected canonical strings."""
+    assert AnalyticsEvent.PROJECT_INITIALIZED == "Kitaru project initialized"
+    assert AnalyticsEvent.LOGIN_COMPLETED == "Kitaru login completed"
+    assert AnalyticsEvent.LOCAL_SERVER_STARTED == "Kitaru local server started"
+    assert AnalyticsEvent.LOCAL_SERVER_STOPPED == "Kitaru local server stopped"
+    assert AnalyticsEvent.FLOW_TERMINAL == "Kitaru flow terminal"
+    assert AnalyticsEvent.WAIT_CREATED == "Kitaru wait created"
+    assert AnalyticsEvent.WAIT_RESOLVED == "Kitaru wait resolved"
+    assert AnalyticsEvent.EXECUTION_RETRIED == "Kitaru execution retried"
+    assert AnalyticsEvent.EXECUTION_RESUMED == "Kitaru execution resumed"
+    assert AnalyticsEvent.EXECUTION_CANCELLED == "Kitaru execution cancelled"
+
+
+def test_phase3_event_canonical_strings() -> None:
+    """Phase 3 feature-adoption events should carry expected canonical strings."""
+    assert AnalyticsEvent.LLM_CALLED == "Kitaru LLM called"
+    assert AnalyticsEvent.ARTIFACT_SAVED == "Kitaru artifact saved"
+    assert AnalyticsEvent.ARTIFACT_LOADED == "Kitaru artifact loaded"
+    assert AnalyticsEvent.SECRET_UPSERTED == "Kitaru secret upserted"
+    assert AnalyticsEvent.STACK_CREATED == "Kitaru stack created"
+    assert AnalyticsEvent.STACK_ACTIVATED == "Kitaru stack activated"
+    assert AnalyticsEvent.MODEL_ALIAS_REGISTERED == "Kitaru model alias registered"
+    assert AnalyticsEvent.LOG_STORE_CONFIGURED == "Kitaru log store configured"
+
+
+def test_phase4_event_canonical_strings() -> None:
+    """Phase 4 adapter events should carry expected canonical strings."""
+    assert AnalyticsEvent.PYDANTIC_AI_WRAPPED == "Kitaru PydanticAI wrapped"
+    assert AnalyticsEvent.PYDANTIC_AI_RUN_COMPLETED == "Kitaru PydanticAI run completed"
+
+
 def test_cli_entrypoint_tracks_two_token_command_granularity() -> None:
     """CLI entrypoint should capture command + subcommand from argv."""
     with (

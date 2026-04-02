@@ -41,12 +41,23 @@ def wrap(
     _require_pydantic_ai()
     from ._agent import KitaruAgent
 
-    return KitaruAgent(
+    wrapped = KitaruAgent(
         agent,
         name=name,
         tool_capture_config=tool_capture_config,
         tool_capture_config_by_name=tool_capture_config_by_name,
     )
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.PYDANTIC_AI_WRAPPED,
+        {
+            "agent_name": wrapped.name,
+            "toolset_count": len(wrapped.toolsets),
+        },
+    )
+    return wrapped
 
 
 def hitl_tool(

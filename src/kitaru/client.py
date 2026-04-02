@@ -523,6 +523,15 @@ class _ExecutionsAPI:
                 f"'{condition.name}' for execution '{exec_id}': {exc}"
             ) from exc
 
+        track(
+            AnalyticsEvent.WAIT_RESOLVED,
+            {
+                "execution_id": exec_id,
+                "wait_name": getattr(condition, "name", None),
+                "resolution": resolution,
+            },
+        )
+
         return self.get(exec_id)
 
     def input(self, exec_id: str, *, wait: str, value: Any) -> Execution:
@@ -557,6 +566,7 @@ class _ExecutionsAPI:
             client=self._client_ref,
             operation_name="retry",
         )
+        track(AnalyticsEvent.EXECUTION_RETRIED, {"execution_id": exec_id})
         return self.get(exec_id)
 
     def resume(self, exec_id: str) -> Execution:
@@ -583,6 +593,7 @@ class _ExecutionsAPI:
             client=self._client_ref,
             operation_name="resume",
         )
+        track(AnalyticsEvent.EXECUTION_RESUMED, {"execution_id": exec_id})
         return self.get(exec_id)
 
     def replay(
@@ -770,6 +781,7 @@ class _ExecutionsAPI:
         """Cancel an execution if supported by the backend state."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         stop_run(run=run, graceful=False)
+        track(AnalyticsEvent.EXECUTION_CANCELLED, {"execution_id": exec_id})
         return self.get(exec_id)
 
 

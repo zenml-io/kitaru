@@ -352,6 +352,23 @@ def _extract_flow_result(run: PipelineRunResponse) -> Any:
     return tuple(values)
 
 
+def _classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
+    """Classify the failure origin for an unsuccessful run without raising."""
+    run_body = run.get_body() if hasattr(run, "get_body") else run
+    status_reason = getattr(run_body, "status_reason", None)
+    traceback_text: str | None = None
+    if run.exception_info is not None:
+        traceback_text = run.exception_info.traceback
+    default_origin = (
+        FailureOrigin.USER_CODE if traceback_text is not None else FailureOrigin.UNKNOWN
+    )
+    return classify_failure_origin(
+        status_reason=status_reason,
+        traceback=traceback_text,
+        default=default_origin,
+    )
+
+
 def _raise_for_unsuccessful_run(run: PipelineRunResponse) -> None:
     """Raise a typed Kitaru execution error with run failure context."""
     details = [f"Execution {run.id} finished with status '{run.status.value}'."]
@@ -396,6 +413,7 @@ class FlowHandle:
         """
         self._run = run
         self._run_id = run.id
+        self._terminal_event_emitted = False
 
     @property
     def exec_id(self) -> str:
@@ -406,6 +424,24 @@ class FlowHandle:
     def status(self) -> ExecutionStatus:
         """Current execution status."""
         return self._refresh().status
+
+    def _track_terminal_once(
+        self,
+        run: PipelineRunResponse,
+        *,
+        failure_origin: FailureOrigin | None = None,
+    ) -> None:
+        """Emit FLOW_TERMINAL at most once per handle instance."""
+        if self._terminal_event_emitted:
+            return
+        self._terminal_event_emitted = True
+        metadata: dict[str, Any] = {
+            "execution_id": str(run.id),
+            "status": run.status.value,
+        }
+        if failure_origin is not None:
+            metadata["failure_origin"] = failure_origin.value
+        track(AnalyticsEvent.FLOW_TERMINAL, metadata)
 
     def wait(self) -> Any:
         """Block until execution finishes and return its result.
@@ -421,7 +457,11 @@ class FlowHandle:
             run = self._refresh()
             if run.status.is_finished:
                 if not run.status.is_successful:
+                    self._track_terminal_once(
+                        run, failure_origin=_classify_run_failure(run)
+                    )
                     _raise_for_unsuccessful_run(run)
+                self._track_terminal_once(run)
                 return _extract_flow_result(run)
             time.sleep(1)
 
@@ -442,7 +482,9 @@ class FlowHandle:
                 f"Execution {run.id} is still running (status: {run.status.value})."
             )
         if not run.status.is_successful:
+            self._track_terminal_once(run, failure_origin=_classify_run_failure(run))
             _raise_for_unsuccessful_run(run)
+        self._track_terminal_once(run)
         return _extract_flow_result(run)
 
     def _refresh(self) -> PipelineRunResponse:

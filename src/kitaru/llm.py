@@ -650,6 +650,18 @@ def _execute_llm_call(request: _LLMRequest) -> str:
     }
     log(llm_calls={request.call_name: filtered_metadata})
 
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.LLM_CALLED,
+        {
+            "call_name": request.call_name,
+            "resolved_model": model_selection.resolved_model,
+            "credential_source": credential_source,
+            "mocked": latency_ms == 0.0,
+        },
+    )
+
     return response_text
 
 

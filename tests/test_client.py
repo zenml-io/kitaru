@@ -1708,3 +1708,244 @@ def test_replay_delegate_does_not_emit_fallback_analytics() -> None:
         client.executions.replay(str(source_run.id), from_="write")
 
     track_mock.assert_not_called()
+
+
+def test_retry_emits_execution_retried_event() -> None:
+    """Successful retry should emit EXECUTION_RETRIED analytics event."""
+    run_id = uuid4()
+    snapshot_stack_id = uuid4()
+    failed = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    retried = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+
+    old_stack_id = uuid4()
+    active_stack = SimpleNamespace(orchestrator=SimpleNamespace(resume_run=MagicMock()))
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+        client_mock.active_stack = active_stack
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(failed),
+            _as_pipeline_run(retried),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.retry(str(run_id))
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.EXECUTION_RETRIED,
+        {"execution_id": str(run_id)},
+    )
+
+
+def test_resume_emits_execution_resumed_event() -> None:
+    """Successful resume should emit EXECUTION_RESUMED analytics event."""
+    run_id = uuid4()
+    snapshot_stack_id = uuid4()
+    paused = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+    resumed = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_id=run_id,
+        snapshot=SimpleNamespace(stack=SimpleNamespace(id=snapshot_stack_id)),
+    )
+
+    old_stack_id = uuid4()
+    active_stack = SimpleNamespace(orchestrator=SimpleNamespace(resume_run=MagicMock()))
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+        client_mock.active_stack = active_stack
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(paused),
+            _as_pipeline_run(resumed),
+        ]
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.resume(str(run_id))
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.EXECUTION_RESUMED,
+        {"execution_id": str(run_id)},
+    )
+
+
+def test_cancel_emits_execution_cancelled_event() -> None:
+    """Successful cancel should emit EXECUTION_CANCELLED analytics event."""
+    run_id = uuid4()
+    running = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+    stopped = _DummyRun(
+        status=ZenMLExecutionStatus.STOPPED,
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.stop_run"),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(running),
+            _as_pipeline_run(stopped),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+        client_mock.list_run_wait_conditions.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.cancel(str(run_id))
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.EXECUTION_CANCELLED,
+        {"execution_id": str(run_id)},
+    )
+
+
+def test_input_emits_wait_resolved_event() -> None:
+    """Providing input should emit WAIT_RESOLVED with continue resolution."""
+    run_id = uuid4()
+    wait_condition = _dummy_wait_condition(
+        name="approve_deploy",
+        question="Deploy to prod?",
+        data_schema={"type": "boolean"},
+    )
+    waiting_run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        active_wait_condition=wait_condition,
+    )
+    resumed_run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(waiting_run),
+            _as_pipeline_run(resumed_run),
+        ]
+        client_mock.list_run_wait_conditions.side_effect = [
+            SimpleNamespace(items=[wait_condition]),
+            SimpleNamespace(items=[]),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.input(
+            str(run_id),
+            wait="approve_deploy",
+            value=True,
+        )
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.WAIT_RESOLVED,
+        {
+            "execution_id": str(run_id),
+            "wait_name": "approve_deploy",
+            "resolution": "continue",
+        },
+    )
+
+
+def test_abort_wait_emits_wait_resolved_event() -> None:
+    """Aborting a wait should emit WAIT_RESOLVED with abort resolution."""
+    run_id = uuid4()
+    wait_condition = _dummy_wait_condition(
+        name="approve_deploy",
+        question="Deploy to prod?",
+    )
+    waiting_run = _DummyRun(
+        status=_paused_status(),
+        flow_name="flow_a",
+        run_id=run_id,
+        active_wait_condition=wait_condition,
+    )
+    aborted_run = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+        run_id=run_id,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(waiting_run),
+            _as_pipeline_run(aborted_run),
+        ]
+        client_mock.list_run_wait_conditions.side_effect = [
+            SimpleNamespace(items=[wait_condition]),
+            SimpleNamespace(items=[]),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        client.executions.abort_wait(str(run_id), wait="approve_deploy")
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.WAIT_RESOLVED,
+        {
+            "execution_id": str(run_id),
+            "wait_name": "approve_deploy",
+            "resolution": "abort",
+        },
+    )

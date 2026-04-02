@@ -207,6 +207,17 @@ def set_(
         exit_with_error=_exit_with_error,
     )
 
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.SECRET_UPSERTED,
+        {
+            "secret_name": name,
+            "operation": action.lower(),
+            "key_count": len(assignments),
+        },
+    )
+
     if output_format == CLIOutputFormat.JSON:
         payload = serialize_secret_summary(secret)
         payload["result"] = action.lower()
