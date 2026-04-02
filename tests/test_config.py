@@ -3880,9 +3880,14 @@ def test_new_string_fields_reject_empty() -> None:
     """New string fields should reject empty/whitespace values."""
     from pydantic import ValidationError
 
-    for field in ("build_context_root", "image_tag", "target_repository", "user"):
-        with pytest.raises(ValidationError, match="cannot be empty"):
-            ImageSettings(**{field: "   "})
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(build_context_root="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(image_tag="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(target_repository="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(user="   ")
 
 
 def test_new_fields_excluded_from_is_empty() -> None:
