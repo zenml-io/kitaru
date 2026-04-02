@@ -5,8 +5,9 @@ need API keys.
 
 Run with:
 
-    uv sync --extra local --extra pydantic-ai
-    uv run python -m examples.pydantic_ai_agent.pydantic_ai_adapter
+    cd examples/pydantic_ai_agent
+    uv pip install 'kitaru[local,pydantic-ai]'
+    python pydantic_ai_adapter.py
 """
 
 from pydantic_ai import Agent
