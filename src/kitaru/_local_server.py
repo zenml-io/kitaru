@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import shutil
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -26,10 +23,6 @@ _LOCAL_INSTALL_GUIDANCE = "\n".join(
         "  uv pip install 'kitaru[local]'",
     ]
 )
-
-_SENTINEL_DIR_NAME = ".kitaru-ui"
-_SENTINEL_FILE_NAME = "bundle_manifest.json"
-_MANIFEST_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -53,186 +46,12 @@ class LocalServerStopResult:
 # ---------------------------------------------------------------------------
 
 
-def _safe_rmtree(path: Path, label: str) -> None:
-    """Remove a directory tree, logging a warning on failure."""
-    if path.exists():
-        try:
-            shutil.rmtree(path)
-        except OSError:
-            logger.warning("Could not remove %s %s", label, path)
-
-
-def _resolve_zenml_dashboard_dir() -> Path:
-    """Locate ZenML's installed dashboard directory."""
-    import zenml
-
-    return Path(zenml.__path__[0]) / "zen_server" / "dashboard"
-
-
 def _resolve_bundled_ui_dir() -> Path | None:
     """Return the path to the bundled Kitaru UI dist directory, or None."""
     ui_dir = Path(__file__).parent / "_ui" / "dist"
     if ui_dir.is_dir() and (ui_dir / "index.html").is_file():
         return ui_dir
     return None
-
-
-def _load_manifest_json(path: Path) -> dict[str, Any] | None:
-    """Load and validate a manifest JSON file.
-
-    Returns the parsed dict if the file exists, is valid JSON, is a dict,
-    and has the expected schema version.  Returns None otherwise.
-    """
-    if not path.is_file():
-        return None
-    try:
-        with open(path) as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        logger.warning("Manifest %s contains invalid JSON", path)
-        return None
-    except OSError as exc:
-        logger.warning("Could not read manifest %s: %s", path, exc)
-        return None
-    if not isinstance(data, dict):
-        logger.warning("Manifest %s is not a JSON object", path)
-        return None
-    if data.get("schema_version") != _MANIFEST_SCHEMA_VERSION:
-        logger.warning(
-            "Manifest %s has unsupported schema version %s (expected %s)",
-            path,
-            data.get("schema_version"),
-            _MANIFEST_SCHEMA_VERSION,
-        )
-        return None
-    return data
-
-
-def _load_bundled_manifest() -> dict[str, Any] | None:
-    """Load the bundled bundle_manifest.json, or None if unavailable."""
-    return _load_manifest_json(Path(__file__).parent / "_ui" / _SENTINEL_FILE_NAME)
-
-
-def _load_installed_sentinel(dashboard_dir: Path) -> dict[str, Any] | None:
-    """Load the sentinel manifest from the installed dashboard, or None."""
-    return _load_manifest_json(dashboard_dir / _SENTINEL_DIR_NAME / _SENTINEL_FILE_NAME)
-
-
-def _dashboard_needs_update(dashboard_dir: Path, bundled: dict[str, Any]) -> bool:
-    """Check whether the installed dashboard needs to be replaced.
-
-    Returns False only when the installed sentinel matches the bundled
-    manifest on both version and checksum, AND index.html is present.
-    """
-    if not (dashboard_dir / "index.html").is_file():
-        return True
-
-    installed = _load_installed_sentinel(dashboard_dir)
-    if installed is None:
-        return True
-
-    return installed.get("ui_version") != bundled.get("ui_version") or installed.get(
-        "bundle_sha256"
-    ) != bundled.get("bundle_sha256")
-
-
-def _apply_dashboard_patch(
-    dashboard_dir: Path, bundled_manifest: dict[str, Any]
-) -> None:
-    """Replace the ZenML dashboard directory with bundled Kitaru UI.
-
-    Uses an atomic-ish rename strategy: copy to a temp sibling, rename
-    old to backup, rename temp to target, then remove backup.  If the
-    final rename fails, the backup is restored.
-    """
-    bundled_dir = _resolve_bundled_ui_dir()
-    if bundled_dir is None:
-        raise KitaruBackendError(
-            "Kitaru UI assets are missing from this installation.\n"
-            "Reinstall with: pip install 'kitaru[local]'"
-        )
-
-    parent = dashboard_dir.parent
-    pid = os.getpid()
-    ts = int(time.time())
-    tmp_dir = parent / f"dashboard.__kitaru_tmp__{pid}_{ts}"
-    backup_dir = parent / f"dashboard.__kitaru_bak__{pid}_{ts}"
-
-    try:
-        shutil.copytree(bundled_dir, tmp_dir)
-
-        sentinel_dir = tmp_dir / _SENTINEL_DIR_NAME
-        sentinel_dir.mkdir(exist_ok=True)
-        with open(sentinel_dir / _SENTINEL_FILE_NAME, "w") as f:
-            json.dump(bundled_manifest, f, indent=2)
-
-        if not (tmp_dir / "index.html").is_file():
-            raise KitaruBackendError(
-                "Bundled Kitaru UI is missing index.html — package may be corrupt."
-            )
-
-        had_backup = False
-        if dashboard_dir.exists():
-            dashboard_dir.rename(backup_dir)
-            had_backup = True
-
-        try:
-            tmp_dir.rename(dashboard_dir)
-        except OSError:
-            logger.error(
-                "Failed to rename %s → %s; restoring backup",
-                tmp_dir,
-                dashboard_dir,
-            )
-            if had_backup and backup_dir.exists():
-                backup_dir.rename(dashboard_dir)
-            raise
-
-        if had_backup:
-            _safe_rmtree(backup_dir, "backup directory")
-
-        logger.info(
-            "Kitaru UI %s installed.",
-            bundled_manifest.get("ui_version", "unknown"),
-        )
-    finally:
-        _safe_rmtree(tmp_dir, "temp directory")
-
-
-def _ensure_kitaru_dashboard() -> bool:
-    """Ensure ZenML's dashboard directory has the Kitaru UI.
-
-    Returns True if the dashboard was updated, False if already current.
-    Silently returns False if no bundled UI is available (dev installs).
-    """
-    if _resolve_bundled_ui_dir() is None:
-        logger.debug("No bundled Kitaru UI found; skipping dashboard patch")
-        return False
-
-    bundled_manifest = _load_bundled_manifest()
-    if bundled_manifest is None:
-        logger.warning(
-            "Bundled Kitaru UI files exist but manifest is missing or invalid; "
-            "skipping dashboard patch"
-        )
-        return False
-
-    dashboard_dir = _resolve_zenml_dashboard_dir()
-    if not _dashboard_needs_update(dashboard_dir, bundled_manifest):
-        logger.debug("Kitaru UI already installed and up to date")
-        return False
-
-    try:
-        _apply_dashboard_patch(dashboard_dir, bundled_manifest)
-        return True
-    except KitaruBackendError:
-        raise
-    except Exception as exc:
-        raise KitaruBackendError(
-            "Could not patch ZenML dashboard with Kitaru UI.\n"
-            f"{exc}\n"
-            "The local server was not started to avoid showing the wrong dashboard."
-        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +185,8 @@ def _deploy_and_connect(
         port=port,
     )
     try:
+        if ui_dir := _resolve_bundled_ui_dir():
+            os.environ["ZENML_SERVER_DASHBOARD_FILES_PATH"] = str(ui_dir)
         os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-api"
         deployed_server = deployer.deploy_server(config, timeout=timeout)
         deployer.connect_to_server()
@@ -402,8 +223,6 @@ def start_or_connect_local_server(
         get_local_server,
     ) = _load_local_server_runtime()
 
-    dashboard_was_updated = _ensure_kitaru_dashboard()
-
     deployer = local_server_deployer_cls()
     local_server = get_local_server()
 
@@ -413,35 +232,16 @@ def start_or_connect_local_server(
         is_running = _is_server_running(local_server) and bool(existing_url)
 
         if is_running and (port is None or port == existing_port):
-            if not dashboard_was_updated:
-                try:
-                    deployer.connect_to_server()
-                except Exception as exc:
-                    raise KitaruBackendError(
-                        f"Failed to connect to local server: {exc}"
-                    ) from exc
-                assert existing_url is not None
-                return LocalServerConnectionResult(
-                    url=existing_url,
-                    action="connected",
-                )
-
-            # Dashboard was just patched — restart so the server picks up
-            # the new files (dashboard paths are cached at server startup).
             try:
-                deployer.remove_server(timeout=timeout)
+                deployer.connect_to_server()
             except Exception as exc:
                 raise KitaruBackendError(
-                    f"Failed to stop existing local server: {exc}"
+                    f"Failed to connect to local server: {exc}"
                 ) from exc
-
-            return _deploy_and_connect(
-                deployer=deployer,
-                deployment_config_cls=deployment_config_cls,
-                provider_type=server_provider_type,
-                port=existing_port or port or _DEFAULT_LOCAL_SERVER_PORT,
-                timeout=timeout,
-                action="restarted",
+            assert existing_url is not None
+            return LocalServerConnectionResult(
+                url=existing_url,
+                action="connected",
             )
 
         # Server exists but isn't running or is on a different port.
