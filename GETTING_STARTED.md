@@ -75,7 +75,7 @@ That gives you a second local stack to switch to or delete while testing.
 uv run examples/basic_flow/first_working_flow.py
 ```
 
-This runs a simple two-checkpoint flow (`fetch_data` → `process_data`)
+This runs a simple two-checkpoint flow (`gather_sources` → `summarize`)
 and prints the result. Everything is persisted locally — you can
 inspect it afterwards.
 
@@ -134,7 +134,7 @@ to run in **another terminal** to approve/reject and resume:
 
 ```bash
 # In a second terminal (from the kitaru repo directory):
-uv run kitaru executions input <EXEC_ID> --wait <WAIT_ID> --value true
+uv run kitaru executions input <EXEC_ID> --value true
 uv run kitaru executions resume <EXEC_ID>
 ```
 
@@ -202,7 +202,7 @@ Once connected, your AI assistant can:
 - **List and inspect executions** — "show me my recent executions"
 - **Read execution logs** — "what did my last flow print?"
 - **Browse artifacts** — "load the output of the research checkpoint"
-- **Run flows** — "run examples/basic_flow/first_working_flow.py:my_agent"
+- **Run flows** — "run examples/basic_flow/first_working_flow.py:research_agent"
 - **Provide wait input** — "approve the pending wait"
 - **Replay executions** — "replay my last run from write_draft"
 - **Check status** — "what stack am I connected to?"

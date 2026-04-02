@@ -1,22 +1,37 @@
 # PydanticAI adapter example
 
 This directory shows how to wrap an existing PydanticAI agent and keep Kitaru's
-durability and observability around it.
+durability and observability around it — no rewrite needed.
+
+## Getting started
 
 ```bash
-uv sync --extra local --extra pydantic-ai
-uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py
+cd examples/pydantic_ai_agent
+uv pip install 'kitaru[local,pydantic-ai]'   # Install Kitaru with local runtime + PydanticAI
+kitaru init                                  # Initialize a Kitaru project
+```
+
+Then run:
+
+```bash
+python pydantic_ai_adapter.py
 ```
 
 This example uses your current Kitaru connection context. If you want the run
-to use a deployed Kitaru server, connect first with `uv run kitaru login ...`
-(or `kitaru login ...`) and verify with `kitaru status`.
+to use a deployed Kitaru server, connect first with `kitaru login <server>`
+and verify with `kitaru status`.
 
-For the full catalog, see [../README.md](../README.md).
+## `pydantic_ai_adapter.py` — Wrap an agent, keep your replay boundary
 
-| Example | What it demonstrates | Test |
-|---|---|---|
-| [pydantic_ai_adapter.py](pydantic_ai_adapter.py) | `wrap(agent)` with captured child events, summaries, and a replay-safe outer checkpoint | [../../tests/test_phase17_pydantic_ai_example.py](../../tests/test_phase17_pydantic_ai_example.py) |
+Wraps a PydanticAI `Agent` with `kp.wrap(agent)`. The outer `@checkpoint`
+becomes the replay boundary — if the flow is replayed, the entire agent
+call is treated as a single unit. Internal model requests and tool calls
+are tracked as child events under that checkpoint, giving you full
+observability without changing the agent's control flow.
+
+Uses `TestModel` so no API keys are needed to run it.
 
 For the concept walkthrough, see
-[PydanticAI Adapter](https://kitaru.ai/docs/getting-started/pydantic-ai-adapter).
+[PydanticAI Adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter).
+
+For the full catalog, see [../README.md](../README.md).
