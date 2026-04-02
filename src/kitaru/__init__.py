@@ -27,10 +27,10 @@ Current status:
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
   ``delete_stack()``), model alias helpers via CLI
-  (``kitaru model register/list``), ``KitaruClient`` execution/artifact APIs
-  (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts), and a typed
-  Kitaru exception hierarchy with failure journaling (`Execution.failure`,
-  `CheckpointCall.attempts`).
+  (``kitaru model register/list``), ``KitaruClient`` execution/artifact/memory APIs
+  (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifacts + memories), and
+  a typed Kitaru exception hierarchy with failure journaling
+  (`Execution.failure`, `CheckpointCall.attempts`).
 - Implemented: replay support (`KitaruClient.executions.replay(...)`).
 
 The CLI also supports global runtime log-store configuration via

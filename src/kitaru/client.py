@@ -1,7 +1,7 @@
-"""Kitaru client for execution and artifact management.
+"""Kitaru client for execution, artifact, and memory management.
 
 `KitaruClient` provides a programmatic API for inspecting and managing
-executions outside flow bodies.
+executions, artifacts, and memories outside flow bodies.
 
 Example::
 
@@ -95,6 +95,21 @@ from kitaru.errors import (
     KitaruWaitValidationError,
     classify_failure_origin,
     execution_error_from_failure,
+)
+from kitaru.memory import (
+    MemoryEntry,
+    MemoryScopeInfo,
+    _delete_impl,
+    _get_entry_impl,
+    _history_impl,
+    _list_impl,
+    _list_scopes_impl,
+    _MemoryScope,
+    _MemoryScopeType,
+    _set_entry_impl,
+    _validate_memory_identifier,
+    _validate_memory_scope_type,
+    _validate_memory_version,
 )
 from kitaru.replay import build_replay_plan
 
@@ -809,8 +824,104 @@ class _ArtifactsAPI:
         )
 
 
+class _MemoriesAPI:
+    """Namespace for typed memory inspection and control operations."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self._client_ref = client
+
+    def _scope(
+        self,
+        scope: str,
+        *,
+        scope_type: str = "namespace",
+    ) -> _MemoryScope:
+        """Validate and construct a memory scope for client operations."""
+        return _MemoryScope(
+            scope=_validate_memory_identifier(scope, kind="scope"),
+            scope_type=_validate_memory_scope_type(scope_type),
+        )
+
+    def get(
+        self,
+        key: str,
+        *,
+        scope: str,
+        version: int | None = None,
+    ) -> MemoryEntry | None:
+        """Get one typed memory entry by key and scope."""
+        return _get_entry_impl(
+            self._scope(scope),
+            _validate_memory_identifier(key, kind="key"),
+            version=_validate_memory_version(version),
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def list(
+        self,
+        *,
+        scope: str,
+        prefix: str | None = None,
+    ) -> builtins.list[MemoryEntry]:
+        """List typed memory entries for a scope, optionally filtered by prefix."""
+        normalized_prefix = (
+            _validate_memory_identifier(prefix, kind="prefix")
+            if prefix is not None
+            else None
+        )
+        return _list_impl(
+            self._scope(scope),
+            prefix=normalized_prefix,
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def history(self, key: str, *, scope: str) -> builtins.list[MemoryEntry]:
+        """Return the full version history for one memory key."""
+        return _history_impl(
+            self._scope(scope),
+            _validate_memory_identifier(key, kind="key"),
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def set(
+        self,
+        key: str,
+        value: Any,
+        *,
+        scope: str,
+        scope_type: _MemoryScopeType = "namespace",
+    ) -> MemoryEntry:
+        """Persist a memory value and return the created metadata entry."""
+        return _set_entry_impl(
+            self._scope(scope, scope_type=scope_type),
+            _validate_memory_identifier(key, kind="key"),
+            value,
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def delete(self, key: str, *, scope: str) -> MemoryEntry | None:
+        """Soft-delete a memory key and return the tombstone entry."""
+        return _delete_impl(
+            self._scope(scope),
+            _validate_memory_identifier(key, kind="key"),
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def scopes(self) -> builtins.list[MemoryScopeInfo]:
+        """Discover all memory scopes with active entry counts."""
+        return _list_scopes_impl(
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+
 class KitaruClient:
-    """Client for managing Kitaru executions and artifacts."""
+    """Client for managing Kitaru executions, artifacts, and memories."""
 
     def __init__(
         self,
@@ -852,6 +963,7 @@ class KitaruClient:
 
         self.executions = _ExecutionsAPI(self)
         self.artifacts = _ArtifactsAPI(self)
+        self.memories = _MemoriesAPI(self)
 
     def _client(self) -> Client:
         """Return a ZenML client instance."""

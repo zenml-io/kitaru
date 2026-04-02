@@ -19,6 +19,7 @@ Usage:
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -47,7 +48,72 @@ EXCLUDED_SUBMODULES = {"cli", "adapters", "runtime"}
 
 def _is_private(name: str) -> bool:
     """Check if a module/symbol name is private by convention."""
-    return name.startswith("_")
+    return name.rsplit(".", 1)[-1].startswith("_")
+
+
+def _is_documented_member(name: str) -> bool:
+    """Return whether a member should appear in generated docs."""
+    return name == "__init__" or not _is_private(name)
+
+
+def _exported_names(data: dict) -> set[str] | None:
+    """Return ``__all__`` names when the module defines them."""
+    for attr in data.get("attributes", []):
+        if attr.get("name") != "__all__":
+            continue
+        raw_value = attr.get("value")
+        if not isinstance(raw_value, str):
+            return None
+        try:
+            parsed = ast.literal_eval(raw_value)
+        except (SyntaxError, ValueError):
+            return None
+        if isinstance(parsed, list) and all(isinstance(name, str) for name in parsed):
+            return set(parsed)
+        return None
+    return None
+
+
+def _filter_attributes(
+    attributes: list[dict],
+    *,
+    exported_names: set[str] | None = None,
+) -> list[dict]:
+    """Filter a list of serialized attributes to public ones only."""
+    filtered: list[dict] = []
+    for attr in attributes:
+        name = attr.get("name", "")
+        if name == "__all__":
+            continue
+        if exported_names is not None:
+            if name not in exported_names:
+                continue
+        elif _is_private(name):
+            continue
+        filtered.append(attr)
+    return filtered
+
+
+def _filter_class(data: dict) -> dict:
+    """Filter private methods and attributes from one serialized class."""
+    filtered = dict(data)
+    filtered["functions"] = {
+        name: func
+        for name, func in data.get("functions", {}).items()
+        if _is_documented_member(name)
+    }
+    filtered["classes"] = {
+        name: _filter_class(cls)
+        for name, cls in data.get("classes", {}).items()
+        if _is_documented_member(name)
+    }
+    filtered["attributes"] = _filter_attributes(data.get("attributes", []))
+    filtered["inherited_members"] = {
+        name: member
+        for name, member in data.get("inherited_members", {}).items()
+        if _is_documented_member(name)
+    }
+    return filtered
 
 
 def _filter_module(data: dict, *, is_root: bool = False) -> dict:
@@ -57,6 +123,7 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
     submodules to the top level (matching __all__ behavior).
     """
     filtered = dict(data)
+    exported_names = _exported_names(data) if is_root else None
 
     # Collect symbols from private submodules before removing them
     promoted_classes: dict = {}
@@ -67,8 +134,24 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
             continue
         if _is_private(name) and is_root:
             # Promote public symbols from private modules to root
-            promoted_classes.update(submod.get("classes", {}))
-            promoted_functions.update(submod.get("functions", {}))
+            promoted_classes.update(
+                {
+                    symbol_name: _filter_class(symbol)
+                    for symbol_name, symbol in submod.get("classes", {}).items()
+                    if exported_names is not None
+                    and symbol_name in exported_names
+                    and _is_documented_member(symbol_name)
+                }
+            )
+            promoted_functions.update(
+                {
+                    symbol_name: symbol
+                    for symbol_name, symbol in submod.get("functions", {}).items()
+                    if exported_names is not None
+                    and symbol_name in exported_names
+                    and _is_documented_member(symbol_name)
+                }
+            )
 
     # Remove excluded and private submodules
     filtered["modules"] = {
@@ -77,20 +160,33 @@ def _filter_module(data: dict, *, is_root: bool = False) -> dict:
         if name not in EXCLUDED_SUBMODULES and not _is_private(name)
     }
 
+    filtered["classes"] = {
+        name: _filter_class(cls)
+        for name, cls in data.get("classes", {}).items()
+        if _is_documented_member(name)
+        and (exported_names is None or name in exported_names)
+    }
+    filtered["functions"] = {
+        name: func
+        for name, func in data.get("functions", {}).items()
+        if _is_documented_member(name)
+        and (exported_names is None or name in exported_names)
+    }
+
     # Merge promoted symbols into root
     if is_root:
-        existing_classes = dict(filtered.get("classes", {}))
+        existing_classes = dict(filtered["classes"])
         existing_classes.update(promoted_classes)
         filtered["classes"] = existing_classes
 
-        existing_functions = dict(filtered.get("functions", {}))
+        existing_functions = dict(filtered["functions"])
         existing_functions.update(promoted_functions)
         filtered["functions"] = existing_functions
 
-    # Filter __all__ from attributes (implementation detail, not useful in docs)
-    filtered["attributes"] = [
-        attr for attr in data.get("attributes", []) if attr.get("name") != "__all__"
-    ]
+    filtered["attributes"] = _filter_attributes(
+        data.get("attributes", []),
+        exported_names=exported_names,
+    )
 
     return filtered
 

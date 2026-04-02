@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,10 +17,12 @@ from kitaru.errors import KitaruContextError, KitaruStateError, KitaruUsageError
 from kitaru.memory import (
     MemoryEntry,
     _delete_impl,
+    _get_entry_impl,
     _get_impl,
     _history_impl,
     _list_impl,
     _MemoryScope,
+    _set_entry_impl,
     _set_impl,
 )
 from kitaru.runtime import _checkpoint_scope, _flow_scope
@@ -71,6 +73,11 @@ def _flow_memory_scope(name: str = "demo_flow") -> _MemoryScope:
     return _MemoryScope(scope=name, scope_type="flow")
 
 
+def _created_artifact_response(artifact_id: UUID | None = None) -> SimpleNamespace:
+    """Build the lightweight response returned by ``save_artifact``."""
+    return SimpleNamespace(id=artifact_id or uuid4())
+
+
 def _memory_entry(
     *,
     key: str = "prefs",
@@ -107,8 +114,13 @@ def _memory_entry(
         lambda: memory.delete("prefs"),
     ],
 )
-def test_memory_apis_require_flow_context(call: Callable[[], object]) -> None:
-    with pytest.raises(KitaruContextError, match=r"inside a @flow"):
+def test_memory_apis_require_configured_scope_outside_flow(
+    call: Callable[[], object],
+) -> None:
+    with pytest.raises(
+        KitaruStateError,
+        match=r"requires an explicit scope.*memory\.configure\(scope=\.\.\.\)",
+    ):
         call()
 
 
@@ -224,6 +236,25 @@ def test_memory_set_dispatches_to_synthetic_step() -> None:
     )
 
 
+def test_memory_set_outside_flow_dispatches_to_direct_impl() -> None:
+    payload = {"language": "en", "theme": "dark"}
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch("kitaru.memory._set_impl") as set_impl,
+        patch("kitaru.memory._memory_set_step") as memory_set_step,
+    ):
+        result = memory.set("user_preferences", payload)
+
+    assert result is None
+    set_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "user_preferences",
+        payload,
+    )
+    memory_set_step.assert_not_called()
+
+
 def test_memory_get_dispatches_to_synthetic_step() -> None:
     with (
         _flow_scope(name="demo_flow"),
@@ -236,6 +267,27 @@ def test_memory_get_dispatches_to_synthetic_step() -> None:
 
     assert result == {"theme": "dark"}
     memory_get_step.assert_called_once_with("demo_flow", "flow", "prefs", 2)
+
+
+def test_memory_get_outside_flow_dispatches_to_direct_impl() -> None:
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._get_impl",
+            return_value={"theme": "dark"},
+        ) as get_impl,
+        patch("kitaru.memory._memory_get_step") as memory_get_step,
+    ):
+        result = memory.get("prefs", version=2)
+
+    assert result == {"theme": "dark"}
+    get_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "prefs",
+        2,
+    )
+    memory_get_step.assert_not_called()
 
 
 def test_memory_list_dispatches_to_synthetic_step() -> None:
@@ -254,6 +306,26 @@ def test_memory_list_dispatches_to_synthetic_step() -> None:
     memory_list_step.assert_called_once_with("demo_flow", "flow")
 
 
+def test_memory_list_outside_flow_dispatches_to_direct_impl() -> None:
+    fake_entries = [_memory_entry(scope="repo_seed", scope_type="namespace")]
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._list_impl",
+            return_value=fake_entries,
+        ) as list_impl,
+        patch("kitaru.memory._memory_list_step") as memory_list_step,
+    ):
+        result = memory.list()
+
+    assert result == fake_entries
+    list_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace")
+    )
+    memory_list_step.assert_not_called()
+
+
 def test_memory_history_dispatches_to_synthetic_step() -> None:
     fake_entries = [_memory_entry(version=3, is_deleted=True)]
 
@@ -270,6 +342,27 @@ def test_memory_history_dispatches_to_synthetic_step() -> None:
     memory_history_step.assert_called_once_with("demo_flow", "flow", "prefs")
 
 
+def test_memory_history_outside_flow_dispatches_to_direct_impl() -> None:
+    fake_entries = [_memory_entry(scope="repo_seed", scope_type="namespace")]
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._history_impl",
+            return_value=fake_entries,
+        ) as history_impl,
+        patch("kitaru.memory._memory_history_step") as memory_history_step,
+    ):
+        result = memory.history("prefs")
+
+    assert result == fake_entries
+    history_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "prefs",
+    )
+    memory_history_step.assert_not_called()
+
+
 def test_memory_delete_dispatches_to_synthetic_step() -> None:
     fake_entry = _memory_entry(version=3, is_deleted=True)
 
@@ -284,6 +377,32 @@ def test_memory_delete_dispatches_to_synthetic_step() -> None:
 
     assert result == fake_entry
     memory_delete_step.assert_called_once_with("demo_flow", "flow", "prefs")
+
+
+def test_memory_delete_outside_flow_dispatches_to_direct_impl() -> None:
+    fake_entry = _memory_entry(
+        scope="repo_seed",
+        scope_type="namespace",
+        version=2,
+        is_deleted=True,
+    )
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._delete_impl",
+            return_value=fake_entry,
+        ) as delete_impl,
+        patch("kitaru.memory._memory_delete_step") as memory_delete_step,
+    ):
+        result = memory.delete("prefs")
+
+    assert result == fake_entry
+    delete_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "prefs",
+    )
+    memory_delete_step.assert_not_called()
 
 
 def test_memory_configure_sets_namespace_scope_for_subsequent_calls() -> None:
@@ -412,10 +531,66 @@ def test_memory_configure_inside_flow_overrides_process_default_without_mutation
     memory_list_step_2.assert_called_once_with("repo_seed", "namespace")
 
 
+def test_memory_outside_flow_public_roundtrip_uses_detached_artifacts(
+    primed_zenml: None,
+) -> None:
+    del primed_zenml
+
+    memory.configure(scope="repo_seed")
+
+    memory.set("prefs", {"theme": "dark"})
+    assert memory.get("prefs") == {"theme": "dark"}
+
+    listed = memory.list()
+    assert len(listed) == 1
+    assert listed[0].key == "prefs"
+    assert listed[0].scope == "repo_seed"
+    assert listed[0].scope_type == "namespace"
+    assert listed[0].version == 1
+    assert listed[0].execution_id is None
+    assert listed[0].is_deleted is False
+
+    initial_history = memory.history("prefs")
+    assert [entry.version for entry in initial_history] == [1]
+    assert [entry.is_deleted for entry in initial_history] == [False]
+    assert all(entry.execution_id is None for entry in initial_history)
+
+    deleted = memory.delete("prefs")
+    assert deleted is not None
+    assert deleted.scope == "repo_seed"
+    assert deleted.scope_type == "namespace"
+    assert deleted.version == 2
+    assert deleted.is_deleted is True
+    assert deleted.execution_id is None
+
+    assert memory.get("prefs") is None
+    assert memory.list() == []
+
+    final_history = memory.history("prefs")
+    assert [entry.version for entry in final_history] == [2, 1]
+    assert [entry.is_deleted for entry in final_history] == [True, False]
+    assert all(entry.execution_id is None for entry in final_history)
+
+
 def test_set_impl_persists_expected_artifact_contract() -> None:
     payload = {"language": "en", "theme": "dark"}
+    created = _memory_artifact(
+        scope="research_agent",
+        key="user_preferences",
+        version=1,
+        value=payload,
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page()
+    client_mock.get_artifact_version.return_value = created
 
-    with patch("kitaru.memory.save_artifact") as save_artifact_mock:
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        patch(
+            "kitaru.memory.save_artifact",
+            return_value=_created_artifact_response(created.id),
+        ) as save_artifact_mock,
+    ):
         _set_impl(_flow_memory_scope("research_agent"), "user_preferences", payload)
 
     save_artifact_mock.assert_called_once_with(
@@ -432,6 +607,104 @@ def test_set_impl_persists_expected_artifact_contract() -> None:
             "kitaru_memory_deleted": False,
         },
     )
+    client_mock.get_artifact_version.assert_called_once_with(
+        name_id_or_prefix=str(created.id),
+        hydrate=True,
+    )
+
+
+def test_set_entry_impl_returns_created_memory_entry() -> None:
+    payload = {"language": "en", "theme": "dark"}
+    created = _memory_artifact(
+        scope="research_agent",
+        key="user_preferences",
+        version=2,
+        value=payload,
+        execution_id=uuid4(),
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page()
+    client_mock.get_artifact_version.return_value = created
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        patch(
+            "kitaru.memory.save_artifact",
+            return_value=_created_artifact_response(created.id),
+        ),
+    ):
+        entry = _set_entry_impl(
+            _flow_memory_scope("research_agent"),
+            "user_preferences",
+            payload,
+        )
+
+    assert entry.key == "user_preferences"
+    assert entry.scope == "research_agent"
+    assert entry.version == 2
+    assert entry.execution_id == str(created.producer_pipeline_run_id)
+
+
+def test_set_entry_impl_temporarily_switches_project_for_write() -> None:
+    payload = {"language": "en"}
+    created = _memory_artifact(
+        scope="research_agent",
+        key="user_preferences",
+        version=1,
+        value=payload,
+    )
+    default_project_id = uuid4()
+    client_mock = MagicMock()
+    client_mock.active_project = SimpleNamespace(
+        id=default_project_id,
+        name="default",
+    )
+    client_mock.list_artifact_versions.return_value = _page()
+    client_mock.get_artifact_version.return_value = created
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        patch(
+            "kitaru.memory.save_artifact",
+            return_value=_created_artifact_response(created.id),
+        ),
+    ):
+        _set_entry_impl(
+            _flow_memory_scope("research_agent"),
+            "user_preferences",
+            payload,
+            project="project-override",
+        )
+
+    assert client_mock.set_active_project.call_args_list == [
+        call("project-override"),
+        call(str(default_project_id)),
+    ]
+
+
+def test_set_entry_impl_rejects_scope_type_mismatch_with_existing_history() -> None:
+    existing = _memory_artifact(
+        scope="shared_scope",
+        key="prefs",
+        version=1,
+        value={"theme": "dark"},
+        scope_type="flow",
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(existing)
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory.save_artifact") as save_artifact_mock,
+        pytest.raises(KitaruUsageError, match="scope_type mismatch"),
+    ):
+        _set_entry_impl(
+            _MemoryScope(scope="shared_scope", scope_type="namespace"),
+            "prefs",
+            {"theme": "light"},
+        )
+
+    save_artifact_mock.assert_not_called()
 
 
 def test_get_impl_returns_none_when_key_does_not_exist() -> None:
@@ -460,9 +733,30 @@ def test_get_impl_returns_latest_value() -> None:
     latest.load.assert_called_once_with()
     call_kwargs = client_mock.list_artifact_versions.call_args.kwargs
     assert call_kwargs["artifact"] == "kitaru_mem:demo_flow:prefs"
-    assert call_kwargs["sort_by"] == "version_number:desc"
+    assert call_kwargs["sort_by"] == "desc:version_number"
     assert call_kwargs["hydrate"] is True
     assert call_kwargs["size"] == 1
+
+
+def test_get_entry_impl_returns_latest_memory_entry() -> None:
+    latest = _memory_artifact(
+        scope="demo_flow",
+        key="prefs",
+        version=2,
+        value={"theme": "dark"},
+        created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+        execution_id=uuid4(),
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(latest)
+
+    with patch("kitaru.memory.Client", return_value=client_mock):
+        entry = _get_entry_impl(_flow_memory_scope(), "prefs")
+
+    assert entry is not None
+    assert entry.key == "prefs"
+    assert entry.version == 2
+    assert entry.execution_id == str(latest.producer_pipeline_run_id)
 
 
 def test_get_impl_returns_requested_version() -> None:
@@ -581,6 +875,20 @@ def test_list_impl_dedupes_versions_and_excludes_deleted_latest_keys() -> None:
     assert entries[1].is_deleted is False
 
 
+def test_list_impl_filters_by_prefix_after_deduping() -> None:
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(
+        _memory_artifact(scope="demo_flow", key="repo_alpha", version=2, value=1),
+        _memory_artifact(scope="demo_flow", key="repo_beta", version=1, value=2),
+        _memory_artifact(scope="demo_flow", key="notes", version=3, value="x"),
+    )
+
+    with patch("kitaru.memory.Client", return_value=client_mock):
+        entries = _list_impl(_flow_memory_scope(), prefix="repo_")
+
+    assert [entry.key for entry in entries] == ["repo_alpha", "repo_beta"]
+
+
 def test_history_impl_returns_all_versions_newest_first_across_pages() -> None:
     base_time = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
     version_1 = _memory_artifact(
@@ -649,14 +957,15 @@ def test_delete_impl_writes_tombstone_and_returns_entry() -> None:
         execution_id=uuid4(),
     )
     client_mock = MagicMock()
-    client_mock.list_artifact_versions.side_effect = [
-        _page(existing),
-        _page(tombstone),
-    ]
+    client_mock.list_artifact_versions.return_value = _page(existing)
+    client_mock.get_artifact_version.return_value = tombstone
 
     with (
         patch("kitaru.memory.Client", return_value=client_mock),
-        patch("kitaru.memory.save_artifact") as save_artifact_mock,
+        patch(
+            "kitaru.memory.save_artifact",
+            return_value=_created_artifact_response(tombstone.id),
+        ) as save_artifact_mock,
     ):
         result = _delete_impl(_flow_memory_scope(), "prefs")
 
@@ -679,10 +988,53 @@ def test_delete_impl_writes_tombstone_and_returns_entry() -> None:
     assert result.version == 2
     assert result.is_deleted is True
     assert result.execution_id == str(tombstone.producer_pipeline_run_id)
-    # Two list calls: existence check + tombstone re-fetch (both size=1).
-    assert client_mock.list_artifact_versions.call_count == 2
-    for call in client_mock.list_artifact_versions.call_args_list:
-        assert call.kwargs["size"] == 1
+    client_mock.get_artifact_version.assert_called_once_with(
+        name_id_or_prefix=str(tombstone.id),
+        hydrate=True,
+    )
+    assert client_mock.list_artifact_versions.call_count == 1
+
+
+def test_delete_impl_temporarily_switches_project_for_tombstone_write() -> None:
+    existing = _memory_artifact(
+        scope="demo_flow",
+        key="prefs",
+        version=1,
+        value={"theme": "dark"},
+    )
+    tombstone = _memory_artifact(
+        scope="demo_flow",
+        key="prefs",
+        version=2,
+        value=None,
+        deleted=True,
+    )
+    default_project_id = uuid4()
+    client_mock = MagicMock()
+    client_mock.active_project = SimpleNamespace(
+        id=default_project_id,
+        name="default",
+    )
+    client_mock.list_artifact_versions.return_value = _page(existing)
+    client_mock.get_artifact_version.return_value = tombstone
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        patch(
+            "kitaru.memory.save_artifact",
+            return_value=_created_artifact_response(tombstone.id),
+        ),
+    ):
+        _delete_impl(
+            _flow_memory_scope(),
+            "prefs",
+            project="project-override",
+        )
+
+    assert client_mock.set_active_project.call_args_list == [
+        call("project-override"),
+        call(str(default_project_id)),
+    ]
 
 
 def test_delete_impl_returns_existing_tombstone_when_key_already_deleted() -> None:
