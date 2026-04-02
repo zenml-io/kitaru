@@ -420,7 +420,7 @@ class TestWriteDocsTree:
             assert (output_dir / "log-store" / f"{command}.mdx").exists()
             assert f"log-store/{command}.mdx" in files
 
-        for command in ("delete", "get", "history", "list", "set"):
+        for command in ("delete", "get", "history", "list", "scopes", "set"):
             assert (output_dir / "memory" / f"{command}.mdx").exists()
             assert f"memory/{command}.mdx" in files
 

@@ -25,6 +25,24 @@ from ._helpers import (
 )
 
 
+def _require_scope(
+    scope: str | None,
+    *,
+    command: str,
+    output: CLIOutputFormat,
+) -> str:
+    """Validate that ``--scope`` was provided, or exit with a helpful hint."""
+    if scope is not None:
+        return scope
+    _exit_with_error(
+        command,
+        "Missing required option `--scope`. "
+        "Run `kitaru memory scopes` to see available scopes.",
+        output=output,
+    )
+    raise SystemExit(1)  # unreachable; satisfies type checker
+
+
 def _memory_timestamp(value: str | None) -> str:
     """Render an optional serialized timestamp for CLI output."""
     return value or "not available"
@@ -130,18 +148,61 @@ def _memory_value_section(payload: dict[str, Any]) -> SnapshotSection:
     )
 
 
+def _memory_scopes_rows(scopes: list[dict[str, Any]]) -> list[list[str]]:
+    """Build table rows for `kitaru memory scopes`."""
+    return [
+        [
+            str(s["scope"]),
+            str(s["scope_type"]),
+            str(s["entry_count"]),
+        ]
+        for s in scopes
+    ]
+
+
+@memory_app.command(name="scopes")
+def scopes_(
+    *,
+    output: OutputFormatOption = "text",
+) -> None:
+    """List all discovered memory scopes."""
+    command = "memory.scopes"
+    output_format = _resolve_output_format(output)
+    facade = _facade_module()
+    scopes = run_with_cli_error_boundary(
+        lambda: facade.scopes_memory_payload(
+            facade.KitaruClient(),
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_items(command, scopes, output=output_format)
+        return
+
+    _emit_table(
+        "Kitaru memory scopes",
+        ["Scope", "Scope Type", "Entries"],
+        _memory_scopes_rows(scopes),
+        empty_message="no memory scopes found",
+    )
+
+
 @memory_app.command
 def list_(
     *,
     scope: Annotated[
-        str,
-        Parameter(help="Memory scope to inspect."),
-    ],
+        str | None,
+        Parameter(help="Memory scope to inspect. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """List active memory entries for one explicit scope."""
     command = "memory.list"
     output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
     facade = _facade_module()
     entries = run_with_cli_error_boundary(
         lambda: facade.list_memory_payload(
@@ -161,7 +222,10 @@ def list_(
         f"Kitaru memory ({scope})",
         ["Key", "Type", "Version", "Updated", "Scope Type", "Execution"],
         _memory_list_rows(entries),
-        empty_message=f"none found for scope `{scope}`",
+        empty_message=(
+            f"none found for scope `{scope}`. "
+            "Run `kitaru memory scopes` to see available scopes."
+        ),
     )
 
 
@@ -176,14 +240,15 @@ def get_(
     ],
     *,
     scope: Annotated[
-        str,
-        Parameter(help="Memory scope to read from."),
-    ],
+        str | None,
+        Parameter(help="Memory scope to read from. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Read the latest value for one memory key in one explicit scope."""
     command = "memory.get"
     output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.get_memory_payload(
@@ -237,9 +302,9 @@ def set_(
     ],
     *,
     scope: Annotated[
-        str,
-        Parameter(help="Memory scope to write into."),
-    ],
+        str | None,
+        Parameter(help="Memory scope to write into. [required]", show_default=False),
+    ] = None,
     scope_type: Annotated[
         Literal["namespace", "flow", "execution"] | None,
         Parameter(
@@ -253,6 +318,7 @@ def set_(
     """Write one memory value into one explicit scope."""
     command = "memory.set"
     output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.set_memory_payload(
@@ -291,14 +357,15 @@ def delete_(
     ],
     *,
     scope: Annotated[
-        str,
-        Parameter(help="Memory scope to delete from."),
-    ],
+        str | None,
+        Parameter(help="Memory scope to delete from. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Soft-delete one memory key from one explicit scope."""
     command = "memory.delete"
     output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.delete_memory_payload(
@@ -342,14 +409,15 @@ def history_(
     ],
     *,
     scope: Annotated[
-        str,
-        Parameter(help="Memory scope to inspect."),
-    ],
+        str | None,
+        Parameter(help="Memory scope to inspect. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Show all versions for one memory key in one explicit scope."""
     command = "memory.history"
     output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
     facade = _facade_module()
     entries = run_with_cli_error_boundary(
         lambda: facade.history_memory_payload(

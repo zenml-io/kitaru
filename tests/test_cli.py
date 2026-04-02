@@ -377,7 +377,7 @@ def test_memory_help_lists_all_supported_subcommands(
         app(["memory", "--help"])
     assert exc_info.value.code == 0
     output = capsys.readouterr().out.lower()
-    for command in ("list", "get", "set", "delete", "history"):
+    for command in ("list", "get", "set", "delete", "history", "scopes"):
         assert command in output
 
 
@@ -1935,6 +1935,31 @@ def test_model_list_reads_transported_registry(
     assert "fast: openai/gpt-4o-mini (secret=openai-creds) [default]" in output
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["memory", "list"],
+        ["memory", "get", "some_key"],
+        ["memory", "set", "some_key", "some_value"],
+        ["memory", "delete", "some_key"],
+        ["memory", "history", "some_key"],
+    ],
+    ids=["list", "get", "set", "delete", "history"],
+)
+def test_memory_missing_scope_shows_helpful_error(
+    capsys: pytest.CaptureFixture[str],
+    args: list[str],
+) -> None:
+    """Omitting `--scope` should suggest `kitaru memory scopes`."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(args)
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "kitaru memory scopes" in err
+    assert "--scope" in err
+
+
 def test_memory_list_renders_entries(capsys: pytest.CaptureFixture[str]) -> None:
     """`kitaru memory list` should render active entries for the requested scope."""
     fake_client = Mock()
@@ -1992,6 +2017,83 @@ def test_memory_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["command"] == "memory.list"
     assert payload["count"] == 1
     assert payload["items"][0]["key"] == "repo_conventions"
+
+
+def test_memory_list_empty_scope_suggests_scopes_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An empty scope result should hint the user to `kitaru memory scopes`."""
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.list_memory_payload", return_value=[]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "list", "--scope", "unknown_repo"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "kitaru memory scopes" in output
+
+
+def test_memory_scopes_renders_table(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru memory scopes` should render discovered scopes."""
+    fake_client = Mock()
+    scopes = [
+        {"scope": "code_review", "scope_type": "flow", "entry_count": 2},
+        {"scope": "my_repo", "scope_type": "namespace", "entry_count": 4},
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.cli.scopes_memory_payload",
+            return_value=scopes,
+        ) as mock_scopes,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "scopes"])
+
+    assert exc_info.value.code == 0
+    mock_scopes.assert_called_once_with(fake_client)
+    output = capsys.readouterr().out
+    assert "Kitaru memory scopes" in output
+    assert "my_repo" in output
+    assert "code_review" in output
+    assert "namespace" in output
+
+
+def test_memory_scopes_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru memory scopes --output json` should emit scope entries."""
+    scopes = [
+        {"scope": "my_repo", "scope_type": "namespace", "entry_count": 3},
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.scopes_memory_payload", return_value=scopes),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "scopes", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["command"] == "memory.scopes"
+    assert envelope["count"] == 1
+    assert envelope["items"][0]["scope"] == "my_repo"
+
+
+def test_memory_scopes_empty(capsys: pytest.CaptureFixture[str]) -> None:
+    """No scopes should show the empty-state message."""
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.scopes_memory_payload", return_value=[]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "scopes"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "no memory scopes found" in output
 
 
 def test_memory_get_renders_value_sections(capsys: pytest.CaptureFixture[str]) -> None:
@@ -2138,6 +2240,61 @@ def test_memory_set_json_output_supports_scope_type(
     assert envelope["item"]["scope_type"] == "execution"
 
 
+def test_memory_get_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru memory get --output json` should emit the full payload envelope."""
+    payload = _memory_payload(
+        key="repo_conventions",
+        scope="my_repo",
+        version=4,
+        value={"style": "ruff"},
+        value_format="json",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.get_memory_payload", return_value=payload),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "get", "repo_conventions", "--scope", "my_repo", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["command"] == "memory.get"
+    assert envelope["item"]["key"] == "repo_conventions"
+    assert envelope["item"]["value"]["style"] == "ruff"
+
+
+def test_memory_delete_renders_success(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru memory delete` should confirm soft-deletion on success."""
+    fake_client = Mock()
+    payload = _memory_payload(
+        key="obsolete_prefs",
+        scope="my_repo",
+        version=3,
+        is_deleted=True,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.cli.delete_memory_payload",
+            return_value=payload,
+        ) as mock_delete_memory,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "delete", "obsolete_prefs", "--scope", "my_repo"])
+
+    assert exc_info.value.code == 0
+    mock_delete_memory.assert_called_once_with(
+        fake_client,
+        key="obsolete_prefs",
+        scope="my_repo",
+    )
+    output = capsys.readouterr().out
+    assert "Deleted memory: obsolete_prefs" in output
+    assert "Tombstone version: 3" in output
+
+
 def test_memory_delete_errors_when_missing(capsys: pytest.CaptureFixture[str]) -> None:
     """Deleting a missing memory key should fail cleanly."""
     with (
@@ -2152,6 +2309,29 @@ def test_memory_delete_errors_when_missing(capsys: pytest.CaptureFixture[str]) -
         "No memory entry found for key `prefs` in scope `my_repo`."
         in capsys.readouterr().err
     )
+
+
+def test_memory_delete_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru memory delete --output json` should emit the tombstone envelope."""
+    payload = _memory_payload(
+        key="obsolete_prefs",
+        scope="my_repo",
+        version=3,
+        is_deleted=True,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.delete_memory_payload", return_value=payload),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "delete", "obsolete_prefs", "--scope", "my_repo", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["command"] == "memory.delete"
+    assert envelope["item"]["key"] == "obsolete_prefs"
+    assert envelope["item"]["is_deleted"] is True
 
 
 def test_memory_history_renders_versions(capsys: pytest.CaptureFixture[str]) -> None:
@@ -2193,6 +2373,43 @@ def test_memory_history_renders_versions(capsys: pytest.CaptureFixture[str]) -> 
     assert "Kitaru memory history (my_repo/repo_conventions)" in output
     assert "kr-333" in output
     assert "yes" in output.lower()
+
+
+def test_memory_history_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru memory history --output json` should emit version entries."""
+    history = [
+        _memory_payload(key="prefs", scope="my_repo", version=2, is_deleted=True),
+        _memory_payload(key="prefs", scope="my_repo", version=1),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.history_memory_payload", return_value=history),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "history", "prefs", "--scope", "my_repo", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["command"] == "memory.history"
+    assert envelope["count"] == 2
+    assert envelope["items"][0]["version"] == 2
+
+
+def test_memory_history_errors_when_empty(capsys: pytest.CaptureFixture[str]) -> None:
+    """Empty history for a key should produce a clear non-zero CLI error."""
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.history_memory_payload", return_value=[]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "history", "prefs", "--scope", "my_repo"])
+
+    assert exc_info.value.code == 1
+    assert (
+        "No memory history found for key `prefs` in scope `my_repo`."
+        in capsys.readouterr().err
+    )
 
 
 def test_secrets_set_creates_secret(

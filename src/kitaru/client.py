@@ -98,10 +98,12 @@ from kitaru.errors import (
 )
 from kitaru.memory import (
     MemoryEntry,
+    MemoryScopeInfo,
     _delete_impl,
     _get_entry_impl,
     _history_impl,
     _list_impl,
+    _list_scopes_impl,
     _MemoryScope,
     _MemoryScopeType,
     _set_entry_impl,
@@ -906,6 +908,13 @@ class _MemoriesAPI:
         return _delete_impl(
             self._scope(scope),
             _validate_memory_identifier(key, kind="key"),
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def scopes(self) -> builtins.list[MemoryScopeInfo]:
+        """Discover all memory scopes with active entry counts."""
+        return _list_scopes_impl(
             client_factory=self._client_ref._client,
             project=self._client_ref._project,
         )

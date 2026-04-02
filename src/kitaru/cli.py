@@ -74,6 +74,18 @@ from kitaru._cli._helpers import (
     _value_style,
 )
 from kitaru._cli._init import init
+from kitaru._cli._memory import (
+    _memory_entry_rows,
+    _memory_execution_label,
+    _memory_history_rows,
+    _memory_list_rows,
+    _memory_scopes_rows,
+    _memory_timestamp,
+    _memory_value_section,
+    _parse_memory_cli_value,
+    _require_scope,
+    _stringify_memory_value,
+)
 from kitaru._cli._models import _model_rows, list___, register
 from kitaru._cli._secrets import (
     _SECRET_KEY_PATTERN,
@@ -138,6 +150,7 @@ from kitaru._interface_memory import (
     get_memory_payload,
     history_memory_payload,
     list_memory_payload,
+    scopes_memory_payload,
     set_memory_payload,
 )
 from kitaru._local_server import (
@@ -268,11 +281,19 @@ __all__ = [
     "_logout_current_connection",
     "_logout_result_message",
     "_logout_result_payload",
+    "_memory_entry_rows",
+    "_memory_execution_label",
+    "_memory_history_rows",
+    "_memory_list_rows",
+    "_memory_scopes_rows",
+    "_memory_timestamp",
+    "_memory_value_section",
     "_merge_stack_create_inputs",
     "_model_rows",
     "_normalize_stack_create_file_mapping",
     "_parse_json_object",
     "_parse_json_value",
+    "_parse_memory_cli_value",
     "_parse_secret_assignments",
     "_print_success",
     "_print_warning",
@@ -283,6 +304,7 @@ __all__ = [
     "_render_plain_snapshot_sections",
     "_render_rich_snapshot",
     "_render_rich_snapshot_sections",
+    "_require_scope",
     "_resolve_output_format",
     "_resolve_secret_exact",
     "_run_interactive_input_flow",
@@ -296,6 +318,7 @@ __all__ = [
     "_stack_show_rows",
     "_status_label",
     "_status_rows",
+    "_stringify_memory_value",
     "_value_style",
     "app",
     "cancel_",
@@ -338,6 +361,7 @@ __all__ = [
     "resolve_log_store",
     "resume_",
     "retry_",
+    "scopes_memory_payload",
     "secrets_app",
     "set",
     "set_",

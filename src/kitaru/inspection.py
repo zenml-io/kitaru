@@ -42,7 +42,7 @@ from kitaru.config import (
     list_active_kitaru_environment_variables,
     resolve_log_store,
 )
-from kitaru.memory import MemoryEntry
+from kitaru.memory import MemoryEntry, MemoryScopeInfo
 
 
 @dataclass
@@ -389,6 +389,15 @@ def serialize_memory_entry(entry: MemoryEntry) -> dict[str, Any]:
 def serialize_memory_history(history: Sequence[MemoryEntry]) -> list[dict[str, Any]]:
     """Serialize a memory history sequence."""
     return [serialize_memory_entry(entry) for entry in history]
+
+
+def serialize_memory_scope_info(info: MemoryScopeInfo) -> dict[str, Any]:
+    """Serialize a discovered memory scope for transport layers."""
+    return {
+        "scope": info.scope,
+        "scope_type": info.scope_type,
+        "entry_count": info.entry_count,
+    }
 
 
 def serialize_memory_value(value: Any) -> dict[str, Any]:
