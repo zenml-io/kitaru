@@ -3830,6 +3830,75 @@ def test_apt_packages_passes_through() -> None:
     assert docker_settings.requirements == ["kitaru"]
 
 
+def test_build_context_root_passes_through() -> None:
+    """build_context_root should flow through to DockerSettings."""
+    image_settings = ImageSettings(build_context_root="/app/context")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.build_context_root == "/app/context"
+
+
+def test_image_tag_passes_through() -> None:
+    """image_tag should flow through to DockerSettings."""
+    image_settings = ImageSettings(image_tag="my-custom-tag:v1")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.image_tag == "my-custom-tag:v1"
+
+
+def test_target_repository_passes_through() -> None:
+    """target_repository should flow through to DockerSettings."""
+    image_settings = ImageSettings(target_repository="my-registry/my-repo")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.target_repository == "my-registry/my-repo"
+
+
+def test_user_passes_through() -> None:
+    """user should flow through to DockerSettings."""
+    image_settings = ImageSettings(user="nonroot")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.user == "nonroot"
+
+
+def test_build_options_passes_through() -> None:
+    """build_options should flow through to DockerSettings."""
+    opts = {"buildargs": {"FOO": "bar"}, "network": "host"}
+    image_settings = ImageSettings(build_options=opts)
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.build_options == opts
+
+
+def test_new_string_fields_reject_empty() -> None:
+    """New string fields should reject empty/whitespace values."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(build_context_root="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(image_tag="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(target_repository="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(user="   ")
+
+
+def test_new_fields_excluded_from_is_empty() -> None:
+    """Setting any new field should make ImageSettings non-empty."""
+    assert ImageSettings(build_context_root="/ctx").is_empty() is False
+    assert ImageSettings(image_tag="v1").is_empty() is False
+    assert ImageSettings(target_repository="repo").is_empty() is False
+    assert ImageSettings(user="root").is_empty() is False
+    assert ImageSettings(build_options={"k": "v"}).is_empty() is False
+
+
 def test_connection_resolution_precedence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

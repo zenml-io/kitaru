@@ -58,9 +58,14 @@ def my_agent(topic: str) -> str:
 | `base_image` | `str` | Docker image to start from (e.g. `python:3.12-slim`) |
 | `requirements` | `list[str]` | Python packages to install (pip format) |
 | `dockerfile` | `str` | Path to a custom Dockerfile instead of auto-building |
+| `build_context_root` | `str` | Root directory for the Docker build context |
 | `environment` | `dict[str, str]` | Environment variables set inside the container |
 | `apt_packages` | `list[str]` | System packages to install via apt |
 | `replicate_local_python_environment` | `bool` | Mirror your local `pip freeze` into the container |
+| `image_tag` | `str` | Custom tag for the built image |
+| `target_repository` | `str` | Registry repository to push the image to (e.g. `my-registry/my-repo`) |
+| `user` | `str` | OS user to run as inside the container (e.g. `nonroot`) |
+| `build_options` | `dict[str, Any]` | Extra options passed to the Docker build engine |
 
 ## Automatic Kitaru injection
 
