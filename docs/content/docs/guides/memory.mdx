@@ -160,14 +160,16 @@ memory.set("draft/status", "approved")
 memory.delete("draft/status")
 
 print(memory.get("draft/status"))          # None
-print(memory.history("draft/status"))      # includes versions + tombstone
+print(memory.history("draft/status"))      # includes all versions + deletion marker
 ```
 
 That sequence tells a concrete story:
 
 1. the key existed
 2. it changed over time
-3. the latest version became a tombstone
+3. the latest version is a deletion marker (called a
+   [tombstone](/concepts/memory#what-is-a-tombstone) — a version that means
+   "this key was deleted," rather than the data being erased)
 4. history still preserves the earlier states
 
 ## Restrictions to remember

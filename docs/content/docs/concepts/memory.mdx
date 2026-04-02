@@ -65,19 +65,23 @@ memory.set("status", "approved")
 ```
 
 If the latest version is not deleted, that latest version is the current value.
-If the latest version is a tombstone, the key has no current value even though
-older versions still exist in history.
 
-Deletes are **soft deletes**, not hard purges. When you call `memory.delete(key)`,
-Kitaru writes a new hidden tombstone version instead of erasing history.
+### What is a tombstone?
 
-That means:
+When you delete a memory key, Kitaru does not erase the data. Instead, it writes
+a special marker called a **tombstone** — a version that means "this key was
+deleted at this point in time." Think of it like crossing out an entry in a
+logbook rather than ripping out the page: the old entries are still readable, but
+the most recent line says "removed."
 
-- `memory.get(key)` returns `None` when the newest version is deleted
-- `memory.list()` hides deleted keys
-- `memory.history(key)` still shows older versions and tombstones
+Because deletes are **soft deletes** (tombstones) rather than hard purges:
 
-This is useful for audit trails and future rollback/forking patterns.
+- `memory.get(key)` returns `None` when the newest version is a tombstone
+- `memory.list()` hides tombstoned keys from the listing
+- `memory.history(key)` still shows every version, including tombstones
+
+This is useful for audit trails and future rollback/forking patterns. You always
+have a complete record of what happened to a key, even after deletion.
 
 ## Where memory calls are allowed
 
