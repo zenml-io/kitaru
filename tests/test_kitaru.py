@@ -315,3 +315,4 @@ class TestPlaceholderBehavior:
         client = kitaru.KitaruClient()
         assert hasattr(client, "executions")
         assert hasattr(client, "artifacts")
+        assert hasattr(client, "memories")
