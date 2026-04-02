@@ -30,7 +30,7 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-Your agent crashed at step 6. Kitaru replays from step 6 — not from scratch.
+Your agent crashed at step 7. Kitaru replays from step 7 — not from scratch.
 Add two decorators to your existing Python agent and get crash recovery, human
 approval gates, cost tracking, and a full dashboard. No rewrite. No framework
 lock-in. No distributed systems overhead.
