@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru.memory.set/get/list/history/delete()` now require an explicit configured scope outside flows and raise `KitaruStateError` with setup guidance when no outside-flow scope has been configured
 - In-flow memory reads and writes continue to run through private non-cacheable synthetic ZenML memory steps, while checkpoint-context restrictions remain unchanged (`memory.*` is still forbidden inside `@checkpoint`)
 - Memory writes now re-fetch the exact created artifact version by ID before returning typed metadata, so the client surface can report the concrete written version without guessing from “latest by name”
+- Documentation now includes dedicated memory concept/guide pages and refreshed generated CLI, SDK, and changelog reference output for the shipped memory surfaces
 
 ### Fixed
 - Memory artifact version queries now use the correct `desc:version_number` sort order (was `version_number:desc`)

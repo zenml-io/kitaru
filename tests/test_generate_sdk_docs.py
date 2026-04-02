@@ -12,7 +12,9 @@ import pytest
 
 from generate_sdk_docs import (
     EXCLUDED_SUBMODULES,
+    _exported_names,
     _filter_module,
+    _is_documented_member,
     _is_private,
     extract_api,
 )
@@ -37,6 +39,31 @@ class TestPrivateDetection:
 
     def test_public_name(self) -> None:
         assert _is_private("flow") is False
+
+    def test_dotted_private_module_is_private(self) -> None:
+        assert _is_private("kitaru._flow_loading") is True
+
+
+class TestDocumentedMemberDetection:
+    """Tests for public-vs-private member filtering."""
+
+    def test_init_is_kept(self) -> None:
+        assert _is_documented_member("__init__") is True
+
+    def test_private_helper_is_excluded(self) -> None:
+        assert _is_documented_member("_helper") is False
+
+
+class TestExportedNames:
+    """Tests for parsing __all__ export names."""
+
+    def test_reads_all_names(self) -> None:
+        data = {
+            "attributes": [
+                {"name": "__all__", "value": "['flow', 'checkpoint']"},
+            ]
+        }
+        assert _exported_names(data) == {"flow", "checkpoint"}
 
 
 class TestFilterModule:
@@ -95,11 +122,29 @@ class TestFilterModule:
             },
             "classes": {},
             "functions": {},
-            "attributes": [],
+            "attributes": [{"name": "__all__", "value": "['Foo', 'bar']"}],
         }
         filtered = _filter_module(data, is_root=True)
         assert "Foo" in filtered["classes"]
         assert "bar" in filtered["functions"]
+
+    def test_does_not_promote_non_exported_private_symbols(self) -> None:
+        data = {
+            "modules": {
+                "_internal": {
+                    "name": "_internal",
+                    "modules": {},
+                    "classes": {"Foo": {"name": "Foo"}},
+                    "functions": {"bar": {"name": "bar"}},
+                },
+            },
+            "classes": {},
+            "functions": {},
+            "attributes": [{"name": "__all__", "value": "['flow']"}],
+        }
+        filtered = _filter_module(data, is_root=True)
+        assert "Foo" not in filtered["classes"]
+        assert "bar" not in filtered["functions"]
 
     def test_filters_dunder_all_attribute(self) -> None:
         data = {
@@ -135,6 +180,37 @@ class TestFilterModule:
         assert "_private" not in filtered["modules"]
         # But symbols are NOT promoted when not root
         assert "Secret" not in filtered["classes"]
+
+    def test_filters_private_class_members(self) -> None:
+        data = {
+            "modules": {},
+            "classes": {
+                "Widget": {
+                    "name": "Widget",
+                    "functions": {
+                        "__init__": {"name": "__init__"},
+                        "_helper": {"name": "_helper"},
+                        "render": {"name": "render"},
+                    },
+                    "classes": {},
+                    "attributes": [
+                        {"name": "_secret"},
+                        {"name": "label"},
+                    ],
+                    "inherited_members": {
+                        "_base_helper": {"name": "_base_helper"},
+                        "display": {"name": "display"},
+                    },
+                }
+            },
+            "functions": {},
+            "attributes": [],
+        }
+        filtered = _filter_module(data)
+        widget = filtered["classes"]["Widget"]
+        assert set(widget["functions"]) == {"__init__", "render"}
+        assert [attr["name"] for attr in widget["attributes"]] == ["label"]
+        assert set(widget["inherited_members"]) == {"display"}
 
 
 class TestExcludedModules:
@@ -197,3 +273,24 @@ class TestExtractApi:
             "current_stack",
             "use_stack",
         }.issubset(config_funcs)
+
+    def test_filtered_extraction_excludes_private_reference_modules(self) -> None:
+        raw = extract_api("kitaru")
+        filtered = _filter_module(raw, is_root=True)
+        assert "_flow_loading" not in filtered.get("modules", {})
+        assert "_local_server" not in filtered.get("modules", {})
+
+    def test_filtered_extraction_excludes_private_client_members(self) -> None:
+        raw = extract_api("kitaru")
+        filtered = _filter_module(raw, is_root=True)
+        client_classes = (
+            filtered.get("modules", {}).get("client", {}).get("classes", {})
+        )
+        assert "_ExecutionsAPI" not in client_classes
+        assert "_ArtifactsAPI" not in client_classes
+        assert "_MemoriesAPI" not in client_classes
+
+        client_methods = client_classes["KitaruClient"]["functions"]
+        assert "_client" not in client_methods
+        assert "_get_pipeline_run" not in client_methods
+        assert "__init__" in client_methods
