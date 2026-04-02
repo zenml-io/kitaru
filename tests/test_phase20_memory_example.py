@@ -27,9 +27,11 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert execution_id
     assert snapshot["namespace_scope"] == namespace_scope
     assert snapshot["flow_scope"] == "memory_showcase"
-    assert snapshot["execution_scope"] == execution_id
 
+    assert "conventions/test_runner" in seed_snapshot["active_keys"]
+    assert seed_snapshot["topic_count"] == 2
     assert seed_snapshot["deleted_key_hidden"] is True
+    assert seed_snapshot["deleted_history_contains_tombstone"] is True
     assert flow_snapshot["topic_count_before"] == 2
     assert flow_snapshot["topic_count_after"] == 3
     assert flow_snapshot["topic_count_history_versions_after_write"] == [2, 1]

@@ -241,6 +241,9 @@ def run_workflow(
     seed_snapshot = seed_namespace_memory(namespace_scope)
 
     handle = memory_showcase.run(namespace_scope, topic)
+    # Poll instead of handle.wait() because wait() tries to extract the flow
+    # result, which fails when the flow ends with multiple terminal synthetic
+    # memory steps (ambiguous output).
     while True:
         status = handle.status
         if status.is_finished:
@@ -324,6 +327,10 @@ def run_workflow(
         "summaries/latest",
         scope="memory_showcase",
     )
+    execution_transient = client.memories.get(
+        "execution/transient",
+        scope=execution_scope,
+    )
     scopes = client.memories.scopes()
 
     flow_snapshot = {
@@ -342,7 +349,6 @@ def run_workflow(
         "obsolete_deleted_entry": _optional_entry_snapshot(
             namespace_obsolete_history[0] if namespace_obsolete_history else None
         ),
-        "flow_scope": "memory_showcase",
         "flow_keys": _keys(flow_entries),
         "flow_summary_history_versions": _versions(flow_summary_history),
     }
@@ -351,7 +357,6 @@ def run_workflow(
         "execution_id": execution_scope,
         "namespace_scope": namespace_scope,
         "flow_scope": "memory_showcase",
-        "execution_scope": execution_scope,
         "seed_snapshot": seed_snapshot,
         "flow_snapshot": flow_snapshot,
         "client_snapshot": {
@@ -380,18 +385,13 @@ def run_workflow(
             "flow_summary_value": flow_summary_value,
             "flow_summary_history_versions": _versions(flow_summary_history),
             "execution_history_versions": _versions(execution_history),
-            "execution_transient_hidden": client.memories.get(
-                "execution/transient",
-                scope=execution_scope,
-            )
-            is None,
+            "execution_transient_hidden": execution_transient is None,
             "scopes": [_scope_snapshot(scope) for scope in scopes],
         },
     }
 
 
 def main() -> None:
-    """Run the example as a script."""
     print(json.dumps(run_workflow(), indent=2, sort_keys=True, default=str))
 
 
