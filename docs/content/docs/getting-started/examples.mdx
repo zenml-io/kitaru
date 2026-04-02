@@ -50,6 +50,7 @@ kitaru status
 | Replay from a checkpoint with overrides | `replay/` | `python replay_with_overrides.py` |
 | Track a model call inside a flow | `llm/` | `python flow_with_llm.py` |
 | Wrap a PydanticAI agent | `pydantic_ai_agent/` | `python pydantic_ai_adapter.py` |
+| Build a multi-agent harness with crash recovery | `durable_harness/` | `python harness.py "Your task"` |
 | Query executions from an MCP client | `mcp/` | `python mcp_query_tools.py` |
 
 For example:
@@ -82,6 +83,7 @@ python first_working_flow.py
 |---|---|---|
 | `llm/flow_with_llm.py` | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
 | `pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with Kitaru replay boundaries | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
+| `durable_harness/harness.py` | Planner -> builder -> evaluator harness with crash recovery, replay, and HITL | [Replay and Overrides](/guides/replay-and-overrides), [Wait and Resume](/guides/wait-and-resume) |
 | `mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
 
 <Callout type="info">

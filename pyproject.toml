@@ -136,6 +136,12 @@ include = ["scripts/r2-upload.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+[[tool.ty.overrides]]
+include = ["tests/test_phase20_durable_harness_unit.py", "tests/test_phase20_durable_harness_example.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-vv -n auto"
