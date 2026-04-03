@@ -91,8 +91,21 @@ have a complete record of what happened to a key, even after deletion.
 | Inside `@checkpoint` | No | No | Raises `KitaruContextError` |
 | Outside a flow | Yes, after `memory.configure(...)` | Yes, after `memory.configure(...)` | Good for seeding and scripting |
 
-The checkpoint restriction is intentional. Memory is a flow-level coordination
-primitive, not a checkpoint-local storage API.
+The checkpoint restriction exists for a concrete technical reason. Checkpoints
+can be **skipped** — by cache hits (same inputs → reuse the cached output) or
+during replay (fast-forward past already-completed work). If memory operations
+lived inside a checkpoint:
+
+- **Reads could go stale.** A cached checkpoint returns its old output without
+  re-executing the body, so a `memory.get()` inside it never runs. The output
+  was computed with whatever the memory value was at original execution time,
+  which may no longer be current.
+- **Writes could be silently lost.** A `memory.set()` inside a cached checkpoint
+  also never runs. No error, no warning — the write just doesn't happen.
+
+Kitaru avoids both problems by treating memory as a **flow-level coordination
+primitive**: reads and writes happen in the flow body, where they always execute,
+and the results are passed into checkpoints as ordinary arguments.
 
 ## Replay caveats
 
@@ -119,6 +132,18 @@ The Python module API uses the currently configured scope. The client, CLI, and
 MCP surfaces require or expose explicit scope values more directly.
 
 See [Use Memory](/guides/memory) for concrete examples across all four.
+
+## Provenance
+
+Memory entries written **inside a flow** are linked to the execution that
+produced them. You can trace any entry back to the specific run that wrote it.
+
+Memory entries written **outside a flow** (from a script, CLI, or MCP) are
+explicitly **detached** — their `execution_id` is `None`. This makes it clear
+that the entry was manually seeded rather than produced by an agent run.
+
+Both cases appear in `memory.history()`, so you can always tell whether a
+particular version came from a flow execution or from an external write.
 
 ## Next steps
 

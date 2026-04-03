@@ -46,10 +46,16 @@ def research_agent(topic: str) -> None:
     memory.set("last_topic", topic)
 ```
 
-The important detail is that in-flow `memory.get()`, `memory.list()`,
-`memory.history()`, and `memory.delete()` behave like runtime step outputs, not
-eager Python values. Keep the memory calls in the flow body, then pass those
-results into checkpoints when you need normal Python logic.
+Notice the shape: **read memory first**, pass the values into a checkpoint, then
+**write memory after** the checkpoint produces its result. This is the pattern to
+follow. Reads before checkpoints mean the agent starts with the latest knowledge.
+Writes after checkpoints mean memory only records outcomes that the durable work
+has already verified — no speculative state.
+
+In-flow `memory.get()`, `memory.list()`, `memory.history()`, and
+`memory.delete()` behave like runtime step outputs, not eager Python values. Keep
+the memory calls in the flow body, then pass those results into checkpoints when
+you need normal Python logic.
 
 If you want a different scope, configure it first:
 
@@ -175,7 +181,10 @@ That sequence tells a concrete story:
 ## Restrictions to remember
 
 - Memory is allowed in flow bodies
-- Memory is forbidden inside `@checkpoint`
+- Memory is **forbidden inside `@checkpoint`** — checkpoints can be skipped by
+  caching or replay, which would silently lose writes and serve stale reads.
+  See [Why memory is forbidden in checkpoints](/concepts/memory#where-memory-calls-are-allowed)
+  for the full explanation.
 - Outside a flow, configure the scope first with `memory.configure(...)`
 - Replay may observe newer values and replays of writes create new versions
 
