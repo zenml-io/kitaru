@@ -275,6 +275,9 @@ _MARKERS: dict[str, str] = {
     "error": "\u2716",
 }
 
+_KITARU_HANDLER_MARKER_ATTR = "_kitaru_terminal_handler_marker"
+_KITARU_HANDLER_MARKER_VALUE = "kitaru-terminal-handler/v1"
+
 
 def _render(decision: _TerminalDecision, *, interactive: bool) -> str:
     """Render a terminal decision to a display string."""
@@ -313,6 +316,8 @@ class _KitaruTerminalHandler(logging.Handler):
     see the original record.
     """
 
+    _kitaru_terminal_handler_marker = _KITARU_HANDLER_MARKER_VALUE
+
     def __init__(self) -> None:
         super().__init__()
         self._write = _get_bypass_write()
@@ -334,22 +339,40 @@ class _KitaruTerminalHandler(logging.Handler):
 # ---------------------------------------------------------------------------
 
 
+def _is_kitaru_terminal_handler(handler: logging.Handler) -> bool:
+    """Return whether a handler is a Kitaru terminal handler.
+
+    Detection is marker-based so handlers created before
+    ``importlib.reload(kitaru._terminal_logging)`` are still recognized after
+    reload, even though their Python class identity has changed.
+    """
+    marker = getattr(handler, _KITARU_HANDLER_MARKER_ATTR, None)
+    if marker == _KITARU_HANDLER_MARKER_VALUE:
+        return True
+    return isinstance(handler, _KitaruTerminalHandler)
+
+
 def install_terminal_log_intercept() -> None:
     """Replace ZenML's console handler with a Kitaru terminal handler.
 
-    This function is idempotent: calling it multiple times (including across
-    ``importlib.reload()``) will not add duplicate handlers.
+    This function is idempotent: calling it multiple times, including after
+    ``importlib.reload(kitaru._terminal_logging)``, converges the root logger
+    to one Kitaru terminal handler plus any preserved non-console handlers.
     """
     from zenml.logger import ConsoleFormatter, ZenMLLoggingHandler
 
     root = logging.getLogger()
 
-    existing_kitaru: _KitaruTerminalHandler | None = None
+    existing_kitaru: logging.Handler | None = None
+    has_duplicate_kitaru = False
     zenml_console_indices: list[int] = []
 
     for i, handler in enumerate(root.handlers):
-        if isinstance(handler, _KitaruTerminalHandler):
-            existing_kitaru = handler
+        if _is_kitaru_terminal_handler(handler):
+            if existing_kitaru is None:
+                existing_kitaru = handler
+            else:
+                has_duplicate_kitaru = True
             continue
         if isinstance(handler, ZenMLLoggingHandler):
             continue
@@ -359,14 +382,11 @@ def install_terminal_log_intercept() -> None:
     kitaru_handler = existing_kitaru or _KitaruTerminalHandler()
 
     if zenml_console_indices:
-        # Replace the first ZenML console handler with ours, remove extras
+        # Replace the first ZenML console handler with ours, remove extras.
         first_idx = zenml_console_indices[0]
         new_handlers: list[logging.Handler] = []
         for i, handler in enumerate(root.handlers):
-            if (
-                isinstance(handler, _KitaruTerminalHandler)
-                and handler is not kitaru_handler
-            ):
+            if _is_kitaru_terminal_handler(handler) and handler is not kitaru_handler:
                 continue
             if i == first_idx:
                 if existing_kitaru is None:
@@ -382,11 +402,20 @@ def install_terminal_log_intercept() -> None:
                 continue
             new_handlers.append(handler)
 
-        # Ensure the Kitaru handler is in the list exactly once
+        # Ensure the Kitaru handler is in the list exactly once.
         if kitaru_handler not in new_handlers:
             new_handlers.insert(first_idx, kitaru_handler)
 
         root.handlers = new_handlers
     elif existing_kitaru is None:
-        # No ZenML console handler found; add ours as a fallback
+        # No ZenML console handler found; add ours as a fallback.
         root.addHandler(kitaru_handler)
+    elif has_duplicate_kitaru:
+        # No console handler to replace, but still collapse duplicate Kitaru
+        # handlers down to the first recognized instance.
+        new_handlers = []
+        for handler in root.handlers:
+            if _is_kitaru_terminal_handler(handler) and handler is not kitaru_handler:
+                continue
+            new_handlers.append(handler)
+        root.handlers = new_handlers
