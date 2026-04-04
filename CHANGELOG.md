@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - In-flow memory reads and writes continue to run through private non-cacheable synthetic ZenML memory steps, while checkpoint-context restrictions remain unchanged (`memory.*` is still forbidden inside `@checkpoint`)
 - Memory writes now re-fetch the exact created artifact version by ID before returning typed metadata, so the client surface can report the concrete written version without guessing from “latest by name”
 - Documentation now includes dedicated memory concept/guide pages and refreshed generated CLI, SDK, and changelog reference output for the shipped memory surfaces
+- Bump minimum `pydantic-ai-slim` from `>=0.2.0` to `>=1.75.0` to align with upstream API changes (new method signatures, `tool_plain` decorator, `AgentSpec` support)
 - Rewritten examples: realistic research-agent metaphor in basic flow, two-wait pattern (boolean gate + Pydantic schema) in wait/resume, parallel tool submission in coding agent, and consistent “Getting Started” READMEs across all example groups
 
 ### Fixed
