@@ -5,6 +5,11 @@ This example demonstrates:
 - reading, listing, updating, deleting, and inspecting history inside a flow
 - switching from namespace scope to flow scope with ``memory.configure(...)``
 - inspecting namespace, flow, and execution scopes via ``KitaruClient.memories``
+- post-run memory maintenance: compact, purge, and compaction audit log
+
+The compaction phase uses ``kitaru.llm()`` under the hood, so it requires a
+configured default model (e.g. ``kitaru model register default openai/gpt-4o``)
+when run outside tests.
 """
 
 import json
@@ -353,12 +358,57 @@ def run_workflow(
         "flow_summary_history_versions": _versions(flow_summary_history),
     }
 
+    # --- Memory maintenance (admin surface) ---
+    # Compact: summarize two convention keys into one summary key.
+    # This sends the current values to an LLM and writes the summary as a
+    # new memory version.  Source keys are left untouched.
+    compact_result = client.memories.compact(
+        scope=namespace_scope,
+        keys=["conventions/test_runner", "conventions/python"],
+        target_key="summaries/conventions",
+        instruction="Summarize these repo conventions in 2-3 concise bullets.",
+    )
+
+    # Read back the summary that was just written.
+    summary_entry = client.memories.get("summaries/conventions", scope=namespace_scope)
+    summary_value = (
+        client.artifacts.get(summary_entry.artifact_id).load()
+        if summary_entry is not None
+        else None
+    )
+
+    # Purge: keep only the newest version of test_runner, delete the rest.
+    purge_result = client.memories.purge(
+        "conventions/test_runner",
+        scope=namespace_scope,
+        keep=1,
+    )
+
+    # Check that history was actually trimmed.
+    test_runner_history_after = client.memories.history(
+        "conventions/test_runner", scope=namespace_scope
+    )
+
+    # Audit log: read back the compact + purge records.
+    compaction_log = client.memories.compaction_log(scope=namespace_scope)
+
+    maintenance_snapshot = {
+        "compact_result": compact_result.model_dump(mode="json"),
+        "summary_value": summary_value,
+        "purge_result": purge_result.model_dump(mode="json"),
+        "test_runner_history_versions_after_purge": _versions(
+            test_runner_history_after
+        ),
+        "compaction_log": [record.model_dump(mode="json") for record in compaction_log],
+    }
+
     return {
         "execution_id": execution_scope,
         "namespace_scope": namespace_scope,
         "flow_scope": "memory_showcase",
         "seed_snapshot": seed_snapshot,
         "flow_snapshot": flow_snapshot,
+        "maintenance_snapshot": maintenance_snapshot,
         "client_snapshot": {
             "namespace_keys": _keys(namespace_entries),
             "flow_keys": _keys(flow_entries),

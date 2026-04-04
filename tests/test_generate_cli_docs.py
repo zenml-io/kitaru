@@ -420,7 +420,18 @@ class TestWriteDocsTree:
             assert (output_dir / "log-store" / f"{command}.mdx").exists()
             assert f"log-store/{command}.mdx" in files
 
-        for command in ("delete", "get", "history", "list", "scopes", "set"):
+        for command in (
+            "compact",
+            "compaction-log",
+            "delete",
+            "get",
+            "history",
+            "list",
+            "purge",
+            "purge-scope",
+            "scopes",
+            "set",
+        ):
             assert (output_dir / "memory" / f"{command}.mdx").exists()
             assert f"memory/{command}.mdx" in files
 
@@ -435,6 +446,24 @@ class TestWriteDocsTree:
         memory_get_content = (output_dir / "memory" / "get.mdx").read_text()
         assert "kitaru memory get KEY [OPTIONS]" in memory_get_content
         assert "| `KEY` | `str` | Yes |  | Memory key to read. |" in memory_get_content
+
+        compact_content = (output_dir / "memory" / "compact.mdx").read_text()
+        assert "`--key`" in compact_content
+        assert "`--keys`" in compact_content
+        assert "`--target-key`" in compact_content
+        assert "`--model`" in compact_content
+
+        purge_content = (output_dir / "memory" / "purge.mdx").read_text()
+        assert "`KEY`" in purge_content
+        assert "`--keep`" in purge_content
+
+        purge_scope_content = (output_dir / "memory" / "purge-scope.mdx").read_text()
+        assert "`--include-deleted`" in purge_scope_content
+
+        compaction_log_content = (
+            output_dir / "memory" / "compaction-log.mdx"
+        ).read_text()
+        assert "`--scope`" in compaction_log_content
 
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content

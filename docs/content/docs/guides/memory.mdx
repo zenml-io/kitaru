@@ -13,12 +13,12 @@ cabinet where you keep the latest durable facts under stable keys.
 All memory surfaces talk to the same stored data, but they do not expose the
 exact same controls.
 
-| Surface | Scope input | Version support | Prefix support | Notes |
+| Surface | Scope input | Version reads | Admin ops (purge/compact/log) | Notes |
 |---|---|---|---|---|
 | `kitaru.memory` | Implicit via `memory.configure(...)` or active flow | `get(version=...)` | No | Best inside Python flows and scripts |
-| `KitaruClient.memories` | Explicit `scope=` on every call | Yes | Yes on `list` | Best for admin/inspection code |
-| CLI | `--scope` required | No | No | Best for shell inspection and quick edits |
-| MCP | `scope` required | Yes on `get` | Yes on `list` | Best for assistant/tool use |
+| `KitaruClient.memories` | Explicit `scope=` on every call | Yes | Yes | Best for admin/inspection code |
+| CLI | `--scope` required | No | Yes | Best for shell inspection and maintenance |
+| MCP | `scope` required | Yes on `get` | Yes | Best for assistant/tool use |
 
 <Callout type="info">
   The module-level `kitaru.memory` API does not take per-call `scope=`
@@ -178,6 +178,127 @@ That sequence tells a concrete story:
    "this key was deleted," rather than the data being erased)
 4. history still preserves the earlier states
 
+## Compact memory with an LLM summary
+
+Over time, a memory key can accumulate many versions — or several related keys
+can hold overlapping information. `compact` sends those values to an LLM and
+writes the returned summary as a new memory version.
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+
+# Multi-key mode: summarize the current value of several keys into one
+result = client.memories.compact(
+    scope="repo_docs",
+    keys=["conventions/test_runner", "conventions/python"],
+    target_key="summaries/conventions",
+    instruction="Summarize these repo conventions in 2-3 concise bullets.",
+)
+
+print(result.entry.key)       # "summaries/conventions"
+print(result.sources_read)    # 2
+```
+
+In multi-key mode, `target_key` is required — this is where the summary gets
+written. The original source keys are left untouched.
+
+In single-key mode, `compact` summarizes all historical versions of one key.
+The summary is written to that same key by default (or to `target_key` if you
+set one):
+
+```python
+result = client.memories.compact(
+    scope="repo_docs",
+    key="conventions/test_runner",
+)
+# result.entry.key == "conventions/test_runner" (newest version is now the summary)
+```
+
+<Callout type="info">
+  Compact **does not** delete source entries. If you want to reclaim old
+  history after writing a summary, run `purge` separately.
+</Callout>
+
+## Purge old versions
+
+Soft deletes preserve history, but sometimes you need to reclaim space. `purge`
+physically deletes artifact versions.
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+
+# Keep the newest version, delete the rest
+result = client.memories.purge(
+    "conventions/test_runner",
+    scope="repo_docs",
+    keep=1,
+)
+print(result.versions_deleted)  # number of old versions removed
+
+# Purge across an entire scope
+result = client.memories.purge_scope(
+    scope="repo_docs",
+    keep=1,
+    include_deleted=True,  # also fully remove tombstoned keys
+)
+```
+
+Omitting `keep` deletes **all** versions, including the current value.
+`purge_scope` skips the internal compaction audit log so the maintenance
+trail survives cleanup.
+
+## Inspect the compaction audit log
+
+Every `compact` and `purge` operation writes an audit record. Read the
+maintenance trail with `compaction_log`:
+
+```python
+records = client.memories.compaction_log(scope="repo_docs")
+
+for record in records:  # newest first
+    print(record.operation, record.scope, record.timestamp)
+    if record.operation == "compact":
+        print(f"  wrote {record.target_key} v{record.target_version}")
+    else:
+        print(f"  deleted {record.versions_deleted} versions")
+```
+
+## Memory maintenance from the CLI
+
+The CLI exposes the same admin operations:
+
+```bash
+# Compact multiple keys into a summary
+kitaru memory compact --scope repo_docs \
+    --keys conventions/test_runner --keys conventions/python \
+    --target-key summaries/conventions \
+    --instruction "Summarize in 2-3 bullets."
+
+# Purge old versions of one key, keeping the newest
+kitaru memory purge conventions/test_runner --scope repo_docs --keep 1
+
+# Purge an entire scope, including tombstoned keys
+kitaru memory purge-scope --scope repo_docs --keep 1 --include-deleted
+
+# View the compaction audit log
+kitaru memory compaction-log --scope repo_docs
+```
+
+## Memory maintenance from MCP
+
+Assistants can use the MCP memory maintenance tools:
+
+- `kitaru_memory_compact(scope, key=None, keys=None, target_key=None, instruction=None, model=None)`
+- `kitaru_memory_purge(key, scope, keep=None)`
+- `kitaru_memory_purge_scope(scope, keep=None, include_deleted=False)`
+- `kitaru_memory_compaction_log(scope)`
+
+These follow the same semantics as the Python client and CLI surfaces.
+
 ## Restrictions to remember
 
 - Memory is allowed in flow bodies
@@ -198,6 +319,14 @@ It demonstrates:
 - outside-flow namespace seeding with `kitaru.memory`
 - in-flow reads, writes, deletes, history, and scope switching
 - explicit namespace, flow, and execution inspection with `KitaruClient.memories`
+- post-run memory maintenance: multi-key compaction, purge, and audit log inspection
+
+<Callout type="info">
+  The compaction portion uses `kitaru.llm()` under the hood, so it requires a
+  configured default model when run outside tests. See the
+  [example README](https://github.com/zenml-io/kitaru/tree/develop/examples/memory)
+  for setup details.
+</Callout>
 
 ## Reference pages
 

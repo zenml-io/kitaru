@@ -420,7 +420,12 @@ def purge_(
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Physically delete old versions of one memory key."""
+    """Physically delete old versions of one memory key.
+
+    Omit --keep to delete all versions (including the current value).
+    Use --keep N to retain the newest N versions and delete the rest.
+    An audit record is written to the compaction log when versions are deleted.
+    """
     command = "memory.purge"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
@@ -475,7 +480,13 @@ def purge_scope_(
     ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Purge old versions across all keys in one scope."""
+    """Purge old versions across all keys in one scope.
+
+    Active keys retain the newest --keep versions; older versions are physically
+    deleted. Tombstoned (soft-deleted) keys are skipped unless --include-deleted
+    is set, in which case all their versions are removed entirely.
+    The internal compaction audit log is never purged by this command.
+    """
     command = "memory.purge-scope"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
@@ -550,7 +561,14 @@ def compact_(
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Summarize memory values using an LLM."""
+    """Summarize memory values using an LLM and write the result as a new version.
+
+    Use --key for single-key mode (summarizes all versions of that key) or
+    --keys for multi-key mode (summarizes the current value of each listed key).
+    --key and --keys are mutually exclusive. Multi-key mode requires --target-key.
+    In single-key mode, the summary is written to the source key unless
+    --target-key is specified. Source entries are not deleted.
+    """
     command = "memory.compact"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
@@ -595,7 +613,12 @@ def compaction_log_(
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Show the compaction audit log for one scope."""
+    """Show the compaction audit log for one scope.
+
+    Displays all compact and purge audit records for the given scope,
+    newest first. Each record shows what operation was performed, which
+    keys were involved, and the resulting target or deletion counts.
+    """
     command = "memory.compaction-log"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)

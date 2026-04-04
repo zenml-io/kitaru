@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
 from examples.memory.flow_with_memory import run_workflow
 
@@ -14,20 +16,55 @@ def _scope_map(scopes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {scope["scope"]: scope for scope in scopes}
 
 
+def _stub_resolve_model_selection(model: str | None) -> Any:
+    """Return a deterministic model selection stub for compaction tests."""
+    return SimpleNamespace(
+        requested_model=model,
+        alias=None,
+        resolved_model="test-model",
+        secret=None,
+    )
+
+
+def _stub_dispatch_provider_call(**_kwargs: Any) -> Any:
+    """Return a deterministic LLM response for compaction tests."""
+    return SimpleNamespace(
+        response_text="Stubbed conventions summary",
+        usage=SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        ),
+    )
+
+
 def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     """Verify namespace, flow, and execution memory behavior end to end."""
     namespace_scope = "repo_memory_demo"
-    snapshot = run_workflow(topic="memory-browser", namespace_scope=namespace_scope)
+
+    with (
+        patch(
+            "kitaru.llm.resolve_model_selection",
+            side_effect=_stub_resolve_model_selection,
+        ),
+        patch(
+            "kitaru.llm._dispatch_provider_call",
+            side_effect=_stub_dispatch_provider_call,
+        ),
+    ):
+        snapshot = run_workflow(topic="memory-browser", namespace_scope=namespace_scope)
 
     execution_id = cast(str, snapshot["execution_id"])
     flow_snapshot = cast(dict[str, Any], snapshot["flow_snapshot"])
     client_snapshot = cast(dict[str, Any], snapshot["client_snapshot"])
     seed_snapshot = cast(dict[str, Any], snapshot["seed_snapshot"])
+    maintenance = cast(dict[str, Any], snapshot["maintenance_snapshot"])
 
     assert execution_id
     assert snapshot["namespace_scope"] == namespace_scope
     assert snapshot["flow_scope"] == "memory_showcase"
 
+    # --- Seed phase assertions ---
     assert "conventions/test_runner" in seed_snapshot["active_keys"]
     assert seed_snapshot["topic_count"] == 2
     assert seed_snapshot["deleted_key_hidden"] is True
@@ -42,6 +79,7 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
         is True
     )
 
+    # --- Client inspection assertions ---
     client = KitaruClient()
 
     namespace_entries = client.memories.list(scope=namespace_scope)
@@ -80,3 +118,30 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert scopes[namespace_scope]["scope_type"] == "namespace"
     assert scopes["memory_showcase"]["scope_type"] == "flow"
     assert scopes[execution_id]["scope_type"] == "execution"
+
+    # --- Maintenance phase assertions ---
+    compact_result = maintenance["compact_result"]
+    assert compact_result["entry"]["key"] == "summaries/conventions"
+    assert compact_result["entry"]["scope"] == namespace_scope
+    assert compact_result["sources_read"] == 2
+    assert compact_result["scope"] == namespace_scope
+
+    assert maintenance["summary_value"] == "Stubbed conventions summary"
+
+    purge_result = maintenance["purge_result"]
+    assert purge_result["versions_deleted"] == 1
+    assert purge_result["keys_affected"] == 1
+    assert purge_result["scope"] == namespace_scope
+
+    # After purge with keep=1, only the newest version remains.
+    assert maintenance["test_runner_history_versions_after_purge"] == [2]
+
+    # Compaction log should have 2 records: purge (newest) then compact.
+    log_records = maintenance["compaction_log"]
+    assert len(log_records) == 2
+    assert log_records[0]["operation"] == "purge"
+    assert log_records[0]["keep"] == 1
+    assert log_records[0]["versions_deleted"] == 1
+    assert log_records[1]["operation"] == "compact"
+    assert log_records[1]["target_key"] == "summaries/conventions"
+    assert log_records[1]["target_version"] is not None
