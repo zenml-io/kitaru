@@ -15,13 +15,19 @@ from zenml.enums import ArtifactType
 from kitaru import memory
 from kitaru.errors import KitaruContextError, KitaruStateError, KitaruUsageError
 from kitaru.memory import (
+    _COMPACTION_LOG_PREFIX,
+    CompactionRecord,
     MemoryEntry,
+    PurgeResult,
+    _compaction_log_impl,
     _delete_impl,
     _get_entry_impl,
     _get_impl,
     _history_impl,
     _list_impl,
     _MemoryScope,
+    _purge_impl,
+    _purge_scope_impl,
     _set_entry_impl,
     _set_impl,
 )
@@ -1059,3 +1065,240 @@ def test_delete_impl_returns_existing_tombstone_when_key_already_deleted() -> No
     assert result.version == 2
     assert result.is_deleted is True
     save_artifact_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Reserved _compaction/ prefix
+# ---------------------------------------------------------------------------
+
+
+def test_compaction_prefix_rejected_in_normal_set() -> None:
+    with pytest.raises(
+        KitaruUsageError,
+        match=r"reserved for compaction audit logs",
+    ):
+        memory.configure(scope="test", scope_type="namespace")
+        memory.set(f"{_COMPACTION_LOG_PREFIX}test", "value")
+
+
+def test_validate_identifier_rejects_compaction_prefix() -> None:
+    from kitaru.memory import _validate_memory_identifier
+
+    with pytest.raises(KitaruUsageError, match=r"reserved"):
+        _validate_memory_identifier(f"{_COMPACTION_LOG_PREFIX}scope", kind="key")
+
+
+def test_validate_identifier_allows_compaction_prefix_when_flag_set() -> None:
+    from kitaru.memory import _validate_memory_identifier
+
+    result = _validate_memory_identifier(
+        f"{_COMPACTION_LOG_PREFIX}scope",
+        kind="key",
+        _allow_compaction_prefix=True,
+    )
+    assert result == f"{_COMPACTION_LOG_PREFIX}scope"
+
+
+# ---------------------------------------------------------------------------
+# Purge implementation
+# ---------------------------------------------------------------------------
+
+
+class TestPurgeImpl:
+    def test_purge_deletes_old_versions_keeping_newest(self) -> None:
+        artifacts = [
+            _memory_artifact(scope="s", key="k", version=i, value=f"v{i}")
+            for i in range(1, 6)
+        ]
+        client_mock = MagicMock()
+        client_mock.list_artifact_versions.return_value = _page(*artifacts)
+
+        with (
+            patch("kitaru.memory.Client", return_value=client_mock),
+            patch(
+                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+            ),
+        ):
+            # Re-fetch for compaction record
+            client_mock.get_artifact_version.return_value = _memory_artifact(
+                scope="s",
+                key=f"{_COMPACTION_LOG_PREFIX}s",
+                version=1,
+                value={},
+            )
+            result = _purge_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                "k",
+                keep=2,
+            )
+
+        assert isinstance(result, PurgeResult)
+        assert result.versions_deleted == 3
+        assert result.keys_affected == 1
+        assert result.scope == "s"
+        # Should have called delete_artifact_version 3 times
+        assert client_mock.delete_artifact_version.call_count == 3
+
+    def test_purge_with_keep_none_deletes_all(self) -> None:
+        artifacts = [
+            _memory_artifact(scope="s", key="k", version=i, value=f"v{i}")
+            for i in range(1, 4)
+        ]
+        client_mock = MagicMock()
+        client_mock.list_artifact_versions.return_value = _page(*artifacts)
+
+        with (
+            patch("kitaru.memory.Client", return_value=client_mock),
+            patch(
+                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+            ),
+        ):
+            client_mock.get_artifact_version.return_value = _memory_artifact(
+                scope="s",
+                key=f"{_COMPACTION_LOG_PREFIX}s",
+                version=1,
+                value={},
+            )
+            result = _purge_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                "k",
+                keep=None,
+            )
+
+        assert result.versions_deleted == 3
+        assert client_mock.delete_artifact_version.call_count == 3
+
+    def test_purge_no_versions_returns_zero(self) -> None:
+        client_mock = MagicMock()
+        client_mock.list_artifact_versions.return_value = _page()
+
+        with patch("kitaru.memory.Client", return_value=client_mock):
+            result = _purge_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                "k",
+                keep=2,
+            )
+
+        assert result.versions_deleted == 0
+        assert result.keys_affected == 0
+        client_mock.delete_artifact_version.assert_not_called()
+
+    def test_purge_rejects_negative_keep(self) -> None:
+        with pytest.raises(KitaruUsageError, match=r"keep.*>= 0"):
+            _purge_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                "k",
+                keep=-1,
+            )
+
+
+class TestPurgeScopeImpl:
+    def test_purge_scope_deletes_across_keys(self) -> None:
+        a1 = _memory_artifact(scope="s", key="k1", version=1, value="v1")
+        a2 = _memory_artifact(scope="s", key="k1", version=2, value="v2")
+        a3 = _memory_artifact(scope="s", key="k2", version=1, value="v3")
+
+        client_mock = MagicMock()
+        client_mock.list_artifact_versions.return_value = _page(a1, a2, a3)
+
+        with (
+            patch("kitaru.memory.Client", return_value=client_mock),
+            patch(
+                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+            ),
+        ):
+            client_mock.get_artifact_version.return_value = _memory_artifact(
+                scope="s",
+                key=f"{_COMPACTION_LOG_PREFIX}s",
+                version=1,
+                value={},
+            )
+            result = _purge_scope_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                keep=1,
+            )
+
+        assert result.versions_deleted == 1  # only k1 has 2 versions
+        assert result.keys_affected == 1
+
+    def test_purge_scope_with_include_deleted(self) -> None:
+        active = _memory_artifact(scope="s", key="k1", version=1, value="v1")
+        tombstone = _memory_artifact(
+            scope="s", key="k2", version=1, value=None, deleted=True
+        )
+
+        client_mock = MagicMock()
+        client_mock.list_artifact_versions.return_value = _page(active, tombstone)
+
+        with (
+            patch("kitaru.memory.Client", return_value=client_mock),
+            patch(
+                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+            ),
+        ):
+            client_mock.get_artifact_version.return_value = _memory_artifact(
+                scope="s",
+                key=f"{_COMPACTION_LOG_PREFIX}s",
+                version=1,
+                value={},
+            )
+            result = _purge_scope_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                keep=0,
+                include_deleted=True,
+            )
+
+        # Both keys purged: active (1 version) and tombstoned (1 version)
+        assert result.versions_deleted == 2
+        assert result.keys_affected == 2
+
+
+# ---------------------------------------------------------------------------
+# Compaction log
+# ---------------------------------------------------------------------------
+
+
+class TestCompactionLog:
+    def test_compaction_log_returns_records(self) -> None:
+        record_data = CompactionRecord(
+            operation="purge",
+            scope="s",
+            timestamp=datetime(2026, 4, 1, tzinfo=UTC),
+            source_keys=["k1"],
+            source_versions=[1, 2],
+            target_key=None,
+            target_version=None,
+            instruction=None,
+            model=None,
+            keys_affected=1,
+            versions_deleted=2,
+            keep=1,
+        )
+        artifact = _memory_artifact(
+            scope="s",
+            key=f"{_COMPACTION_LOG_PREFIX}s",
+            version=1,
+            value=record_data.model_dump(mode="json"),
+        )
+        client_mock = MagicMock()
+        client_mock.list_artifact_versions.return_value = _page(artifact)
+
+        with patch("kitaru.memory.Client", return_value=client_mock):
+            records = _compaction_log_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+            )
+
+        assert len(records) == 1
+        assert records[0].operation == "purge"
+        assert records[0].versions_deleted == 2
+
+    def test_compaction_log_empty_scope(self) -> None:
+        client_mock = MagicMock()
+        client_mock.list_artifact_versions.return_value = _page()
+
+        with patch("kitaru.memory.Client", return_value=client_mock):
+            records = _compaction_log_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+            )
+
+        assert records == []

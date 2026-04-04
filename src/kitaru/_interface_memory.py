@@ -141,3 +141,87 @@ def delete_memory_payload(
     if entry is None:
         return None
     return inspection.serialize_memory_entry(entry)
+
+
+def normalize_memory_keep(keep: int | None) -> int | None:
+    """Validate and normalize an optional transport-level keep parameter."""
+    if keep is None:
+        return None
+    if isinstance(keep, bool) or not isinstance(keep, int) or keep < 0:
+        raise ValueError("`keep` must be a non-negative integer or None.")
+    return keep
+
+
+def purge_memory_payload(
+    client: KitaruClient,
+    *,
+    key: str,
+    scope: str,
+    keep: int | None = None,
+) -> dict[str, Any]:
+    """Build a serialized payload for purging one memory key."""
+    result = client.memories.purge(
+        normalize_memory_key(key),
+        scope=normalize_memory_scope(scope),
+        keep=normalize_memory_keep(keep),
+    )
+    return inspection.serialize_purge_result(result)
+
+
+def purge_scope_memory_payload(
+    client: KitaruClient,
+    *,
+    scope: str,
+    keep: int | None = None,
+    include_deleted: bool = False,
+) -> dict[str, Any]:
+    """Build a serialized payload for purging all keys in a scope."""
+    result = client.memories.purge_scope(
+        scope=normalize_memory_scope(scope),
+        keep=normalize_memory_keep(keep),
+        include_deleted=include_deleted,
+    )
+    return inspection.serialize_purge_result(result)
+
+
+def compact_memory_payload(
+    client: KitaruClient,
+    *,
+    scope: str,
+    key: str | None = None,
+    keys: list[str] | None = None,
+    target_key: str | None = None,
+    instruction: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Build a serialized payload for compacting memory."""
+    validated_key = normalize_memory_key(key) if key is not None else None
+    validated_keys = (
+        [normalize_memory_key(k) for k in keys] if keys is not None else None
+    )
+    validated_target = (
+        normalize_memory_key(target_key) if target_key is not None else None
+    )
+    result = client.memories.compact(
+        scope=normalize_memory_scope(scope),
+        key=validated_key,
+        keys=validated_keys,
+        target_key=validated_target,
+        instruction=instruction,
+        model=model,
+        max_tokens=max_tokens,
+    )
+    return inspection.serialize_compact_result(result)
+
+
+def compaction_log_memory_payload(
+    client: KitaruClient,
+    *,
+    scope: str,
+) -> list[dict[str, Any]]:
+    """Build serialized payloads for compaction audit log entries."""
+    records = client.memories.compaction_log(
+        scope=normalize_memory_scope(scope),
+    )
+    return [inspection.serialize_compaction_record(record) for record in records]

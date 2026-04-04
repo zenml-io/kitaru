@@ -42,7 +42,13 @@ from kitaru.config import (
     list_active_kitaru_environment_variables,
     resolve_log_store,
 )
-from kitaru.memory import MemoryEntry, MemoryScopeInfo
+from kitaru.memory import (
+    CompactionRecord,
+    CompactResult,
+    MemoryEntry,
+    MemoryScopeInfo,
+    PurgeResult,
+)
 
 
 @dataclass
@@ -403,6 +409,43 @@ def serialize_memory_scope_info(info: MemoryScopeInfo) -> dict[str, Any]:
 def serialize_memory_value(value: Any) -> dict[str, Any]:
     """Serialize a loaded memory value using the shared artifact-value rules."""
     return serialize_artifact_value(value)
+
+
+def serialize_purge_result(result: PurgeResult) -> dict[str, Any]:
+    """Serialize a purge result for transport layers."""
+    return {
+        "versions_deleted": result.versions_deleted,
+        "keys_affected": result.keys_affected,
+        "scope": result.scope,
+    }
+
+
+def serialize_compaction_record(record: CompactionRecord) -> dict[str, Any]:
+    """Serialize a compaction audit record for transport layers."""
+    return {
+        "operation": record.operation,
+        "scope": record.scope,
+        "timestamp": to_jsonable(record.timestamp, fallback_repr=True),
+        "source_keys": record.source_keys,
+        "source_versions": record.source_versions,
+        "target_key": record.target_key,
+        "target_version": record.target_version,
+        "instruction": record.instruction,
+        "model": record.model,
+        "keys_affected": record.keys_affected,
+        "versions_deleted": record.versions_deleted,
+        "keep": record.keep,
+    }
+
+
+def serialize_compact_result(result: CompactResult) -> dict[str, Any]:
+    """Serialize a compact result for transport layers."""
+    return {
+        "entry": serialize_memory_entry(result.entry),
+        "sources_read": result.sources_read,
+        "scope": result.scope,
+        "compaction_record": serialize_compaction_record(result.compaction_record),
+    }
 
 
 def serialize_checkpoint_attempt(attempt: CheckpointAttempt) -> dict[str, Any]:

@@ -340,6 +340,78 @@ def kitaru_memory_history(
 
 
 @tracked_mcp_tool
+def kitaru_memory_purge(
+    key: str,
+    scope: str,
+    keep: int | None = None,
+) -> dict[str, Any]:
+    """Physically delete old versions of one memory key."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.purge_memory_payload(
+            client_api.KitaruClient(),
+            key=key,
+            scope=scope,
+            keep=keep,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_purge_scope(
+    scope: str,
+    keep: int | None = None,
+    include_deleted: bool = False,
+) -> dict[str, Any]:
+    """Purge old versions across all keys in one scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.purge_scope_memory_payload(
+            client_api.KitaruClient(),
+            scope=scope,
+            keep=keep,
+            include_deleted=include_deleted,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_compact(
+    scope: str,
+    key: str | None = None,
+    keys: list[str] | None = None,
+    target_key: str | None = None,
+    instruction: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Summarize memory values using an LLM and write the result."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.compact_memory_payload(
+            client_api.KitaruClient(),
+            scope=scope,
+            key=key,
+            keys=keys,
+            target_key=target_key,
+            instruction=instruction,
+            model=model,
+            max_tokens=max_tokens,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_compaction_log(
+    scope: str,
+) -> list[dict[str, Any]]:
+    """Show the compaction audit log for one scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.compaction_log_memory_payload(
+            client_api.KitaruClient(),
+            scope=scope,
+        )
+    )
+
+
+@tracked_mcp_tool
 def kitaru_artifacts_list(
     exec_id: str,
     name: str | None = None,

@@ -97,8 +97,13 @@ from kitaru.errors import (
     execution_error_from_failure,
 )
 from kitaru.memory import (
+    CompactionRecord,
+    CompactResult,
     MemoryEntry,
     MemoryScopeInfo,
+    PurgeResult,
+    _compact_impl,
+    _compaction_log_impl,
     _delete_impl,
     _get_entry_impl,
     _history_impl,
@@ -106,6 +111,8 @@ from kitaru.memory import (
     _list_scopes_impl,
     _MemoryScope,
     _MemoryScopeType,
+    _purge_impl,
+    _purge_scope_impl,
     _set_entry_impl,
     _validate_memory_identifier,
     _validate_memory_scope_type,
@@ -915,6 +922,87 @@ class _MemoriesAPI:
     def scopes(self) -> builtins.list[MemoryScopeInfo]:
         """Discover all memory scopes with active entry counts."""
         return _list_scopes_impl(
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def purge(
+        self,
+        key: str,
+        *,
+        scope: str,
+        keep: int | None = None,
+    ) -> PurgeResult:
+        """Physically delete old versions of a memory key."""
+        return _purge_impl(
+            self._scope(scope),
+            _validate_memory_identifier(key, kind="key"),
+            keep=keep,
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def purge_scope(
+        self,
+        *,
+        scope: str,
+        keep: int | None = None,
+        include_deleted: bool = False,
+    ) -> PurgeResult:
+        """Purge old versions across all keys in a scope."""
+        return _purge_scope_impl(
+            self._scope(scope),
+            keep=keep,
+            include_deleted=include_deleted,
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def compact(
+        self,
+        *,
+        scope: str,
+        key: str | None = None,
+        keys: builtins.list[str] | None = None,
+        target_key: str | None = None,
+        instruction: str | None = None,
+        model: str | None = None,
+        max_tokens: int | None = None,
+    ) -> CompactResult:
+        """Summarize memory values using an LLM and write the result."""
+        validated_key = (
+            _validate_memory_identifier(key, kind="key") if key is not None else None
+        )
+        validated_keys = (
+            [_validate_memory_identifier(k, kind="key") for k in keys]
+            if keys is not None
+            else None
+        )
+        validated_target = (
+            _validate_memory_identifier(target_key, kind="key")
+            if target_key is not None
+            else None
+        )
+        return _compact_impl(
+            self._scope(scope),
+            key=validated_key,
+            keys=validated_keys,
+            target_key=validated_target,
+            instruction=instruction,
+            model=model,
+            max_tokens=max_tokens,
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def compaction_log(
+        self,
+        *,
+        scope: str,
+    ) -> builtins.list[CompactionRecord]:
+        """Read all compaction audit records for a scope."""
+        return _compaction_log_impl(
+            self._scope(scope),
             client_factory=self._client_ref._client,
             project=self._client_ref._project,
         )
