@@ -104,7 +104,7 @@ class PurgeResult(BaseModel):
 class CompactionRecord(BaseModel):
     """Audit log entry for one compaction or purge operation."""
 
-    operation: str
+    operation: Literal["compact", "purge"]
     scope: str
     timestamp: datetime
     source_keys: _list[str]
@@ -416,6 +416,7 @@ def _parse_memory_artifact_identity(artifact_name: str) -> tuple[str, str]:
             key,
             kind="key",
             error_type=KitaruRuntimeError,
+            _allow_compaction_prefix=True,
         ),
     )
 
@@ -887,12 +888,11 @@ def _write_compaction_record(
 ) -> None:
     """Persist a compaction audit record under the reserved prefix."""
     log_key = f"{_COMPACTION_LOG_PREFIX}{scope.scope}"
-    internal_scope = _MemoryScope(scope=scope.scope, scope_type=scope.scope_type)
     try:
         client = _resolve_memory_client_factory(client_factory)()
         _save_memory_artifact(
             client=client,
-            scope=internal_scope,
+            scope=scope,
             key=log_key,
             value=record.model_dump(mode="json"),
             deleted=False,
@@ -990,9 +990,7 @@ def _purge_impl(
     )
 
     if deleted_count > 0:
-        source_versions = [
-            _parse_memory_version(a.version) for a in to_delete[:deleted_count]
-        ]
+        source_versions = [_parse_memory_version(a.version) for a in to_delete]
         record = CompactionRecord(
             operation="purge",
             scope=scope.scope,
@@ -1044,7 +1042,6 @@ def _purge_scope_impl(
             f"Failed to list artifacts for purge of scope {scope.scope!r}: {exc}"
         ) from exc
 
-    # Group by artifact name (i.e., by key)
     by_name: dict[str, _list[ArtifactVersionResponse]] = {}
     for artifact in _sort_memory_artifacts(artifacts):
         by_name.setdefault(artifact.name, []).append(artifact)
@@ -1055,7 +1052,6 @@ def _purge_scope_impl(
     all_source_versions: _list[int] = []
 
     for artifact_name, versions in by_name.items():
-        # Skip compaction log entries
         _scope, parsed_key = _parse_memory_artifact_identity(artifact_name)
         if parsed_key.startswith(_COMPACTION_LOG_PREFIX):
             continue
@@ -1064,14 +1060,11 @@ def _purge_scope_impl(
         is_tombstoned = latest is not None and _is_deleted_artifact(latest)
 
         if is_tombstoned and not include_deleted:
-            # Only purge active keys when include_deleted is False
             continue
 
         if is_tombstoned and include_deleted:
-            # Purge ALL versions of tombstoned keys
             to_delete = versions
         else:
-            # Keep the newest `effective_keep` versions
             to_delete = versions[effective_keep:]
 
         if not to_delete:
@@ -1093,7 +1086,7 @@ def _purge_scope_impl(
             keys_affected_count += 1
             all_source_keys.append(parsed_key)
             all_source_versions.extend(
-                _parse_memory_version(a.version) for a in to_delete[:key_deleted]
+                _parse_memory_version(a.version) for a in to_delete
             )
 
     result = PurgeResult(
@@ -1140,7 +1133,6 @@ def _compact_impl(
     project: str | None = None,
 ) -> CompactResult:
     """Summarize memory values using an LLM and write the result."""
-    # Validate args: exactly one of key or keys must be provided
     if key is not None and keys is not None:
         raise KitaruUsageError(
             "compact() requires exactly one of `key` or `keys`, not both."
@@ -1151,61 +1143,48 @@ def _compact_impl(
             "or `keys` (multi-key mode)."
         )
 
-    # In multi-key mode, target_key is required
     if keys is not None and target_key is None:
         raise KitaruUsageError("compact() in multi-key mode requires `target_key`.")
 
-    # Single-key mode: target defaults to the same key
     effective_target = target_key if target_key is not None else key
     assert effective_target is not None  # guaranteed by validation above
 
-    # Collect source content
     source_entries: _list[tuple[str, int, Any]] = []  # (key, version, value)
+    client = _resolve_memory_client_factory(client_factory)()
 
     if key is not None:
-        # Single-key mode: load all non-deleted versions
-        history = _history_impl(
-            scope,
-            key,
-            client_factory=client_factory,
-            project=project,
+        # Single-key mode: load all non-deleted versions directly from
+        # paginated artifacts (avoids N+1 re-fetch per version).
+        artifacts = _paginate_artifact_versions(
+            client,
+            artifact=_memory_artifact_name(scope.scope, key),
+            **_memory_query_kwargs(project=project),
         )
-        factory = _resolve_memory_client_factory(client_factory)
-        client = factory()
-        for entry in history:
-            if entry.is_deleted:
+        for artifact in _sort_memory_artifacts(artifacts):
+            if _is_deleted_artifact(artifact):
                 continue
             try:
-                artifact = _fetch_exact_artifact_version(
-                    client,
-                    entry.artifact_id,
-                    project=project,
-                )
                 value = artifact.load()
-                source_entries.append((entry.key, entry.version, value))
+                version = _parse_memory_version(artifact.version)
+                source_entries.append((key, version, value))
             except Exception:
                 continue
     else:
         assert keys is not None
-        factory = _resolve_memory_client_factory(client_factory)
-        client = factory()
+        # Multi-key mode: fetch current value of each key directly.
         for k in keys:
-            entry = _get_entry_impl(
+            artifact = _fetch_memory_artifact(
+                client,
                 scope,
                 k,
-                client_factory=client_factory,
                 project=project,
             )
-            if entry is None:
+            if artifact is None or _is_deleted_artifact(artifact):
                 continue
             try:
-                artifact = _fetch_exact_artifact_version(
-                    client,
-                    entry.artifact_id,
-                    project=project,
-                )
                 value = artifact.load()
-                source_entries.append((entry.key, entry.version, value))
+                version = _parse_memory_version(artifact.version)
+                source_entries.append((k, version, value))
             except Exception:
                 continue
 
@@ -1230,60 +1209,21 @@ def _compact_impl(
         f"{context_block}"
     )
 
-    # Execute LLM call using the low-level provider machinery
+    # Execute LLM call using the shared provider dispatch
     from kitaru.llm import (
-        _call_anthropic,
-        _call_openai,
+        _dispatch_provider_call,
         _normalize_messages,
-        _parse_provider_target,
-        _resolve_credential_overlay,
         resolve_model_selection,
     )
 
     model_selection = resolve_model_selection(model)
     messages = _normalize_messages(prompt, system=None)
-    env_overlay, _credential_source = _resolve_credential_overlay(model_selection)
-    target = _parse_provider_target(model_selection.resolved_model)
-
-    if target.provider == "anthropic":
-        result = _call_anthropic(
-            model=target.provider_model,
-            messages=messages,
-            temperature=None,
-            max_tokens=max_tokens,
-            env_overlay=env_overlay,
-        )
-    elif target.provider in ("openai", "ollama", "openrouter"):
-        import os as _os
-
-        call_kwargs: dict[str, Any] = {
-            "model": target.provider_model,
-            "messages": messages,
-            "temperature": None,
-            "max_tokens": max_tokens,
-            "env_overlay": env_overlay,
-        }
-        if target.provider == "ollama":
-            from kitaru.llm import (
-                _OLLAMA_DEFAULT_HOST,
-                _OLLAMA_DUMMY_API_KEY,
-                _OLLAMA_HOST_ENV,
-            )
-
-            ollama_host = _os.environ.get(_OLLAMA_HOST_ENV, _OLLAMA_DEFAULT_HOST)
-            call_kwargs["base_url"] = ollama_host.rstrip("/") + "/v1"
-            call_kwargs["api_key"] = _OLLAMA_DUMMY_API_KEY
-        elif target.provider == "openrouter":
-            from kitaru.llm import _MODEL_PROVIDER_HINTS, _OPENROUTER_BASE_URL
-
-            call_kwargs["base_url"] = _OPENROUTER_BASE_URL
-            key_name = _MODEL_PROVIDER_HINTS["openrouter"][0]
-            call_kwargs["api_key"] = env_overlay.get(key_name) or _os.environ.get(
-                key_name
-            )
-        result = _call_openai(**call_kwargs)
-    else:
-        raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
+    result = _dispatch_provider_call(
+        model_selection=model_selection,
+        messages=messages,
+        temperature=None,
+        max_tokens=max_tokens,
+    )
 
     summary_text = result.response_text
 

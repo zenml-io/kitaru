@@ -368,7 +368,7 @@ def test_memories_methods_validate_scope_key_version_and_scope_type() -> None:
             "prefs",
             {"theme": "dark"},
             scope="repo_scope",
-            scope_type="bogus",  # type: ignore[arg-type]
+            scope_type="bogus",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         )
 
 

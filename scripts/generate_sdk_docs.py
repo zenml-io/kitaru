@@ -69,7 +69,7 @@ def _exported_names(data: dict) -> set[str] | None:
         except (SyntaxError, ValueError):
             return None
         if isinstance(parsed, list) and all(isinstance(name, str) for name in parsed):
-            return set(parsed)
+            return {str(name) for name in parsed}
         return None
     return None
 

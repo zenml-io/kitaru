@@ -237,7 +237,7 @@ def test_checkpoint_rejects_invalid_runtime_string() -> None:
 
 def test_checkpoint_rejects_invalid_runtime_type() -> None:
     with pytest.raises(KitaruUsageError, match="Unsupported checkpoint runtime"):
-        checkpoint(runtime=123)(lambda: None)  # type: ignore[arg-type]
+        checkpoint(runtime=123)(lambda: None)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def test_checkpoint_rejects_call_outside_flow_context() -> None:

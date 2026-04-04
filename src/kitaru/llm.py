@@ -165,7 +165,7 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
         )
 
     return _ProviderTarget(
-        provider=provider,  # type: ignore[arg-type]
+        provider=provider,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         provider_model=model_name,
         resolved_model=resolved_model,
     )
@@ -565,6 +565,60 @@ def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
 # ---------------------------------------------------------------------------
 
 
+def _dispatch_provider_call(
+    *,
+    model_selection: ResolvedModelSelection,
+    messages: list[dict[str, str]],
+    temperature: float | None,
+    max_tokens: int | None,
+    env_overlay: dict[str, str] | None = None,
+) -> _ProviderCallResult:
+    """Route a normalized LLM call to the correct provider SDK.
+
+    Shared by ``_execute_llm_call`` (flow-scoped, with tracking) and
+    ``_compact_impl`` (admin operation, no tracking needed).
+    """
+    if env_overlay is None:
+        env_overlay, _ = _resolve_credential_overlay(model_selection)
+    target = _parse_provider_target(model_selection.resolved_model)
+    if target.provider == "openai":
+        return _call_openai(
+            model=target.provider_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            env_overlay=env_overlay,
+        )
+    if target.provider == "anthropic":
+        return _call_anthropic(
+            model=target.provider_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            env_overlay=env_overlay,
+        )
+    if target.provider in ("ollama", "openrouter"):
+        if target.provider == "ollama":
+            ollama_host = os.environ.get(_OLLAMA_HOST_ENV, _OLLAMA_DEFAULT_HOST)
+            compat_base_url = ollama_host.rstrip("/") + "/v1"
+            compat_api_key: str | None = _OLLAMA_DUMMY_API_KEY
+        else:
+            compat_base_url = _OPENROUTER_BASE_URL
+            key_name = _MODEL_PROVIDER_HINTS["openrouter"][0]
+            compat_api_key = env_overlay.get(key_name) or os.environ.get(key_name)
+        return _call_openai(
+            model=target.provider_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            env_overlay=env_overlay,
+            base_url=compat_base_url,
+            api_key=compat_api_key,
+            provider_label=target.provider,
+        )
+    raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
+
+
 def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
     model_selection = resolve_model_selection(request.model)
@@ -578,45 +632,14 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         latency_ms = 0.0
     else:
         env_overlay, credential_source = _resolve_credential_overlay(model_selection)
-        target = _parse_provider_target(model_selection.resolved_model)
         started_at = time.perf_counter()
-        if target.provider == "openai":
-            result = _call_openai(
-                model=target.provider_model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-                env_overlay=env_overlay,
-            )
-        elif target.provider == "anthropic":
-            result = _call_anthropic(
-                model=target.provider_model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-                env_overlay=env_overlay,
-            )
-        elif target.provider in ("ollama", "openrouter"):
-            if target.provider == "ollama":
-                ollama_host = os.environ.get(_OLLAMA_HOST_ENV, _OLLAMA_DEFAULT_HOST)
-                compat_base_url = ollama_host.rstrip("/") + "/v1"
-                compat_api_key: str | None = _OLLAMA_DUMMY_API_KEY
-            else:
-                compat_base_url = _OPENROUTER_BASE_URL
-                key_name = _MODEL_PROVIDER_HINTS["openrouter"][0]
-                compat_api_key = env_overlay.get(key_name) or os.environ.get(key_name)
-            result = _call_openai(
-                model=target.provider_model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-                env_overlay=env_overlay,
-                base_url=compat_base_url,
-                api_key=compat_api_key,
-                provider_label=target.provider,
-            )
-        else:
-            raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
+        result = _dispatch_provider_call(
+            model_selection=model_selection,
+            messages=messages,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            env_overlay=env_overlay,
+        )
         latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
     response_text = result.response_text
