@@ -14,7 +14,7 @@ The compaction phase uses `kitaru.llm()` under the hood, so you need a
 configured default model to run the full example:
 
 ```bash
-kitaru model register default openai/gpt-4o
+kitaru model register default --model openai/gpt-5-nano
 ```
 
 This example uses your current Kitaru connection context. If you want it to use

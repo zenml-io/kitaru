@@ -8,8 +8,9 @@ This example demonstrates:
 - post-run memory maintenance: compact, purge, and compaction audit log
 
 The compaction phase uses ``kitaru.llm()`` under the hood, so it requires a
-configured default model (e.g. ``kitaru model register default openai/gpt-4o``)
-when run outside tests.
+configured default model (e.g.
+``kitaru model register default --model openai/gpt-5-nano``) when run
+outside tests.
 """
 
 import json

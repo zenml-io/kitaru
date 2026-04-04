@@ -138,7 +138,7 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
         raise KitaruUsageError(
             f"Model `{resolved_model}` does not include a provider prefix. "
             "The built-in kitaru.llm() runtime requires a provider-qualified "
-            "model string like `openai/gpt-4o-mini`, "
+            "model string like `openai/gpt-5-nano`, "
             "`anthropic/claude-sonnet-4-20250514`, or `ollama/qwen3.5`. "
             "If you registered an alias, make sure it resolves to a "
             "provider/model string. For other providers, call the SDK "
@@ -696,7 +696,7 @@ def llm(
     Args:
         prompt: User prompt text or a chat-style message list.
         model: Model alias or provider/model identifier
-            (e.g. ``openai/gpt-4o-mini``).
+            (e.g. ``openai/gpt-5-nano``).
         system: Optional system prompt.
         temperature: Optional sampling temperature.
         max_tokens: Optional maximum response tokens.
