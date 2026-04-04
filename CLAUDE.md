@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Kitaru?
 
-Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `save`, `load`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
+Kitaru is ZenML's **durable execution layer for AI agents**. It provides primitives (`flow`, `checkpoint`, `save`, `load`, `memory`, `wait`, `log`) that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
 
 **Core philosophy:** Primitives first, frameworks second. Sync-first. Every checkpoint output persisted invisibly for replay. Zero config locally, one-line connect for production.
 
@@ -100,6 +100,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - Generated reference output should still come from the existing generation scripts rather than manual edits.
 - Agent-facing CLI docs should describe the shared `--output json` / `-o json` contract: single-item commands emit `{command, item}`, list commands emit `{command, items, count}`, and `kitaru executions logs --follow --output json` emits JSONL event objects.
 - Login docs/guidance should treat bare `kitaru login` as local server startup and `kitaru login <server>` as remote login. Local server support requires the `kitaru[local]` extra.
+- Memory docs should distinguish the shipped surfaces accurately: module-level `kitaru.memory.*` uses the active configured scope and does not take per-call `scope=` arguments; `KitaruClient.memories`, CLI memory commands, and MCP memory tools use explicit scopes. Memory stays forbidden inside `@checkpoint`.
 - Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
 - If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), not the generated `docs/content/docs/cli/*` output.
 - Current shipped stack-create types on the CLI/MCP surface are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. Advanced CLI/MCP stack creation also supports `--extra` / structured `extra` plus the remote-only `--async` / `async_mode` convenience flag. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only, so docs should keep that distinction explicit.
@@ -202,6 +203,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | `kitaru.log()` | Implemented |
 | `kitaru.save()` | Implemented |
 | `kitaru.load()` | Implemented |
+| `kitaru.memory` | Implemented |
 | Stack lifecycle (`list_stacks` / `current_stack` / `use_stack` / `create_stack` / `delete_stack`) | Implemented |
 | `kitaru.configure()` + config precedence | Implemented |
 | `KitaruClient` (`get/list/latest/logs/input/retry/resume/cancel/replay` + artifact browsing) | Implemented |

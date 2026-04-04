@@ -1,0 +1,153 @@
+---
+title: Memory
+description: Versioned durable key-value state for flows, scripts, CLI, and MCP
+---
+
+Kitaru memory gives you **durable key-value state** that lives beyond a single
+execution.
+
+Use it when your agent needs to remember things like:
+
+- user preferences
+- repository conventions
+- previously discovered facts
+- long-lived workflow state that should not be passed through every function call
+
+Unlike checkpoint outputs, memory is looked up by **key + scope**, not by an execution ID.
+
+## Memory vs artifacts
+
+Think of the two storage features like two kinds of containers:
+
+- **Artifacts** are labeled boxes tied to a particular execution or checkpoint.
+  You fetch them later by saying, in effect, "give me the box from that run."
+- **Memory** is a labeled shelf. You put a value under a stable key and later
+  ask for "the current value on the `preferences/theme` shelf."
+
+Use [`kitaru.save()` / `kitaru.load()`](/guides/artifacts) when you want
+explicit execution-linked artifacts. Use memory when you want durable shared
+state that can be updated over time.
+
+## Scope model
+
+Every memory entry lives inside a **scope**. A scope is just a string name plus
+optional `scope_type` classification metadata.
+
+| Scope type | Typical use | Example |
+|---|---|---|
+| `namespace` | Shared durable state across many executions | `customer_profiles` |
+| `flow` | State associated with one flow name | `research_agent` |
+| `execution` | State isolated to one execution | `3d1d8d7f-...` |
+
+Inside a `@flow`, Kitaru defaults to the flow name as the active scope when you
+have not configured one explicitly. Outside a flow, you must configure a scope
+first with `memory.configure(scope=...)`.
+
+```python
+from kitaru import memory
+
+memory.configure(scope="customer_profiles", scope_type="namespace")
+memory.set("user_42/theme", "dark")
+```
+
+<Callout type="info">
+  Memory keys and scopes may contain letters, numbers, `.`, `_`, `-`, and `/`.
+  Colons are not allowed.
+</Callout>
+
+## Versioning and tombstones
+
+Memory is **versioned**. Each write creates a new version.
+
+```python
+memory.set("status", "draft")
+memory.set("status", "approved")
+```
+
+If the latest version is not deleted, that latest version is the current value.
+
+### What is a tombstone?
+
+When you delete a memory key, Kitaru does not erase the data. Instead, it writes
+a special marker called a **tombstone** — a version that means "this key was
+deleted at this point in time." Think of it like crossing out an entry in a
+logbook rather than ripping out the page: the old entries are still readable, but
+the most recent line says "removed."
+
+Because deletes are **soft deletes** (tombstones) rather than hard purges:
+
+- `memory.get(key)` returns `None` when the newest version is a tombstone
+- `memory.list()` hides tombstoned keys from the listing
+- `memory.history(key)` still shows every version, including tombstones
+
+This is useful for audit trails and future rollback/forking patterns. You always
+have a complete record of what happened to a key, even after deletion.
+
+## Where memory calls are allowed
+
+| Context | `memory.get/list/history` | `memory.set/delete` | Notes |
+|---|---|---|---|
+| Flow body | Yes | Yes | Uses the active flow/configured scope |
+| Inside `@checkpoint` | No | No | Raises `KitaruContextError` |
+| Outside a flow | Yes, after `memory.configure(...)` | Yes, after `memory.configure(...)` | Good for seeding and scripting |
+
+The checkpoint restriction exists for a concrete technical reason. Checkpoints
+can be **skipped** — by cache hits (same inputs → reuse the cached output) or
+during replay (fast-forward past already-completed work). If memory operations
+lived inside a checkpoint:
+
+- **Reads could go stale.** A cached checkpoint returns its old output without
+  re-executing the body, so a `memory.get()` inside it never runs. The output
+  was computed with whatever the memory value was at original execution time,
+  which may no longer be current.
+- **Writes could be silently lost.** A `memory.set()` inside a cached checkpoint
+  also never runs. No error, no warning — the write just doesn't happen.
+
+Kitaru avoids both problems by treating memory as a **flow-level coordination
+primitive**: reads and writes happen in the flow body, where they always execute,
+and the results are passed into checkpoints as ordinary arguments.
+
+## Replay caveats
+
+Memory is durable and auditable, but its replay semantics are intentionally
+conservative in the current release.
+
+- A replayed run may read a **newer** memory value than the original run saw.
+- Replaying code that writes memory creates **new versions** again.
+- Memory is therefore **not marketed as fully replay-deterministic** today.
+
+The safe mental model is: memory is shared durable state, not a frozen snapshot
+of past reads and writes.
+
+## Public surfaces
+
+Kitaru exposes memory through several surfaces:
+
+- `kitaru.memory` inside Python code
+- `KitaruClient.memories` for explicit-scope inspection and administration
+- `kitaru memory ...` on the CLI
+- `kitaru_memory_*` MCP tools for assistants
+
+The Python module API uses the currently configured scope. The client, CLI, and
+MCP surfaces require or expose explicit scope values more directly.
+
+See [Use Memory](/guides/memory) for concrete examples across all four.
+
+## Provenance
+
+Memory entries written **inside a flow** are linked to the execution that
+produced them. You can trace any entry back to the specific run that wrote it.
+
+Memory entries written **outside a flow** (from a script, CLI, or MCP) are
+explicitly **detached** — their `execution_id` is `None`. This makes it clear
+that the entry was manually seeded rather than produced by an agent run.
+
+Both cases appear in `memory.history()`, so you can always tell whether a
+particular version came from a flow execution or from an external write.
+
+## Next steps
+
+- Follow the step-by-step [Memory guide](/guides/memory)
+- Compare memory with [Artifacts](/guides/artifacts)
+- Browse the generated [Python memory reference](/reference/python/memory)
+- Inspect the generated [CLI memory reference](/cli/memory)

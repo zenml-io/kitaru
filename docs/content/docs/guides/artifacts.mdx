@@ -5,6 +5,12 @@ description: Persist named values in checkpoints and reuse them across execution
 
 Kitaru offers two ways to work with artifacts, depending on where your code runs.
 
+<Callout type="info">
+  Use artifacts when you want values tied to a specific execution or checkpoint.
+  Use [`kitaru.memory`](/guides/memory) when you want durable versioned
+  key-value state that can be reused and updated across executions.
+</Callout>
+
 ## Inside checkpoints
 
 Use `kitaru.save()` and `kitaru.load()` for inline artifact handling:
