@@ -39,7 +39,7 @@ local = [
     "zenml[server]>=0.94.1",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim>=0.2.0",
+    "pydantic-ai-slim>=1.75.0",
 ]
 mcp = [
     "mcp>=1.19.0,<1.20.0",
@@ -84,7 +84,7 @@ dev = [
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=0.2.0",
+    "pydantic-ai-slim>=1.75.0",
     "openai>=1.0.0,<2",
     "anthropic>=0.40.0,<1",
 ]
