@@ -347,9 +347,9 @@ def _is_kitaru_terminal_handler(handler: logging.Handler) -> bool:
     reload, even though their Python class identity has changed.
     """
     marker = getattr(handler, _KITARU_HANDLER_MARKER_ATTR, None)
-    if marker == _KITARU_HANDLER_MARKER_VALUE:
-        return True
-    return isinstance(handler, _KitaruTerminalHandler)
+    return marker == _KITARU_HANDLER_MARKER_VALUE or isinstance(
+        handler, _KitaruTerminalHandler
+    )
 
 
 def install_terminal_log_intercept() -> None:
@@ -384,6 +384,7 @@ def install_terminal_log_intercept() -> None:
     if zenml_console_indices:
         # Replace the first ZenML console handler with ours, remove extras.
         first_idx = zenml_console_indices[0]
+        extra_console_indices = set(zenml_console_indices[1:])
         new_handlers: list[logging.Handler] = []
         for i, handler in enumerate(root.handlers):
             if _is_kitaru_terminal_handler(handler) and handler is not kitaru_handler:
@@ -397,7 +398,7 @@ def install_terminal_log_intercept() -> None:
                     # the ZenML one.
                     handler.close()
                 continue
-            if i in zenml_console_indices[1:]:
+            if i in extra_console_indices:
                 handler.close()
                 continue
             new_handlers.append(handler)
@@ -413,9 +414,8 @@ def install_terminal_log_intercept() -> None:
     elif has_duplicate_kitaru:
         # No console handler to replace, but still collapse duplicate Kitaru
         # handlers down to the first recognized instance.
-        new_handlers = []
-        for handler in root.handlers:
-            if _is_kitaru_terminal_handler(handler) and handler is not kitaru_handler:
-                continue
-            new_handlers.append(handler)
-        root.handlers = new_handlers
+        root.handlers = [
+            h
+            for h in root.handlers
+            if not (_is_kitaru_terminal_handler(h) and h is not kitaru_handler)
+        ]
