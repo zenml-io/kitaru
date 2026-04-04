@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
 from examples.memory.flow_with_memory import run_workflow
 
 from kitaru import KitaruClient
+from kitaru.config import ResolvedModelSelection
+from kitaru.llm import _LLMUsage, _ProviderCallResult
 
 
 def _scope_map(scopes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -16,9 +17,9 @@ def _scope_map(scopes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {scope["scope"]: scope for scope in scopes}
 
 
-def _stub_resolve_model_selection(model: str | None) -> Any:
-    """Return a deterministic model selection stub for compaction tests."""
-    return SimpleNamespace(
+def _stub_resolve_model_selection(model: str | None) -> ResolvedModelSelection:
+    """Return a deterministic model selection for compaction tests."""
+    return ResolvedModelSelection(
         requested_model=model,
         alias=None,
         resolved_model="test-model",
@@ -26,11 +27,11 @@ def _stub_resolve_model_selection(model: str | None) -> Any:
     )
 
 
-def _stub_dispatch_provider_call(**_kwargs: Any) -> Any:
+def _stub_dispatch_provider_call(**_kwargs: Any) -> _ProviderCallResult:
     """Return a deterministic LLM response for compaction tests."""
-    return SimpleNamespace(
+    return _ProviderCallResult(
         response_text="Stubbed conventions summary",
-        usage=SimpleNamespace(
+        usage=_LLMUsage(
             prompt_tokens=10,
             completion_tokens=5,
             total_tokens=15,

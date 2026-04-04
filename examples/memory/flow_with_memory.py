@@ -369,13 +369,8 @@ def run_workflow(
         instruction="Summarize these repo conventions in 2-3 concise bullets.",
     )
 
-    # Read back the summary that was just written.
-    summary_entry = client.memories.get("summaries/conventions", scope=namespace_scope)
-    summary_value = (
-        client.artifacts.get(summary_entry.artifact_id).load()
-        if summary_entry is not None
-        else None
-    )
+    # The compact result already carries the written entry — no need to re-fetch.
+    summary_value = client.artifacts.get(compact_result.entry.artifact_id).load()
 
     # Purge: keep only the newest version of test_runner, delete the rest.
     purge_result = client.memories.purge(
