@@ -1,18 +1,23 @@
-"""Showcase Kitaru memory across outside-flow, in-flow, and client surfaces.
+"""Repo Memory Walkthrough — Kitaru's durable memory surface end to end.
 
 This example demonstrates:
+
 - seeding namespace memory outside a flow
 - reading, listing, updating, deleting, and inspecting history inside a flow
 - switching from namespace scope to flow scope with ``memory.configure(...)``
 - inspecting namespace, flow, and execution scopes via ``KitaruClient.memories``
 - post-run memory maintenance: compact, purge, and compaction audit log
 
-The compaction phase uses ``kitaru.llm()`` under the hood, so it requires a
-configured default model (e.g.
-``kitaru model register default --model openai/gpt-5-nano``) when run
-outside tests.
+Run it directly::
+
+    uv run examples/memory/flow_with_memory.py
+
+If a default model is configured (``kitaru model register default --model ...``),
+the walkthrough includes LLM-powered compaction, purge, and audit log inspection.
+Without a model, those sections are skipped with guidance on how to enable them.
 """
 
+import argparse
 import json
 import time
 from typing import Any, Protocol, cast, runtime_checkable
@@ -20,73 +25,12 @@ from typing import Any, Protocol, cast, runtime_checkable
 from kitaru import KitaruClient, checkpoint, flow, memory
 from kitaru.memory import MemoryEntry, MemoryScopeInfo
 
+FLOW_SCOPE = "repo_memory_demo"
+"""The flow scope name, derived from the ``@flow`` function name below."""
 
-@runtime_checkable
-class _MemoryEntryLike(Protocol):
-    """Structural protocol for memory entries crossing runtime boundaries."""
-
-    key: str
-    version: int
-
-    def model_dump(self, *, mode: str = "python") -> dict[str, Any]: ...
-
-
-def _entry_snapshot(entry: Any) -> dict[str, Any]:
-    """Convert one ``MemoryEntry`` into a JSON-friendly payload."""
-    if isinstance(entry, dict):
-        return entry
-    if isinstance(entry, _MemoryEntryLike):
-        return entry.model_dump(mode="json")
-    raise RuntimeError(f"Expected a memory entry, got {type(entry)!r}.")
-
-
-def _entries_snapshot(entries: list[MemoryEntry]) -> list[dict[str, Any]]:
-    """Convert memory entry lists into JSON-friendly payloads."""
-    return [_entry_snapshot(entry) for entry in entries]
-
-
-def _scope_snapshot(scope: MemoryScopeInfo) -> dict[str, Any]:
-    """Convert one ``MemoryScopeInfo`` into a JSON-friendly payload."""
-    return scope.model_dump(mode="json")
-
-
-def _entry_key(entry: Any) -> str:
-    """Read a memory-entry key from either a model or a plain dictionary."""
-    if isinstance(entry, _MemoryEntryLike):
-        return entry.key
-    if isinstance(entry, dict):
-        return str(entry["key"])
-    raise RuntimeError(f"Expected a memory entry with a key, got {type(entry)!r}.")
-
-
-def _entry_version(entry: Any) -> int:
-    """Read a memory-entry version from either a model or a plain dictionary."""
-    if isinstance(entry, _MemoryEntryLike):
-        return entry.version
-    if isinstance(entry, dict):
-        return int(entry["version"])
-    raise RuntimeError(f"Expected a memory entry with a version, got {type(entry)!r}.")
-
-
-def _keys(entries: list[Any]) -> list[str]:
-    """Return stable sorted memory keys from memory-entry-like objects."""
-    return [_entry_key(entry) for entry in entries]
-
-
-def _versions(entries: list[Any]) -> list[int]:
-    """Return memory version numbers from memory-entry-like objects."""
-    return [_entry_version(entry) for entry in entries]
-
-
-def _optional_entry_snapshot(value: Any) -> dict[str, Any] | None:
-    """Normalize an optional memory entry into a JSON-friendly payload."""
-    if value is None:
-        return None
-    if isinstance(value, _MemoryEntryLike):
-        return _entry_snapshot(value)
-    if isinstance(value, dict):
-        return value
-    raise RuntimeError(f"Expected a MemoryEntry-compatible value, got {type(value)!r}.")
+# ---------------------------------------------------------------------------
+# Checkpoints — the durable work units
+# ---------------------------------------------------------------------------
 
 
 @checkpoint
@@ -158,6 +102,55 @@ def summarize_flow_reads(
     }
 
 
+# ---------------------------------------------------------------------------
+# Flow — the "read → checkpoint → write" pattern front and center
+# ---------------------------------------------------------------------------
+
+
+@flow
+def repo_memory_demo(namespace_scope: str, topic: str) -> None:
+    """Run a flow that reads and mutates memory in multiple scopes."""
+    memory.configure(scope=namespace_scope, scope_type="namespace")
+
+    test_runner = memory.get("conventions/test_runner")
+    python_defaults = memory.get("conventions/python")
+    topic_count_before = memory.get("sessions/topic_count")
+    namespace_before = memory.list()
+    topic_count_history_before = memory.history("sessions/topic_count")
+
+    summarize_namespace_reads(
+        topic,
+        test_runner=test_runner,
+        python_defaults=python_defaults,
+        topic_count=topic_count_before,
+        namespace_entries=namespace_before,
+        topic_count_history=topic_count_history_before,
+    )
+    summary = build_topic_summary(
+        topic,
+        test_runner,
+        python_defaults,
+        topic_count_before,
+    )
+    next_topic_count = increment_topic_count(topic_count_before)
+
+    memory.set("sessions/topic_count", next_topic_count)
+    memory.set("sessions/last_topic", topic)
+    memory.delete("scratch/obsolete")
+
+    memory.configure(scope_type="flow")
+    flow_entries_before = memory.list()
+    flow_history_before = memory.history("summaries/latest")
+    summarize_flow_reads(flow_entries_before, flow_history_before)
+    memory.set("summaries/latest", summary)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Outside-flow seeding — detached provenance, no execution link
+# ---------------------------------------------------------------------------
+
+
 def seed_namespace_memory(namespace_scope: str) -> dict[str, Any]:
     """Seed detached namespace memory before the flow starts."""
     memory.configure(scope=namespace_scope, scope_type="namespace")
@@ -200,53 +193,105 @@ def seed_namespace_memory(namespace_scope: str) -> dict[str, Any]:
     }
 
 
-@flow
-def memory_showcase(namespace_scope: str, topic: str) -> None:
-    """Run a flow that reads and mutates memory in multiple scopes."""
-    memory.configure(scope=namespace_scope, scope_type="namespace")
+# ---------------------------------------------------------------------------
+# Snapshot helpers — stable serialization for tests and JSON output
+# ---------------------------------------------------------------------------
 
-    test_runner = memory.get("conventions/test_runner")
-    python_defaults = memory.get("conventions/python")
-    topic_count_before = memory.get("sessions/topic_count")
-    namespace_before = memory.list()
-    topic_count_history_before = memory.history("sessions/topic_count")
 
-    summarize_namespace_reads(
-        topic,
-        test_runner=test_runner,
-        python_defaults=python_defaults,
-        topic_count=topic_count_before,
-        namespace_entries=namespace_before,
-        topic_count_history=topic_count_history_before,
-    )
-    summary = build_topic_summary(
-        topic,
-        test_runner,
-        python_defaults,
-        topic_count_before,
-    )
-    next_topic_count = increment_topic_count(topic_count_before)
+@runtime_checkable
+class _MemoryEntryLike(Protocol):
+    """Structural protocol for memory entries crossing runtime boundaries."""
 
-    memory.set("sessions/topic_count", next_topic_count)
-    memory.set("sessions/last_topic", topic)
-    memory.delete("scratch/obsolete")
+    key: str
+    version: int
 
-    memory.configure(scope_type="flow")
-    flow_entries_before = memory.list()
-    flow_history_before = memory.history("summaries/latest")
-    summarize_flow_reads(flow_entries_before, flow_history_before)
-    memory.set("summaries/latest", summary)
-    return None
+    def model_dump(self, *, mode: str = "python") -> dict[str, Any]: ...
+
+
+def _entry_snapshot(entry: Any) -> dict[str, Any]:
+    """Convert one ``MemoryEntry`` into a JSON-friendly payload."""
+    if isinstance(entry, dict):
+        return entry
+    if isinstance(entry, _MemoryEntryLike):
+        return entry.model_dump(mode="json")
+    raise RuntimeError(f"Expected a memory entry, got {type(entry)!r}.")
+
+
+def _entries_snapshot(entries: list[MemoryEntry]) -> list[dict[str, Any]]:
+    """Convert memory entry lists into JSON-friendly payloads."""
+    return [_entry_snapshot(entry) for entry in entries]
+
+
+def _scope_snapshot(scope: MemoryScopeInfo) -> dict[str, Any]:
+    """Convert one ``MemoryScopeInfo`` into a JSON-friendly payload."""
+    return scope.model_dump(mode="json")
+
+
+def _entry_key(entry: Any) -> str:
+    """Read a memory-entry key from either a model or a plain dictionary."""
+    if isinstance(entry, _MemoryEntryLike):
+        return entry.key
+    if isinstance(entry, dict):
+        return str(entry["key"])
+    raise RuntimeError(f"Expected a memory entry with a key, got {type(entry)!r}.")
+
+
+def _entry_version(entry: Any) -> int:
+    """Read a memory-entry version from either a model or a plain dictionary."""
+    if isinstance(entry, _MemoryEntryLike):
+        return entry.version
+    if isinstance(entry, dict):
+        return int(entry["version"])
+    raise RuntimeError(f"Expected a memory entry with a version, got {type(entry)!r}.")
+
+
+def _keys(entries: list[Any]) -> list[str]:
+    """Return stable sorted memory keys from memory-entry-like objects."""
+    return [_entry_key(entry) for entry in entries]
+
+
+def _versions(entries: list[Any]) -> list[int]:
+    """Return memory version numbers from memory-entry-like objects."""
+    return [_entry_version(entry) for entry in entries]
+
+
+def _optional_entry_snapshot(value: Any) -> dict[str, Any] | None:
+    """Normalize an optional memory entry into a JSON-friendly payload."""
+    if value is None:
+        return None
+    if isinstance(value, _MemoryEntryLike):
+        return _entry_snapshot(value)
+    if isinstance(value, dict):
+        return value
+    raise RuntimeError(f"Expected a MemoryEntry-compatible value, got {type(value)!r}.")
+
+
+# ---------------------------------------------------------------------------
+# Orchestration — run the full walkthrough and collect a structured snapshot
+# ---------------------------------------------------------------------------
 
 
 def run_workflow(
-    topic: str = "memory",
-    namespace_scope: str = "repo_memory_demo",
+    topic: str = "release_notes",
+    namespace_scope: str = "repo_docs",
+    *,
+    include_maintenance: bool = True,
+    compact_model: str = "default",
 ) -> dict[str, Any]:
-    """Run the full memory showcase and collect a final inspection snapshot."""
+    """Run the full memory walkthrough and collect a final inspection snapshot.
+
+    Args:
+        topic: The topic string passed into the flow.
+        namespace_scope: Namespace scope name for seeding and flow usage.
+        include_maintenance: When False, skip compact/purge/audit log.
+        compact_model: Model alias or identifier for LLM compaction.
+
+    Returns:
+        Structured snapshot dict consumed by tests and the text renderer.
+    """
     seed_snapshot = seed_namespace_memory(namespace_scope)
 
-    handle = memory_showcase.run(namespace_scope, topic)
+    handle = repo_memory_demo.run(namespace_scope, topic)
     # Poll instead of handle.wait() because wait() tries to extract the flow
     # result, which fails when the flow ends with multiple terminal synthetic
     # memory steps (ambiguous output).
@@ -255,7 +300,7 @@ def run_workflow(
         if status.is_finished:
             if not status.is_successful:
                 raise RuntimeError(
-                    f"memory_showcase execution {handle.exec_id} finished with "
+                    f"repo_memory_demo execution {handle.exec_id} finished with "
                     f"status {status.value!r}."
                 )
             break
@@ -285,7 +330,7 @@ def run_workflow(
     client.memories.delete("execution/transient", scope=execution_scope)
 
     namespace_entries = client.memories.list(scope=namespace_scope)
-    flow_entries = client.memories.list(scope="memory_showcase")
+    flow_entries = client.memories.list(scope=FLOW_SCOPE)
     execution_entries = client.memories.list(scope=execution_scope)
     execution_history = client.memories.history(
         "execution/notes",
@@ -321,9 +366,7 @@ def run_workflow(
         "scratch/obsolete",
         scope=namespace_scope,
     )
-    flow_summary_entry = client.memories.get(
-        "summaries/latest", scope="memory_showcase"
-    )
+    flow_summary_entry = client.memories.get("summaries/latest", scope=FLOW_SCOPE)
     flow_summary_value = (
         client.artifacts.get(flow_summary_entry.artifact_id).load()
         if flow_summary_entry is not None
@@ -331,7 +374,7 @@ def run_workflow(
     )
     flow_summary_history = client.memories.history(
         "summaries/latest",
-        scope="memory_showcase",
+        scope=FLOW_SCOPE,
     )
     execution_transient = client.memories.get(
         "execution/transient",
@@ -360,49 +403,54 @@ def run_workflow(
     }
 
     # --- Memory maintenance (admin surface) ---
-    # Compact: summarize two convention keys into one summary key.
-    # This sends the current values to an LLM and writes the summary as a
-    # new memory version.  Source keys are left untouched.
-    compact_result = client.memories.compact(
-        scope=namespace_scope,
-        keys=["conventions/test_runner", "conventions/python"],
-        target_key="summaries/conventions",
-        instruction="Summarize these repo conventions in 2-3 concise bullets.",
-        model="default",
-    )
+    maintenance_snapshot: dict[str, Any] | None = None
 
-    # The compact result already carries the written entry — no need to re-fetch.
-    summary_value = client.artifacts.get(compact_result.entry.artifact_id).load()
+    if include_maintenance:
+        # Compact: summarize two convention keys into one summary key.
+        # This sends the current values to an LLM and writes the summary as a
+        # new memory version.  Source keys are left untouched.
+        compact_result = client.memories.compact(
+            scope=namespace_scope,
+            keys=["conventions/test_runner", "conventions/python"],
+            target_key="summaries/conventions",
+            instruction="Summarize these repo conventions in 2-3 concise bullets.",
+            model=compact_model,
+        )
 
-    # Purge: keep only the newest version of test_runner, delete the rest.
-    purge_result = client.memories.purge(
-        "conventions/test_runner",
-        scope=namespace_scope,
-        keep=1,
-    )
+        # The compact result carries the written entry — load via artifact_id.
+        summary_value = client.artifacts.get(compact_result.entry.artifact_id).load()
 
-    # Check that history was actually trimmed.
-    test_runner_history_after = client.memories.history(
-        "conventions/test_runner", scope=namespace_scope
-    )
+        # Purge: keep only the newest version of test_runner, delete the rest.
+        purge_result = client.memories.purge(
+            "conventions/test_runner",
+            scope=namespace_scope,
+            keep=1,
+        )
 
-    # Audit log: read back the compact + purge records.
-    compaction_log = client.memories.compaction_log(scope=namespace_scope)
+        # Check that history was actually trimmed.
+        test_runner_history_after = client.memories.history(
+            "conventions/test_runner", scope=namespace_scope
+        )
 
-    maintenance_snapshot = {
-        "compact_result": compact_result.model_dump(mode="json"),
-        "summary_value": summary_value,
-        "purge_result": purge_result.model_dump(mode="json"),
-        "test_runner_history_versions_after_purge": _versions(
-            test_runner_history_after
-        ),
-        "compaction_log": [record.model_dump(mode="json") for record in compaction_log],
-    }
+        # Audit log: read back the compact + purge records.
+        compaction_log = client.memories.compaction_log(scope=namespace_scope)
+
+        maintenance_snapshot = {
+            "compact_result": compact_result.model_dump(mode="json"),
+            "summary_value": summary_value,
+            "purge_result": purge_result.model_dump(mode="json"),
+            "test_runner_history_versions_after_purge": _versions(
+                test_runner_history_after
+            ),
+            "compaction_log": [
+                record.model_dump(mode="json") for record in compaction_log
+            ],
+        }
 
     return {
         "execution_id": execution_scope,
         "namespace_scope": namespace_scope,
-        "flow_scope": "memory_showcase",
+        "flow_scope": FLOW_SCOPE,
         "seed_snapshot": seed_snapshot,
         "flow_snapshot": flow_snapshot,
         "maintenance_snapshot": maintenance_snapshot,
@@ -438,8 +486,153 @@ def run_workflow(
     }
 
 
+# ---------------------------------------------------------------------------
+# Text renderer — narrated output for demos and first-time runs
+# ---------------------------------------------------------------------------
+
+
+def _render_text(
+    snapshot: dict[str, Any],
+    *,
+    include_maintenance: bool,
+    model_available: bool = True,
+) -> str:
+    """Convert a structured snapshot into concise narrated terminal output."""
+    lines: list[str] = []
+
+    lines.append("=== Repo Memory Walkthrough ===")
+    lines.append("")
+    lines.append(f"Namespace scope: {snapshot['namespace_scope']}")
+    lines.append(f"Flow scope:      {snapshot['flow_scope']}")
+    lines.append(f"Execution:       {snapshot['execution_id']}")
+
+    # --- Seeding ---
+    seed = snapshot["seed_snapshot"]
+    lines.append("")
+    lines.append("--- Seeding ---")
+    n_keys = len(seed["active_keys"])
+    lines.append(f"Seeded {n_keys} keys in {snapshot['namespace_scope']} namespace")
+    if seed["deleted_key_hidden"]:
+        lines.append(
+            "Soft-deleted scratch/outdated (hidden from get, preserved in history)"
+        )
+
+    # --- Flow execution ---
+    fs = snapshot["flow_snapshot"]
+    lines.append("")
+    lines.append("--- Flow execution ---")
+    lines.append(
+        f"Topic count: {fs['topic_count_before']} -> {fs['topic_count_after']}"
+    )
+    if fs.get("planned_summary"):
+        lines.append("Flow summary written to summaries/latest")
+    if fs["obsolete_hidden_after_delete"]:
+        lines.append("Soft-deleted scratch/obsolete in flow body")
+
+    # --- Maintenance ---
+    lines.append("")
+    lines.append("--- Maintenance ---")
+    maint = snapshot["maintenance_snapshot"]
+    if maint is not None:
+        compact = maint["compact_result"]
+        record = compact.get("compaction_record", {})
+        source_keys = record.get("source_keys", [])
+        target = compact["entry"]["key"]
+        sources_read = compact["sources_read"]
+        source_mode = record.get("source_mode", "current")
+        keys_label = " + ".join(source_keys) if source_keys else f"{sources_read} keys"
+        lines.append(f"Compacted {keys_label} -> {target}")
+        lines.append(f"  Source mode: {source_mode} | Sources read: {sources_read}")
+
+        purge = maint["purge_result"]
+        lines.append(
+            f"Purged {purge['scope']}: "
+            f"{purge['versions_deleted']} version(s) deleted (kept newest)"
+        )
+
+        log_records = maint["compaction_log"]
+        ops = [r["operation"] for r in log_records]
+        lines.append(f"Audit log: {len(log_records)} records ({', '.join(ops)})")
+    elif not model_available:
+        lines.append("Skipped (no model configured).")
+        lines.append("To see compaction, purge, and audit log:")
+        lines.append("  kitaru model register default --model openai/gpt-5-nano")
+        lines.append("  uv run examples/memory/flow_with_memory.py")
+    elif not include_maintenance:
+        lines.append("Skipped (--skip-maintenance flag).")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint — auto-detects model availability
+# ---------------------------------------------------------------------------
+
+
+def _probe_model(model: str) -> bool:
+    """Return True if the given model alias/identifier can be resolved."""
+    try:
+        from kitaru.config import resolve_model_selection
+
+        resolve_model_selection(model)
+    except Exception:
+        return False
+    return True
+
+
 def main() -> None:
-    print(json.dumps(run_workflow(), indent=2, sort_keys=True, default=str))
+    parser = argparse.ArgumentParser(
+        description="Repo Memory Walkthrough — Kitaru's durable memory demo.",
+    )
+    parser.add_argument(
+        "--output",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text).",
+    )
+    parser.add_argument(
+        "--skip-maintenance",
+        action="store_true",
+        help="Skip compact/purge/audit even when a model is available.",
+    )
+    parser.add_argument(
+        "--namespace-scope",
+        default="repo_docs",
+        help="Namespace scope name (default: repo_docs).",
+    )
+    parser.add_argument(
+        "--topic",
+        default="release_notes",
+        help="Topic string for the flow (default: release_notes).",
+    )
+    parser.add_argument(
+        "--model",
+        default="default",
+        help="Model alias or identifier for compaction (default: default).",
+    )
+    args = parser.parse_args()
+
+    model_available = _probe_model(args.model)
+    include_maintenance = model_available and not args.skip_maintenance
+
+    snapshot = run_workflow(
+        topic=args.topic,
+        namespace_scope=args.namespace_scope,
+        include_maintenance=include_maintenance,
+        compact_model=args.model,
+    )
+
+    if args.output == "json":
+        print(json.dumps(snapshot, indent=2, sort_keys=True, default=str))
+    else:
+        print(
+            _render_text(
+                snapshot,
+                include_maintenance=include_maintenance,
+                model_available=model_available,
+            )
+        )
 
 
 if __name__ == "__main__":

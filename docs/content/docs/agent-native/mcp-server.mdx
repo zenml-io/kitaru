@@ -182,6 +182,11 @@ Recommended maintenance sequence:
 3. `kitaru_memory_purge(key="notes/preferences", scope="repo_docs", keep=1)`
 4. `kitaru_memory_compaction_log(scope="repo_docs")`
 
+For a complete memory walkthrough including seeding, flow usage, and
+cross-surface inspection, see `examples/memory/flow_with_memory.py` and
+its [demo playbook](https://github.com/zenml-io/kitaru/tree/develop/examples/memory/DEMO_PLAYBOOK.md)
+for detailed MCP tool-call sequences.
+
 ## Authentication and context
 
 The MCP server reuses the same config/auth context as `kitaru` CLI and SDK.

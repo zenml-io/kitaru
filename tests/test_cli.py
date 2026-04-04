@@ -2412,6 +2412,220 @@ def test_memory_history_errors_when_empty(capsys: pytest.CaptureFixture[str]) ->
     )
 
 
+class TestMemoryMaintenance:
+    """CLI smoke tests for memory maintenance commands (compact/purge/log)."""
+
+    def test_compact_single_key_exits_zero(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`kitaru memory compact --key k` should delegate and exit zero."""
+        compact_payload = {
+            "entry": {
+                "key": "conventions/test_runner",
+                "scope": "repo_docs",
+                "version": 3,
+            },
+            "sources_read": 1,
+            "scope": "repo_docs",
+            "compaction_record": {
+                "source_mode": "current",
+                "source_keys": ["conventions/test_runner"],
+            },
+        }
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.compact_memory_payload",
+                return_value=compact_payload,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(
+                [
+                    "memory",
+                    "compact",
+                    "--scope",
+                    "repo_docs",
+                    "--key",
+                    "conventions/test_runner",
+                ]
+            )
+
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "conventions/test_runner" in output
+
+    def test_compact_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """`kitaru memory compact --output json` should emit a JSON item."""
+        compact_payload = {
+            "entry": {"key": "k", "scope": "s", "version": 1},
+            "sources_read": 1,
+            "scope": "s",
+            "compaction_record": {"source_mode": "current"},
+        }
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.compact_memory_payload",
+                return_value=compact_payload,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(
+                [
+                    "memory",
+                    "compact",
+                    "--scope",
+                    "s",
+                    "--key",
+                    "k",
+                    "--output",
+                    "json",
+                ]
+            )
+
+        assert exc_info.value.code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["command"] == "memory.compact"
+        assert payload["item"]["sources_read"] == 1
+
+    def test_purge_exits_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """`kitaru memory purge` should delegate and exit zero."""
+        purge_payload = {
+            "scope": "repo_docs",
+            "versions_deleted": 2,
+            "keys_affected": 1,
+        }
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.purge_memory_payload",
+                return_value=purge_payload,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(
+                [
+                    "memory",
+                    "purge",
+                    "conventions/test_runner",
+                    "--scope",
+                    "repo_docs",
+                    "--keep",
+                    "1",
+                ]
+            )
+
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "conventions/test_runner" in output
+
+    def test_purge_scope_exits_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """`kitaru memory purge-scope` should delegate and exit zero."""
+        purge_scope_payload = {
+            "scope": "repo_docs",
+            "versions_deleted": 5,
+            "keys_affected": 3,
+        }
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.purge_scope_memory_payload",
+                return_value=purge_scope_payload,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(
+                [
+                    "memory",
+                    "purge-scope",
+                    "--scope",
+                    "repo_docs",
+                    "--keep",
+                    "1",
+                ]
+            )
+
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "repo_docs" in output
+
+    def test_compaction_log_exits_zero(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`kitaru memory compaction-log` should delegate and exit zero."""
+        log_records = [
+            {
+                "operation": "compact",
+                "scope": "repo_docs",
+                "target_key": "summaries/conventions",
+                "target_version": 1,
+                "source_keys": [
+                    "conventions/test_runner",
+                    "conventions/python",
+                ],
+                "sources_read": 2,
+                "source_mode": "current",
+                "timestamp": "2026-04-03T12:00:00+00:00",
+                "versions_deleted": None,
+                "keep": None,
+                "keys_affected": None,
+                "include_deleted": None,
+            },
+        ]
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.compaction_log_memory_payload",
+                return_value=log_records,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["memory", "compaction-log", "--scope", "repo_docs"])
+
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "compact" in output
+
+    def test_compaction_log_json_output(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`kitaru memory compaction-log --output json` should emit JSON items."""
+        log_records = [
+            {
+                "operation": "purge",
+                "scope": "repo_docs",
+                "versions_deleted": 3,
+                "keep": 1,
+                "timestamp": "2026-04-03T13:00:00+00:00",
+            },
+        ]
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.compaction_log_memory_payload",
+                return_value=log_records,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(
+                [
+                    "memory",
+                    "compaction-log",
+                    "--scope",
+                    "repo_docs",
+                    "--output",
+                    "json",
+                ]
+            )
+
+        assert exc_info.value.code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["command"] == "memory.compaction-log"
+        assert payload["count"] == 1
+        assert payload["items"][0]["operation"] == "purge"
+
+
 def test_secrets_set_creates_secret(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
