@@ -388,6 +388,7 @@ def install_terminal_log_intercept() -> None:
         new_handlers: list[logging.Handler] = []
         for i, handler in enumerate(root.handlers):
             if _is_kitaru_terminal_handler(handler) and handler is not kitaru_handler:
+                handler.close()
                 continue
             if i == first_idx:
                 if existing_kitaru is None:
