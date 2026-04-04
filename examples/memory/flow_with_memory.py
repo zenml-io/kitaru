@@ -368,6 +368,7 @@ def run_workflow(
         keys=["conventions/test_runner", "conventions/python"],
         target_key="summaries/conventions",
         instruction="Summarize these repo conventions in 2-3 concise bullets.",
+        model="default",
     )
 
     # The compact result already carries the written entry — no need to re-fetch.
