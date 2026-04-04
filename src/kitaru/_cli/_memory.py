@@ -559,6 +559,12 @@ def compact_(
             help="LLM model to use for summarization.",
         ),
     ] = None,
+    max_tokens: Annotated[
+        int | None,
+        Parameter(
+            help="Maximum response tokens for the LLM summarization.",
+        ),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Summarize memory values using an LLM and write the result as a new version.
@@ -583,6 +589,7 @@ def compact_(
             target_key=target_key,
             instruction=instruction,
             model=model,
+            max_tokens=max_tokens,
         ),
         command=command,
         output=output_format,
