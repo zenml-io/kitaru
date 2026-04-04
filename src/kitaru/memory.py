@@ -495,13 +495,15 @@ def _sort_memory_artifacts(
 
 def _paginate_artifact_versions(
     client: Client,
+    *,
+    hydrate: bool = True,
     **kwargs: Any,
 ) -> _list[ArtifactVersionResponse]:
     """Collect all artifact-version pages for a query."""
     page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
         page=1,
         size=_MEMORY_PAGE_SIZE,
-        hydrate=True,
+        hydrate=hydrate,
         sort_by=_MEMORY_VERSION_SORT,
         **kwargs,
     )
@@ -510,7 +512,7 @@ def _paginate_artifact_versions(
         page = client.list_artifact_versions(
             page=page.index + 1,
             size=_MEMORY_PAGE_SIZE,
-            hydrate=True,
+            hydrate=hydrate,
             sort_by=_MEMORY_VERSION_SORT,
             **kwargs,
         )
@@ -941,6 +943,75 @@ def _compaction_log_impl(
     return records
 
 
+def _list_unused_memory_artifact_versions(
+    client: Client,
+    *,
+    artifact_name: str,
+    project: str | None = None,
+) -> _list[ArtifactVersionResponse]:
+    """List unused versions for one exact memory artifact."""
+    return _paginate_artifact_versions(
+        client,
+        hydrate=False,
+        artifact=artifact_name,
+        only_unused=True,
+        **_memory_query_kwargs(project=project),
+    )
+
+
+def _delete_preflighted_memory_versions(
+    client: Client,
+    *,
+    scope: _MemoryScope,
+    key: str,
+    to_delete: _list[ArtifactVersionResponse],
+    project: str | None = None,
+) -> int:
+    """Preflight deletability for one key, then delete versions directly."""
+    if not to_delete:
+        return 0
+
+    artifact_name = _memory_artifact_name(scope.scope, key)
+    try:
+        unused_versions = _list_unused_memory_artifact_versions(
+            client,
+            artifact_name=artifact_name,
+            project=project,
+        )
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to preflight purge eligibility for key {key!r} "
+            f"in scope {scope.scope!r}: {exc}"
+        ) from exc
+
+    deletable_ids = {artifact.id for artifact in unused_versions}
+    blocked_versions = [
+        _parse_memory_version(artifact.version)
+        for artifact in to_delete
+        if artifact.id not in deletable_ids
+    ]
+    if blocked_versions:
+        raise KitaruBackendError(
+            f"Cannot purge versions {blocked_versions!r} for key {key!r} "
+            f"in scope {scope.scope!r} because they are not unused."
+        )
+
+    # Bypass client.delete_artifact_version(): the high-level wrapper
+    # re-scans all unused artifacts per call, causing O(N*total) queries.
+    # Direct zen_store access after our own preflight keeps it O(1) per version.
+    deleted_count = 0
+    for artifact in to_delete:
+        try:
+            client.zen_store.delete_artifact_version(artifact.id)
+            deleted_count += 1
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to delete artifact version {artifact.id} during "
+                f"purge of key {key!r} in scope {scope.scope!r}: {exc}"
+            ) from exc
+    return deleted_count
+
+
 def _purge_impl(
     scope: _MemoryScope,
     key: str,
@@ -972,16 +1043,13 @@ def _purge_impl(
     sorted_artifacts = _sort_memory_artifacts(artifacts)
     to_delete = sorted_artifacts[effective_keep:]
 
-    deleted_count = 0
-    for artifact in to_delete:
-        try:
-            client.delete_artifact_version(str(artifact.id))
-            deleted_count += 1
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Failed to delete artifact version {artifact.id} during "
-                f"purge of key {key!r} in scope {scope.scope!r}: {exc}"
-            ) from exc
+    deleted_count = _delete_preflighted_memory_versions(
+        client,
+        scope=scope,
+        key=key,
+        to_delete=to_delete,
+        project=project,
+    )
 
     result = PurgeResult(
         versions_deleted=deleted_count,
@@ -1070,16 +1138,13 @@ def _purge_scope_impl(
         if not to_delete:
             continue
 
-        key_deleted = 0
-        for artifact in to_delete:
-            try:
-                client.delete_artifact_version(str(artifact.id))
-                key_deleted += 1
-            except Exception as exc:
-                raise KitaruBackendError(
-                    f"Failed to delete artifact version {artifact.id} during "
-                    f"purge of scope {scope.scope!r}: {exc}"
-                ) from exc
+        key_deleted = _delete_preflighted_memory_versions(
+            client,
+            scope=scope,
+            key=parsed_key,
+            to_delete=to_delete,
+            project=project,
+        )
 
         if key_deleted > 0:
             total_deleted += key_deleted
