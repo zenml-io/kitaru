@@ -573,6 +573,42 @@ class TestHandlerSwap:
 
 
 # ---------------------------------------------------------------------------
+# _is_kitaru_terminal_handler unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsKitaruTerminalHandler:
+    """Direct tests for the marker-based handler detection function."""
+
+    def test_plain_handler_returns_false(self) -> None:
+        handler = logging.StreamHandler()
+        assert terminal_logging._is_kitaru_terminal_handler(handler) is False
+
+    def test_kitaru_handler_returns_true(self) -> None:
+        handler = terminal_logging._KitaruTerminalHandler()
+        assert terminal_logging._is_kitaru_terminal_handler(handler) is True
+
+    def test_handler_with_marker_attribute_returns_true(self) -> None:
+        """Simulates a handler from a pre-reload class that still has the marker."""
+        handler = logging.StreamHandler()
+        setattr(
+            handler,
+            terminal_logging._KITARU_HANDLER_MARKER_ATTR,
+            terminal_logging._KITARU_HANDLER_MARKER_VALUE,
+        )
+        assert terminal_logging._is_kitaru_terminal_handler(handler) is True
+
+    def test_handler_with_wrong_marker_value_returns_false(self) -> None:
+        handler = logging.StreamHandler()
+        setattr(
+            handler,
+            terminal_logging._KITARU_HANDLER_MARKER_ATTR,
+            "wrong-value",
+        )
+        assert terminal_logging._is_kitaru_terminal_handler(handler) is False
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap integration test
 # ---------------------------------------------------------------------------
 
@@ -597,8 +633,6 @@ class TestBootstrapIntegration:
 
     def test_reload_patches_terminal_intercept(self) -> None:
         """Reloading kitaru should re-run the terminal log intercept."""
-        import importlib
-
         import kitaru
 
         with patch(

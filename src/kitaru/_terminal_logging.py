@@ -414,8 +414,10 @@ def install_terminal_log_intercept() -> None:
     elif has_duplicate_kitaru:
         # No console handler to replace, but still collapse duplicate Kitaru
         # handlers down to the first recognized instance.
-        root.handlers = [
-            h
-            for h in root.handlers
-            if not (_is_kitaru_terminal_handler(h) and h is not kitaru_handler)
-        ]
+        new_handlers = []
+        for h in root.handlers:
+            if _is_kitaru_terminal_handler(h) and h is not kitaru_handler:
+                h.close()
+                continue
+            new_handlers.append(h)
+        root.handlers = new_handlers
