@@ -1150,11 +1150,26 @@ class TestPurgeImpl:
             call(artifacts[0].id),
         ]
         assert client_mock.list_artifact_versions.call_count == 2
-        assert client_mock.list_artifact_versions.call_args_list[0].kwargs["artifact"] == "kitaru_mem:s:k"
-        assert client_mock.list_artifact_versions.call_args_list[0].kwargs["hydrate"] is True
-        assert client_mock.list_artifact_versions.call_args_list[1].kwargs["artifact"] == "kitaru_mem:s:k"
-        assert client_mock.list_artifact_versions.call_args_list[1].kwargs["only_unused"] is True
-        assert client_mock.list_artifact_versions.call_args_list[1].kwargs["hydrate"] is False
+        assert (
+            client_mock.list_artifact_versions.call_args_list[0].kwargs["artifact"]
+            == "kitaru_mem:s:k"
+        )
+        assert (
+            client_mock.list_artifact_versions.call_args_list[0].kwargs["hydrate"]
+            is True
+        )
+        assert (
+            client_mock.list_artifact_versions.call_args_list[1].kwargs["artifact"]
+            == "kitaru_mem:s:k"
+        )
+        assert (
+            client_mock.list_artifact_versions.call_args_list[1].kwargs["only_unused"]
+            is True
+        )
+        assert (
+            client_mock.list_artifact_versions.call_args_list[1].kwargs["hydrate"]
+            is False
+        )
 
     def test_purge_with_keep_none_deletes_all(self) -> None:
         artifacts = [
@@ -1224,13 +1239,13 @@ class TestPurgeImpl:
         with (
             patch("kitaru.memory.Client", return_value=client_mock),
             patch("kitaru.memory.save_artifact") as save_artifact_mock,
+            pytest.raises(KitaruBackendError, match="not unused"),
         ):
-            with pytest.raises(KitaruBackendError, match="not unused"):
-                _purge_impl(
-                    _MemoryScope(scope="s", scope_type="namespace"),
-                    "k",
-                    keep=1,
-                )
+            _purge_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                "k",
+                keep=1,
+            )
 
         client_mock.zen_store.delete_artifact_version.assert_not_called()
         client_mock.delete_artifact_version.assert_not_called()
@@ -1266,8 +1281,14 @@ class TestPurgeImpl:
                 project="project-override",
             )
 
-        assert client_mock.list_artifact_versions.call_args_list[0].kwargs["project"] == "project-override"
-        assert client_mock.list_artifact_versions.call_args_list[1].kwargs["project"] == "project-override"
+        assert (
+            client_mock.list_artifact_versions.call_args_list[0].kwargs["project"]
+            == "project-override"
+        )
+        assert (
+            client_mock.list_artifact_versions.call_args_list[1].kwargs["project"]
+            == "project-override"
+        )
 
     def test_purge_rejects_negative_keep(self) -> None:
         with pytest.raises(KitaruUsageError, match=r"keep.*>= 0"):
@@ -1310,10 +1331,18 @@ class TestPurgeScopeImpl:
         assert result.versions_deleted == 1
         assert result.keys_affected == 1
         client_mock.delete_artifact_version.assert_not_called()
-        assert client_mock.zen_store.delete_artifact_version.call_args_list == [call(a1.id)]
+        assert client_mock.zen_store.delete_artifact_version.call_args_list == [
+            call(a1.id)
+        ]
         assert client_mock.list_artifact_versions.call_count == 2
-        assert client_mock.list_artifact_versions.call_args_list[1].kwargs["artifact"] == "kitaru_mem:s:k1"
-        assert client_mock.list_artifact_versions.call_args_list[1].kwargs["only_unused"] is True
+        assert (
+            client_mock.list_artifact_versions.call_args_list[1].kwargs["artifact"]
+            == "kitaru_mem:s:k1"
+        )
+        assert (
+            client_mock.list_artifact_versions.call_args_list[1].kwargs["only_unused"]
+            is True
+        )
 
     def test_purge_scope_with_include_deleted(self) -> None:
         active = _memory_artifact(scope="s", key="k1", version=1, value="v1")
@@ -1323,7 +1352,7 @@ class TestPurgeScopeImpl:
 
         client_mock = MagicMock()
 
-        def _list_side_effect(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        def _list_side_effect(*_args: Any, **kwargs: Any) -> SimpleNamespace:
             if kwargs.get("only_unused"):
                 if kwargs["artifact"] == "kitaru_mem:s:k1":
                     return _page(active)
@@ -1355,10 +1384,8 @@ class TestPurgeScopeImpl:
         assert result.versions_deleted == 2
         assert result.keys_affected == 2
         client_mock.delete_artifact_version.assert_not_called()
-        deleted_ids = {
-            call_args.args[0]
-            for call_args in client_mock.zen_store.delete_artifact_version.call_args_list
-        }
+        zen_delete = client_mock.zen_store.delete_artifact_version
+        deleted_ids = {call_args.args[0] for call_args in zen_delete.call_args_list}
         assert deleted_ids == {active.id, tombstone.id}
 
 
