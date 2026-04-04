@@ -165,7 +165,7 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
         )
 
     return _ProviderTarget(
-        provider=provider,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        provider=provider,  # type: ignore[arg-type]
         provider_model=model_name,
         resolved_model=resolved_model,
     )

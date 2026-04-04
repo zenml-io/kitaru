@@ -51,7 +51,7 @@ def _wait_for_pending_wait(
         if state["error"] is not None:
             raise RuntimeError(
                 "Flow run failed before reaching a wait condition."
-            ) from state["error"]  # type: ignore[arg-type]  # ty: ignore[invalid-raise]
+            ) from state["error"]  # type: ignore[arg-type]
         try:
             found = _find_pending_wait(client=client, topic=topic)
         except ValueError:
