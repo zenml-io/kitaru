@@ -63,6 +63,7 @@ _MEMORY_PAGE_SIZE = 100
 _MEMORY_VERSION_SORT = "desc:version_number"
 _MEMORY_STEP_EXTRA_PREFIX = {"kitaru": {"boundary": "memory"}}
 _MemoryScopeType = Literal["namespace", "flow", "execution"]
+_MemoryCompactionSourceMode = Literal["current", "history"]
 
 
 class MemoryEntry(BaseModel):
@@ -113,6 +114,7 @@ class CompactionRecord(BaseModel):
     target_version: int | None
     instruction: str | None
     model: str | None
+    source_mode: _MemoryCompactionSourceMode | None = None
     keys_affected: int
     versions_deleted: int
     keep: int | None
@@ -204,6 +206,20 @@ def _validate_memory_version(
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         raise error_type("Memory version must be an integer >= 1.")
     return version
+
+
+def _validate_memory_compaction_source_mode(
+    value: str,
+    *,
+    error_type: type[Exception] = KitaruUsageError,
+) -> _MemoryCompactionSourceMode:
+    """Validate and normalize a compaction source mode."""
+    normalized = str(value).strip().lower()
+    if normalized not in {"current", "history"}:
+        raise error_type(
+            "Memory compaction source_mode must be 'current' or 'history'."
+        )
+    return cast(_MemoryCompactionSourceMode, normalized)
 
 
 def _require_memory_boundary(api_name: str) -> None:
@@ -943,6 +959,94 @@ def _compaction_log_impl(
     return records
 
 
+def _collect_single_key_current_entries(
+    client: Client,
+    scope: _MemoryScope,
+    key: str,
+    *,
+    project: str | None = None,
+) -> _list[tuple[str, int, Any]]:
+    """Collect the current non-deleted value of one key for compaction."""
+    artifact = _fetch_memory_artifact(
+        client,
+        scope,
+        key,
+        project=project,
+    )
+    if artifact is None:
+        raise KitaruUsageError(
+            "compact() found no current value for key "
+            f"{key!r} in scope {scope.scope!r}."
+        )
+    if _is_deleted_artifact(artifact):
+        raise KitaruUsageError(
+            f"compact() cannot summarize key {key!r} in scope {scope.scope!r} "
+            "because its current value is deleted."
+        )
+
+    try:
+        value = artifact.load()
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to load memory key {key!r} in scope {scope.scope!r}: {exc}"
+        ) from exc
+
+    return [(key, _parse_memory_version(artifact.version), value)]
+
+
+def _collect_single_key_history_entries(
+    client: Client,
+    scope: _MemoryScope,
+    key: str,
+    *,
+    project: str | None = None,
+) -> _list[tuple[str, int, Any]]:
+    """Collect all non-deleted historical versions of one key for compaction."""
+    source_entries: _list[tuple[str, int, Any]] = []
+    artifacts = _paginate_artifact_versions(
+        client,
+        artifact=_memory_artifact_name(scope.scope, key),
+        **_memory_query_kwargs(project=project),
+    )
+    for artifact in _sort_memory_artifacts(artifacts):
+        if _is_deleted_artifact(artifact):
+            continue
+        try:
+            value = artifact.load()
+            version = _parse_memory_version(artifact.version)
+            source_entries.append((key, version, value))
+        except Exception:
+            continue
+    return source_entries
+
+
+def _collect_multi_key_current_entries(
+    client: Client,
+    scope: _MemoryScope,
+    keys: _list[str],
+    *,
+    project: str | None = None,
+) -> _list[tuple[str, int, Any]]:
+    """Collect current non-deleted values for many keys for compaction."""
+    source_entries: _list[tuple[str, int, Any]] = []
+    for key in keys:
+        artifact = _fetch_memory_artifact(
+            client,
+            scope,
+            key,
+            project=project,
+        )
+        if artifact is None or _is_deleted_artifact(artifact):
+            continue
+        try:
+            value = artifact.load()
+            version = _parse_memory_version(artifact.version)
+            source_entries.append((key, version, value))
+        except Exception:
+            continue
+    return source_entries
+
+
 def _list_unused_memory_artifact_versions(
     client: Client,
     *,
@@ -1069,6 +1173,7 @@ def _purge_impl(
             target_version=None,
             instruction=None,
             model=None,
+            source_mode=None,
             keys_affected=result.keys_affected,
             versions_deleted=deleted_count,
             keep=keep,
@@ -1171,6 +1276,7 @@ def _purge_scope_impl(
             target_version=None,
             instruction=None,
             model=None,
+            source_mode=None,
             keys_affected=keys_affected_count,
             versions_deleted=total_deleted,
             keep=keep,
@@ -1190,6 +1296,7 @@ def _compact_impl(
     *,
     key: str | None = None,
     keys: _list[str] | None = None,
+    source_mode: _MemoryCompactionSourceMode = "current",
     target_key: str | None = None,
     instruction: str | None = None,
     model: str | None = None,
@@ -1210,48 +1317,38 @@ def _compact_impl(
 
     if keys is not None and target_key is None:
         raise KitaruUsageError("compact() in multi-key mode requires `target_key`.")
+    if keys is not None and source_mode != "current":
+        raise KitaruUsageError(
+            "compact() only supports `source_mode='history'` in single-key mode."
+        )
 
     effective_target = target_key if target_key is not None else key
     assert effective_target is not None  # guaranteed by validation above
 
-    source_entries: _list[tuple[str, int, Any]] = []  # (key, version, value)
     client = _resolve_memory_client_factory(client_factory)()
-
-    if key is not None:
-        # Single-key mode: load all non-deleted versions directly from
-        # paginated artifacts (avoids N+1 re-fetch per version).
-        artifacts = _paginate_artifact_versions(
+    source_entries: _list[tuple[str, int, Any]]
+    if key is not None and source_mode == "current":
+        source_entries = _collect_single_key_current_entries(
             client,
-            artifact=_memory_artifact_name(scope.scope, key),
-            **_memory_query_kwargs(project=project),
+            scope,
+            key,
+            project=project,
         )
-        for artifact in _sort_memory_artifacts(artifacts):
-            if _is_deleted_artifact(artifact):
-                continue
-            try:
-                value = artifact.load()
-                version = _parse_memory_version(artifact.version)
-                source_entries.append((key, version, value))
-            except Exception:
-                continue
+    elif key is not None:
+        source_entries = _collect_single_key_history_entries(
+            client,
+            scope,
+            key,
+            project=project,
+        )
     else:
         assert keys is not None
-        # Multi-key mode: fetch current value of each key directly.
-        for k in keys:
-            artifact = _fetch_memory_artifact(
-                client,
-                scope,
-                k,
-                project=project,
-            )
-            if artifact is None or _is_deleted_artifact(artifact):
-                continue
-            try:
-                value = artifact.load()
-                version = _parse_memory_version(artifact.version)
-                source_entries.append((k, version, value))
-            except Exception:
-                continue
+        source_entries = _collect_multi_key_current_entries(
+            client,
+            scope,
+            keys,
+            project=project,
+        )
 
     if not source_entries:
         raise KitaruUsageError("compact() found no source entries to summarize.")
@@ -1312,6 +1409,7 @@ def _compact_impl(
         target_version=new_entry.version,
         instruction=instruction,
         model=model_selection.resolved_model,
+        source_mode=source_mode,
         keys_affected=0,
         versions_deleted=0,
         keep=None,

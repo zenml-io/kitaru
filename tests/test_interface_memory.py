@@ -11,11 +11,13 @@ from uuid import uuid4
 import pytest
 
 from kitaru._interface_memory import (
+    compact_memory_payload,
     compaction_log_memory_payload,
     delete_memory_payload,
     get_memory_payload,
     history_memory_payload,
     list_memory_payload,
+    normalize_memory_compaction_source_mode,
     normalize_memory_keep,
     normalize_memory_key,
     normalize_memory_prefix,
@@ -27,7 +29,7 @@ from kitaru._interface_memory import (
     set_memory_payload,
 )
 from kitaru.client import KitaruClient
-from kitaru.memory import CompactionRecord, MemoryEntry, PurgeResult
+from kitaru.memory import CompactionRecord, CompactResult, MemoryEntry, PurgeResult
 
 
 def _sample_memory_entry(
@@ -230,6 +232,27 @@ def test_normalize_memory_keep_rejects_negative(keep: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# normalize_memory_compaction_source_mode
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_memory_compaction_source_mode_defaults_to_current() -> None:
+    assert normalize_memory_compaction_source_mode(None) == "current"
+
+
+@pytest.mark.parametrize("source_mode", ["current", "history"])
+def test_normalize_memory_compaction_source_mode_accepts_known_values(
+    source_mode: str,
+) -> None:
+    assert normalize_memory_compaction_source_mode(source_mode) == source_mode
+
+
+def test_normalize_memory_compaction_source_mode_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="source_mode"):
+        normalize_memory_compaction_source_mode("future")
+
+
+# ---------------------------------------------------------------------------
 # Purge payloads
 # ---------------------------------------------------------------------------
 
@@ -273,6 +296,57 @@ def test_purge_scope_memory_payload_delegates() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Compact payload
+# ---------------------------------------------------------------------------
+
+
+def test_compact_memory_payload_delegates_with_source_mode() -> None:
+    client, memories, _artifacts = _client_with_mocks()
+    entry = _sample_memory_entry(key="prefs", scope="repo", version=4)
+    record = CompactionRecord(
+        operation="compact",
+        scope="repo",
+        timestamp=datetime(2026, 4, 1, tzinfo=UTC),
+        source_keys=["prefs"],
+        source_versions=[3],
+        target_key="prefs",
+        target_version=4,
+        instruction=None,
+        model="gpt-test",
+        source_mode="current",
+        keys_affected=0,
+        versions_deleted=0,
+        keep=None,
+    )
+    memories.compact.return_value = CompactResult(
+        entry=entry,
+        sources_read=1,
+        scope="repo",
+        compaction_record=record,
+    )
+
+    result = compact_memory_payload(
+        cast(KitaruClient, client),
+        scope="repo",
+        key="prefs",
+        source_mode="current",
+    )
+
+    assert result["entry"]["key"] == "prefs"
+    assert result["compaction_record"]["source_mode"] == "current"
+    memories.compact.assert_called_once_with(
+        scope="repo",
+        key="prefs",
+        keys=None,
+        source_mode="current",
+        target_key=None,
+        instruction=None,
+        model=None,
+        max_tokens=None,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Compaction log payload
 # ---------------------------------------------------------------------------
 
@@ -303,4 +377,5 @@ def test_compaction_log_memory_payload_delegates() -> None:
     assert len(result) == 1
     assert result[0]["operation"] == "purge"
     assert result[0]["versions_deleted"] == 2
+    assert result[0]["source_mode"] is None
     memories.compaction_log.assert_called_once_with(scope="repo")

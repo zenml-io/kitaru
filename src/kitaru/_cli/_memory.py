@@ -160,6 +160,16 @@ def _memory_scopes_rows(scopes: list[dict[str, Any]]) -> list[list[str]]:
     ]
 
 
+def _memory_source_mode_label(payload: dict[str, Any]) -> str:
+    """Render a human-readable compaction source mode label."""
+    source_mode = payload.get("source_mode")
+    if source_mode is not None:
+        return str(source_mode)
+    if payload.get("operation") == "compact":
+        return "legacy"
+    return "-"
+
+
 @memory_app.command(name="scopes")
 def scopes_(
     *,
@@ -526,17 +536,31 @@ def compact_(
     key: Annotated[
         str | None,
         Parameter(
-            help="Single key to compact (summarize version history).",
+            help=(
+                "Single key to compact. Defaults to summarizing the current "
+                "value; use --source-mode history for full version history."
+            ),
             allow_leading_hyphen=True,
         ),
     ] = None,
     keys: Annotated[
         tuple[str, ...] | None,
         Parameter(
-            help="Multiple keys to merge into one summary.",
+            help=(
+                "Multiple keys whose current values should be merged into one summary."
+            ),
             allow_leading_hyphen=True,
         ),
     ] = None,
+    source_mode: Annotated[
+        Literal["current", "history"],
+        Parameter(
+            help=(
+                "Source selection for single-key compaction: current (default) "
+                "or history. Multi-key compaction supports current only."
+            ),
+        ),
+    ] = "current",
     target_key: Annotated[
         str | None,
         Parameter(
@@ -569,11 +593,14 @@ def compact_(
 ) -> None:
     """Summarize memory values using an LLM and write the result as a new version.
 
-    Use --key for single-key mode (summarizes all versions of that key) or
-    --keys for multi-key mode (summarizes the current value of each listed key).
-    --key and --keys are mutually exclusive. Multi-key mode requires --target-key.
-    In single-key mode, the summary is written to the source key unless
-    --target-key is specified. Source entries are not deleted.
+    Use --key for single-key mode (defaults to summarizing the current value of
+    that key) or --keys for multi-key mode (summarizes the current value of
+    each listed key). Use --source-mode history with --key to summarize the
+    full non-deleted version history of one key instead. --key and --keys are
+    mutually exclusive. Multi-key mode requires --target-key and supports only
+    --source-mode current. In single-key mode, the summary is written to the
+    source key unless --target-key is specified. Source entries are not deleted;
+    run purge separately if you want to reclaim old history.
     """
     command = "memory.compact"
     output_format = _resolve_output_format(output)
@@ -586,6 +613,7 @@ def compact_(
             scope=scope,
             key=key,
             keys=keys_list,
+            source_mode=source_mode,
             target_key=target_key,
             instruction=instruction,
             model=model,
@@ -606,7 +634,8 @@ def compact_(
         detail=(
             f"Scope: {entry['scope']} | "
             f"Version: {entry['version']} | "
-            f"Sources read: {payload['sources_read']}"
+            f"Sources read: {payload['sources_read']} | "
+            f"Source mode: {_memory_source_mode_label(payload['compaction_record'])}"
         ),
     )
 
@@ -648,6 +677,7 @@ def compaction_log_(
         f"Kitaru compaction log ({scope})",
         [
             "Operation",
+            "Source Mode",
             "Timestamp",
             "Source Keys",
             "Target Key",
@@ -657,6 +687,7 @@ def compaction_log_(
         [
             [
                 str(e["operation"]),
+                _memory_source_mode_label(e),
                 _memory_timestamp(e.get("timestamp")),
                 ", ".join(e.get("source_keys", [])),
                 str(e.get("target_key") or "-"),

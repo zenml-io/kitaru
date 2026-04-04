@@ -432,6 +432,7 @@ def serialize_compaction_record(record: CompactionRecord) -> dict[str, Any]:
         "target_version": record.target_version,
         "instruction": record.instruction,
         "model": record.model,
+        "source_mode": record.source_mode,
         "keys_affected": record.keys_affected,
         "versions_deleted": record.versions_deleted,
         "keep": record.keep,

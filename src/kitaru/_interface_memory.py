@@ -7,7 +7,9 @@ from typing import Any
 import kitaru.inspection as inspection
 from kitaru.client import KitaruClient
 from kitaru.memory import (
+    _MemoryCompactionSourceMode,
     _MemoryScopeType,
+    _validate_memory_compaction_source_mode,
     _validate_memory_identifier,
     _validate_memory_scope_type,
     _validate_memory_version,
@@ -44,6 +46,16 @@ def normalize_memory_scope_type(
     """Validate and normalize a transport-level memory scope type."""
     candidate = default if scope_type is None else scope_type
     return _validate_memory_scope_type(candidate, error_type=ValueError)
+
+
+def normalize_memory_compaction_source_mode(
+    source_mode: str | None,
+    *,
+    default: str = "current",
+) -> _MemoryCompactionSourceMode:
+    """Validate and normalize a transport-level compaction source mode."""
+    candidate = default if source_mode is None else source_mode
+    return _validate_memory_compaction_source_mode(candidate, error_type=ValueError)
 
 
 def scopes_memory_payload(
@@ -190,6 +202,7 @@ def compact_memory_payload(
     scope: str,
     key: str | None = None,
     keys: list[str] | None = None,
+    source_mode: str | None = None,
     target_key: str | None = None,
     instruction: str | None = None,
     model: str | None = None,
@@ -207,6 +220,7 @@ def compact_memory_payload(
         scope=normalize_memory_scope(scope),
         key=validated_key,
         keys=validated_keys,
+        source_mode=normalize_memory_compaction_source_mode(source_mode),
         target_key=validated_target,
         instruction=instruction,
         model=model,

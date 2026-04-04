@@ -3,7 +3,7 @@
 This group demonstrates Kitaru's durable memory surface end to end: seeding
 memory outside a flow, reading and updating it inside a flow body, inspecting
 multiple scopes explicitly with `KitaruClient.memories`, and running post-flow
-memory maintenance (compaction, purge, and audit log inspection).
+memory maintenance (multi-key compaction, purge, and audit log inspection).
 
 ```bash
 uv sync --extra local
@@ -25,7 +25,11 @@ For the full catalog, see [../README.md](../README.md).
 
 | Example | What it demonstrates | Test |
 |---|---|---|
-| [flow_with_memory.py](flow_with_memory.py) | Outside-flow seeding, in-flow `kitaru.memory` usage, explicit-scope inspection with `KitaruClient.memories`, and post-run maintenance (compact, purge, audit log) | [../../tests/test_phase20_memory_example.py](../../tests/test_phase20_memory_example.py) |
+| [flow_with_memory.py](flow_with_memory.py) | Outside-flow seeding, in-flow `kitaru.memory` usage, explicit-scope inspection with `KitaruClient.memories`, and post-run maintenance (multi-key compact, purge, audit log) | [../../tests/test_phase20_memory_example.py](../../tests/test_phase20_memory_example.py) |
+
+Single-key compaction now defaults to compacting the current value of one key.
+Use `source_mode="history"` when you explicitly want to summarize that key's
+full non-deleted version history instead.
 
 For the broader feature overview, see
 [Use Memory](https://kitaru.ai/docs/guides/memory).

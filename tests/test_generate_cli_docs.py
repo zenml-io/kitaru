@@ -450,6 +450,7 @@ class TestWriteDocsTree:
         compact_content = (output_dir / "memory" / "compact.mdx").read_text()
         assert "`--key`" in compact_content
         assert "`--keys`" in compact_content
+        assert "`--source-mode`" in compact_content
         assert "`--target-key`" in compact_content
         assert "`--model`" in compact_content
 

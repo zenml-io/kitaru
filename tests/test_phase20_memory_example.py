@@ -126,6 +126,7 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert compact_result["entry"]["scope"] == namespace_scope
     assert compact_result["sources_read"] == 2
     assert compact_result["scope"] == namespace_scope
+    assert compact_result["compaction_record"]["source_mode"] == "current"
 
     assert maintenance["summary_value"] == "Stubbed conventions summary"
 
@@ -143,6 +144,8 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert log_records[0]["operation"] == "purge"
     assert log_records[0]["keep"] == 1
     assert log_records[0]["versions_deleted"] == 1
+    assert log_records[0]["source_mode"] is None
     assert log_records[1]["operation"] == "compact"
     assert log_records[1]["target_key"] == "summaries/conventions"
     assert log_records[1]["target_version"] is not None
+    assert log_records[1]["source_mode"] == "current"

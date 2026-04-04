@@ -181,15 +181,42 @@ That sequence tells a concrete story:
 ## Compact memory with an LLM summary
 
 Over time, a memory key can accumulate many versions — or several related keys
-can hold overlapping information. `compact` sends those values to an LLM and
-writes the returned summary as a new memory version.
+can hold overlapping information. `compact` sends selected memory values to an
+LLM and writes the returned summary as a new memory version.
+
+The default single-key workflow is the common one: the **current value** of one
+key has gotten too large, so you compact just that latest live value back down.
 
 ```python
 from kitaru import KitaruClient
 
 client = KitaruClient()
 
-# Multi-key mode: summarize the current value of several keys into one
+# Single-key mode: compact the current value of one key
+result = client.memories.compact(
+    scope="repo_docs",
+    key="conventions/test_runner",
+)
+
+print(result.entry.key)       # "conventions/test_runner"
+print(result.sources_read)    # 1
+```
+
+If you explicitly want to summarize the full non-deleted version history of one
+key instead, set `source_mode="history"`:
+
+```python
+result = client.memories.compact(
+    scope="repo_docs",
+    key="conventions/test_runner",
+    source_mode="history",
+)
+```
+
+Multi-key mode still summarizes the **current value** of each listed key into a
+separate target key:
+
+```python
 result = client.memories.compact(
     scope="repo_docs",
     keys=["conventions/test_runner", "conventions/python"],
@@ -201,24 +228,13 @@ print(result.entry.key)       # "summaries/conventions"
 print(result.sources_read)    # 2
 ```
 
-In multi-key mode, `target_key` is required — this is where the summary gets
-written. The original source keys are left untouched.
-
-In single-key mode, `compact` summarizes all historical versions of one key.
-The summary is written to that same key by default (or to `target_key` if you
-set one):
-
-```python
-result = client.memories.compact(
-    scope="repo_docs",
-    key="conventions/test_runner",
-)
-# result.entry.key == "conventions/test_runner" (newest version is now the summary)
-```
+In multi-key mode, `target_key` is required. The original source keys are left
+untouched.
 
 <Callout type="info">
-  Compact **does not** delete source entries. If you want to reclaim old
-  history after writing a summary, run `purge` separately.
+  Compact **does not** delete source entries. The recommended storage-reduction
+  workflow is: compact, inspect the summary if you want, then run `purge`
+  separately.
 </Callout>
 
 ## Purge old versions
@@ -272,7 +288,16 @@ for record in records:  # newest first
 The CLI exposes the same admin operations:
 
 ```bash
-# Compact multiple keys into a summary
+# Compact the current value of one key
+kitaru memory compact --scope repo_docs \
+    --key conventions/test_runner
+
+# Summarize the full history of one key instead
+kitaru memory compact --scope repo_docs \
+    --key conventions/test_runner \
+    --source-mode history
+
+# Compact multiple current values into one summary key
 kitaru memory compact --scope repo_docs \
     --keys conventions/test_runner --keys conventions/python \
     --target-key summaries/conventions \
@@ -292,7 +317,7 @@ kitaru memory compaction-log --scope repo_docs
 
 Assistants can use the MCP memory maintenance tools:
 
-- `kitaru_memory_compact(scope, key=None, keys=None, target_key=None, instruction=None, model=None, max_tokens=None)`
+- `kitaru_memory_compact(scope, key=None, keys=None, source_mode="current", target_key=None, instruction=None, model=None, max_tokens=None)`
 - `kitaru_memory_purge(key, scope, keep=None)`
 - `kitaru_memory_purge_scope(scope, keep=None, include_deleted=False)`
 - `kitaru_memory_compaction_log(scope)`

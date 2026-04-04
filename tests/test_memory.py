@@ -21,9 +21,9 @@ from kitaru.errors import (
 )
 from kitaru.memory import (
     _COMPACTION_LOG_PREFIX,
-    CompactionRecord,
     MemoryEntry,
     PurgeResult,
+    _compact_impl,
     _compaction_log_impl,
     _delete_impl,
     _get_entry_impl,
@@ -218,7 +218,7 @@ def test_memory_configure_namespace_scope_type_requires_explicit_scope() -> None
 
 def test_memory_configure_rejects_invalid_scope_type() -> None:
     with pytest.raises(KitaruUsageError, match="Memory scope_type"):
-        memory.configure(scope="repo_seed", scope_type="bogus")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        memory.configure(scope="repo_seed", scope_type="bogus")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("scope_type", ["flow", "execution"])
@@ -226,7 +226,7 @@ def test_memory_configure_cannot_infer_flowish_scope_outside_flow(
     scope_type: str,
 ) -> None:
     with pytest.raises(KitaruContextError, match=r"inside a @flow"):
-        memory.configure(scope_type=scope_type)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        memory.configure(scope_type=scope_type)  # type: ignore[arg-type]
 
 
 def test_memory_set_dispatches_to_synthetic_step() -> None:
@@ -1073,6 +1073,242 @@ def test_delete_impl_returns_existing_tombstone_when_key_already_deleted() -> No
 
 
 # ---------------------------------------------------------------------------
+# Compaction implementation
+# ---------------------------------------------------------------------------
+
+
+class TestCompactImpl:
+    def test_single_key_compact_defaults_to_current_value(self) -> None:
+        latest = _memory_artifact(
+            scope="s",
+            key="prefs",
+            version=3,
+            value="latest summary candidate",
+        )
+        new_entry = _memory_entry(
+            key="prefs", scope="s", scope_type="namespace", version=4
+        )
+        client_mock = MagicMock()
+
+        def client_factory() -> MagicMock:
+            return client_mock
+
+        with (
+            patch(
+                "kitaru.memory._fetch_memory_artifact",
+                return_value=latest,
+            ) as fetch_artifact,
+            patch(
+                "kitaru.memory._paginate_artifact_versions",
+                side_effect=AssertionError("history path should not run"),
+            ),
+            patch(
+                "kitaru.memory._set_entry_impl",
+                return_value=new_entry,
+            ) as set_entry_impl,
+            patch("kitaru.memory._write_compaction_record") as write_record,
+            patch(
+                "kitaru.llm.resolve_model_selection",
+                return_value=SimpleNamespace(resolved_model="resolved-model"),
+            ),
+            patch(
+                "kitaru.llm._normalize_messages",
+                return_value=[{"role": "user", "content": "prompt"}],
+            ) as normalize_messages,
+            patch(
+                "kitaru.llm._dispatch_provider_call",
+                return_value=SimpleNamespace(response_text="Compacted latest value"),
+            ),
+        ):
+            result = _compact_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                key="prefs",
+                client_factory=client_factory,
+            )
+
+        assert result.sources_read == 1
+        assert result.entry == new_entry
+        assert result.compaction_record.source_mode == "current"
+        assert result.compaction_record.source_versions == [3]
+        fetch_artifact.assert_called_once()
+        normalize_messages.assert_called_once()
+        prompt = normalize_messages.call_args.args[0]
+        assert "latest summary candidate" in prompt
+        assert "version 3" in prompt
+        set_entry_impl.assert_called_once_with(
+            _MemoryScope(scope="s", scope_type="namespace"),
+            "prefs",
+            "Compacted latest value",
+            client_factory=client_factory,
+            project=None,
+        )
+        record = write_record.call_args.args[1]
+        assert record.source_mode == "current"
+        assert record.target_key == "prefs"
+
+    def test_single_key_history_mode_reads_all_non_deleted_versions(self) -> None:
+        newest = _memory_artifact(scope="s", key="prefs", version=3, value="latest")
+        middle = _memory_artifact(scope="s", key="prefs", version=2, value="middle")
+        deleted = _memory_artifact(
+            scope="s",
+            key="prefs",
+            version=1,
+            value=None,
+            deleted=True,
+        )
+        new_entry = _memory_entry(
+            key="prefs", scope="s", scope_type="namespace", version=4
+        )
+        client_mock = MagicMock()
+
+        with (
+            patch(
+                "kitaru.memory._fetch_memory_artifact",
+                side_effect=AssertionError("current-value path should not run"),
+            ),
+            patch(
+                "kitaru.memory._paginate_artifact_versions",
+                return_value=[newest, middle, deleted],
+            ),
+            patch(
+                "kitaru.memory._set_entry_impl",
+                return_value=new_entry,
+            ),
+            patch("kitaru.memory._write_compaction_record") as write_record,
+            patch(
+                "kitaru.llm.resolve_model_selection",
+                return_value=SimpleNamespace(resolved_model="resolved-model"),
+            ),
+            patch(
+                "kitaru.llm._normalize_messages",
+                return_value=[{"role": "user", "content": "prompt"}],
+            ) as normalize_messages,
+            patch(
+                "kitaru.llm._dispatch_provider_call",
+                return_value=SimpleNamespace(response_text="History summary"),
+            ),
+        ):
+            result = _compact_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                key="prefs",
+                source_mode="history",
+                client_factory=lambda: client_mock,
+            )
+
+        assert result.sources_read == 2
+        assert result.compaction_record.source_mode == "history"
+        assert result.compaction_record.source_versions == [3, 2]
+        prompt = normalize_messages.call_args.args[0]
+        assert "latest" in prompt
+        assert "middle" in prompt
+        assert "version 1" not in prompt
+        record = write_record.call_args.args[1]
+        assert record.source_mode == "history"
+
+    def test_multi_key_compact_keeps_current_value_behavior(self) -> None:
+        runner = _memory_artifact(scope="s", key="runner", version=2, value="just test")
+        python = _memory_artifact(scope="s", key="python", version=5, value="uv run")
+        tombstone = _memory_artifact(
+            scope="s",
+            key="obsolete",
+            version=1,
+            value=None,
+            deleted=True,
+        )
+        new_entry = _memory_entry(
+            key="summary",
+            scope="s",
+            scope_type="namespace",
+            version=6,
+        )
+        fetch_side_effect = [runner, python, tombstone]
+
+        with (
+            patch(
+                "kitaru.memory._fetch_memory_artifact",
+                side_effect=fetch_side_effect,
+            ) as fetch_artifact,
+            patch(
+                "kitaru.memory._paginate_artifact_versions",
+                side_effect=AssertionError("history path should not run"),
+            ),
+            patch(
+                "kitaru.memory._set_entry_impl",
+                return_value=new_entry,
+            ),
+            patch("kitaru.memory._write_compaction_record") as write_record,
+            patch(
+                "kitaru.llm.resolve_model_selection",
+                return_value=SimpleNamespace(resolved_model="resolved-model"),
+            ),
+            patch(
+                "kitaru.llm._normalize_messages",
+                return_value=[{"role": "user", "content": "prompt"}],
+            ) as normalize_messages,
+            patch(
+                "kitaru.llm._dispatch_provider_call",
+                return_value=SimpleNamespace(response_text="Merged summary"),
+            ),
+        ):
+            result = _compact_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                keys=["runner", "python", "obsolete"],
+                target_key="summary",
+                client_factory=lambda: MagicMock(),
+            )
+
+        assert result.sources_read == 2
+        assert fetch_artifact.call_count == 3
+        assert result.compaction_record.source_mode == "current"
+        prompt = normalize_messages.call_args.args[0]
+        assert "just test" in prompt
+        assert "uv run" in prompt
+        assert "obsolete" not in prompt
+        record = write_record.call_args.args[1]
+        assert record.source_mode == "current"
+        assert record.target_key == "summary"
+
+    def test_compact_rejects_history_mode_for_multi_key(self) -> None:
+        with pytest.raises(KitaruUsageError, match="single-key mode"):
+            _compact_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                keys=["runner"],
+                target_key="summary",
+                source_mode="history",
+                client_factory=lambda: MagicMock(),
+            )
+
+    def test_single_key_current_mode_rejects_missing_key(self) -> None:
+        with (
+            patch("kitaru.memory._fetch_memory_artifact", return_value=None),
+            pytest.raises(KitaruUsageError, match="found no current value"),
+        ):
+            _compact_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                key="prefs",
+                client_factory=lambda: MagicMock(),
+            )
+
+    def test_single_key_current_mode_rejects_tombstoned_key(self) -> None:
+        tombstone = _memory_artifact(
+            scope="s",
+            key="prefs",
+            version=4,
+            value=None,
+            deleted=True,
+        )
+        with (
+            patch("kitaru.memory._fetch_memory_artifact", return_value=tombstone),
+            pytest.raises(KitaruUsageError, match="current value is deleted"),
+        ):
+            _compact_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                key="prefs",
+                client_factory=lambda: MagicMock(),
+            )
+
+
+# ---------------------------------------------------------------------------
 # Reserved _compaction/ prefix
 # ---------------------------------------------------------------------------
 
@@ -1298,6 +1534,34 @@ class TestPurgeImpl:
                 keep=-1,
             )
 
+    def test_purge_writes_record_with_null_source_mode(self) -> None:
+        artifacts = [
+            _memory_artifact(scope="s", key="k", version=i, value=f"v{i}")
+            for i in range(1, 3)
+        ]
+
+        with (
+            patch(
+                "kitaru.memory._paginate_artifact_versions",
+                return_value=artifacts,
+            ),
+            patch(
+                "kitaru.memory._delete_preflighted_memory_versions",
+                return_value=1,
+            ),
+            patch("kitaru.memory._write_compaction_record") as write_record,
+        ):
+            _purge_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                "k",
+                keep=1,
+                client_factory=lambda: MagicMock(),
+            )
+
+        record = write_record.call_args.args[1]
+        assert record.operation == "purge"
+        assert record.source_mode is None
+
 
 class TestPurgeScopeImpl:
     def test_purge_scope_deletes_across_keys(self) -> None:
@@ -1396,25 +1660,25 @@ class TestPurgeScopeImpl:
 
 class TestCompactionLog:
     def test_compaction_log_returns_records(self) -> None:
-        record_data = CompactionRecord(
-            operation="purge",
-            scope="s",
-            timestamp=datetime(2026, 4, 1, tzinfo=UTC),
-            source_keys=["k1"],
-            source_versions=[1, 2],
-            target_key=None,
-            target_version=None,
-            instruction=None,
-            model=None,
-            keys_affected=1,
-            versions_deleted=2,
-            keep=1,
-        )
+        record_data = {
+            "operation": "purge",
+            "scope": "s",
+            "timestamp": datetime(2026, 4, 1, tzinfo=UTC).isoformat(),
+            "source_keys": ["k1"],
+            "source_versions": [1, 2],
+            "target_key": None,
+            "target_version": None,
+            "instruction": None,
+            "model": None,
+            "keys_affected": 1,
+            "versions_deleted": 2,
+            "keep": 1,
+        }
         artifact = _memory_artifact(
             scope="s",
             key=f"{_COMPACTION_LOG_PREFIX}s",
             version=1,
-            value=record_data.model_dump(mode="json"),
+            value=record_data,
         )
         client_mock = MagicMock()
         client_mock.list_artifact_versions.return_value = _page(artifact)
@@ -1427,6 +1691,7 @@ class TestCompactionLog:
         assert len(records) == 1
         assert records[0].operation == "purge"
         assert records[0].versions_deleted == 2
+        assert records[0].source_mode is None
 
     def test_compaction_log_empty_scope(self) -> None:
         client_mock = MagicMock()

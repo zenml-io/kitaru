@@ -109,11 +109,13 @@ from kitaru.memory import (
     _history_impl,
     _list_impl,
     _list_scopes_impl,
+    _MemoryCompactionSourceMode,
     _MemoryScope,
     _MemoryScopeType,
     _purge_impl,
     _purge_scope_impl,
     _set_entry_impl,
+    _validate_memory_compaction_source_mode,
     _validate_memory_identifier,
     _validate_memory_scope_type,
     _validate_memory_version,
@@ -964,6 +966,7 @@ class _MemoriesAPI:
         scope: str,
         key: str | None = None,
         keys: builtins.list[str] | None = None,
+        source_mode: _MemoryCompactionSourceMode = "current",
         target_key: str | None = None,
         instruction: str | None = None,
         model: str | None = None,
@@ -983,10 +986,12 @@ class _MemoriesAPI:
             if target_key is not None
             else None
         )
+        validated_source_mode = _validate_memory_compaction_source_mode(source_mode)
         return _compact_impl(
             self._scope(scope),
             key=validated_key,
             keys=validated_keys,
+            source_mode=validated_source_mode,
             target_key=validated_target,
             instruction=instruction,
             model=model,
