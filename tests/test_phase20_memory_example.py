@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 from unittest.mock import patch
 
-from examples.memory.flow_with_memory import run_workflow
+from examples.memory.flow_with_memory import FLOW_SCOPE, run_workflow
 
 from kitaru import KitaruClient
 from kitaru.config import ResolvedModelSelection
@@ -41,7 +41,7 @@ def _stub_dispatch_provider_call(**_kwargs: Any) -> _ProviderCallResult:
 
 def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     """Verify namespace, flow, and execution memory behavior end to end."""
-    namespace_scope = "repo_memory_demo"
+    namespace_scope = "repo_memory_test"
 
     with (
         patch(
@@ -63,7 +63,7 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
 
     assert execution_id
     assert snapshot["namespace_scope"] == namespace_scope
-    assert snapshot["flow_scope"] == "memory_showcase"
+    assert snapshot["flow_scope"] == FLOW_SCOPE
 
     # --- Seed phase assertions ---
     assert "conventions/test_runner" in seed_snapshot["active_keys"]
@@ -98,15 +98,13 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert topic_history[0].execution_id == execution_id
     assert topic_history[1].execution_id is None
 
-    flow_entry = client.memories.get("summaries/latest", scope="memory_showcase")
+    flow_entry = client.memories.get("summaries/latest", scope=FLOW_SCOPE)
     assert flow_entry is not None
     flow_summary = client.artifacts.get(flow_entry.artifact_id).load()
     assert flow_summary == flow_snapshot["planned_summary"]
     assert [
         entry.version
-        for entry in client.memories.history(
-            "summaries/latest", scope="memory_showcase"
-        )
+        for entry in client.memories.history("summaries/latest", scope=FLOW_SCOPE)
     ] == [1]
 
     execution_entries = client.memories.list(scope=execution_id)
@@ -117,7 +115,7 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
 
     scopes = _scope_map(cast(list[dict[str, Any]], client_snapshot["scopes"]))
     assert scopes[namespace_scope]["scope_type"] == "namespace"
-    assert scopes["memory_showcase"]["scope_type"] == "flow"
+    assert scopes[FLOW_SCOPE]["scope_type"] == "flow"
     assert scopes[execution_id]["scope_type"] == "execution"
 
     # --- Maintenance phase assertions ---
@@ -149,3 +147,25 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert log_records[1]["target_key"] == "summaries/conventions"
     assert log_records[1]["target_version"] is not None
     assert log_records[1]["source_mode"] == "current"
+
+
+def test_phase20_memory_without_maintenance(primed_zenml) -> None:
+    """Running without maintenance skips LLM and returns None maintenance snapshot."""
+    snapshot = run_workflow(
+        topic="runtime-test",
+        namespace_scope="repo_memory_runtime",
+        include_maintenance=False,
+    )
+
+    assert snapshot["maintenance_snapshot"] is None
+    assert snapshot["flow_scope"] == FLOW_SCOPE
+
+    # Core runtime claims still hold.
+    seed = snapshot["seed_snapshot"]
+    assert seed["topic_count"] == 2
+    assert seed["deleted_key_hidden"] is True
+
+    flow_snap = snapshot["flow_snapshot"]
+    assert flow_snap["topic_count_before"] == 2
+    assert flow_snap["topic_count_after"] == 3
+    assert flow_snap["obsolete_hidden_after_delete"] is True
