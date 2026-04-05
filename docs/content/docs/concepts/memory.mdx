@@ -83,6 +83,63 @@ Because deletes are **soft deletes** (tombstones) rather than hard purges:
 This is useful for audit trails and future rollback/forking patterns. You always
 have a complete record of what happened to a key, even after deletion.
 
+## Memory maintenance: purge, compact, and audit
+
+Soft deletes (tombstones) preserve full history, but over time a scope can
+accumulate versions you no longer need. Kitaru provides three **admin
+operations** to manage that growth:
+
+| Operation | What it does | Deletes stored versions? | Changes current value? | Writes audit record? |
+|---|---|---|---|---|
+| `delete` | Soft-delete via tombstone | No | Yes (latest = "deleted") | No |
+| `purge` | Hard-delete old versions of one key | Yes | Possibly (if all versions removed) | Yes |
+| `purge_scope` | Hard-delete old versions across a scope | Yes | Possibly | Yes |
+| `compact` | LLM-summarize entries into a new version | No | Yes (writes summary to target key) | Yes |
+| `compaction_log` | Read the maintenance audit trail | N/A | No | N/A |
+
+Think of it this way:
+
+- **delete** is crossing out an entry in the logbook
+- **purge** is ripping out old pages
+- **compact** is writing a summary page from several entries
+
+<Callout type="info">
+  Purge, compact, and compaction log are **admin operations** — they are not
+  available on the module-level `kitaru.memory` API. Use
+  `KitaruClient.memories`, the CLI (`kitaru memory purge`, etc.), or the
+  MCP memory tools.
+</Callout>
+
+### Reserved audit keys
+
+Compaction and purge records are stored under a reserved `_compaction/` prefix
+inside each scope. Normal user writes to keys starting with `_compaction/` are
+rejected. Scope-wide purges intentionally skip this internal key so the
+maintenance log survives cleanup.
+
+### What compact writes
+
+`compact` sends memory values to an LLM and writes the returned **summary text**
+as a new version of the target key.
+
+- With one `key`, compact defaults to summarizing the **current value** of that
+  key.
+- With one `key` and `source_mode="history"`, compact summarizes the full
+  non-deleted version history of that key.
+- With `keys=[...]`, compact summarizes the **current value** of each listed
+  key into `target_key`.
+
+Compact does **not** delete the source entries. If you want to reclaim old
+history after compaction, the recommended workflow is: compact, inspect the
+summary if needed, then run `purge` separately.
+
+Compaction audit records now include the `source_mode` that was used, so the
+maintenance log shows whether a summary came from current state or historical
+versions.
+
+See [Use Memory — Memory maintenance](/guides/memory#compact-memory-with-an-llm-summary)
+for step-by-step examples.
+
 ## Where memory calls are allowed
 
 | Context | `memory.get/list/history` | `memory.set/delete` | Notes |

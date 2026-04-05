@@ -44,7 +44,7 @@ kitaru status
 | Start with the smallest runnable flow | `basic_flow/` | `python first_working_flow.py` |
 | See structured metadata logging | `basic_flow/` | `python flow_with_logging.py` |
 | Persist and reload data across executions | `basic_flow/` | `python flow_with_artifacts.py` |
-| Seed and inspect durable memory across scopes | `memory/` | `python flow_with_memory.py` |
+| Seed, inspect, compact, and purge durable memory | `memory/` | `python flow_with_memory.py` |
 | Set runtime configuration defaults | `basic_flow/` | `python flow_with_configuration.py` |
 | Inspect and manage past executions | `execution_management/` | `python client_execution_management.py` |
 | Pause for human input and resume later | `execution_management/` | `python wait_and_resume.py` |
@@ -73,7 +73,7 @@ python first_working_flow.py
 
 | Example | Demonstrates | Related docs |
 |---|---|---|
-| `memory/flow_with_memory.py` | Outside-flow seeding, in-flow `kitaru.memory`, and explicit-scope inspection with `KitaruClient.memories` | [Use Memory](/guides/memory) |
+| `memory/flow_with_memory.py` | Outside-flow seeding, in-flow `kitaru.memory`, explicit-scope inspection, and post-run maintenance (compact, purge, audit log) via `KitaruClient.memories` | [Use Memory](/guides/memory) |
 
 ## Execution lifecycle and recovery
 

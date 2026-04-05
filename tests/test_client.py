@@ -345,6 +345,49 @@ def test_memories_delete_delegates_to_delete_impl() -> None:
     )
 
 
+def test_memories_compact_delegates_to_compact_impl_with_source_mode() -> None:
+    compact_result = MagicMock()
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch(
+            "kitaru.client._compact_impl", return_value=compact_result
+        ) as compact_impl,
+    ):
+        client = KitaruClient()
+        result = client.memories.compact(
+            scope="repo_scope",
+            key="prefs",
+            source_mode="history",
+        )
+
+    assert result == compact_result
+    assert compact_impl.call_args.args == (
+        _MemoryScope(scope="repo_scope", scope_type="namespace"),
+    )
+    assert compact_impl.call_args.kwargs["key"] == "prefs"
+    assert compact_impl.call_args.kwargs["keys"] is None
+    assert compact_impl.call_args.kwargs["source_mode"] == "history"
+    assert compact_impl.call_args.kwargs["target_key"] is None
+
+
+def test_memories_compact_rejects_invalid_source_mode() -> None:
+    with patch(
+        "kitaru.client.resolve_connection_config", return_value=_resolved_connection()
+    ):
+        client = KitaruClient()
+
+    with pytest.raises(KitaruUsageError, match="source_mode"):
+        client.memories.compact(
+            scope="repo_scope",
+            key="prefs",
+            source_mode="future",  # type: ignore[arg-type]
+        )
+
+
 def test_memories_methods_validate_scope_key_version_and_scope_type() -> None:
     with patch(
         "kitaru.client.resolve_connection_config", return_value=_resolved_connection()

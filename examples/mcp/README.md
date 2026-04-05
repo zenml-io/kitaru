@@ -33,4 +33,8 @@ this example just calls them directly as Python functions.
 For the broader lifecycle story, see
 [Execution Management](https://kitaru.ai/docs/getting-started/execution-management).
 
+For MCP memory tools (list, get, set, compact, purge, compaction log), see the
+[memory walkthrough](../memory/README.md) and its
+[demo playbook](../memory/DEMO_PLAYBOOK.md) for tool-call sequences.
+
 For the full catalog, see [../README.md](../README.md).

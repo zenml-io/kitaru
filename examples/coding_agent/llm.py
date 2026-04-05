@@ -79,7 +79,7 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
     if "/" not in resolved_model:
         raise KitaruUsageError(
             f"Model `{resolved_model}` does not include a provider prefix. "
-            "Use a string like `openai/gpt-4o-mini` or "
+            "Use a string like `openai/gpt-5-nano` or "
             "`anthropic/claude-sonnet-4-20250514`, or register an alias that "
             "resolves to one."
         )

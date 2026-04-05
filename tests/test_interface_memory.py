@@ -11,19 +11,25 @@ from uuid import uuid4
 import pytest
 
 from kitaru._interface_memory import (
+    compact_memory_payload,
+    compaction_log_memory_payload,
     delete_memory_payload,
     get_memory_payload,
     history_memory_payload,
     list_memory_payload,
+    normalize_memory_compaction_source_mode,
+    normalize_memory_keep,
     normalize_memory_key,
     normalize_memory_prefix,
     normalize_memory_scope,
     normalize_memory_scope_type,
     normalize_memory_version,
+    purge_memory_payload,
+    purge_scope_memory_payload,
     set_memory_payload,
 )
 from kitaru.client import KitaruClient
-from kitaru.memory import MemoryEntry
+from kitaru.memory import CompactionRecord, CompactResult, MemoryEntry, PurgeResult
 
 
 def _sample_memory_entry(
@@ -54,6 +60,10 @@ def _client_with_mocks() -> tuple[Any, Any, Any]:
         history=MagicMock(),
         set=MagicMock(),
         delete=MagicMock(),
+        purge=MagicMock(),
+        purge_scope=MagicMock(),
+        compact=MagicMock(),
+        compaction_log=MagicMock(),
     )
     artifacts = SimpleNamespace(get=MagicMock())
     client = cast(Any, SimpleNamespace(memories=memories, artifacts=artifacts))
@@ -199,3 +209,173 @@ def test_delete_memory_payload_returns_none_when_key_missing() -> None:
         delete_memory_payload(cast(KitaruClient, client), key="prefs", scope="repo")
         is None
     )
+
+
+# ---------------------------------------------------------------------------
+# normalize_memory_keep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("keep", [0, 1, 5, 100])
+def test_normalize_memory_keep_accepts_valid_values(keep: int) -> None:
+    assert normalize_memory_keep(keep) == keep
+
+
+def test_normalize_memory_keep_accepts_none() -> None:
+    assert normalize_memory_keep(None) is None
+
+
+@pytest.mark.parametrize("keep", [-1, -100])
+def test_normalize_memory_keep_rejects_negative(keep: int) -> None:
+    with pytest.raises(ValueError, match=r"non-negative"):
+        normalize_memory_keep(keep)
+
+
+# ---------------------------------------------------------------------------
+# normalize_memory_compaction_source_mode
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_memory_compaction_source_mode_defaults_to_current() -> None:
+    assert normalize_memory_compaction_source_mode(None) == "current"
+
+
+@pytest.mark.parametrize("source_mode", ["current", "history"])
+def test_normalize_memory_compaction_source_mode_accepts_known_values(
+    source_mode: str,
+) -> None:
+    assert normalize_memory_compaction_source_mode(source_mode) == source_mode
+
+
+def test_normalize_memory_compaction_source_mode_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="source_mode"):
+        normalize_memory_compaction_source_mode("future")
+
+
+# ---------------------------------------------------------------------------
+# Purge payloads
+# ---------------------------------------------------------------------------
+
+
+def test_purge_memory_payload_delegates_and_serializes() -> None:
+    client, memories, _artifacts = _client_with_mocks()
+    memories.purge.return_value = PurgeResult(
+        versions_deleted=3, keys_affected=1, scope="repo"
+    )
+
+    result = purge_memory_payload(
+        cast(KitaruClient, client),
+        key="prefs",
+        scope="repo",
+        keep=2,
+    )
+
+    assert result["versions_deleted"] == 3
+    assert result["keys_affected"] == 1
+    assert result["scope"] == "repo"
+    memories.purge.assert_called_once_with("prefs", scope="repo", keep=2)
+
+
+def test_purge_scope_memory_payload_delegates() -> None:
+    client, memories, _artifacts = _client_with_mocks()
+    memories.purge_scope.return_value = PurgeResult(
+        versions_deleted=5, keys_affected=2, scope="repo"
+    )
+
+    result = purge_scope_memory_payload(
+        cast(KitaruClient, client),
+        scope="repo",
+        keep=1,
+        include_deleted=True,
+    )
+
+    assert result["versions_deleted"] == 5
+    memories.purge_scope.assert_called_once_with(
+        scope="repo", keep=1, include_deleted=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# Compact payload
+# ---------------------------------------------------------------------------
+
+
+def test_compact_memory_payload_delegates_with_source_mode() -> None:
+    client, memories, _artifacts = _client_with_mocks()
+    entry = _sample_memory_entry(key="prefs", scope="repo", version=4)
+    record = CompactionRecord(
+        operation="compact",
+        scope="repo",
+        timestamp=datetime(2026, 4, 1, tzinfo=UTC),
+        source_keys=["prefs"],
+        source_versions=[3],
+        target_key="prefs",
+        target_version=4,
+        instruction=None,
+        model="gpt-test",
+        source_mode="current",
+        keys_affected=0,
+        versions_deleted=0,
+        keep=None,
+    )
+    memories.compact.return_value = CompactResult(
+        entry=entry,
+        sources_read=1,
+        scope="repo",
+        compaction_record=record,
+    )
+
+    result = compact_memory_payload(
+        cast(KitaruClient, client),
+        scope="repo",
+        key="prefs",
+        source_mode="current",
+    )
+
+    assert result["entry"]["key"] == "prefs"
+    assert result["compaction_record"]["source_mode"] == "current"
+    memories.compact.assert_called_once_with(
+        scope="repo",
+        key="prefs",
+        keys=None,
+        source_mode="current",
+        target_key=None,
+        instruction=None,
+        model=None,
+        max_tokens=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Compaction log payload
+# ---------------------------------------------------------------------------
+
+
+def test_compaction_log_memory_payload_delegates() -> None:
+    client, memories, _artifacts = _client_with_mocks()
+    record = CompactionRecord(
+        operation="purge",
+        scope="repo",
+        timestamp=datetime(2026, 4, 1, tzinfo=UTC),
+        source_keys=["k1"],
+        source_versions=[1, 2],
+        target_key=None,
+        target_version=None,
+        instruction=None,
+        model=None,
+        keys_affected=1,
+        versions_deleted=2,
+        keep=1,
+    )
+    memories.compaction_log.return_value = [record]
+
+    result = compaction_log_memory_payload(
+        cast(KitaruClient, client),
+        scope="repo",
+    )
+
+    assert len(result) == 1
+    assert result[0]["operation"] == "purge"
+    assert result[0]["versions_deleted"] == 2
+    assert result[0]["source_mode"] is None
+    memories.compaction_log.assert_called_once_with(scope="repo")

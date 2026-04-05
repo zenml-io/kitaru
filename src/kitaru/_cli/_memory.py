@@ -160,6 +160,16 @@ def _memory_scopes_rows(scopes: list[dict[str, Any]]) -> list[list[str]]:
     ]
 
 
+def _memory_source_mode_label(payload: dict[str, Any]) -> str:
+    """Render a human-readable compaction source mode label."""
+    source_mode = payload.get("source_mode")
+    if source_mode is not None:
+        return str(source_mode)
+    if payload.get("operation") == "compact":
+        return "legacy"
+    return "-"
+
+
 @memory_app.command(name="scopes")
 def scopes_(
     *,
@@ -395,6 +405,298 @@ def delete_(
             f"Scope: {payload['scope']} ({payload['scope_type']}) | "
             f"Tombstone version: {payload['version']}"
         ),
+    )
+
+
+@memory_app.command(name="purge")
+def purge_(
+    key: Annotated[
+        str,
+        Parameter(
+            help="Memory key to purge old versions of.",
+            allow_leading_hyphen=True,
+        ),
+    ],
+    *,
+    scope: Annotated[
+        str | None,
+        Parameter(help="Memory scope. [required]", show_default=False),
+    ] = None,
+    keep: Annotated[
+        int | None,
+        Parameter(
+            help=("Number of newest versions to retain. Omit to delete all versions."),
+        ),
+    ] = None,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Physically delete old versions of one memory key.
+
+    Omit --keep to delete all versions (including the current value).
+    Use --keep N to retain the newest N versions and delete the rest.
+    An audit record is written to the compaction log when versions are deleted.
+    """
+    command = "memory.purge"
+    output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
+    facade = _facade_module()
+    payload = run_with_cli_error_boundary(
+        lambda: facade.purge_memory_payload(
+            facade.KitaruClient(),
+            key=key,
+            scope=scope,
+            keep=keep,
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    _print_success(
+        f"Purged memory: {key}",
+        detail=(
+            f"Scope: {payload['scope']} | "
+            f"Versions deleted: {payload['versions_deleted']} | "
+            f"Keys affected: {payload['keys_affected']}"
+        ),
+    )
+
+
+@memory_app.command(name="purge-scope")
+def purge_scope_(
+    *,
+    scope: Annotated[
+        str | None,
+        Parameter(help="Memory scope to purge. [required]", show_default=False),
+    ] = None,
+    keep: Annotated[
+        int | None,
+        Parameter(
+            help=(
+                "Number of newest versions to retain per key. "
+                "Omit to delete all versions."
+            ),
+        ),
+    ] = None,
+    include_deleted: Annotated[
+        bool,
+        Parameter(
+            help="Also purge tombstoned (soft-deleted) keys entirely.",
+        ),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Purge old versions across all keys in one scope.
+
+    Active keys retain the newest --keep versions; older versions are physically
+    deleted. Tombstoned (soft-deleted) keys are skipped unless --include-deleted
+    is set, in which case all their versions are removed entirely.
+    The internal compaction audit log is never purged by this command.
+    """
+    command = "memory.purge-scope"
+    output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
+    facade = _facade_module()
+    payload = run_with_cli_error_boundary(
+        lambda: facade.purge_scope_memory_payload(
+            facade.KitaruClient(),
+            scope=scope,
+            keep=keep,
+            include_deleted=include_deleted,
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    _print_success(
+        f"Purged scope: {scope}",
+        detail=(
+            f"Versions deleted: {payload['versions_deleted']} | "
+            f"Keys affected: {payload['keys_affected']}"
+        ),
+    )
+
+
+@memory_app.command(name="compact")
+def compact_(
+    *,
+    scope: Annotated[
+        str | None,
+        Parameter(help="Memory scope. [required]", show_default=False),
+    ] = None,
+    key: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Single key to compact. Defaults to summarizing the current "
+                "value; use --source-mode history for full version history."
+            ),
+            allow_leading_hyphen=True,
+        ),
+    ] = None,
+    keys: Annotated[
+        tuple[str, ...] | None,
+        Parameter(
+            help=(
+                "Multiple keys whose current values should be merged into one summary."
+            ),
+            allow_leading_hyphen=True,
+        ),
+    ] = None,
+    source_mode: Annotated[
+        Literal["current", "history"],
+        Parameter(
+            help=(
+                "Source selection for single-key compaction: current (default) "
+                "or history. Multi-key compaction supports current only."
+            ),
+        ),
+    ] = "current",
+    target_key: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Key to write the summary into. "
+                "Defaults to the source key in single-key mode."
+            ),
+            allow_leading_hyphen=True,
+        ),
+    ] = None,
+    instruction: Annotated[
+        str | None,
+        Parameter(
+            help="Custom instruction for the LLM summarization.",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None,
+        Parameter(
+            help="LLM model to use for summarization.",
+        ),
+    ] = None,
+    max_tokens: Annotated[
+        int | None,
+        Parameter(
+            help="Maximum response tokens for the LLM summarization.",
+        ),
+    ] = None,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Summarize memory values using an LLM and write the result as a new version.
+
+    Use --key for single-key mode (defaults to summarizing the current value of
+    that key) or --keys for multi-key mode (summarizes the current value of
+    each listed key). Use --source-mode history with --key to summarize the
+    full non-deleted version history of one key instead. --key and --keys are
+    mutually exclusive. Multi-key mode requires --target-key and supports only
+    --source-mode current. In single-key mode, the summary is written to the
+    source key unless --target-key is specified. Source entries are not deleted;
+    run purge separately if you want to reclaim old history.
+    """
+    command = "memory.compact"
+    output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
+    keys_list = list(keys) if keys else None
+    facade = _facade_module()
+    payload = run_with_cli_error_boundary(
+        lambda: facade.compact_memory_payload(
+            facade.KitaruClient(),
+            scope=scope,
+            key=key,
+            keys=keys_list,
+            source_mode=source_mode,
+            target_key=target_key,
+            instruction=instruction,
+            model=model,
+            max_tokens=max_tokens,
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    entry = payload["entry"]
+    _print_success(
+        f"Compacted memory into: {entry['key']}",
+        detail=(
+            f"Scope: {entry['scope']} | "
+            f"Version: {entry['version']} | "
+            f"Sources read: {payload['sources_read']} | "
+            f"Source mode: {_memory_source_mode_label(payload['compaction_record'])}"
+        ),
+    )
+
+
+@memory_app.command(name="compaction-log")
+def compaction_log_(
+    *,
+    scope: Annotated[
+        str | None,
+        Parameter(help="Memory scope to inspect. [required]", show_default=False),
+    ] = None,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Show the compaction audit log for one scope.
+
+    Displays all compact and purge audit records for the given scope,
+    newest first. Each record shows what operation was performed, which
+    keys were involved, and the resulting target or deletion counts.
+    """
+    command = "memory.compaction-log"
+    output_format = _resolve_output_format(output)
+    scope = _require_scope(scope, command=command, output=output_format)
+    facade = _facade_module()
+    entries = run_with_cli_error_boundary(
+        lambda: facade.compaction_log_memory_payload(
+            facade.KitaruClient(),
+            scope=scope,
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_items(command, entries, output=output_format)
+        return
+
+    _emit_table(
+        f"Kitaru compaction log ({scope})",
+        [
+            "Operation",
+            "Source Mode",
+            "Timestamp",
+            "Source Keys",
+            "Target Key",
+            "Versions Deleted",
+            "Model",
+        ],
+        [
+            [
+                str(e["operation"]),
+                _memory_source_mode_label(e),
+                _memory_timestamp(e.get("timestamp")),
+                ", ".join(e.get("source_keys", [])),
+                str(e.get("target_key") or "-"),
+                str(e["versions_deleted"]),
+                str(e.get("model") or "-"),
+            ]
+            for e in entries
+        ],
+        empty_message=f"no compaction records found for scope `{scope}`.",
     )
 
 
