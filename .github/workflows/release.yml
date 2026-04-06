@@ -8,8 +8,8 @@ on:
         required: true
         type: string
       kitaru-ui-tag:
-        description: Kitaru UI release tag for Docker image (e.g. v0.1.0). Defaults
-          to v<version>.
+        description: Kitaru UI release tag (e.g. v0.1.0). Defaults to latest kitaru-ui
+          release.
         required: false
         type: string
         default: ''
@@ -52,8 +52,12 @@ jobs:
           if [ -n "$INPUT_TAG" ]; then
             echo "KITARU_UI_TAG=$INPUT_TAG" >> "$GITHUB_ENV"
           else
-            echo "KITARU_UI_TAG=v$VERSION" >> "$GITHUB_ENV"
+            LATEST_TAG=$(gh release view --repo zenml-io/kitaru-ui --json tagName -q '.tagName')
+            echo "Using latest Kitaru UI release: $LATEST_TAG"
+            echo "KITARU_UI_TAG=$LATEST_TAG" >> "$GITHUB_ENV"
           fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Check tag does not already exist (dispatch only)
         if: github.event_name == 'workflow_dispatch'
         run: |
