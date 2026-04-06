@@ -1515,12 +1515,19 @@ def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
             "kitaru.cli.stop_registered_local_server",
             return_value=SimpleNamespace(
                 stopped=True,
-                url="http://127.0.0.1:8383",
+                url="http://127.0.0.1:8237",
             ),
         ),
         patch(
             "kitaru.cli.get_credentials_store",
             return_value=fake_credentials_store,
+        ),
+        patch(
+            "kitaru.inspection.get_local_server",
+            return_value=SimpleNamespace(
+                status=SimpleNamespace(url=None),
+                config=SimpleNamespace(url=None, port=8237, ip_address="127.0.0.1"),
+            ),
         ),
     ):
         result = _logout_current_connection()
