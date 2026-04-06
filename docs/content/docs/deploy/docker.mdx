@@ -15,6 +15,19 @@ Start a server with sensible defaults:
 docker run -d --name kitaru-server -p 8080:8080 zenmldocker/kitaru:latest
 ```
 
+<Callout type="warn">
+  **Apple Silicon (M-series) Macs:** The published image is currently amd64-only.
+  Docker Desktop can run it under Rosetta emulation, but you must add the
+  `--platform` flag:
+
+  ```bash
+  docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 zenmldocker/kitaru:latest
+  ```
+
+  Without `--platform linux/amd64`, `docker pull` and `docker run` will fail
+  with `no matching manifest for linux/arm64/v8`.
+</Callout>
+
 <Callout type="info">
   Use a version-pinned tag (e.g. `zenmldocker/kitaru:0.2.0`) that matches your
   client SDK version to avoid API incompatibilities.
@@ -324,12 +337,29 @@ Common causes:
 ### Login stalls or shows errors
 
 - Ensure the `/health` endpoint returns 200 before attempting login.
+  The server takes ~20 seconds on first startup to initialize the database.
 - If the browser shows `{"detail":"An unexpected error occurred."}`, the
   dashboard assets may be missing from the image. Rebuild from source or use a
   newer image tag.
 - If the CLI keeps printing `authorization_pending`, the server may not be
   fully initialized. Wait and retry.
+- If you see `ConnectionRefused` on port **8383**, you likely ran bare
+  `kitaru login` without a URL. That command starts a local server process —
+  it does not connect to a Docker container. Use
+  `kitaru login http://localhost:8080` to connect to your Docker server.
 - Check `docker logs kitaru-server` for error details.
+
+### `no matching manifest for linux/arm64/v8` (Apple Silicon)
+
+If you see this error when pulling or running the image on an M-series Mac:
+
+```
+no matching manifest for linux/arm64/v8 in the manifest list entries
+```
+
+Add `--platform linux/amd64` to your `docker run` (or `docker pull`) command.
+Docker Desktop will run the image under Rosetta emulation. See the
+[Quick start](#quick-start) callout for the full command.
 
 ### `host.docker.internal` not resolving (Linux)
 
