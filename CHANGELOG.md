@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-06
+
 ### Fixed
 - Fix duplicate terminal handler accumulation after `importlib.reload()` by using marker-based detection instead of `isinstance` checks, preventing duplicated log output in long-running or reload-heavy environments
 
