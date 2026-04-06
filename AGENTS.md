@@ -104,6 +104,18 @@ Agent-facing commands should keep the shared `--output json` / `-o json` contrac
 
 Use `pytest` for unit and integration tests. Name files `test_*.py` and test functions `test_*`. Mirror source paths (example: `src/kitaru/runtime.py` -> `tests/test_runtime.py`). Every bug fix should include a regression test that fails before the fix and passes after it.
 
+## Analytics Instrumentation
+
+Kitaru collects anonymous usage analytics for opted-in users. When adding new features, discuss analytics coverage with the core team to decide what should be tracked.
+
+- All event names must be added to the `AnalyticsEvent` enum in `src/kitaru/analytics.py`.
+- Track only non-sensitive metadata (event names, boolean flags, enum values, counts). Never include user content, file paths, prompts, or secret values.
+- Follow the existing patterns for each surface:
+  - **CLI:** feature events via `track()` in subcommand handlers (`src/kitaru/_cli/`).
+  - **MCP:** `@tracked_mcp_tool` decorator in `src/kitaru/mcp/server.py`.
+  - **Core SDK:** `track(AnalyticsEvent.X, {...})` at lifecycle points in the relevant module.
+- All `track()` calls must fail silently — never break user-facing functionality for analytics.
+
 ## Commit & Pull Request Guidelines
 
 Use short, imperative subjects (for example: `Add ...`, `Update ...`, `Create ...`). Keep commit titles concise (about 50 chars), and explain the why in the body when needed.
