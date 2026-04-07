@@ -443,7 +443,6 @@ def test_serialize_execution_contract() -> None:
             "image_tag": None,
             "target_repository": None,
             "user": None,
-            "build_options": None,
         },
         "cache": None,
         "retries": None,

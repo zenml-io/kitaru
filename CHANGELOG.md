@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, `user`, and `build_options` fields for finer-grained container image configuration
+- `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, and `user` fields for finer-grained container image configuration
 
 ## [0.3.2] - 2026-04-06
 

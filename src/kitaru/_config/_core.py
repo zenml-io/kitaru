@@ -45,7 +45,6 @@ class ImageSettings(BaseModel):
     image_tag: str | None = None
     target_repository: str | None = None
     user: str | None = None
-    build_options: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -110,7 +109,6 @@ class ImageSettings(BaseModel):
             and self.image_tag is None
             and self.target_repository is None
             and self.user is None
-            and self.build_options is None
         )
 
 
@@ -265,7 +263,6 @@ def _coerce_image_input(value: Any) -> ImageSettings | None:
             image_tag=value.image_tag,
             target_repository=value.target_repository,
             user=value.user,
-            build_options=value.build_options or None,
         )
     if isinstance(value, str):
         normalized_image = value.strip()
@@ -342,11 +339,6 @@ def _merge_image_settings(
             else base.target_repository
         ),
         user=(override.user if override.user is not None else base.user),
-        build_options=(
-            override.build_options
-            if override.build_options is not None
-            else base.build_options
-        ),
     )
 
 
@@ -425,8 +417,6 @@ def image_settings_to_docker_settings(
         docker_settings_kwargs["target_repository"] = image_settings.target_repository
     if image_settings.user is not None:
         docker_settings_kwargs["user"] = image_settings.user
-    if image_settings.build_options is not None:
-        docker_settings_kwargs["build_options"] = image_settings.build_options
 
     return DockerSettings(**docker_settings_kwargs)
 
