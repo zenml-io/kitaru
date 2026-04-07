@@ -97,8 +97,12 @@ def wait(
 
     resolved_timeout = _DEFAULT_WAIT_TIMEOUT_SECONDS if timeout is None else timeout
 
+    zenml_wait = _resolve_zenml_wait()
+
     from kitaru.analytics import AnalyticsEvent, track
 
+    # Track after resolving the wait function but before the blocking call,
+    # so the event only fires when wait support is actually available.
     track(
         AnalyticsEvent.WAIT_CREATED,
         {
@@ -108,7 +112,6 @@ def wait(
         },
     )
 
-    zenml_wait = _resolve_zenml_wait()
     return zenml_wait(
         schema=schema,
         question=question,

@@ -230,13 +230,12 @@ def cli() -> None:
     # stored server URL.
     if _should_bootstrap_store(argv):
         GlobalConfiguration().zen_store  # noqa: B018
-    args = sys.argv[1:]
-    if not args:
+    if not argv:
         command = "help"
-    elif len(args) >= 2 and args[0] in _MULTI_TOKEN_COMMANDS:
-        command = f"{args[0]} {args[1]}"
+    elif len(argv) >= 2 and argv[0] in _MULTI_TOKEN_COMMANDS:
+        command = f"{argv[0]} {argv[1]}"
     else:
-        command = args[0]
+        command = argv[0]
     track(AnalyticsEvent.CLI_INVOKED, {"command": command})
     _apply_runtime_version()
     app()

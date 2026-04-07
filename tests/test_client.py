@@ -1584,7 +1584,7 @@ def test_replay_fallback_emits_requested_and_replayed_events() -> None:
 
     replayed_call = track_mock.call_args_list[1]
     assert replayed_call.args[0] == AnalyticsEvent.FLOW_REPLAYED
-    assert replayed_call.args[1]["execution_id"] == str(replayed_run.id)
+    assert replayed_call.args[1]["replay_path"] == "pipeline_fallback"
 
 
 def test_replay_fallback_failure_emits_requested_then_failed() -> None:
@@ -1753,7 +1753,7 @@ def test_retry_emits_execution_retried_event() -> None:
 
     track_mock.assert_called_once_with(
         AnalyticsEvent.EXECUTION_RETRIED,
-        {"execution_id": str(run_id)},
+        {},
     )
 
 
@@ -1800,7 +1800,7 @@ def test_resume_emits_execution_resumed_event() -> None:
 
     track_mock.assert_called_once_with(
         AnalyticsEvent.EXECUTION_RESUMED,
-        {"execution_id": str(run_id)},
+        {},
     )
 
 
@@ -1840,7 +1840,7 @@ def test_cancel_emits_execution_cancelled_event() -> None:
 
     track_mock.assert_called_once_with(
         AnalyticsEvent.EXECUTION_CANCELLED,
-        {"execution_id": str(run_id)},
+        {},
     )
 
 
@@ -1893,7 +1893,6 @@ def test_input_emits_wait_resolved_event() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.WAIT_RESOLVED,
         {
-            "execution_id": str(run_id),
             "resolution": "continue",
         },
     )
@@ -1943,7 +1942,6 @@ def test_abort_wait_emits_wait_resolved_event() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.WAIT_RESOLVED,
         {
-            "execution_id": str(run_id),
             "resolution": "abort",
         },
     )

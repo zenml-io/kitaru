@@ -369,7 +369,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     event_stream_handler=wrapped_handler,
                     spec=spec,
                 )
-        except BaseException as exc:
+        except Exception as exc:
             _track_adapter_run(method="run", error=exc)
             raise
         _track_adapter_run(method="run")
@@ -416,7 +416,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 event_stream_handler=wrapped_handler,
                 spec=spec,
             )
-        except BaseException as exc:
+        except Exception as exc:
             _track_adapter_run(method="run_sync", error=exc)
             raise
         _track_adapter_run(method="run_sync")
@@ -465,7 +465,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     spec=spec,
                 ) as run:
                     yield run
-            except BaseException as error:
+            except Exception as error:
                 iter_status = "failed"
                 iter_error = error
                 raise

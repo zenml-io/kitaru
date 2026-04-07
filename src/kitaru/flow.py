@@ -378,10 +378,19 @@ def _classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
 
 
 def _safe_classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
-    """Classify failure origin, defaulting to UNKNOWN on unexpected errors."""
+    """Classify failure origin for analytics without crashing.
+
+    Falls back to UNKNOWN if classification itself raises, so analytics
+    never masks the user's real execution error.
+    """
     try:
         return _classify_run_failure(run)
     except Exception:
+        logger.debug(
+            "Failed to classify failure origin for run %s; defaulting to UNKNOWN",
+            run.id,
+            exc_info=True,
+        )
         return FailureOrigin.UNKNOWN
 
 
@@ -445,7 +454,6 @@ class FlowHandle:
             return
         self._terminal_event_emitted = True
         metadata: dict[str, Any] = {
-            "execution_id": str(run.id),
             "status": run.status.value,
         }
         if failure_origin is not None:
@@ -671,7 +679,6 @@ class _FlowDefinition:
         )
 
         replay_metadata = {
-            "source_execution_id": str(original_run.id),
             "from_checkpoint": from_,
             "replay_path": "flow_wrapper",
         }
@@ -727,7 +734,7 @@ class _FlowDefinition:
             frozen_execution_spec=frozen_execution_spec,
         )
 
-        track(AnalyticsEvent.FLOW_REPLAYED, {"execution_id": str(replayed_run.id)})
+        track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "flow_wrapper"})
         return FlowHandle(replayed_run)
 
     def _submit(
@@ -773,12 +780,7 @@ class _FlowDefinition:
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
-        track(
-            AnalyticsEvent.FLOW_SUBMITTED,
-            {
-                "execution_id": str(run.id),
-            },
-        )
+        track(AnalyticsEvent.FLOW_SUBMITTED, {})
         persist_frozen_execution_spec(
             run_id=run.id,
             frozen_execution_spec=frozen_execution_spec,

@@ -691,12 +691,7 @@ def use_stack(name_or_id: str) -> StackInfo:
 
     from kitaru.analytics import AnalyticsEvent, track
 
-    track(
-        AnalyticsEvent.STACK_ACTIVATED,
-        {
-            "stack_id": str(result.id),
-        },
-    )
+    track(AnalyticsEvent.STACK_ACTIVATED, {})
     return result
 
 

@@ -526,7 +526,6 @@ class _ExecutionsAPI:
         track(
             AnalyticsEvent.WAIT_RESOLVED,
             {
-                "execution_id": exec_id,
                 "resolution": resolution,
             },
         )
@@ -565,7 +564,7 @@ class _ExecutionsAPI:
             client=self._client_ref,
             operation_name="retry",
         )
-        track(AnalyticsEvent.EXECUTION_RETRIED, {"execution_id": exec_id})
+        track(AnalyticsEvent.EXECUTION_RETRIED, {})
         return self.get(exec_id)
 
     def resume(self, exec_id: str) -> Execution:
@@ -592,7 +591,7 @@ class _ExecutionsAPI:
             client=self._client_ref,
             operation_name="resume",
         )
-        track(AnalyticsEvent.EXECUTION_RESUMED, {"execution_id": exec_id})
+        track(AnalyticsEvent.EXECUTION_RESUMED, {})
         return self.get(exec_id)
 
     def replay(
@@ -648,7 +647,6 @@ class _ExecutionsAPI:
         )
 
         replay_metadata: dict[str, Any] = {
-            "source_execution_id": str(source_run.id),
             "from_checkpoint": from_,
             "replay_path": "pipeline_fallback",
         }
@@ -699,7 +697,7 @@ class _ExecutionsAPI:
             )
             raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
 
-        track(AnalyticsEvent.FLOW_REPLAYED, {"execution_id": replayed_exec_id})
+        track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "pipeline_fallback"})
         return self.get(replayed_exec_id)
 
     def get(self, exec_id: str) -> Execution:
@@ -780,7 +778,7 @@ class _ExecutionsAPI:
         """Cancel an execution if supported by the backend state."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         stop_run(run=run, graceful=False)
-        track(AnalyticsEvent.EXECUTION_CANCELLED, {"execution_id": exec_id})
+        track(AnalyticsEvent.EXECUTION_CANCELLED, {})
         return self.get(exec_id)
 
 

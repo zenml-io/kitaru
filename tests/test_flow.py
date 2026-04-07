@@ -892,7 +892,7 @@ def test_submit_emits_flow_submitted_event() -> None:
 
     track_mock.assert_called_once_with(
         AnalyticsEvent.FLOW_SUBMITTED,
-        {"execution_id": str(run.id)},
+        {},
     )
 
 
@@ -964,7 +964,7 @@ def test_replay_success_emits_requested_and_replayed_events() -> None:
 
     replayed_call = track_mock.call_args_list[1]
     assert replayed_call.args[0] == AnalyticsEvent.FLOW_REPLAYED
-    assert replayed_call.args[1]["execution_id"] == str(replayed_run.id)
+    assert replayed_call.args[1]["replay_path"] == "flow_wrapper"
 
 
 def test_replay_failure_emits_requested_then_failed_events() -> None:
@@ -1073,7 +1073,7 @@ def test_flow_handle_wait_emits_flow_terminal_on_success() -> None:
 
     track_mock.assert_called_once_with(
         AnalyticsEvent.FLOW_TERMINAL,
-        {"execution_id": str(run_id), "status": "completed"},
+        {"status": "completed"},
     )
 
 
@@ -1101,7 +1101,6 @@ def test_flow_handle_wait_emits_flow_terminal_on_failure() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.FLOW_TERMINAL,
         {
-            "execution_id": str(run_id),
             "status": "failed",
             "failure_origin": FailureOrigin.USER_CODE.value,
         },
@@ -1128,7 +1127,7 @@ def test_flow_handle_get_emits_flow_terminal_on_success() -> None:
 
     track_mock.assert_called_once_with(
         AnalyticsEvent.FLOW_TERMINAL,
-        {"execution_id": str(run_id), "status": "completed"},
+        {"status": "completed"},
     )
 
 
@@ -1183,7 +1182,6 @@ def test_flow_handle_wait_still_raises_when_classify_fails() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.FLOW_TERMINAL,
         {
-            "execution_id": str(run_id),
             "status": "failed",
             "failure_origin": FailureOrigin.UNKNOWN.value,
         },

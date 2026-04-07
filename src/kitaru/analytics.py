@@ -83,12 +83,13 @@ def set_source(suffix_or_source: str) -> None:
         )
 
 
-def track(event_name: str, metadata: dict[str, Any] | None = None) -> bool:
+def track(event_name: AnalyticsEvent, metadata: dict[str, Any] | None = None) -> bool:
     """Track a Kitaru analytics event via ZenML's pipeline.
 
     Passes ``event_name`` as a plain string to ZenML's ``track()`` (which
-    accepts ``Union[AnalyticsEvent, str]``).  Kitaru event names are defined
-    here in the Kitaru repo — no corresponding enum entry is needed in ZenML.
+    accepts ``Union[AnalyticsEvent, str]``).  ``AnalyticsEvent`` is a
+    ``StrEnum``, so it works as a ``str`` at the ZenML boundary while giving
+    callers type-checked event names.
 
     Silently returns False if analytics are disabled or if tracking fails.
     """
