@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Shared memory transport helpers and serializers (`kitaru._interface_memory`, `kitaru.inspection.serialize_memory_*`) so future CLI and MCP surfaces can reuse one payload/validation layer instead of re-implementing memory semantics
 - Runnable memory example under `examples/memory/flow_with_memory.py` showing outside-flow seeding, in-flow `kitaru.memory` usage, and explicit-scope inspection via `KitaruClient.memories`
 - Memory example now renders narrated text output by default, auto-detects model availability for maintenance demos, and includes a public demo playbook (`examples/memory/DEMO_PLAYBOOK.md`)
+- `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, and `user` fields for finer-grained container image configuration
+
+## [0.3.2] - 2026-04-06
+
+### Fixed
+- Skip eager ZenML store bootstrap for commands that don't need a server connection (`--version`, `--help`, `login`, `logout`, `init`), preventing ~30 second startup delays when the stored config points to an unreachable server (#107)
+
+### Changed
+- Add Apple Silicon Docker guidance: `--platform linux/amd64` workaround for M-series Macs, troubleshooting for manifest mismatch errors, and startup timing notes (#106)
+- Default Kitaru UI Docker build tag to latest release instead of requiring explicit version (#103)
+
+## [0.3.1] - 2026-04-06
+
+### Fixed
+- Fix duplicate terminal handler accumulation after `importlib.reload()` by using marker-based detection instead of `isinstance` checks, preventing duplicated log output in long-running or reload-heavy environments
 
 ### Changed
 - `kitaru.memory.set/get/list/history/delete()` now require an explicit configured scope outside flows and raise `KitaruStateError` with setup guidance when no outside-flow scope has been configured
@@ -21,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Documentation now includes dedicated memory concept/guide pages and refreshed generated CLI, SDK, and changelog reference output for the shipped memory surfaces
 - Bump minimum `pydantic-ai-slim` from `>=0.2.0` to `>=1.75.0` to align with upstream API changes (new method signatures, `tool_plain` decorator, `AgentSpec` support)
 - Rewritten examples: realistic research-agent metaphor in basic flow, two-wait pattern (boolean gate + Pydantic schema) in wait/resume, parallel tool submission in coding agent, and consistent “Getting Started” READMEs across all example groups
+- Add PyPI classifiers and keywords for improved package discoverability
 
 ### Fixed
 - Memory artifact version queries now use the correct `desc:version_number` sort order (was `version_number:desc`)
