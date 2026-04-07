@@ -513,6 +513,7 @@ def test_serialize_execution_contract() -> None:
             "image_tag": None,
             "target_repository": None,
             "user": None,
+            "platform": None,
         },
         "cache": None,
         "retries": None,

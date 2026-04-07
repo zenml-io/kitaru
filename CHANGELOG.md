@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Runnable memory example under `examples/memory/flow_with_memory.py` showing outside-flow seeding, in-flow `kitaru.memory` usage, and explicit-scope inspection via `KitaruClient.memories`
 - Memory example now renders narrated text output by default, auto-detects model availability for maintenance demos, and includes a public demo playbook (`examples/memory/DEMO_PLAYBOOK.md`)
 - `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, and `user` fields for finer-grained container image configuration
+- `ImageSettings.platform` field for specifying the target Docker build platform (e.g. `linux/amd64`)
 
 ## [0.3.2] - 2026-04-06
 
