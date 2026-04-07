@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Sequence
 
 from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
@@ -186,6 +187,40 @@ from kitaru.inspection import log_store_mismatch_details as _log_store_mismatch_
 
 app.version = _UNKNOWN_VERSION
 
+# Commands that manage their own connection lifecycle or never need a live
+# store.  Matching is on the first non-option token in sys.argv.
+_DEFERRED_BOOTSTRAP_COMMANDS: frozenset[str] = frozenset(
+    {
+        "init",
+        "login",
+        "logout",
+    }
+)
+
+_HELP_FLAGS: frozenset[str] = frozenset({"--help", "-h"})
+_VERSION_FLAGS: frozenset[str] = frozenset({"--version", "-V"})
+
+
+def _should_bootstrap_store(argv: Sequence[str]) -> bool:
+    """Return whether the CLI should eagerly initialize the ZenML store.
+
+    Commands that don't need a live server connection (help, version, login,
+    logout, init) return False so a stale/unreachable stored server URL
+    cannot block CLI startup.
+    """
+    _skip_flags = _HELP_FLAGS | _VERSION_FLAGS
+    first_command = None
+    for tok in argv:
+        if tok in _skip_flags:
+            return False
+        if first_command is None and not tok.startswith("-"):
+            first_command = tok
+
+    if first_command is None:
+        return False
+
+    return first_command not in _DEFERRED_BOOTSTRAP_COMMANDS
+
 
 def _sdk_version() -> str:
     """Resolve the installed SDK version lazily."""
@@ -201,12 +236,17 @@ def cli() -> None:
     """Entry point for the `kitaru` console script."""
     from kitaru.analytics import AnalyticsEvent, set_source, track
 
+    argv = sys.argv[1:]
     set_source("cli")
     # Touch zen_store to mark GlobalConfiguration as initialized before
     # any analytics calls.  Without this, AnalyticsContext.__enter__()
     # sees is_initialized=False and silently skips all tracking.
-    GlobalConfiguration().zen_store  # noqa: B018
-    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(sys.argv[1:2]) or "help"})
+    # Skip for commands that don't need a live store connection (help,
+    # version, login, logout, init) to avoid blocking on a stale/unreachable
+    # stored server URL.
+    if _should_bootstrap_store(argv):
+        GlobalConfiguration().zen_store  # noqa: B018
+    track(AnalyticsEvent.CLI_INVOKED, {"command": " ".join(argv[:1]) or "help"})
     _apply_runtime_version()
     app()
 
