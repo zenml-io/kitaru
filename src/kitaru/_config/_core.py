@@ -38,13 +38,24 @@ class ImageSettings(BaseModel):
     base_image: str | None = None
     requirements: list[str] | None = None
     dockerfile: str | None = None
+    build_context_root: str | None = None
     environment: dict[str, str] | None = None
     apt_packages: list[str] | None = None
     replicate_local_python_environment: bool | None = None
+    image_tag: str | None = None
+    target_repository: str | None = None
+    user: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("base_image", "dockerfile")
+    @field_validator(
+        "base_image",
+        "dockerfile",
+        "build_context_root",
+        "image_tag",
+        "target_repository",
+        "user",
+    )
     @classmethod
     def _validate_optional_strings(cls, value: str | None) -> str | None:
         if value is None:
@@ -91,9 +102,13 @@ class ImageSettings(BaseModel):
             self.base_image is None
             and self.requirements is None
             and self.dockerfile is None
+            and self.build_context_root is None
             and self.environment is None
             and self.apt_packages is None
             and self.replicate_local_python_environment is None
+            and self.image_tag is None
+            and self.target_repository is None
+            and self.user is None
         )
 
 
@@ -239,11 +254,15 @@ def _coerce_image_input(value: Any) -> ImageSettings | None:
             base_image=value.parent_image,
             requirements=value.requirements,
             dockerfile=value.dockerfile,
+            build_context_root=value.build_context_root,
             environment=value.environment,
             apt_packages=value.apt_packages or None,
             replicate_local_python_environment=(
                 replicate if isinstance(replicate, bool) else None
             ),
+            image_tag=value.image_tag,
+            target_repository=value.target_repository,
+            user=value.user,
         )
     if isinstance(value, str):
         normalized_image = value.strip()
@@ -295,6 +314,11 @@ def _merge_image_settings(
         dockerfile=(
             override.dockerfile if override.dockerfile is not None else base.dockerfile
         ),
+        build_context_root=(
+            override.build_context_root
+            if override.build_context_root is not None
+            else base.build_context_root
+        ),
         environment=merged_environment,
         apt_packages=(
             override.apt_packages
@@ -306,6 +330,15 @@ def _merge_image_settings(
             if override.replicate_local_python_environment is not None
             else base.replicate_local_python_environment
         ),
+        image_tag=(
+            override.image_tag if override.image_tag is not None else base.image_tag
+        ),
+        target_repository=(
+            override.target_repository
+            if override.target_repository is not None
+            else base.target_repository
+        ),
+        user=(override.user if override.user is not None else base.user),
     )
 
 
@@ -368,6 +401,8 @@ def image_settings_to_docker_settings(
 
     if image_settings.dockerfile is not None:
         docker_settings_kwargs["dockerfile"] = image_settings.dockerfile
+    if image_settings.build_context_root is not None:
+        docker_settings_kwargs["build_context_root"] = image_settings.build_context_root
     if image_settings.environment is not None:
         docker_settings_kwargs["environment"] = image_settings.environment
     if image_settings.apt_packages is not None:
@@ -376,6 +411,12 @@ def image_settings_to_docker_settings(
         docker_settings_kwargs["replicate_local_python_environment"] = (
             image_settings.replicate_local_python_environment
         )
+    if image_settings.image_tag is not None:
+        docker_settings_kwargs["image_tag"] = image_settings.image_tag
+    if image_settings.target_repository is not None:
+        docker_settings_kwargs["target_repository"] = image_settings.target_repository
+    if image_settings.user is not None:
+        docker_settings_kwargs["user"] = image_settings.user
 
     return DockerSettings(**docker_settings_kwargs)
 
