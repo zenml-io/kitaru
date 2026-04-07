@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Shared memory transport helpers and serializers (`kitaru._interface_memory`, `kitaru.inspection.serialize_memory_*`) so future CLI and MCP surfaces can reuse one payload/validation layer instead of re-implementing memory semantics
 - Runnable memory example under `examples/memory/flow_with_memory.py` showing outside-flow seeding, in-flow `kitaru.memory` usage, and explicit-scope inspection via `KitaruClient.memories`
 - `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, and `user` fields for finer-grained container image configuration
+- `ImageSettings.platform` field for specifying the target Docker build platform (e.g. `linux/amd64`)
 
 ## [0.3.2] - 2026-04-06
 
