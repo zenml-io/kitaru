@@ -1435,6 +1435,49 @@ def test_logout_returns_local_server_mode_for_local_connection() -> None:
     assert str(result) == "Logged out from the local Kitaru server."
 
 
+def test_logout_treats_localhost_docker_server_as_remote() -> None:
+    """Docker localhost URLs should not be mistaken for the local daemon."""
+    fake_gc = Mock()
+    fake_gc.uses_local_store = False
+    fake_gc.store_configuration = SimpleNamespace(url="http://localhost:8080")
+    fake_credentials_store = Mock()
+
+    with (
+        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.cli._connected_to_local_server", return_value=False),
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="http://localhost:8080",
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(
+                stopped=True,
+                url="http://127.0.0.1:8383",
+            ),
+        ),
+        patch(
+            "kitaru.cli.get_credentials_store",
+            return_value=fake_credentials_store,
+        ),
+        patch(
+            "kitaru.inspection.get_local_server",
+            return_value=SimpleNamespace(
+                status=SimpleNamespace(url="http://127.0.0.1:8383"),
+                config=SimpleNamespace(url="http://127.0.0.1:8383"),
+            ),
+        ),
+    ):
+        result = _logout_current_connection()
+
+    fake_gc.set_default_store.assert_called_once_with()
+    fake_credentials_store.clear_credentials.assert_called_once_with(
+        "http://localhost:8080"
+    )
+    assert result.mode == "remote_server"
+    assert result.target == "http://localhost:8080"
+
+
 def test_logout_is_idempotent_on_local_store() -> None:
     """The logout helper should be a no-op when already on the local store."""
     fake_gc = Mock()
@@ -1473,12 +1516,19 @@ def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
             "kitaru.cli.stop_registered_local_server",
             return_value=SimpleNamespace(
                 stopped=True,
-                url="http://127.0.0.1:8383",
+                url="http://127.0.0.1:8237",
             ),
         ),
         patch(
             "kitaru.cli.get_credentials_store",
             return_value=fake_credentials_store,
+        ),
+        patch(
+            "kitaru.inspection.get_local_server",
+            return_value=SimpleNamespace(
+                status=SimpleNamespace(url=None),
+                config=SimpleNamespace(url=None, port=8237, ip_address="127.0.0.1"),
+            ),
         ),
     ):
         result = _logout_current_connection()
@@ -4658,7 +4708,11 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
     fake_gc.store_configuration = SimpleNamespace(url="http://127.0.0.1:8237")
     fake_gc.config_directory = "/tmp/kitaru-config"
     fake_local_server = SimpleNamespace(
-        config=SimpleNamespace(provider=SimpleNamespace(value="daemon")),
+        config=SimpleNamespace(
+            provider=SimpleNamespace(value="daemon"),
+            port=8237,
+            ip_address="127.0.0.1",
+        ),
         status=SimpleNamespace(
             url=None,
             status_message="service daemon is not running",
