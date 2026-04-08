@@ -198,6 +198,14 @@ def _run_clean(
         handled_exceptions=(Exception,),
     )
 
+    if not result.aborted:
+        from kitaru.analytics import AnalyticsEvent, track
+
+        track(
+            AnalyticsEvent.CLEAN_COMPLETED,
+            {"scope": scope.value, "dry_run": False},
+        )
+
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
@@ -223,14 +231,10 @@ def project(
         bool,
         Parameter(help="Show what would be deleted without deleting."),
     ] = False,
-    force: Annotated[
-        bool,
-        Parameter(help="Required when cleanup would destroy model registry aliases."),
-    ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
     """Remove the project-local .kitaru/ directory."""
-    _run_clean(CleanScope.PROJECT, yes=yes, dry_run=dry_run, force=force, output=output)
+    _run_clean(CleanScope.PROJECT, yes=yes, dry_run=dry_run, force=False, output=output)
 
 
 @clean_app.command(name="global")

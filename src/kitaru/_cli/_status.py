@@ -893,11 +893,22 @@ def info(
     )
 
     if file is not None:
-        _write_info_file(snapshot, file)
+        run_with_cli_error_boundary(
+            lambda: _write_info_file(snapshot, file),
+            command=command,
+            output=output_format,
+            exit_with_error=_exit_with_error,
+            handled_exceptions=(OSError, ValueError),
+        )
+
+        from kitaru.analytics import AnalyticsEvent, track
+
+        file_format = (
+            "yaml" if Path(file).suffix.lower() in (".yaml", ".yml") else "json"
+        )
+        track(AnalyticsEvent.INFO_EXPORTED, {"format": file_format})
+
         if output_format == CLIOutputFormat.JSON:
-            file_format = (
-                "yaml" if Path(file).suffix.lower() in (".yaml", ".yml") else "json"
-            )
             _emit_json_item(
                 command,
                 {"file": file, "format": file_format},

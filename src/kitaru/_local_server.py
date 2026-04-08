@@ -318,14 +318,15 @@ def _force_kill_server_process(local_server: Any) -> int | None:
         if config is not None:
             pid = getattr(config, "pid", None)
 
-    if pid is None or not isinstance(pid, int):
+    if pid is None or not isinstance(pid, int) or pid <= 0:
         return None
 
     try:
         os.kill(pid, signal.SIGKILL)
         return pid
     except ProcessLookupError:
-        return pid
+        # Process already exited — don't claim we killed it
+        return None
     except OSError:
         logger.warning("Could not force-kill server process %d", pid)
         return None

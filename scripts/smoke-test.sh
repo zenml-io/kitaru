@@ -218,13 +218,15 @@ fi
 # ---------------------------------------------------------------------------
 section_header "CLI commands"
 
-run_test "kitaru --version"       $UV_RUN kitaru --version
-run_test "kitaru status"          $UV_RUN kitaru status
-run_test "kitaru info"            $UV_RUN kitaru info
-run_test "kitaru status -o json"  $UV_RUN kitaru status -o json
-run_test "kitaru stack list"      $UV_RUN kitaru stack list
-run_test "kitaru stack current"   $UV_RUN kitaru stack current
-run_test "kitaru model list"      $UV_RUN kitaru model list
+run_test "kitaru --version"              $UV_RUN kitaru --version
+run_test "kitaru status"                 $UV_RUN kitaru status
+run_test "kitaru info"                   $UV_RUN kitaru info
+run_test "kitaru info --all -o json"     $UV_RUN kitaru info --all -o json
+run_test "kitaru status -o json"         $UV_RUN kitaru status -o json
+run_test "kitaru stack list"             $UV_RUN kitaru stack list
+run_test "kitaru stack current"          $UV_RUN kitaru stack current
+run_test "kitaru model list"             $UV_RUN kitaru model list
+run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run
 
 # ---------------------------------------------------------------------------
 # Project init

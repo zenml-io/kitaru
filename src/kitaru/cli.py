@@ -185,6 +185,7 @@ app.version = _UNKNOWN_VERSION
 # store.  Matching is on the first non-option token in sys.argv.
 _DEFERRED_BOOTSTRAP_COMMANDS: frozenset[str] = frozenset(
     {
+        "clean",
         "init",
         "login",
         "logout",
@@ -227,7 +228,7 @@ def _apply_runtime_version() -> None:
 
 
 _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
-    {"executions", "secrets", "log-store", "stack", "model"}
+    {"clean", "executions", "secrets", "log-store", "stack", "model"}
 )
 
 

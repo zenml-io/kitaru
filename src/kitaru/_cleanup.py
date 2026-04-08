@@ -227,10 +227,8 @@ def _build_global_preview(
         # Compute per-child sizes once, then sum for the parent total
         # to avoid walking the tree twice.
         child_sizes = [(d, _dir_size(d)) for d in store_dirs]
-        top_level_files_size = (
-            sum(_file_size(f) for f in local_stores.iterdir() if f.is_file())
-            if local_stores.exists()
-            else 0
+        top_level_files_size = sum(
+            _file_size(f) for f in local_stores.iterdir() if f.is_file()
         )
         ls_size = sum(s for _, s in child_sizes) + top_level_files_size
         total += ls_size
@@ -367,6 +365,7 @@ def _read_alias_count() -> int | None:
             return 0
         return len(config.model_registry.aliases)
     except Exception:
+        logger.debug("Could not read model registry alias count", exc_info=True)
         return None
 
 
@@ -654,10 +653,13 @@ def execute_cleanup_plan(
                     f"Force-killed process {force_killed_pid}."
                 )
 
-        if _delete_directory(config_root):
-            deleted_paths.append(str(config_root))
-        else:
-            warnings.append(f"Config directory already absent: {config_root}")
+        try:
+            if _delete_directory(config_root):
+                deleted_paths.append(str(config_root))
+            else:
+                warnings.append(f"Config directory already absent: {config_root}")
+        except OSError as exc:
+            warnings.append(f"Failed to delete config directory {config_root}: {exc}")
 
         try:
             _reset_global_config()
@@ -669,8 +671,11 @@ def execute_cleanup_plan(
 
     if plan.project_config_path:
         project_path = Path(plan.project_config_path)
-        if _delete_directory(project_path):
-            deleted_paths.append(str(project_path))
+        try:
+            if _delete_directory(project_path):
+                deleted_paths.append(str(project_path))
+        except OSError as exc:
+            warnings.append(f"Failed to delete project config {project_path}: {exc}")
 
     if (
         plan.can_reinitialize_project
@@ -680,6 +685,11 @@ def execute_cleanup_plan(
         and prompt_reinitialize("Would you like to re-initialize this project?")
     ):
         reinitialized = _reinitialize_project(Path(plan.repo_root))
+        if not reinitialized:
+            warnings.append(
+                f"Could not re-initialize project at {plan.repo_root}. "
+                "Run `kitaru init` manually to set up the project again."
+            )
 
     if plan.active_environment_overrides:
         env_lines = [

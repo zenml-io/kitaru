@@ -4947,6 +4947,129 @@ class TestCleanAll:
         assert exc_info.value.code == 0
 
 
+class TestExecuteCleanupPlan:
+    """Tests for the actual deletion path of execute_cleanup_plan()."""
+
+    def test_project_cleanup_deletes_directory(self, tmp_path: Path) -> None:
+        """execute_cleanup_plan should delete the project config directory."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("active_stack: default\n")
+
+        plan = CleanupPlan(
+            scope=CleanScope.PROJECT,
+            repo_root=str(tmp_path),
+            project_config_path=str(project_dir),
+        )
+
+        result = execute_cleanup_plan(plan, yes=True, force=False)
+
+        assert not result.aborted
+        assert not result.dry_run
+        assert str(project_dir) in result.deleted_paths
+        assert not project_dir.exists()
+
+    def test_global_cleanup_creates_backup_before_deleting(
+        self, tmp_path: Path
+    ) -> None:
+        """Backup should exist before config directory is removed."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+        db_dir = config_root / "local_stores" / "default_zen_store"
+        db_dir.mkdir(parents=True)
+        db_file = db_dir / "zenml.db"
+        db_file.write_text("fake database content")
+
+        backup_path = str(tmp_path / "config-backups" / "backup-test.db")
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root=str(config_root),
+            backup_path=backup_path,
+            model_registry_alias_count=0,
+        )
+
+        with patch("kitaru._cleanup._reset_global_config"):
+            result = execute_cleanup_plan(plan, yes=True, force=False)
+
+        assert not result.aborted
+        assert Path(backup_path).exists()
+        assert Path(backup_path).read_text() == "fake database content"
+        assert not config_root.exists()
+        assert str(config_root) in result.deleted_paths
+
+    def test_reinit_failure_produces_warning(self, tmp_path: Path) -> None:
+        """Failed re-initialization should add a warning."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("active_stack: default\n")
+
+        plan = CleanupPlan(
+            scope=CleanScope.PROJECT,
+            repo_root=str(tmp_path),
+            project_config_path=str(project_dir),
+            can_reinitialize_project=True,
+        )
+
+        with patch(
+            "kitaru._cleanup._reinitialize_project",
+            return_value=False,
+        ):
+            result = execute_cleanup_plan(
+                plan,
+                yes=False,
+                force=False,
+                prompt_confirm=lambda _: True,
+                prompt_reinitialize=lambda _: True,
+            )
+
+        assert any("re-initialize" in w.lower() for w in result.warnings)
+
+    def test_deletion_failure_produces_warning(self, tmp_path: Path) -> None:
+        """OSError during deletion should produce a warning, not a crash."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        plan = CleanupPlan(
+            scope=CleanScope.PROJECT,
+            repo_root=str(tmp_path),
+            project_config_path=str(tmp_path / "nonexistent" / ".kitaru"),
+        )
+
+        with patch(
+            "kitaru._cleanup._delete_directory",
+            side_effect=OSError("Permission denied"),
+        ):
+            result = execute_cleanup_plan(
+                plan,
+                yes=True,
+                force=False,
+            )
+
+        assert any("permission denied" in w.lower() for w in result.warnings)
+
+
 # ---------------------------------------------------------------------------
 # Enhanced info tests
 # ---------------------------------------------------------------------------

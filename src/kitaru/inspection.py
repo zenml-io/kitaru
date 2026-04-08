@@ -422,20 +422,24 @@ def _collect_packages(
     if include_all:
         packages: dict[str, str] = {}
         for dist in importlib.metadata.distributions():
-            name = dist.metadata["Name"]
-            if name:
-                normalized = name.lower().replace("_", "-")
-                packages[normalized] = dist.version
+            try:
+                name = dist.metadata["Name"]
+                if name:
+                    normalized = name.lower().replace("_", "-")
+                    packages[normalized] = dist.version
+            except (KeyError, TypeError, ValueError):
+                continue
         return dict(sorted(packages.items()))
 
     if package_names:
         packages = {}
         for name in package_names:
+            normalized = name.lower().replace("_", "-")
             try:
                 version = importlib.metadata.version(name)
-                packages[name.lower()] = version
+                packages[normalized] = version
             except importlib.metadata.PackageNotFoundError:
-                packages[name.lower()] = "not installed"
+                packages[normalized] = "not installed"
         return dict(sorted(packages.items()))
 
     return None
