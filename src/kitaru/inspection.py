@@ -437,6 +437,8 @@ def serialize_memory_entry(entry: MemoryEntry) -> dict[str, Any]:
         "is_deleted": entry.is_deleted,
         "artifact_id": entry.artifact_id,
         "execution_id": entry.execution_id,
+        "flow_id": entry.flow_id,
+        "flow_name": entry.flow_name,
     }
 
 

@@ -39,6 +39,9 @@ def _sample_memory_entry(
     scope_type: str = "namespace",
     version: int = 2,
     is_deleted: bool = False,
+    execution_id: str | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
 ) -> MemoryEntry:
     return MemoryEntry(
         key=key,
@@ -49,7 +52,9 @@ def _sample_memory_entry(
         created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
         is_deleted=is_deleted,
         artifact_id=str(uuid4()),
-        execution_id=None,
+        execution_id=execution_id,
+        flow_id=flow_id,
+        flow_name=flow_name,
     )
 
 
@@ -91,7 +96,14 @@ def test_normalizers_raise_value_error_for_invalid_transport_input(
 
 def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
     client, memories, artifacts = _client_with_mocks()
-    entry = _sample_memory_entry(scope="repo_scope", version=3)
+    entry = _sample_memory_entry(
+        scope="exec-123",
+        scope_type="execution",
+        version=3,
+        execution_id=None,
+        flow_id="flow-456",
+        flow_name="repo_memory_demo",
+    )
     memories.get.return_value = entry
     artifacts.get.return_value = SimpleNamespace(
         load=MagicMock(return_value={"theme": "dark"})
@@ -100,7 +112,7 @@ def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
     payload = get_memory_payload(
         cast(KitaruClient, client),
         key="prefs",
-        scope="repo_scope",
+        scope="exec-123",
         version=3,
     )
 
@@ -108,16 +120,18 @@ def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
         "key": "prefs",
         "value_type": "dict",
         "version": 3,
-        "scope": "repo_scope",
-        "scope_type": "namespace",
+        "scope": "exec-123",
+        "scope_type": "execution",
         "created_at": "2026-04-01T12:00:00+00:00",
         "is_deleted": False,
         "artifact_id": entry.artifact_id,
         "execution_id": None,
+        "flow_id": "flow-456",
+        "flow_name": "repo_memory_demo",
         "value": {"theme": "dark"},
         "value_format": "json",
     }
-    memories.get.assert_called_once_with("prefs", scope="repo_scope", version=3)
+    memories.get.assert_called_once_with("prefs", scope="exec-123", version=3)
     artifacts.get.assert_called_once_with(entry.artifact_id)
 
 

@@ -53,6 +53,11 @@ def _memory_execution_label(execution_id: str | None) -> str:
     return execution_id or "detached"
 
 
+def _memory_flow_label(flow_value: str | None) -> str:
+    """Render optional flow-context values for CLI output."""
+    return flow_value or "not indexed"
+
+
 def _stringify_memory_value(value: Any, *, value_format: str) -> str:
     """Render one loaded memory value for text-mode CLI output."""
     if value_format == "json":
@@ -72,7 +77,7 @@ def _parse_memory_cli_value(raw_value: str) -> Any:
 
 def _memory_entry_rows(entry: dict[str, Any]) -> list[tuple[str, str]]:
     """Build metadata rows for one serialized memory entry."""
-    return [
+    rows = [
         ("Key", str(entry["key"])),
         ("Scope", str(entry["scope"])),
         ("Scope type", str(entry["scope_type"])),
@@ -81,8 +86,20 @@ def _memory_entry_rows(entry: dict[str, Any]) -> list[tuple[str, str]]:
         ("Deleted", "yes" if entry["is_deleted"] else "no"),
         ("Created", _memory_timestamp(entry.get("created_at"))),
         ("Execution", _memory_execution_label(entry.get("execution_id"))),
-        ("Artifact ID", str(entry["artifact_id"])),
     ]
+    if (
+        entry.get("scope_type") == "execution"
+        or entry.get("flow_id")
+        or entry.get("flow_name")
+    ):
+        rows.extend(
+            [
+                ("Flow ID", _memory_flow_label(entry.get("flow_id"))),
+                ("Flow Name", _memory_flow_label(entry.get("flow_name"))),
+            ]
+        )
+    rows.append(("Artifact ID", str(entry["artifact_id"])))
+    return rows
 
 
 def _memory_list_rows(entries: list[dict[str, Any]]) -> list[list[str]]:

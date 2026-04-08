@@ -162,6 +162,8 @@ def _memory_payload(
     value_type: str = "dict",
     is_deleted: bool = False,
     execution_id: str | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
     artifact_id: str | None = None,
     value: Any | None = None,
     value_format: str | None = None,
@@ -177,6 +179,8 @@ def _memory_payload(
         "is_deleted": is_deleted,
         "artifact_id": artifact_id or f"artifact-{key}-{version}",
         "execution_id": execution_id,
+        "flow_id": flow_id,
+        "flow_name": flow_name,
     }
     if value_format is not None:
         payload["value_format"] = value_format
@@ -2180,6 +2184,36 @@ def test_memory_get_renders_value_sections(capsys: pytest.CaptureFixture[str]) -
     assert "Metadata" in output
     assert '"test_framework": "pytest"' in output
     assert "kr-222" in output
+
+
+def test_memory_get_execution_scope_shows_flow_context(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Execution-scope detail view should surface logical flow context."""
+    payload = _memory_payload(
+        key="scratch",
+        scope="exec-123",
+        scope_type="execution",
+        version=2,
+        flow_id="flow-456",
+        flow_name="repo_memory_demo",
+        value={"draft": True},
+        value_format="json",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.get_memory_payload", return_value=payload),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "get", "scratch", "--scope", "exec-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Flow ID" in output
+    assert "flow-456" in output
+    assert "Flow Name" in output
+    assert "repo_memory_demo" in output
 
 
 def test_memory_get_errors_when_missing(capsys: pytest.CaptureFixture[str]) -> None:

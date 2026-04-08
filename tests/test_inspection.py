@@ -148,6 +148,9 @@ def _sample_memory_entry(
     scope: str = "repo_scope",
     scope_type: str = "namespace",
     is_deleted: bool = False,
+    execution_id: str | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
 ) -> MemoryEntry:
     return MemoryEntry(
         key=key,
@@ -158,7 +161,13 @@ def _sample_memory_entry(
         created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
         is_deleted=is_deleted,
         artifact_id="artifact-123",
-        execution_id="exec-123" if scope_type != "namespace" else None,
+        execution_id=(
+            execution_id
+            if execution_id is not None
+            else ("exec-123" if scope_type != "namespace" else None)
+        ),
+        flow_id=flow_id,
+        flow_name=flow_name,
     )
 
 
@@ -352,7 +361,33 @@ def test_serialize_memory_entry_contract() -> None:
         "is_deleted": False,
         "artifact_id": "artifact-123",
         "execution_id": "exec-123",
+        "flow_id": None,
+        "flow_name": None,
     }
+
+
+def test_serialize_memory_entry_includes_flow_context_when_present() -> None:
+    payload = serialize_memory_entry(
+        MemoryEntry(
+            key="prefs",
+            value_type="dict",
+            version=2,
+            scope="exec-123",
+            scope_type="execution",
+            created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+            is_deleted=False,
+            artifact_id="artifact-123",
+            execution_id=None,
+            flow_id="flow-456",
+            flow_name="repo_memory_demo",
+        )
+    )
+
+    assert payload["scope"] == "exec-123"
+    assert payload["scope_type"] == "execution"
+    assert payload["execution_id"] is None
+    assert payload["flow_id"] == "flow-456"
+    assert payload["flow_name"] == "repo_memory_demo"
 
 
 def test_serialize_memory_history_contract() -> None:
