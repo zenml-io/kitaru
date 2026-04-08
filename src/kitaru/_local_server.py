@@ -42,7 +42,7 @@ class LocalServerStopResult:
 
 
 # ---------------------------------------------------------------------------
-# Dashboard UI patching helpers
+# Bundled UI helpers
 # ---------------------------------------------------------------------------
 
 
@@ -187,12 +187,20 @@ def _deploy_and_connect(
     try:
         if ui_dir := _resolve_bundled_ui_dir():
             os.environ["ZENML_SERVER_DASHBOARD_FILES_PATH"] = str(ui_dir)
+            logger.info("Kitaru UI directory: %s", ui_dir)
+        else:
+            logger.debug(
+                "No bundled Kitaru UI found (expected at %s); "
+                "server will use default ZenML dashboard",
+                Path(__file__).parent / "_ui" / "dist",
+            )
         os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-api"
         deployed_server = deployer.deploy_server(config, timeout=timeout)
         deployer.connect_to_server()
     except Exception as exc:
         raise _local_server_start_error(action=action, exc=exc) from exc
     finally:
+        os.environ.pop("ZENML_SERVER_DASHBOARD_FILES_PATH", None)
         os.environ["ZENML_DEFAULT_ANALYTICS_SOURCE"] = "kitaru-python"
 
     deployed_url = (
@@ -216,9 +224,9 @@ def start_or_connect_local_server(
 ) -> LocalServerConnectionResult:
     """Start a daemon local server or connect to an existing one.
 
-    Before starting or connecting, ensures the ZenML dashboard directory
-    contains Kitaru UI assets.  If a compatible server is already running
-    but serving a stale dashboard, it is restarted.
+    When deploying a new server, sets ZENML_SERVER_DASHBOARD_FILES_PATH to
+    the bundled Kitaru UI directory (if available) so the server serves the
+    Kitaru dashboard instead of the default ZenML dashboard.
     """
     _validate_local_server_inputs(port=port, timeout=timeout)
     _ensure_local_server_dependencies()
@@ -239,6 +247,12 @@ def start_or_connect_local_server(
         is_running = _is_server_running(local_server) and bool(existing_url)
 
         if is_running and (port is None or port == existing_port):
+            if _resolve_bundled_ui_dir() is not None:
+                logger.debug(
+                    "Connecting to existing server; dashboard may differ "
+                    "from bundled Kitaru UI. Restart the server to pick "
+                    "up UI updates (kitaru logout && kitaru login).",
+                )
             try:
                 deployer.connect_to_server()
             except Exception as exc:
@@ -253,14 +267,12 @@ def start_or_connect_local_server(
             _track_local_server_started(result)
             return result
 
-        # Server exists but isn't running or is on a different port.
-        if local_server is not None:
-            try:
-                deployer.remove_server(timeout=timeout)
-            except Exception as exc:
-                raise KitaruBackendError(
-                    f"Failed to stop existing local server: {exc}"
-                ) from exc
+        try:
+            deployer.remove_server(timeout=timeout)
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to stop existing local server: {exc}"
+            ) from exc
 
     action: Literal["started", "restarted"] = (
         "restarted" if port is not None and local_server is not None else "started"
