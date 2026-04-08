@@ -34,6 +34,7 @@ scripts/              # Doc generation + site merge scripts
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
+  smoke-test.sh              # Pre-release end-to-end sanity check (CLI, flows, MCP, LLM)
 docker/               # Dockerfiles — see docker/CLAUDE.md for full architecture details
   Dockerfile          # Production server (FROM zenmldocker/zenml-server + Kitaru + Kitaru UI)
   Dockerfile.server-dev  # Dev server for local UI testing (local source + local UI dist)
@@ -114,9 +115,10 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 ### Releasing a new version
 
 1. Ensure `develop` has all changes for the release.
-2. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
-3. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-4. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
+2. Run the smoke test: `./scripts/smoke-test.sh` (or `./scripts/smoke-test.sh -s` to skip reinstall). This exercises CLI, SDK flows, MCP tools, and LLM integration against a local server. Set `OPENAI_API_KEY` to include LLM tests. Use `-k` to keep the server running and inspect the dashboard afterward.
+3. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
+4. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
+5. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
 
 ## Development commands
 
