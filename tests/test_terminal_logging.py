@@ -365,6 +365,41 @@ class TestDecideDropRules:
         record = _make_record("zenml.config.global_config", msg)
         assert terminal_logging._decide(record) is None
 
+    def test_resume_config_warning_dropped_with_typo(self) -> None:
+        """Current upstream text has doubled 'the the' — should be dropped."""
+        record = _make_record(
+            "zenml.execution.pipeline.dynamic.runner",
+            "Configuration for step `llm_0` changed since the the "
+            "orchestration environment was restarted. If the step "
+            "needs to be retried, it will use the old configuration.",
+            level=logging.WARNING,
+        )
+        assert terminal_logging._decide(record) is None
+
+    def test_resume_config_warning_dropped_without_typo(self) -> None:
+        """Future corrected text (single 'the') should also be dropped."""
+        record = _make_record(
+            "zenml.execution.pipeline.dynamic.runner",
+            "Configuration for step `search_zenml_pipelines_1` changed since "
+            "the orchestration environment was restarted. If the step "
+            "needs to be retried, it will use the old configuration.",
+            level=logging.WARNING,
+        )
+        assert terminal_logging._decide(record) is None
+
+    def test_resume_config_warning_not_dropped_for_non_zenml_logger(self) -> None:
+        """Same text from a non-ZenML logger should pass through."""
+        record = _make_record(
+            "my_app.runner",
+            "Configuration for step `llm_0` changed since the the "
+            "orchestration environment was restarted. If the step "
+            "needs to be retried, it will use the old configuration.",
+            level=logging.WARNING,
+        )
+        decision = terminal_logging._decide(record)
+        assert decision is not None
+        assert "Configuration for step" in decision.text
+
 
 class TestDecidePassthrough:
     """Non-ZenML records and unmatched ZenML messages pass through."""
