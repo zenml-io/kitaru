@@ -301,15 +301,23 @@ def _detect_environment_type() -> str:
     return "native"
 
 
+@dataclass(frozen=True)
+class ConfigProvenance:
+    """Resolved config file paths for provenance display."""
+
+    kitaru_global_config: str | None = None
+    zenml_global_config: str | None = None
+    local_stores: str | None = None
+    repository_config: str | None = None
+    uses_repo_local: bool = False
+
+
 def _collect_config_provenance(
     gc: GlobalConfiguration,
     *,
     repository_root: str | None,
-) -> tuple[str | None, str | None, str | None, str | None, bool]:
-    """Collect config file path provenance.
-
-    Returns (kitaru_config, zenml_config, local_stores, repo_config, uses_repo).
-    """
+) -> ConfigProvenance:
+    """Collect config file path provenance."""
     from kitaru._config._log_store import _kitaru_global_config_path
 
     config_dir = Path(gc.config_directory)
@@ -335,12 +343,12 @@ def _collect_config_provenance(
             repo_config_str = str(repo_config)
             uses_repo = True
 
-    return (
-        kitaru_config_str,
-        zenml_config_str,
-        local_stores_str,
-        repo_config_str,
-        uses_repo,
+    return ConfigProvenance(
+        kitaru_global_config=kitaru_config_str,
+        zenml_global_config=zenml_config_str,
+        local_stores=local_stores_str,
+        repository_config=repo_config_str,
+        uses_repo_local=uses_repo,
     )
 
 
@@ -416,7 +424,7 @@ def _collect_packages(
         for dist in importlib.metadata.distributions():
             name = dist.metadata["Name"]
             if name:
-                normalized = name.lower().replace("-", "-")
+                normalized = name.lower().replace("_", "-")
                 packages[normalized] = dist.version
         return dict(sorted(packages.items()))
 
@@ -526,18 +534,16 @@ def build_runtime_snapshot(
         with contextlib.suppress(Exception):
             snapshot.active_project = client.active_project.name
 
-        # Config provenance (needs repository_root)
         with contextlib.suppress(Exception):
-            (
-                snapshot.kitaru_global_config_path,
-                snapshot.zenml_global_config_path,
-                snapshot.local_stores_path,
-                snapshot.repository_config_path,
-                snapshot.uses_repo_local_config,
-            ) = _collect_config_provenance(
+            provenance = _collect_config_provenance(
                 gc,
                 repository_root=snapshot.repository_root,
             )
+            snapshot.kitaru_global_config_path = provenance.kitaru_global_config
+            snapshot.zenml_global_config_path = provenance.zenml_global_config
+            snapshot.local_stores_path = provenance.local_stores
+            snapshot.repository_config_path = provenance.repository_config
+            snapshot.uses_repo_local_config = provenance.uses_repo_local
 
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         snapshot.warning = f"Unable to query the configured store: {exc}"

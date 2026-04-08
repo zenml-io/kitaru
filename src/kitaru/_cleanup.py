@@ -32,12 +32,21 @@ class CleanScope(StrEnum):
     ALL = "all"
 
 
+class PreviewEntryType(StrEnum):
+    """Type of node in a cleanup dry-run preview tree."""
+
+    FILE = "file"
+    DIRECTORY = "directory"
+    BACKUP = "backup"
+    SERVER = "server"
+
+
 @dataclass(frozen=True)
 class CleanupPreviewEntry:
     """One node in the dry-run preview tree."""
 
     path: str
-    entry_type: str
+    entry_type: PreviewEntryType
     size_bytes: int | None = None
     note: str | None = None
     children: tuple[CleanupPreviewEntry, ...] = ()
@@ -111,7 +120,7 @@ def _file_size(path: Path) -> int:
         return 0
 
 
-def _format_size(size_bytes: int) -> str:
+def format_size(size_bytes: int) -> str:
     """Human-readable file size."""
     if size_bytes < 1024:
         return f"{size_bytes} B"
@@ -138,7 +147,7 @@ def _build_project_preview(project_config_path: Path) -> list[CleanupPreviewEntr
                 children.append(
                     CleanupPreviewEntry(
                         path=str(child),
-                        entry_type="file",
+                        entry_type=PreviewEntryType.FILE,
                         size_bytes=size,
                     )
                 )
@@ -148,7 +157,7 @@ def _build_project_preview(project_config_path: Path) -> list[CleanupPreviewEntr
                 children.append(
                     CleanupPreviewEntry(
                         path=str(child),
-                        entry_type="directory",
+                        entry_type=PreviewEntryType.DIRECTORY,
                         size_bytes=size,
                     )
                 )
@@ -158,7 +167,7 @@ def _build_project_preview(project_config_path: Path) -> list[CleanupPreviewEntr
     entries.append(
         CleanupPreviewEntry(
             path=str(project_config_path),
-            entry_type="directory",
+            entry_type=PreviewEntryType.DIRECTORY,
             size_bytes=total,
             children=tuple(children),
         )
@@ -190,7 +199,7 @@ def _build_global_preview(
         children.append(
             CleanupPreviewEntry(
                 path=str(kitaru_yaml),
-                entry_type="file",
+                entry_type=PreviewEntryType.FILE,
                 size_bytes=size,
                 note=note,
             )
@@ -203,36 +212,45 @@ def _build_global_preview(
         children.append(
             CleanupPreviewEntry(
                 path=str(zenml_config),
-                entry_type="file",
+                entry_type=PreviewEntryType.FILE,
                 size_bytes=size,
             )
         )
 
     local_stores = config_root / "local_stores"
     if local_stores.exists():
-        ls_size = _dir_size(local_stores)
-        total += ls_size
         try:
             store_dirs = sorted(d for d in local_stores.iterdir() if d.is_dir())
         except OSError:
             store_dirs = []
+
+        # Compute per-child sizes once, then sum for the parent total
+        # to avoid walking the tree twice.
+        child_sizes = [(d, _dir_size(d)) for d in store_dirs]
+        top_level_files_size = (
+            sum(_file_size(f) for f in local_stores.iterdir() if f.is_file())
+            if local_stores.exists()
+            else 0
+        )
+        ls_size = sum(s for _, s in child_sizes) + top_level_files_size
+        total += ls_size
 
         ls_children: tuple[CleanupPreviewEntry, ...] = ()
         if len(store_dirs) <= _LOCAL_STORES_THRESHOLD:
             ls_children = tuple(
                 CleanupPreviewEntry(
                     path=str(d),
-                    entry_type="directory",
-                    size_bytes=_dir_size(d),
+                    entry_type=PreviewEntryType.DIRECTORY,
+                    size_bytes=size,
                 )
-                for d in store_dirs
+                for d, size in child_sizes
             )
 
         note = f"{len(store_dirs)} stores" if store_dirs else None
         children.append(
             CleanupPreviewEntry(
                 path=str(local_stores),
-                entry_type="directory",
+                entry_type=PreviewEntryType.DIRECTORY,
                 size_bytes=ls_size,
                 note=note,
                 children=ls_children,
@@ -246,7 +264,7 @@ def _build_global_preview(
         children.append(
             CleanupPreviewEntry(
                 path=str(daemon_dir),
-                entry_type="directory",
+                entry_type=PreviewEntryType.DIRECTORY,
                 size_bytes=size,
             )
         )
@@ -263,7 +281,7 @@ def _build_global_preview(
                 children.append(
                     CleanupPreviewEntry(
                         path=str(child),
-                        entry_type="file",
+                        entry_type=PreviewEntryType.FILE,
                         size_bytes=size,
                     )
                 )
@@ -273,7 +291,7 @@ def _build_global_preview(
                 children.append(
                     CleanupPreviewEntry(
                         path=str(child),
-                        entry_type="directory",
+                        entry_type=PreviewEntryType.DIRECTORY,
                         size_bytes=size,
                     )
                 )
@@ -283,7 +301,7 @@ def _build_global_preview(
     entries.append(
         CleanupPreviewEntry(
             path=str(config_root),
-            entry_type="directory",
+            entry_type=PreviewEntryType.DIRECTORY,
             size_bytes=total,
             children=tuple(children),
         )
@@ -293,7 +311,7 @@ def _build_global_preview(
         entries.append(
             CleanupPreviewEntry(
                 path=backup_path,
-                entry_type="backup",
+                entry_type=PreviewEntryType.BACKUP,
                 note="Database backup will be saved here",
             )
         )
@@ -400,8 +418,9 @@ def _describe_local_server_for_cleanup() -> tuple[str | None, bool]:
     if local_server is None:
         return "not running", False
 
-    status = getattr(local_server, "status", None)
-    url = getattr(status, "url", None) if status else None
+    from kitaru._local_server import _existing_local_server_url
+
+    url = _existing_local_server_url(local_server)
     if url:
         return f"running at {url}", True
     return "registered but not running", True
@@ -423,7 +442,6 @@ def build_cleanup_plan(
     preview_entries: list[CleanupPreviewEntry] = []
     total_bytes = 0
 
-    # Project resolution
     if scope in (CleanScope.PROJECT, CleanScope.ALL):
         resolved_root = _resolve_repo_root()
         if resolved_root is not None:
@@ -438,7 +456,6 @@ def build_cleanup_plan(
                 "No Kitaru project found. Run `kitaru init` to create one."
             )
 
-    # Global resolution
     if scope in (CleanScope.GLOBAL, CleanScope.ALL):
         config_root = _resolve_config_root()
         global_config_root = str(config_root)
@@ -462,10 +479,12 @@ def build_cleanup_plan(
         )
         preview_entries.extend(global_entries)
         for entry in global_entries:
-            if entry.entry_type != "backup" and entry.size_bytes is not None:
+            if (
+                entry.entry_type != PreviewEntryType.BACKUP
+                and entry.size_bytes is not None
+            ):
                 total_bytes += entry.size_bytes
 
-    # Project preview
     if project_config_path is not None:
         project_entries = _build_project_preview(Path(project_config_path))
         preview_entries.extend(project_entries)
@@ -473,7 +492,6 @@ def build_cleanup_plan(
             if entry.size_bytes is not None:
                 total_bytes += entry.size_bytes
 
-    # Environment overrides
     from kitaru.config import list_active_kitaru_environment_variables
 
     env_overrides = list_active_kitaru_environment_variables()
@@ -602,7 +620,6 @@ def execute_cleanup_plan(
                 "Use --force to proceed."
             )
 
-    # Confirmation
     if not yes:
         if prompt_confirm is None:
             raise KitaruUsageError(
@@ -614,11 +631,9 @@ def execute_cleanup_plan(
         ):
             return CleanupResult(scope=scope, aborted=True)
 
-    # Global cleanup
     if scope in (CleanScope.GLOBAL, CleanScope.ALL) and plan.global_config_root:
         config_root = Path(plan.global_config_root)
 
-        # Backup
         if plan.backup_path:
             try:
                 _create_backup(plan.backup_path, config_root)
@@ -627,7 +642,6 @@ def execute_cleanup_plan(
                     f"Failed to create database backup: {exc}"
                 ) from exc
 
-        # Stop local server
         if plan.local_server_would_stop:
             from kitaru._local_server import stop_registered_local_server_for_cleanup
 
@@ -640,13 +654,11 @@ def execute_cleanup_plan(
                     f"Force-killed process {force_killed_pid}."
                 )
 
-        # Delete config root
         if _delete_directory(config_root):
             deleted_paths.append(str(config_root))
         else:
             warnings.append(f"Config directory already absent: {config_root}")
 
-        # Reset singletons and recreate default config
         try:
             _reset_global_config()
         except Exception as exc:
@@ -655,13 +667,11 @@ def execute_cleanup_plan(
                 "On-disk cleanup already completed."
             )
 
-    # Project cleanup
     if plan.project_config_path:
         project_path = Path(plan.project_config_path)
         if _delete_directory(project_path):
             deleted_paths.append(str(project_path))
 
-    # Re-init offer
     if (
         plan.can_reinitialize_project
         and plan.repo_root
@@ -671,7 +681,6 @@ def execute_cleanup_plan(
     ):
         reinitialized = _reinitialize_project(Path(plan.repo_root))
 
-    # Environment override warnings
     if plan.active_environment_overrides:
         env_lines = [
             f"  {entry.name}={entry.value}"

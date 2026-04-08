@@ -11,9 +11,10 @@ from kitaru._cleanup import (
     CleanupPlan,
     CleanupPreviewEntry,
     CleanupResult,
-    _format_size,
+    PreviewEntryType,
     build_cleanup_plan,
     execute_cleanup_plan,
+    format_size,
     serialize_cleanup_result,
 )
 from kitaru._interface_errors import run_with_cli_error_boundary
@@ -45,12 +46,12 @@ def _render_preview_entry(
     prefix = " " * indent
     lines: list[str] = []
 
-    size_str = f" ({_format_size(entry.size_bytes)})" if entry.size_bytes else ""
+    size_str = f" ({format_size(entry.size_bytes)})" if entry.size_bytes else ""
     note_str = f" — {entry.note}" if entry.note else ""
 
-    if entry.entry_type == "backup":
+    if entry.entry_type == PreviewEntryType.BACKUP:
         lines.append(f"{prefix}Backup: {entry.path}{note_str}")
-    elif entry.entry_type == "server":
+    elif entry.entry_type == PreviewEntryType.SERVER:
         lines.append(f"{prefix}Local server: {entry.note or entry.path}")
     else:
         lines.append(f"{prefix}{entry.path}{size_str}{note_str}")
@@ -69,7 +70,8 @@ def _render_cleanup_preview(plan: CleanupPlan) -> None:
         global_entries = [
             e
             for e in plan.preview_entries
-            if e.path == plan.global_config_root or e.entry_type == "backup"
+            if e.path == plan.global_config_root
+            or e.entry_type == PreviewEntryType.BACKUP
         ]
         if global_entries:
             lines.append("  Global config:")
@@ -89,7 +91,7 @@ def _render_cleanup_preview(plan: CleanupPlan) -> None:
     if plan.local_server_would_stop and plan.local_server_status:
         lines.append(f"  Local server: {plan.local_server_status} (would be stopped)")
 
-    lines.append(f"  Total: ~{_format_size(plan.total_bytes)}")
+    lines.append(f"  Total: ~{format_size(plan.total_bytes)}")
 
     print("\n".join(lines))
 
