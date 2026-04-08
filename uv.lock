@@ -3,8 +3,10 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-04-03T15:38:21.735191398Z"
-exclude-newer-span = "P3D"
+exclude-newer = "2026-04-08T16:51:18Z"
+
+[options.exclude-newer-package]
+zenml = false
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -1146,8 +1148,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.75.0" },
     { name = "rich", specifier = ">=12.0.0" },
-    { name = "zenml", extras = ["local"], specifier = ">=0.94.1" },
-    { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.94.1" },
+    { name = "zenml", extras = ["local"], specifier = ">=0.94.2" },
+    { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.94.2" },
 ]
 provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "mcp"]
 
@@ -1165,7 +1167,7 @@ dev = [
     { name = "ruff", specifier = ">=0.11" },
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
-    { name = "zenml", extras = ["server"], specifier = ">=0.94.1" },
+    { name = "zenml", extras = ["server"], specifier = ">=0.94.2" },
 ]
 
 [[package]]
@@ -2908,7 +2910,7 @@ wheels = [
 
 [[package]]
 name = "zenml"
-version = "0.94.1"
+version = "0.94.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
@@ -2927,9 +2929,9 @@ dependencies = [
     { name = "rich" },
     { name = "setuptools" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/52/5feb76c4fd039aaa23146ae5f2dd06bac9302f3b939b0f46c1635f63be2e/zenml-0.94.1.tar.gz", hash = "sha256:3564723585c8405de14125e50ec503ba870b7dc9c109bdc552466aae5dd1c533", size = 7083620, upload-time = "2026-03-19T17:10:49.258Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5b/38/1496321bbbacf82aa716afb74108a6aeb72fa958201f14af71d06ecaf1ac/zenml-0.94.2.tar.gz", hash = "sha256:e2bc7f245bb910b4cc4bd902cc2b0c7fa2fec4c1c004ea61f24b1aca3aac4efa", size = 7087286, upload-time = "2026-04-08T14:36:38.381Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/e9/249bbc4dad71522fea518a3c74a58e8381038312b9408bdf939aa544b9dc/zenml-0.94.1-py3-none-any.whl", hash = "sha256:360bdf783456e3efb65e133f7f2d25178c8020ee1078e23def9db65fb77e64de", size = 8200405, upload-time = "2026-03-19T17:10:46.011Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/92/f662ca3d9d797b26bdff1dfd5c976f3c83de1616e72d56ad495387e5377e/zenml-0.94.2-py3-none-any.whl", hash = "sha256:c88bbca1a708092d3cd6274af46b2ada1e76e72636d6d4fded819a155e760dfe", size = 8202437, upload-time = "2026-04-08T14:36:36.22Z" },
 ]
 
 [package.optional-dependencies]
