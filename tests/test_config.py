@@ -3960,6 +3960,89 @@ def test_docker_settings_round_trip_new_fields() -> None:
     assert round_tripped.user == "rtuser"
 
 
+def test_platform_passes_through() -> None:
+    """platform should flow through to DockerSettings build_config."""
+    image_settings = ImageSettings(platform="linux/amd64")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.build_config is not None
+    assert docker_settings.build_config.build_options is not None
+    extras = docker_settings.build_config.build_options.model_extra
+    assert extras is not None
+    assert extras.get("platform") == "linux/amd64"
+
+
+def test_platform_rejects_empty() -> None:
+    """platform should reject empty/whitespace values."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(platform="   ")
+
+
+def test_platform_excluded_from_is_empty() -> None:
+    """Setting platform should make ImageSettings non-empty."""
+    assert ImageSettings(platform="linux/arm64").is_empty() is False
+
+
+def test_coerce_docker_settings_with_platform() -> None:
+    """DockerSettings with platform in build_config should coerce into ImageSettings."""
+    from zenml.config.docker_settings import DockerBuildConfig, DockerBuildOptions
+
+    docker = DockerSettings(
+        build_config=DockerBuildConfig(
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+        ),
+    )
+    result = _coerce_image_input(docker)
+    assert result is not None
+    assert result.platform == "linux/amd64"
+
+
+def test_coerce_docker_settings_without_build_config_has_no_platform() -> None:
+    """DockerSettings without build_config should produce None platform."""
+    docker = DockerSettings()
+    result = _coerce_image_input(docker)
+    assert result is not None
+    assert result.platform is None
+
+
+def test_merge_image_settings_platform_override_wins() -> None:
+    """Override platform should win over base."""
+    base = ImageSettings(platform="linux/arm64")
+    override = ImageSettings(platform="linux/amd64")
+    merged = _merge_image_settings(base=base, override=override)
+    assert merged.platform == "linux/amd64"
+
+
+def test_merge_image_settings_platform_base_fills_gap() -> None:
+    """Base platform should fill in when override is None."""
+    base = ImageSettings(platform="linux/amd64")
+    override = ImageSettings()
+    merged = _merge_image_settings(base=base, override=override)
+    assert merged.platform == "linux/amd64"
+
+
+def test_platform_round_trip() -> None:
+    """platform should survive a DockerSettings round-trip."""
+    from zenml.config.docker_settings import DockerBuildConfig, DockerBuildOptions
+
+    original = DockerSettings(
+        build_config=DockerBuildConfig(
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+        ),
+    )
+    image_settings = _coerce_image_input(original)
+    assert image_settings is not None
+    round_tripped = image_settings_to_docker_settings(image_settings)
+    assert round_tripped.build_config is not None
+    assert round_tripped.build_config.build_options is not None
+    extras = round_tripped.build_config.build_options.model_extra
+    assert extras is not None
+    assert extras.get("platform") == "linux/amd64"
+
+
 def test_connection_resolution_precedence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

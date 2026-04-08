@@ -17,7 +17,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from zenml.config.docker_settings import DockerSettings
+from zenml.config.docker_settings import (
+    DockerBuildConfig,
+    DockerBuildOptions,
+    DockerSettings,
+)
 from zenml.enums import MetadataResourceTypes
 from zenml.models.v2.misc.run_metadata import RunMetadataResource
 from zenml.utils import io_utils, yaml_utils
@@ -45,6 +49,7 @@ class ImageSettings(BaseModel):
     image_tag: str | None = None
     target_repository: str | None = None
     user: str | None = None
+    platform: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -55,6 +60,7 @@ class ImageSettings(BaseModel):
         "image_tag",
         "target_repository",
         "user",
+        "platform",
     )
     @classmethod
     def _validate_optional_strings(cls, value: str | None) -> str | None:
@@ -98,18 +104,7 @@ class ImageSettings(BaseModel):
 
     def is_empty(self) -> bool:
         """Return whether this object carries any configured values."""
-        return (
-            self.base_image is None
-            and self.requirements is None
-            and self.dockerfile is None
-            and self.build_context_root is None
-            and self.environment is None
-            and self.apt_packages is None
-            and self.replicate_local_python_environment is None
-            and self.image_tag is None
-            and self.target_repository is None
-            and self.user is None
-        )
+        return not self.model_dump(exclude_none=True)
 
 
 ImageInput = str | DockerSettings | Mapping[str, Any] | ImageSettings
@@ -242,6 +237,22 @@ _RUNTIME_EXECUTION_OVERRIDES: dict[str, Any] = {}
 _RUNTIME_CONNECTION_OVERRIDES: dict[str, Any] = {}
 
 
+def _extract_platform_from_docker_settings(
+    docker_settings: DockerSettings,
+) -> str | None:
+    """Extract the platform string from nested DockerSettings build config."""
+    build_config = docker_settings.build_config
+    if build_config is None:
+        return None
+    build_options = build_config.build_options
+    if build_options is None:
+        return None
+    platform = (
+        build_options.model_extra.get("platform") if build_options.model_extra else None
+    )
+    return platform if isinstance(platform, str) else None
+
+
 def _coerce_image_input(value: Any) -> ImageSettings | None:
     """Coerce supported image inputs into :class:`ImageSettings`."""
     if value is None:
@@ -250,6 +261,7 @@ def _coerce_image_input(value: Any) -> ImageSettings | None:
         return value
     if isinstance(value, DockerSettings):
         replicate = value.replicate_local_python_environment
+        platform = _extract_platform_from_docker_settings(value)
         return ImageSettings(
             base_image=value.parent_image,
             requirements=value.requirements,
@@ -263,6 +275,7 @@ def _coerce_image_input(value: Any) -> ImageSettings | None:
             image_tag=value.image_tag,
             target_repository=value.target_repository,
             user=value.user,
+            platform=platform,
         )
     if isinstance(value, str):
         normalized_image = value.strip()
@@ -339,6 +352,9 @@ def _merge_image_settings(
             else base.target_repository
         ),
         user=(override.user if override.user is not None else base.user),
+        platform=(
+            override.platform if override.platform is not None else base.platform
+        ),
     )
 
 
@@ -417,6 +433,10 @@ def image_settings_to_docker_settings(
         docker_settings_kwargs["target_repository"] = image_settings.target_repository
     if image_settings.user is not None:
         docker_settings_kwargs["user"] = image_settings.user
+    if image_settings.platform is not None:
+        docker_settings_kwargs["build_config"] = DockerBuildConfig(
+            build_options=DockerBuildOptions(platform=image_settings.platform),  # type: ignore[call-arg]  # Pydantic extra="allow"
+        )
 
     return DockerSettings(**docker_settings_kwargs)
 
