@@ -374,7 +374,7 @@ class TestDecideDropRules:
             "needs to be retried, it will use the old configuration.",
             level=logging.WARNING,
         )
-        assert _decide(record) is None
+        assert terminal_logging._decide(record) is None
 
     def test_resume_config_warning_dropped_without_typo(self) -> None:
         """Future corrected text (single 'the') should also be dropped."""
@@ -385,7 +385,7 @@ class TestDecideDropRules:
             "needs to be retried, it will use the old configuration.",
             level=logging.WARNING,
         )
-        assert _decide(record) is None
+        assert terminal_logging._decide(record) is None
 
     def test_resume_config_warning_not_dropped_for_non_zenml_logger(self) -> None:
         """Same text from a non-ZenML logger should pass through."""
@@ -396,7 +396,7 @@ class TestDecideDropRules:
             "needs to be retried, it will use the old configuration.",
             level=logging.WARNING,
         )
-        decision = _decide(record)
+        decision = terminal_logging._decide(record)
         assert decision is not None
         assert "Configuration for step" in decision.text
 
