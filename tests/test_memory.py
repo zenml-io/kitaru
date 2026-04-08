@@ -22,6 +22,7 @@ from kitaru.errors import (
 from kitaru.memory import (
     _COMPACTION_LOG_PREFIX,
     MemoryEntry,
+    MemoryReindexResult,
     PurgeResult,
     _compact_impl,
     _compaction_log_impl,
@@ -33,6 +34,7 @@ from kitaru.memory import (
     _MemoryScope,
     _purge_impl,
     _purge_scope_impl,
+    _reindex_impl,
     _set_entry_impl,
     _set_impl,
 )
@@ -59,20 +61,30 @@ def _memory_artifact(
     scope_type: str = "flow",
     value_type_import_path: str = "builtins.dict",
     execution_id: UUID | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
+    tags: list[object] | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight artifact-version-like object for memory tests."""
     timestamp = created_at or datetime(2026, 4, 1, tzinfo=UTC)
     artifact_name = f"kitaru_mem:{scope}:{key}"
+    run_metadata = {
+        "kitaru_memory_scope_type": scope_type,
+        "kitaru_memory_deleted": deleted,
+    }
+    if flow_id is not None:
+        run_metadata["kitaru_memory_flow_id"] = flow_id
+    if flow_name is not None:
+        run_metadata["kitaru_memory_flow_name"] = flow_name
+
     return SimpleNamespace(
         id=uuid4(),
         artifact=SimpleNamespace(name=artifact_name),
         name=artifact_name,
         version=str(version),
         created=timestamp,
-        run_metadata={
-            "kitaru_memory_scope_type": scope_type,
-            "kitaru_memory_deleted": deleted,
-        },
+        tags=list(tags) if tags is not None else [],
+        run_metadata=run_metadata,
         data_type=SimpleNamespace(import_path=value_type_import_path),
         producer_pipeline_run_id=execution_id,
         load=MagicMock(return_value=value),
@@ -100,6 +112,8 @@ def _memory_entry(
     is_deleted: bool = False,
     artifact_id: str | None = None,
     execution_id: str | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
 ) -> MemoryEntry:
     """Build a ``MemoryEntry`` with sensible defaults for tests."""
     return MemoryEntry(
@@ -112,6 +126,8 @@ def _memory_entry(
         is_deleted=is_deleted,
         artifact_id=artifact_id or str(uuid4()),
         execution_id=execution_id,
+        flow_id=flow_id,
+        flow_name=flow_name,
     )
 
 
@@ -612,6 +628,7 @@ def test_set_impl_persists_expected_artifact_contract() -> None:
             "kitaru:memory",
             "kitaru:memory:scope:research_agent",
             "kitaru:memory:key:user_preferences",
+            "kitaru:memory:scope_type:flow",
         ],
         user_metadata={
             "kitaru_memory_scope_type": "flow",
@@ -654,6 +671,362 @@ def test_set_entry_impl_returns_created_memory_entry() -> None:
     assert entry.scope == "research_agent"
     assert entry.version == 2
     assert entry.execution_id == str(created.producer_pipeline_run_id)
+    assert entry.flow_id is None
+    assert entry.flow_name is None
+
+
+def test_set_entry_impl_execution_scope_indexes_detached_flow_context() -> None:
+    payload = {"draft": True}
+    flow_id = uuid4()
+    created = _memory_artifact(
+        scope="exec-123",
+        key="scratch",
+        version=1,
+        value=payload,
+        scope_type="execution",
+        flow_id=str(flow_id),
+        flow_name="__kitaru_pipeline_source_repo_memory_demo",
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page()
+    client_mock.get_artifact_version.return_value = created
+    client_mock.get_pipeline_run.return_value = SimpleNamespace(
+        pipeline=SimpleNamespace(
+            id=flow_id,
+            name="__kitaru_pipeline_source_repo_memory_demo",
+        )
+    )
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        patch(
+            "kitaru.memory.save_artifact",
+            return_value=_created_artifact_response(created.id),
+        ) as save_artifact_mock,
+    ):
+        entry = _set_entry_impl(
+            _MemoryScope(scope="exec-123", scope_type="execution"),
+            "scratch",
+            payload,
+        )
+
+    save_artifact_mock.assert_called_once_with(
+        data=payload,
+        name="kitaru_mem:exec-123:scratch",
+        artifact_type=ArtifactType.DATA,
+        tags=[
+            "kitaru:memory",
+            "kitaru:memory:scope:exec-123",
+            "kitaru:memory:key:scratch",
+            "kitaru:memory:scope_type:execution",
+            f"kitaru:memory:flow_id:{flow_id}",
+        ],
+        user_metadata={
+            "kitaru_memory_scope_type": "execution",
+            "kitaru_memory_deleted": False,
+            "kitaru_memory_flow_id": str(flow_id),
+            "kitaru_memory_flow_name": "repo_memory_demo",
+        },
+    )
+    client_mock.get_pipeline_run.assert_called_once_with(
+        name_id_or_prefix="exec-123",
+        allow_name_prefix_match=False,
+        hydrate=True,
+        project=None,
+    )
+    assert entry.flow_id == str(flow_id)
+    assert entry.flow_name == "repo_memory_demo"
+    assert entry.execution_id is None
+
+
+def test_execution_scope_write_stays_non_breaking_when_flow_lookup_fails() -> None:
+    payload = {"draft": True}
+    created = _memory_artifact(
+        scope="exec-123",
+        key="scratch",
+        version=1,
+        value=payload,
+        scope_type="execution",
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page()
+    client_mock.get_artifact_version.return_value = created
+    client_mock.get_pipeline_run.side_effect = RuntimeError("run lookup failed")
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        patch(
+            "kitaru.memory.save_artifact",
+            return_value=_created_artifact_response(created.id),
+        ) as save_artifact_mock,
+        patch("kitaru.memory.logger.warning") as warning_mock,
+    ):
+        entry = _set_entry_impl(
+            _MemoryScope(scope="exec-123", scope_type="execution"),
+            "scratch",
+            payload,
+        )
+
+    save_artifact_mock.assert_called_once_with(
+        data=payload,
+        name="kitaru_mem:exec-123:scratch",
+        artifact_type=ArtifactType.DATA,
+        tags=[
+            "kitaru:memory",
+            "kitaru:memory:scope:exec-123",
+            "kitaru:memory:key:scratch",
+            "kitaru:memory:scope_type:execution",
+        ],
+        user_metadata={
+            "kitaru_memory_scope_type": "execution",
+            "kitaru_memory_deleted": False,
+        },
+    )
+    warning_mock.assert_called_once()
+    assert entry.flow_id is None
+    assert entry.flow_name is None
+
+
+def test_execution_scope_prefers_active_step_context_for_current_execution() -> None:
+    payload = {"draft": True}
+    flow_id = uuid4()
+    created = _memory_artifact(
+        scope="exec-123",
+        key="scratch",
+        version=1,
+        value=payload,
+        scope_type="execution",
+        flow_id=str(flow_id),
+        flow_name="__kitaru_pipeline_source_demo_flow",
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page()
+    client_mock.get_artifact_version.return_value = created
+    step_context = SimpleNamespace(
+        pipeline_run=SimpleNamespace(
+            pipeline=SimpleNamespace(
+                id=flow_id,
+                name="__kitaru_pipeline_source_demo_flow",
+            )
+        )
+    )
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        patch(
+            "kitaru.memory.save_artifact",
+            return_value=_created_artifact_response(created.id),
+        ) as save_artifact_mock,
+        patch("kitaru.memory._get_current_execution_id", return_value="exec-123"),
+        patch("kitaru.memory.StepContext.get", return_value=step_context),
+    ):
+        entry = _set_entry_impl(
+            _MemoryScope(scope="exec-123", scope_type="execution"),
+            "scratch",
+            payload,
+        )
+
+    client_mock.get_pipeline_run.assert_not_called()
+    save_artifact_mock.assert_called_once_with(
+        data=payload,
+        name="kitaru_mem:exec-123:scratch",
+        artifact_type=ArtifactType.DATA,
+        tags=[
+            "kitaru:memory",
+            "kitaru:memory:scope:exec-123",
+            "kitaru:memory:key:scratch",
+            "kitaru:memory:scope_type:execution",
+            f"kitaru:memory:flow_id:{flow_id}",
+        ],
+        user_metadata={
+            "kitaru_memory_scope_type": "execution",
+            "kitaru_memory_deleted": False,
+            "kitaru_memory_flow_id": str(flow_id),
+            "kitaru_memory_flow_name": "demo_flow",
+        },
+    )
+    assert entry.flow_id == str(flow_id)
+    assert entry.flow_name == "demo_flow"
+
+
+def test_reindex_impl_dry_run_identifies_missing_tags_without_mutating() -> None:
+    flow_artifact = _memory_artifact(
+        scope="repo_memory_demo",
+        key="flow_notes",
+        version=3,
+        value={"summary": "hello"},
+        scope_type="flow",
+        tags=[
+            "kitaru:memory",
+            "kitaru:memory:scope:repo_memory_demo",
+            "kitaru:memory:key:flow_notes",
+        ],
+    )
+    execution_artifact = _memory_artifact(
+        scope="exec-123",
+        key="scratch",
+        version=2,
+        value={"draft": True},
+        scope_type="execution",
+        tags=[
+            "kitaru:memory",
+            "kitaru:memory:scope:exec-123",
+            "kitaru:memory:key:scratch",
+        ],
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(
+        flow_artifact,
+        execution_artifact,
+    )
+    client_mock.get_pipeline_run.return_value = SimpleNamespace(
+        pipeline=SimpleNamespace(
+            id="flow-456",
+            name="__kitaru_pipeline_source_repo_memory_demo",
+        )
+    )
+
+    result = _reindex_impl(client_factory=lambda: client_mock)
+
+    assert result == MemoryReindexResult(
+        dry_run=True,
+        versions_scanned=2,
+        execution_scope_versions_scanned=1,
+        already_indexed=0,
+        versions_needing_updates=2,
+        versions_updated=0,
+        scope_type_tags_identified=2,
+        flow_tags_identified=1,
+        scope_type_tags_added=0,
+        flow_tags_added=0,
+        issues_count=0,
+        issue_samples=[],
+    )
+    client_mock.get_pipeline_run.assert_called_once_with(
+        name_id_or_prefix="exec-123",
+        allow_name_prefix_match=False,
+        hydrate=True,
+        project=None,
+    )
+    client_mock.update_artifact_version.assert_not_called()
+
+
+def test_reindex_impl_apply_updates_missing_tags_and_prefers_producer_run() -> None:
+    producer_run_id = uuid4()
+    missing_tags_artifact = _memory_artifact(
+        scope="exec-123",
+        key="scratch",
+        version=2,
+        value={"draft": True},
+        scope_type="execution",
+        execution_id=producer_run_id,
+        tags=[
+            SimpleNamespace(name="kitaru:memory"),
+            SimpleNamespace(name="kitaru:memory:scope:exec-123"),
+            SimpleNamespace(name="kitaru:memory:key:scratch"),
+        ],
+    )
+    already_indexed_artifact = _memory_artifact(
+        scope="exec-999",
+        key="notes",
+        version=1,
+        value={"done": True},
+        scope_type="execution",
+        tags=[
+            "kitaru:memory",
+            "kitaru:memory:scope:exec-999",
+            "kitaru:memory:key:notes",
+            "kitaru:memory:scope_type:execution",
+            "kitaru:memory:flow_id:flow-existing",
+        ],
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(
+        missing_tags_artifact,
+        already_indexed_artifact,
+    )
+    client_mock.get_pipeline_run.return_value = SimpleNamespace(
+        pipeline=SimpleNamespace(
+            id="flow-456",
+            name="__kitaru_pipeline_source_repo_memory_demo",
+        )
+    )
+
+    result = _reindex_impl(
+        dry_run=False,
+        client_factory=lambda: client_mock,
+        project="project-override",
+    )
+
+    assert result == MemoryReindexResult(
+        dry_run=False,
+        versions_scanned=2,
+        execution_scope_versions_scanned=2,
+        already_indexed=1,
+        versions_needing_updates=1,
+        versions_updated=1,
+        scope_type_tags_identified=1,
+        flow_tags_identified=1,
+        scope_type_tags_added=1,
+        flow_tags_added=1,
+        issues_count=0,
+        issue_samples=[],
+    )
+    client_mock.get_pipeline_run.assert_called_once_with(
+        name_id_or_prefix=str(producer_run_id),
+        allow_name_prefix_match=False,
+        hydrate=True,
+        project="project-override",
+    )
+    client_mock.update_artifact_version.assert_called_once_with(
+        name_id_or_prefix=str(missing_tags_artifact.id),
+        add_tags=[
+            "kitaru:memory:scope_type:execution",
+            "kitaru:memory:flow_id:flow-456",
+        ],
+        project="project-override",
+    )
+
+
+def test_reindex_impl_records_issue_but_still_updates_scope_type_tag() -> None:
+    execution_artifact = _memory_artifact(
+        scope="exec-123",
+        key="scratch",
+        version=2,
+        value={"draft": True},
+        scope_type="execution",
+        tags=[
+            "kitaru:memory",
+            "kitaru:memory:scope:exec-123",
+            "kitaru:memory:key:scratch",
+        ],
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(execution_artifact)
+    client_mock.get_pipeline_run.side_effect = RuntimeError("run lookup failed")
+
+    result = _reindex_impl(
+        dry_run=False,
+        client_factory=lambda: client_mock,
+    )
+
+    assert result.dry_run is False
+    assert result.versions_scanned == 1
+    assert result.execution_scope_versions_scanned == 1
+    assert result.already_indexed == 0
+    assert result.versions_needing_updates == 1
+    assert result.versions_updated == 1
+    assert result.scope_type_tags_identified == 1
+    assert result.flow_tags_identified == 0
+    assert result.scope_type_tags_added == 1
+    assert result.flow_tags_added == 0
+    assert result.issues_count == 1
+    assert len(result.issue_samples) == 1
+    assert "execution scope 'exec-123'" in result.issue_samples[0].reason
+    client_mock.update_artifact_version.assert_called_once_with(
+        name_id_or_prefix=str(execution_artifact.id),
+        add_tags=["kitaru:memory:scope_type:execution"],
+    )
 
 
 def test_set_entry_impl_temporarily_switches_project_for_write() -> None:
@@ -988,6 +1361,7 @@ def test_delete_impl_writes_tombstone_and_returns_entry() -> None:
             "kitaru:memory",
             "kitaru:memory:scope:demo_flow",
             "kitaru:memory:key:prefs",
+            "kitaru:memory:scope_type:flow",
         ],
         user_metadata={
             "kitaru_memory_scope_type": "flow",

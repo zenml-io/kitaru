@@ -26,10 +26,18 @@ from kitaru._interface_memory import (
     normalize_memory_version,
     purge_memory_payload,
     purge_scope_memory_payload,
+    reindex_memory_payload,
     set_memory_payload,
 )
 from kitaru.client import KitaruClient
-from kitaru.memory import CompactionRecord, CompactResult, MemoryEntry, PurgeResult
+from kitaru.memory import (
+    CompactionRecord,
+    CompactResult,
+    MemoryEntry,
+    MemoryReindexIssue,
+    MemoryReindexResult,
+    PurgeResult,
+)
 
 
 def _sample_memory_entry(
@@ -39,6 +47,9 @@ def _sample_memory_entry(
     scope_type: str = "namespace",
     version: int = 2,
     is_deleted: bool = False,
+    execution_id: str | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
 ) -> MemoryEntry:
     return MemoryEntry(
         key=key,
@@ -49,7 +60,9 @@ def _sample_memory_entry(
         created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
         is_deleted=is_deleted,
         artifact_id=str(uuid4()),
-        execution_id=None,
+        execution_id=execution_id,
+        flow_id=flow_id,
+        flow_name=flow_name,
     )
 
 
@@ -64,6 +77,7 @@ def _client_with_mocks() -> tuple[Any, Any, Any]:
         purge_scope=MagicMock(),
         compact=MagicMock(),
         compaction_log=MagicMock(),
+        reindex=MagicMock(),
     )
     artifacts = SimpleNamespace(get=MagicMock())
     client = cast(Any, SimpleNamespace(memories=memories, artifacts=artifacts))
@@ -91,7 +105,14 @@ def test_normalizers_raise_value_error_for_invalid_transport_input(
 
 def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
     client, memories, artifacts = _client_with_mocks()
-    entry = _sample_memory_entry(scope="repo_scope", version=3)
+    entry = _sample_memory_entry(
+        scope="exec-123",
+        scope_type="execution",
+        version=3,
+        execution_id=None,
+        flow_id="flow-456",
+        flow_name="repo_memory_demo",
+    )
     memories.get.return_value = entry
     artifacts.get.return_value = SimpleNamespace(
         load=MagicMock(return_value={"theme": "dark"})
@@ -100,7 +121,7 @@ def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
     payload = get_memory_payload(
         cast(KitaruClient, client),
         key="prefs",
-        scope="repo_scope",
+        scope="exec-123",
         version=3,
     )
 
@@ -108,16 +129,18 @@ def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
         "key": "prefs",
         "value_type": "dict",
         "version": 3,
-        "scope": "repo_scope",
-        "scope_type": "namespace",
+        "scope": "exec-123",
+        "scope_type": "execution",
         "created_at": "2026-04-01T12:00:00+00:00",
         "is_deleted": False,
         "artifact_id": entry.artifact_id,
         "execution_id": None,
+        "flow_id": "flow-456",
+        "flow_name": "repo_memory_demo",
         "value": {"theme": "dark"},
         "value_format": "json",
     }
-    memories.get.assert_called_once_with("prefs", scope="repo_scope", version=3)
+    memories.get.assert_called_once_with("prefs", scope="exec-123", version=3)
     artifacts.get.assert_called_once_with(entry.artifact_id)
 
 
@@ -199,6 +222,41 @@ def test_set_and_delete_memory_payloads_delegate_to_client_namespace() -> None:
         scope_type="flow",
     )
     memories.delete.assert_called_once_with("prefs", scope="repo_scope")
+
+
+def test_reindex_memory_payload_delegates_and_serializes_result() -> None:
+    client, memories, _artifacts = _client_with_mocks()
+    memories.reindex.return_value = MemoryReindexResult(
+        dry_run=False,
+        versions_scanned=4,
+        execution_scope_versions_scanned=2,
+        already_indexed=1,
+        versions_needing_updates=3,
+        versions_updated=0,
+        scope_type_tags_identified=3,
+        flow_tags_identified=2,
+        scope_type_tags_added=0,
+        flow_tags_added=0,
+        issues_count=1,
+        issue_samples=[
+            MemoryReindexIssue(
+                artifact_id="artifact-1",
+                artifact_name="kitaru_mem:exec-123:scratch",
+                scope="exec-123",
+                key="scratch",
+                reason="execution scope 'exec-123': lookup failed",
+            )
+        ],
+    )
+
+    payload = reindex_memory_payload(cast(KitaruClient, client), apply=True)
+
+    assert payload["dry_run"] is False
+    assert payload["versions_scanned"] == 4
+    assert payload["flow_tags_identified"] == 2
+    assert payload["issues_count"] == 1
+    assert payload["issue_samples"][0]["scope"] == "exec-123"
+    memories.reindex.assert_called_once_with(apply=True)
 
 
 def test_delete_memory_payload_returns_none_when_key_missing() -> None:

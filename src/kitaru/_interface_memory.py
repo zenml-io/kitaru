@@ -239,3 +239,13 @@ def compaction_log_memory_payload(
         scope=normalize_memory_scope(scope),
     )
     return [inspection.serialize_compaction_record(record) for record in records]
+
+
+def reindex_memory_payload(
+    client: KitaruClient,
+    *,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Build a serialized payload for memory reindex/backfill."""
+    result = client.memories.reindex(apply=apply)
+    return inspection.serialize_memory_reindex_result(result)

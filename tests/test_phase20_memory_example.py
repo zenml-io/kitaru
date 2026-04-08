@@ -109,8 +109,28 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
 
     execution_entries = client.memories.list(scope=execution_id)
     assert [entry.key for entry in execution_entries] == ["execution/notes"]
+    execution_entry = execution_entries[0]
+    assert execution_entry.scope == execution_id
+    assert execution_entry.scope_type == "execution"
+    assert execution_entry.execution_id is None
+    assert execution_entry.flow_id
+    assert execution_entry.flow_name == FLOW_SCOPE
+
+    execution_snapshot_entry = cast(
+        list[dict[str, Any]], client_snapshot["execution_entries"]
+    )[0]
+    assert execution_snapshot_entry["scope"] == execution_id
+    assert execution_snapshot_entry["scope_type"] == "execution"
+    assert execution_snapshot_entry["execution_id"] is None
+    assert execution_snapshot_entry["flow_id"]
+    assert execution_snapshot_entry["flow_name"] == FLOW_SCOPE
     execution_history = client.memories.history("execution/notes", scope=execution_id)
     assert [entry.version for entry in execution_history] == [2, 1]
+    assert all(entry.scope == execution_id for entry in execution_history)
+    assert all(entry.scope_type == "execution" for entry in execution_history)
+    assert all(entry.execution_id is None for entry in execution_history)
+    assert all(entry.flow_id for entry in execution_history)
+    assert {entry.flow_name for entry in execution_history} == {FLOW_SCOPE}
     assert client.memories.get("execution/transient", scope=execution_id) is None
 
     scopes = _scope_map(cast(list[dict[str, Any]], client_snapshot["scopes"]))

@@ -155,6 +155,7 @@ from kitaru._interface_memory import (
     list_memory_payload,
     purge_memory_payload,
     purge_scope_memory_payload,
+    reindex_memory_payload,
     scopes_memory_payload,
     set_memory_payload,
 )
@@ -402,6 +403,7 @@ __all__ = [
     "purge_scope_memory_payload",
     "register",
     "register_model_alias",
+    "reindex_memory_payload",
     "replay_",
     "reset",
     "reset_global_log_store",

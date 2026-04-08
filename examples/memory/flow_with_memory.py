@@ -6,6 +6,8 @@ This example demonstrates:
 - reading, listing, updating, deleting, and inspecting history inside a flow
 - switching from namespace scope to flow scope with ``memory.configure(...)``
 - inspecting namespace, flow, and execution scopes via ``KitaruClient.memories``
+- detached post-run writes into an execution scope, and how that differs from
+  execution provenance
 - post-run memory maintenance: compact, purge, and compaction audit log
 
 Run it directly::
@@ -528,6 +530,37 @@ def _render_text(
         lines.append("Flow summary written to summaries/latest")
     if fs["obsolete_hidden_after_delete"]:
         lines.append("Soft-deleted scratch/obsolete in flow body")
+
+    # --- Execution-scope inspection ---
+    client_snapshot = snapshot["client_snapshot"]
+    execution_notes_entry = next(
+        (
+            entry
+            for entry in client_snapshot["execution_entries"]
+            if entry.get("key") == "execution/notes"
+        ),
+        None,
+    )
+    if execution_notes_entry is not None:
+        producer = (
+            execution_notes_entry.get("execution_id")
+            or execution_notes_entry.get("producer_pipeline_run_id")
+            or "detached write (execution_id=None)"
+        )
+        flow_label = execution_notes_entry.get("flow_name") or "not indexed"
+        lines.append("")
+        lines.append("--- Execution-scope inspection ---")
+        lines.append(
+            "Post-run updated execution/notes in execution scope "
+            f"{execution_notes_entry.get('scope', snapshot['execution_id'])}"
+        )
+        lines.append(
+            "Membership: "
+            f"scope={execution_notes_entry.get('scope', snapshot['execution_id'])} "
+            f"({execution_notes_entry.get('scope_type', 'execution')})"
+        )
+        lines.append(f"Producer: {producer}")
+        lines.append(f"Flow context: belongs to flow {flow_label} for discovery")
 
     # --- Maintenance ---
     lines.append("")
