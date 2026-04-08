@@ -43,6 +43,8 @@ from kitaru.config import (
     resolve_log_store,
 )
 
+_LOCALHOST_NAMES = {"127.0.0.1", "localhost", "::1"}
+
 
 @dataclass
 class RuntimeSnapshot:
@@ -94,6 +96,53 @@ def describe_local_server() -> str:
     return f"registered but unavailable ({provider})"
 
 
+def _localhost_url_identity(url: str | None) -> tuple[str, int] | None:
+    """Return a comparable identity for localhost URLs.
+
+    Localhost aliases are treated as equivalent; only the scheme-defaulted port
+    matters for matching against the registered local server.
+    """
+    if not url:
+        return None
+
+    parsed = urlparse(url)
+    if parsed.hostname not in _LOCALHOST_NAMES:
+        return None
+
+    if parsed.port is not None:
+        return ("localhost", parsed.port)
+    if parsed.scheme == "https":
+        return ("localhost", 443)
+    return ("localhost", 80)
+
+
+def is_registered_local_server_url(url: str | None) -> bool:
+    """Return whether a URL matches the registered local Kitaru server."""
+    candidate = _localhost_url_identity(url)
+    if candidate is None:
+        return False
+
+    try:
+        local_server = get_local_server()
+    except ImportError:
+        return False
+    if local_server is None:
+        return False
+
+    status = getattr(local_server, "status", None)
+    local_url = getattr(status, "url", None)
+    config = getattr(local_server, "config", None)
+    if not local_url and config is not None:
+        local_url = getattr(config, "url", None)
+    if not local_url and config is not None:
+        local_port = getattr(config, "port", None)
+        if isinstance(local_port, int):
+            local_host = getattr(config, "ip_address", None) or "127.0.0.1"
+            local_url = f"http://{local_host}:{local_port}"
+
+    return _localhost_url_identity(str(local_url) if local_url else None) == candidate
+
+
 def connected_to_local_server_safe() -> bool:
     """Safely check whether the current client is bound to a local server."""
     try:
@@ -133,8 +182,7 @@ def uses_stale_local_server_url(
     if not server_url or not local_server_status:
         return False
 
-    hostname = urlparse(server_url).hostname
-    return hostname in {"127.0.0.1", "localhost", "::1"} and (
+    return is_registered_local_server_url(server_url) and (
         "unavailable" in local_server_status
     )
 
