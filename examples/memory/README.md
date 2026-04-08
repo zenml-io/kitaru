@@ -2,8 +2,9 @@
 
 This example demonstrates Kitaru's durable memory surface end to end: seeding
 memory outside a flow, reading and updating it inside a flow body, inspecting
-multiple scopes via `KitaruClient.memories`, and running post-flow memory
-maintenance (multi-key compaction, purge, and audit log inspection).
+multiple scopes via `KitaruClient.memories`, showing detached post-run writes
+into an execution scope, and running post-flow memory maintenance (multi-key
+compaction, purge, and audit log inspection).
 
 ## Quick start
 
@@ -55,11 +56,19 @@ instructions, and a safe/unsafe claims reference.
 
 | Example | What it demonstrates | Test |
 |---|---|---|
-| [flow_with_memory.py](flow_with_memory.py) | Outside-flow seeding, in-flow `kitaru.memory` usage, explicit-scope inspection with `KitaruClient.memories`, and post-run maintenance (multi-key compact, purge, audit log) | [../../tests/test_phase20_memory_example.py](../../tests/test_phase20_memory_example.py) |
+| [flow_with_memory.py](flow_with_memory.py) | Outside-flow seeding, in-flow `kitaru.memory` usage, detached post-run execution-scope writes, explicit-scope inspection with `KitaruClient.memories`, and post-run maintenance (multi-key compact, purge, audit log) | [../../tests/test_phase20_memory_example.py](../../tests/test_phase20_memory_example.py) |
 
 Single-key compaction defaults to compacting the current value of one key.
 Use `source_mode="history"` when you explicitly want to summarize that key's
 full non-deleted version history instead.
+
+The example also shows an important execution-memory distinction:
+
+- `scope=<execution_id>` tells you which execution bucket a memory entry belongs to
+- `execution_id` on the entry tells you whether that particular version was actually produced during a live run
+
+That means a detached post-run write can still belong to one execution scope
+without claiming that the execution itself physically wrote the version.
 
 For the broader feature overview, see
 [Use Memory](https://kitaru.ai/docs/guides/memory).

@@ -116,6 +116,29 @@ scopes = client.memories.scopes()
 The client API is the best fit for admin utilities because every call makes the
 scope explicit.
 
+That explicit scope matters most for execution-scoped memory. For example, a
+script can write into one execution bucket after the run has finished:
+
+```python
+client.memories.set(
+    "execution/notes",
+    {"status": "reviewed"},
+    scope="execution-123",
+    scope_type="execution",
+)
+
+entry = client.memories.get("execution/notes", scope="execution-123")
+print(entry.scope)         # "execution-123" -> membership bucket
+print(entry.execution_id)  # None for a detached write
+print(entry.flow_id)       # owning flow, when Kitaru can resolve it
+```
+
+The story here is simple:
+
+- `scope` tells you which execution bucket the entry belongs to
+- `execution_id` tells you whether that specific version was produced during a live run
+- detached post-run writes are valid execution-scope memory; they are just not live-run provenance
+
 ## Read and update memory from the CLI
 
 The CLI surface mirrors the same storage, but it always requires `--scope`.
@@ -370,6 +393,9 @@ This adds any missing:
 - This phase backfills **tags only**, not `flow_id` / `flow_name` metadata. So
   older entries may become discoverable in the UI while still showing
   `not indexed` for flow metadata in detailed inspection views.
+- Reindexing improves discovery. It does **not** retroactively turn detached
+  writes into live-run provenance, so `execution_id` stays `None` for those
+  historical detached versions.
 - Rerunning the command is safe. It recomputes which tags are still missing and
   only adds those.
 
@@ -408,6 +434,7 @@ It demonstrates:
 - outside-flow namespace seeding with `kitaru.memory`
 - in-flow reads, writes, deletes, history, and scope switching
 - explicit namespace, flow, and execution inspection with `KitaruClient.memories`
+- detached post-run writes into an execution scope, including the membership-vs-provenance distinction
 - post-run memory maintenance: multi-key compaction, purge, and audit log inspection
 
 By default the example renders narrated text output. Use `--output json` for

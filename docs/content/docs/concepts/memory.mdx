@@ -199,6 +199,16 @@ Memory entries written **outside a flow** (from a script, CLI, or MCP) are
 explicitly **detached** — their `execution_id` is `None`. This makes it clear
 that the entry was manually seeded rather than produced by an agent run.
 
+A concrete example helps here:
+
+- an in-flow write stores `execution/notes` in execution scope `E1`
+- a later script writes another `execution/notes` version into the same scope `E1`
+- both versions belong to the **same execution bucket** because their scope is `E1`
+- only the in-flow version necessarily has live-run producer provenance
+
+So `scope` answers **where the entry belongs**, while `execution_id` answers
+**who physically wrote that version**.
+
 Both cases appear in `memory.history()`, so you can always tell whether a
 particular version came from a flow execution or from an external write.
 
@@ -226,6 +236,8 @@ That means:
 - detached writes into an execution scope can still be associated back to the
   owning flow when Kitaru can resolve that execution ID
 - the flow UI can discover those execution scopes without any manual migration
+- this discovery context (`flow_id` / `flow_name`) is about **membership**, not
+  producer provenance
 
 ### Existing users: historical data may need reindexing
 
