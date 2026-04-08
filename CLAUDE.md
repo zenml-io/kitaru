@@ -115,10 +115,12 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 ### Releasing a new version
 
 1. Ensure `develop` has all changes for the release.
-2. Run the smoke test: `./scripts/smoke-test.sh` (or `./scripts/smoke-test.sh -s` to skip reinstall). This exercises CLI, SDK flows, MCP tools, and LLM integration against a local server. Set `OPENAI_API_KEY` to include LLM tests. Use `-k` to keep the server running and inspect the dashboard afterward.
-3. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
-4. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-5. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
+2. Ensure `CHANGELOG.md` `[Unreleased]` section is complete — cross-check against `git log v<prev>..develop` for any missing user-facing changes.
+3. Run the smoke test: `./scripts/smoke-test.sh` (or `./scripts/smoke-test.sh -s` to skip reinstall). This exercises CLI, SDK flows, MCP tools, and LLM integration against a local server. Set `OPENAI_API_KEY` to include LLM tests. Use `-k` to keep the server running and inspect the dashboard afterward.
+4. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
+5. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
+6. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to ECR, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes.
+7. After the workflow completes, edit the GitHub Release notes (`gh release edit vX.Y.Z --notes ...`) to replace the auto-generated PR list with a structured changelog: a **Highlights** section for the most notable changes, then **Added/Changed/Fixed/Infrastructure** categories mirroring the changelog.
 
 ## Development commands
 
