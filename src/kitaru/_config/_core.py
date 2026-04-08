@@ -104,19 +104,7 @@ class ImageSettings(BaseModel):
 
     def is_empty(self) -> bool:
         """Return whether this object carries any configured values."""
-        return (
-            self.base_image is None
-            and self.requirements is None
-            and self.dockerfile is None
-            and self.build_context_root is None
-            and self.environment is None
-            and self.apt_packages is None
-            and self.replicate_local_python_environment is None
-            and self.image_tag is None
-            and self.target_repository is None
-            and self.user is None
-            and self.platform is None
-        )
+        return not self.model_dump(exclude_none=True)
 
 
 ImageInput = str | DockerSettings | Mapping[str, Any] | ImageSettings
