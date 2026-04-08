@@ -26,10 +26,18 @@ from kitaru._interface_memory import (
     normalize_memory_version,
     purge_memory_payload,
     purge_scope_memory_payload,
+    reindex_memory_payload,
     set_memory_payload,
 )
 from kitaru.client import KitaruClient
-from kitaru.memory import CompactionRecord, CompactResult, MemoryEntry, PurgeResult
+from kitaru.memory import (
+    CompactionRecord,
+    CompactResult,
+    MemoryEntry,
+    MemoryReindexIssue,
+    MemoryReindexResult,
+    PurgeResult,
+)
 
 
 def _sample_memory_entry(
@@ -69,6 +77,7 @@ def _client_with_mocks() -> tuple[Any, Any, Any]:
         purge_scope=MagicMock(),
         compact=MagicMock(),
         compaction_log=MagicMock(),
+        reindex=MagicMock(),
     )
     artifacts = SimpleNamespace(get=MagicMock())
     client = cast(Any, SimpleNamespace(memories=memories, artifacts=artifacts))
@@ -213,6 +222,41 @@ def test_set_and_delete_memory_payloads_delegate_to_client_namespace() -> None:
         scope_type="flow",
     )
     memories.delete.assert_called_once_with("prefs", scope="repo_scope")
+
+
+def test_reindex_memory_payload_delegates_and_serializes_result() -> None:
+    client, memories, _artifacts = _client_with_mocks()
+    memories.reindex.return_value = MemoryReindexResult(
+        dry_run=False,
+        versions_scanned=4,
+        execution_scope_versions_scanned=2,
+        already_indexed=1,
+        versions_needing_updates=3,
+        versions_updated=0,
+        scope_type_tags_identified=3,
+        flow_tags_identified=2,
+        scope_type_tags_added=0,
+        flow_tags_added=0,
+        issues_count=1,
+        issue_samples=[
+            MemoryReindexIssue(
+                artifact_id="artifact-1",
+                artifact_name="kitaru_mem:exec-123:scratch",
+                scope="exec-123",
+                key="scratch",
+                reason="execution scope 'exec-123': lookup failed",
+            )
+        ],
+    )
+
+    payload = reindex_memory_payload(cast(KitaruClient, client), apply=True)
+
+    assert payload["dry_run"] is False
+    assert payload["versions_scanned"] == 4
+    assert payload["flow_tags_identified"] == 2
+    assert payload["issues_count"] == 1
+    assert payload["issue_samples"][0]["scope"] == "exec-123"
+    memories.reindex.assert_called_once_with(apply=True)
 
 
 def test_delete_memory_payload_returns_none_when_key_missing() -> None:

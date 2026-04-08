@@ -100,6 +100,7 @@ from kitaru.memory import (
     CompactionRecord,
     CompactResult,
     MemoryEntry,
+    MemoryReindexResult,
     MemoryScopeInfo,
     PurgeResult,
     _compact_impl,
@@ -114,6 +115,7 @@ from kitaru.memory import (
     _MemoryScopeType,
     _purge_impl,
     _purge_scope_impl,
+    _reindex_impl,
     _set_entry_impl,
     _validate_memory_compaction_source_mode,
     _validate_memory_identifier,
@@ -1008,6 +1010,18 @@ class _MemoriesAPI:
         """Read all compaction audit records for a scope."""
         return _compaction_log_impl(
             self._scope(scope),
+            client_factory=self._client_ref._client,
+            project=self._client_ref._project,
+        )
+
+    def reindex(
+        self,
+        *,
+        apply: bool = False,
+    ) -> MemoryReindexResult:
+        """Backfill missing memory indexing tags for historical artifacts."""
+        return _reindex_impl(
+            dry_run=not apply,
             client_factory=self._client_ref._client,
             project=self._client_ref._project,
         )

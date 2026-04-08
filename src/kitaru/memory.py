@@ -142,7 +142,55 @@ class CompactResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class MemoryReindexIssue(BaseModel):
+    """One non-fatal issue encountered while reindexing memory versions."""
+
+    artifact_id: str
+    artifact_name: str
+    scope: str | None
+    key: str | None
+    reason: str
+
+    model_config = ConfigDict(frozen=True)
+
+
+class MemoryReindexResult(BaseModel):
+    """Summary of one memory reindex/backfill operation."""
+
+    dry_run: bool
+    versions_scanned: int
+    execution_scope_versions_scanned: int
+    already_indexed: int
+    versions_needing_updates: int
+    versions_updated: int
+    scope_type_tags_identified: int
+    flow_tags_identified: int
+    scope_type_tags_added: int
+    flow_tags_added: int
+    issues_count: int
+    issue_samples: _list[MemoryReindexIssue]
+
+    model_config = ConfigDict(frozen=True)
+
+
 _COMPACTION_LOG_PREFIX = "_compaction/"
+_MEMORY_REINDEX_ISSUE_SAMPLE_LIMIT = 10
+
+
+@dataclass
+class _ReindexCounters:
+    """Mutable accumulator for reindex statistics."""
+
+    versions_scanned: int = 0
+    execution_scope_versions_scanned: int = 0
+    already_indexed: int = 0
+    versions_needing_updates: int = 0
+    versions_updated: int = 0
+    scope_type_tags_identified: int = 0
+    flow_tags_identified: int = 0
+    scope_type_tags_added: int = 0
+    flow_tags_added: int = 0
+    issues_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -643,6 +691,19 @@ def _artifact_to_memory_entry(artifact: ArtifactVersionResponse) -> MemoryEntry:
     )
 
 
+def _artifact_tag_names(artifact: ArtifactVersionResponse) -> set[str]:
+    """Normalize artifact-version tags into a comparable name set."""
+    tag_names: builtins.set[str] = builtins.set()
+    for raw_tag in getattr(artifact, "tags", []) or []:
+        if isinstance(raw_tag, str):
+            normalized = raw_tag.strip()
+        else:
+            normalized = _optional_metadata_string(getattr(raw_tag, "name", None))
+        if normalized:
+            tag_names.add(normalized)
+    return tag_names
+
+
 def _sort_memory_artifacts(
     artifacts: _list[ArtifactVersionResponse],
 ) -> _list[ArtifactVersionResponse]:
@@ -783,6 +844,255 @@ def _resolve_memory_client_factory(
 ) -> Callable[[], Client]:
     """Resolve an optional client factory lazily for test patchability."""
     return Client if client_factory is None else client_factory
+
+
+def _record_reindex_issue(
+    issue_samples: _list[MemoryReindexIssue],
+    *,
+    artifact_id: str,
+    artifact_name: str,
+    scope: str | None,
+    key: str | None,
+    reason: str,
+) -> None:
+    """Append one sampled reindex issue if the sample budget allows."""
+    if len(issue_samples) >= _MEMORY_REINDEX_ISSUE_SAMPLE_LIMIT:
+        return
+    issue_samples.append(
+        MemoryReindexIssue(
+            artifact_id=artifact_id,
+            artifact_name=artifact_name,
+            scope=scope,
+            key=key,
+            reason=reason,
+        )
+    )
+
+
+def _lookup_reindex_flow_context(
+    client: Client,
+    *,
+    run_identifier: str,
+    project: str | None = None,
+) -> tuple[_ExecutionFlowContext | None, str | None]:
+    """Resolve flow context for one run identifier used during reindexing."""
+    try:
+        run = client.get_pipeline_run(
+            name_id_or_prefix=run_identifier,
+            allow_name_prefix_match=False,
+            hydrate=True,
+            project=project,
+        )
+    except KitaruError:
+        raise
+    except Exception as exc:
+        return None, f"lookup failed: {exc}"
+
+    flow_context = _extract_flow_context_from_pipeline(getattr(run, "pipeline", None))
+    if flow_context is None:
+        return None, "resolved run did not expose a pipeline id"
+    return flow_context, None
+
+
+def _resolve_reindex_flow_context(
+    client: Client,
+    *,
+    producer_run_id: str | None,
+    scope: str,
+    project: str | None,
+    producer_run_cache: dict[str, tuple[_ExecutionFlowContext | None, str | None]],
+    execution_scope_cache: dict[str, tuple[_ExecutionFlowContext | None, str | None]],
+) -> tuple[_ExecutionFlowContext | None, str]:
+    """Resolve flow context for historical execution-scope memory."""
+    reasons: _list[str] = []
+
+    if producer_run_id is not None:
+        cached = producer_run_cache.get(producer_run_id)
+        if cached is None:
+            cached = _lookup_reindex_flow_context(
+                client,
+                run_identifier=producer_run_id,
+                project=project,
+            )
+            producer_run_cache[producer_run_id] = cached
+        flow_context, reason = cached
+        if flow_context is not None:
+            return flow_context, ""
+        if reason is not None:
+            reasons.append(f"producer run {producer_run_id!r}: {reason}")
+        # Skip redundant scope lookup when both identifiers are the same run.
+        if producer_run_id == scope:
+            return None, reasons[0] if reasons else "producer run matches scope"
+
+    cached_scope = execution_scope_cache.get(scope)
+    if cached_scope is None:
+        cached_scope = _lookup_reindex_flow_context(
+            client,
+            run_identifier=scope,
+            project=project,
+        )
+        execution_scope_cache[scope] = cached_scope
+    flow_context, reason = cached_scope
+    if flow_context is not None:
+        return flow_context, ""
+    if reason is not None:
+        reasons.append(f"execution scope {scope!r}: {reason}")
+
+    if not reasons:
+        reasons.append(
+            "could not resolve flow context from producer run or execution scope"
+        )
+    return None, "; ".join(reasons)
+
+
+def _reindex_impl(
+    *,
+    dry_run: bool = True,
+    client_factory: Callable[[], Client] | None = None,
+    project: str | None = None,
+) -> MemoryReindexResult:
+    """Backfill missing memory indexing tags on historical artifact versions."""
+    try:
+        client = _resolve_memory_client_factory(client_factory)()
+        artifacts = _paginate_artifact_versions(
+            client,
+            tags=[_MEMORY_TAG_MARKER],
+            **_memory_query_kwargs(project=project),
+        )
+    except KitaruError:
+        raise
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to list memory artifacts for reindexing: {exc}"
+        ) from exc
+
+    producer_run_cache: dict[str, tuple[_ExecutionFlowContext | None, str | None]] = {}
+    execution_scope_cache: dict[
+        str, tuple[_ExecutionFlowContext | None, str | None]
+    ] = {}
+    issue_samples: _list[MemoryReindexIssue] = []
+    counts = _ReindexCounters()
+
+    for artifact in artifacts:
+        counts.versions_scanned += 1
+        artifact_id = str(artifact.id)
+        artifact_name = artifact.name
+        scope: str | None = None
+        key: str | None = None
+        issue_recorded = False
+
+        try:
+            scope, key = _parse_memory_artifact_identity(artifact_name)
+            scope_type = _validate_memory_scope_type(
+                _resolve_scope_type(artifact),
+                error_type=KitaruRuntimeError,
+            )
+        except Exception as exc:
+            counts.issues_count += 1
+            issue_recorded = True
+            _record_reindex_issue(
+                issue_samples,
+                artifact_id=artifact_id,
+                artifact_name=artifact_name,
+                scope=scope,
+                key=key,
+                reason=str(exc),
+            )
+            continue
+
+        tag_names = _artifact_tag_names(artifact)
+        add_tags: _list[str] = []
+        added_scope_type_tag = False
+        added_flow_tag = False
+
+        scope_type_tag = _memory_scope_type_tag(scope_type)
+        if scope_type_tag not in tag_names:
+            add_tags.append(scope_type_tag)
+            added_scope_type_tag = True
+            counts.scope_type_tags_identified += 1
+
+        if scope_type == "execution":
+            counts.execution_scope_versions_scanned += 1
+            has_flow_tag = any(
+                tag_name.startswith(_MEMORY_TAG_FLOW_ID_PREFIX)
+                for tag_name in tag_names
+            )
+            if not has_flow_tag:
+                producer_run_id = _optional_metadata_string(
+                    artifact.producer_pipeline_run_id
+                )
+                flow_context, reason = _resolve_reindex_flow_context(
+                    client,
+                    producer_run_id=producer_run_id,
+                    scope=scope,
+                    project=project,
+                    producer_run_cache=producer_run_cache,
+                    execution_scope_cache=execution_scope_cache,
+                )
+                if flow_context is not None:
+                    add_tags.append(_memory_flow_id_tag(flow_context.flow_id))
+                    added_flow_tag = True
+                    counts.flow_tags_identified += 1
+                else:
+                    counts.issues_count += 1
+                    issue_recorded = True
+                    _record_reindex_issue(
+                        issue_samples,
+                        artifact_id=artifact_id,
+                        artifact_name=artifact_name,
+                        scope=scope,
+                        key=key,
+                        reason=reason,
+                    )
+
+        if add_tags:
+            counts.versions_needing_updates += 1
+        elif not issue_recorded:
+            counts.already_indexed += 1
+
+        if not add_tags or dry_run:
+            continue
+
+        try:
+            client.update_artifact_version(
+                name_id_or_prefix=artifact_id,
+                add_tags=add_tags,
+                **_memory_query_kwargs(project=project),
+            )
+        except KitaruError:
+            raise
+        except Exception as exc:
+            counts.issues_count += 1
+            _record_reindex_issue(
+                issue_samples,
+                artifact_id=artifact_id,
+                artifact_name=artifact_name,
+                scope=scope,
+                key=key,
+                reason=f"failed to add tags {add_tags!r}: {exc}",
+            )
+            continue
+
+        counts.versions_updated += 1
+        if added_scope_type_tag:
+            counts.scope_type_tags_added += 1
+        if added_flow_tag:
+            counts.flow_tags_added += 1
+
+    return MemoryReindexResult(
+        dry_run=dry_run,
+        versions_scanned=counts.versions_scanned,
+        execution_scope_versions_scanned=counts.execution_scope_versions_scanned,
+        already_indexed=counts.already_indexed,
+        versions_needing_updates=counts.versions_needing_updates,
+        versions_updated=counts.versions_updated,
+        scope_type_tags_identified=counts.scope_type_tags_identified,
+        flow_tags_identified=counts.flow_tags_identified,
+        scope_type_tags_added=counts.scope_type_tags_added,
+        flow_tags_added=counts.flow_tags_added,
+        issues_count=counts.issues_count,
+        issue_samples=issue_samples,
+    )
 
 
 def _get_entry_impl(
@@ -1772,6 +2082,8 @@ __all__ = [
     "CompactResult",
     "CompactionRecord",
     "MemoryEntry",
+    "MemoryReindexIssue",
+    "MemoryReindexResult",
     "PurgeResult",
     "configure",
     "delete",

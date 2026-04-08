@@ -313,6 +313,66 @@ kitaru memory purge-scope --scope repo_docs --keep 1 --include-deleted
 kitaru memory compaction-log --scope repo_docs
 ```
 
+## Reindex older execution-scope memory
+
+Most users do **not** need to do anything here.
+
+If you are starting on a current Kitaru release, new execution-scoped memory is
+indexed automatically when it is written. That is the normal happy path, and it
+is the one to optimize for in day-to-day use.
+
+The reindex command is mainly for the smaller group of users who already had
+execution-scoped memory stored before flow-level discovery tags were added.
+
+### When should you run it?
+
+Run `kitaru memory reindex` if all of the following are true:
+
+1. you already have older execution-scoped memory in a project
+2. you want the UI to discover execution-scope memories by flow membership
+3. that older data was written before the new indexing tags shipped
+
+### Dry run first
+
+Start with the preview:
+
+```bash
+kitaru memory reindex
+```
+
+This scans memory artifact versions in the active project and reports:
+
+- how many versions were scanned
+- how many already have the new tags
+- how many historical versions need tag updates
+- whether any versions could not be matched back to a flow
+
+### Apply the backfill
+
+If the dry run looks good, rerun with `--apply`:
+
+```bash
+kitaru memory reindex --apply
+```
+
+This adds any missing:
+
+- `kitaru:memory:scope_type:*` tags
+- `kitaru:memory:flow_id:*` tags for execution-scoped memory when the flow can
+  be resolved
+
+### Important limitations
+
+- Reindexing is **project-scoped**. Run it separately in each project that has
+  historical memory data.
+- The operation is **additive only**. It does not rewrite memory values, delete
+  anything, or remove existing tags.
+- This phase backfills **tags only**, not `flow_id` / `flow_name` metadata. So
+  older entries may become discoverable in the UI while still showing
+  `not indexed` for flow metadata in detailed inspection views.
+- Rerunning the command is safe. It recomputes which tags are still missing and
+  only adds those.
+
 ## Memory maintenance from MCP
 
 Assistants can use the MCP memory maintenance tools:

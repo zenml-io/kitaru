@@ -187,6 +187,46 @@ def _memory_source_mode_label(payload: dict[str, Any]) -> str:
     return "-"
 
 
+def _memory_reindex_mode_label(payload: dict[str, Any]) -> str:
+    """Render the effective reindex mode for text output."""
+    return "dry-run" if payload.get("dry_run", True) else "apply"
+
+
+def _memory_reindex_status_label(payload: dict[str, Any]) -> str:
+    """Summarize what the reindex result means for the operator."""
+    if payload.get("dry_run", True):
+        if payload.get("versions_needing_updates", 0) == 0:
+            if payload.get("issues_count", 0) == 0:
+                return "up to date; no action needed"
+            return "no tag updates needed; inspect issues below"
+        return "preview only; rerun with --apply to persist tag additions"
+    if payload.get("issues_count", 0) == 0:
+        return "completed"
+    return "completed with issues; rerun is safe"
+
+
+def _memory_reindex_issue_rows(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    """Build text rows for sampled reindex issues."""
+    rows: list[tuple[str, str]] = []
+    for index, issue in enumerate(payload.get("issue_samples", []), start=1):
+        scope = issue.get("scope")
+        key = issue.get("key")
+        if scope and key:
+            location = f"{scope}/{key}"
+        else:
+            location = str(issue.get("artifact_name", "unknown artifact"))
+        rows.append(
+            (
+                f"Issue {index}",
+                (
+                    f"{location} ({issue.get('artifact_id', 'unknown id')}) — "
+                    f"{issue.get('reason', 'unknown issue')}"
+                ),
+            )
+        )
+    return rows
+
+
 @memory_app.command(name="scopes")
 def scopes_(
     *,
@@ -541,6 +581,84 @@ def purge_scope_(
             f"Keys affected: {payload['keys_affected']}"
         ),
     )
+
+
+@memory_app.command(name="reindex")
+def reindex_(
+    *,
+    apply: Annotated[
+        bool,
+        Parameter(
+            help=(
+                "Persist missing scope-type and flow-membership tags for "
+                "historical memory artifacts. By default this command runs "
+                "as a dry-run preview."
+            ),
+        ),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Backfill indexing tags for historical memory artifacts.
+
+    New execution-scope writes are indexed automatically at write time. This
+    command is for older data that was created before that behavior shipped.
+    By default it performs a dry-run preview; rerun with --apply to persist any
+    missing tags in the active project. The reindex is additive only: it adds
+    missing discovery tags and does not rewrite stored values or metadata.
+    """
+    command = "memory.reindex"
+    output_format = _resolve_output_format(output)
+    facade = _facade_module()
+    payload = run_with_cli_error_boundary(
+        lambda: facade.reindex_memory_payload(
+            facade.KitaruClient(),
+            apply=apply,
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    sections = [
+        SnapshotSection(
+            title="Summary",
+            rows=[
+                ("Mode", _memory_reindex_mode_label(payload)),
+                ("Versions scanned", str(payload["versions_scanned"])),
+                (
+                    "Execution-scope versions",
+                    str(payload["execution_scope_versions_scanned"]),
+                ),
+                ("Already indexed", str(payload["already_indexed"])),
+                (
+                    "Versions needing updates",
+                    str(payload["versions_needing_updates"]),
+                ),
+                ("Versions updated", str(payload["versions_updated"])),
+                (
+                    "Scope-type tags identified",
+                    str(payload["scope_type_tags_identified"]),
+                ),
+                ("Flow tags identified", str(payload["flow_tags_identified"])),
+                ("Scope-type tags added", str(payload["scope_type_tags_added"])),
+                ("Flow tags added", str(payload["flow_tags_added"])),
+                ("Issues", str(payload["issues_count"])),
+            ],
+        ),
+        SnapshotSection(
+            title="Status",
+            rows=[("Result", _memory_reindex_status_label(payload))],
+        ),
+    ]
+    issue_rows = _memory_reindex_issue_rows(payload)
+    if issue_rows:
+        sections.append(SnapshotSection(title="Issue samples", rows=issue_rows))
+
+    _emit_snapshot_sections("Kitaru memory reindex", sections)
 
 
 @memory_app.command(name="compact")

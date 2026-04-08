@@ -381,7 +381,7 @@ def test_memory_help_lists_all_supported_subcommands(
         app(["memory", "--help"])
     assert exc_info.value.code == 0
     output = capsys.readouterr().out.lower()
-    for command in ("list", "get", "set", "delete", "history", "scopes"):
+    for command in ("list", "get", "set", "delete", "history", "scopes", "reindex"):
         assert command in output
 
 
@@ -2497,7 +2497,84 @@ def test_memory_history_errors_when_empty(capsys: pytest.CaptureFixture[str]) ->
 
 
 class TestMemoryMaintenance:
-    """CLI smoke tests for memory maintenance commands (compact/purge/log)."""
+    """CLI smoke tests for memory maintenance commands."""
+
+    def test_reindex_dry_run_exits_zero(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`kitaru memory reindex` should render a dry-run summary."""
+        reindex_payload = {
+            "dry_run": True,
+            "versions_scanned": 4,
+            "execution_scope_versions_scanned": 2,
+            "already_indexed": 1,
+            "versions_needing_updates": 3,
+            "versions_updated": 0,
+            "scope_type_tags_identified": 3,
+            "flow_tags_identified": 2,
+            "scope_type_tags_added": 0,
+            "flow_tags_added": 0,
+            "issues_count": 1,
+            "issue_samples": [
+                {
+                    "artifact_id": "artifact-1",
+                    "artifact_name": "kitaru_mem:exec-123:scratch",
+                    "scope": "exec-123",
+                    "key": "scratch",
+                    "reason": "execution scope 'exec-123': lookup failed",
+                }
+            ],
+        }
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.reindex_memory_payload",
+                return_value=reindex_payload,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["memory", "reindex"])
+
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "Kitaru memory reindex" in output
+        assert "dry-run" in output
+        assert "--apply" in output
+        assert "exec-123/scratch" in output
+
+    def test_reindex_apply_json_output(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`kitaru memory reindex --apply --output json` should emit a JSON item."""
+        reindex_payload = {
+            "dry_run": False,
+            "versions_scanned": 4,
+            "execution_scope_versions_scanned": 2,
+            "already_indexed": 1,
+            "versions_needing_updates": 3,
+            "versions_updated": 3,
+            "scope_type_tags_identified": 3,
+            "flow_tags_identified": 2,
+            "scope_type_tags_added": 3,
+            "flow_tags_added": 2,
+            "issues_count": 0,
+            "issue_samples": [],
+        }
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.reindex_memory_payload",
+                return_value=reindex_payload,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["memory", "reindex", "--apply", "--output", "json"])
+
+        assert exc_info.value.code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["command"] == "memory.reindex"
+        assert payload["item"]["dry_run"] is False
+        assert payload["item"]["versions_updated"] == 3
 
     def test_compact_single_key_exits_zero(
         self, capsys: pytest.CaptureFixture[str]

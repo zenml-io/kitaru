@@ -54,6 +54,7 @@ from kitaru.inspection import (
     serialize_log_entry,
     serialize_memory_entry,
     serialize_memory_history,
+    serialize_memory_reindex_result,
     serialize_memory_value,
     serialize_model_alias,
     serialize_pending_wait,
@@ -68,7 +69,7 @@ from kitaru.inspection import (
     to_jsonable,
     uses_stale_local_server_url,
 )
-from kitaru.memory import MemoryEntry
+from kitaru.memory import MemoryEntry, MemoryReindexIssue, MemoryReindexResult
 
 
 @dataclass(frozen=True)
@@ -400,6 +401,56 @@ def test_serialize_memory_history_contract() -> None:
 
     assert [entry["version"] for entry in payload] == [2, 1]
     assert [entry["is_deleted"] for entry in payload] == [True, False]
+
+
+def test_serialize_memory_reindex_result_contract() -> None:
+    payload = serialize_memory_reindex_result(
+        MemoryReindexResult(
+            dry_run=True,
+            versions_scanned=4,
+            execution_scope_versions_scanned=2,
+            already_indexed=1,
+            versions_needing_updates=3,
+            versions_updated=0,
+            scope_type_tags_identified=3,
+            flow_tags_identified=2,
+            scope_type_tags_added=0,
+            flow_tags_added=0,
+            issues_count=1,
+            issue_samples=[
+                MemoryReindexIssue(
+                    artifact_id="artifact-1",
+                    artifact_name="kitaru_mem:exec-123:scratch",
+                    scope="exec-123",
+                    key="scratch",
+                    reason="execution scope 'exec-123': lookup failed",
+                )
+            ],
+        )
+    )
+
+    assert payload == {
+        "dry_run": True,
+        "versions_scanned": 4,
+        "execution_scope_versions_scanned": 2,
+        "already_indexed": 1,
+        "versions_needing_updates": 3,
+        "versions_updated": 0,
+        "scope_type_tags_identified": 3,
+        "flow_tags_identified": 2,
+        "scope_type_tags_added": 0,
+        "flow_tags_added": 0,
+        "issues_count": 1,
+        "issue_samples": [
+            {
+                "artifact_id": "artifact-1",
+                "artifact_name": "kitaru_mem:exec-123:scratch",
+                "scope": "exec-123",
+                "key": "scratch",
+                "reason": "execution scope 'exec-123': lookup failed",
+            }
+        ],
+    }
 
 
 def test_serialize_memory_value_reuses_artifact_value_rules() -> None:
