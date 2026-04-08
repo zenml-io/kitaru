@@ -19,7 +19,7 @@ docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   app/                # Next.js app routes, layout, metadata
 site/                 # Astro landing page + runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (e.g. /api/waitlist with KV)
-scripts/              # Doc generation + site merge scripts (includes SDK reference extraction)
+scripts/              # Doc generation, site merge, and smoke test scripts
 docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing stack)
 spec/                 # SDK design specifications (planning material, not shipped code)
 design/               # Design docs, meeting notes (gitignored, never commit)
@@ -150,6 +150,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 
 - Default branch is `develop`. All PRs target `develop`.
 - `main` tracks the latest released version only; do not push directly.
+- Before releasing, run `./scripts/smoke-test.sh` to exercise CLI, SDK flows, MCP tools, and LLM integration end-to-end against a local server. Use `-s` to skip reinstall, `-k` to keep the server running afterward. Set `OPENAI_API_KEY` to include LLM tests.
 - Releases are cut via the Release workflow (`workflow_dispatch` on `develop` or `v*` tag push).
 - Release branches (`release/X.Y.Z`) and tags (`vX.Y.Z`) are created automatically.
 - Version is maintained in `pyproject.toml` and bumped by the release workflow. Never hardcode it — use `importlib.metadata.version("kitaru")`.
