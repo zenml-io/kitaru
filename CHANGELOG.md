@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-04-08
+
 ### Added
 - `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, and `user` fields for finer-grained container image configuration
 - `ImageSettings.platform` field for specifying the target Docker build platform (e.g. `linux/amd64`)
