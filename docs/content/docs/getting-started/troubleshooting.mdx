@@ -1,0 +1,110 @@
+---
+title: Troubleshooting
+description: Diagnose problems and reset Kitaru state
+---
+
+## Gathering diagnostics
+
+When something isn't working, start with `kitaru info` to see your current
+environment at a glance:
+
+```bash
+kitaru info
+```
+
+This shows your SDK version, connection state, server URL, active stack,
+config file paths, and more.
+
+For a full diagnostic dump (including all installed packages and environment
+type), use:
+
+```bash
+kitaru info --all
+```
+
+### Exporting diagnostics for support
+
+If you're opening a [GitHub issue](https://github.com/zenml-io/kitaru/issues)
+or asking for help in the [ZenML Slack](https://zenml.io/slack), include the
+output of `kitaru info` so we have the full picture. The easiest way is to
+export it to a file:
+
+```bash
+kitaru info --all --file debug.json
+# or: kitaru info --all --file debug.yaml
+```
+
+<Callout type="info">
+Environment variable secrets are automatically masked in the exported file,
+so it's safe to share.
+</Callout>
+
+You can also get JSON output directly for pasting into an issue:
+
+```bash
+kitaru info --all -o json
+```
+
+## Resetting Kitaru state
+
+If your local database is in a weird state, connections are stale, or you
+just want a fresh start, `kitaru clean` will get you out of trouble.
+
+### Preview before deleting
+
+Always use `--dry-run` first to see what would be removed:
+
+```bash
+kitaru clean project --dry-run   # Preview project-local cleanup
+kitaru clean global --dry-run    # Preview global config cleanup
+kitaru clean all --dry-run       # Preview both
+```
+
+### Clean scopes
+
+| Command | What it removes |
+|---|---|
+| `kitaru clean project` | The `.kitaru/` directory in the current project |
+| `kitaru clean global` | The global config directory (database, stores, server state) |
+| `kitaru clean all` | Both project and global state |
+
+### Safety features
+
+- **Auto-backup:** Before removing global state, the SQLite database is
+  backed up automatically
+- **Model registry protection:** If you have registered model aliases,
+  `clean global` and `clean all` require `--force` to confirm
+- **Local server teardown:** A running local server is stopped before cleanup
+- **Confirmation prompt:** You'll be asked to confirm unless you pass `--yes`
+
+### Common scenarios
+
+**Database in a bad state:**
+
+```bash
+kitaru clean global --force --yes
+kitaru login
+```
+
+This backs up your database, removes all global state, and starts fresh.
+
+**Starting a new project from scratch:**
+
+```bash
+kitaru clean project --yes
+kitaru init
+```
+
+**Full reset (nuclear option):**
+
+```bash
+kitaru clean all --force --yes
+kitaru init
+kitaru login
+```
+
+## Getting help
+
+- [GitHub Issues](https://github.com/zenml-io/kitaru/issues) — bug reports
+  and feature requests
+- [ZenML Slack](https://zenml.io/slack) — real-time help from the team
