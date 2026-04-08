@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Analytics instrumentation across all SDK surfaces: flow lifecycle (submit, terminal, replay), execution management (retry, resume, cancel, wait), CLI commands (init, login, secrets), local server lifecycle, feature adoption (LLM, artifacts, stacks, model aliases, log store), and PydanticAI adapter tracking
 - `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, and `user` fields for finer-grained container image configuration
 - `ImageSettings.platform` field for specifying the target Docker build platform (e.g. `linux/amd64`)
 
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Bump minimum `pydantic-ai-slim` from `>=0.2.0` to `>=1.75.0` to align with upstream API changes (new method signatures, `tool_plain` decorator, `AgentSpec` support)
 - Rewritten examples: realistic research-agent metaphor in basic flow, two-wait pattern (boolean gate + Pydantic schema) in wait/resume, parallel tool submission in coding agent, and consistent "Getting Started" READMEs across all example groups
+- CLI command tracking now uses an allowlist of known multi-word commands to avoid leaking positional arguments (URLs, paths) into analytics
 - Add PyPI classifiers and keywords for improved package discoverability
 
 ## [0.3.0] - 2026-03-24
