@@ -12,8 +12,17 @@ with Docker, Docker Compose, or any container orchestration platform.
 Start a server with sensible defaults:
 
 ```bash
-docker run -d --name kitaru-server -p 8080:8080 zenmldocker/kitaru:latest
+docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 zenmldocker/kitaru:latest
 ```
+
+<Callout type="warn">
+  **Apple Silicon (M-series) Macs:** The published image is currently amd64-only.
+  Keep `--platform linux/amd64` on every `docker run`, `docker pull`, or Docker
+  Compose service that uses `zenmldocker/kitaru:*`. Without it, Docker will fail
+  with `no matching manifest for linux/arm64/v8`.
+
+  On Intel/AMD hosts, you can omit the flag if you prefer.
+</Callout>
 
 <Callout type="info">
   Use a version-pinned tag (e.g. `zenmldocker/kitaru:0.2.0`) that matches your
@@ -49,7 +58,7 @@ To skip this manual onboarding step (useful for automated or headless
 deployments), pass these environment variables:
 
 ```bash
-docker run -d --name kitaru-server -p 8080:8080 \
+docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
     -e ZENML_SERVER_AUTO_ACTIVATE=1 \
     -e ZENML_DEFAULT_USER_NAME=admin \
     -e ZENML_DEFAULT_USER_PASSWORD=password \
@@ -120,7 +129,7 @@ Mount a host directory or Docker volume at the default data path:
 <Tabs items={["Named volume", "Host directory"]}>
   <Tab value="Named volume">
     ```bash
-    docker run -d --name kitaru-server -p 8080:8080 \
+    docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
         -v kitaru-data:/zenml/.zenconfig/local_stores/default_zen_store \
         zenmldocker/kitaru:latest
     ```
@@ -128,7 +137,7 @@ Mount a host directory or Docker volume at the default data path:
   <Tab value="Host directory">
     ```bash
     mkdir kitaru-data
-    docker run -d --name kitaru-server -p 8080:8080 \
+    docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
         --mount type=bind,source=$PWD/kitaru-data,target=/zenml/.zenconfig/local_stores/default_zen_store \
         zenmldocker/kitaru:latest
     ```
@@ -170,7 +179,7 @@ docker run -d --name kitaru-mysql \
 Then start the Kitaru server pointing at it:
 
 ```bash
-docker run -d --name kitaru-server -p 8080:8080 \
+docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
     --add-host host.docker.internal:host-gateway \
     --env ZENML_STORE_URL=mysql://root:password@host.docker.internal:3306/kitaru \
     zenmldocker/kitaru:latest
@@ -213,6 +222,7 @@ services:
 
   kitaru:
     image: zenmldocker/kitaru:latest
+    platform: linux/amd64
     ports:
       - "8080:8080"
     environment:
@@ -324,12 +334,30 @@ Common causes:
 ### Login stalls or shows errors
 
 - Ensure the `/health` endpoint returns 200 before attempting login.
+  The server takes ~20 seconds on first startup to initialize the database.
 - If the browser shows `{"detail":"An unexpected error occurred."}`, the
   dashboard assets may be missing from the image. Rebuild from source or use a
   newer image tag.
 - If the CLI keeps printing `authorization_pending`, the server may not be
   fully initialized. Wait and retry.
+- Port **8383** belongs to bare `kitaru login` local-server mode. To connect
+  to the Docker container, run `kitaru login http://localhost:8080`
+  explicitly. If you already used the URL form and still see login failures,
+  treat that as a separate problem: confirm `/health` returns 200 and inspect
+  `docker logs kitaru-server` for the server-side error.
 - Check `docker logs kitaru-server` for error details.
+
+### `no matching manifest for linux/arm64/v8` (Apple Silicon)
+
+If you see this error when pulling or running the image on an M-series Mac:
+
+```
+no matching manifest for linux/arm64/v8 in the manifest list entries
+```
+
+Add `--platform linux/amd64` to your `docker run` (or `docker pull`) command.
+Docker Desktop will run the image under Rosetta emulation. See the
+[Quick start](#quick-start) callout for the full command.
 
 ### `host.docker.internal` not resolving (Linux)
 

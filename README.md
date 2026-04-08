@@ -30,7 +30,7 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-Your agent crashed at step 6. Kitaru replays from step 6 — not from scratch.
+Your agent crashed at step 7. Kitaru replays from step 7 — not from scratch.
 Add two decorators to your existing Python agent and get crash recovery, human
 approval gates, cost tracking, and a full dashboard. No rewrite. No framework
 lock-in. No distributed systems overhead.
@@ -183,3 +183,5 @@ all PRs should target it.
 ## License
 
 [Apache 2.0](LICENSE)
+
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=633f1c0b-9a82-47af-8a6c-251a150bcc16" alt="" />

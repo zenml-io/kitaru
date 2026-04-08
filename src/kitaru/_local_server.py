@@ -202,6 +202,13 @@ def _deploy_and_connect(
     return LocalServerConnectionResult(url=deployed_url, action=action)
 
 
+def _track_local_server_started(result: LocalServerConnectionResult) -> None:
+    """Emit LOCAL_SERVER_STARTED analytics after a successful lifecycle event."""
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(AnalyticsEvent.LOCAL_SERVER_STARTED, {"action": result.action})
+
+
 def start_or_connect_local_server(
     *,
     port: int | None,
@@ -239,10 +246,12 @@ def start_or_connect_local_server(
                     f"Failed to connect to local server: {exc}"
                 ) from exc
             assert existing_url is not None
-            return LocalServerConnectionResult(
+            result = LocalServerConnectionResult(
                 url=existing_url,
                 action="connected",
             )
+            _track_local_server_started(result)
+            return result
 
         # Server exists but isn't running or is on a different port.
         if local_server is not None:
@@ -257,7 +266,7 @@ def start_or_connect_local_server(
         "restarted" if port is not None and local_server is not None else "started"
     )
 
-    return _deploy_and_connect(
+    result = _deploy_and_connect(
         deployer=deployer,
         deployment_config_cls=deployment_config_cls,
         provider_type=server_provider_type,
@@ -265,6 +274,9 @@ def start_or_connect_local_server(
         timeout=timeout,
         action=action,
     )
+
+    _track_local_server_started(result)
+    return result
 
 
 def stop_registered_local_server() -> LocalServerStopResult:
@@ -283,5 +295,9 @@ def stop_registered_local_server() -> LocalServerStopResult:
         local_server_deployer_cls().remove_server()
     except Exception as exc:
         raise KitaruBackendError(f"Failed to stop local server: {exc}") from exc
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(AnalyticsEvent.LOCAL_SERVER_STOPPED, {})
 
     return LocalServerStopResult(stopped=True, url=url)

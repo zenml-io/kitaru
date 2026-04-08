@@ -43,6 +43,7 @@ from kitaru.errors import FailureOrigin
 from kitaru.inspection import (
     RuntimeSnapshot,
     build_runtime_snapshot,
+    is_registered_local_server_url,
     serialize_artifact_ref,
     serialize_artifact_value,
     serialize_checkpoint_attempt,
@@ -62,6 +63,7 @@ from kitaru.inspection import (
     serialize_stack_delete_result,
     serialize_stack_details,
     to_jsonable,
+    uses_stale_local_server_url,
 )
 
 
@@ -434,9 +436,14 @@ def test_serialize_execution_contract() -> None:
             "base_image": None,
             "requirements": None,
             "dockerfile": "Dockerfile",
+            "build_context_root": None,
             "environment": None,
             "apt_packages": None,
             "replicate_local_python_environment": None,
+            "image_tag": None,
+            "target_repository": None,
+            "user": None,
+            "platform": None,
         },
         "cache": None,
         "retries": None,
@@ -683,6 +690,13 @@ def test_build_runtime_snapshot_appends_legacy_warning_for_stale_local_server(
             "kitaru.inspection.describe_local_server",
             return_value="registered but unavailable (daemon: stopped)",
         ),
+        patch(
+            "kitaru.inspection.get_local_server",
+            return_value=SimpleNamespace(
+                status=SimpleNamespace(url=None),
+                config=SimpleNamespace(url=None, port=8237, ip_address="127.0.0.1"),
+            ),
+        ),
         patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
         patch(
             "kitaru.inspection.list_active_kitaru_environment_variables",
@@ -698,6 +712,41 @@ def test_build_runtime_snapshot_appends_legacy_warning_for_stale_local_server(
     assert snapshot.warning is not None
     assert "stopped local server" in snapshot.warning
     assert "`KITARU_RUNNER` was renamed to `KITARU_STACK`" in snapshot.warning
+
+
+def test_registered_local_server_url_matches_localhost_aliases() -> None:
+    local_server = SimpleNamespace(
+        status=SimpleNamespace(url="http://127.0.0.1:8383"),
+        config=SimpleNamespace(url="http://127.0.0.1:8383"),
+    )
+
+    with patch("kitaru.inspection.get_local_server", return_value=local_server):
+        assert is_registered_local_server_url("http://localhost:8383") is True
+        assert is_registered_local_server_url("http://127.0.0.1:8383") is True
+        assert is_registered_local_server_url("http://localhost:8080") is False
+
+
+def test_uses_stale_local_server_url_ignores_non_local_daemon_port() -> None:
+    local_server = SimpleNamespace(
+        status=SimpleNamespace(url="http://127.0.0.1:8383"),
+        config=SimpleNamespace(url="http://127.0.0.1:8383"),
+    )
+
+    with patch("kitaru.inspection.get_local_server", return_value=local_server):
+        assert (
+            uses_stale_local_server_url(
+                "http://localhost:8080",
+                "registered but unavailable (daemon: stopped)",
+            )
+            is False
+        )
+        assert (
+            uses_stale_local_server_url(
+                "http://localhost:8383",
+                "registered but unavailable (daemon: stopped)",
+            )
+            is True
+        )
 
 
 def test_build_runtime_snapshot_populates_log_store_mismatch_details() -> None:

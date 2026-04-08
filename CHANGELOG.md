@@ -7,8 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Analytics instrumentation across all SDK surfaces: flow lifecycle (submit, terminal, replay), execution management (retry, resume, cancel, wait), CLI commands (init, login, secrets), local server lifecycle, feature adoption (LLM, artifacts, stacks, model aliases, log store), and PydanticAI adapter tracking
+- `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, and `user` fields for finer-grained container image configuration
+- `ImageSettings.platform` field for specifying the target Docker build platform (e.g. `linux/amd64`)
+
+## [0.3.2] - 2026-04-06
+
+### Fixed
+- Skip eager ZenML store bootstrap for commands that don't need a server connection (`--version`, `--help`, `login`, `logout`, `init`), preventing ~30 second startup delays when the stored config points to an unreachable server (#107)
+
 ### Changed
+- Add Apple Silicon Docker guidance: `--platform linux/amd64` workaround for M-series Macs, troubleshooting for manifest mismatch errors, and startup timing notes (#106)
+- Default Kitaru UI Docker build tag to latest release instead of requiring explicit version (#103)
+
+## [0.3.1] - 2026-04-06
+
+### Fixed
+- Fix duplicate terminal handler accumulation after `importlib.reload()` by using marker-based detection instead of `isinstance` checks, preventing duplicated log output in long-running or reload-heavy environments
+
+### Changed
+- Bump minimum `pydantic-ai-slim` from `>=0.2.0` to `>=1.75.0` to align with upstream API changes (new method signatures, `tool_plain` decorator, `AgentSpec` support)
 - Rewritten examples: realistic research-agent metaphor in basic flow, two-wait pattern (boolean gate + Pydantic schema) in wait/resume, parallel tool submission in coding agent, and consistent "Getting Started" READMEs across all example groups
+- CLI command tracking now uses an allowlist of known multi-word commands to avoid leaking positional arguments (URLs, paths) into analytics
+- Add PyPI classifiers and keywords for improved package discoverability
 
 ## [0.3.0] - 2026-03-24
 
