@@ -750,15 +750,9 @@ def _save_memory_artifact(
     deleted: bool,
     scope_type: _MemoryScopeType,
     project: str | None = None,
+    flow_context: _ExecutionFlowContext | None = None,
 ) -> ArtifactVersionResponse:
     """Persist a memory artifact version and reload the exact created version."""
-    flow_context: _ExecutionFlowContext | None = None
-    if scope_type == "execution":
-        flow_context = _resolve_execution_flow_context(
-            client,
-            scope=scope,
-            project=project,
-        )
 
     with _temporary_active_project(client, project):
         created = save_artifact(
@@ -853,6 +847,14 @@ def _set_entry_impl(
                 )
             resolved_scope_type = existing_scope_type
 
+        flow_context: _ExecutionFlowContext | None = None
+        if resolved_scope_type == "execution":
+            flow_context = _resolve_execution_flow_context(
+                client,
+                scope=scope,
+                project=project,
+            )
+
         created = _save_memory_artifact(
             client=client,
             scope=scope,
@@ -861,6 +863,7 @@ def _set_entry_impl(
             deleted=False,
             scope_type=resolved_scope_type,
             project=project,
+            flow_context=flow_context,
         )
     except KitaruError:
         raise
@@ -1042,17 +1045,27 @@ def _delete_impl(
         if _is_deleted_artifact(latest_current):
             return _artifact_to_memory_entry(latest_current)
 
+        resolved_scope_type = _validate_memory_scope_type(
+            _resolve_scope_type(latest_current),
+            error_type=KitaruRuntimeError,
+        )
+        flow_context: _ExecutionFlowContext | None = None
+        if resolved_scope_type == "execution":
+            flow_context = _resolve_execution_flow_context(
+                client,
+                scope=scope,
+                project=project,
+            )
+
         tombstone = _save_memory_artifact(
             client=client,
             scope=scope,
             key=key,
             value=None,
             deleted=True,
-            scope_type=_validate_memory_scope_type(
-                _resolve_scope_type(latest_current),
-                error_type=KitaruRuntimeError,
-            ),
+            scope_type=resolved_scope_type,
             project=project,
+            flow_context=flow_context,
         )
         return _artifact_to_memory_entry(tombstone)
     except KitaruError:
@@ -1074,6 +1087,14 @@ def _write_compaction_record(
     log_key = f"{_COMPACTION_LOG_PREFIX}{scope.scope}"
     try:
         client = _resolve_memory_client_factory(client_factory)()
+        flow_context: _ExecutionFlowContext | None = None
+        if scope.scope_type == "execution":
+            flow_context = _resolve_execution_flow_context(
+                client,
+                scope=scope,
+                project=project,
+            )
+
         _save_memory_artifact(
             client=client,
             scope=scope,
@@ -1082,6 +1103,7 @@ def _write_compaction_record(
             deleted=False,
             scope_type=scope.scope_type,
             project=project,
+            flow_context=flow_context,
         )
     except KitaruError:
         raise
