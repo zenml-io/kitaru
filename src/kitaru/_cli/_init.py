@@ -60,6 +60,8 @@ def init(
 
     from zenml.client import Client
 
+    from kitaru.analytics import AnalyticsEvent, track
+
     run_with_cli_error_boundary(
         lambda: Client.initialize(root=target),
         command=command,
@@ -67,6 +69,8 @@ def init(
         exit_with_error=_exit_with_error,
         handled_exceptions=(Exception,),
     )
+
+    track(AnalyticsEvent.PROJECT_INITIALIZED, {"used_cwd": path is None})
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(

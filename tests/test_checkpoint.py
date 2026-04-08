@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 from zenml.config.retry_config import StepRetryConfig
-from zenml.enums import StepType
+from zenml.enums import StepRuntime, StepType
 
 from kitaru.checkpoint import checkpoint
 from kitaru.errors import KitaruContextError, KitaruUsageError
@@ -67,6 +67,7 @@ def _build_checkpoint(
     *,
     retries: int = 0,
     checkpoint_type: str | None = None,
+    runtime: StepRuntime | str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Create a checkpoint with a fake ZenML step decorator."""
     captured: dict[str, Any] = {}
@@ -77,11 +78,13 @@ def _build_checkpoint(
         retry: StepRetryConfig | None,
         extra: dict[str, Any],
         step_type: StepType | None = None,
+        runtime: StepRuntime | None = None,
     ) -> Any:
         captured["name"] = name
         captured["retry"] = retry
         captured["extra"] = extra
         captured["step_type"] = step_type
+        captured["runtime"] = runtime
 
         def _decorate(step_func: Callable[..., Any]) -> _FakeStep:
             fake_step = _FakeStep(step_func)
@@ -91,7 +94,9 @@ def _build_checkpoint(
         return _decorate
 
     with patch("kitaru.checkpoint.step", side_effect=_fake_step):
-        wrapped = checkpoint(retries=retries, type=checkpoint_type)(func)
+        wrapped = checkpoint(retries=retries, type=checkpoint_type, runtime=runtime)(
+            func
+        )
 
     return wrapped, captured
 
@@ -203,6 +208,36 @@ def test_checkpoint_registers_source_alias_for_step_reload() -> None:
 def test_checkpoint_rejects_negative_retries() -> None:
     with pytest.raises(KitaruUsageError, match="Checkpoint retries must be >= 0"):
         checkpoint(retries=-1)(lambda: None)
+
+
+def test_checkpoint_forwards_runtime_to_zenml_step() -> None:
+    _, captured = _build_checkpoint(lambda: "ok", runtime="isolated")
+    assert captured["runtime"] == StepRuntime.ISOLATED
+
+
+def test_checkpoint_omitted_runtime_forwards_none() -> None:
+    _, captured = _build_checkpoint(lambda: "ok")
+    assert captured["runtime"] is None
+
+
+def test_checkpoint_normalizes_runtime_string() -> None:
+    _, captured = _build_checkpoint(lambda: "ok", runtime=" Isolated ")
+    assert captured["runtime"] == StepRuntime.ISOLATED
+
+
+def test_checkpoint_accepts_runtime_enum_directly() -> None:
+    _, captured = _build_checkpoint(lambda: "ok", runtime=StepRuntime.INLINE)
+    assert captured["runtime"] == StepRuntime.INLINE
+
+
+def test_checkpoint_rejects_invalid_runtime_string() -> None:
+    with pytest.raises(KitaruUsageError, match="Unsupported checkpoint runtime"):
+        checkpoint(runtime="remote")(lambda: None)
+
+
+def test_checkpoint_rejects_invalid_runtime_type() -> None:
+    with pytest.raises(KitaruUsageError, match="Unsupported checkpoint runtime"):
+        checkpoint(runtime=123)(lambda: None)  # type: ignore[arg-type]
 
 
 def test_checkpoint_rejects_call_outside_flow_context() -> None:

@@ -1825,3 +1825,62 @@ def test_tracked_mcp_tool_captures_concrete_error_type() -> None:
         _value_error_tool()
 
     assert mock_track.call_args[0][1]["error_type"] == "ValueError"
+
+
+def test_start_local_server_fires_analytics_on_success() -> None:
+    """kitaru_start_local_server should emit MCP tool analytics after success."""
+    with (
+        patch(
+            "kitaru.mcp.server.start_or_connect_local_server",
+            return_value=SimpleNamespace(
+                url="http://127.0.0.1:8383",
+                action="started",
+            ),
+        ),
+        patch("kitaru.mcp.server.track") as mock_track,
+    ):
+        kitaru_start_local_server(port=9090, timeout=45)
+
+    mock_track.assert_called_once_with(
+        "Kitaru MCP tool called",
+        {"tool_name": "kitaru_start_local_server", "success": True},
+    )
+
+
+def test_stop_local_server_fires_analytics_on_success() -> None:
+    """kitaru_stop_local_server should emit MCP tool analytics after success."""
+    with (
+        patch(
+            "kitaru.mcp.server.stop_registered_local_server",
+            return_value=SimpleNamespace(stopped=True, url="http://127.0.0.1:8383"),
+        ),
+        patch("kitaru.mcp.server.track") as mock_track,
+    ):
+        kitaru_stop_local_server()
+
+    mock_track.assert_called_once_with(
+        "Kitaru MCP tool called",
+        {"tool_name": "kitaru_stop_local_server", "success": True},
+    )
+
+
+def test_start_local_server_fires_analytics_on_failure() -> None:
+    """kitaru_start_local_server should emit failure analytics when helper raises."""
+    with (
+        patch(
+            "kitaru.mcp.server.start_or_connect_local_server",
+            side_effect=RuntimeError("missing deps"),
+        ),
+        patch("kitaru.mcp.server.track") as mock_track,
+        pytest.raises(RuntimeError, match="missing deps"),
+    ):
+        kitaru_start_local_server()
+
+    mock_track.assert_called_once_with(
+        "Kitaru MCP tool called",
+        {
+            "tool_name": "kitaru_start_local_server",
+            "success": False,
+            "error_type": "RuntimeError",
+        },
+    )

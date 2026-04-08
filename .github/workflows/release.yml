@@ -8,8 +8,8 @@ on:
         required: true
         type: string
       kitaru-ui-tag:
-        description: Kitaru UI release tag for Docker image (e.g. v0.1.0). Defaults
-          to v<version>.
+        description: Kitaru UI release tag (e.g. v0.1.0). Defaults to latest kitaru-ui
+          release.
         required: false
         type: string
         default: ''
@@ -52,8 +52,12 @@ jobs:
           if [ -n "$INPUT_TAG" ]; then
             echo "KITARU_UI_TAG=$INPUT_TAG" >> "$GITHUB_ENV"
           else
-            echo "KITARU_UI_TAG=v$VERSION" >> "$GITHUB_ENV"
+            LATEST_TAG=$(gh release view --repo zenml-io/kitaru-ui --json tagName -q '.tagName')
+            echo "Using latest Kitaru UI release: $LATEST_TAG"
+            echo "KITARU_UI_TAG=$LATEST_TAG" >> "$GITHUB_ENV"
           fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Check tag does not already exist (dispatch only)
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -65,14 +69,14 @@ jobs:
       # --- Checkout ---
       - name: Checkout develop (dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: develop
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout tagged commit (tag push)
         if: github.event_name == 'push'
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
 
@@ -84,7 +88,7 @@ jobs:
 
       # --- Install uv (needed before version bump to regenerate lockfile) ---
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
         with:
           python-version: '3.12'
 
@@ -124,7 +128,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra mcp
       - name: Check typos
-        uses: crate-ci/typos@v1
+        uses: crate-ci/typos@5745f2a8dd91cd7b684680e2e10a2b388ba6e5cf  # v1
       - name: Lint
         run: |
           uv run ruff check .
@@ -166,7 +170,21 @@ jobs:
       # --- Publish (skip on dry-run) ---
       - name: Publish to PyPI
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
+      - name: Wait for PyPI availability
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        run: |
+          echo "Waiting for kitaru==$VERSION to appear on PyPI..."
+          for i in $(seq 1 30); do
+            if curl -fsS "https://pypi.org/pypi/kitaru/$VERSION/json" >/dev/null 2>&1; then
+              echo "kitaru==$VERSION is available on PyPI (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i/30: not yet available, waiting 10s..."
+            sleep 10
+          done
+          echo "::error::kitaru==$VERSION did not appear on PyPI within 5 minutes"
+          exit 1
 
       # --- Push release commit to develop (dispatch only, skip on dry-run) ---
       - name: Push release commit to develop
@@ -202,15 +220,15 @@ jobs:
 
       # --- Docker image ---
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4
       - name: Log in to Docker Hub
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build and push Docker image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294  # v7
         with:
           context: .
           file: docker/Dockerfile
@@ -232,7 +250,7 @@ jobs:
 
       # --- Helm chart ---
       - name: Install Helm
-        uses: azure/setup-helm@5119fcb9089d432beecbf79bb2c7915207344b78  # v3.5
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
         with:
           version: v3.9.2
       - name: Set Chart.yaml version
@@ -247,14 +265,14 @@ jobs:
         run: helm lint ./helm
       - name: Configure AWS credentials (Helm / ECR)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: aws-actions/configure-aws-credentials@5fd3084fc36e372ff1fff382a39b10d03659f355  # v2
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37  # v6.1.0
         with:
           role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
           aws-region: us-east-1
       - name: Login to Amazon ECR Public (Helm)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076  # v2
+        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78  # v2
         with:
           mask-password: 'true'
           registry-type: public

@@ -3,7 +3,7 @@
 ---
 
 <nav class="nav" id="nav">
-  <a href="/" class="nav-brand">
+  <a href="/" class="nav-brand" aria-label="Kitaru home">
     <svg viewBox="0 0 513 82" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M513 80.7128H502.015L501.207 69.2507C498.73 73.2837 495.391 76.4145 491.191 78.6433C486.991 80.7659 482.091 81.8272 476.491 81.8272C470.244 81.8272 464.805 80.5536 460.174 78.0065C455.543 75.4594 451.936 71.6386 449.351 66.5444C446.874 61.4501 445.635 55.0292 445.635 47.2816V1.11469H457.59V46.008C457.59 54.1801 459.367 60.3888 462.921 64.634C466.582 68.7731 471.806 70.8427 478.591 70.8427C485.483 70.8427 490.922 68.667 494.907 64.3156C498.999 59.8581 501.046 53.1719 501.046 44.2569V1.11469H513V80.7128Z" fill="var(--color-primary)"/>
       <path d="M388.712 1.1147H399.859L400.505 12.736C402.659 9.87049 405.244 7.42948 408.259 5.41299C411.383 3.39651 414.775 2.01681 418.437 1.27389C422.206 0.424845 426.191 0.371779 430.391 1.1147V13.0544C425.868 12.2054 421.775 12.2054 418.114 13.0544C414.56 13.9035 411.49 15.4954 408.906 17.8303C406.321 20.1652 404.328 23.1369 402.928 26.7453C401.528 30.2476 400.828 34.3337 400.828 39.0034V80.7128H388.712V1.1147Z" fill="var(--color-primary)"/>
@@ -42,11 +42,11 @@
 
   <!-- Mobile slide-down menu -->
   <div class="nav-mobile-menu" id="navMobileMenu" aria-hidden="true">
-    <a href="/docs">Docs</a>
-    <a href="/blog">Blog</a>
-    <a href="/docs/getting-started/examples">Examples</a>
-    <a href="/#how-it-works">Features</a>
-    <a href="/docs" class="nav-mobile-cta">Get started</a>
+    <a href="/docs" tabindex="-1">Docs</a>
+    <a href="/blog" tabindex="-1">Blog</a>
+    <a href="/docs/getting-started/examples" tabindex="-1">Examples</a>
+    <a href="/#how-it-works" tabindex="-1">Features</a>
+    <a href="/docs" class="nav-mobile-cta" tabindex="-1">Get started</a>
   </div>
 </nav>
 
@@ -222,6 +222,9 @@
     hamburger.setAttribute('aria-label', isOpen ? 'Close menu' : 'Open menu');
     mobileMenu.setAttribute('aria-hidden', String(!isOpen));
     mobileMenu.classList.toggle('open', isOpen);
+    mobileMenu.querySelectorAll('a').forEach(link => {
+      (link as HTMLElement).setAttribute('tabindex', isOpen ? '0' : '-1');
+    });
   }
 
   hamburger?.addEventListener('click', () => toggleMenu());

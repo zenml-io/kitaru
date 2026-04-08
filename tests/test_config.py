@@ -49,6 +49,7 @@ from kitaru.config import (
     StackComponentConfigOverrides,
     StackType,
     VertexStackSpec,
+    _coerce_image_input,
     _create_azureml_stack_operation,
     _create_kubernetes_stack_operation,
     _create_sagemaker_stack_operation,
@@ -57,6 +58,7 @@ from kitaru.config import (
     _delete_stack_components_best_effort,
     _delete_stack_operation,
     _list_stack_entries,
+    _merge_image_settings,
     _show_stack_operation,
     _StackComponent,
     build_frozen_execution_spec,
@@ -1021,6 +1023,19 @@ def test_empty_env_default_model_raises_clear_error(
 
     with pytest.raises(KitaruUsageError, match=KITARU_DEFAULT_MODEL_ENV):
         resolve_model_selection(None)
+
+
+def test_resolve_model_selection_passes_through_providerless_string() -> None:
+    """Config resolution stays permissive for bare model strings without a prefix.
+
+    The runtime backend in kitaru.llm() enforces provider support — config
+    should not. This locks in the boundary between the config and runtime layers.
+    """
+    selection = resolve_model_selection("gpt-4o-mini")
+
+    assert selection.alias is None
+    assert selection.resolved_model == "gpt-4o-mini"
+    assert selection.secret is None
 
 
 def test_resolve_model_selection_requires_default_or_explicit_model() -> None:
@@ -3815,6 +3830,217 @@ def test_apt_packages_passes_through() -> None:
 
     assert docker_settings.apt_packages == ["git", "curl"]
     assert docker_settings.requirements == ["kitaru"]
+
+
+def test_build_context_root_passes_through() -> None:
+    """build_context_root should flow through to DockerSettings."""
+    image_settings = ImageSettings(build_context_root="/app/context")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.build_context_root == "/app/context"
+
+
+def test_image_tag_passes_through() -> None:
+    """image_tag should flow through to DockerSettings."""
+    image_settings = ImageSettings(image_tag="my-custom-tag:v1")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.image_tag == "my-custom-tag:v1"
+
+
+def test_target_repository_passes_through() -> None:
+    """target_repository should flow through to DockerSettings."""
+    image_settings = ImageSettings(target_repository="my-registry/my-repo")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.target_repository == "my-registry/my-repo"
+
+
+def test_user_passes_through() -> None:
+    """user should flow through to DockerSettings."""
+    image_settings = ImageSettings(user="nonroot")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.user == "nonroot"
+
+
+def test_new_string_fields_reject_empty() -> None:
+    """New string fields should reject empty/whitespace values."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(build_context_root="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(image_tag="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(target_repository="   ")
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(user="   ")
+
+
+def test_new_fields_excluded_from_is_empty() -> None:
+    """Setting any new field should make ImageSettings non-empty."""
+    assert ImageSettings(build_context_root="/ctx").is_empty() is False
+    assert ImageSettings(image_tag="v1").is_empty() is False
+    assert ImageSettings(target_repository="repo").is_empty() is False
+    assert ImageSettings(user="root").is_empty() is False
+
+
+def test_coerce_docker_settings_with_new_fields() -> None:
+    """DockerSettings with new fields should coerce into ImageSettings."""
+    docker = DockerSettings(
+        build_context_root="/app",
+        image_tag="v2.0",
+        target_repository="gcr.io/my-project/my-image",
+        user="appuser",
+    )
+    result = _coerce_image_input(docker)
+    assert result is not None
+    assert result.build_context_root == "/app"
+    assert result.image_tag == "v2.0"
+    assert result.target_repository == "gcr.io/my-project/my-image"
+    assert result.user == "appuser"
+
+
+def test_merge_image_settings_override_wins_for_new_fields() -> None:
+    """Override should win over base for all new fields."""
+    base = ImageSettings(
+        build_context_root="/old",
+        image_tag="v1",
+        target_repository="old-repo",
+        user="root",
+    )
+    override = ImageSettings(
+        build_context_root="/new",
+        image_tag="v2",
+        target_repository="new-repo",
+        user="appuser",
+    )
+    merged = _merge_image_settings(base=base, override=override)
+    assert merged.build_context_root == "/new"
+    assert merged.image_tag == "v2"
+    assert merged.target_repository == "new-repo"
+    assert merged.user == "appuser"
+
+
+def test_merge_image_settings_base_fills_gaps_for_new_fields() -> None:
+    """Base values should fill in when override is None."""
+    base = ImageSettings(
+        build_context_root="/base",
+        image_tag="base-tag",
+        target_repository="base-repo",
+        user="baseuser",
+    )
+    override = ImageSettings()
+    merged = _merge_image_settings(base=base, override=override)
+    assert merged.build_context_root == "/base"
+    assert merged.image_tag == "base-tag"
+    assert merged.target_repository == "base-repo"
+    assert merged.user == "baseuser"
+
+
+def test_docker_settings_round_trip_new_fields() -> None:
+    """New fields survive a DockerSettings round-trip."""
+    original = DockerSettings(
+        build_context_root="/ctx",
+        image_tag="rt-tag",
+        target_repository="rt-repo",
+        user="rtuser",
+    )
+    image_settings = _coerce_image_input(original)
+    assert image_settings is not None
+    round_tripped = image_settings_to_docker_settings(image_settings)
+    assert round_tripped.build_context_root == "/ctx"
+    assert round_tripped.image_tag == "rt-tag"
+    assert round_tripped.target_repository == "rt-repo"
+    assert round_tripped.user == "rtuser"
+
+
+def test_platform_passes_through() -> None:
+    """platform should flow through to DockerSettings build_config."""
+    image_settings = ImageSettings(platform="linux/amd64")
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.build_config is not None
+    assert docker_settings.build_config.build_options is not None
+    extras = docker_settings.build_config.build_options.model_extra
+    assert extras is not None
+    assert extras.get("platform") == "linux/amd64"
+
+
+def test_platform_rejects_empty() -> None:
+    """platform should reject empty/whitespace values."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        ImageSettings(platform="   ")
+
+
+def test_platform_excluded_from_is_empty() -> None:
+    """Setting platform should make ImageSettings non-empty."""
+    assert ImageSettings(platform="linux/arm64").is_empty() is False
+
+
+def test_coerce_docker_settings_with_platform() -> None:
+    """DockerSettings with platform in build_config should coerce into ImageSettings."""
+    from zenml.config.docker_settings import DockerBuildConfig, DockerBuildOptions
+
+    docker = DockerSettings(
+        build_config=DockerBuildConfig(
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+        ),
+    )
+    result = _coerce_image_input(docker)
+    assert result is not None
+    assert result.platform == "linux/amd64"
+
+
+def test_coerce_docker_settings_without_build_config_has_no_platform() -> None:
+    """DockerSettings without build_config should produce None platform."""
+    docker = DockerSettings()
+    result = _coerce_image_input(docker)
+    assert result is not None
+    assert result.platform is None
+
+
+def test_merge_image_settings_platform_override_wins() -> None:
+    """Override platform should win over base."""
+    base = ImageSettings(platform="linux/arm64")
+    override = ImageSettings(platform="linux/amd64")
+    merged = _merge_image_settings(base=base, override=override)
+    assert merged.platform == "linux/amd64"
+
+
+def test_merge_image_settings_platform_base_fills_gap() -> None:
+    """Base platform should fill in when override is None."""
+    base = ImageSettings(platform="linux/amd64")
+    override = ImageSettings()
+    merged = _merge_image_settings(base=base, override=override)
+    assert merged.platform == "linux/amd64"
+
+
+def test_platform_round_trip() -> None:
+    """platform should survive a DockerSettings round-trip."""
+    from zenml.config.docker_settings import DockerBuildConfig, DockerBuildOptions
+
+    original = DockerSettings(
+        build_config=DockerBuildConfig(
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+        ),
+    )
+    image_settings = _coerce_image_input(original)
+    assert image_settings is not None
+    round_tripped = image_settings_to_docker_settings(image_settings)
+    assert round_tripped.build_config is not None
+    assert round_tripped.build_config.build_options is not None
+    extras = round_tripped.build_config.build_options.model_extra
+    assert extras is not None
+    assert extras.get("platform") == "linux/amd64"
 
 
 def test_connection_resolution_precedence(

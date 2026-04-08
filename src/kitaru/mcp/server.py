@@ -295,7 +295,7 @@ def kitaru_artifacts_get(artifact_id: str) -> dict[str, Any]:
     return run_with_mcp_error_boundary(_get_artifact)
 
 
-@mcp.tool()
+@tracked_mcp_tool
 def kitaru_start_local_server(
     port: int | None = None,
     timeout: int = 60,
@@ -313,7 +313,7 @@ def kitaru_start_local_server(
     return run_with_mcp_error_boundary(_start_local_server)
 
 
-@mcp.tool()
+@tracked_mcp_tool
 def kitaru_stop_local_server() -> dict[str, Any]:
     """Stop the registered local Kitaru server, if one exists."""
 

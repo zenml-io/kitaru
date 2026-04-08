@@ -206,7 +206,7 @@ async def test_capture_config_metadata_only_tracks_without_artifacts(
 
     toolset: FunctionToolset[None] = FunctionToolset()
 
-    @toolset.tool
+    @toolset.tool_plain
     def increment(value: int) -> int:
         return value + 1
 
@@ -249,7 +249,7 @@ async def test_capture_config_off_disables_tracking_for_selected_tool(
 
     toolset: FunctionToolset[None] = FunctionToolset()
 
-    @toolset.tool
+    @toolset.tool_plain
     def increment(value: int) -> int:
         return value + 1
 
@@ -441,7 +441,7 @@ async def test_deferred_tool_approval_required_raises_clear_adapter_error(
     """ApprovalRequired should surface adapter guidance for deferred tool flows."""
     toolset: FunctionToolset[None] = FunctionToolset()
 
-    @toolset.tool
+    @toolset.tool_plain
     def plain_tool() -> str:
         return "ok"
 
@@ -477,7 +477,7 @@ async def test_deferred_tool_call_deferred_raises_clear_adapter_error(
     """CallDeferred should surface adapter guidance for deferred tool flows."""
     toolset: FunctionToolset[None] = FunctionToolset()
 
-    @toolset.tool
+    @toolset.tool_plain
     def plain_tool() -> str:
         return "ok"
 
