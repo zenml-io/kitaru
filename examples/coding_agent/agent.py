@@ -1,31 +1,28 @@
 """General-purpose coding agent — Kitaru primitives + direct provider SDKs.
 
 An agent loop where each LLM call and tool execution is a visible
-checkpoint. When the LLM returns multiple tool calls, they are submitted
-in parallel via ``checkpoint.submit()``. The initial task is passed as a
-flow parameter. If the LLM needs clarification it calls ``ask_user``,
-which triggers ``kitaru.wait()``. When done, it calls ``hand_back`` and
-waits for a follow-up instruction.
+checkpoint.  When the LLM returns multiple tool calls, they are
+submitted in parallel via ``checkpoint.submit()``.
+
+Memory is flow-scoped (derived from the flow name at runtime). LLM
+tools (remember, recall, list_memories) let the model store and
+retrieve facts across sessions.  Task summaries are saved after each
+hand_back.  When the conversation grows past a threshold, older
+messages are compacted via LLM summarization.
 
 Usage::
 
     cd examples/coding_agent
     python agent.py "Create a plotly chart"
 
-Or supply follow-up input via the CLI::
+Follow-up input::
 
     kitaru executions input <exec-id> --value "use population data"
     kitaru executions resume <exec-id>
-
-Optional env (see also ``llm.py``): ``CODING_AGENT_TOOL_TRANSIENT_RETRIES`` (default
-``2``) for transient network failures during tool execution; LLM backoff and
-recovery rounds are controlled by ``CODING_AGENT_LLM_MAX_RETRIES``,
-``CODING_AGENT_LLM_RECOVERY_ROUNDS``, etc.
 """
 
 import html
 import json
-import os
 import tempfile
 import time
 from pathlib import Path
@@ -33,63 +30,32 @@ from typing import Any
 
 import click
 import materializers as _materializers  # noqa: F401 — registers custom materializers
-from llm import MAX_TOOL_ROUNDS, MODEL, complete_agent_turn_resilient
-from models import (
-    FollowUp,
-    LLMResponse,
-    ToolCallResult,
+from agent_memory import (
+    FLOW_BODY_TOOLS,
+    compact_messages,
+    handle_list_memories,
+    handle_recall,
+    handle_remember,
+    load_session_context,
+    save_task_summary,
 )
+from llm import MAX_TOOL_ROUNDS, MODEL, complete_agent_turn_resilient
+from models import FollowUp, LLMResponse, ToolCallResult
 from prompts import SYSTEM_PROMPT
-from tools import ALL_TOOLS, dispatch_tool, sanitize_display_name, save_generated_files
+from tools import (
+    ALL_TOOLS,
+    dispatch_tool_with_retries,
+    sanitize_display_name,
+    save_generated_files,
+)
 from zenml.types import HTMLString
 
 import kitaru
-from kitaru import checkpoint, flow
+from kitaru import checkpoint, flow, memory
 
-_WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
+WORKSPACE = Path(tempfile.mkdtemp(prefix="agent_"))
 
-_TOOL_TRANSIENT_RETRIES: int = max(
-    1, int(os.environ.get("CODING_AGENT_TOOL_TRANSIENT_RETRIES", "2"))
-)
-
-
-def _is_transient_error(exc: BaseException) -> bool:
-    """Return True for network-ish failures that may succeed on retry."""
-    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
-        return True
-    name = type(exc).__name__
-    if "Timeout" in name or "Connection" in name:
-        return True
-    mod = type(exc).__module__
-    if mod.startswith(("httpx", "httpcore", "urllib3", "requests")):
-        return name in (
-            "ConnectError",
-            "ReadTimeout",
-            "ConnectTimeout",
-            "RemoteProtocolError",
-            "ProtocolError",
-        )
-    return False
-
-
-def _dispatch_tool_with_retries(
-    cwd: str,
-    tool_name: str,
-    arguments: dict[str, Any],
-) -> Any:
-    """Run ``dispatch_tool`` with a few retries on transient failures."""
-    last: Exception | None = None
-    for attempt in range(_TOOL_TRANSIENT_RETRIES):
-        try:
-            return dispatch_tool(cwd, tool_name, arguments)
-        except Exception as exc:
-            last = exc
-            if attempt < _TOOL_TRANSIENT_RETRIES - 1 and _is_transient_error(exc):
-                time.sleep(min(2**attempt, 8))
-                continue
-            raise
-    assert last is not None
-    raise last
+_FINISHED = object()
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +66,9 @@ def _dispatch_tool_with_retries(
 @checkpoint(type="llm_call")
 def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
     """Single LLM completion — tracked as a checkpoint."""
-    started_at = time.perf_counter()
+    started = time.perf_counter()
     response, usage = complete_agent_turn_resilient(messages, tools=ALL_TOOLS)
-    latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
+    latency_ms = round((time.perf_counter() - started) * 1000, 3)
 
     kitaru.log(
         llm_usage={
@@ -117,12 +83,11 @@ def llm_call(messages: list[dict[str, Any]]) -> LLMResponse:
             if v is not None
         }
     )
-
     return response
 
 
 @checkpoint(type="tool_call")
-def tool_call(
+def run_tool(
     tool_name: str,
     arguments: dict[str, Any],
     cwd: str,
@@ -135,12 +100,11 @@ def tool_call(
         else set()
     )
 
-    # Save source code as a browsable artifact before execution
     if tool_name == "python_exec" and "code" in arguments:
-        _save_html_artifact("script.py", arguments["code"])
+        _save_code_artifact("script.py", arguments["code"])
 
     try:
-        raw_result = _dispatch_tool_with_retries(cwd, tool_name, arguments)
+        raw_result = dispatch_tool_with_retries(cwd, tool_name, arguments)
     except Exception as exc:
         kitaru.log(
             tool_exception=tool_name,
@@ -148,28 +112,24 @@ def tool_call(
         )
         return ToolCallResult(
             tool_name=tool_name,
-            output=(f"[tool error after retries: {type(exc).__name__}] {exc}"),
+            output=f"[tool error after retries: {type(exc).__name__}] {exc}",
         )
 
-    # Save full file content as a browsable artifact (LLM only sees truncated)
     if tool_name == "read_file" and "path" in arguments:
         try:
             full_content = (Path(cwd) / arguments["path"]).read_text()
-            _save_html_artifact(arguments["path"], full_content)
+            _save_code_artifact(arguments["path"], full_content)
         except Exception as exc:
             kitaru.log(
-                artifact_warning=f"Could not save full file artifact for "
+                artifact_warning=f"Could not save artifact for "
                 f"{arguments['path']}: {type(exc).__name__}: {exc}"
             )
 
-    # Persist any new files the tool created (HTML, CSV, PNG, etc.)
     save_generated_files(cwd, files_before)
-
     return ToolCallResult(tool_name=tool_name, output=str(raw_result))
 
 
-def _save_html_artifact(name: str, code: str) -> None:
-    """Save a code string as a syntax-highlighted HTML artifact."""
+def _save_code_artifact(name: str, code: str) -> None:
     escaped = html.escape(code)
     kitaru.save(
         name,
@@ -193,164 +153,254 @@ def _save_html_artifact(name: str, code: str) -> None:
     },
 )
 def coding_agent(task: str) -> str:
-    """Agent that solves tasks using tools, then waits for follow-ups.
-
-    1. Receives a task as input
-    2. Loops: calls the LLM, executes tool calls, feeds results back
-    3. When done, calls ``hand_back`` → waits for the next instruction
-    4. Repeats until the tool-call budget is exhausted
-    """
-    cwd = str(_WORKSPACE)
+    """Agent loop: LLM calls, tool execution, memory, and follow-ups."""
+    cwd = str(WORKSPACE)
     kitaru.log(task=task)
+    memory.configure(scope_type="flow")
 
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Working directory: {cwd}\n\nTask: {task}"},
-    ]
-
+    messages = _build_initial_messages(task, cwd)
     results: list[str] = []
-    counter = 0  # monotonic counter for unique checkpoint IDs
+    task_count = 0
+    step_id = 0
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response: LLMResponse = llm_call(messages, id=f"llm_{counter}").load()
-        counter += 1
+        messages = compact_messages(messages)
 
-        # No tool calls → the LLM is done (shouldn't happen if it follows
-        # instructions to call hand_back, but handle it gracefully)
+        response: LLMResponse = llm_call(messages, id=f"llm_{step_id}").load()
+        step_id += 1
+
         if not response.has_tool_calls:
             results.append(response.content or "")
             kitaru.log(phase="done")
             break
 
         messages.append(response.to_message())
+        parsed, step_id = _parse_and_validate_tool_calls(response, messages, step_id)
 
-        _INTERACTIVE = ("hand_back", "ask_user")
-        parsed_calls: list[tuple[Any, dict[str, Any], str]] = []
-        for tc in response.tool_calls:
-            args, parse_err = _parse_tool_arguments(tc.function.arguments)
-            if parse_err:
-                kitaru.log(tool_parse_error=tc.function.name, detail=parse_err)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": parse_err,
-                    }
-                )
-                continue
-            display_name = _make_display_name(
-                tc.function.name, args.pop("_display_name", None), counter
-            )
-            counter += 1
-            parsed_calls.append((tc, args, display_name))
-
-        regular = [
-            (tc, a, dn)
-            for tc, a, dn in parsed_calls
-            if tc.function.name not in _INTERACTIVE
+        checkpoint_calls = [
+            call for call in parsed if call[0].function.name not in FLOW_BODY_TOOLS
         ]
-        special = [
-            (tc, a, dn)
-            for tc, a, dn in parsed_calls
-            if tc.function.name in _INTERACTIVE
+        flow_body_calls = [
+            call for call in parsed if call[0].function.name in FLOW_BODY_TOOLS
         ]
 
-        futures = [
-            (tc, tool_call.submit(tc.function.name, args, cwd, id=display_name))
-            for tc, args, display_name in regular
-        ]
-        for tc, future in futures:
-            try:
-                result: ToolCallResult = future.load()
-            except Exception as exc:
-                kitaru.log(
-                    tool_checkpoint_error=tc.function.name,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-                result = ToolCallResult(
-                    tool_name=tc.function.name,
-                    output=(f"[execution error: {type(exc).__name__}] {exc}"),
-                )
-            msg = {"role": "tool", "tool_call_id": tc.id, "content": result.output}
-            messages.append(msg)
-
-        # --- Handle special tools sequentially ------------------------------
-        for tc, args, _dn in special:
-            if tc.function.name == "hand_back":
-                summary = args.get("summary", "")
-                question = args.get("question", "What would you like to do next?")
-                results.append(summary)
-                kitaru.log(phase="hand_back")
-
-                kitaru.log(follow_up_prompt=question)
-                follow_up: FollowUp = kitaru.wait(
-                    name=None,
-                    timeout=600,
-                    schema=FollowUp,
-                    question=(
-                        "Follow-up or finish "
-                        "(see execution logs for the agent's prompt)."
-                    ),
-                    metadata={},
-                )
-                if follow_up.is_finished:
-                    return "\n\n---\n\n".join(results)
-                msg = {"role": "tool", "tool_call_id": tc.id, "content": summary}
-                messages.append(msg)
-                messages.append({"role": "user", "content": follow_up.message})
-                counter += 1
-
-            elif tc.function.name == "ask_user":
-                question = args.get("question", "The agent needs your input:")
-                kitaru.log(ask_user_prompt=question)
-                answer = kitaru.wait(
-                    name=None,
-                    timeout=600,
-                    schema=str,
-                    question=(
-                        "Input requested (see execution logs for the question text)."
-                    ),
-                    metadata={},
-                )
-                msg = {"role": "tool", "tool_call_id": tc.id, "content": answer}
-                messages.append(msg)
-                counter += 1
+        _run_checkpoint_tools(checkpoint_calls, cwd, messages)
+        outcome = _run_flow_body_tools(
+            flow_body_calls, messages, results, task_count, step_id
+        )
+        if outcome is _FINISHED:
+            return "\n\n---\n\n".join(results)
+        task_count, step_id = outcome
 
     else:
-        # Exhausted tool-call budget — ask for a summary
         messages.append(
             {
                 "role": "user",
                 "content": "Tool call limit reached. Summarize what you accomplished.",
             }
         )
-        final: LLMResponse = llm_call(messages, id=f"llm_{counter}").load()
+        final: LLMResponse = llm_call(messages, id=f"llm_{step_id}").load()
         results.append(final.content or "")
 
     return "\n\n---\n\n".join(results) if results else "No tasks completed."
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Flow helpers
 # ---------------------------------------------------------------------------
 
 
-def _parse_tool_arguments(raw: str) -> tuple[dict[str, Any], str | None]:
-    """Parse tool JSON; on failure return ``({}, error_message)`` for self-heal."""
-    stripped = raw.strip()
-    if not stripped:
-        return {}, None
-    try:
-        return json.loads(stripped), None
-    except json.JSONDecodeError as exc:
-        return {}, f"Invalid JSON in tool arguments: {exc}"
+def _build_initial_messages(task: str, cwd: str) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+    ]
+
+    session_context = load_session_context()
+    if session_context:
+        messages.append({"role": "user", "content": session_context})
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "Understood, I have context from our previous sessions.",
+            }
+        )
+        kitaru.log(session_context_loaded=True)
+
+    messages.append(
+        {
+            "role": "user",
+            "content": f"Working directory: {cwd}\n\nTask: {task}",
+        }
+    )
+    return messages
 
 
-def _make_display_name(tool_name: str, llm_name: Any, counter: int) -> str:
-    """Build a checkpoint ID from the LLM-suggested name or fall back."""
-    if isinstance(llm_name, str) and llm_name.strip():
-        return sanitize_display_name(llm_name, counter)
-    return f"{tool_name}_{counter}"
+def _parse_and_validate_tool_calls(
+    response: LLMResponse,
+    messages: list[dict[str, Any]],
+    step_id: int,
+) -> tuple[list[tuple[Any, dict[str, Any], str]], int]:
+    """Parse tool calls from an LLM response.
+
+    Returns (parsed_calls, updated_step_id).  Parse errors are
+    appended to *messages* so the LLM can self-heal.
+    """
+    parsed: list[tuple[Any, dict[str, Any], str]] = []
+
+    for tool_call_request in response.tool_calls:
+        raw_args = tool_call_request.function.arguments.strip()
+        if not raw_args:
+            args: dict[str, Any] = {}
+            error = None
+        else:
+            try:
+                args = json.loads(raw_args)
+                error = None
+            except json.JSONDecodeError as exc:
+                args = {}
+                error = f"Invalid JSON in tool arguments: {exc}"
+
+        if error:
+            kitaru.log(
+                tool_parse_error=tool_call_request.function.name,
+                detail=error,
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_request.id,
+                    "content": error,
+                }
+            )
+            continue
+
+        display_name = args.pop("_display_name", None)
+        if isinstance(display_name, str) and display_name.strip():
+            checkpoint_id = sanitize_display_name(display_name, step_id)
+        else:
+            checkpoint_id = f"{tool_call_request.function.name}_{step_id}"
+        step_id += 1
+
+        parsed.append((tool_call_request, args, checkpoint_id))
+
+    return parsed, step_id
+
+
+def _run_checkpoint_tools(
+    calls: list[tuple[Any, dict[str, Any], str]],
+    cwd: str,
+    messages: list[dict[str, Any]],
+) -> None:
+    """Submit tool calls as checkpoints in parallel, collect results."""
+    futures = [
+        (
+            request,
+            run_tool.submit(request.function.name, args, cwd, id=checkpoint_id),
+        )
+        for request, args, checkpoint_id in calls
+    ]
+
+    for request, future in futures:
+        try:
+            result: ToolCallResult = future.load()
+        except Exception as exc:
+            kitaru.log(
+                tool_checkpoint_error=request.function.name,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            result = ToolCallResult(
+                tool_name=request.function.name,
+                output=f"[execution error: {type(exc).__name__}] {exc}",
+            )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": request.id,
+                "content": result.output,
+            }
+        )
+
+
+def _run_flow_body_tools(
+    calls: list[tuple[Any, dict[str, Any], str]],
+    messages: list[dict[str, Any]],
+    results: list[str],
+    task_count: int,
+    step_id: int,
+) -> tuple[int, int] | object:
+    """Handle tools that must run in the flow body (memory, HITL).
+
+    Returns ``(updated_task_count, updated_step_id)`` normally, or the
+    sentinel ``_FINISHED`` when the user ends the session.
+    """
+    for request, args, _checkpoint_id in calls:
+        name = request.function.name
+
+        if name == "hand_back":
+            summary = args.get("summary", "")
+            question = args.get("question", "What would you like to do next?")
+            results.append(summary)
+            kitaru.log(phase="hand_back")
+
+            save_task_summary(summary, task_count)
+            task_count += 1
+
+            kitaru.log(follow_up_prompt=question)
+            follow_up: FollowUp = kitaru.wait(
+                name=None,
+                timeout=600,
+                schema=FollowUp,
+                question=(
+                    "Follow-up or finish (see execution logs for the agent's prompt)."
+                ),
+                metadata={},
+            )
+            if follow_up.is_finished:
+                return _FINISHED
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": request.id,
+                    "content": summary,
+                }
+            )
+            messages.append({"role": "user", "content": follow_up.message})
+            step_id += 1
+
+        elif name == "ask_user":
+            question = args.get("question", "The agent needs your input:")
+            kitaru.log(ask_user_prompt=question)
+            answer = kitaru.wait(
+                name=None,
+                timeout=600,
+                schema=str,
+                question=(
+                    "Input requested (see execution logs for the question text)."
+                ),
+                metadata={},
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": request.id,
+                    "content": answer,
+                }
+            )
+            step_id += 1
+
+        elif name == "remember":
+            messages.append(handle_remember(request.id, args, step_id))
+            step_id += 1
+
+        elif name == "recall":
+            messages.append(handle_recall(request.id, args, step_id))
+            step_id += 1
+
+        elif name == "list_memories":
+            messages.append(handle_list_memories(request.id, args, step_id))
+            step_id += 1
+
+    return task_count, step_id
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +411,14 @@ def _make_display_name(tool_name: str, llm_name: Any, counter: int) -> str:
 @click.command(help="General-purpose interactive agent.")
 @click.argument("task")
 def main(task: str) -> None:
+    kitaru.configure(
+        stack="local_remote",
+        image={
+            "dockerfile": "../../docker/Dockerfile.dev",
+            "build_context_root": "../../",
+            "platform": "linux/amd64",
+        },
+    )
     coding_agent.run(task)
 
 
