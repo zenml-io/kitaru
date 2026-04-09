@@ -13,6 +13,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 from zenml.exceptions import EntityExistsError
 
+from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
     RuntimeSnapshot,
     _build_runtime_snapshot,
@@ -162,6 +163,8 @@ def _memory_payload(
     value_type: str = "dict",
     is_deleted: bool = False,
     execution_id: str | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
     artifact_id: str | None = None,
     value: Any | None = None,
     value_format: str | None = None,
@@ -177,6 +180,8 @@ def _memory_payload(
         "is_deleted": is_deleted,
         "artifact_id": artifact_id or f"artifact-{key}-{version}",
         "execution_id": execution_id,
+        "flow_id": flow_id,
+        "flow_name": flow_name,
     }
     if value_format is not None:
         payload["value_format"] = value_format
@@ -377,7 +382,7 @@ def test_memory_help_lists_all_supported_subcommands(
         app(["memory", "--help"])
     assert exc_info.value.code == 0
     output = capsys.readouterr().out.lower()
-    for command in ("list", "get", "set", "delete", "history", "scopes"):
+    for command in ("list", "get", "set", "delete", "history", "scopes", "reindex"):
         assert command in output
 
 
@@ -1480,6 +1485,49 @@ def test_logout_returns_local_server_mode_for_local_connection() -> None:
     assert str(result) == "Logged out from the local Kitaru server."
 
 
+def test_logout_treats_localhost_docker_server_as_remote() -> None:
+    """Docker localhost URLs should not be mistaken for the local daemon."""
+    fake_gc = Mock()
+    fake_gc.uses_local_store = False
+    fake_gc.store_configuration = SimpleNamespace(url="http://localhost:8080")
+    fake_credentials_store = Mock()
+
+    with (
+        patch("kitaru.cli.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.cli._connected_to_local_server", return_value=False),
+        patch(
+            "kitaru.cli._get_connected_server_url",
+            return_value="http://localhost:8080",
+        ),
+        patch(
+            "kitaru.cli.stop_registered_local_server",
+            return_value=SimpleNamespace(
+                stopped=True,
+                url="http://127.0.0.1:8383",
+            ),
+        ),
+        patch(
+            "kitaru.cli.get_credentials_store",
+            return_value=fake_credentials_store,
+        ),
+        patch(
+            "kitaru.inspection.get_local_server",
+            return_value=SimpleNamespace(
+                status=SimpleNamespace(url="http://127.0.0.1:8383"),
+                config=SimpleNamespace(url="http://127.0.0.1:8383"),
+            ),
+        ),
+    ):
+        result = _logout_current_connection()
+
+    fake_gc.set_default_store.assert_called_once_with()
+    fake_credentials_store.clear_credentials.assert_called_once_with(
+        "http://localhost:8080"
+    )
+    assert result.mode == "remote_server"
+    assert result.target == "http://localhost:8080"
+
+
 def test_logout_is_idempotent_on_local_store() -> None:
     """The logout helper should be a no-op when already on the local store."""
     fake_gc = Mock()
@@ -1518,12 +1566,19 @@ def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
             "kitaru.cli.stop_registered_local_server",
             return_value=SimpleNamespace(
                 stopped=True,
-                url="http://127.0.0.1:8383",
+                url="http://127.0.0.1:8237",
             ),
         ),
         patch(
             "kitaru.cli.get_credentials_store",
             return_value=fake_credentials_store,
+        ),
+        patch(
+            "kitaru.inspection.get_local_server",
+            return_value=SimpleNamespace(
+                status=SimpleNamespace(url=None),
+                config=SimpleNamespace(url=None, port=8237, ip_address="127.0.0.1"),
+            ),
         ),
     ):
         result = _logout_current_connection()
@@ -2132,6 +2187,36 @@ def test_memory_get_renders_value_sections(capsys: pytest.CaptureFixture[str]) -
     assert "kr-222" in output
 
 
+def test_memory_get_execution_scope_shows_flow_context(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Execution-scope detail view should surface logical flow context."""
+    payload = _memory_payload(
+        key="scratch",
+        scope="exec-123",
+        scope_type="execution",
+        version=2,
+        flow_id="flow-456",
+        flow_name="repo_memory_demo",
+        value={"draft": True},
+        value_format="json",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.get_memory_payload", return_value=payload),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["memory", "get", "scratch", "--scope", "exec-123"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Flow ID" in output
+    assert "flow-456" in output
+    assert "Flow Name" in output
+    assert "repo_memory_demo" in output
+
+
 def test_memory_get_errors_when_missing(capsys: pytest.CaptureFixture[str]) -> None:
     """Missing memory keys should produce a clear non-zero CLI error."""
     with (
@@ -2413,7 +2498,84 @@ def test_memory_history_errors_when_empty(capsys: pytest.CaptureFixture[str]) ->
 
 
 class TestMemoryMaintenance:
-    """CLI smoke tests for memory maintenance commands (compact/purge/log)."""
+    """CLI smoke tests for memory maintenance commands."""
+
+    def test_reindex_dry_run_exits_zero(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`kitaru memory reindex` should render a dry-run summary."""
+        reindex_payload = {
+            "dry_run": True,
+            "versions_scanned": 4,
+            "execution_scope_versions_scanned": 2,
+            "already_indexed": 1,
+            "versions_needing_updates": 3,
+            "versions_updated": 0,
+            "scope_type_tags_identified": 3,
+            "flow_tags_identified": 2,
+            "scope_type_tags_added": 0,
+            "flow_tags_added": 0,
+            "issues_count": 1,
+            "issue_samples": [
+                {
+                    "artifact_id": "artifact-1",
+                    "artifact_name": "kitaru_mem:exec-123:scratch",
+                    "scope": "exec-123",
+                    "key": "scratch",
+                    "reason": "execution scope 'exec-123': lookup failed",
+                }
+            ],
+        }
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.reindex_memory_payload",
+                return_value=reindex_payload,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["memory", "reindex"])
+
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "Kitaru memory reindex" in output
+        assert "dry-run" in output
+        assert "--apply" in output
+        assert "exec-123/scratch" in output
+
+    def test_reindex_apply_json_output(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`kitaru memory reindex --apply --output json` should emit a JSON item."""
+        reindex_payload = {
+            "dry_run": False,
+            "versions_scanned": 4,
+            "execution_scope_versions_scanned": 2,
+            "already_indexed": 1,
+            "versions_needing_updates": 3,
+            "versions_updated": 3,
+            "scope_type_tags_identified": 3,
+            "flow_tags_identified": 2,
+            "scope_type_tags_added": 3,
+            "flow_tags_added": 2,
+            "issues_count": 0,
+            "issue_samples": [],
+        }
+        with (
+            patch("kitaru.cli.KitaruClient", return_value=Mock()),
+            patch(
+                "kitaru.cli.reindex_memory_payload",
+                return_value=reindex_payload,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["memory", "reindex", "--apply", "--output", "json"])
+
+        assert exc_info.value.code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["command"] == "memory.reindex"
+        assert payload["item"]["dry_run"] is False
+        assert payload["item"]["versions_updated"] == 3
 
     def test_compact_single_key_exits_zero(
         self, capsys: pytest.CaptureFixture[str]
@@ -5394,7 +5556,11 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
     fake_gc.store_configuration = SimpleNamespace(url="http://127.0.0.1:8237")
     fake_gc.config_directory = "/tmp/kitaru-config"
     fake_local_server = SimpleNamespace(
-        config=SimpleNamespace(provider=SimpleNamespace(value="daemon")),
+        config=SimpleNamespace(
+            provider=SimpleNamespace(value="daemon"),
+            port=8237,
+            ip_address="127.0.0.1",
+        ),
         status=SimpleNamespace(
             url=None,
             status_message="service daemon is not running",
@@ -5424,3 +5590,102 @@ def test_describe_local_server_handles_missing_local_backend() -> None:
         status = _describe_local_server()
 
     assert status == "unavailable (local runtime support not installed)"
+
+
+class TestCLIAnalytics:
+    """Tests that CLI commands emit the expected analytics events."""
+
+    def test_init_emits_project_initialized_event(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``kitaru init`` should emit PROJECT_INITIALIZED after success."""
+        target = tmp_path / "analytics_init"
+        target.mkdir()
+        with (
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["init", str(target)])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.PROJECT_INITIALIZED,
+            {"used_cwd": False},
+        )
+
+    def test_login_local_emits_login_completed_event(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Bare ``kitaru login`` should emit LOGIN_COMPLETED with local mode."""
+        with (
+            patch(
+                "kitaru.cli.start_or_connect_local_server",
+                return_value=SimpleNamespace(
+                    url="http://127.0.0.1:8383",
+                    action="started",
+                ),
+            ),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["login"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.LOGIN_COMPLETED,
+            {"mode": "local", "action": "started"},
+        )
+
+    def test_login_remote_emits_login_completed_event(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``kitaru login <server>`` should emit LOGIN_COMPLETED with remote mode."""
+        with (
+            patch("kitaru.cli.login_to_server"),
+            patch(
+                "kitaru.cli._get_connected_server_url",
+                return_value="https://example.com",
+            ),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["login", "https://example.com/", "--api-key", "secret-key"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.LOGIN_COMPLETED,
+            {"mode": "remote", "project_provided": False},
+        )
+
+    def test_secrets_set_emits_secret_upserted_event(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``kitaru secrets set`` should emit SECRET_UPSERTED after success."""
+        fake_client = Mock()
+        fake_client.create_secret.return_value = SimpleNamespace(
+            name="openai-creds",
+            id="secret-id",
+        )
+
+        with (
+            patch("kitaru.cli.Client", return_value=fake_client),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(
+                [
+                    "secrets",
+                    "set",
+                    "openai-creds",
+                    "--OPENAI_API_KEY=sk-123",
+                ]
+            )
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.SECRET_UPSERTED,
+            {
+                "operation": "created",
+                "key_count": 1,
+            },
+        )

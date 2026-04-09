@@ -43,6 +43,7 @@ from kitaru.errors import FailureOrigin
 from kitaru.inspection import (
     RuntimeSnapshot,
     build_runtime_snapshot,
+    is_registered_local_server_url,
     serialize_artifact_ref,
     serialize_artifact_value,
     serialize_checkpoint_attempt,
@@ -53,6 +54,7 @@ from kitaru.inspection import (
     serialize_log_entry,
     serialize_memory_entry,
     serialize_memory_history,
+    serialize_memory_reindex_result,
     serialize_memory_value,
     serialize_model_alias,
     serialize_pending_wait,
@@ -65,8 +67,9 @@ from kitaru.inspection import (
     serialize_stack_delete_result,
     serialize_stack_details,
     to_jsonable,
+    uses_stale_local_server_url,
 )
-from kitaru.memory import MemoryEntry
+from kitaru.memory import MemoryEntry, MemoryReindexIssue, MemoryReindexResult
 
 
 @dataclass(frozen=True)
@@ -146,6 +149,9 @@ def _sample_memory_entry(
     scope: str = "repo_scope",
     scope_type: str = "namespace",
     is_deleted: bool = False,
+    execution_id: str | None = None,
+    flow_id: str | None = None,
+    flow_name: str | None = None,
 ) -> MemoryEntry:
     return MemoryEntry(
         key=key,
@@ -156,7 +162,13 @@ def _sample_memory_entry(
         created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
         is_deleted=is_deleted,
         artifact_id="artifact-123",
-        execution_id="exec-123" if scope_type != "namespace" else None,
+        execution_id=(
+            execution_id
+            if execution_id is not None
+            else ("exec-123" if scope_type != "namespace" else None)
+        ),
+        flow_id=flow_id,
+        flow_name=flow_name,
     )
 
 
@@ -350,7 +362,33 @@ def test_serialize_memory_entry_contract() -> None:
         "is_deleted": False,
         "artifact_id": "artifact-123",
         "execution_id": "exec-123",
+        "flow_id": None,
+        "flow_name": None,
     }
+
+
+def test_serialize_memory_entry_includes_flow_context_when_present() -> None:
+    payload = serialize_memory_entry(
+        MemoryEntry(
+            key="prefs",
+            value_type="dict",
+            version=2,
+            scope="exec-123",
+            scope_type="execution",
+            created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+            is_deleted=False,
+            artifact_id="artifact-123",
+            execution_id=None,
+            flow_id="flow-456",
+            flow_name="repo_memory_demo",
+        )
+    )
+
+    assert payload["scope"] == "exec-123"
+    assert payload["scope_type"] == "execution"
+    assert payload["execution_id"] is None
+    assert payload["flow_id"] == "flow-456"
+    assert payload["flow_name"] == "repo_memory_demo"
 
 
 def test_serialize_memory_history_contract() -> None:
@@ -363,6 +401,56 @@ def test_serialize_memory_history_contract() -> None:
 
     assert [entry["version"] for entry in payload] == [2, 1]
     assert [entry["is_deleted"] for entry in payload] == [True, False]
+
+
+def test_serialize_memory_reindex_result_contract() -> None:
+    payload = serialize_memory_reindex_result(
+        MemoryReindexResult(
+            dry_run=True,
+            versions_scanned=4,
+            execution_scope_versions_scanned=2,
+            already_indexed=1,
+            versions_needing_updates=3,
+            versions_updated=0,
+            scope_type_tags_identified=3,
+            flow_tags_identified=2,
+            scope_type_tags_added=0,
+            flow_tags_added=0,
+            issues_count=1,
+            issue_samples=[
+                MemoryReindexIssue(
+                    artifact_id="artifact-1",
+                    artifact_name="kitaru_mem:exec-123:scratch",
+                    scope="exec-123",
+                    key="scratch",
+                    reason="execution scope 'exec-123': lookup failed",
+                )
+            ],
+        )
+    )
+
+    assert payload == {
+        "dry_run": True,
+        "versions_scanned": 4,
+        "execution_scope_versions_scanned": 2,
+        "already_indexed": 1,
+        "versions_needing_updates": 3,
+        "versions_updated": 0,
+        "scope_type_tags_identified": 3,
+        "flow_tags_identified": 2,
+        "scope_type_tags_added": 0,
+        "flow_tags_added": 0,
+        "issues_count": 1,
+        "issue_samples": [
+            {
+                "artifact_id": "artifact-1",
+                "artifact_name": "kitaru_mem:exec-123:scratch",
+                "scope": "exec-123",
+                "key": "scratch",
+                "reason": "execution scope 'exec-123': lookup failed",
+            }
+        ],
+    }
 
 
 def test_serialize_memory_value_reuses_artifact_value_rules() -> None:
@@ -504,9 +592,14 @@ def test_serialize_execution_contract() -> None:
             "base_image": None,
             "requirements": None,
             "dockerfile": "Dockerfile",
+            "build_context_root": None,
             "environment": None,
             "apt_packages": None,
             "replicate_local_python_environment": None,
+            "image_tag": None,
+            "target_repository": None,
+            "user": None,
+            "platform": None,
         },
         "cache": None,
         "retries": None,
@@ -754,6 +847,13 @@ def test_build_runtime_snapshot_appends_legacy_warning_for_stale_local_server(
             "kitaru.inspection.describe_local_server",
             return_value="registered but unavailable (daemon: stopped)",
         ),
+        patch(
+            "kitaru.inspection.get_local_server",
+            return_value=SimpleNamespace(
+                status=SimpleNamespace(url=None),
+                config=SimpleNamespace(url=None, port=8237, ip_address="127.0.0.1"),
+            ),
+        ),
         patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
         patch(
             "kitaru.inspection.list_active_kitaru_environment_variables",
@@ -769,6 +869,41 @@ def test_build_runtime_snapshot_appends_legacy_warning_for_stale_local_server(
     assert snapshot.warning is not None
     assert "stopped local server" in snapshot.warning
     assert "`KITARU_RUNNER` was renamed to `KITARU_STACK`" in snapshot.warning
+
+
+def test_registered_local_server_url_matches_localhost_aliases() -> None:
+    local_server = SimpleNamespace(
+        status=SimpleNamespace(url="http://127.0.0.1:8383"),
+        config=SimpleNamespace(url="http://127.0.0.1:8383"),
+    )
+
+    with patch("kitaru.inspection.get_local_server", return_value=local_server):
+        assert is_registered_local_server_url("http://localhost:8383") is True
+        assert is_registered_local_server_url("http://127.0.0.1:8383") is True
+        assert is_registered_local_server_url("http://localhost:8080") is False
+
+
+def test_uses_stale_local_server_url_ignores_non_local_daemon_port() -> None:
+    local_server = SimpleNamespace(
+        status=SimpleNamespace(url="http://127.0.0.1:8383"),
+        config=SimpleNamespace(url="http://127.0.0.1:8383"),
+    )
+
+    with patch("kitaru.inspection.get_local_server", return_value=local_server):
+        assert (
+            uses_stale_local_server_url(
+                "http://localhost:8080",
+                "registered but unavailable (daemon: stopped)",
+            )
+            is False
+        )
+        assert (
+            uses_stale_local_server_url(
+                "http://localhost:8383",
+                "registered but unavailable (daemon: stopped)",
+            )
+            is True
+        )
 
 
 def test_build_runtime_snapshot_populates_log_store_mismatch_details() -> None:

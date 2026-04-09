@@ -630,6 +630,7 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         env_overlay: dict[str, str] = {}
         credential_source = "environment"
         latency_ms = 0.0
+        is_mocked = True
     else:
         env_overlay, credential_source = _resolve_credential_overlay(model_selection)
         started_at = time.perf_counter()
@@ -641,6 +642,7 @@ def _execute_llm_call(request: _LLMRequest) -> str:
             env_overlay=env_overlay,
         )
         latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
+        is_mocked = False
 
     response_text = result.response_text
     usage = result.usage
@@ -672,6 +674,17 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         key: value for key, value in llm_metadata.items() if value is not None
     }
     log(llm_calls={request.call_name: filtered_metadata})
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.LLM_CALLED,
+        {
+            "resolved_model": model_selection.resolved_model,
+            "credential_source": credential_source,
+            "mocked": is_mocked,
+        },
+    )
 
     return response_text
 

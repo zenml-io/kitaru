@@ -34,6 +34,7 @@ scripts/              # Doc generation + site merge scripts
   generate_changelog_docs.py # Generates changelog MDX from CHANGELOG.md
   generate_sdk_docs.py       # Extracts Python SDK API to JSON (griffe → docs/.generated/sdk-api.json)
   merge_site.sh              # Merges docs static export into Astro build output
+  smoke-test.sh              # Pre-release end-to-end sanity check (CLI, flows, MCP, LLM)
 docker/               # Dockerfiles — see docker/CLAUDE.md for full architecture details
   Dockerfile          # Production server (FROM zenmldocker/zenml-server + Kitaru + Kitaru UI)
   Dockerfile.server-dev  # Dev server for local UI testing (local source + local UI dist)
@@ -115,9 +116,12 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 ### Releasing a new version
 
 1. Ensure `develop` has all changes for the release.
-2. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
-3. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-4. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release.
+2. Ensure `CHANGELOG.md` `[Unreleased]` section is complete — cross-check against `git log v<prev>..develop` for any missing user-facing changes.
+3. Run the smoke test: `./scripts/smoke-test.sh` (or `./scripts/smoke-test.sh -s` to skip reinstall). This exercises CLI, SDK flows, MCP tools, and LLM integration against a local server. Set `OPENAI_API_KEY` to include LLM tests. Use `-k` to keep the server running and inspect the dashboard afterward.
+4. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
+5. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
+6. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to ECR, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes.
+7. After the workflow completes, edit the GitHub Release notes (`gh release edit vX.Y.Z --notes ...`) to replace the auto-generated PR list with a structured changelog: a **Highlights** section for the most notable changes, then **Added/Changed/Fixed/Infrastructure** categories mirroring the changelog.
 
 ## Development commands
 
@@ -245,6 +249,19 @@ Future work will add richer OpenTelemetry-native tracing and exporter integratio
 - **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
 - **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Use standalone util files only for truly generic functions used across unrelated modules.
 - **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
+
+## Analytics instrumentation
+
+Kitaru collects anonymous usage analytics for users who have opted in (via ZenML's global analytics setting). When adding new features, discuss analytics coverage with the core team during planning to decide what (if anything) should be tracked.
+
+- **Event registry:** all event names live in the `AnalyticsEvent` enum in `src/kitaru/analytics.py`. Add new events there — never use raw strings.
+- **Privacy by design:** track only non-sensitive metadata (event names, boolean flags, enum values, counts). Never include user content, file paths, prompts, model outputs, secret values, or positional CLI arguments. The CLI command tracker uses an allowlist of known multi-word commands (`_MULTI_TOKEN_COMMANDS`) to avoid leaking positional args.
+- **Three instrumentation surfaces:**
+  - **CLI** (`src/kitaru/cli.py` + `src/kitaru/_cli/`): entry-point tracking in `cli()`, per-command feature events in subcommand handlers.
+  - **MCP** (`src/kitaru/mcp/server.py`): `@tracked_mcp_tool` decorator wraps each tool with automatic success/failure tracking.
+  - **Core SDK** (`src/kitaru/`): `track(AnalyticsEvent.X, {...})` calls at key lifecycle points (flow submit/terminal, wait, LLM calls, artifact save/load, replay, etc.).
+- **Graceful degradation:** all `track()` calls silently fail if analytics is unavailable. Never let a tracking failure break user-facing functionality.
+- **Source tagging:** each entry point calls `set_source()` (cli, mcp, python) so events can be segmented by surface without leaking specifics.
 
 ## Versioning and changelog
 

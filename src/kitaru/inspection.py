@@ -46,9 +46,13 @@ from kitaru.memory import (
     CompactionRecord,
     CompactResult,
     MemoryEntry,
+    MemoryReindexIssue,
+    MemoryReindexResult,
     MemoryScopeInfo,
     PurgeResult,
 )
+
+_LOCALHOST_NAMES = {"127.0.0.1", "localhost", "::1"}
 
 
 @dataclass
@@ -101,6 +105,53 @@ def describe_local_server() -> str:
     return f"registered but unavailable ({provider})"
 
 
+def _localhost_url_identity(url: str | None) -> tuple[str, int] | None:
+    """Return a comparable identity for localhost URLs.
+
+    Localhost aliases are treated as equivalent; only the scheme-defaulted port
+    matters for matching against the registered local server.
+    """
+    if not url:
+        return None
+
+    parsed = urlparse(url)
+    if parsed.hostname not in _LOCALHOST_NAMES:
+        return None
+
+    if parsed.port is not None:
+        return ("localhost", parsed.port)
+    if parsed.scheme == "https":
+        return ("localhost", 443)
+    return ("localhost", 80)
+
+
+def is_registered_local_server_url(url: str | None) -> bool:
+    """Return whether a URL matches the registered local Kitaru server."""
+    candidate = _localhost_url_identity(url)
+    if candidate is None:
+        return False
+
+    try:
+        local_server = get_local_server()
+    except ImportError:
+        return False
+    if local_server is None:
+        return False
+
+    status = getattr(local_server, "status", None)
+    local_url = getattr(status, "url", None)
+    config = getattr(local_server, "config", None)
+    if not local_url and config is not None:
+        local_url = getattr(config, "url", None)
+    if not local_url and config is not None:
+        local_port = getattr(config, "port", None)
+        if isinstance(local_port, int):
+            local_host = getattr(config, "ip_address", None) or "127.0.0.1"
+            local_url = f"http://{local_host}:{local_port}"
+
+    return _localhost_url_identity(str(local_url) if local_url else None) == candidate
+
+
 def connected_to_local_server_safe() -> bool:
     """Safely check whether the current client is bound to a local server."""
     try:
@@ -140,8 +191,7 @@ def uses_stale_local_server_url(
     if not server_url or not local_server_status:
         return False
 
-    hostname = urlparse(server_url).hostname
-    return hostname in {"127.0.0.1", "localhost", "::1"} and (
+    return is_registered_local_server_url(server_url) and (
         "unavailable" in local_server_status
     )
 
@@ -389,6 +439,8 @@ def serialize_memory_entry(entry: MemoryEntry) -> dict[str, Any]:
         "is_deleted": entry.is_deleted,
         "artifact_id": entry.artifact_id,
         "execution_id": entry.execution_id,
+        "flow_id": entry.flow_id,
+        "flow_name": entry.flow_name,
     }
 
 
@@ -446,6 +498,37 @@ def serialize_compact_result(result: CompactResult) -> dict[str, Any]:
         "sources_read": result.sources_read,
         "scope": result.scope,
         "compaction_record": serialize_compaction_record(result.compaction_record),
+    }
+
+
+def serialize_memory_reindex_issue(issue: MemoryReindexIssue) -> dict[str, Any]:
+    """Serialize a sampled memory reindex issue for transport layers."""
+    return {
+        "artifact_id": issue.artifact_id,
+        "artifact_name": issue.artifact_name,
+        "scope": issue.scope,
+        "key": issue.key,
+        "reason": issue.reason,
+    }
+
+
+def serialize_memory_reindex_result(result: MemoryReindexResult) -> dict[str, Any]:
+    """Serialize a memory reindex result for transport layers."""
+    return {
+        "dry_run": result.dry_run,
+        "versions_scanned": result.versions_scanned,
+        "execution_scope_versions_scanned": result.execution_scope_versions_scanned,
+        "already_indexed": result.already_indexed,
+        "versions_needing_updates": result.versions_needing_updates,
+        "versions_updated": result.versions_updated,
+        "scope_type_tags_identified": result.scope_type_tags_identified,
+        "flow_tags_identified": result.flow_tags_identified,
+        "scope_type_tags_added": result.scope_type_tags_added,
+        "flow_tags_added": result.flow_tags_added,
+        "issues_count": result.issues_count,
+        "issue_samples": [
+            serialize_memory_reindex_issue(issue) for issue in result.issue_samples
+        ],
     }
 
 

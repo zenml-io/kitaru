@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.3.0"
+version = "0.3.3"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -10,18 +10,39 @@ authors = [
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: Pydantic",
+    "Framework :: Pydantic :: 2",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+keywords = [
+    "ai-agents",
+    "durable-execution",
+    "workflow",
+    "orchestration",
+    "checkpoints",
+    "replay",
+    "llm",
+    "mlops",
+    "pydantic",
+    "observability",
 ]
 dependencies = [
     "cyclopts>=3.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    "zenml[local]>=0.94.1",
+    "zenml[local]>=0.94.2",
 ]
 
 [project.optional-dependencies]
@@ -36,7 +57,7 @@ llm = [
     "kitaru[anthropic]",
 ]
 local = [
-    "zenml[server]>=0.94.1",
+    "zenml[server]>=0.94.2",
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=1.75.0",
@@ -71,13 +92,14 @@ packages = ["src/kitaru", "src/kitaru_init_hook"]
 
 [tool.uv]
 exclude-newer = "3 days"
+exclude-newer-package = { zenml = false }
 
 [dependency-groups]
 dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    "zenml[server]>=0.94.1",
+    "zenml[server]>=0.94.2",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",

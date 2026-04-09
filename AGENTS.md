@@ -19,7 +19,7 @@ docs/                 # FumaDocs Next.js app — documentation at kitaru.ai/docs
   app/                # Next.js app routes, layout, metadata
 site/                 # Astro landing page + runtime shell at kitaru.ai/
   src/pages/api/      # Server-side API routes (e.g. /api/waitlist with KV)
-scripts/              # Doc generation + site merge scripts (includes SDK reference extraction)
+scripts/              # Doc generation, site merge, and smoke test scripts
 docker/               # Dockerfiles (Dockerfile = production server, Dockerfile.dev = dev/testing stack)
 spec/                 # SDK design specifications (planning material, not shipped code)
 design/               # Design docs, meeting notes (gitignored, never commit)
@@ -104,6 +104,18 @@ Agent-facing commands should keep the shared `--output json` / `-o json` contrac
 
 Use `pytest` for unit and integration tests. Name files `test_*.py` and test functions `test_*`. Mirror source paths (example: `src/kitaru/runtime.py` -> `tests/test_runtime.py`). Every bug fix should include a regression test that fails before the fix and passes after it.
 
+## Analytics Instrumentation
+
+Kitaru collects anonymous usage analytics for opted-in users. When adding new features, discuss analytics coverage with the core team to decide what should be tracked.
+
+- All event names must be added to the `AnalyticsEvent` enum in `src/kitaru/analytics.py`.
+- Track only non-sensitive metadata (event names, boolean flags, enum values, counts). Never include user content, file paths, prompts, or secret values.
+- Follow the existing patterns for each surface:
+  - **CLI:** feature events via `track()` in subcommand handlers (`src/kitaru/_cli/`).
+  - **MCP:** `@tracked_mcp_tool` decorator in `src/kitaru/mcp/server.py`.
+  - **Core SDK:** `track(AnalyticsEvent.X, {...})` at lifecycle points in the relevant module.
+- All `track()` calls must fail silently — never break user-facing functionality for analytics.
+
 ## Commit & Pull Request Guidelines
 
 Use short, imperative subjects (for example: `Add ...`, `Update ...`, `Create ...`). Keep commit titles concise (about 50 chars), and explain the why in the body when needed.
@@ -138,6 +150,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 
 - Default branch is `develop`. All PRs target `develop`.
 - `main` tracks the latest released version only; do not push directly.
+- Before releasing, run `./scripts/smoke-test.sh` to exercise CLI, SDK flows, MCP tools, and LLM integration end-to-end against a local server. Use `-s` to skip reinstall, `-k` to keep the server running afterward. Set `OPENAI_API_KEY` to include LLM tests.
 - Releases are cut via the Release workflow (`workflow_dispatch` on `develop` or `v*` tag push).
 - Release branches (`release/X.Y.Z`) and tags (`vX.Y.Z`) are created automatically.
 - Version is maintained in `pyproject.toml` and bumped by the release workflow. Never hardcode it — use `importlib.metadata.version("kitaru")`.

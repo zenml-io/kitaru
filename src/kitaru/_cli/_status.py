@@ -24,6 +24,7 @@ from kitaru.config import (
 from kitaru.inspection import (
     RuntimeSnapshot,
     describe_local_server,
+    is_registered_local_server_url,
     serialize_resolved_log_store,
     serialize_runtime_snapshot,
 )
@@ -204,10 +205,8 @@ def _validate_remote_login_flags(
 
 
 def _is_localhost_url(url: str | None) -> bool:
-    """Return whether a URL points at localhost."""
-    if not url:
-        return False
-    return urlparse(url).hostname in {"127.0.0.1", "localhost", "::1"}
+    """Return whether a URL matches the registered local server."""
+    return is_registered_local_server_url(url)
 
 
 def _login_payload_local(result: Any) -> dict[str, Any]:
@@ -538,6 +537,13 @@ def login(
             handled_exceptions=(Exception,),
         )
 
+        from kitaru.analytics import AnalyticsEvent, track
+
+        track(
+            AnalyticsEvent.LOGIN_COMPLETED,
+            {"mode": "local", "action": result.action},
+        )
+
         if output_format == CLIOutputFormat.JSON:
             _emit_json_item(
                 command,
@@ -570,6 +576,13 @@ def login(
         output=output_format,
         exit_with_error=_exit_with_error,
         handled_exceptions=(Exception,),
+    )
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.LOGIN_COMPLETED,
+        {"mode": "remote", "project_provided": project is not None},
     )
 
     connected_server_url = facade._get_connected_server_url() or server.rstrip("/")
