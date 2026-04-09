@@ -19,7 +19,10 @@
     </div>
 
     <p class="sp-tagline" data-reveal data-reveal-delay="1">
-      Kitaru inherits production-proven orchestration foundations from ZenML and draws on lessons from real AI systems. Kitaru's own claims stay narrow and concrete: durable execution, replay, wait/resume, durable memory, and portability are shipped today.
+      From production-proven foundations to purpose-built agent primitives.
+    </p>
+    <p class="sp-subtext" data-reveal data-reveal-delay="1">
+      Kitaru inherits orchestration foundations from ZenML and ships its own concrete primitives &mdash; durable execution, replay, wait/resume, durable memory, and portability.
     </p>
 
     <div class="sp-stats">
@@ -127,8 +130,17 @@
     color: var(--color-primary);
     letter-spacing: -0.03em;
     line-height: 1.15;
-    margin: 0 0 56px;
+    margin: 0 0 16px;
     max-width: 860px;
+  }
+
+  .sp-subtext {
+    font-size: clamp(15px, 1.8vw, 18px);
+    font-weight: 400;
+    color: var(--color-secondary);
+    line-height: 1.6;
+    margin: 0 0 56px;
+    max-width: 720px;
   }
 
   .sp-stats {
@@ -252,7 +264,11 @@
     .sp-tagline {
       font-size: 22px;
       line-height: 1.25;
-      margin-bottom: 40px;
+      margin-bottom: 12px;
+    }
+
+    .sp-subtext {
+      margin-bottom: 36px;
     }
 
     .sp-stats {
@@ -279,7 +295,8 @@
 
   @media (max-width: 480px) {
     .social-proof-section { padding: 60px 0; }
-    .sp-tagline { font-size: 19px; margin-bottom: 32px; }
+    .sp-tagline { font-size: 19px; margin-bottom: 10px; }
+    .sp-subtext { font-size: 14px; margin-bottom: 28px; }
     .sp-stat { padding: 24px 20px; }
     .sp-stat-number { font-size: 44px; }
     .sp-stat-text { font-size: 28px; }
