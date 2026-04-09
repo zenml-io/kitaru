@@ -202,7 +202,7 @@ def format_recovery_hint(exec_id: str, *, status: str) -> str | None:
     command = build_recovery_command(exec_id, status=status)
     if command is None:
         return None
-    return f"To retry this execution from the failed checkpoint, run:\n\n  {command}"
+    return f"To retry this failed execution, run:\n\n  {command}"
 
 
 __all__ = [

@@ -1210,8 +1210,14 @@ class TestRecoveryHintHelpers:
         assert "kitaru executions retry kr-abc" in hint
         assert "To retry" in hint
 
+    def test_build_recovery_command_returns_none_for_cancelled(self) -> None:
+        assert build_recovery_command("kr-abc", status="cancelled") is None
+
     def test_format_recovery_hint_returns_none_for_completed(self) -> None:
         assert format_recovery_hint("kr-abc", status="completed") is None
+
+    def test_format_recovery_hint_returns_none_for_cancelled(self) -> None:
+        assert format_recovery_hint("kr-abc", status="cancelled") is None
 
 
 def test_flow_handle_get_includes_retry_hint_on_failure() -> None:
@@ -1236,7 +1242,7 @@ def test_flow_handle_get_includes_retry_hint_on_failure() -> None:
 
     message = str(exc_info.value)
     assert f"kitaru executions retry {run_id}" in message
-    assert "To retry this execution" in message
+    assert "To retry this failed execution" in message
 
 
 def test_flow_handle_wait_includes_retry_hint_on_failure() -> None:

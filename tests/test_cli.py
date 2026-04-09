@@ -775,7 +775,7 @@ def test_executions_logs_follow_failure_shows_retry_hint(
     assert exc_info.value.code == 1
     output = capsys.readouterr().out
     assert "kitaru executions retry kr-456" in output
-    assert "To retry this execution" in output
+    assert "To retry this failed execution" in output
 
 
 def test_executions_logs_follow_failure_json_includes_recovery_command(
