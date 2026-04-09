@@ -1,10 +1,18 @@
-# Repo Memory Walkthrough
+# Memory Walkthrough
 
-This example demonstrates Kitaru's durable memory surface end to end: seeding
-memory outside a flow, reading and updating it inside a flow body, inspecting
-multiple scopes via `KitaruClient.memories`, showing detached post-run writes
-into an execution scope, and running post-flow memory maintenance (multi-key
-compaction, purge, and audit log inspection).
+This example demonstrates Kitaru's durable memory evolving **checkpoint by
+checkpoint** across all three scopes:
+
+- **namespace scope**: seeded before the flow, read and updated during it
+- **execution scope**: tracking per-run progress within the flow body
+- **flow scope**: accumulating cross-run summaries
+
+The flow interleaves memory writes between checkpoints so that each checkpoint
+boundary has a different memory state visible — ideal for UI panels that show
+"what memory was available at this checkpoint."
+
+Also covers detached post-run writes into an execution scope via `KitaruClient`
+and post-flow memory maintenance (multi-key compaction, purge, and audit log).
 
 ## Quick start
 
@@ -56,19 +64,20 @@ instructions, and a safe/unsafe claims reference.
 
 | Example | What it demonstrates | Test |
 |---|---|---|
-| [flow_with_memory.py](flow_with_memory.py) | Outside-flow seeding, in-flow `kitaru.memory` usage, detached post-run execution-scope writes, explicit-scope inspection with `KitaruClient.memories`, and post-run maintenance (multi-key compact, purge, audit log) | [../../tests/test_phase20_memory_example.py](../../tests/test_phase20_memory_example.py) |
+| [flow_with_memory.py](flow_with_memory.py) | Memory evolving checkpoint-by-checkpoint across namespace, execution, and flow scopes; detached post-run execution-scope writes; `KitaruClient.memories` inspection; and post-run maintenance (compact, purge, audit log) | [../../tests/test_phase20_memory_example.py](../../tests/test_phase20_memory_example.py) |
 
 Single-key compaction defaults to compacting the current value of one key.
 Use `source_mode="history"` when you explicitly want to summarize that key's
 full non-deleted version history instead.
 
-The example also shows an important execution-memory distinction:
+The example shows two kinds of execution-scope writes:
 
-- `scope=<execution_id>` tells you which execution bucket a memory entry belongs to
-- `execution_id` on the entry tells you whether that particular version was actually produced during a live run
-
-That means a detached post-run write can still belong to one execution scope
-without claiming that the execution itself physically wrote the version.
+- **In-flow writes** (`progress/phase`, `progress/items_processed`): written
+  between checkpoints during the flow, so the UI can show them evolving
+- **Post-flow writes** (`execution/notes`): detached annotations added after
+  the flow completes, demonstrating that `scope=<execution_id>` is the bucket
+  while `execution_id` on the entry tracks whether it was physically produced
+  during a live run
 
 For the broader feature overview, see
 [Use Memory](https://kitaru.ai/docs/guides/memory).
