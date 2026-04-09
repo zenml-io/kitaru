@@ -13,6 +13,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 from zenml.exceptions import EntityExistsError
 
+from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
     RuntimeSnapshot,
     _build_runtime_snapshot,
@@ -5264,3 +5265,102 @@ def test_describe_local_server_handles_missing_local_backend() -> None:
         status = _describe_local_server()
 
     assert status == "unavailable (local runtime support not installed)"
+
+
+class TestCLIAnalytics:
+    """Tests that CLI commands emit the expected analytics events."""
+
+    def test_init_emits_project_initialized_event(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``kitaru init`` should emit PROJECT_INITIALIZED after success."""
+        target = tmp_path / "analytics_init"
+        target.mkdir()
+        with (
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["init", str(target)])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.PROJECT_INITIALIZED,
+            {"used_cwd": False},
+        )
+
+    def test_login_local_emits_login_completed_event(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Bare ``kitaru login`` should emit LOGIN_COMPLETED with local mode."""
+        with (
+            patch(
+                "kitaru.cli.start_or_connect_local_server",
+                return_value=SimpleNamespace(
+                    url="http://127.0.0.1:8383",
+                    action="started",
+                ),
+            ),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["login"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.LOGIN_COMPLETED,
+            {"mode": "local", "action": "started"},
+        )
+
+    def test_login_remote_emits_login_completed_event(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``kitaru login <server>`` should emit LOGIN_COMPLETED with remote mode."""
+        with (
+            patch("kitaru.cli.login_to_server"),
+            patch(
+                "kitaru.cli._get_connected_server_url",
+                return_value="https://example.com",
+            ),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["login", "https://example.com/", "--api-key", "secret-key"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.LOGIN_COMPLETED,
+            {"mode": "remote", "project_provided": False},
+        )
+
+    def test_secrets_set_emits_secret_upserted_event(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``kitaru secrets set`` should emit SECRET_UPSERTED after success."""
+        fake_client = Mock()
+        fake_client.create_secret.return_value = SimpleNamespace(
+            name="openai-creds",
+            id="secret-id",
+        )
+
+        with (
+            patch("kitaru.cli.Client", return_value=fake_client),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(
+                [
+                    "secrets",
+                    "set",
+                    "openai-creds",
+                    "--OPENAI_API_KEY=sk-123",
+                ]
+            )
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.SECRET_UPSERTED,
+            {
+                "operation": "created",
+                "key_count": 1,
+            },
+        )

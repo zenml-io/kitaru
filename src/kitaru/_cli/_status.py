@@ -537,6 +537,13 @@ def login(
             handled_exceptions=(Exception,),
         )
 
+        from kitaru.analytics import AnalyticsEvent, track
+
+        track(
+            AnalyticsEvent.LOGIN_COMPLETED,
+            {"mode": "local", "action": result.action},
+        )
+
         if output_format == CLIOutputFormat.JSON:
             _emit_json_item(
                 command,
@@ -569,6 +576,13 @@ def login(
         output=output_format,
         exit_with_error=_exit_with_error,
         handled_exceptions=(Exception,),
+    )
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.LOGIN_COMPLETED,
+        {"mode": "remote", "project_provided": project is not None},
     )
 
     connected_server_url = facade._get_connected_server_url() or server.rstrip("/")

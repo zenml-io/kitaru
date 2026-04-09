@@ -372,13 +372,26 @@ def set_global_log_store(
     api_key: str | None = None,
 ) -> ResolvedLogStore:
     """Persist a global log-store override backend."""
-    return _config_log_store.set_global_log_store(
+    result = _config_log_store.set_global_log_store(
         backend,
         endpoint=endpoint,
         api_key=api_key,
         update_global_config=_update_kitaru_global_config,
         resolve_log_store_fn=resolve_log_store,
     )
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.LOG_STORE_CONFIGURED,
+        {
+            "requested_backend": backend,
+            "effective_backend": result.backend,
+            "effective_source": result.source,
+            "api_key_provided": api_key is not None,
+        },
+    )
+    return result
 
 
 def reset_global_log_store() -> ResolvedLogStore:
@@ -403,13 +416,24 @@ def register_model_alias(
     secret: str | None = None,
 ) -> ModelAliasEntry:
     """Register or update a local model alias for `kitaru.llm()`."""
-    return _config_models.register_model_alias(
+    result = _config_models.register_model_alias(
         alias,
         model=model,
         secret=secret,
         update_global_config=_update_kitaru_global_config,
         normalize_model_alias=_normalize_model_alias,
     )
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.MODEL_ALIAS_REGISTERED,
+        {
+            "has_secret": result.secret is not None,
+            "is_default": result.is_default,
+        },
+    )
+    return result
 
 
 def list_model_aliases() -> list[ModelAliasEntry]:
@@ -547,7 +571,7 @@ def _create_stack_operation(
     component_overrides: StackComponentConfigOverrides | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
-    return _config_stacks._create_stack_operation(
+    result = _config_stacks._create_stack_operation(
         name,
         stack_type=stack_type,
         activate=activate,
@@ -565,6 +589,17 @@ def _create_stack_operation(
             },
         ),
     )
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.STACK_CREATED,
+        {
+            "stack_type": stack_type.value,
+            "activate_requested": activate,
+        },
+    )
+    return result
 
 
 def _create_local_stack_operation(
@@ -648,11 +683,16 @@ def use_stack(name_or_id: str) -> StackInfo:
         KitaruStateError: If the requested stack cannot be activated due to
             current runtime state.
     """
-    return _config_stacks.use_stack(
+    result = _config_stacks.use_stack(
         name_or_id,
         client_factory=Client,
         current_stack_getter=current_stack,
     )
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(AnalyticsEvent.STACK_ACTIVATED, {})
+    return result
 
 
 @contextmanager
