@@ -37,8 +37,11 @@ uv run examples/memory/flow_with_memory.py
 What to point at in the output:
 
 - **Seeding:** keys seeded outside a flow — detached provenance
-- **Flow execution:** topic count increment, flow summary, soft-delete in flow body
-- **Execution-scope inspection:** the execution bucket is still the execution ID even when a later detached write updates it
+- **Flow execution — all three scopes evolving:**
+  - Namespace: topic count increment, last_topic set, soft-delete in flow body
+  - Execution: progress/phase evolves from "analysis" to "synthesis" between checkpoints
+  - Flow: summary written after analysis
+- **Post-flow annotation:** execution/notes as a detached write pattern
 - **Maintenance:** compact writes a summary, purge trims history, audit log tracks both
 
 Safe claims this supports:
@@ -46,6 +49,7 @@ Safe claims this supports:
 - Durable, versioned, artifact-backed memory
 - One memory system across Python, client, CLI, and MCP
 - In-flow writes preserve execution provenance
+- Memory evolves visibly across checkpoints in all three scopes
 - Detached post-run writes can still belong to one execution scope
 - Compact and purge are separate control-plane operations
 - Soft deletes preserve full history

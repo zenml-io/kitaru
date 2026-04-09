@@ -57,6 +57,7 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
 
     execution_id = cast(str, snapshot["execution_id"])
     flow_snapshot = cast(dict[str, Any], snapshot["flow_snapshot"])
+    execution_snapshot = cast(dict[str, Any], snapshot["execution_snapshot"])
     client_snapshot = cast(dict[str, Any], snapshot["client_snapshot"])
     seed_snapshot = cast(dict[str, Any], snapshot["seed_snapshot"])
     maintenance = cast(dict[str, Any], snapshot["maintenance_snapshot"])
@@ -70,19 +71,33 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert seed_snapshot["topic_count"] == 2
     assert seed_snapshot["deleted_key_hidden"] is True
     assert seed_snapshot["deleted_history_contains_tombstone"] is True
+
+    # --- Flow snapshot assertions (namespace mutations) ---
     assert flow_snapshot["topic_count_before"] == 2
     assert flow_snapshot["topic_count_after"] == 3
     assert flow_snapshot["topic_count_history_versions_after_write"] == [2, 1]
+    assert flow_snapshot["last_topic"] == "memory-browser"
     assert flow_snapshot["obsolete_hidden_after_delete"] is True
     assert flow_snapshot["obsolete_history_versions"] == [2, 1]
     assert (
         cast(dict[str, Any], flow_snapshot["obsolete_deleted_entry"])["is_deleted"]
         is True
     )
+    assert flow_snapshot["flow_summary"] is not None
+    assert "memory-browser" in cast(str, flow_snapshot["flow_summary"])
+    assert flow_snapshot["flow_summary_history_versions"] == [1]
+
+    # --- Execution snapshot assertions (in-flow + post-flow) ---
+    assert execution_snapshot["in_flow_phase"] == "synthesis"
+    assert execution_snapshot["in_flow_phase_history_versions"] == [2, 1]
+    assert execution_snapshot["in_flow_items_processed"] == 3
+    assert execution_snapshot["post_flow_notes_history_versions"] == [2, 1]
+    assert execution_snapshot["post_flow_transient_hidden"] is True
 
     # --- Client inspection assertions ---
     client = KitaruClient()
 
+    # Namespace scope
     namespace_entries = client.memories.list(scope=namespace_scope)
     namespace_keys = [entry.key for entry in namespace_entries]
     assert "conventions/test_runner" in namespace_keys
@@ -98,32 +113,48 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert topic_history[0].execution_id == execution_id
     assert topic_history[1].execution_id is None
 
+    # Flow scope
     flow_entry = client.memories.get("summaries/latest", scope=FLOW_SCOPE)
     assert flow_entry is not None
     flow_summary = client.artifacts.get(flow_entry.artifact_id).load()
-    assert flow_summary == flow_snapshot["planned_summary"]
+    assert flow_summary == flow_snapshot["flow_summary"]
     assert [
         entry.version
         for entry in client.memories.history("summaries/latest", scope=FLOW_SCOPE)
     ] == [1]
 
+    # Execution scope — in-flow entries
     execution_entries = client.memories.list(scope=execution_id)
-    assert [entry.key for entry in execution_entries] == ["execution/notes"]
-    execution_entry = execution_entries[0]
-    assert execution_entry.scope == execution_id
-    assert execution_entry.scope_type == "execution"
-    assert execution_entry.execution_id is None
-    assert execution_entry.flow_id
-    assert execution_entry.flow_name == FLOW_SCOPE
+    execution_keys = [entry.key for entry in execution_entries]
+    assert "progress/phase" in execution_keys
+    assert "progress/items_processed" in execution_keys
+    assert "execution/notes" in execution_keys
 
-    execution_snapshot_entry = cast(
-        list[dict[str, Any]], client_snapshot["execution_entries"]
-    )[0]
-    assert execution_snapshot_entry["scope"] == execution_id
-    assert execution_snapshot_entry["scope_type"] == "execution"
-    assert execution_snapshot_entry["execution_id"] is None
-    assert execution_snapshot_entry["flow_id"]
-    assert execution_snapshot_entry["flow_name"] == FLOW_SCOPE
+    phase_entry = client.memories.get("progress/phase", scope=execution_id)
+    assert phase_entry is not None
+    assert phase_entry.scope == execution_id
+    assert phase_entry.scope_type == "execution"
+    phase_value = client.artifacts.get(phase_entry.artifact_id).load()
+    assert phase_value == "synthesis"
+
+    phase_history = client.memories.history("progress/phase", scope=execution_id)
+    assert [entry.version for entry in phase_history] == [2, 1]
+    first_phase = client.artifacts.get(phase_history[1].artifact_id).load()
+    assert first_phase == "analysis"
+
+    items_entry = client.memories.get("progress/items_processed", scope=execution_id)
+    assert items_entry is not None
+    items_value = client.artifacts.get(items_entry.artifact_id).load()
+    assert items_value == 3
+
+    # Execution scope — post-flow detached entries
+    notes_entry = next(e for e in execution_entries if e.key == "execution/notes")
+    assert notes_entry.scope == execution_id
+    assert notes_entry.scope_type == "execution"
+    assert notes_entry.execution_id is None
+    assert notes_entry.flow_id
+    assert notes_entry.flow_name == FLOW_SCOPE
+
     execution_history = client.memories.history("execution/notes", scope=execution_id)
     assert [entry.version for entry in execution_history] == [2, 1]
     assert all(entry.scope == execution_id for entry in execution_history)
@@ -133,6 +164,7 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert {entry.flow_name for entry in execution_history} == {FLOW_SCOPE}
     assert client.memories.get("execution/transient", scope=execution_id) is None
 
+    # Scopes
     scopes = _scope_map(cast(list[dict[str, Any]], client_snapshot["scopes"]))
     assert scopes[namespace_scope]["scope_type"] == "namespace"
     assert scopes[FLOW_SCOPE]["scope_type"] == "flow"
@@ -153,10 +185,8 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert purge_result["keys_affected"] == 1
     assert purge_result["scope"] == namespace_scope
 
-    # After purge with keep=1, only the newest version remains.
     assert maintenance["test_runner_history_versions_after_purge"] == [2]
 
-    # Compaction log should have 2 records: purge (newest) then compact.
     log_records = maintenance["compaction_log"]
     assert len(log_records) == 2
     assert log_records[0]["operation"] == "purge"
@@ -189,3 +219,8 @@ def test_phase20_memory_without_maintenance(primed_zenml) -> None:
     assert flow_snap["topic_count_before"] == 2
     assert flow_snap["topic_count_after"] == 3
     assert flow_snap["obsolete_hidden_after_delete"] is True
+
+    # Execution-scope memory was written during the flow.
+    exec_snap = snapshot["execution_snapshot"]
+    assert exec_snap["in_flow_phase"] == "synthesis"
+    assert exec_snap["in_flow_items_processed"] == 3

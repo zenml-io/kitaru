@@ -1,22 +1,22 @@
-"""Repo Memory Walkthrough — Kitaru's durable memory surface end to end.
+"""Memory Walkthrough — Kitaru's durable memory across all three scopes.
 
-This example demonstrates:
+This example demonstrates memory evolving **checkpoint by checkpoint**:
 
-- seeding namespace memory outside a flow
-- reading, listing, updating, deleting, and inspecting history inside a flow
-- switching from namespace scope to flow scope with ``memory.configure(...)``
-- inspecting namespace, flow, and execution scopes via ``KitaruClient.memories``
-- detached post-run writes into an execution scope, and how that differs from
-  execution provenance
+- **namespace scope**: seeded before the flow, read and updated during it
+- **execution scope**: tracking per-run progress within the flow body
+- **flow scope**: accumulating cross-run summaries
+
+The flow interleaves memory writes between checkpoints so that each
+checkpoint boundary has a different memory state visible — ideal for UI
+panels that show "what memory was available at this checkpoint."
+
+Also covers:
+- detached post-run writes into an execution scope via ``KitaruClient``
 - post-run memory maintenance: compact, purge, and compaction audit log
 
 Run it directly::
 
     uv run examples/memory/flow_with_memory.py
-
-If a default model is configured (``kitaru model register default --model ...``),
-the walkthrough includes LLM-powered compaction, purge, and audit log inspection.
-Without a model, those sections are skipped with guidance on how to enable them.
 """
 
 import argparse
@@ -36,116 +36,100 @@ FLOW_SCOPE = "repo_memory_demo"
 
 
 @checkpoint
-def build_topic_summary(
-    topic: str,
-    test_runner: Any,
-    python_defaults: Any,
-    previous_topic_count: Any,
-) -> str:
-    """Build a summary using memory values that were read in the flow body."""
-    if not isinstance(test_runner, dict):
-        raise RuntimeError("Expected test_runner memory to contain a dictionary.")
-    if not isinstance(python_defaults, dict):
-        raise RuntimeError("Expected python_defaults memory to contain a dictionary.")
-    if not isinstance(previous_topic_count, int):
-        raise RuntimeError(
-            "Expected previous_topic_count memory to contain an integer."
-        )
-    return (
-        f"Prepared {topic!r} using {test_runner['command']} with "
-        f"{python_defaults['runner']} and {previous_topic_count} previous topics."
-    )
-
-
-@checkpoint
-def summarize_namespace_reads(
+def capture_initial_state(
     topic: str,
     test_runner: Any,
     python_defaults: Any,
     topic_count: Any,
-    namespace_entries: list[Any],
-    topic_count_history: list[Any],
 ) -> dict[str, Any]:
-    """Turn resolved namespace memory reads into a stable summary payload."""
+    """Snapshot the initial namespace memory state."""
     if not isinstance(test_runner, dict):
         raise RuntimeError("Expected test_runner memory to contain a dictionary.")
     if not isinstance(python_defaults, dict):
         raise RuntimeError("Expected python_defaults memory to contain a dictionary.")
     if not isinstance(topic_count, int):
         raise RuntimeError("Expected topic_count memory to contain an integer.")
-
     return {
         "topic": topic,
         "test_runner_command": test_runner["command"],
         "python_runner": python_defaults["runner"],
-        "topic_count_before": topic_count,
-        "namespace_keys_before_write": _keys(namespace_entries),
-        "topic_count_history_versions_before_write": _versions(topic_count_history),
+        "topic_count": topic_count,
     }
 
 
 @checkpoint
-def increment_topic_count(topic_count: Any) -> int:
+def increment_topic_count(current: Any) -> int:
     """Compute the next topic counter from the seeded namespace value."""
-    if not isinstance(topic_count, int):
+    if not isinstance(current, int):
         raise RuntimeError("Expected topic_count memory to contain an integer.")
-    return topic_count + 1
+    return current + 1
 
 
 @checkpoint
-def summarize_flow_reads(
-    flow_entries: list[Any],
-    flow_history: list[Any],
-) -> dict[str, Any]:
-    """Summarize flow-scoped reads that happened before writing new data."""
-    return {
-        "flow_keys_before_write": _keys(flow_entries),
-        "flow_history_versions_before_write": _versions(flow_history),
-    }
+def run_analysis(topic: str, topic_count: int) -> str:
+    """Produce an analysis result using the current topic state."""
+    return f"Analyzed {topic!r} (topic #{topic_count})"
+
+
+@checkpoint
+def build_summary(topic: str, analysis: str, topic_count: int) -> str:
+    """Build a final summary from the analysis and state."""
+    return f"Summary: {analysis} — {topic_count} topics tracked"
+
+
+@checkpoint
+def finalize(summary: str) -> str:
+    """Mark the workflow complete with the final summary."""
+    return f"Complete: {summary}"
 
 
 # ---------------------------------------------------------------------------
-# Flow — the "read → checkpoint → write" pattern front and center
+# Flow — memory writes interleaved between checkpoints
 # ---------------------------------------------------------------------------
 
 
 @flow
 def repo_memory_demo(namespace_scope: str, topic: str) -> None:
-    """Run a flow that reads and mutates memory in multiple scopes."""
-    memory.configure(scope=namespace_scope, scope_type="namespace")
+    """Demonstrate memory evolving across checkpoints in all three scopes.
 
+    Each memory write happens between checkpoints so that the UI can show
+    "what memory was available at this checkpoint" using creation timestamps.
+
+    Timeline for UI visibility:
+
+    - Before checkpoint 1: seeded namespace entries visible
+    - Before checkpoint 3: updated namespace + new execution memory visible
+    - Before checkpoint 5: updated execution + new flow memory visible
+    """
+    # ── Phase 1: Read seeded namespace memory ──────────────────
+    memory.configure(scope=namespace_scope, scope_type="namespace")
     test_runner = memory.get("conventions/test_runner")
     python_defaults = memory.get("conventions/python")
     topic_count_before = memory.get("sessions/topic_count")
-    namespace_before = memory.list()
-    topic_count_history_before = memory.history("sessions/topic_count")
 
-    summarize_namespace_reads(
-        topic,
-        test_runner=test_runner,
-        python_defaults=python_defaults,
-        topic_count=topic_count_before,
-        namespace_entries=namespace_before,
-        topic_count_history=topic_count_history_before,
-    )
-    summary = build_topic_summary(
-        topic,
-        test_runner,
-        python_defaults,
-        topic_count_before,
-    )
+    capture_initial_state(topic, test_runner, python_defaults, topic_count_before)
+
+    # ── Phase 2: Update namespace + create execution-scope tracking ──
     next_topic_count = increment_topic_count(topic_count_before)
-
     memory.set("sessions/topic_count", next_topic_count)
     memory.set("sessions/last_topic", topic)
     memory.delete("scratch/obsolete")
 
+    memory.configure(scope_type="execution")
+    memory.set("progress/phase", "analysis")
+    memory.set("progress/items_processed", 0)
+
+    analysis = run_analysis(topic, next_topic_count)
+
+    # ── Phase 3: Update execution progress + write flow summary ──
+    memory.set("progress/phase", "synthesis")
+    memory.set("progress/items_processed", 3)
+
     memory.configure(scope_type="flow")
-    flow_entries_before = memory.list()
-    flow_history_before = memory.history("summaries/latest")
-    summarize_flow_reads(flow_entries_before, flow_history_before)
+    summary = build_summary(topic, analysis, next_topic_count)
     memory.set("summaries/latest", summary)
-    return None
+
+    finalize(summary)
 
 
 # ---------------------------------------------------------------------------
@@ -184,11 +168,9 @@ def seed_namespace_memory(namespace_scope: str) -> dict[str, Any]:
     return {
         "namespace_scope": namespace_scope,
         "active_keys": _keys(listed),
-        "entries": _entries_snapshot(listed),
         "topic_count": cast(int, memory.get("sessions/topic_count")),
         "topic_count_history_versions": _versions(topic_count_history),
         "deleted_key_hidden": memory.get("scratch/outdated") is None,
-        "deleted_history_versions": _versions(outdated_history),
         "deleted_history_contains_tombstone": any(
             entry.is_deleted for entry in outdated_history
         ),
@@ -268,6 +250,13 @@ def _optional_entry_snapshot(value: Any) -> dict[str, Any] | None:
     raise RuntimeError(f"Expected a MemoryEntry-compatible value, got {type(value)!r}.")
 
 
+def _load_value(client: KitaruClient, entry: MemoryEntry | None) -> Any:
+    """Load the artifact value for a memory entry, or return None."""
+    if entry is None:
+        return None
+    return client.artifacts.get(entry.artifact_id).load()
+
+
 # ---------------------------------------------------------------------------
 # Orchestration — run the full walkthrough and collect a structured snapshot
 # ---------------------------------------------------------------------------
@@ -294,9 +283,6 @@ def run_workflow(
     seed_snapshot = seed_namespace_memory(namespace_scope)
 
     handle = repo_memory_demo.run(namespace_scope, topic)
-    # Poll instead of handle.wait() because wait() tries to extract the flow
-    # result, which fails when the flow ends with multiple terminal synthetic
-    # memory steps (ambiguous output).
     while True:
         status = handle.status
         if status.is_finished:
@@ -311,6 +297,7 @@ def run_workflow(
     client = KitaruClient()
     execution_scope = handle.exec_id
 
+    # --- Post-flow detached execution-scope writes (annotation pattern) ---
     client.memories.set(
         "execution/notes",
         {"topic": topic, "stage": "draft"},
@@ -331,61 +318,53 @@ def run_workflow(
     )
     client.memories.delete("execution/transient", scope=execution_scope)
 
+    # --- Client inspection of all scopes ---
     namespace_entries = client.memories.list(scope=namespace_scope)
     flow_entries = client.memories.list(scope=FLOW_SCOPE)
     execution_entries = client.memories.list(scope=execution_scope)
-    execution_history = client.memories.history(
-        "execution/notes",
-        scope=execution_scope,
-    )
+
     namespace_topic_count = client.memories.get(
-        "sessions/topic_count",
-        scope=namespace_scope,
+        "sessions/topic_count", scope=namespace_scope
     )
+    namespace_topic_count_value = _load_value(client, namespace_topic_count)
     namespace_topic_count_history = client.memories.history(
-        "sessions/topic_count",
-        scope=namespace_scope,
-    )
-    namespace_topic_count_value = (
-        client.artifacts.get(namespace_topic_count.artifact_id).load()
-        if namespace_topic_count is not None
-        else None
+        "sessions/topic_count", scope=namespace_scope
     )
     namespace_last_topic = client.memories.get(
-        "sessions/last_topic",
-        scope=namespace_scope,
+        "sessions/last_topic", scope=namespace_scope
     )
-    namespace_last_topic_value = (
-        client.artifacts.get(namespace_last_topic.artifact_id).load()
-        if namespace_last_topic is not None
-        else None
-    )
-    namespace_obsolete = client.memories.get(
-        "scratch/obsolete",
-        scope=namespace_scope,
-    )
+    namespace_last_topic_value = _load_value(client, namespace_last_topic)
+    namespace_obsolete = client.memories.get("scratch/obsolete", scope=namespace_scope)
     namespace_obsolete_history = client.memories.history(
-        "scratch/obsolete",
-        scope=namespace_scope,
+        "scratch/obsolete", scope=namespace_scope
     )
+
     flow_summary_entry = client.memories.get("summaries/latest", scope=FLOW_SCOPE)
-    flow_summary_value = (
-        client.artifacts.get(flow_summary_entry.artifact_id).load()
-        if flow_summary_entry is not None
-        else None
+    flow_summary_value = _load_value(client, flow_summary_entry)
+    flow_summary_history = client.memories.history("summaries/latest", scope=FLOW_SCOPE)
+
+    # In-flow execution memory (written during the flow, not post-flow)
+    execution_phase = client.memories.get("progress/phase", scope=execution_scope)
+    execution_phase_value = _load_value(client, execution_phase)
+    execution_phase_history = client.memories.history(
+        "progress/phase", scope=execution_scope
     )
-    flow_summary_history = client.memories.history(
-        "summaries/latest",
-        scope=FLOW_SCOPE,
+    execution_items = client.memories.get(
+        "progress/items_processed", scope=execution_scope
+    )
+    execution_items_value = _load_value(client, execution_items)
+
+    # Post-flow execution memory
+    execution_notes_history = client.memories.history(
+        "execution/notes", scope=execution_scope
     )
     execution_transient = client.memories.get(
-        "execution/transient",
-        scope=execution_scope,
+        "execution/transient", scope=execution_scope
     )
+
     scopes = client.memories.scopes()
 
     flow_snapshot = {
-        "planned_summary": flow_summary_value,
         "topic_count_before": (
             cast(int, namespace_topic_count_value) - 1
             if isinstance(namespace_topic_count_value, int)
@@ -395,22 +374,29 @@ def run_workflow(
         "topic_count_history_versions_after_write": _versions(
             namespace_topic_count_history
         ),
+        "last_topic": namespace_last_topic_value,
         "obsolete_hidden_after_delete": namespace_obsolete is None,
         "obsolete_history_versions": _versions(namespace_obsolete_history),
         "obsolete_deleted_entry": _optional_entry_snapshot(
             namespace_obsolete_history[0] if namespace_obsolete_history else None
         ),
+        "flow_summary": flow_summary_value,
         "flow_keys": _keys(flow_entries),
         "flow_summary_history_versions": _versions(flow_summary_history),
+    }
+
+    execution_snapshot = {
+        "in_flow_phase": execution_phase_value,
+        "in_flow_phase_history_versions": _versions(execution_phase_history),
+        "in_flow_items_processed": execution_items_value,
+        "post_flow_notes_history_versions": _versions(execution_notes_history),
+        "post_flow_transient_hidden": execution_transient is None,
     }
 
     # --- Memory maintenance (admin surface) ---
     maintenance_snapshot: dict[str, Any] | None = None
 
     if include_maintenance:
-        # Compact: summarize two convention keys into one summary key.
-        # This sends the current values to an LLM and writes the summary as a
-        # new memory version.  Source keys are left untouched.
         compact_result = client.memories.compact(
             scope=namespace_scope,
             keys=["conventions/test_runner", "conventions/python"],
@@ -419,22 +405,18 @@ def run_workflow(
             model=compact_model,
         )
 
-        # The compact result carries the written entry — load via artifact_id.
         summary_value = client.artifacts.get(compact_result.entry.artifact_id).load()
 
-        # Purge: keep only the newest version of test_runner, delete the rest.
         purge_result = client.memories.purge(
             "conventions/test_runner",
             scope=namespace_scope,
             keep=1,
         )
 
-        # Check that history was actually trimmed.
         test_runner_history_after = client.memories.history(
             "conventions/test_runner", scope=namespace_scope
         )
 
-        # Audit log: read back the compact + purge records.
         compaction_log = client.memories.compaction_log(scope=namespace_scope)
 
         maintenance_snapshot = {
@@ -455,6 +437,7 @@ def run_workflow(
         "flow_scope": FLOW_SCOPE,
         "seed_snapshot": seed_snapshot,
         "flow_snapshot": flow_snapshot,
+        "execution_snapshot": execution_snapshot,
         "maintenance_snapshot": maintenance_snapshot,
         "client_snapshot": {
             "namespace_keys": _keys(namespace_entries),
@@ -481,7 +464,11 @@ def run_workflow(
             "flow_summary_entry": _optional_entry_snapshot(flow_summary_entry),
             "flow_summary_value": flow_summary_value,
             "flow_summary_history_versions": _versions(flow_summary_history),
-            "execution_history_versions": _versions(execution_history),
+            "execution_phase_entry": _optional_entry_snapshot(execution_phase),
+            "execution_phase_value": execution_phase_value,
+            "execution_items_entry": _optional_entry_snapshot(execution_items),
+            "execution_items_value": execution_items_value,
+            "execution_notes_history_versions": _versions(execution_notes_history),
             "execution_transient_hidden": execution_transient is None,
             "scopes": [_scope_snapshot(scope) for scope in scopes],
         },
@@ -502,7 +489,7 @@ def _render_text(
     """Convert a structured snapshot into concise narrated terminal output."""
     lines: list[str] = []
 
-    lines.append("=== Repo Memory Walkthrough ===")
+    lines.append("=== Memory Walkthrough ===")
     lines.append("")
     lines.append(f"Namespace scope: {snapshot['namespace_scope']}")
     lines.append(f"Flow scope:      {snapshot['flow_scope']}")
@@ -511,7 +498,7 @@ def _render_text(
     # --- Seeding ---
     seed = snapshot["seed_snapshot"]
     lines.append("")
-    lines.append("--- Seeding ---")
+    lines.append("--- Seeding (namespace scope, detached) ---")
     n_keys = len(seed["active_keys"])
     lines.append(f"Seeded {n_keys} keys in {snapshot['namespace_scope']} namespace")
     if seed["deleted_key_hidden"]:
@@ -521,46 +508,34 @@ def _render_text(
 
     # --- Flow execution ---
     fs = snapshot["flow_snapshot"]
+    es = snapshot["execution_snapshot"]
     lines.append("")
-    lines.append("--- Flow execution ---")
+    lines.append("--- Flow execution (all three scopes evolving) ---")
     lines.append(
-        f"Topic count: {fs['topic_count_before']} -> {fs['topic_count_after']}"
+        f"Namespace: topic count {fs['topic_count_before']} -> "
+        f"{fs['topic_count_after']}, last_topic = {fs['last_topic']!r}"
     )
-    if fs.get("planned_summary"):
-        lines.append("Flow summary written to summaries/latest")
     if fs["obsolete_hidden_after_delete"]:
-        lines.append("Soft-deleted scratch/obsolete in flow body")
-
-    # --- Execution-scope inspection ---
-    client_snapshot = snapshot["client_snapshot"]
-    execution_notes_entry = next(
-        (
-            entry
-            for entry in client_snapshot["execution_entries"]
-            if entry.get("key") == "execution/notes"
-        ),
-        None,
+        lines.append("Namespace: soft-deleted scratch/obsolete in flow body")
+    lines.append(
+        f"Execution: progress/phase evolved to {es['in_flow_phase']!r} "
+        f"({len(es['in_flow_phase_history_versions'])} versions)"
     )
-    if execution_notes_entry is not None:
-        producer = (
-            execution_notes_entry.get("execution_id")
-            or execution_notes_entry.get("producer_pipeline_run_id")
-            or "detached write (execution_id=None)"
-        )
-        flow_label = execution_notes_entry.get("flow_name") or "not indexed"
-        lines.append("")
-        lines.append("--- Execution-scope inspection ---")
-        lines.append(
-            "Post-run updated execution/notes in execution scope "
-            f"{execution_notes_entry.get('scope', snapshot['execution_id'])}"
-        )
-        lines.append(
-            "Membership: "
-            f"scope={execution_notes_entry.get('scope', snapshot['execution_id'])} "
-            f"({execution_notes_entry.get('scope_type', 'execution')})"
-        )
-        lines.append(f"Producer: {producer}")
-        lines.append(f"Flow context: belongs to flow {flow_label} for discovery")
+    lines.append(
+        f"Execution: progress/items_processed = {es['in_flow_items_processed']}"
+    )
+    if fs.get("flow_summary"):
+        lines.append(f"Flow: summaries/latest = {fs['flow_summary']!r}")
+
+    # --- Post-flow execution-scope annotation ---
+    lines.append("")
+    lines.append("--- Post-flow annotation (detached execution-scope writes) ---")
+    lines.append(
+        f"execution/notes: {len(es['post_flow_notes_history_versions'])} versions "
+        "(draft -> final)"
+    )
+    if es["post_flow_transient_hidden"]:
+        lines.append("execution/transient: written then soft-deleted")
 
     # --- Maintenance ---
     lines.append("")
@@ -616,7 +591,7 @@ def _probe_model(model: str) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Repo Memory Walkthrough — Kitaru's durable memory demo.",
+        description="Memory Walkthrough — Kitaru's durable memory demo.",
     )
     parser.add_argument(
         "--output",
