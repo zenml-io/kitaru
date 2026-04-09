@@ -9,7 +9,7 @@
       State your agents can come back to.
     </h2>
     <p class="memory-subhead" data-reveal data-reveal-delay="2">
-      Versioned, scoped memory across Python, client, CLI, and MCP &mdash; not a bolt-on scratchpad.
+      Versioned, scoped memory across Python, CLI, and MCP &mdash; not a bolt-on scratchpad.
     </p>
 
     <div class="memory-grid">
@@ -74,7 +74,6 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
             <div class="shelf-indicator" id="shelfIndicator" aria-live="polite"></div>
             <div class="shelf-surfaces" id="shelfSurfaces">
               <span class="shelf-badge" data-surface="python">Python</span>
-              <span class="shelf-badge" data-surface="client">Client</span>
               <span class="shelf-badge" data-surface="cli">CLI</span>
               <span class="shelf-badge" data-surface="mcp">MCP</span>
             </div>
@@ -466,10 +465,10 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
       const indicator = document.getElementById('shelfIndicator');
       const badges = shelf.querySelectorAll<HTMLElement>('.shelf-badge');
 
-      const labels = [
-        '\u2192 memory.get("conventions/test_runner") \u2192 v3',
-        '\u2192 memory.get("sessions/topic_count") \u2192 v2',
-        '\u2192 memory.get("scratch/obsolete") \u2192 None',
+      const steps = [
+        { row: 0, surface: 0, label: '\u2192 memory.get("conventions/test_runner") \u2192 v3' },
+        { row: 1, surface: 1, label: '\u2192 kitaru memory get sessions/topic_count \u2192 v2' },
+        { row: 2, surface: 2, label: '\u2192 kitaru_memory_get("scratch/obsolete") \u2192 deleted' },
       ];
 
       let step = 0;
@@ -498,22 +497,21 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
         badges.forEach(b => b.classList.remove('active'));
         indicator?.classList.remove('visible');
 
-        const rowIdx = step % 3;
-        const surfIdx = step % 4;
+        const { row, surface, label } = steps[step % steps.length];
 
-        rows[rowIdx]?.classList.add('highlight');
+        rows[row]?.classList.add('highlight');
 
         sched(() => {
           if (!isVisible) return;
-          badges[surfIdx]?.classList.add('active');
+          badges[surface]?.classList.add('active');
           if (indicator) {
-            indicator.textContent = labels[rowIdx];
+            indicator.textContent = label;
             indicator.classList.add('visible');
           }
         }, 300);
 
         step++;
-        sched(tick, 1800);
+        sched(tick, 2200);
       }
 
       const observer = new IntersectionObserver((entries) => {
