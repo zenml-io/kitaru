@@ -549,6 +549,13 @@ class _ExecutionsAPI:
                 f"'{condition.name}' for execution '{exec_id}': {exc}"
             ) from exc
 
+        track(
+            AnalyticsEvent.WAIT_RESOLVED,
+            {
+                "resolution": resolution,
+            },
+        )
+
         return self.get(exec_id)
 
     def input(self, exec_id: str, *, wait: str, value: Any) -> Execution:
@@ -583,6 +590,7 @@ class _ExecutionsAPI:
             client=self._client_ref,
             operation_name="retry",
         )
+        track(AnalyticsEvent.EXECUTION_RETRIED, {})
         return self.get(exec_id)
 
     def resume(self, exec_id: str) -> Execution:
@@ -609,6 +617,7 @@ class _ExecutionsAPI:
             client=self._client_ref,
             operation_name="resume",
         )
+        track(AnalyticsEvent.EXECUTION_RESUMED, {})
         return self.get(exec_id)
 
     def replay(
@@ -663,6 +672,12 @@ class _ExecutionsAPI:
             flow_inputs=flow_inputs,
         )
 
+        replay_metadata: dict[str, Any] = {
+            "from_checkpoint": from_,
+            "replay_path": "pipeline_fallback",
+        }
+        track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+
         try:
             replayed_run = replay_pipeline.replay(
                 pipeline_run=source_run.id,
@@ -677,6 +692,14 @@ class _ExecutionsAPI:
                 traceback=None,
                 default=FailureOrigin.BACKEND,
             )
+            track(
+                AnalyticsEvent.REPLAY_FAILED,
+                {
+                    **replay_metadata,
+                    "error_type": type(exc).__name__,
+                    "failure_origin": failure_origin.value,
+                },
+            )
             if failure_origin == FailureOrigin.DIVERGENCE:
                 raise execution_error_from_failure(
                     f"Replay divergence detected for execution '{exec_id}': {exc}",
@@ -690,9 +713,17 @@ class _ExecutionsAPI:
 
         replayed_exec_id = str(getattr(replayed_run, "id", ""))
         if not replayed_exec_id:
+            track(
+                AnalyticsEvent.REPLAY_FAILED,
+                {
+                    **replay_metadata,
+                    "error_type": "KitaruRuntimeError",
+                    "failure_origin": FailureOrigin.RUNTIME.value,
+                },
+            )
             raise KitaruRuntimeError("Replay did not produce a pipeline run ID.")
 
-        track(AnalyticsEvent.FLOW_REPLAYED, {"execution_id": replayed_exec_id})
+        track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "pipeline_fallback"})
         return self.get(replayed_exec_id)
 
     def get(self, exec_id: str) -> Execution:
@@ -773,6 +804,7 @@ class _ExecutionsAPI:
         """Cancel an execution if supported by the backend state."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         stop_run(run=run, graceful=False)
+        track(AnalyticsEvent.EXECUTION_CANCELLED, {})
         return self.get(exec_id)
 
 
