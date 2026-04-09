@@ -37,7 +37,11 @@ uv run examples/memory/flow_with_memory.py
 What to point at in the output:
 
 - **Seeding:** keys seeded outside a flow — detached provenance
-- **Flow execution:** topic count increment, flow summary, soft-delete in flow body
+- **Flow execution — all three scopes evolving:**
+  - Namespace: topic count increment, last_topic set, soft-delete in flow body
+  - Execution: progress/phase evolves from "analysis" to "synthesis" between checkpoints
+  - Flow: summary written after analysis
+- **Post-flow annotation:** execution/notes as a detached write pattern
 - **Maintenance:** compact writes a summary, purge trims history, audit log tracks both
 
 Safe claims this supports:
@@ -45,6 +49,8 @@ Safe claims this supports:
 - Durable, versioned, artifact-backed memory
 - One memory system across Python, client, CLI, and MCP
 - In-flow writes preserve execution provenance
+- Memory evolves visibly across checkpoints in all three scopes
+- Detached post-run writes can still belong to one execution scope
 - Compact and purge are separate control-plane operations
 - Soft deletes preserve full history
 
@@ -88,6 +94,7 @@ Use the same scope/key names with MCP tools from an assistant:
 | Durable, versioned, artifact-backed memory | Replay-safe memory |
 | One memory system across Python, client, CLI, and MCP | Memory inside checkpoints |
 | In-flow writes preserve execution provenance | Repo Memory Agent is shipped |
+| Detached post-run writes can still belong to one execution scope | Every execution-scoped entry was physically written by that execution |
 | Compact and purge are separate control-plane operations | Compaction deletes source entries |
 | Soft deletes preserve full history | Every entry links to a checkpoint |
 | Compaction audit log tracks all maintenance | Rollback or fork from memory history |

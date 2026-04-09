@@ -199,8 +199,66 @@ Memory entries written **outside a flow** (from a script, CLI, or MCP) are
 explicitly **detached** — their `execution_id` is `None`. This makes it clear
 that the entry was manually seeded rather than produced by an agent run.
 
+A concrete example helps here:
+
+- an in-flow write stores `execution/notes` in execution scope `E1`
+- a later script writes another `execution/notes` version into the same scope `E1`
+- both versions belong to the **same execution bucket** because their scope is `E1`
+- only the in-flow version necessarily has live-run producer provenance
+
+So `scope` answers **where the entry belongs**, while `execution_id` answers
+**who physically wrote that version**.
+
 Both cases appear in `memory.history()`, so you can always tell whether a
 particular version came from a flow execution or from an external write.
+
+## Execution-scope discovery indexing
+
+Execution-scoped memory has two slightly different jobs:
+
+- the **scope** tells Kitaru which execution bucket the value belongs to
+- the **producer execution** tells you whether a particular version was written
+  during a live flow run or added later from a script, CLI, or MCP
+
+That distinction matters for the UI. Kitaru now adds extra discovery tags to
+new execution-scoped writes so the flow UI can answer the practical question:
+
+> show me all execution-scoped memories that belong to this flow
+
+### New users: no action needed
+
+If you are starting fresh on a current Kitaru version, new execution-scoped
+writes are indexed automatically at write time.
+
+That means:
+
+- in-flow execution-scoped writes work automatically
+- detached writes into an execution scope can still be associated back to the
+  owning flow when Kitaru can resolve that execution ID
+- the flow UI can discover those execution scopes without any manual migration
+- this discovery context (`flow_id` / `flow_name`) is about **membership**, not
+  producer provenance
+
+### Existing users: historical data may need reindexing
+
+If you already created execution-scoped memory before this indexing shipped,
+older artifact versions may be missing the new discovery tags.
+
+Use the CLI to preview and optionally backfill those tags inside the active
+project:
+
+```bash
+kitaru memory reindex
+kitaru memory reindex --apply
+```
+
+- the default command is a **dry run**
+- `--apply` persists the missing tags
+- the reindex is **additive and idempotent** — rerunning it is safe
+
+This Phase 3 reindex only backfills **tags**, not metadata fields like
+`flow_id` / `flow_name`. Historical entries may therefore become discoverable by
+flow in the UI while still showing missing flow metadata in inspection views.
 
 ## Next steps
 

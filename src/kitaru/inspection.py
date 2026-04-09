@@ -46,6 +46,8 @@ from kitaru.memory import (
     CompactionRecord,
     CompactResult,
     MemoryEntry,
+    MemoryReindexIssue,
+    MemoryReindexResult,
     MemoryScopeInfo,
     PurgeResult,
 )
@@ -437,6 +439,8 @@ def serialize_memory_entry(entry: MemoryEntry) -> dict[str, Any]:
         "is_deleted": entry.is_deleted,
         "artifact_id": entry.artifact_id,
         "execution_id": entry.execution_id,
+        "flow_id": entry.flow_id,
+        "flow_name": entry.flow_name,
     }
 
 
@@ -494,6 +498,37 @@ def serialize_compact_result(result: CompactResult) -> dict[str, Any]:
         "sources_read": result.sources_read,
         "scope": result.scope,
         "compaction_record": serialize_compaction_record(result.compaction_record),
+    }
+
+
+def serialize_memory_reindex_issue(issue: MemoryReindexIssue) -> dict[str, Any]:
+    """Serialize a sampled memory reindex issue for transport layers."""
+    return {
+        "artifact_id": issue.artifact_id,
+        "artifact_name": issue.artifact_name,
+        "scope": issue.scope,
+        "key": issue.key,
+        "reason": issue.reason,
+    }
+
+
+def serialize_memory_reindex_result(result: MemoryReindexResult) -> dict[str, Any]:
+    """Serialize a memory reindex result for transport layers."""
+    return {
+        "dry_run": result.dry_run,
+        "versions_scanned": result.versions_scanned,
+        "execution_scope_versions_scanned": result.execution_scope_versions_scanned,
+        "already_indexed": result.already_indexed,
+        "versions_needing_updates": result.versions_needing_updates,
+        "versions_updated": result.versions_updated,
+        "scope_type_tags_identified": result.scope_type_tags_identified,
+        "flow_tags_identified": result.flow_tags_identified,
+        "scope_type_tags_added": result.scope_type_tags_added,
+        "flow_tags_added": result.flow_tags_added,
+        "issues_count": result.issues_count,
+        "issue_samples": [
+            serialize_memory_reindex_issue(issue) for issue in result.issue_samples
+        ],
     }
 
 

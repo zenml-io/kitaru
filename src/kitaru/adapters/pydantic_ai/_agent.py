@@ -35,6 +35,24 @@ from ._model import KitaruModel
 from ._toolset import CaptureConfig, kitaruify_toolset
 from ._tracking import get_current_tracker, normalize_agent_name, tracker_scope
 
+
+def _track_adapter_run(
+    *,
+    method: str,
+    error: BaseException | None = None,
+) -> None:
+    """Emit PYDANTIC_AI_RUN_COMPLETED analytics."""
+    from kitaru.analytics import AnalyticsEvent, track
+
+    metadata: dict[str, Any] = {
+        "method": method,
+        "status": "failed" if error is not None else "completed",
+    }
+    if error is not None:
+        metadata["error_type"] = type(error).__name__
+    track(AnalyticsEvent.PYDANTIC_AI_RUN_COMPLETED, metadata)
+
+
 _EVENT_STREAM_HANDLER_WRAPPED_ATTR = "_kitaru_event_stream_handler_wrapped"
 _SYNTHETIC_RUN_CALLABLES: dict[str, Callable[[], Any]] = {}
 _SYNTHETIC_RUN_LOCK = Lock()
@@ -311,45 +329,51 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         """Run async, using synthetic checkpointing when at flow scope."""
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
 
-        if _is_inside_flow() and not _is_inside_checkpoint():
-            return await asyncio.to_thread(
-                self._run_sync_core,
-                user_prompt,
-                output_type=output_type,
-                message_history=message_history,
-                deferred_tool_results=deferred_tool_results,
-                model=model,
-                instructions=instructions,
-                deps=deps,
-                model_settings=model_settings,
-                usage_limits=usage_limits,
-                usage=usage,
-                metadata=metadata,
-                infer_name=infer_name,
-                toolsets=toolsets,
-                builtin_tools=builtin_tools,
-                event_stream_handler=wrapped_handler,
-                spec=spec,
-            )
-
-        return await super().run(
-            user_prompt,
-            output_type=output_type,
-            message_history=message_history,
-            deferred_tool_results=deferred_tool_results,
-            model=model,
-            instructions=instructions,
-            deps=deps,
-            model_settings=model_settings,
-            usage_limits=usage_limits,
-            usage=usage,
-            metadata=metadata,
-            infer_name=infer_name,
-            toolsets=toolsets,
-            builtin_tools=builtin_tools,
-            event_stream_handler=wrapped_handler,
-            spec=spec,
-        )
+        try:
+            if _is_inside_flow() and not _is_inside_checkpoint():
+                result = await asyncio.to_thread(
+                    self._run_sync_core,
+                    user_prompt,
+                    output_type=output_type,
+                    message_history=message_history,
+                    deferred_tool_results=deferred_tool_results,
+                    model=model,
+                    instructions=instructions,
+                    deps=deps,
+                    model_settings=model_settings,
+                    usage_limits=usage_limits,
+                    usage=usage,
+                    metadata=metadata,
+                    infer_name=infer_name,
+                    toolsets=toolsets,
+                    builtin_tools=builtin_tools,
+                    event_stream_handler=wrapped_handler,
+                    spec=spec,
+                )
+            else:
+                result = await super().run(
+                    user_prompt,
+                    output_type=output_type,
+                    message_history=message_history,
+                    deferred_tool_results=deferred_tool_results,
+                    model=model,
+                    instructions=instructions,
+                    deps=deps,
+                    model_settings=model_settings,
+                    usage_limits=usage_limits,
+                    usage=usage,
+                    metadata=metadata,
+                    infer_name=infer_name,
+                    toolsets=toolsets,
+                    builtin_tools=builtin_tools,
+                    event_stream_handler=wrapped_handler,
+                    spec=spec,
+                )
+        except Exception as exc:
+            _track_adapter_run(method="run", error=exc)
+            raise
+        _track_adapter_run(method="run")
+        return result
 
     def run_sync(
         self,
@@ -373,24 +397,30 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     ) -> Any:
         """Run sync, using synthetic checkpointing when at flow scope."""
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
-        return self._run_sync_core(
-            user_prompt,
-            output_type=output_type,
-            message_history=message_history,
-            deferred_tool_results=deferred_tool_results,
-            model=model,
-            instructions=instructions,
-            deps=deps,
-            model_settings=model_settings,
-            usage_limits=usage_limits,
-            usage=usage,
-            metadata=metadata,
-            infer_name=infer_name,
-            toolsets=toolsets,
-            builtin_tools=builtin_tools,
-            event_stream_handler=wrapped_handler,
-            spec=spec,
-        )
+        try:
+            result = self._run_sync_core(
+                user_prompt,
+                output_type=output_type,
+                message_history=message_history,
+                deferred_tool_results=deferred_tool_results,
+                model=model,
+                instructions=instructions,
+                deps=deps,
+                model_settings=model_settings,
+                usage_limits=usage_limits,
+                usage=usage,
+                metadata=metadata,
+                infer_name=infer_name,
+                toolsets=toolsets,
+                builtin_tools=builtin_tools,
+                event_stream_handler=wrapped_handler,
+                spec=spec,
+            )
+        except Exception as exc:
+            _track_adapter_run(method="run_sync", error=exc)
+            raise
+        _track_adapter_run(method="run_sync")
+        return result
 
     @asynccontextmanager
     async def iter(
@@ -412,8 +442,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AsyncIterator[AgentRun[AgentDepsT, Any]]:
-        status = "completed"
-        run_error: dict[str, str] | None = None
+        iter_status = "completed"
+        iter_error: BaseException | None = None
 
         with self._kitaru_overrides(), tracker_scope(self._name) as tracker:
             try:
@@ -435,17 +465,20 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     spec=spec,
                 ) as run:
                     yield run
-            except BaseException as error:
-                status = "failed"
-                run_error = _error_payload(error)
+            except Exception as error:
+                iter_status = "failed"
+                iter_error = error
                 raise
             finally:
                 if _is_inside_checkpoint():
                     log(
                         pydantic_ai_run_summaries={
                             tracker.run_label: tracker.build_run_summary(
-                                status=status,
-                                error=run_error,
+                                status=iter_status,
+                                error=_error_payload(iter_error)
+                                if iter_error is not None
+                                else None,
                             )
                         }
                     )
+                _track_adapter_run(method="iter", error=iter_error)
