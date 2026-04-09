@@ -750,6 +750,76 @@ def test_executions_logs_follow_failure_exits_non_zero(
     assert "[Execution failed: Checkpoint failed]" in output
 
 
+def test_executions_logs_follow_failure_shows_retry_hint(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--follow` should show a retry hint when execution fails."""
+    failed = _execution_stub(
+        exec_id="kr-456",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        failure=SimpleNamespace(message="Checkpoint failed"),
+    )
+
+    fake_client = Mock()
+    fake_client.executions.logs.return_value = []
+    fake_client.executions.get.return_value = failed
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru.cli.time.sleep"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "logs", "kr-456", "--follow", "--interval", "0.01"])
+
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().out
+    assert "kitaru executions retry kr-456" in output
+    assert "To retry this execution" in output
+
+
+def test_executions_logs_follow_failure_json_includes_recovery_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--follow --output json` should include recovery_command in terminal event."""
+    failed = _execution_stub(
+        exec_id="kr-789",
+        flow_name="content_pipeline",
+        status=ExecutionStatus.FAILED,
+        failure=SimpleNamespace(message="Checkpoint failed"),
+    )
+
+    fake_client = Mock()
+    fake_client.executions.logs.return_value = []
+    fake_client.executions.get.return_value = failed
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru.cli.time.sleep"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "executions",
+                "logs",
+                "kr-789",
+                "--follow",
+                "--interval",
+                "0.01",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().out
+    terminal_event = json.loads(output.strip())
+    assert terminal_event["event"] == "terminal"
+    assert terminal_event["item"]["recovery_command"] == (
+        "kitaru executions retry kr-789"
+    )
+
+
 def test_executions_logs_surfaces_backend_errors(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -172,6 +172,39 @@ def execution_error_from_failure(
     )
 
 
+def build_recovery_command(exec_id: str, *, status: str) -> str | None:
+    """Return the CLI recovery command appropriate for a given run status.
+
+    Args:
+        exec_id: Execution identifier.
+        status: Raw run status value (e.g. ``"failed"``).
+
+    Returns:
+        Copy-pasteable CLI command string, or ``None`` when no recovery
+        action is available for the status.
+    """
+    if status == "failed":
+        return f"kitaru executions retry {exec_id}"
+    return None
+
+
+def format_recovery_hint(exec_id: str, *, status: str) -> str | None:
+    """Format a user-facing recovery hint for a non-successful execution.
+
+    Args:
+        exec_id: Execution identifier.
+        status: Raw run status value.
+
+    Returns:
+        Multi-line hint string, or ``None`` when no recovery action
+        is available.
+    """
+    command = build_recovery_command(exec_id, status=status)
+    if command is None:
+        return None
+    return f"To retry this execution from the failed checkpoint, run:\n\n  {command}"
+
+
 __all__ = [
     "FailureOrigin",
     "KitaruBackendError",
@@ -186,8 +219,10 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "build_recovery_command",
     "classify_failure_origin",
     "execution_error_from_failure",
+    "format_recovery_hint",
     "traceback_exception_type",
     "traceback_last_line",
 ]
