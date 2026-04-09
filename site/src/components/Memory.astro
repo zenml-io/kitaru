@@ -24,7 +24,7 @@
             </div>
             <span class="memory-code-filename">memory_demo.py</span>
           </div>
-          <pre class="memory-code-pre code-syntax" aria-label="Kitaru memory API example"><code><span class="kw">from</span> kitaru <span class="kw">import</span> memory
+          <pre class="memory-code-pre code-syntax" aria-label="Kitaru memory API example"><code is:raw><span class="kw">from</span> kitaru <span class="kw">import</span> memory
 
 memory.<span class="fn">configure</span>(
     scope<span class="op">=</span><span class="str">"my_repo"</span>,
@@ -46,36 +46,38 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
 
       <div class="memory-visual" data-reveal="fade-right" data-reveal-delay="4">
         <div class="shelf-container" id="memoryShelf">
+          <div class="shelf-label">Memory Store</div>
           <div class="shelf-row" data-shelf="0">
             <div class="shelf-key">conventions/test_runner</div>
             <div class="shelf-versions">
-              <span class="shelf-version">v1</span>
-              <span class="shelf-version">v2</span>
+              <span class="shelf-version shelf-faded">v1</span>
+              <span class="shelf-version shelf-faded">v2</span>
               <span class="shelf-version shelf-latest">v3</span>
             </div>
           </div>
           <div class="shelf-row" data-shelf="1">
             <div class="shelf-key">sessions/topic_count</div>
             <div class="shelf-versions">
-              <span class="shelf-version">v1</span>
+              <span class="shelf-version shelf-faded">v1</span>
               <span class="shelf-version shelf-latest">v2</span>
             </div>
           </div>
           <div class="shelf-row" data-shelf="2">
             <div class="shelf-key">scratch/obsolete</div>
             <div class="shelf-versions">
-              <span class="shelf-version">v1</span>
+              <span class="shelf-version shelf-faded">v1</span>
               <span class="shelf-version shelf-tombstone">deleted</span>
             </div>
           </div>
 
-          <div class="shelf-indicator" id="shelfIndicator" aria-live="polite"></div>
-
-          <div class="shelf-surfaces" id="shelfSurfaces">
-            <span class="shelf-badge" data-surface="python">Python</span>
-            <span class="shelf-badge" data-surface="client">Client</span>
-            <span class="shelf-badge" data-surface="cli">CLI</span>
-            <span class="shelf-badge" data-surface="mcp">MCP</span>
+          <div class="shelf-footer">
+            <div class="shelf-indicator" id="shelfIndicator" aria-live="polite"></div>
+            <div class="shelf-surfaces" id="shelfSurfaces">
+              <span class="shelf-badge" data-surface="python">Python</span>
+              <span class="shelf-badge" data-surface="client">Client</span>
+              <span class="shelf-badge" data-surface="cli">CLI</span>
+              <span class="shelf-badge" data-surface="mcp">MCP</span>
+            </div>
           </div>
         </div>
       </div>
@@ -139,12 +141,18 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
     display: grid;
     grid-template-columns: 1.15fr 1fr;
     gap: 32px;
-    align-items: start;
+    align-items: stretch;
     margin-top: 48px;
     margin-bottom: 48px;
   }
 
   /* ═══ Code window ═══ */
+  .memory-code {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
   .memory-code-window {
     background: oklch(0.16 0.015 60);
     border: 1px solid oklch(1 0 0 / 0.08);
@@ -184,61 +192,69 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
 
   /* ═══ Shelf visual ═══ */
   .memory-visual {
-    background: var(--color-surface-warm);
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
-    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     min-height: 320px;
   }
 
   .shelf-container {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
+  }
+
+  .shelf-label {
+    font-family: var(--font-mono);
+    font-size: 0.63rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
   }
 
   .shelf-row {
     display: flex;
+    flex-direction: column;
     align-items: stretch;
-    background: var(--color-surface);
+    background: oklch(1 0 0 / 0.6);
     border: 1px solid var(--color-border);
-    border-radius: 8px;
+    border-radius: 10px;
     overflow: hidden;
-    transition: border-color 0.3s, box-shadow 0.3s;
+    transition: border-color 0.35s, box-shadow 0.35s;
   }
 
   .shelf-row.highlight {
-    border-color: oklch(0.65 0.16 45 / 0.35);
-    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.06);
+    border-color: oklch(0.65 0.16 45 / 0.4);
+    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.07), 0 2px 8px oklch(0.65 0.16 45 / 0.06);
   }
 
   .shelf-key {
     font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--color-primary);
-    padding: 10px 12px;
-    background: oklch(0.975 0.008 75);
-    border-right: 1px solid var(--color-border);
-    min-width: 150px;
+    padding: 10px 14px 0;
     display: flex;
     align-items: center;
-    font-weight: 500;
+    font-weight: 600;
     white-space: nowrap;
+    letter-spacing: -0.01em;
   }
 
   .shelf-versions {
     display: flex;
     gap: 6px;
-    padding: 8px 12px;
+    padding: 8px 14px 10px;
     align-items: center;
     flex-wrap: wrap;
   }
 
   .shelf-version {
     font-family: var(--font-mono);
-    font-size: 0.63rem;
-    padding: 3px 9px;
-    border-radius: 4px;
+    font-size: 0.6rem;
+    padding: 3px 10px;
+    border-radius: 5px;
     border: 1px solid var(--color-border);
     background: var(--color-surface);
     color: var(--color-muted);
@@ -246,11 +262,16 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
     white-space: nowrap;
   }
 
+  .shelf-faded {
+    opacity: 0.45;
+  }
+
   .shelf-latest {
-    border-color: oklch(0.65 0.16 45 / 0.35);
+    border-color: oklch(0.65 0.16 45 / 0.4);
     background: oklch(0.65 0.16 45 / 0.08);
     color: var(--color-accent);
     font-weight: 600;
+    opacity: 1;
   }
 
   .shelf-tombstone {
@@ -261,12 +282,20 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
     border-color: oklch(0.55 0.18 25 / 0.25);
   }
 
+  .shelf-footer {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 6px;
+    text-align: center;
+  }
+
   .shelf-indicator {
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: 0.66rem;
     color: var(--color-accent);
     text-align: center;
-    margin-top: 8px;
     height: 20px;
     opacity: 0;
     transition: opacity 0.35s;
@@ -278,27 +307,28 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
 
   .shelf-surfaces {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     justify-content: center;
-    margin-top: 12px;
+    margin-top: 8px;
     flex-wrap: wrap;
   }
 
   .shelf-badge {
     font-family: var(--font-mono);
-    font-size: 0.63rem;
+    font-size: 0.6rem;
     padding: 4px 12px;
     border-radius: 20px;
-    background: var(--color-surface);
+    background: var(--color-surface-warm);
     border: 1px solid var(--color-border);
     color: var(--color-muted);
     transition: all 0.35s;
   }
 
   .shelf-badge.active {
-    border-color: oklch(0.65 0.16 45 / 0.35);
+    border-color: oklch(0.65 0.16 45 / 0.4);
     color: var(--color-accent);
-    background: oklch(0.65 0.16 45 / 0.06);
+    background: oklch(0.65 0.16 45 / 0.07);
+    box-shadow: 0 0 0 2px oklch(0.65 0.16 45 / 0.05);
   }
 
   /* ═══ Bullet cards ═══ */
@@ -394,7 +424,6 @@ conventions <span class="op">=</span> memory.<span class="fn">get</span>(
     }
 
     .shelf-key {
-      min-width: 120px;
       font-size: 0.62rem;
     }
   }
