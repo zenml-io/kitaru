@@ -4,7 +4,6 @@ on:
   push:
     branches: [develop]
   pull_request:
-    branches: [develop]
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

@@ -47,7 +47,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 ## How the examples are organized
 
 - [basic_flow/README.md](basic_flow/README.md) — smallest flows, logging, artifacts, and runtime configuration
-- [memory/README.md](memory/README.md) — durable memory seeding, scope switching, and inspection
+- [memory/README.md](memory/README.md) — durable memory seeding, scope switching, detached post-run execution writes, and inspection
 - [execution_management/README.md](execution_management/README.md) — inspect executions, resolve waits, and resume work
 - [replay/README.md](replay/README.md) — replay from a checkpoint boundary with targeted overrides
 - [llm/README.md](llm/README.md) — tracked `kitaru.llm()` calls inside flows
@@ -69,7 +69,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 
 | Example | Run | Requires | What it demonstrates | Docs | Test |
 |---|---|---|---|---|---|
-| [Memory](memory/flow_with_memory.py) | `uv run examples/memory/flow_with_memory.py` | `uv sync --extra local` | Outside-flow seeding, in-flow `kitaru.memory`, and explicit-scope inspection with `KitaruClient.memories` | [Use Memory](https://kitaru.ai/docs/guides/memory) | [tests/test_phase20_memory_example.py](../tests/test_phase20_memory_example.py) |
+| [Memory](memory/flow_with_memory.py) | `uv run examples/memory/flow_with_memory.py` | `uv sync --extra local` | Outside-flow seeding, in-flow `kitaru.memory`, detached post-run execution-scope writes, and explicit-scope inspection with `KitaruClient.memories` | [Use Memory](https://kitaru.ai/docs/guides/memory) | [tests/test_phase20_memory_example.py](../tests/test_phase20_memory_example.py) |
 
 ## Execution lifecycle and recovery
 

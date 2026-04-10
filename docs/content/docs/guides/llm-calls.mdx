@@ -35,13 +35,13 @@ and default alias take precedence over matching local entries.
 ## Register a model alias
 
 ```bash
-kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+kitaru model register fast --model openai/gpt-5-nano --secret openai-creds
 ```
 
 You can also register an alias without a linked secret:
 
 ```bash
-kitaru model register fast --model openai/gpt-4o-mini
+kitaru model register fast --model openai/gpt-5-nano
 ```
 
 List aliases with:
@@ -180,7 +180,7 @@ from kitaru import checkpoint
 def agent_step(messages: list[dict]) -> str:
     client = OpenAI()
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5-nano",
         messages=messages,
         tools=[...],  # tool calling, structured output, etc.
     )
@@ -217,7 +217,7 @@ Each `kitaru.llm()` call records:
 uv sync --extra local --extra llm
 
 # Register an alias (with or without a linked secret) before running the example.
-uv run kitaru model register fast --model openai/gpt-4o-mini
+uv run kitaru model register fast --model openai/gpt-5-nano
 uv run examples/llm/flow_with_llm.py
 uv run pytest tests/test_phase12_llm_example.py
 ```

@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Public memory operations now work outside flows after `kitaru.memory.configure(scope=...)`, enabling seeding and inspection from plain scripts while reusing the same durable artifact-backed storage contract
 - `KitaruClient.memories` typed memory namespace for `get/list/history/set/delete` operations by explicit scope
+- Automatic flow-membership indexing for new execution-scoped memory writes plus `kitaru memory reindex` / `KitaruClient.memories.reindex(apply=...)` for backfilling historical memory tags in existing projects
 - Shared memory transport helpers and serializers (`kitaru._interface_memory`, `kitaru.inspection.serialize_memory_*`) so future CLI and MCP surfaces can reuse one payload/validation layer instead of re-implementing memory semantics
 - Runnable memory example under `examples/memory/flow_with_memory.py` showing outside-flow seeding, in-flow `kitaru.memory` usage, and explicit-scope inspection via `KitaruClient.memories`
+- Memory example now renders narrated text output by default, auto-detects model availability for maintenance demos, and includes a public demo playbook (`examples/memory/DEMO_PLAYBOOK.md`)
 - `ImageSettings` now supports `build_context_root`, `image_tag`, `target_repository`, and `user` fields for finer-grained container image configuration
 - `ImageSettings.platform` field for specifying the target Docker build platform (e.g. `linux/amd64`)
 - Anonymous usage analytics instrumentation across CLI, MCP, and SDK surfaces
@@ -21,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Replace runtime dashboard file patching with `ZENML_SERVER_DASHBOARD_FILES_PATH` environment variable, simplifying local server startup (#92)
+- New users do not need any memory migration: fresh execution-scoped writes are indexed automatically, while existing projects can opt into a dry-run-first tag backfill flow with `kitaru memory reindex [--apply]`
 
 ### Fixed
 - Suppress noisy config-change warnings that appeared during flow resume (#97)

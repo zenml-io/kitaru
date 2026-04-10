@@ -13,12 +13,12 @@ cabinet where you keep the latest durable facts under stable keys.
 All memory surfaces talk to the same stored data, but they do not expose the
 exact same controls.
 
-| Surface | Scope input | Version support | Prefix support | Notes |
+| Surface | Scope input | Version reads | Admin ops (purge/compact/log) | Notes |
 |---|---|---|---|---|
 | `kitaru.memory` | Implicit via `memory.configure(...)` or active flow | `get(version=...)` | No | Best inside Python flows and scripts |
-| `KitaruClient.memories` | Explicit `scope=` on every call | Yes | Yes on `list` | Best for admin/inspection code |
-| CLI | `--scope` required | No | No | Best for shell inspection and quick edits |
-| MCP | `scope` required | Yes on `get` | Yes on `list` | Best for assistant/tool use |
+| `KitaruClient.memories` | Explicit `scope=` + `scope_type=` on scoped calls | Yes | Yes | Best for admin/inspection code |
+| CLI | Explicit `--scope` + `--scope-type` on scoped commands | No | Yes | Best for shell inspection and maintenance |
+| MCP | Explicit `scope` + `scope_type` on scoped tools | Yes on `get` | Yes | Best for assistant/tool use |
 
 <Callout type="info">
   The module-level `kitaru.memory` API does not take per-call `scope=`
@@ -107,26 +107,62 @@ client.memories.set(
     scope_type="namespace",
 )
 
-entries = client.memories.list(scope="repo_docs")
-latest = client.memories.get("team/default_model", scope="repo_docs")
-history = client.memories.history("team/default_model", scope="repo_docs")
+entries = client.memories.list(scope="repo_docs", scope_type="namespace")
+latest = client.memories.get(
+    "team/default_model",
+    scope="repo_docs",
+    scope_type="namespace",
+)
+history = client.memories.history(
+    "team/default_model",
+    scope="repo_docs",
+    scope_type="namespace",
+)
 scopes = client.memories.scopes()
 ```
 
 The client API is the best fit for admin utilities because every call makes the
-scope explicit.
+typed scope explicit.
+
+That explicit scope matters most for execution-scoped memory. For example, a
+script can write into one execution bucket after the run has finished:
+
+```python
+client.memories.set(
+    "execution/notes",
+    {"status": "reviewed"},
+    scope="execution-123",
+    scope_type="execution",
+)
+
+entry = client.memories.get(
+    "execution/notes",
+    scope="execution-123",
+    scope_type="execution",
+)
+print(entry.scope)         # "execution-123" -> membership bucket
+print(entry.execution_id)  # None for a detached write
+print(entry.flow_id)       # owning flow, when Kitaru can resolve it
+```
+
+The story here is simple:
+
+- `scope` tells you which execution bucket the entry belongs to
+- `execution_id` tells you whether that specific version was produced during a live run
+- detached post-run writes are valid execution-scope memory; they are just not live-run provenance
 
 ## Read and update memory from the CLI
 
-The CLI surface mirrors the same storage, but it always requires `--scope`.
+The CLI surface mirrors the same storage, but scoped commands require both
+`--scope` and `--scope-type`.
 
 ```bash
 kitaru memory scopes
-kitaru memory list --scope repo_docs
-kitaru memory get style/release_notes --scope repo_docs
+kitaru memory list --scope repo_docs --scope-type namespace
+kitaru memory get style/release_notes --scope repo_docs --scope-type namespace
 kitaru memory set style/release_notes '{"tone":"concise"}' --scope repo_docs --scope-type namespace
-kitaru memory history style/release_notes --scope repo_docs
-kitaru memory delete style/release_notes --scope repo_docs
+kitaru memory history style/release_notes --scope repo_docs --scope-type namespace
+kitaru memory delete style/release_notes --scope repo_docs --scope-type namespace
 ```
 
 Two details matter here:
@@ -138,16 +174,16 @@ Two details matter here:
 
 Assistants can use the MCP server's structured memory tools:
 
-- `kitaru_memory_list(scope, prefix=None)`
-- `kitaru_memory_get(key, scope, version=None)`
-- `kitaru_memory_set(key, value, scope, scope_type=None)`
-- `kitaru_memory_delete(key, scope)`
-- `kitaru_memory_history(key, scope)`
+- `kitaru_memory_list(scope, scope_type, prefix=None)`
+- `kitaru_memory_get(key, scope, scope_type, version=None)`
+- `kitaru_memory_set(key, value, scope, scope_type)`
+- `kitaru_memory_delete(key, scope, scope_type)`
+- `kitaru_memory_history(key, scope, scope_type)`
 
 A typical sequence looks like this:
 
-1. `kitaru_memory_list(scope="repo_docs")`
-2. `kitaru_memory_get(key="style/release_notes", scope="repo_docs")`
+1. `kitaru_memory_list(scope="repo_docs", scope_type="namespace")`
+2. `kitaru_memory_get(key="style/release_notes", scope="repo_docs", scope_type="namespace")`
 3. `kitaru_memory_set(key="style/release_notes", value={"tone": "concise"}, scope="repo_docs", scope_type="namespace")`
 
 Use MCP when an assistant needs to inspect or update durable state without
@@ -178,6 +214,226 @@ That sequence tells a concrete story:
    "this key was deleted," rather than the data being erased)
 4. history still preserves the earlier states
 
+## Compact memory with an LLM summary
+
+Over time, a memory key can accumulate many versions — or several related keys
+can hold overlapping information. `compact` sends selected memory values to an
+LLM and writes the returned summary as a new memory version.
+
+The default single-key workflow is the common one: the **current value** of one
+key has gotten too large, so you compact just that latest live value back down.
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+
+# Single-key mode: compact the current value of one key
+result = client.memories.compact(
+    scope="repo_docs",
+    scope_type="namespace",
+    key="conventions/test_runner",
+)
+
+print(result.entry.key)       # "conventions/test_runner"
+print(result.sources_read)    # 1
+```
+
+If you explicitly want to summarize the full non-deleted version history of one
+key instead, set `source_mode="history"`:
+
+```python
+result = client.memories.compact(
+    scope="repo_docs",
+    scope_type="namespace",
+    key="conventions/test_runner",
+    source_mode="history",
+)
+```
+
+Multi-key mode still summarizes the **current value** of each listed key into a
+separate target key:
+
+```python
+result = client.memories.compact(
+    scope="repo_docs",
+    scope_type="namespace",
+    keys=["conventions/test_runner", "conventions/python"],
+    target_key="summaries/conventions",
+    instruction="Summarize these repo conventions in 2-3 concise bullets.",
+)
+
+print(result.entry.key)       # "summaries/conventions"
+print(result.sources_read)    # 2
+```
+
+In multi-key mode, `target_key` is required. The original source keys are left
+untouched.
+
+<Callout type="info">
+  Compact **does not** delete source entries. The recommended storage-reduction
+  workflow is: compact, inspect the summary if you want, then run `purge`
+  separately.
+</Callout>
+
+## Purge old versions
+
+Soft deletes preserve history, but sometimes you need to reclaim space. `purge`
+physically deletes artifact versions.
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+
+# Keep the newest version, delete the rest
+result = client.memories.purge(
+    "conventions/test_runner",
+    scope="repo_docs",
+    scope_type="namespace",
+    keep=1,
+)
+print(result.versions_deleted)  # number of old versions removed
+
+# Purge across an entire scope
+result = client.memories.purge_scope(
+    scope="repo_docs",
+    scope_type="namespace",
+    keep=1,
+    include_deleted=True,  # also fully remove tombstoned keys
+)
+```
+
+Omitting `keep` deletes **all** versions, including the current value.
+`purge_scope` skips the internal compaction audit log so the maintenance
+trail survives cleanup.
+
+## Inspect the compaction audit log
+
+Every `compact` and `purge` operation writes an audit record. Read the
+maintenance trail with `compaction_log`:
+
+```python
+records = client.memories.compaction_log(
+    scope="repo_docs",
+    scope_type="namespace",
+)
+
+for record in records:  # newest first
+    print(record.operation, record.scope, record.timestamp)
+    if record.operation == "compact":
+        print(f"  wrote {record.target_key} v{record.target_version}")
+    else:
+        print(f"  deleted {record.versions_deleted} versions")
+```
+
+## Memory maintenance from the CLI
+
+The CLI exposes the same admin operations:
+
+```bash
+# Compact the current value of one key
+kitaru memory compact --scope repo_docs \
+    --scope-type namespace \
+    --key conventions/test_runner
+
+# Summarize the full history of one key instead
+kitaru memory compact --scope repo_docs \
+    --scope-type namespace \
+    --key conventions/test_runner \
+    --source-mode history
+
+# Compact multiple current values into one summary key
+kitaru memory compact --scope repo_docs \
+    --scope-type namespace \
+    --keys conventions/test_runner --keys conventions/python \
+    --target-key summaries/conventions \
+    --instruction "Summarize in 2-3 bullets."
+
+# Purge old versions of one key, keeping the newest
+kitaru memory purge conventions/test_runner --scope repo_docs --scope-type namespace --keep 1
+
+# Purge an entire scope, including tombstoned keys
+kitaru memory purge-scope --scope repo_docs --scope-type namespace --keep 1 --include-deleted
+
+# View the compaction audit log
+kitaru memory compaction-log --scope repo_docs --scope-type namespace
+```
+
+## Reindex older execution-scope memory
+
+Most users do **not** need to do anything here.
+
+If you are starting on a current Kitaru release, new execution-scoped memory is
+indexed automatically when it is written. That is the normal happy path, and it
+is the one to optimize for in day-to-day use.
+
+The reindex command is mainly for the smaller group of users who already had
+execution-scoped memory stored before flow-level discovery tags were added.
+
+### When should you run it?
+
+Run `kitaru memory reindex` if all of the following are true:
+
+1. you already have older execution-scoped memory in a project
+2. you want the UI to discover execution-scope memories by flow membership
+3. that older data was written before the new indexing tags shipped
+
+### Dry run first
+
+Start with the preview:
+
+```bash
+kitaru memory reindex
+```
+
+This scans memory artifact versions in the active project and reports:
+
+- how many versions were scanned
+- how many already have the new tags
+- how many historical versions need tag updates
+- whether any versions could not be matched back to a flow
+
+### Apply the backfill
+
+If the dry run looks good, rerun with `--apply`:
+
+```bash
+kitaru memory reindex --apply
+```
+
+This adds any missing:
+
+- `kitaru:memory:scope_type:*` tags
+- `kitaru:memory:flow_id:*` tags for execution-scoped memory when the flow can
+  be resolved
+
+### Important limitations
+
+- Reindexing is **project-scoped**. Run it separately in each project that has
+  historical memory data.
+- The operation is **additive only**. It does not rewrite memory values, delete
+  anything, or remove existing tags.
+- This phase backfills **tags only**, not `flow_id` / `flow_name` metadata. So
+  older entries may become discoverable in the UI while still showing
+  `not indexed` for flow metadata in detailed inspection views.
+- Reindexing improves discovery. It does **not** retroactively turn detached
+  writes into live-run provenance, so `execution_id` stays `None` for those
+  historical detached versions.
+- Rerunning the command is safe. It recomputes which tags are still missing and
+  only adds those.
+
+## Memory maintenance from MCP
+
+Assistants can use the MCP memory maintenance tools:
+
+- `kitaru_memory_compact(scope, scope_type, key=None, keys=None, source_mode="current", target_key=None, instruction=None, model=None, max_tokens=None)`
+- `kitaru_memory_purge(key, scope, scope_type, keep=None)`
+- `kitaru_memory_purge_scope(scope, scope_type, keep=None, include_deleted=False)`
+- `kitaru_memory_compaction_log(scope, scope_type)`
+
+These follow the same semantics as the Python client and CLI surfaces.
+
 ## Restrictions to remember
 
 - Memory is allowed in flow bodies
@@ -191,13 +447,33 @@ That sequence tells a concrete story:
 ## Runnable example
 
 If you want one script that tells the whole story, run
-`examples/memory/flow_with_memory.py`.
+`examples/memory/flow_with_memory.py`:
+
+```bash
+uv run examples/memory/flow_with_memory.py
+```
 
 It demonstrates:
 
 - outside-flow namespace seeding with `kitaru.memory`
 - in-flow reads, writes, deletes, history, and scope switching
 - explicit namespace, flow, and execution inspection with `KitaruClient.memories`
+- detached post-run writes into an execution scope, including the membership-vs-provenance distinction
+- post-run memory maintenance: multi-key compaction, purge, and audit log inspection
+
+By default the example renders narrated text output. Use `--output json` for
+the raw structured snapshot.
+
+<Callout type="info">
+  The example auto-detects whether a default model is configured. If one is
+  available, the walkthrough includes LLM-powered compaction, purge, and audit
+  log inspection. Without a model, those sections are skipped with guidance on
+  how to enable them. See the
+  [example README](https://github.com/zenml-io/kitaru/tree/develop/examples/memory)
+  for setup details and the
+  [demo playbook](https://github.com/zenml-io/kitaru/tree/develop/examples/memory/DEMO_PLAYBOOK.md)
+  for recording recipes.
+</Callout>
 
 ## Reference pages
 

@@ -16,7 +16,7 @@ Register a model alias and provide credentials:
 
 ```bash
 kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
-kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+kitaru model register fast --model openai/gpt-5-nano --secret openai-creds
 ```
 
 Then run:

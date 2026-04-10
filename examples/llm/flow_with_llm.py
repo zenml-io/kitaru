@@ -3,12 +3,12 @@
 Before running this example, register a model alias and provide credentials:
 
     kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
-    kitaru model register fast --model openai/gpt-4o-mini --secret openai-creds
+    kitaru model register fast --model openai/gpt-5-nano --secret openai-creds
 
 For quick local testing you can also skip the linked secret and just export
 the provider key:
 
-    kitaru model register fast --model openai/gpt-4o-mini
+    kitaru model register fast --model openai/gpt-5-nano
     export OPENAI_API_KEY=sk-...
 """
 

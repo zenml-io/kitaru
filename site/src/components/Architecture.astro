@@ -6,10 +6,13 @@
   <div class="section-inner">
     <!-- Eyebrow + title above the grid -->
     <div class="arch-header" data-reveal>
-      <span class="section-eyebrow">Architecture</span>
+      <span class="section-eyebrow">OPEN RUNTIME</span>
       <h2 id="arch-heading" class="section-title arch-title">
-        Orchestration layer.<br><em class="arch-italic">Not a framework.</em>
+        An orchestration layer for long-running agents.<br><em class="arch-italic">Not a framework.</em>
       </h2>
+      <p class="arch-desc">
+        Keep your existing agent code. Kitaru adds checkpoints, memory, and execution control underneath it, then runs it on your infrastructure.
+      </p>
     </div>
 
     <div class="arch-grid">
@@ -38,9 +41,10 @@
               <span class="arch-pill">log()</span>
               <span class="arch-pill">save()</span>
               <span class="arch-pill">load()</span>
+              <span class="arch-pill">memory.*</span>
               <span class="arch-pill">configure()</span>
             </div>
-            <div class="arch-layer-note">Eight primitives. Full durability.</div>
+            <div class="arch-layer-note">Core primitives. Durable execution + memory.</div>
           </div>
 
           <div class="arch-layer arch-layer-engine">
@@ -51,7 +55,7 @@
               <span class="arch-pill">Replay</span>
               <span class="arch-pill">Cost Engine</span>
             </div>
-            <div class="arch-layer-note">Powered by ZenML</div>
+            <div class="arch-layer-note">Built on ZenML foundations</div>
           </div>
 
           <div class="arch-layer arch-layer-infra">
@@ -122,6 +126,16 @@
 
   .arch-header {
     margin-bottom: 40px;
+  }
+
+  .arch-desc {
+    max-width: 640px;
+    margin-top: 16px;
+    margin-bottom: 0;
+    color: oklch(1 0 0 / 0.7);
+    font-size: clamp(0.98rem, 1.5vw, 1.08rem);
+    line-height: 1.7;
+    font-weight: 300;
   }
 
   /* Layer stack */

@@ -39,10 +39,14 @@ from kitaru.mcp.server import (
     kitaru_executions_replay,
     kitaru_executions_retry,
     kitaru_executions_run,
+    kitaru_memory_compact,
+    kitaru_memory_compaction_log,
     kitaru_memory_delete,
     kitaru_memory_get,
     kitaru_memory_history,
     kitaru_memory_list,
+    kitaru_memory_purge,
+    kitaru_memory_purge_scope,
     kitaru_memory_set,
     kitaru_stacks_list,
     kitaru_start_local_server,
@@ -653,11 +657,16 @@ def test_memory_list_delegates_to_shared_interface(
             return_value=payload,
         ) as mock_list,
     ):
-        result = kitaru_memory_list(scope="repo/demo", prefix="preferences")
+        result = kitaru_memory_list(
+            scope="repo/demo",
+            scope_type="namespace",
+            prefix="preferences",
+        )
 
     mock_list.assert_called_once_with(
         mock_kitaru_client,
         scope="repo/demo",
+        scope_type="namespace",
         prefix="preferences",
     )
     assert result == payload
@@ -684,6 +693,7 @@ def test_memory_get_delegates_to_shared_interface(
         result = kitaru_memory_get(
             "preferences/theme",
             scope="repo/demo",
+            scope_type="namespace",
             version=3,
         )
 
@@ -691,6 +701,7 @@ def test_memory_get_delegates_to_shared_interface(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
         version=3,
     )
     assert result == payload
@@ -707,12 +718,17 @@ def test_memory_get_returns_none_when_missing(
             return_value=None,
         ) as mock_get,
     ):
-        result = kitaru_memory_get("preferences/theme", scope="repo/demo")
+        result = kitaru_memory_get(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_get.assert_called_once_with(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
         version=None,
     )
     assert result is None
@@ -771,12 +787,17 @@ def test_memory_delete_delegates_to_shared_interface(
             return_value=payload,
         ) as mock_delete,
     ):
-        result = kitaru_memory_delete("preferences/theme", scope="repo/demo")
+        result = kitaru_memory_delete(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_delete.assert_called_once_with(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
     )
     assert result == payload
 
@@ -792,12 +813,17 @@ def test_memory_delete_returns_none_when_missing(
             return_value=None,
         ) as mock_delete,
     ):
-        result = kitaru_memory_delete("preferences/theme", scope="repo/demo")
+        result = kitaru_memory_delete(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_delete.assert_called_once_with(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
     )
     assert result is None
 
@@ -818,12 +844,143 @@ def test_memory_history_delegates_to_shared_interface(
             return_value=payload,
         ) as mock_history,
     ):
-        result = kitaru_memory_history("preferences/theme", scope="repo/demo")
+        result = kitaru_memory_history(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_history.assert_called_once_with(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
+    )
+    assert result == payload
+
+
+def test_memory_compact_delegates_to_shared_interface(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    payload = {
+        "entry": {"key": "summaries/theme", "scope": "repo/demo", "version": 4},
+        "sources_read": 1,
+        "scope": "repo/demo",
+        "compaction_record": {"source_mode": "current"},
+    }
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch.object(
+            memory_interface,
+            "compact_memory_payload",
+            return_value=payload,
+        ) as mock_compact,
+    ):
+        result = kitaru_memory_compact(
+            scope="repo/demo",
+            scope_type="namespace",
+            key="preferences/theme",
+            source_mode="current",
+        )
+
+    mock_compact.assert_called_once_with(
+        mock_kitaru_client,
+        scope="repo/demo",
+        scope_type="namespace",
+        key="preferences/theme",
+        keys=None,
+        source_mode="current",
+        target_key=None,
+        instruction=None,
+        model=None,
+        max_tokens=None,
+    )
+    assert result == payload
+
+
+def test_memory_purge_delegates_to_shared_interface(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    payload = {"versions_deleted": 2, "keys_affected": 1, "scope": "repo/demo"}
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch.object(
+            memory_interface,
+            "purge_memory_payload",
+            return_value=payload,
+        ) as mock_purge,
+    ):
+        result = kitaru_memory_purge(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+            keep=1,
+        )
+
+    mock_purge.assert_called_once_with(
+        mock_kitaru_client,
+        key="preferences/theme",
+        scope="repo/demo",
+        scope_type="namespace",
+        keep=1,
+    )
+    assert result == payload
+
+
+def test_memory_purge_scope_delegates_to_shared_interface(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    payload = {"versions_deleted": 5, "keys_affected": 2, "scope": "repo/demo"}
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch.object(
+            memory_interface,
+            "purge_scope_memory_payload",
+            return_value=payload,
+        ) as mock_purge_scope,
+    ):
+        result = kitaru_memory_purge_scope(
+            scope="repo/demo",
+            scope_type="namespace",
+            keep=1,
+            include_deleted=True,
+        )
+
+    mock_purge_scope.assert_called_once_with(
+        mock_kitaru_client,
+        scope="repo/demo",
+        scope_type="namespace",
+        keep=1,
+        include_deleted=True,
+    )
+    assert result == payload
+
+
+def test_memory_compaction_log_delegates_to_shared_interface(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    payload = [{"operation": "compact", "source_mode": "current"}]
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch.object(
+            memory_interface,
+            "compaction_log_memory_payload",
+            return_value=payload,
+        ) as mock_log,
+    ):
+        result = kitaru_memory_compaction_log(
+            scope="repo/demo",
+            scope_type="namespace",
+        )
+
+    mock_log.assert_called_once_with(
+        mock_kitaru_client,
+        scope="repo/demo",
+        scope_type="namespace",
     )
     assert result == payload
 
@@ -1445,7 +1602,6 @@ def test_manage_stack_create_vertex_dispatches_structured_spec() -> None:
         "credentials": None,
         "verify": False,
     }
-
     assert payload == {
         "id": "stack-vertex-id",
         "name": "vertex-dev",

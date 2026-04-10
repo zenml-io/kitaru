@@ -261,6 +261,7 @@ def kitaru_executions_replay(
 @tracked_mcp_tool
 def kitaru_memory_list(
     scope: str,
+    scope_type: str,
     prefix: str | None = None,
 ) -> list[dict[str, Any]]:
     """List memory entries for one explicit scope."""
@@ -268,6 +269,7 @@ def kitaru_memory_list(
         lambda: memory_interface.list_memory_payload(
             client_api.KitaruClient(),
             scope=scope,
+            scope_type=scope_type,
             prefix=prefix,
         )
     )
@@ -277,6 +279,7 @@ def kitaru_memory_list(
 def kitaru_memory_get(
     key: str,
     scope: str,
+    scope_type: str,
     version: int | None = None,
 ) -> dict[str, Any] | None:
     """Get one memory value from one explicit scope."""
@@ -285,6 +288,7 @@ def kitaru_memory_get(
             client_api.KitaruClient(),
             key=key,
             scope=scope,
+            scope_type=scope_type,
             version=version,
         )
     )
@@ -295,7 +299,7 @@ def kitaru_memory_set(
     key: str,
     value: Any,
     scope: str,
-    scope_type: str | None = None,
+    scope_type: str,
 ) -> dict[str, Any]:
     """Write one memory value into one explicit scope."""
     return run_with_mcp_error_boundary(
@@ -313,6 +317,7 @@ def kitaru_memory_set(
 def kitaru_memory_delete(
     key: str,
     scope: str,
+    scope_type: str,
 ) -> dict[str, Any] | None:
     """Soft-delete one memory key from one explicit scope."""
     return run_with_mcp_error_boundary(
@@ -320,6 +325,7 @@ def kitaru_memory_delete(
             client_api.KitaruClient(),
             key=key,
             scope=scope,
+            scope_type=scope_type,
         )
     )
 
@@ -328,6 +334,7 @@ def kitaru_memory_delete(
 def kitaru_memory_history(
     key: str,
     scope: str,
+    scope_type: str,
 ) -> list[dict[str, Any]]:
     """Show all versions for one memory key in one explicit scope."""
     return run_with_mcp_error_boundary(
@@ -335,6 +342,89 @@ def kitaru_memory_history(
             client_api.KitaruClient(),
             key=key,
             scope=scope,
+            scope_type=scope_type,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_purge(
+    key: str,
+    scope: str,
+    scope_type: str,
+    keep: int | None = None,
+) -> dict[str, Any]:
+    """Physically delete old versions of one memory key."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.purge_memory_payload(
+            client_api.KitaruClient(),
+            key=key,
+            scope=scope,
+            scope_type=scope_type,
+            keep=keep,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_purge_scope(
+    scope: str,
+    scope_type: str,
+    keep: int | None = None,
+    include_deleted: bool = False,
+) -> dict[str, Any]:
+    """Purge old versions across all keys in one scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.purge_scope_memory_payload(
+            client_api.KitaruClient(),
+            scope=scope,
+            scope_type=scope_type,
+            keep=keep,
+            include_deleted=include_deleted,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_compact(
+    scope: str,
+    scope_type: str,
+    key: str | None = None,
+    keys: list[str] | None = None,
+    source_mode: Literal["current", "history"] = "current",
+    target_key: str | None = None,
+    instruction: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Summarize memory values using an LLM and write the result."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.compact_memory_payload(
+            client_api.KitaruClient(),
+            scope=scope,
+            scope_type=scope_type,
+            key=key,
+            keys=keys,
+            source_mode=source_mode,
+            target_key=target_key,
+            instruction=instruction,
+            model=model,
+            max_tokens=max_tokens,
+        )
+    )
+
+
+@tracked_mcp_tool
+def kitaru_memory_compaction_log(
+    scope: str,
+    scope_type: str,
+) -> list[dict[str, Any]]:
+    """Show the compaction audit log for one scope."""
+    return run_with_mcp_error_boundary(
+        lambda: memory_interface.compaction_log_memory_payload(
+            client_api.KitaruClient(),
+            scope=scope,
+            scope_type=scope_type,
         )
     )
 

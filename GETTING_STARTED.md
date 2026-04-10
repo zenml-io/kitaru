@@ -152,7 +152,7 @@ capability.
 
 ```bash
 # Register a model alias and set your key
-uv run kitaru model register fast --model openai/gpt-4o-mini
+uv run kitaru model register fast --model openai/gpt-5-nano
 export OPENAI_API_KEY=sk-...
 
 uv run examples/llm/flow_with_llm.py

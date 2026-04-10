@@ -86,6 +86,10 @@ Memory tools:
 - `kitaru_memory_set`
 - `kitaru_memory_delete`
 - `kitaru_memory_history`
+- `kitaru_memory_compact`
+- `kitaru_memory_purge`
+- `kitaru_memory_purge_scope`
+- `kitaru_memory_compaction_log`
 
 Connection tools:
 
@@ -141,19 +145,46 @@ or `manage_stack(action="delete", name="local-dev", force=True)`.
 The memory tools give assistants direct structured access to Kitaru's durable
 key-value memory store.
 
-- `scope` is required on every memory tool
+- `scope` and `scope_type` are required on every scoped memory tool
 - `version` is available only on `kitaru_memory_get`
-- `scope_type` is available only on `kitaru_memory_set`
 
 Typical memory query/update flow:
 
-1. `kitaru_memory_list(scope="repo_docs")`
-2. `kitaru_memory_get(key="style/release_notes", scope="repo_docs")`
+1. `kitaru_memory_list(scope="repo_docs", scope_type="namespace")`
+2. `kitaru_memory_get(key="style/release_notes", scope="repo_docs", scope_type="namespace")`
 3. `kitaru_memory_set(key="style/release_notes", value={"tone": "concise"}, scope="repo_docs", scope_type="namespace")`
-4. `kitaru_memory_history(key="style/release_notes", scope="repo_docs")`
+4. `kitaru_memory_history(key="style/release_notes", scope="repo_docs", scope_type="namespace")`
 
 Use these tools when an assistant needs durable shared state without parsing CLI
 output or inventing its own scratchpad format.
+
+### Memory maintenance tools
+
+The maintenance tools let assistants manage memory growth:
+
+- `kitaru_memory_compact` — summarize memory values with an LLM and write
+  the result. Use `key` for the default single-key current-value workflow,
+  `key` plus `source_mode="history"` to summarize one key's full non-deleted
+  history, or `keys` (a list) with `target_key` for multi-key merging. Source
+  entries are not deleted.
+- `kitaru_memory_purge` — physically delete old versions of one key. Set
+  `keep` to retain the newest N versions, or omit it to delete everything.
+- `kitaru_memory_purge_scope` — purge old versions across all keys in a
+  scope. Set `include_deleted` to also remove tombstoned keys entirely.
+- `kitaru_memory_compaction_log` — read the audit trail of all compact and
+  purge operations for one scope (newest first).
+
+Recommended maintenance sequence:
+
+1. `kitaru_memory_compact(scope="repo_docs", scope_type="namespace", key="notes/preferences")`
+2. Inspect the new summary if needed.
+3. `kitaru_memory_purge(key="notes/preferences", scope="repo_docs", scope_type="namespace", keep=1)`
+4. `kitaru_memory_compaction_log(scope="repo_docs", scope_type="namespace")`
+
+For a complete memory walkthrough including seeding, flow usage, and
+cross-surface inspection, see `examples/memory/flow_with_memory.py` and
+its [demo playbook](https://github.com/zenml-io/kitaru/tree/develop/examples/memory/DEMO_PLAYBOOK.md)
+for detailed MCP tool-call sequences.
 
 ## Authentication and context
 

@@ -13,7 +13,7 @@ Use it when your agent needs to remember things like:
 - previously discovered facts
 - long-lived workflow state that should not be passed through every function call
 
-Unlike checkpoint outputs, memory is looked up by **key + scope**, not by an execution ID.
+Unlike checkpoint outputs, memory is looked up by **key within a typed scope** (`scope_type` + `scope`), not by an execution ID.
 
 ## Memory vs artifacts
 
@@ -30,8 +30,15 @@ state that can be updated over time.
 
 ## Scope model
 
-Every memory entry lives inside a **scope**. A scope is just a string name plus
-optional `scope_type` classification metadata.
+Every memory entry lives inside a **typed scope**. That means two things travel
+together:
+
+- `scope_type` — what kind of bucket this is (`namespace`, `flow`, or `execution`)
+- `scope` — the concrete bucket name inside that type
+
+For explicit memory operations, the durable identity is therefore:
+
+`scope_type` + `scope` + `key`
 
 | Scope type | Typical use | Example |
 |---|---|---|
@@ -39,9 +46,9 @@ optional `scope_type` classification metadata.
 | `flow` | State associated with one flow name | `research_agent` |
 | `execution` | State isolated to one execution | `3d1d8d7f-...` |
 
-Inside a `@flow`, Kitaru defaults to the flow name as the active scope when you
-have not configured one explicitly. Outside a flow, you must configure a scope
-first with `memory.configure(scope=...)`.
+Inside a `@flow`, Kitaru defaults to the flow name as the active typed scope
+when you have not configured one explicitly. Outside a flow, you must configure
+a scope first with `memory.configure(scope=..., scope_type=...)`.
 
 ```python
 from kitaru import memory
@@ -82,6 +89,63 @@ Because deletes are **soft deletes** (tombstones) rather than hard purges:
 
 This is useful for audit trails and future rollback/forking patterns. You always
 have a complete record of what happened to a key, even after deletion.
+
+## Memory maintenance: purge, compact, and audit
+
+Soft deletes (tombstones) preserve full history, but over time a scope can
+accumulate versions you no longer need. Kitaru provides three **admin
+operations** to manage that growth:
+
+| Operation | What it does | Deletes stored versions? | Changes current value? | Writes audit record? |
+|---|---|---|---|---|
+| `delete` | Soft-delete via tombstone | No | Yes (latest = "deleted") | No |
+| `purge` | Hard-delete old versions of one key | Yes | Possibly (if all versions removed) | Yes |
+| `purge_scope` | Hard-delete old versions across a scope | Yes | Possibly | Yes |
+| `compact` | LLM-summarize entries into a new version | No | Yes (writes summary to target key) | Yes |
+| `compaction_log` | Read the maintenance audit trail | N/A | No | N/A |
+
+Think of it this way:
+
+- **delete** is crossing out an entry in the logbook
+- **purge** is ripping out old pages
+- **compact** is writing a summary page from several entries
+
+<Callout type="info">
+  Purge, compact, and compaction log are **admin operations** — they are not
+  available on the module-level `kitaru.memory` API. Use
+  `KitaruClient.memories`, the CLI (`kitaru memory purge`, etc.), or the
+  MCP memory tools, which all address memory through explicit typed scopes.
+</Callout>
+
+### Reserved audit keys
+
+Compaction and purge records are stored under a reserved `_compaction/` prefix
+inside each scope. Normal user writes to keys starting with `_compaction/` are
+rejected. Scope-wide purges intentionally skip this internal key so the
+maintenance log survives cleanup.
+
+### What compact writes
+
+`compact` sends memory values to an LLM and writes the returned **summary text**
+as a new version of the target key.
+
+- With one `key`, compact defaults to summarizing the **current value** of that
+  key.
+- With one `key` and `source_mode="history"`, compact summarizes the full
+  non-deleted version history of that key.
+- With `keys=[...]`, compact summarizes the **current value** of each listed
+  key into `target_key`.
+
+Compact does **not** delete the source entries. If you want to reclaim old
+history after compaction, the recommended workflow is: compact, inspect the
+summary if needed, then run `purge` separately.
+
+Compaction audit records now include the `source_mode` that was used, so the
+maintenance log shows whether a summary came from current state or historical
+versions.
+
+See [Use Memory — Memory maintenance](/guides/memory#compact-memory-with-an-llm-summary)
+for step-by-step examples.
 
 ## Where memory calls are allowed
 
@@ -124,12 +188,13 @@ of past reads and writes.
 Kitaru exposes memory through several surfaces:
 
 - `kitaru.memory` inside Python code
-- `KitaruClient.memories` for explicit-scope inspection and administration
+- `KitaruClient.memories` for explicit typed-scope inspection and administration
 - `kitaru memory ...` on the CLI
 - `kitaru_memory_*` MCP tools for assistants
 
-The Python module API uses the currently configured scope. The client, CLI, and
-MCP surfaces require or expose explicit scope values more directly.
+The Python module API uses the currently configured typed scope. The client,
+CLI, and MCP surfaces require explicit typed scope identity (`scope` +
+`scope_type`) on scoped operations.
 
 See [Use Memory](/guides/memory) for concrete examples across all four.
 
@@ -142,8 +207,66 @@ Memory entries written **outside a flow** (from a script, CLI, or MCP) are
 explicitly **detached** — their `execution_id` is `None`. This makes it clear
 that the entry was manually seeded rather than produced by an agent run.
 
+A concrete example helps here:
+
+- an in-flow write stores `execution/notes` in execution scope `E1`
+- a later script writes another `execution/notes` version into the same scope `E1`
+- both versions belong to the **same execution bucket** because their scope is `E1`
+- only the in-flow version necessarily has live-run producer provenance
+
+So typed scope answers **where the entry belongs**, while `execution_id`
+answers **who physically wrote that version**.
+
 Both cases appear in `memory.history()`, so you can always tell whether a
 particular version came from a flow execution or from an external write.
+
+## Execution-scope discovery indexing
+
+Execution-scoped memory has two slightly different jobs:
+
+- the **scope** tells Kitaru which execution bucket the value belongs to
+- the **producer execution** tells you whether a particular version was written
+  during a live flow run or added later from a script, CLI, or MCP
+
+That distinction matters for the UI. Kitaru now adds extra discovery tags to
+new execution-scoped writes so the flow UI can answer the practical question:
+
+> show me all execution-scoped memories that belong to this flow
+
+### New users: no action needed
+
+If you are starting fresh on a current Kitaru version, new execution-scoped
+writes are indexed automatically at write time.
+
+That means:
+
+- in-flow execution-scoped writes work automatically
+- detached writes into an execution scope can still be associated back to the
+  owning flow when Kitaru can resolve that execution ID
+- the flow UI can discover those execution scopes without any manual migration
+- this discovery context (`flow_id` / `flow_name`) is about **membership**, not
+  producer provenance
+
+### Existing users: historical data may need reindexing
+
+If you already created execution-scoped memory before this indexing shipped,
+older artifact versions may be missing the new discovery tags.
+
+Use the CLI to preview and optionally backfill those tags inside the active
+project:
+
+```bash
+kitaru memory reindex
+kitaru memory reindex --apply
+```
+
+- the default command is a **dry run**
+- `--apply` persists the missing tags
+- the reindex is **additive and idempotent** — rerunning it is safe
+
+This reindex only backfills **tags**, not metadata fields like
+`flow_id` / `flow_name`. Historical entries may therefore become discoverable by
+flow in the UI while still showing missing flow metadata in inspection views.
 
 ## Next steps
 

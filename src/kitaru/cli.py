@@ -147,10 +147,15 @@ from kitaru._cli._status import (
 )
 from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
 from kitaru._interface_memory import (
+    compact_memory_payload,
+    compaction_log_memory_payload,
     delete_memory_payload,
     get_memory_payload,
     history_memory_payload,
     list_memory_payload,
+    purge_memory_payload,
+    purge_scope_memory_payload,
+    reindex_memory_payload,
     scopes_memory_payload,
     set_memory_payload,
 )
@@ -233,7 +238,7 @@ def _apply_runtime_version() -> None:
 
 
 _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
-    {"executions", "secrets", "log-store", "stack", "model"}
+    {"executions", "secrets", "log-store", "stack", "model", "memory"}
 )
 
 
@@ -374,6 +379,8 @@ __all__ = [
     "app",
     "cancel_",
     "cli",
+    "compact_memory_payload",
+    "compaction_log_memory_payload",
     "create",
     "current",
     "delete",
@@ -403,8 +410,11 @@ __all__ = [
     "main",
     "memory_app",
     "model_app",
+    "purge_memory_payload",
+    "purge_scope_memory_payload",
     "register",
     "register_model_alias",
+    "reindex_memory_payload",
     "replay_",
     "reset",
     "reset_global_log_store",

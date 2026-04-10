@@ -42,7 +42,15 @@ from kitaru.config import (
     list_active_kitaru_environment_variables,
     resolve_log_store,
 )
-from kitaru.memory import MemoryEntry, MemoryScopeInfo
+from kitaru.memory import (
+    CompactionRecord,
+    CompactResult,
+    MemoryEntry,
+    MemoryReindexIssue,
+    MemoryReindexResult,
+    MemoryScopeInfo,
+    PurgeResult,
+)
 
 _LOCALHOST_NAMES = {"127.0.0.1", "localhost", "::1"}
 
@@ -431,6 +439,8 @@ def serialize_memory_entry(entry: MemoryEntry) -> dict[str, Any]:
         "is_deleted": entry.is_deleted,
         "artifact_id": entry.artifact_id,
         "execution_id": entry.execution_id,
+        "flow_id": entry.flow_id,
+        "flow_name": entry.flow_name,
     }
 
 
@@ -451,6 +461,78 @@ def serialize_memory_scope_info(info: MemoryScopeInfo) -> dict[str, Any]:
 def serialize_memory_value(value: Any) -> dict[str, Any]:
     """Serialize a loaded memory value using the shared artifact-value rules."""
     return serialize_artifact_value(value)
+
+
+def serialize_purge_result(result: PurgeResult) -> dict[str, Any]:
+    """Serialize a purge result for transport layers."""
+    return {
+        "versions_deleted": result.versions_deleted,
+        "keys_affected": result.keys_affected,
+        "scope": result.scope,
+        "scope_type": result.scope_type,
+    }
+
+
+def serialize_compaction_record(record: CompactionRecord) -> dict[str, Any]:
+    """Serialize a compaction audit record for transport layers."""
+    return {
+        "operation": record.operation,
+        "scope": record.scope,
+        "scope_type": record.scope_type,
+        "timestamp": to_jsonable(record.timestamp, fallback_repr=True),
+        "source_keys": record.source_keys,
+        "source_versions": record.source_versions,
+        "target_key": record.target_key,
+        "target_version": record.target_version,
+        "instruction": record.instruction,
+        "model": record.model,
+        "source_mode": record.source_mode,
+        "keys_affected": record.keys_affected,
+        "versions_deleted": record.versions_deleted,
+        "keep": record.keep,
+    }
+
+
+def serialize_compact_result(result: CompactResult) -> dict[str, Any]:
+    """Serialize a compact result for transport layers."""
+    return {
+        "entry": serialize_memory_entry(result.entry),
+        "sources_read": result.sources_read,
+        "scope": result.scope,
+        "scope_type": result.scope_type,
+        "compaction_record": serialize_compaction_record(result.compaction_record),
+    }
+
+
+def serialize_memory_reindex_issue(issue: MemoryReindexIssue) -> dict[str, Any]:
+    """Serialize a sampled memory reindex issue for transport layers."""
+    return {
+        "artifact_id": issue.artifact_id,
+        "artifact_name": issue.artifact_name,
+        "scope": issue.scope,
+        "key": issue.key,
+        "reason": issue.reason,
+    }
+
+
+def serialize_memory_reindex_result(result: MemoryReindexResult) -> dict[str, Any]:
+    """Serialize a memory reindex result for transport layers."""
+    return {
+        "dry_run": result.dry_run,
+        "versions_scanned": result.versions_scanned,
+        "execution_scope_versions_scanned": result.execution_scope_versions_scanned,
+        "already_indexed": result.already_indexed,
+        "versions_needing_updates": result.versions_needing_updates,
+        "versions_updated": result.versions_updated,
+        "scope_type_tags_identified": result.scope_type_tags_identified,
+        "flow_tags_identified": result.flow_tags_identified,
+        "scope_type_tags_added": result.scope_type_tags_added,
+        "flow_tags_added": result.flow_tags_added,
+        "issues_count": result.issues_count,
+        "issue_samples": [
+            serialize_memory_reindex_issue(issue) for issue in result.issue_samples
+        ],
+    }
 
 
 def serialize_checkpoint_attempt(attempt: CheckpointAttempt) -> dict[str, Any]:
