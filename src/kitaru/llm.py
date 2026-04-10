@@ -619,6 +619,28 @@ def _dispatch_provider_call(
     raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
 
 
+def _track_llm_call_analytics(
+    *,
+    model_selection: ResolvedModelSelection,
+    credential_source: str,
+    mocked: bool,
+    extra_metadata: Mapping[str, Any] | None = None,
+) -> None:
+    """Emit the canonical `LLM_CALLED` analytics event."""
+    from kitaru.analytics import AnalyticsEvent, track
+
+    metadata: dict[str, Any] = {
+        "resolved_model": model_selection.resolved_model,
+        "credential_source": credential_source,
+        "mocked": mocked,
+    }
+    if extra_metadata is not None:
+        metadata.update(
+            {key: value for key, value in extra_metadata.items() if value is not None}
+        )
+    track(AnalyticsEvent.LLM_CALLED, metadata)
+
+
 def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
     model_selection = resolve_model_selection(request.model)
@@ -675,15 +697,10 @@ def _execute_llm_call(request: _LLMRequest) -> str:
     }
     log(llm_calls={request.call_name: filtered_metadata})
 
-    from kitaru.analytics import AnalyticsEvent, track
-
-    track(
-        AnalyticsEvent.LLM_CALLED,
-        {
-            "resolved_model": model_selection.resolved_model,
-            "credential_source": credential_source,
-            "mocked": is_mocked,
-        },
+    _track_llm_call_analytics(
+        model_selection=model_selection,
+        credential_source=credential_source,
+        mocked=is_mocked,
     )
 
     return response_text

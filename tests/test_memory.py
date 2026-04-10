@@ -6,13 +6,14 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import ANY, MagicMock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
 from zenml.enums import ArtifactType
 
 from kitaru import memory
+from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
@@ -660,6 +661,7 @@ def test_set_entry_impl_returns_created_memory_entry() -> None:
             "kitaru.memory.save_artifact",
             return_value=_created_artifact_response(created.id),
         ),
+        patch("kitaru.memory.track") as track_mock,
     ):
         entry = _set_entry_impl(
             _flow_memory_scope("research_agent"),
@@ -673,6 +675,16 @@ def test_set_entry_impl_returns_created_memory_entry() -> None:
     assert entry.execution_id == str(created.producer_pipeline_run_id)
     assert entry.flow_id is None
     assert entry.flow_name is None
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.MEMORY_WRITTEN,
+        {
+            "inside_flow": False,
+            "scope_type": "flow",
+            "operation": "set",
+            "value_type": "dict",
+            "execution_flow_indexed": False,
+        },
+    )
 
 
 def test_set_entry_impl_execution_scope_indexes_detached_flow_context() -> None:
@@ -886,7 +898,8 @@ def test_reindex_impl_dry_run_identifies_missing_tags_without_mutating() -> None
         )
     )
 
-    result = _reindex_impl(client_factory=lambda: client_mock)
+    with patch("kitaru.memory.track") as track_mock:
+        result = _reindex_impl(client_factory=lambda: client_mock)
 
     assert result == MemoryReindexResult(
         dry_run=True,
@@ -909,6 +922,16 @@ def test_reindex_impl_dry_run_identifies_missing_tags_without_mutating() -> None
         project=None,
     )
     client_mock.update_artifact_version.assert_not_called()
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.MEMORY_REINDEX_RUN,
+        {
+            "inside_flow": False,
+            "dry_run": True,
+            "versions_scanned": 2,
+            "versions_updated": 0,
+            "issues_count": 0,
+        },
+    )
 
 
 def test_reindex_impl_apply_updates_missing_tags_and_prefers_producer_run() -> None:
@@ -1436,6 +1459,7 @@ def test_delete_impl_returns_existing_tombstone_when_key_already_deleted() -> No
     with (
         patch("kitaru.memory.Client", return_value=client_mock),
         patch("kitaru.memory.save_artifact") as save_artifact_mock,
+        patch("kitaru.memory.track") as track_mock,
     ):
         result = _delete_impl(_flow_memory_scope(), "prefs")
 
@@ -1444,6 +1468,15 @@ def test_delete_impl_returns_existing_tombstone_when_key_already_deleted() -> No
     assert result.version == 2
     assert result.is_deleted is True
     save_artifact_mock.assert_not_called()
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.MEMORY_DELETED,
+        {
+            "inside_flow": False,
+            "scope_type": "flow",
+            "operation": "delete",
+            "already_deleted": True,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1490,9 +1523,15 @@ class TestCompactImpl:
                 return_value=[{"role": "user", "content": "prompt"}],
             ) as normalize_messages,
             patch(
+                "kitaru.llm._resolve_credential_overlay",
+                return_value=({}, "environment"),
+            ),
+            patch(
                 "kitaru.llm._dispatch_provider_call",
                 return_value=SimpleNamespace(response_text="Compacted latest value"),
             ),
+            patch("kitaru.llm._track_llm_call_analytics") as llm_track_mock,
+            patch("kitaru.memory.track") as track_mock,
         ):
             result = _compact_impl(
                 _MemoryScope(scope="s", scope_type="namespace"),
@@ -1515,6 +1554,27 @@ class TestCompactImpl:
             "Compacted latest value",
             client_factory=client_factory,
             project=None,
+            emit_analytics=False,
+        )
+        llm_track_mock.assert_called_once_with(
+            model_selection=ANY,
+            credential_source="environment",
+            mocked=False,
+            extra_metadata={"usage_context": "memory_compaction"},
+        )
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.MEMORY_COMPACTED,
+            {
+                "inside_flow": False,
+                "scope_type": "namespace",
+                "operation": "compact",
+                "source_mode": "current",
+                "sources_read": 1,
+                "multi_key": False,
+                "target_overridden": False,
+                "custom_instruction": False,
+                "model_provided": False,
+            },
         )
         record = write_record.call_args.args[1]
         assert record.source_mode == "current"
@@ -1557,6 +1617,10 @@ class TestCompactImpl:
                 "kitaru.llm._normalize_messages",
                 return_value=[{"role": "user", "content": "prompt"}],
             ) as normalize_messages,
+            patch(
+                "kitaru.llm._resolve_credential_overlay",
+                return_value=({}, "environment"),
+            ),
             patch(
                 "kitaru.llm._dispatch_provider_call",
                 return_value=SimpleNamespace(response_text="History summary"),
@@ -1619,6 +1683,10 @@ class TestCompactImpl:
                 "kitaru.llm._normalize_messages",
                 return_value=[{"role": "user", "content": "prompt"}],
             ) as normalize_messages,
+            patch(
+                "kitaru.llm._resolve_credential_overlay",
+                return_value=({}, "environment"),
+            ),
             patch(
                 "kitaru.llm._dispatch_provider_call",
                 return_value=SimpleNamespace(response_text="Merged summary"),
@@ -1924,6 +1992,7 @@ class TestPurgeImpl:
                 return_value=1,
             ),
             patch("kitaru.memory._write_compaction_record") as write_record,
+            patch("kitaru.memory.track") as track_mock,
         ):
             _purge_impl(
                 _MemoryScope(scope="s", scope_type="namespace"),
@@ -1935,6 +2004,17 @@ class TestPurgeImpl:
         record = write_record.call_args.args[1]
         assert record.operation == "purge"
         assert record.source_mode is None
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.MEMORY_PURGED,
+            {
+                "inside_flow": False,
+                "scope_type": "namespace",
+                "operation": "purge",
+                "versions_deleted": 1,
+                "keys_affected": 1,
+                "keep_provided": True,
+            },
+        )
 
 
 class TestPurgeScopeImpl:
