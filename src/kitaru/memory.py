@@ -1112,6 +1112,8 @@ def _reindex_impl(
         issues_count=counts.issues_count,
         issue_samples=issue_samples,
     )
+    # Reindex is a global operation without a per-scope context, so it
+    # calls track() directly instead of _track_memory_event().
     track(
         AnalyticsEvent.MEMORY_REINDEX_RUN,
         {
@@ -1162,7 +1164,6 @@ def _set_entry_impl(
     *,
     client_factory: Callable[[], Client] | None = None,
     project: str | None = None,
-    emit_analytics: bool = True,
 ) -> MemoryEntry:
     """Persist a new version of a memory key and return its metadata entry."""
     try:
@@ -1213,28 +1214,22 @@ def _set_entry_impl(
             f"Failed to set memory key {key!r} in scope {scope.scope!r}: {exc}"
         ) from exc
 
-    entry = _artifact_to_memory_entry(created)
-    if emit_analytics:
-        _track_memory_event(
-            AnalyticsEvent.MEMORY_WRITTEN,
-            scope=scope,
-            metadata={
-                "operation": "set",
-                "value_type": entry.value_type,
-                "execution_flow_indexed": (
-                    flow_context is not None
-                    if resolved_scope_type == "execution"
-                    else False
-                ),
-            },
-        )
-    return entry
+    return _artifact_to_memory_entry(created)
 
 
 def _set_impl(scope: _MemoryScope, key: str, value: Any) -> None:
     """Persist a new version of a memory key for the resolved scope."""
-    _set_entry_impl(scope, key, value)
-    return None
+    entry = _set_entry_impl(scope, key, value)
+    _track_memory_event(
+        AnalyticsEvent.MEMORY_WRITTEN,
+        scope=scope,
+        metadata={
+            "value_type": entry.value_type,
+            "execution_flow_indexed": (
+                entry.flow_id is not None if scope.scope_type == "execution" else False
+            ),
+        },
+    )
 
 
 def _get_impl(
@@ -1403,7 +1398,7 @@ def _delete_impl(
             _track_memory_event(
                 AnalyticsEvent.MEMORY_DELETED,
                 scope=scope,
-                metadata={"operation": "delete", "already_deleted": True},
+                metadata={"already_deleted": True},
             )
             return entry
 
@@ -1433,7 +1428,7 @@ def _delete_impl(
         _track_memory_event(
             AnalyticsEvent.MEMORY_DELETED,
             scope=scope,
-            metadata={"operation": "delete", "already_deleted": False},
+            metadata={"already_deleted": False},
         )
         return entry
     except KitaruError:
@@ -1983,7 +1978,6 @@ def _compact_impl(
         summary_text,
         client_factory=client_factory,
         project=project,
-        emit_analytics=False,
     )
 
     # Write compaction record
@@ -2019,7 +2013,6 @@ def _compact_impl(
         AnalyticsEvent.MEMORY_COMPACTED,
         scope=scope,
         metadata={
-            "operation": "compact",
             "source_mode": source_mode,
             "sources_read": result_payload.sources_read,
             "multi_key": keys is not None,

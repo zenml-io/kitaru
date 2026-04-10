@@ -575,8 +575,9 @@ def _dispatch_provider_call(
 ) -> _ProviderCallResult:
     """Route a normalized LLM call to the correct provider SDK.
 
-    Shared by ``_execute_llm_call`` (flow-scoped, with tracking) and
-    ``_compact_impl`` (admin operation, no tracking needed).
+    Shared by ``_execute_llm_call`` (flow-scoped) and ``_compact_impl``
+    (admin operation).  Both callers now track LLM usage via
+    ``_track_llm_call_analytics``.
     """
     if env_overlay is None:
         env_overlay, _ = _resolve_credential_overlay(model_selection)

@@ -661,7 +661,6 @@ def test_set_entry_impl_returns_created_memory_entry() -> None:
             "kitaru.memory.save_artifact",
             return_value=_created_artifact_response(created.id),
         ),
-        patch("kitaru.memory.track") as track_mock,
     ):
         entry = _set_entry_impl(
             _flow_memory_scope("research_agent"),
@@ -675,16 +674,6 @@ def test_set_entry_impl_returns_created_memory_entry() -> None:
     assert entry.execution_id == str(created.producer_pipeline_run_id)
     assert entry.flow_id is None
     assert entry.flow_name is None
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.MEMORY_WRITTEN,
-        {
-            "inside_flow": False,
-            "scope_type": "flow",
-            "operation": "set",
-            "value_type": "dict",
-            "execution_flow_indexed": False,
-        },
-    )
 
 
 def test_set_entry_impl_execution_scope_indexes_detached_flow_context() -> None:
@@ -1473,7 +1462,6 @@ def test_delete_impl_returns_existing_tombstone_when_key_already_deleted() -> No
         {
             "inside_flow": False,
             "scope_type": "flow",
-            "operation": "delete",
             "already_deleted": True,
         },
     )
@@ -1554,7 +1542,6 @@ class TestCompactImpl:
             "Compacted latest value",
             client_factory=client_factory,
             project=None,
-            emit_analytics=False,
         )
         llm_track_mock.assert_called_once_with(
             model_selection=ANY,
@@ -1567,7 +1554,6 @@ class TestCompactImpl:
             {
                 "inside_flow": False,
                 "scope_type": "namespace",
-                "operation": "compact",
                 "source_mode": "current",
                 "sources_read": 1,
                 "multi_key": False,
