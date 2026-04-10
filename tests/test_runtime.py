@@ -173,3 +173,40 @@ def test_flow_scope_resolves_flow_id_from_dynamic_run_context() -> None:
 
         assert current_flow is not None
         assert current_flow.flow_id == flow_id
+
+
+def test_flow_scope_resolves_flow_id_from_legacy_pipeline_attr() -> None:
+    """Fall back to run_context.pipeline.id when run.pipeline.id is unavailable."""
+    flow_id = str(uuid4())
+    run_context = type(
+        "DynamicRunContextStub",
+        (),
+        {
+            "run": type(
+                "RunStub",
+                (),
+                {
+                    "pipeline": type(
+                        "PipelineStub",
+                        (),
+                        {"id": None, "name": None},
+                    )()
+                },
+            )(),
+            "pipeline": type(
+                "LegacyPipelineStub",
+                (),
+                {"id": flow_id, "name": "demo_flow"},
+            )(),
+        },
+    )()
+
+    with (
+        patch("kitaru.runtime.StepContext.get", return_value=None),
+        patch("kitaru.runtime.DynamicPipelineRunContext.get", return_value=run_context),
+        _flow_scope(name="demo_flow"),
+    ):
+        current_flow = _get_current_flow()
+
+        assert current_flow is not None
+        assert current_flow.flow_id == flow_id

@@ -218,6 +218,16 @@ def test_memory_rejects_invalid_flow_id_as_scope() -> None:
         memory.list()
 
 
+def test_memory_raises_when_flow_active_but_flow_id_missing() -> None:
+    """Flow scope without a resolvable flow ID should raise a diagnostic error."""
+    with (
+        _flow_scope(name="demo_flow"),
+        patch("kitaru.memory._get_current_flow_id", return_value=None),
+        pytest.raises(KitaruStateError, match="could not resolve a durable flow ID"),
+    ):
+        memory.list()
+
+
 def test_memory_configure_rejects_invalid_scope_before_dispatch() -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=_runtime_flow_id("demo_flow")),

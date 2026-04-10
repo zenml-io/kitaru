@@ -335,9 +335,15 @@ def _implicit_flow_memory_scope(api_name: str) -> _MemoryScope:
 
     flow_scope = _get_current_flow()
     resolved_flow_id = _get_current_flow_id()
-    if flow_scope is None or resolved_flow_id is None:
+    if flow_scope is None:
         raise KitaruStateError(
-            f"{qualified_name} requires an active flow ID inside @flow."
+            f"{qualified_name} requires an active flow scope inside @flow."
+        )
+    if resolved_flow_id is None:
+        raise KitaruStateError(
+            f"{qualified_name} could not resolve a durable flow ID from the "
+            f"ZenML runtime. This typically means the pipeline has not been "
+            f"registered yet or the runtime context is not fully initialized."
         )
 
     return _MemoryScope(
@@ -621,6 +627,11 @@ def _memory_tags(
         _memory_key_tag(key),
         _memory_scope_type_tag(scope_type),
     ]
+    # Flow-ID tag is only added for execution-scoped entries as a cross-reference
+    # back to the parent flow.  For flow-scoped entries the scope itself *is*
+    # the flow ID (encoded in the kitaru:memory:scope:<id> tag), so a separate
+    # flow_id tag would be redundant.  Metadata still records flow_id/flow_name
+    # unconditionally for auditability.
     if scope_type == "execution" and flow_context is not None:
         tags.append(_memory_flow_id_tag(flow_context.flow_id))
     return tags
