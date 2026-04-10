@@ -534,8 +534,8 @@ def _map_execution(
     flow_id: str | None = None
     flow_name: str | None = None
     if run.pipeline is not None:
-        if getattr(run.pipeline, "id", None) is not None:
-            flow_id = str(run.pipeline.id)
+        raw_id = getattr(run.pipeline, "id", None)
+        flow_id = str(raw_id) if raw_id is not None else None
         flow_name = _normalize_flow_name(run.pipeline.name)
 
     original_exec_id: str | None = None

@@ -7,8 +7,8 @@ from uuid import uuid4
 
 from kitaru.runtime import (
     _checkpoint_scope,
-    _get_current_flow,
     _flow_scope,
+    _get_current_flow,
     _is_inside_checkpoint,
     _is_inside_flow,
     _suspend_checkpoint_scope,
@@ -37,8 +37,9 @@ def test_suspend_checkpoint_scope_temporarily_clears_checkpoint_scope() -> None:
     ):
         assert _is_inside_flow()
         assert _is_inside_checkpoint()
-        assert _get_current_flow() is not None
-        assert _get_current_flow().flow_id == flow_id
+        current = _get_current_flow()
+        assert current is not None
+        assert current.flow_id == flow_id
 
         with _suspend_checkpoint_scope():
             assert _is_inside_flow()

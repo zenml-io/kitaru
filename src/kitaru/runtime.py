@@ -84,7 +84,9 @@ def _get_zenml_flow_name() -> str | None:
 
     if run_context := DynamicPipelineRunContext.get():
         run_pipeline = getattr(getattr(run_context, "run", None), "pipeline", None)
-        if flow_name := _shared_normalize_flow_name(getattr(run_pipeline, "name", None)):
+        if flow_name := _shared_normalize_flow_name(
+            getattr(run_pipeline, "name", None)
+        ):
             return flow_name
 
         if flow_name := _shared_normalize_flow_name(
@@ -192,10 +194,10 @@ def _get_current_flow() -> _FlowScope | None:
 
 
 def _get_current_flow_id() -> str | None:
-    """Get the durable ID for the active flow from Kitaru or ZenML context."""
+    """Get the durable ID for the active flow, if any."""
     if (flow_scope := _get_current_flow()) and flow_scope.flow_id is not None:
         return flow_scope.flow_id
-    return _get_zenml_flow_id()
+    return None
 
 
 def _is_inside_flow() -> bool:

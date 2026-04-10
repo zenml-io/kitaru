@@ -587,7 +587,9 @@ def _resolve_execution_flow_context(
     return None
 
 
-def _resolve_active_flow_scope_context(scope: _MemoryScope) -> _ExecutionFlowContext | None:
+def _resolve_active_flow_scope_context(
+    scope: _MemoryScope,
+) -> _ExecutionFlowContext | None:
     """Resolve current runtime flow metadata for a flow-scoped write."""
     if scope.scope_type != "flow":
         return None
