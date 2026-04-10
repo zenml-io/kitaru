@@ -13,6 +13,7 @@ from cyclopts import Parameter
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.client import Execution, ExecutionStatus, LogEntry, PendingWait
+from kitaru.errors import build_recovery_command, format_recovery_hint
 from kitaru.inspection import (
     serialize_execution,
     serialize_execution_summary,
@@ -309,19 +310,24 @@ def _follow_execution_logs(
             failure_reason = execution.status_reason or "execution failed"
             if execution.failure is not None:
                 failure_reason = execution.failure.message
+            status_value = ExecutionStatus.FAILED.value
+            recovery_cmd = build_recovery_command(exec_id, status=status_value)
             if output == CLIOutputFormat.JSON:
-                _emit_json_log_event(
-                    "terminal",
-                    {
-                        "status": ExecutionStatus.FAILED.value,
-                        "message": failure_reason,
-                    },
-                )
+                terminal_item: dict[str, Any] = {
+                    "status": status_value,
+                    "message": failure_reason,
+                }
+                if recovery_cmd:
+                    terminal_item["recovery_command"] = recovery_cmd
+                _emit_json_log_event("terminal", terminal_item)
             else:
                 _emit_control_message(
                     f"[Execution failed: {failure_reason}]",
                     output=output,
                 )
+                hint = format_recovery_hint(exec_id, status=status_value)
+                if hint:
+                    _emit_control_message(hint, output=output)
             return 1
         if execution.status == ExecutionStatus.CANCELLED:
             if output == CLIOutputFormat.JSON:
