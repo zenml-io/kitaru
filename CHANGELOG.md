@@ -23,12 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Replace runtime dashboard file patching with `ZENML_SERVER_DASHBOARD_FILES_PATH` environment variable, simplifying local server startup (#92)
+- New users do not need any memory migration: fresh execution-scoped writes are indexed automatically, while existing projects can opt into a dry-run-first tag backfill flow with `kitaru memory reindex [--apply]`
 
 ### Fixed
 - Suppress noisy config-change warnings that appeared during flow resume (#97)
-
-### Changed
-- New users do not need any memory migration: fresh execution-scoped writes are indexed automatically, while existing projects can opt into a dry-run-first tag backfill flow with `kitaru memory reindex [--apply]`
 
 ## [0.3.2] - 2026-04-06
 
