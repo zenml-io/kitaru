@@ -69,7 +69,12 @@ from kitaru.inspection import (
     to_jsonable,
     uses_stale_local_server_url,
 )
-from kitaru.memory import MemoryEntry, MemoryReindexIssue, MemoryReindexResult
+from kitaru.memory import (
+    MemoryEntry,
+    MemoryReindexIssue,
+    MemoryReindexResult,
+    MemoryScopeType,
+)
 
 
 @dataclass(frozen=True)
@@ -147,7 +152,7 @@ def _sample_memory_entry(
     value_type: str = "dict",
     version: int = 2,
     scope: str = "repo_scope",
-    scope_type: str = "namespace",
+    scope_type: MemoryScopeType = "namespace",
     is_deleted: bool = False,
     execution_id: str | None = None,
     flow_id: str | None = None,

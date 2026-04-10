@@ -16,13 +16,16 @@ from kitaru import memory
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
+    KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
 )
 from kitaru.memory import (
     _COMPACTION_LOG_PREFIX,
+    _MEMORY_ARTIFACT_PREFIX,
     MemoryEntry,
     MemoryReindexResult,
+    MemoryScopeType,
     PurgeResult,
     _compact_impl,
     _compaction_log_impl,
@@ -31,7 +34,9 @@ from kitaru.memory import (
     _get_impl,
     _history_impl,
     _list_impl,
+    _memory_artifact_name,
     _MemoryScope,
+    _parse_memory_artifact_identity,
     _purge_impl,
     _purge_scope_impl,
     _reindex_impl,
@@ -107,7 +112,7 @@ def _memory_entry(
     value_type: str = "dict",
     version: int = 1,
     scope: str = "demo_flow",
-    scope_type: str = "flow",
+    scope_type: MemoryScopeType = "flow",
     created_at: datetime | None = None,
     is_deleted: bool = False,
     artifact_id: str | None = None,
@@ -2125,3 +2130,113 @@ class TestCompactionLog:
             )
 
         assert records == []
+
+
+# ---------------------------------------------------------------------------
+# _parse_memory_artifact_identity edge cases (I8)
+# ---------------------------------------------------------------------------
+
+
+class TestParseMemoryArtifactIdentity:
+    """Unit tests for the artifact name parser."""
+
+    def test_valid_name(self) -> None:
+        scope, key = _parse_memory_artifact_identity(
+            "kitaru_mem:namespace:my_project:prefs"
+        )
+        assert scope == _MemoryScope(scope="my_project", scope_type="namespace")
+        assert key == "prefs"
+
+    def test_rejects_wrong_prefix(self) -> None:
+        with pytest.raises(KitaruRuntimeError, match="does not start with"):
+            _parse_memory_artifact_identity("wrong_prefix:namespace:s:k")
+
+    def test_rejects_too_few_segments(self) -> None:
+        with pytest.raises(KitaruRuntimeError, match="not in"):
+            _parse_memory_artifact_identity("kitaru_mem:namespace:scope_only")
+
+    def test_rejects_invalid_scope_type(self) -> None:
+        with pytest.raises(KitaruRuntimeError, match=r"[Ss]cope.type"):
+            _parse_memory_artifact_identity("kitaru_mem:bogus:s:k")
+
+    def test_key_with_slash(self) -> None:
+        """Keys can contain slashes (hierarchical keys)."""
+        scope, key = _parse_memory_artifact_identity(
+            "kitaru_mem:flow:demo:notes/preferences"
+        )
+        assert scope == _MemoryScope(scope="demo", scope_type="flow")
+        assert key == "notes/preferences"
+
+
+# ---------------------------------------------------------------------------
+# _memory_artifact_name round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryArtifactName:
+    """Verify the canonical naming format."""
+
+    def test_format_includes_scope_type(self) -> None:
+        name = _memory_artifact_name(
+            _MemoryScope(scope="demo", scope_type="namespace"), "prefs"
+        )
+        assert name == f"{_MEMORY_ARTIFACT_PREFIX}:namespace:demo:prefs"
+
+    def test_different_scope_types_produce_different_names(self) -> None:
+        """Regression: the scope collision bug this PR fixes."""
+        ns_name = _memory_artifact_name(
+            _MemoryScope(scope="demo", scope_type="namespace"), "prefs"
+        )
+        flow_name = _memory_artifact_name(
+            _MemoryScope(scope="demo", scope_type="flow"), "prefs"
+        )
+        assert ns_name != flow_name
+
+
+# ---------------------------------------------------------------------------
+# Scope collision regression test (C1)
+# ---------------------------------------------------------------------------
+
+
+def test_scope_collision_isolation_between_scope_types() -> None:
+    """Entries with the same scope name but different scope_types are isolated.
+
+    This is the exact scenario the scope_type fix prevents: a namespace
+    named "demo" and a flow named "demo" must not see each other's data.
+    """
+    ns_scope = _MemoryScope(scope="demo", scope_type="namespace")
+    flow_scope = _MemoryScope(scope="demo", scope_type="flow")
+
+    ns_artifact = _memory_artifact(
+        scope="demo",
+        key="prefs",
+        version=1,
+        value={"from": "namespace"},
+        scope_type="namespace",
+    )
+    flow_artifact = _memory_artifact(
+        scope="demo",
+        key="prefs",
+        version=1,
+        value={"from": "flow"},
+        scope_type="flow",
+    )
+
+    # Both artifacts exist in the backend
+    all_artifacts = [ns_artifact, flow_artifact]
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(*all_artifacts)
+
+    with patch("kitaru.memory.Client", return_value=client_mock):
+        ns_entries = _list_impl(ns_scope)
+        flow_entries = _list_impl(flow_scope)
+
+    # Each scope type sees only its own entries
+    assert len(ns_entries) == 1
+    assert ns_entries[0].scope_type == "namespace"
+
+    assert len(flow_entries) == 1
+    assert flow_entries[0].scope_type == "flow"
+
+    # Artifact names are distinct
+    assert ns_artifact.name != flow_artifact.name

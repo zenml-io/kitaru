@@ -31,7 +31,7 @@ from kitaru.errors import (
     KitaruUsageError,
     KitaruWaitValidationError,
 )
-from kitaru.memory import MemoryEntry, _MemoryScope
+from kitaru.memory import MemoryEntry, MemoryScopeType, _MemoryScope
 
 
 def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
@@ -170,7 +170,7 @@ def _sample_memory_entry(
     *,
     key: str = "prefs",
     scope: str = "demo_scope",
-    scope_type: str = "namespace",
+    scope_type: MemoryScopeType = "namespace",
     version: int = 1,
     is_deleted: bool = False,
 ) -> MemoryEntry:

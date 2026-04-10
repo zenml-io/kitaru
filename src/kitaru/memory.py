@@ -69,7 +69,8 @@ _MEMORY_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._\-/]+$")
 _MEMORY_PAGE_SIZE = 100
 _MEMORY_VERSION_SORT = "desc:version_number"
 _MEMORY_STEP_EXTRA_PREFIX = {"kitaru": {"boundary": "memory"}}
-_MemoryScopeType = Literal["namespace", "flow", "execution"]
+MemoryScopeType = Literal["namespace", "flow", "execution"]
+_MemoryScopeType = MemoryScopeType
 _MemoryCompactionSourceMode = Literal["current", "history"]
 _MEMORY_SCOPE_TYPE_SORT_ORDER: dict[_MemoryScopeType, int] = {
     "namespace": 0,
@@ -85,7 +86,7 @@ class MemoryEntry(BaseModel):
     value_type: str
     version: int
     scope: str
-    scope_type: str
+    scope_type: MemoryScopeType
     created_at: datetime
     is_deleted: bool
     artifact_id: str
@@ -100,7 +101,7 @@ class MemoryScopeInfo(BaseModel):
     """Summary of one discovered memory scope."""
 
     scope: str
-    scope_type: str
+    scope_type: MemoryScopeType
     entry_count: int
 
     model_config = ConfigDict(frozen=True)
@@ -112,7 +113,7 @@ class PurgeResult(BaseModel):
     versions_deleted: int
     keys_affected: int
     scope: str
-    scope_type: str
+    scope_type: MemoryScopeType
 
     model_config = ConfigDict(frozen=True)
 
@@ -122,7 +123,7 @@ class CompactionRecord(BaseModel):
 
     operation: Literal["compact", "purge"]
     scope: str
-    scope_type: str
+    scope_type: MemoryScopeType
     timestamp: datetime
     source_keys: _list[str]
     source_versions: _list[int]
@@ -144,7 +145,7 @@ class CompactResult(BaseModel):
     entry: MemoryEntry
     sources_read: int
     scope: str
-    scope_type: str
+    scope_type: MemoryScopeType
     compaction_record: CompactionRecord
 
     model_config = ConfigDict(frozen=True)
@@ -792,13 +793,15 @@ def _iter_matching_memory_artifacts(
         try:
             entry = _artifact_to_memory_entry(artifact)
         except KitaruRuntimeError:
+            logger.debug(
+                "Skipping unparsable memory artifact %s: %s",
+                artifact.name,
+                artifact.id,
+            )
             continue
         parsed_scope = _MemoryScope(
             scope=entry.scope,
-            scope_type=_validate_memory_scope_type(
-                entry.scope_type,
-                error_type=KitaruRuntimeError,
-            ),
+            scope_type=entry.scope_type,
         )
         if scope is not None and parsed_scope != scope:
             continue
@@ -1346,7 +1349,7 @@ def _list_scopes_impl(
     for artifact in _sort_memory_artifacts(artifacts):
         latest_by_artifact.setdefault(artifact.name, artifact)
 
-    scope_stats: dict[tuple[str, str], int] = {}
+    scope_stats: dict[tuple[str, MemoryScopeType], int] = {}
     for _artifact, entry in _iter_matching_memory_artifacts(
         [*latest_by_artifact.values()],
     ):
@@ -1362,12 +1365,7 @@ def _list_scopes_impl(
         ],
         key=lambda info: (
             info.scope,
-            _MEMORY_SCOPE_TYPE_SORT_ORDER[
-                _validate_memory_scope_type(
-                    info.scope_type,
-                    error_type=KitaruRuntimeError,
-                )
-            ],
+            _MEMORY_SCOPE_TYPE_SORT_ORDER[info.scope_type],
         ),
     )
 
@@ -1527,6 +1525,11 @@ def _compaction_log_impl(
             raw = artifact.load()
             records.append(CompactionRecord.model_validate(raw))
         except Exception:
+            logger.warning(
+                "Skipping unreadable compaction record %s (%s)",
+                artifact.name,
+                artifact.id,
+            )
             continue
     return records
 
@@ -1590,6 +1593,11 @@ def _collect_single_key_history_entries(
             value = artifact.load()
             source_entries.append((key, entry.version, value))
         except Exception:
+            logger.warning(
+                "Skipping unloadable memory version %s v%d for compaction",
+                key,
+                entry.version,
+            )
             continue
     return source_entries
 
@@ -1617,6 +1625,10 @@ def _collect_multi_key_current_entries(
             version = _parse_memory_version(artifact.version)
             source_entries.append((key, version, value))
         except Exception:
+            logger.warning(
+                "Skipping unloadable memory entry %s for compaction",
+                key,
+            )
             continue
     return source_entries
 
@@ -2178,6 +2190,8 @@ __all__ = [
     "MemoryEntry",
     "MemoryReindexIssue",
     "MemoryReindexResult",
+    "MemoryScopeInfo",
+    "MemoryScopeType",
     "PurgeResult",
     "configure",
     "delete",

@@ -36,6 +36,7 @@ from kitaru.memory import (
     MemoryEntry,
     MemoryReindexIssue,
     MemoryReindexResult,
+    MemoryScopeType,
     PurgeResult,
 )
 
@@ -44,7 +45,7 @@ def _sample_memory_entry(
     *,
     key: str = "prefs",
     scope: str = "repo_scope",
-    scope_type: str = "namespace",
+    scope_type: MemoryScopeType = "namespace",
     version: int = 2,
     is_deleted: bool = False,
     execution_id: str | None = None,

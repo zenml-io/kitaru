@@ -6,6 +6,7 @@ from typing import Any
 
 import kitaru.inspection as inspection
 from kitaru.client import KitaruClient
+from kitaru.errors import KitaruBackendError
 from kitaru.memory import (
     _MemoryCompactionSourceMode,
     _MemoryScopeType,
@@ -39,7 +40,7 @@ def normalize_memory_prefix(prefix: str | None) -> str | None:
 
 
 def normalize_memory_scope_type(
-    scope_type: str,
+    scope_type: str | None,
 ) -> _MemoryScopeType:
     """Validate and normalize a transport-level memory scope type."""
     if scope_type is None:
@@ -83,9 +84,14 @@ def get_memory_payload(
     if entry is None:
         return None
 
-    value_payload = inspection.serialize_memory_value(
-        client.artifacts.get(entry.artifact_id).load()
-    )
+    try:
+        loaded_value = client.artifacts.get(entry.artifact_id).load()
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Failed to load value for memory key {key!r} "
+            f"(artifact {entry.artifact_id}): {exc}"
+        ) from exc
+    value_payload = inspection.serialize_memory_value(loaded_value)
     return {
         **inspection.serialize_memory_entry(entry),
         "value": value_payload["value"],
