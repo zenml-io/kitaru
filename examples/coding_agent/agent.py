@@ -412,7 +412,7 @@ def _run_flow_body_tools(
 @click.argument("task")
 def main(task: str) -> None:
     kitaru.configure(
-        stack="local_remote",
+        # stack="local_remote",
         image={
             "dockerfile": "../../docker/Dockerfile.dev",
             "build_context_root": "../../",
