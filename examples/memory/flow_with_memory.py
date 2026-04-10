@@ -316,50 +316,92 @@ def run_workflow(
         scope=execution_scope,
         scope_type="execution",
     )
-    client.memories.delete("execution/transient", scope=execution_scope)
+    client.memories.delete(
+        "execution/transient",
+        scope=execution_scope,
+        scope_type="execution",
+    )
 
     # --- Client inspection of all scopes ---
-    namespace_entries = client.memories.list(scope=namespace_scope)
-    flow_entries = client.memories.list(scope=FLOW_SCOPE)
-    execution_entries = client.memories.list(scope=execution_scope)
+    namespace_entries = client.memories.list(
+        scope=namespace_scope,
+        scope_type="namespace",
+    )
+    flow_entries = client.memories.list(scope=FLOW_SCOPE, scope_type="flow")
+    execution_entries = client.memories.list(
+        scope=execution_scope,
+        scope_type="execution",
+    )
 
     namespace_topic_count = client.memories.get(
-        "sessions/topic_count", scope=namespace_scope
+        "sessions/topic_count",
+        scope=namespace_scope,
+        scope_type="namespace",
     )
     namespace_topic_count_value = _load_value(client, namespace_topic_count)
     namespace_topic_count_history = client.memories.history(
-        "sessions/topic_count", scope=namespace_scope
+        "sessions/topic_count",
+        scope=namespace_scope,
+        scope_type="namespace",
     )
     namespace_last_topic = client.memories.get(
-        "sessions/last_topic", scope=namespace_scope
+        "sessions/last_topic",
+        scope=namespace_scope,
+        scope_type="namespace",
     )
     namespace_last_topic_value = _load_value(client, namespace_last_topic)
-    namespace_obsolete = client.memories.get("scratch/obsolete", scope=namespace_scope)
+    namespace_obsolete = client.memories.get(
+        "scratch/obsolete",
+        scope=namespace_scope,
+        scope_type="namespace",
+    )
     namespace_obsolete_history = client.memories.history(
-        "scratch/obsolete", scope=namespace_scope
+        "scratch/obsolete",
+        scope=namespace_scope,
+        scope_type="namespace",
     )
 
-    flow_summary_entry = client.memories.get("summaries/latest", scope=FLOW_SCOPE)
+    flow_summary_entry = client.memories.get(
+        "summaries/latest",
+        scope=FLOW_SCOPE,
+        scope_type="flow",
+    )
     flow_summary_value = _load_value(client, flow_summary_entry)
-    flow_summary_history = client.memories.history("summaries/latest", scope=FLOW_SCOPE)
+    flow_summary_history = client.memories.history(
+        "summaries/latest",
+        scope=FLOW_SCOPE,
+        scope_type="flow",
+    )
 
     # In-flow execution memory (written during the flow, not post-flow)
-    execution_phase = client.memories.get("progress/phase", scope=execution_scope)
+    execution_phase = client.memories.get(
+        "progress/phase",
+        scope=execution_scope,
+        scope_type="execution",
+    )
     execution_phase_value = _load_value(client, execution_phase)
     execution_phase_history = client.memories.history(
-        "progress/phase", scope=execution_scope
+        "progress/phase",
+        scope=execution_scope,
+        scope_type="execution",
     )
     execution_items = client.memories.get(
-        "progress/items_processed", scope=execution_scope
+        "progress/items_processed",
+        scope=execution_scope,
+        scope_type="execution",
     )
     execution_items_value = _load_value(client, execution_items)
 
     # Post-flow execution memory
     execution_notes_history = client.memories.history(
-        "execution/notes", scope=execution_scope
+        "execution/notes",
+        scope=execution_scope,
+        scope_type="execution",
     )
     execution_transient = client.memories.get(
-        "execution/transient", scope=execution_scope
+        "execution/transient",
+        scope=execution_scope,
+        scope_type="execution",
     )
 
     scopes = client.memories.scopes()
@@ -399,6 +441,7 @@ def run_workflow(
     if include_maintenance:
         compact_result = client.memories.compact(
             scope=namespace_scope,
+            scope_type="namespace",
             keys=["conventions/test_runner", "conventions/python"],
             target_key="summaries/conventions",
             instruction="Summarize these repo conventions in 2-3 concise bullets.",
@@ -410,14 +453,20 @@ def run_workflow(
         purge_result = client.memories.purge(
             "conventions/test_runner",
             scope=namespace_scope,
+            scope_type="namespace",
             keep=1,
         )
 
         test_runner_history_after = client.memories.history(
-            "conventions/test_runner", scope=namespace_scope
+            "conventions/test_runner",
+            scope=namespace_scope,
+            scope_type="namespace",
         )
 
-        compaction_log = client.memories.compaction_log(scope=namespace_scope)
+        compaction_log = client.memories.compaction_log(
+            scope=namespace_scope,
+            scope_type="namespace",
+        )
 
         maintenance_snapshot = {
             "compact_result": compact_result.model_dump(mode="json"),

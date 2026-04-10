@@ -98,51 +98,86 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     client = KitaruClient()
 
     # Namespace scope
-    namespace_entries = client.memories.list(scope=namespace_scope)
+    namespace_entries = client.memories.list(
+        scope=namespace_scope,
+        scope_type="namespace",
+    )
     namespace_keys = [entry.key for entry in namespace_entries]
     assert "conventions/test_runner" in namespace_keys
     assert "conventions/python" in namespace_keys
     assert "sessions/topic_count" in namespace_keys
     assert "sessions/last_topic" in namespace_keys
-    assert client.memories.get("scratch/obsolete", scope=namespace_scope) is None
+    assert (
+        client.memories.get(
+            "scratch/obsolete",
+            scope=namespace_scope,
+            scope_type="namespace",
+        )
+        is None
+    )
 
     topic_history = client.memories.history(
-        "sessions/topic_count", scope=namespace_scope
+        "sessions/topic_count",
+        scope=namespace_scope,
+        scope_type="namespace",
     )
     assert [entry.version for entry in topic_history] == [2, 1]
     assert topic_history[0].execution_id == execution_id
     assert topic_history[1].execution_id is None
 
     # Flow scope
-    flow_entry = client.memories.get("summaries/latest", scope=FLOW_SCOPE)
+    flow_entry = client.memories.get(
+        "summaries/latest",
+        scope=FLOW_SCOPE,
+        scope_type="flow",
+    )
     assert flow_entry is not None
     flow_summary = client.artifacts.get(flow_entry.artifact_id).load()
     assert flow_summary == flow_snapshot["flow_summary"]
     assert [
         entry.version
-        for entry in client.memories.history("summaries/latest", scope=FLOW_SCOPE)
+        for entry in client.memories.history(
+            "summaries/latest",
+            scope=FLOW_SCOPE,
+            scope_type="flow",
+        )
     ] == [1]
 
     # Execution scope — in-flow entries
-    execution_entries = client.memories.list(scope=execution_id)
+    execution_entries = client.memories.list(
+        scope=execution_id,
+        scope_type="execution",
+    )
     execution_keys = [entry.key for entry in execution_entries]
     assert "progress/phase" in execution_keys
     assert "progress/items_processed" in execution_keys
     assert "execution/notes" in execution_keys
 
-    phase_entry = client.memories.get("progress/phase", scope=execution_id)
+    phase_entry = client.memories.get(
+        "progress/phase",
+        scope=execution_id,
+        scope_type="execution",
+    )
     assert phase_entry is not None
     assert phase_entry.scope == execution_id
     assert phase_entry.scope_type == "execution"
     phase_value = client.artifacts.get(phase_entry.artifact_id).load()
     assert phase_value == "synthesis"
 
-    phase_history = client.memories.history("progress/phase", scope=execution_id)
+    phase_history = client.memories.history(
+        "progress/phase",
+        scope=execution_id,
+        scope_type="execution",
+    )
     assert [entry.version for entry in phase_history] == [2, 1]
     first_phase = client.artifacts.get(phase_history[1].artifact_id).load()
     assert first_phase == "analysis"
 
-    items_entry = client.memories.get("progress/items_processed", scope=execution_id)
+    items_entry = client.memories.get(
+        "progress/items_processed",
+        scope=execution_id,
+        scope_type="execution",
+    )
     assert items_entry is not None
     items_value = client.artifacts.get(items_entry.artifact_id).load()
     assert items_value == 3
@@ -155,14 +190,25 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     assert notes_entry.flow_id
     assert notes_entry.flow_name == FLOW_SCOPE
 
-    execution_history = client.memories.history("execution/notes", scope=execution_id)
+    execution_history = client.memories.history(
+        "execution/notes",
+        scope=execution_id,
+        scope_type="execution",
+    )
     assert [entry.version for entry in execution_history] == [2, 1]
     assert all(entry.scope == execution_id for entry in execution_history)
     assert all(entry.scope_type == "execution" for entry in execution_history)
     assert all(entry.execution_id is None for entry in execution_history)
     assert all(entry.flow_id for entry in execution_history)
     assert {entry.flow_name for entry in execution_history} == {FLOW_SCOPE}
-    assert client.memories.get("execution/transient", scope=execution_id) is None
+    assert (
+        client.memories.get(
+            "execution/transient",
+            scope=execution_id,
+            scope_type="execution",
+        )
+        is None
+    )
 
     # Scopes
     scopes = _scope_map(cast(list[dict[str, Any]], client_snapshot["scopes"]))

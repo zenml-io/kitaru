@@ -657,11 +657,16 @@ def test_memory_list_delegates_to_shared_interface(
             return_value=payload,
         ) as mock_list,
     ):
-        result = kitaru_memory_list(scope="repo/demo", prefix="preferences")
+        result = kitaru_memory_list(
+            scope="repo/demo",
+            scope_type="namespace",
+            prefix="preferences",
+        )
 
     mock_list.assert_called_once_with(
         mock_kitaru_client,
         scope="repo/demo",
+        scope_type="namespace",
         prefix="preferences",
     )
     assert result == payload
@@ -688,6 +693,7 @@ def test_memory_get_delegates_to_shared_interface(
         result = kitaru_memory_get(
             "preferences/theme",
             scope="repo/demo",
+            scope_type="namespace",
             version=3,
         )
 
@@ -695,6 +701,7 @@ def test_memory_get_delegates_to_shared_interface(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
         version=3,
     )
     assert result == payload
@@ -711,12 +718,17 @@ def test_memory_get_returns_none_when_missing(
             return_value=None,
         ) as mock_get,
     ):
-        result = kitaru_memory_get("preferences/theme", scope="repo/demo")
+        result = kitaru_memory_get(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_get.assert_called_once_with(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
         version=None,
     )
     assert result is None
@@ -775,12 +787,17 @@ def test_memory_delete_delegates_to_shared_interface(
             return_value=payload,
         ) as mock_delete,
     ):
-        result = kitaru_memory_delete("preferences/theme", scope="repo/demo")
+        result = kitaru_memory_delete(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_delete.assert_called_once_with(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
     )
     assert result == payload
 
@@ -796,12 +813,17 @@ def test_memory_delete_returns_none_when_missing(
             return_value=None,
         ) as mock_delete,
     ):
-        result = kitaru_memory_delete("preferences/theme", scope="repo/demo")
+        result = kitaru_memory_delete(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_delete.assert_called_once_with(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
     )
     assert result is None
 
@@ -822,12 +844,17 @@ def test_memory_history_delegates_to_shared_interface(
             return_value=payload,
         ) as mock_history,
     ):
-        result = kitaru_memory_history("preferences/theme", scope="repo/demo")
+        result = kitaru_memory_history(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_history.assert_called_once_with(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
     )
     assert result == payload
 
@@ -852,6 +879,7 @@ def test_memory_compact_delegates_to_shared_interface(
     ):
         result = kitaru_memory_compact(
             scope="repo/demo",
+            scope_type="namespace",
             key="preferences/theme",
             source_mode="current",
         )
@@ -859,6 +887,7 @@ def test_memory_compact_delegates_to_shared_interface(
     mock_compact.assert_called_once_with(
         mock_kitaru_client,
         scope="repo/demo",
+        scope_type="namespace",
         key="preferences/theme",
         keys=None,
         source_mode="current",
@@ -886,6 +915,7 @@ def test_memory_purge_delegates_to_shared_interface(
         result = kitaru_memory_purge(
             "preferences/theme",
             scope="repo/demo",
+            scope_type="namespace",
             keep=1,
         )
 
@@ -893,6 +923,7 @@ def test_memory_purge_delegates_to_shared_interface(
         mock_kitaru_client,
         key="preferences/theme",
         scope="repo/demo",
+        scope_type="namespace",
         keep=1,
     )
     assert result == payload
@@ -913,6 +944,7 @@ def test_memory_purge_scope_delegates_to_shared_interface(
     ):
         result = kitaru_memory_purge_scope(
             scope="repo/demo",
+            scope_type="namespace",
             keep=1,
             include_deleted=True,
         )
@@ -920,6 +952,7 @@ def test_memory_purge_scope_delegates_to_shared_interface(
     mock_purge_scope.assert_called_once_with(
         mock_kitaru_client,
         scope="repo/demo",
+        scope_type="namespace",
         keep=1,
         include_deleted=True,
     )
@@ -939,11 +972,15 @@ def test_memory_compaction_log_delegates_to_shared_interface(
             return_value=payload,
         ) as mock_log,
     ):
-        result = kitaru_memory_compaction_log(scope="repo/demo")
+        result = kitaru_memory_compaction_log(
+            scope="repo/demo",
+            scope_type="namespace",
+        )
 
     mock_log.assert_called_once_with(
         mock_kitaru_client,
         scope="repo/demo",
+        scope_type="namespace",
     )
     assert result == payload
 
@@ -1565,7 +1602,6 @@ def test_manage_stack_create_vertex_dispatches_structured_spec() -> None:
         "credentials": None,
         "verify": False,
     }
-
     assert payload == {
         "id": "stack-vertex-id",
         "name": "vertex-dev",

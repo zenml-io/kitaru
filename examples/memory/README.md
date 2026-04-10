@@ -75,9 +75,10 @@ The example shows two kinds of execution-scope writes:
 - **In-flow writes** (`progress/phase`, `progress/items_processed`): written
   between checkpoints during the flow, so the UI can show them evolving
 - **Post-flow writes** (`execution/notes`): detached annotations added after
-  the flow completes, demonstrating that `scope=<execution_id>` is the bucket
-  while `execution_id` on the entry tracks whether it was physically produced
-  during a live run
+  the flow completes, demonstrating that explicit admin surfaces address that
+  bucket as `scope_type="execution"` + `scope=<execution_id>`, while
+  `execution_id` on the entry tracks whether it was physically produced during
+  a live run
 
 For the broader feature overview, see
 [Use Memory](https://kitaru.ai/docs/guides/memory).

@@ -469,6 +469,7 @@ def serialize_purge_result(result: PurgeResult) -> dict[str, Any]:
         "versions_deleted": result.versions_deleted,
         "keys_affected": result.keys_affected,
         "scope": result.scope,
+        "scope_type": result.scope_type,
     }
 
 
@@ -477,6 +478,7 @@ def serialize_compaction_record(record: CompactionRecord) -> dict[str, Any]:
     return {
         "operation": record.operation,
         "scope": record.scope,
+        "scope_type": record.scope_type,
         "timestamp": to_jsonable(record.timestamp, fallback_repr=True),
         "source_keys": record.source_keys,
         "source_versions": record.source_versions,
@@ -497,6 +499,7 @@ def serialize_compact_result(result: CompactResult) -> dict[str, Any]:
         "entry": serialize_memory_entry(result.entry),
         "sources_read": result.sources_read,
         "scope": result.scope,
+        "scope_type": result.scope_type,
         "compaction_record": serialize_compaction_record(result.compaction_record),
     }
 
