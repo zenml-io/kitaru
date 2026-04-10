@@ -71,21 +71,21 @@ After running the example, demonstrate maintenance from the CLI:
 ```bash
 DEMO_SCOPE=repo_docs  # or your timestamped scope
 
-kitaru memory list --scope "$DEMO_SCOPE"
-kitaru memory compact --scope "$DEMO_SCOPE" --key conventions/test_runner
-kitaru memory purge conventions/test_runner --scope "$DEMO_SCOPE" --keep 1
-kitaru memory compaction-log --scope "$DEMO_SCOPE"
+kitaru memory list --scope "$DEMO_SCOPE" --scope-type namespace
+kitaru memory compact --scope "$DEMO_SCOPE" --scope-type namespace --key conventions/test_runner
+kitaru memory purge conventions/test_runner --scope "$DEMO_SCOPE" --scope-type namespace --keep 1
+kitaru memory compaction-log --scope "$DEMO_SCOPE" --scope-type namespace
 ```
 
 ### MCP assistant clip
 
 Use the same scope/key names with MCP tools from an assistant:
 
-1. `kitaru_memory_list(scope="repo_docs")`
-2. `kitaru_memory_get(key="conventions/test_runner", scope="repo_docs")`
-3. `kitaru_memory_compact(scope="repo_docs", key="conventions/test_runner")`
-4. `kitaru_memory_purge(key="conventions/test_runner", scope="repo_docs", keep=1)`
-5. `kitaru_memory_compaction_log(scope="repo_docs")`
+1. `kitaru_memory_list(scope="repo_docs", scope_type="namespace")`
+2. `kitaru_memory_get(key="conventions/test_runner", scope="repo_docs", scope_type="namespace")`
+3. `kitaru_memory_compact(scope="repo_docs", scope_type="namespace", key="conventions/test_runner")`
+4. `kitaru_memory_purge(key="conventions/test_runner", scope="repo_docs", scope_type="namespace", keep=1)`
+5. `kitaru_memory_compaction_log(scope="repo_docs", scope_type="namespace")`
 
 ## Safe and unsafe claims
 

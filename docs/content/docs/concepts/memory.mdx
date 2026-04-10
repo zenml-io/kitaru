@@ -13,7 +13,7 @@ Use it when your agent needs to remember things like:
 - previously discovered facts
 - long-lived workflow state that should not be passed through every function call
 
-Unlike checkpoint outputs, memory is looked up by **key + scope**, not by an execution ID.
+Unlike checkpoint outputs, memory is looked up by **key within a typed scope** (`scope_type` + `scope`), not by an execution ID.
 
 ## Memory vs artifacts
 
@@ -30,8 +30,15 @@ state that can be updated over time.
 
 ## Scope model
 
-Every memory entry lives inside a **scope**. A scope is just a string name plus
-optional `scope_type` classification metadata.
+Every memory entry lives inside a **typed scope**. That means two things travel
+together:
+
+- `scope_type` — what kind of bucket this is (`namespace`, `flow`, or `execution`)
+- `scope` — the concrete bucket name inside that type
+
+For explicit memory operations, the durable identity is therefore:
+
+`scope_type` + `scope` + `key`
 
 | Scope type | Typical use | Example |
 |---|---|---|
@@ -39,9 +46,9 @@ optional `scope_type` classification metadata.
 | `flow` | State associated with one flow name | `research_agent` |
 | `execution` | State isolated to one execution | `3d1d8d7f-...` |
 
-Inside a `@flow`, Kitaru defaults to the flow name as the active scope when you
-have not configured one explicitly. Outside a flow, you must configure a scope
-first with `memory.configure(scope=...)`.
+Inside a `@flow`, Kitaru defaults to the flow name as the active typed scope
+when you have not configured one explicitly. Outside a flow, you must configure
+a scope first with `memory.configure(scope=..., scope_type=...)`.
 
 ```python
 from kitaru import memory
@@ -107,7 +114,7 @@ Think of it this way:
   Purge, compact, and compaction log are **admin operations** — they are not
   available on the module-level `kitaru.memory` API. Use
   `KitaruClient.memories`, the CLI (`kitaru memory purge`, etc.), or the
-  MCP memory tools.
+  MCP memory tools, which all address memory through explicit typed scopes.
 </Callout>
 
 ### Reserved audit keys
@@ -181,12 +188,13 @@ of past reads and writes.
 Kitaru exposes memory through several surfaces:
 
 - `kitaru.memory` inside Python code
-- `KitaruClient.memories` for explicit-scope inspection and administration
+- `KitaruClient.memories` for explicit typed-scope inspection and administration
 - `kitaru memory ...` on the CLI
 - `kitaru_memory_*` MCP tools for assistants
 
-The Python module API uses the currently configured scope. The client, CLI, and
-MCP surfaces require or expose explicit scope values more directly.
+The Python module API uses the currently configured typed scope. The client,
+CLI, and MCP surfaces require explicit typed scope identity (`scope` +
+`scope_type`) on scoped operations.
 
 See [Use Memory](/guides/memory) for concrete examples across all four.
 
@@ -206,8 +214,8 @@ A concrete example helps here:
 - both versions belong to the **same execution bucket** because their scope is `E1`
 - only the in-flow version necessarily has live-run producer provenance
 
-So `scope` answers **where the entry belongs**, while `execution_id` answers
-**who physically wrote that version**.
+So typed scope answers **where the entry belongs**, while `execution_id`
+answers **who physically wrote that version**.
 
 Both cases appear in `memory.history()`, so you can always tell whether a
 particular version came from a flow execution or from an external write.
@@ -256,7 +264,7 @@ kitaru memory reindex --apply
 - `--apply` persists the missing tags
 - the reindex is **additive and idempotent** — rerunning it is safe
 
-This Phase 3 reindex only backfills **tags**, not metadata fields like
+This reindex only backfills **tags**, not metadata fields like
 `flow_id` / `flow_name`. Historical entries may therefore become discoverable by
 flow in the UI while still showing missing flow metadata in inspection views.
 

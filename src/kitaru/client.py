@@ -877,7 +877,7 @@ class _MemoriesAPI:
         self,
         scope: str,
         *,
-        scope_type: str = "namespace",
+        scope_type: _MemoryScopeType,
     ) -> _MemoryScope:
         """Validate and construct a memory scope for client operations."""
         return _MemoryScope(
@@ -890,11 +890,12 @@ class _MemoriesAPI:
         key: str,
         *,
         scope: str,
+        scope_type: _MemoryScopeType,
         version: int | None = None,
     ) -> MemoryEntry | None:
         """Get one typed memory entry by key and scope."""
         return _get_entry_impl(
-            self._scope(scope),
+            self._scope(scope, scope_type=scope_type),
             _validate_memory_identifier(key, kind="key"),
             version=_validate_memory_version(version),
             client_factory=self._client_ref._client,
@@ -905,6 +906,7 @@ class _MemoriesAPI:
         self,
         *,
         scope: str,
+        scope_type: _MemoryScopeType,
         prefix: str | None = None,
     ) -> builtins.list[MemoryEntry]:
         """List typed memory entries for a scope, optionally filtered by prefix."""
@@ -914,16 +916,22 @@ class _MemoriesAPI:
             else None
         )
         return _list_impl(
-            self._scope(scope),
+            self._scope(scope, scope_type=scope_type),
             prefix=normalized_prefix,
             client_factory=self._client_ref._client,
             project=self._client_ref._project,
         )
 
-    def history(self, key: str, *, scope: str) -> builtins.list[MemoryEntry]:
+    def history(
+        self,
+        key: str,
+        *,
+        scope: str,
+        scope_type: _MemoryScopeType,
+    ) -> builtins.list[MemoryEntry]:
         """Return the full version history for one memory key."""
         return _history_impl(
-            self._scope(scope),
+            self._scope(scope, scope_type=scope_type),
             _validate_memory_identifier(key, kind="key"),
             client_factory=self._client_ref._client,
             project=self._client_ref._project,
@@ -935,7 +943,7 @@ class _MemoriesAPI:
         value: Any,
         *,
         scope: str,
-        scope_type: _MemoryScopeType = "namespace",
+        scope_type: _MemoryScopeType,
     ) -> MemoryEntry:
         """Persist a memory value and return the created metadata entry."""
         return _set_entry_impl(
@@ -946,10 +954,16 @@ class _MemoriesAPI:
             project=self._client_ref._project,
         )
 
-    def delete(self, key: str, *, scope: str) -> MemoryEntry | None:
+    def delete(
+        self,
+        key: str,
+        *,
+        scope: str,
+        scope_type: _MemoryScopeType,
+    ) -> MemoryEntry | None:
         """Soft-delete a memory key and return the tombstone entry."""
         return _delete_impl(
-            self._scope(scope),
+            self._scope(scope, scope_type=scope_type),
             _validate_memory_identifier(key, kind="key"),
             client_factory=self._client_ref._client,
             project=self._client_ref._project,
@@ -967,11 +981,12 @@ class _MemoriesAPI:
         key: str,
         *,
         scope: str,
+        scope_type: _MemoryScopeType,
         keep: int | None = None,
     ) -> PurgeResult:
         """Physically delete old versions of a memory key."""
         return _purge_impl(
-            self._scope(scope),
+            self._scope(scope, scope_type=scope_type),
             _validate_memory_identifier(key, kind="key"),
             keep=keep,
             client_factory=self._client_ref._client,
@@ -982,12 +997,13 @@ class _MemoriesAPI:
         self,
         *,
         scope: str,
+        scope_type: _MemoryScopeType,
         keep: int | None = None,
         include_deleted: bool = False,
     ) -> PurgeResult:
         """Purge old versions across all keys in a scope."""
         return _purge_scope_impl(
-            self._scope(scope),
+            self._scope(scope, scope_type=scope_type),
             keep=keep,
             include_deleted=include_deleted,
             client_factory=self._client_ref._client,
@@ -998,6 +1014,7 @@ class _MemoriesAPI:
         self,
         *,
         scope: str,
+        scope_type: _MemoryScopeType,
         key: str | None = None,
         keys: builtins.list[str] | None = None,
         source_mode: _MemoryCompactionSourceMode = "current",
@@ -1022,7 +1039,7 @@ class _MemoriesAPI:
         )
         validated_source_mode = _validate_memory_compaction_source_mode(source_mode)
         return _compact_impl(
-            self._scope(scope),
+            self._scope(scope, scope_type=scope_type),
             key=validated_key,
             keys=validated_keys,
             source_mode=validated_source_mode,
@@ -1038,10 +1055,11 @@ class _MemoriesAPI:
         self,
         *,
         scope: str,
+        scope_type: _MemoryScopeType,
     ) -> builtins.list[CompactionRecord]:
         """Read all compaction audit records for a scope."""
         return _compaction_log_impl(
-            self._scope(scope),
+            self._scope(scope, scope_type=scope_type),
             client_factory=self._client_ref._client,
             project=self._client_ref._project,
         )

@@ -575,8 +575,9 @@ def _dispatch_provider_call(
 ) -> _ProviderCallResult:
     """Route a normalized LLM call to the correct provider SDK.
 
-    Shared by ``_execute_llm_call`` (flow-scoped, with tracking) and
-    ``_compact_impl`` (admin operation, no tracking needed).
+    Shared by ``_execute_llm_call`` (flow-scoped) and ``_compact_impl``
+    (admin operation).  Both callers now track LLM usage via
+    ``_track_llm_call_analytics``.
     """
     if env_overlay is None:
         env_overlay, _ = _resolve_credential_overlay(model_selection)
@@ -617,6 +618,28 @@ def _dispatch_provider_call(
             provider_label=target.provider,
         )
     raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
+
+
+def _track_llm_call_analytics(
+    *,
+    model_selection: ResolvedModelSelection,
+    credential_source: str,
+    mocked: bool,
+    extra_metadata: Mapping[str, Any] | None = None,
+) -> None:
+    """Emit the canonical `LLM_CALLED` analytics event."""
+    from kitaru.analytics import AnalyticsEvent, track
+
+    metadata: dict[str, Any] = {
+        "resolved_model": model_selection.resolved_model,
+        "credential_source": credential_source,
+        "mocked": mocked,
+    }
+    if extra_metadata is not None:
+        metadata.update(
+            {key: value for key, value in extra_metadata.items() if value is not None}
+        )
+    track(AnalyticsEvent.LLM_CALLED, metadata)
 
 
 def _execute_llm_call(request: _LLMRequest) -> str:
@@ -675,15 +698,10 @@ def _execute_llm_call(request: _LLMRequest) -> str:
     }
     log(llm_calls={request.call_name: filtered_metadata})
 
-    from kitaru.analytics import AnalyticsEvent, track
-
-    track(
-        AnalyticsEvent.LLM_CALLED,
-        {
-            "resolved_model": model_selection.resolved_model,
-            "credential_source": credential_source,
-            "mocked": is_mocked,
-        },
+    _track_llm_call_analytics(
+        model_selection=model_selection,
+        credential_source=credential_source,
+        mocked=is_mocked,
     )
 
     return response_text
