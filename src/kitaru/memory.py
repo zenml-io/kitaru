@@ -450,10 +450,7 @@ def _coerce_memory_scope(scope: str, scope_type: str) -> _MemoryScope:
 
 def _memory_artifact_name(scope: _MemoryScope, key: str) -> str:
     """Build the canonical artifact name for a memory key."""
-    return (
-        f"{_MEMORY_ARTIFACT_PREFIX}:"
-        f"{scope.scope_type}:{scope.scope}:{key}"
-    )
+    return f"{_MEMORY_ARTIFACT_PREFIX}:{scope.scope_type}:{scope.scope}:{key}"
 
 
 def _memory_scope_tag(scope: str) -> str:
@@ -643,16 +640,6 @@ def _parse_memory_artifact_identity(artifact_name: str) -> tuple[_MemoryScope, s
     )
 
 
-def _try_parse_memory_artifact_identity(
-    artifact_name: str,
-) -> tuple[_MemoryScope, str] | None:
-    """Best-effort parse for scan-style operations."""
-    try:
-        return _parse_memory_artifact_identity(artifact_name)
-    except KitaruRuntimeError:
-        return None
-
-
 def _parse_memory_version(raw_version: str) -> int:
     """Convert a ZenML artifact version string into an integer version."""
     try:
@@ -680,17 +667,6 @@ def _resolve_scope_type(artifact: ArtifactVersionResponse) -> str:
             f"{_MEMORY_SCOPE_TYPE_METADATA_KEY!r}."
         )
     return str(raw_scope_type)
-
-
-def _matches_memory_scope(
-    requested: _MemoryScope,
-    actual: _MemoryScope,
-) -> bool:
-    """Return whether two memory scopes refer to the same typed identity."""
-    return (
-        requested.scope == actual.scope
-        and requested.scope_type == actual.scope_type
-    )
 
 
 def _infer_value_type(artifact: ArtifactVersionResponse) -> str:
@@ -810,20 +786,23 @@ def _iter_matching_memory_artifacts(
     artifacts: _list[ArtifactVersionResponse],
     *,
     scope: _MemoryScope | None = None,
-) -> Iterator[ArtifactVersionResponse]:
-    """Yield only well-formed memory artifacts, optionally scoped."""
+) -> Iterator[tuple[ArtifactVersionResponse, MemoryEntry]]:
+    """Yield well-formed memory artifacts with their parsed entries."""
     for artifact in artifacts:
-        parsed = _try_parse_memory_artifact_identity(artifact.name)
-        if parsed is None:
-            continue
-        parsed_scope, _key = parsed
         try:
-            _artifact_to_memory_entry(artifact)
+            entry = _artifact_to_memory_entry(artifact)
         except KitaruRuntimeError:
             continue
-        if scope is not None and not _matches_memory_scope(scope, parsed_scope):
+        parsed_scope = _MemoryScope(
+            scope=entry.scope,
+            scope_type=_validate_memory_scope_type(
+                entry.scope_type,
+                error_type=KitaruRuntimeError,
+            ),
+        )
+        if scope is not None and parsed_scope != scope:
             continue
-        yield artifact
+        yield artifact, entry
 
 
 def _fetch_memory_artifact(
@@ -1331,18 +1310,14 @@ def _list_impl(
             f"Failed to list memories in scope {scope.scope!r}: {exc}"
         ) from exc
 
-    latest_by_artifact: dict[str, ArtifactVersionResponse] = {}
-    for artifact in _iter_matching_memory_artifacts(
+    latest_by_artifact: dict[str, MemoryEntry] = {}
+    for _artifact, entry in _iter_matching_memory_artifacts(
         _sort_memory_artifacts(artifacts),
         scope=scope,
     ):
-        latest_by_artifact.setdefault(artifact.name, artifact)
+        latest_by_artifact.setdefault(entry.key, entry)
 
-    entries = [
-        _artifact_to_memory_entry(artifact)
-        for artifact in latest_by_artifact.values()
-        if not _is_deleted_artifact(artifact)
-    ]
+    entries = [entry for entry in latest_by_artifact.values() if not entry.is_deleted]
     if prefix is not None:
         entries = [entry for entry in entries if entry.key.startswith(prefix)]
     return sorted(entries, key=lambda entry: entry.key)
@@ -1372,10 +1347,11 @@ def _list_scopes_impl(
         latest_by_artifact.setdefault(artifact.name, artifact)
 
     scope_stats: dict[tuple[str, str], int] = {}
-    for artifact in _iter_matching_memory_artifacts([*latest_by_artifact.values()]):
-        if _is_deleted_artifact(artifact):
+    for _artifact, entry in _iter_matching_memory_artifacts(
+        [*latest_by_artifact.values()],
+    ):
+        if entry.is_deleted:
             continue
-        entry = _artifact_to_memory_entry(artifact)
         identity = (entry.scope, entry.scope_type)
         scope_stats[identity] = scope_stats.get(identity, 0) + 1
 
@@ -1420,8 +1396,8 @@ def _history_impl(
         ) from exc
 
     return [
-        _artifact_to_memory_entry(artifact)
-        for artifact in _iter_matching_memory_artifacts(
+        entry
+        for _artifact, entry in _iter_matching_memory_artifacts(
             _sort_memory_artifacts(artifacts),
             scope=scope,
         )
@@ -1541,11 +1517,11 @@ def _compaction_log_impl(
         ) from exc
 
     records: _list[CompactionRecord] = []
-    for artifact in _iter_matching_memory_artifacts(
+    for artifact, entry in _iter_matching_memory_artifacts(
         _sort_memory_artifacts(artifacts),
         scope=scope,
     ):
-        if _is_deleted_artifact(artifact):
+        if entry.is_deleted:
             continue
         try:
             raw = artifact.load()
@@ -1604,16 +1580,15 @@ def _collect_single_key_history_entries(
         artifact=_memory_artifact_name(scope, key),
         **_memory_query_kwargs(project=project),
     )
-    for artifact in _iter_matching_memory_artifacts(
+    for artifact, entry in _iter_matching_memory_artifacts(
         _sort_memory_artifacts(artifacts),
         scope=scope,
     ):
-        if _is_deleted_artifact(artifact):
+        if entry.is_deleted:
             continue
         try:
             value = artifact.load()
-            version = _parse_memory_version(artifact.version)
-            source_entries.append((key, version, value))
+            source_entries.append((key, entry.version, value))
         except Exception:
             continue
     return source_entries
@@ -1743,12 +1718,13 @@ def _purge_impl(
             f"in scope {scope.scope!r}: {exc}"
         ) from exc
 
-    sorted_artifacts = [*(
-        _iter_matching_memory_artifacts(
+    sorted_artifacts = [
+        artifact
+        for artifact, _entry in _iter_matching_memory_artifacts(
             _sort_memory_artifacts(artifacts),
             scope=scope,
         )
-    )]
+    ]
     to_delete = sorted_artifacts[effective_keep:]
 
     deleted_count = _delete_preflighted_memory_versions(
@@ -1825,20 +1801,19 @@ def _purge_scope_impl(
             f"Failed to list artifacts for purge of scope {scope.scope!r}: {exc}"
         ) from exc
 
-    by_name: dict[str, _list[ArtifactVersionResponse]] = {}
-    for artifact in _iter_matching_memory_artifacts(
+    by_key: dict[str, _list[ArtifactVersionResponse]] = {}
+    for artifact, entry in _iter_matching_memory_artifacts(
         _sort_memory_artifacts(artifacts),
         scope=scope,
     ):
-        by_name.setdefault(artifact.name, []).append(artifact)
+        by_key.setdefault(entry.key, []).append(artifact)
 
     total_deleted = 0
     keys_affected_count = 0
     all_source_keys: _list[str] = []
     all_source_versions: _list[int] = []
 
-    for artifact_name, versions in by_name.items():
-        _scope, parsed_key = _parse_memory_artifact_identity(artifact_name)
+    for parsed_key, versions in by_key.items():
         if parsed_key.startswith(_COMPACTION_LOG_PREFIX):
             continue
 

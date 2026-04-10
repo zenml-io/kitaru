@@ -1522,8 +1522,12 @@ class TestCompactImpl:
         assert record.target_key == "prefs"
 
     def test_single_key_history_mode_reads_all_non_deleted_versions(self) -> None:
-        newest = _memory_artifact(scope="s", scope_type="namespace", key="prefs", version=3, value="latest")
-        middle = _memory_artifact(scope="s", scope_type="namespace", key="prefs", version=2, value="middle")
+        newest = _memory_artifact(
+            scope="s", scope_type="namespace", key="prefs", version=3, value="latest"
+        )
+        middle = _memory_artifact(
+            scope="s", scope_type="namespace", key="prefs", version=2, value="middle"
+        )
         deleted = _memory_artifact(
             scope="s",
             scope_type="namespace",
@@ -1582,8 +1586,16 @@ class TestCompactImpl:
         assert record.source_mode == "history"
 
     def test_multi_key_compact_keeps_current_value_behavior(self) -> None:
-        runner = _memory_artifact(scope="s", scope_type="namespace", key="runner", version=2, value="just test")
-        python = _memory_artifact(scope="s", scope_type="namespace", key="python", version=5, value="uv run")
+        runner = _memory_artifact(
+            scope="s",
+            scope_type="namespace",
+            key="runner",
+            version=2,
+            value="just test",
+        )
+        python = _memory_artifact(
+            scope="s", scope_type="namespace", key="python", version=5, value="uv run"
+        )
         tombstone = _memory_artifact(
             scope="s",
             scope_type="namespace",
@@ -1726,7 +1738,9 @@ def test_validate_identifier_allows_compaction_prefix_when_flag_set() -> None:
 class TestPurgeImpl:
     def test_purge_deletes_old_versions_keeping_newest(self) -> None:
         artifacts = [
-            _memory_artifact(scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}")
+            _memory_artifact(
+                scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}"
+            )
             for i in range(1, 6)
         ]
         client_mock = MagicMock()
@@ -1789,7 +1803,9 @@ class TestPurgeImpl:
 
     def test_purge_with_keep_none_deletes_all(self) -> None:
         artifacts = [
-            _memory_artifact(scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}")
+            _memory_artifact(
+                scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}"
+            )
             for i in range(1, 4)
         ]
         client_mock = MagicMock()
@@ -1844,7 +1860,9 @@ class TestPurgeImpl:
 
     def test_purge_aborts_before_delete_when_preflight_blocks_versions(self) -> None:
         artifacts = [
-            _memory_artifact(scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}")
+            _memory_artifact(
+                scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}"
+            )
             for i in range(1, 4)
         ]
         client_mock = MagicMock()
@@ -1870,7 +1888,9 @@ class TestPurgeImpl:
 
     def test_purge_passes_project_to_preflight_queries(self) -> None:
         artifacts = [
-            _memory_artifact(scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}")
+            _memory_artifact(
+                scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}"
+            )
             for i in range(1, 3)
         ]
         client_mock = MagicMock()
@@ -1918,7 +1938,9 @@ class TestPurgeImpl:
 
     def test_purge_writes_record_with_null_source_mode(self) -> None:
         artifacts = [
-            _memory_artifact(scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}")
+            _memory_artifact(
+                scope="s", scope_type="namespace", key="k", version=i, value=f"v{i}"
+            )
             for i in range(1, 3)
         ]
 
@@ -1947,9 +1969,15 @@ class TestPurgeImpl:
 
 class TestPurgeScopeImpl:
     def test_purge_scope_deletes_across_keys(self) -> None:
-        a1 = _memory_artifact(scope="s", scope_type="namespace", key="k1", version=1, value="v1")
-        a2 = _memory_artifact(scope="s", scope_type="namespace", key="k1", version=2, value="v2")
-        a3 = _memory_artifact(scope="s", scope_type="namespace", key="k2", version=1, value="v3")
+        a1 = _memory_artifact(
+            scope="s", scope_type="namespace", key="k1", version=1, value="v1"
+        )
+        a2 = _memory_artifact(
+            scope="s", scope_type="namespace", key="k1", version=2, value="v2"
+        )
+        a3 = _memory_artifact(
+            scope="s", scope_type="namespace", key="k2", version=1, value="v3"
+        )
 
         client_mock = MagicMock()
         client_mock.list_artifact_versions.side_effect = [
@@ -1992,7 +2020,9 @@ class TestPurgeScopeImpl:
         )
 
     def test_purge_scope_with_include_deleted(self) -> None:
-        active = _memory_artifact(scope="s", scope_type="namespace", key="k1", version=1, value="v1")
+        active = _memory_artifact(
+            scope="s", scope_type="namespace", key="k1", version=1, value="v1"
+        )
         tombstone = _memory_artifact(
             scope="s",
             scope_type="namespace",

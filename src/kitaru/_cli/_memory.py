@@ -345,7 +345,9 @@ def get_(
     ] = None,
     scope_type: Annotated[
         Literal["namespace", "flow", "execution"] | None,
-        Parameter(help="Memory scope type to read from. [required]", show_default=False),
+        Parameter(
+            help="Memory scope type to read from. [required]", show_default=False
+        ),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
@@ -479,7 +481,9 @@ def delete_(
     ] = None,
     scope_type: Annotated[
         Literal["namespace", "flow", "execution"] | None,
-        Parameter(help="Memory scope type to delete from. [required]", show_default=False),
+        Parameter(
+            help="Memory scope type to delete from. [required]", show_default=False
+        ),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:

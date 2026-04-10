@@ -39,7 +39,7 @@ def normalize_memory_prefix(prefix: str | None) -> str | None:
 
 
 def normalize_memory_scope_type(
-    scope_type: str | None,
+    scope_type: str,
 ) -> _MemoryScopeType:
     """Validate and normalize a transport-level memory scope type."""
     if scope_type is None:
@@ -70,7 +70,7 @@ def get_memory_payload(
     *,
     key: str,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
     version: int | None = None,
 ) -> dict[str, Any] | None:
     """Build a serialized payload for reading one memory value."""
@@ -97,7 +97,7 @@ def list_memory_payload(
     client: KitaruClient,
     *,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
     prefix: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build serialized payloads for listing memories in one scope."""
@@ -114,7 +114,7 @@ def history_memory_payload(
     *,
     key: str,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
 ) -> list[dict[str, Any]]:
     """Build serialized payloads for one memory key's full history."""
     return inspection.serialize_memory_history(
@@ -132,7 +132,7 @@ def set_memory_payload(
     key: str,
     value: Any,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
 ) -> dict[str, Any]:
     """Build a serialized payload for writing one memory value."""
     entry = client.memories.set(
@@ -149,7 +149,7 @@ def delete_memory_payload(
     *,
     key: str,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
 ) -> dict[str, Any] | None:
     """Build a serialized payload for deleting one memory key."""
     entry = client.memories.delete(
@@ -176,7 +176,7 @@ def purge_memory_payload(
     *,
     key: str,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
     keep: int | None = None,
 ) -> dict[str, Any]:
     """Build a serialized payload for purging one memory key."""
@@ -193,7 +193,7 @@ def purge_scope_memory_payload(
     client: KitaruClient,
     *,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
     keep: int | None = None,
     include_deleted: bool = False,
 ) -> dict[str, Any]:
@@ -211,7 +211,7 @@ def compact_memory_payload(
     client: KitaruClient,
     *,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
     key: str | None = None,
     keys: list[str] | None = None,
     source_mode: str | None = None,
@@ -246,7 +246,7 @@ def compaction_log_memory_payload(
     client: KitaruClient,
     *,
     scope: str,
-    scope_type: str | None,
+    scope_type: str,
 ) -> list[dict[str, Any]]:
     """Build serialized payloads for compaction audit log entries."""
     records = client.memories.compaction_log(

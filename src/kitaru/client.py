@@ -877,7 +877,7 @@ class _MemoriesAPI:
         self,
         scope: str,
         *,
-        scope_type: str,
+        scope_type: _MemoryScopeType,
     ) -> _MemoryScope:
         """Validate and construct a memory scope for client operations."""
         return _MemoryScope(
