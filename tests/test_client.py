@@ -243,7 +243,12 @@ def test_memories_get_delegates_to_entry_impl() -> None:
         patch("kitaru.client._get_entry_impl", return_value=entry) as get_entry_impl,
     ):
         client = KitaruClient()
-        result = client.memories.get("prefs", scope="repo_scope", version=2)
+        result = client.memories.get(
+            "prefs",
+            scope="repo_scope",
+            scope_type="namespace",
+            version=2,
+        )
 
     assert result == entry
     assert get_entry_impl.call_args.args[:2] == (
@@ -264,7 +269,11 @@ def test_memories_list_passes_prefix_to_storage_impl() -> None:
         patch("kitaru.client._list_impl", return_value=[entry]) as list_impl,
     ):
         client = KitaruClient()
-        result = client.memories.list(scope="repo_scope", prefix="repo_")
+        result = client.memories.list(
+            scope="repo_scope",
+            scope_type="namespace",
+            prefix="repo_",
+        )
 
     assert result == [entry]
     assert list_impl.call_args.args == (
@@ -287,7 +296,11 @@ def test_memories_history_delegates_to_history_impl() -> None:
         patch("kitaru.client._history_impl", return_value=history) as history_impl,
     ):
         client = KitaruClient()
-        result = client.memories.history("prefs", scope="repo_scope")
+        result = client.memories.history(
+            "prefs",
+            scope="repo_scope",
+            scope_type="namespace",
+        )
 
     assert result == history
     assert history_impl.call_args.args == (
@@ -337,7 +350,11 @@ def test_memories_delete_delegates_to_delete_impl() -> None:
         patch("kitaru.client._delete_impl", return_value=tombstone) as delete_impl,
     ):
         client = KitaruClient()
-        result = client.memories.delete("prefs", scope="repo_scope")
+        result = client.memories.delete(
+            "prefs",
+            scope="repo_scope",
+            scope_type="namespace",
+        )
 
     assert result == tombstone
     assert delete_impl.call_args.args == (
@@ -361,6 +378,7 @@ def test_memories_compact_delegates_to_compact_impl_with_source_mode() -> None:
         client = KitaruClient()
         result = client.memories.compact(
             scope="repo_scope",
+            scope_type="namespace",
             key="prefs",
             source_mode="history",
         )
@@ -384,6 +402,7 @@ def test_memories_compact_rejects_invalid_source_mode() -> None:
     with pytest.raises(KitaruUsageError, match="source_mode"):
         client.memories.compact(
             scope="repo_scope",
+            scope_type="namespace",
             key="prefs",
             source_mode="future",  # type: ignore[arg-type]
         )
@@ -396,16 +415,25 @@ def test_memories_methods_validate_scope_key_version_and_scope_type() -> None:
         client = KitaruClient()
 
     with pytest.raises(KitaruUsageError, match="Memory scope"):
-        client.memories.get("prefs", scope="bad:scope")
+        client.memories.get("prefs", scope="bad:scope", scope_type="namespace")
 
     with pytest.raises(KitaruUsageError, match="Memory key"):
-        client.memories.history("bad:key", scope="repo_scope")
+        client.memories.history("bad:key", scope="repo_scope", scope_type="namespace")
 
     with pytest.raises(KitaruUsageError, match="Memory version"):
-        client.memories.get("prefs", scope="repo_scope", version=0)
+        client.memories.get(
+            "prefs",
+            scope="repo_scope",
+            scope_type="namespace",
+            version=0,
+        )
 
     with pytest.raises(KitaruUsageError, match="Memory prefix"):
-        client.memories.list(scope="repo_scope", prefix="bad:prefix")
+        client.memories.list(
+            scope="repo_scope",
+            scope_type="namespace",
+            prefix="bad:prefix",
+        )
 
     with pytest.raises(KitaruUsageError, match="Memory scope_type"):
         client.memories.set(

@@ -43,6 +43,29 @@ def _require_scope(
     raise SystemExit(1)  # unreachable; satisfies type checker
 
 
+def _require_scope_type(
+    scope_type: Literal["namespace", "flow", "execution"] | None,
+    *,
+    command: str,
+    output: CLIOutputFormat,
+) -> Literal["namespace", "flow", "execution"]:
+    """Validate that ``--scope-type`` was provided for typed memory identity."""
+    if scope_type is not None:
+        return scope_type
+    _exit_with_error(
+        command,
+        "Missing required option `--scope-type`. "
+        "Run `kitaru memory scopes` to see available typed scopes.",
+        output=output,
+    )
+    raise SystemExit(1)  # unreachable; satisfies type checker
+
+
+def _memory_scope_label(scope: str, scope_type: str) -> str:
+    """Render a memory scope label that includes its type."""
+    return f"{scope} ({scope_type})"
+
+
 def _memory_timestamp(value: str | None) -> str:
     """Render an optional serialized timestamp for CLI output."""
     return value or "not available"
@@ -264,17 +287,27 @@ def list_(
         str | None,
         Parameter(help="Memory scope to inspect. [required]", show_default=False),
     ] = None,
+    scope_type: Annotated[
+        Literal["namespace", "flow", "execution"] | None,
+        Parameter(help="Memory scope type to inspect. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """List active memory entries for one explicit scope."""
     command = "memory.list"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
     entries = run_with_cli_error_boundary(
         lambda: facade.list_memory_payload(
             facade.KitaruClient(),
             scope=scope,
+            scope_type=scope_type,
         ),
         command=command,
         output=output_format,
@@ -286,11 +319,11 @@ def list_(
         return
 
     _emit_table(
-        f"Kitaru memory ({scope})",
+        f"Kitaru memory ({_memory_scope_label(scope, scope_type)})",
         ["Key", "Type", "Version", "Updated", "Scope Type", "Execution"],
         _memory_list_rows(entries),
         empty_message=(
-            f"none found for scope `{scope}`. "
+            f"none found for scope `{_memory_scope_label(scope, scope_type)}`. "
             "Run `kitaru memory scopes` to see available scopes."
         ),
     )
@@ -310,18 +343,28 @@ def get_(
         str | None,
         Parameter(help="Memory scope to read from. [required]", show_default=False),
     ] = None,
+    scope_type: Annotated[
+        Literal["namespace", "flow", "execution"] | None,
+        Parameter(help="Memory scope type to read from. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Read the latest value for one memory key in one explicit scope."""
     command = "memory.get"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.get_memory_payload(
             facade.KitaruClient(),
             key=key,
             scope=scope,
+            scope_type=scope_type,
         ),
         command=command,
         output=output_format,
@@ -331,7 +374,10 @@ def get_(
     if payload is None:
         _exit_with_error(
             command,
-            f"No memory entry found for key `{key}` in scope `{scope}`.",
+            (
+                f"No memory entry found for key `{key}` in scope "
+                f"`{_memory_scope_label(scope, scope_type)}`."
+            ),
             output=output_format,
         )
 
@@ -375,9 +421,8 @@ def set_(
     scope_type: Annotated[
         Literal["namespace", "flow", "execution"] | None,
         Parameter(
-            help=(
-                "Optional scope classification metadata: namespace, flow, or execution."
-            )
+            help="Memory scope type to write into. [required]",
+            show_default=False,
         ),
     ] = None,
     output: OutputFormatOption = "text",
@@ -386,6 +431,11 @@ def set_(
     command = "memory.set"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.set_memory_payload(
@@ -427,18 +477,28 @@ def delete_(
         str | None,
         Parameter(help="Memory scope to delete from. [required]", show_default=False),
     ] = None,
+    scope_type: Annotated[
+        Literal["namespace", "flow", "execution"] | None,
+        Parameter(help="Memory scope type to delete from. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Soft-delete one memory key from one explicit scope."""
     command = "memory.delete"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.delete_memory_payload(
             facade.KitaruClient(),
             key=key,
             scope=scope,
+            scope_type=scope_type,
         ),
         command=command,
         output=output_format,
@@ -448,7 +508,10 @@ def delete_(
     if payload is None:
         _exit_with_error(
             command,
-            f"No memory entry found for key `{key}` in scope `{scope}`.",
+            (
+                f"No memory entry found for key `{key}` in scope "
+                f"`{_memory_scope_label(scope, scope_type)}`."
+            ),
             output=output_format,
         )
 
@@ -479,6 +542,10 @@ def purge_(
         str | None,
         Parameter(help="Memory scope. [required]", show_default=False),
     ] = None,
+    scope_type: Annotated[
+        Literal["namespace", "flow", "execution"] | None,
+        Parameter(help="Memory scope type. [required]", show_default=False),
+    ] = None,
     keep: Annotated[
         int | None,
         Parameter(
@@ -496,12 +563,18 @@ def purge_(
     command = "memory.purge"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.purge_memory_payload(
             facade.KitaruClient(),
             key=key,
             scope=scope,
+            scope_type=scope_type,
             keep=keep,
         ),
         command=command,
@@ -516,7 +589,7 @@ def purge_(
     _print_success(
         f"Purged memory: {key}",
         detail=(
-            f"Scope: {payload['scope']} | "
+            f"Scope: {_memory_scope_label(payload['scope'], payload['scope_type'])} | "
             f"Versions deleted: {payload['versions_deleted']} | "
             f"Keys affected: {payload['keys_affected']}"
         ),
@@ -529,6 +602,10 @@ def purge_scope_(
     scope: Annotated[
         str | None,
         Parameter(help="Memory scope to purge. [required]", show_default=False),
+    ] = None,
+    scope_type: Annotated[
+        Literal["namespace", "flow", "execution"] | None,
+        Parameter(help="Memory scope type to purge. [required]", show_default=False),
     ] = None,
     keep: Annotated[
         int | None,
@@ -557,11 +634,17 @@ def purge_scope_(
     command = "memory.purge-scope"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.purge_scope_memory_payload(
             facade.KitaruClient(),
             scope=scope,
+            scope_type=scope_type,
             keep=keep,
             include_deleted=include_deleted,
         ),
@@ -575,7 +658,7 @@ def purge_scope_(
         return
 
     _print_success(
-        f"Purged scope: {scope}",
+        f"Purged scope: {_memory_scope_label(scope, scope_type)}",
         detail=(
             f"Versions deleted: {payload['versions_deleted']} | "
             f"Keys affected: {payload['keys_affected']}"
@@ -668,6 +751,10 @@ def compact_(
         str | None,
         Parameter(help="Memory scope. [required]", show_default=False),
     ] = None,
+    scope_type: Annotated[
+        Literal["namespace", "flow", "execution"] | None,
+        Parameter(help="Memory scope type. [required]", show_default=False),
+    ] = None,
     key: Annotated[
         str | None,
         Parameter(
@@ -740,12 +827,18 @@ def compact_(
     command = "memory.compact"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     keys_list = list(keys) if keys else None
     facade = _facade_module()
     payload = run_with_cli_error_boundary(
         lambda: facade.compact_memory_payload(
             facade.KitaruClient(),
             scope=scope,
+            scope_type=scope_type,
             key=key,
             keys=keys_list,
             source_mode=source_mode,
@@ -767,7 +860,7 @@ def compact_(
     _print_success(
         f"Compacted memory into: {entry['key']}",
         detail=(
-            f"Scope: {entry['scope']} | "
+            f"Scope: {_memory_scope_label(entry['scope'], entry['scope_type'])} | "
             f"Version: {entry['version']} | "
             f"Sources read: {payload['sources_read']} | "
             f"Source mode: {_memory_source_mode_label(payload['compaction_record'])}"
@@ -782,6 +875,10 @@ def compaction_log_(
         str | None,
         Parameter(help="Memory scope to inspect. [required]", show_default=False),
     ] = None,
+    scope_type: Annotated[
+        Literal["namespace", "flow", "execution"] | None,
+        Parameter(help="Memory scope type to inspect. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Show the compaction audit log for one scope.
@@ -793,11 +890,17 @@ def compaction_log_(
     command = "memory.compaction-log"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
     entries = run_with_cli_error_boundary(
         lambda: facade.compaction_log_memory_payload(
             facade.KitaruClient(),
             scope=scope,
+            scope_type=scope_type,
         ),
         command=command,
         output=output_format,
@@ -809,7 +912,7 @@ def compaction_log_(
         return
 
     _emit_table(
-        f"Kitaru compaction log ({scope})",
+        f"Kitaru compaction log ({_memory_scope_label(scope, scope_type)})",
         [
             "Operation",
             "Source Mode",
@@ -831,7 +934,10 @@ def compaction_log_(
             ]
             for e in entries
         ],
-        empty_message=f"no compaction records found for scope `{scope}`.",
+        empty_message=(
+            f"no compaction records found for scope "
+            f"`{_memory_scope_label(scope, scope_type)}`."
+        ),
     )
 
 
@@ -849,18 +955,28 @@ def history_(
         str | None,
         Parameter(help="Memory scope to inspect. [required]", show_default=False),
     ] = None,
+    scope_type: Annotated[
+        Literal["namespace", "flow", "execution"] | None,
+        Parameter(help="Memory scope type to inspect. [required]", show_default=False),
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """Show all versions for one memory key in one explicit scope."""
     command = "memory.history"
     output_format = _resolve_output_format(output)
     scope = _require_scope(scope, command=command, output=output_format)
+    scope_type = _require_scope_type(
+        scope_type,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
     entries = run_with_cli_error_boundary(
         lambda: facade.history_memory_payload(
             facade.KitaruClient(),
             key=key,
             scope=scope,
+            scope_type=scope_type,
         ),
         command=command,
         output=output_format,
@@ -870,7 +986,10 @@ def history_(
     if not entries:
         _exit_with_error(
             command,
-            f"No memory history found for key `{key}` in scope `{scope}`.",
+            (
+                f"No memory history found for key `{key}` in scope "
+                f"`{_memory_scope_label(scope, scope_type)}`."
+            ),
             output=output_format,
         )
 
@@ -879,7 +998,7 @@ def history_(
         return
 
     _emit_table(
-        f"Kitaru memory history ({scope}/{key})",
+        f"Kitaru memory history ({_memory_scope_label(scope, scope_type)}/{key})",
         ["Version", "Deleted", "Type", "Updated", "Execution", "Artifact ID"],
         _memory_history_rows(entries),
     )

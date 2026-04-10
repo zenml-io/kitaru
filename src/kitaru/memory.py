@@ -71,6 +71,11 @@ _MEMORY_VERSION_SORT = "desc:version_number"
 _MEMORY_STEP_EXTRA_PREFIX = {"kitaru": {"boundary": "memory"}}
 _MemoryScopeType = Literal["namespace", "flow", "execution"]
 _MemoryCompactionSourceMode = Literal["current", "history"]
+_MEMORY_SCOPE_TYPE_SORT_ORDER: dict[_MemoryScopeType, int] = {
+    "namespace": 0,
+    "flow": 1,
+    "execution": 2,
+}
 
 
 class MemoryEntry(BaseModel):
@@ -107,6 +112,7 @@ class PurgeResult(BaseModel):
     versions_deleted: int
     keys_affected: int
     scope: str
+    scope_type: str
 
     model_config = ConfigDict(frozen=True)
 
@@ -116,6 +122,7 @@ class CompactionRecord(BaseModel):
 
     operation: Literal["compact", "purge"]
     scope: str
+    scope_type: str
     timestamp: datetime
     source_keys: _list[str]
     source_versions: _list[int]
@@ -137,6 +144,7 @@ class CompactResult(BaseModel):
     entry: MemoryEntry
     sources_read: int
     scope: str
+    scope_type: str
     compaction_record: CompactionRecord
 
     model_config = ConfigDict(frozen=True)
@@ -440,9 +448,12 @@ def _coerce_memory_scope(scope: str, scope_type: str) -> _MemoryScope:
     )
 
 
-def _memory_artifact_name(scope: str, key: str) -> str:
+def _memory_artifact_name(scope: _MemoryScope, key: str) -> str:
     """Build the canonical artifact name for a memory key."""
-    return f"{_MEMORY_ARTIFACT_PREFIX}:{scope}:{key}"
+    return (
+        f"{_MEMORY_ARTIFACT_PREFIX}:"
+        f"{scope.scope_type}:{scope.scope}:{key}"
+    )
 
 
 def _memory_scope_tag(scope: str) -> str:
@@ -594,8 +605,8 @@ def _memory_metadata(
     return metadata
 
 
-def _parse_memory_artifact_identity(artifact_name: str) -> tuple[str, str]:
-    """Parse ``kitaru_mem:<scope>:<key>`` into its scope/key parts."""
+def _parse_memory_artifact_identity(artifact_name: str) -> tuple[_MemoryScope, str]:
+    """Parse ``kitaru_mem:<scope_type>:<scope>:<key>`` into its parts."""
     prefix = f"{_MEMORY_ARTIFACT_PREFIX}:"
     if not artifact_name.startswith(prefix):
         raise KitaruRuntimeError(
@@ -604,18 +615,24 @@ def _parse_memory_artifact_identity(artifact_name: str) -> tuple[str, str]:
 
     remainder = artifact_name.removeprefix(prefix)
     try:
-        scope, key = remainder.split(":", maxsplit=1)
+        scope_type, scope, key = remainder.split(":", maxsplit=2)
     except ValueError as exc:
         raise KitaruRuntimeError(
             f"Memory artifact name {artifact_name!r} is not in "
-            f"'{_MEMORY_ARTIFACT_PREFIX}:<scope>:<key>' format."
+            f"'{_MEMORY_ARTIFACT_PREFIX}:<scope_type>:<scope>:<key>' format."
         ) from exc
 
     return (
-        _validate_memory_identifier(
-            scope,
-            kind="scope",
-            error_type=KitaruRuntimeError,
+        _MemoryScope(
+            scope=_validate_memory_identifier(
+                scope,
+                kind="scope",
+                error_type=KitaruRuntimeError,
+            ),
+            scope_type=_validate_memory_scope_type(
+                scope_type,
+                error_type=KitaruRuntimeError,
+            ),
         ),
         _validate_memory_identifier(
             key,
@@ -624,6 +641,16 @@ def _parse_memory_artifact_identity(artifact_name: str) -> tuple[str, str]:
             _allow_compaction_prefix=True,
         ),
     )
+
+
+def _try_parse_memory_artifact_identity(
+    artifact_name: str,
+) -> tuple[_MemoryScope, str] | None:
+    """Best-effort parse for scan-style operations."""
+    try:
+        return _parse_memory_artifact_identity(artifact_name)
+    except KitaruRuntimeError:
+        return None
 
 
 def _parse_memory_version(raw_version: str) -> int:
@@ -655,6 +682,17 @@ def _resolve_scope_type(artifact: ArtifactVersionResponse) -> str:
     return str(raw_scope_type)
 
 
+def _matches_memory_scope(
+    requested: _MemoryScope,
+    actual: _MemoryScope,
+) -> bool:
+    """Return whether two memory scopes refer to the same typed identity."""
+    return (
+        requested.scope == actual.scope
+        and requested.scope_type == actual.scope_type
+    )
+
+
 def _infer_value_type(artifact: ArtifactVersionResponse) -> str:
     """Infer a stable human-readable type label for a memory value."""
     import_path = getattr(artifact.data_type, "import_path", None)
@@ -665,7 +703,18 @@ def _infer_value_type(artifact: ArtifactVersionResponse) -> str:
 
 def _artifact_to_memory_entry(artifact: ArtifactVersionResponse) -> MemoryEntry:
     """Convert a ZenML artifact version into a `MemoryEntry`."""
-    scope, key = _parse_memory_artifact_identity(artifact.name)
+    parsed_scope, key = _parse_memory_artifact_identity(artifact.name)
+    metadata_scope_type = _validate_memory_scope_type(
+        _resolve_scope_type(artifact),
+        error_type=KitaruRuntimeError,
+    )
+    if parsed_scope.scope_type != metadata_scope_type:
+        raise KitaruRuntimeError(
+            "Memory artifact identity mismatch for "
+            f"{artifact.name!r}: artifact name encodes scope_type "
+            f"{parsed_scope.scope_type!r}, but metadata encodes "
+            f"{metadata_scope_type!r}."
+        )
     flow_id = _optional_metadata_string(
         artifact.run_metadata.get(_MEMORY_FLOW_ID_METADATA_KEY)
     )
@@ -676,8 +725,8 @@ def _artifact_to_memory_entry(artifact: ArtifactVersionResponse) -> MemoryEntry:
         key=key,
         value_type=_infer_value_type(artifact),
         version=_parse_memory_version(artifact.version),
-        scope=scope,
-        scope_type=_resolve_scope_type(artifact),
+        scope=parsed_scope.scope,
+        scope_type=metadata_scope_type,
         created_at=artifact.created,
         is_deleted=_is_deleted_artifact(artifact),
         artifact_id=str(artifact.id),
@@ -757,6 +806,26 @@ def _memory_query_kwargs(
     return kwargs
 
 
+def _iter_matching_memory_artifacts(
+    artifacts: _list[ArtifactVersionResponse],
+    *,
+    scope: _MemoryScope | None = None,
+) -> Iterator[ArtifactVersionResponse]:
+    """Yield only well-formed memory artifacts, optionally scoped."""
+    for artifact in artifacts:
+        parsed = _try_parse_memory_artifact_identity(artifact.name)
+        if parsed is None:
+            continue
+        parsed_scope, _key = parsed
+        try:
+            _artifact_to_memory_entry(artifact)
+        except KitaruRuntimeError:
+            continue
+        if scope is not None and not _matches_memory_scope(scope, parsed_scope):
+            continue
+        yield artifact
+
+
 def _fetch_memory_artifact(
     client: Client,
     scope: _MemoryScope,
@@ -769,7 +838,7 @@ def _fetch_memory_artifact(
     page: Page[ArtifactVersionResponse] = client.list_artifact_versions(
         **_memory_query_kwargs(
             project=project,
-            artifact=_memory_artifact_name(scope.scope, key),
+            artifact=_memory_artifact_name(scope, key),
             version=version,
             page=1,
             size=1,
@@ -818,7 +887,7 @@ def _save_memory_artifact(
     with _temporary_active_project(client, project):
         created = save_artifact(
             data=value,
-            name=_memory_artifact_name(scope.scope, key),
+            name=_memory_artifact_name(scope, key),
             artifact_type=ArtifactType.DATA,
             tags=_memory_tags(
                 scope.scope,
@@ -978,15 +1047,24 @@ def _reindex_impl(
         artifact_id = str(artifact.id)
         artifact_name = artifact.name
         scope: str | None = None
+        parsed_scope_type: str | None = None
         key: str | None = None
         issue_recorded = False
 
         try:
-            scope, key = _parse_memory_artifact_identity(artifact_name)
+            parsed_scope, key = _parse_memory_artifact_identity(artifact_name)
+            scope = parsed_scope.scope
+            parsed_scope_type = parsed_scope.scope_type
             scope_type = _validate_memory_scope_type(
                 _resolve_scope_type(artifact),
                 error_type=KitaruRuntimeError,
             )
+            if parsed_scope_type != scope_type:
+                raise KitaruRuntimeError(
+                    "Memory artifact identity mismatch for "
+                    f"{artifact_name!r}: artifact name encodes scope_type "
+                    f"{parsed_scope_type!r}, but metadata encodes {scope_type!r}."
+                )
         except Exception as exc:
             counts.issues_count += 1
             issue_recorded = True
@@ -1239,7 +1317,11 @@ def _list_impl(
         client = _resolve_memory_client_factory(client_factory)()
         artifacts = _paginate_artifact_versions(
             client,
-            tags=[_MEMORY_TAG_MARKER, _memory_scope_tag(scope.scope)],
+            tags=[
+                _MEMORY_TAG_MARKER,
+                _memory_scope_tag(scope.scope),
+                _memory_scope_type_tag(scope.scope_type),
+            ],
             **_memory_query_kwargs(project=project),
         )
     except KitaruError:
@@ -1250,7 +1332,10 @@ def _list_impl(
         ) from exc
 
     latest_by_artifact: dict[str, ArtifactVersionResponse] = {}
-    for artifact in _sort_memory_artifacts(artifacts):
+    for artifact in _iter_matching_memory_artifacts(
+        _sort_memory_artifacts(artifacts),
+        scope=scope,
+    ):
         latest_by_artifact.setdefault(artifact.name, artifact)
 
     entries = [
@@ -1286,21 +1371,28 @@ def _list_scopes_impl(
     for artifact in _sort_memory_artifacts(artifacts):
         latest_by_artifact.setdefault(artifact.name, artifact)
 
-    scope_stats: dict[str, tuple[str, int]] = {}
-    for artifact in latest_by_artifact.values():
+    scope_stats: dict[tuple[str, str], int] = {}
+    for artifact in _iter_matching_memory_artifacts([*latest_by_artifact.values()]):
         if _is_deleted_artifact(artifact):
             continue
-        scope, _key = _parse_memory_artifact_identity(artifact.name)
-        scope_type = _resolve_scope_type(artifact)
-        prev_type, prev_count = scope_stats.get(scope, (scope_type, 0))
-        scope_stats[scope] = (prev_type, prev_count + 1)
+        entry = _artifact_to_memory_entry(artifact)
+        identity = (entry.scope, entry.scope_type)
+        scope_stats[identity] = scope_stats.get(identity, 0) + 1
 
     return sorted(
         [
             MemoryScopeInfo(scope=scope, scope_type=scope_type, entry_count=count)
-            for scope, (scope_type, count) in scope_stats.items()
+            for (scope, scope_type), count in scope_stats.items()
         ],
-        key=lambda info: info.scope,
+        key=lambda info: (
+            info.scope,
+            _MEMORY_SCOPE_TYPE_SORT_ORDER[
+                _validate_memory_scope_type(
+                    info.scope_type,
+                    error_type=KitaruRuntimeError,
+                )
+            ],
+        ),
     )
 
 
@@ -1316,7 +1408,7 @@ def _history_impl(
         client = _resolve_memory_client_factory(client_factory)()
         artifacts = _paginate_artifact_versions(
             client,
-            artifact=_memory_artifact_name(scope.scope, key),
+            artifact=_memory_artifact_name(scope, key),
             **_memory_query_kwargs(project=project),
         )
     except KitaruError:
@@ -1329,7 +1421,10 @@ def _history_impl(
 
     return [
         _artifact_to_memory_entry(artifact)
-        for artifact in _sort_memory_artifacts(artifacts)
+        for artifact in _iter_matching_memory_artifacts(
+            _sort_memory_artifacts(artifacts),
+            scope=scope,
+        )
     ]
 
 
@@ -1394,7 +1489,7 @@ def _write_compaction_record(
     project: str | None = None,
 ) -> None:
     """Persist a compaction audit record under the reserved prefix."""
-    log_key = f"{_COMPACTION_LOG_PREFIX}{scope.scope}"
+    log_key = f"{_COMPACTION_LOG_PREFIX}{scope.scope_type}/{scope.scope}"
     try:
         client = _resolve_memory_client_factory(client_factory)()
         flow_context: _ExecutionFlowContext | None = None
@@ -1430,12 +1525,12 @@ def _compaction_log_impl(
     project: str | None = None,
 ) -> _list[CompactionRecord]:
     """Read all compaction audit records for a scope."""
-    log_key = f"{_COMPACTION_LOG_PREFIX}{scope.scope}"
+    log_key = f"{_COMPACTION_LOG_PREFIX}{scope.scope_type}/{scope.scope}"
     try:
         client = _resolve_memory_client_factory(client_factory)()
         artifacts = _paginate_artifact_versions(
             client,
-            artifact=_memory_artifact_name(scope.scope, log_key),
+            artifact=_memory_artifact_name(scope, log_key),
             **_memory_query_kwargs(project=project),
         )
     except KitaruError:
@@ -1446,7 +1541,10 @@ def _compaction_log_impl(
         ) from exc
 
     records: _list[CompactionRecord] = []
-    for artifact in _sort_memory_artifacts(artifacts):
+    for artifact in _iter_matching_memory_artifacts(
+        _sort_memory_artifacts(artifacts),
+        scope=scope,
+    ):
         if _is_deleted_artifact(artifact):
             continue
         try:
@@ -1503,10 +1601,13 @@ def _collect_single_key_history_entries(
     source_entries: _list[tuple[str, int, Any]] = []
     artifacts = _paginate_artifact_versions(
         client,
-        artifact=_memory_artifact_name(scope.scope, key),
+        artifact=_memory_artifact_name(scope, key),
         **_memory_query_kwargs(project=project),
     )
-    for artifact in _sort_memory_artifacts(artifacts):
+    for artifact in _iter_matching_memory_artifacts(
+        _sort_memory_artifacts(artifacts),
+        scope=scope,
+    ):
         if _is_deleted_artifact(artifact):
             continue
         try:
@@ -1573,7 +1674,7 @@ def _delete_preflighted_memory_versions(
     if not to_delete:
         return 0
 
-    artifact_name = _memory_artifact_name(scope.scope, key)
+    artifact_name = _memory_artifact_name(scope, key)
     try:
         unused_versions = _list_unused_memory_artifact_versions(
             client,
@@ -1631,7 +1732,7 @@ def _purge_impl(
         client = _resolve_memory_client_factory(client_factory)()
         artifacts = _paginate_artifact_versions(
             client,
-            artifact=_memory_artifact_name(scope.scope, key),
+            artifact=_memory_artifact_name(scope, key),
             **_memory_query_kwargs(project=project),
         )
     except KitaruError:
@@ -1642,7 +1743,12 @@ def _purge_impl(
             f"in scope {scope.scope!r}: {exc}"
         ) from exc
 
-    sorted_artifacts = _sort_memory_artifacts(artifacts)
+    sorted_artifacts = [*(
+        _iter_matching_memory_artifacts(
+            _sort_memory_artifacts(artifacts),
+            scope=scope,
+        )
+    )]
     to_delete = sorted_artifacts[effective_keep:]
 
     deleted_count = _delete_preflighted_memory_versions(
@@ -1657,6 +1763,7 @@ def _purge_impl(
         versions_deleted=deleted_count,
         keys_affected=1 if deleted_count > 0 else 0,
         scope=scope.scope,
+        scope_type=scope.scope_type,
     )
 
     if deleted_count > 0:
@@ -1664,6 +1771,7 @@ def _purge_impl(
         record = CompactionRecord(
             operation="purge",
             scope=scope.scope,
+            scope_type=scope.scope_type,
             timestamp=datetime.now(),
             source_keys=[key],
             source_versions=source_versions,
@@ -1703,7 +1811,11 @@ def _purge_scope_impl(
         client = _resolve_memory_client_factory(client_factory)()
         artifacts = _paginate_artifact_versions(
             client,
-            tags=[_MEMORY_TAG_MARKER, _memory_scope_tag(scope.scope)],
+            tags=[
+                _MEMORY_TAG_MARKER,
+                _memory_scope_tag(scope.scope),
+                _memory_scope_type_tag(scope.scope_type),
+            ],
             **_memory_query_kwargs(project=project),
         )
     except KitaruError:
@@ -1714,7 +1826,10 @@ def _purge_scope_impl(
         ) from exc
 
     by_name: dict[str, _list[ArtifactVersionResponse]] = {}
-    for artifact in _sort_memory_artifacts(artifacts):
+    for artifact in _iter_matching_memory_artifacts(
+        _sort_memory_artifacts(artifacts),
+        scope=scope,
+    ):
         by_name.setdefault(artifact.name, []).append(artifact)
 
     total_deleted = 0
@@ -1761,12 +1876,14 @@ def _purge_scope_impl(
         versions_deleted=total_deleted,
         keys_affected=keys_affected_count,
         scope=scope.scope,
+        scope_type=scope.scope_type,
     )
 
     if total_deleted > 0:
         record = CompactionRecord(
             operation="purge",
             scope=scope.scope,
+            scope_type=scope.scope_type,
             timestamp=datetime.now(),
             source_keys=all_source_keys,
             source_versions=all_source_versions,
@@ -1900,6 +2017,7 @@ def _compact_impl(
     record = CompactionRecord(
         operation="compact",
         scope=scope.scope,
+        scope_type=scope.scope_type,
         timestamp=datetime.now(),
         source_keys=[src_key for src_key, _, _ in source_entries],
         source_versions=[src_version for _, src_version, _ in source_entries],
@@ -1923,6 +2041,7 @@ def _compact_impl(
         entry=new_entry,
         sources_read=len(source_entries),
         scope=scope.scope,
+        scope_type=scope.scope_type,
         compaction_record=record,
     )
 

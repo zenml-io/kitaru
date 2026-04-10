@@ -122,6 +122,7 @@ def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
         cast(KitaruClient, client),
         key="prefs",
         scope="exec-123",
+        scope_type="execution",
         version=3,
     )
 
@@ -140,7 +141,12 @@ def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
         "value": {"theme": "dark"},
         "value_format": "json",
     }
-    memories.get.assert_called_once_with("prefs", scope="exec-123", version=3)
+    memories.get.assert_called_once_with(
+        "prefs",
+        scope="exec-123",
+        scope_type="execution",
+        version=3,
+    )
     artifacts.get.assert_called_once_with(entry.artifact_id)
 
 
@@ -148,7 +154,12 @@ def test_get_memory_payload_returns_none_when_key_missing() -> None:
     client, memories, artifacts = _client_with_mocks()
     memories.get.return_value = None
 
-    payload = get_memory_payload(cast(KitaruClient, client), key="prefs", scope="repo")
+    payload = get_memory_payload(
+        cast(KitaruClient, client),
+        key="prefs",
+        scope="repo",
+        scope_type="namespace",
+    )
 
     assert payload is None
     artifacts.get.assert_not_called()
@@ -172,19 +183,29 @@ def test_list_and_history_memory_payloads_serialize_entries() -> None:
     list_payload = list_memory_payload(
         cast(KitaruClient, client),
         scope="repo_scope",
+        scope_type="namespace",
         prefix="repo_",
     )
     history_payload = history_memory_payload(
         cast(KitaruClient, client),
         key="prefs",
         scope="repo_scope",
+        scope_type="namespace",
     )
 
     assert [entry["key"] for entry in list_payload] == ["repo_alpha", "repo_beta"]
     assert [entry["version"] for entry in history_payload] == [2, 1]
     assert [entry["is_deleted"] for entry in history_payload] == [True, False]
-    memories.list.assert_called_once_with(scope="repo_scope", prefix="repo_")
-    memories.history.assert_called_once_with("prefs", scope="repo_scope")
+    memories.list.assert_called_once_with(
+        scope="repo_scope",
+        scope_type="namespace",
+        prefix="repo_",
+    )
+    memories.history.assert_called_once_with(
+        "prefs",
+        scope="repo_scope",
+        scope_type="namespace",
+    )
 
 
 def test_set_and_delete_memory_payloads_delegate_to_client_namespace() -> None:
@@ -209,6 +230,7 @@ def test_set_and_delete_memory_payloads_delegate_to_client_namespace() -> None:
         cast(KitaruClient, client),
         key="prefs",
         scope="repo_scope",
+        scope_type="namespace",
     )
 
     assert set_payload["version"] == 4
@@ -221,7 +243,11 @@ def test_set_and_delete_memory_payloads_delegate_to_client_namespace() -> None:
         scope="repo_scope",
         scope_type="flow",
     )
-    memories.delete.assert_called_once_with("prefs", scope="repo_scope")
+    memories.delete.assert_called_once_with(
+        "prefs",
+        scope="repo_scope",
+        scope_type="namespace",
+    )
 
 
 def test_reindex_memory_payload_delegates_and_serializes_result() -> None:
@@ -264,7 +290,12 @@ def test_delete_memory_payload_returns_none_when_key_missing() -> None:
     memories.delete.return_value = None
 
     assert (
-        delete_memory_payload(cast(KitaruClient, client), key="prefs", scope="repo")
+        delete_memory_payload(
+            cast(KitaruClient, client),
+            key="prefs",
+            scope="repo",
+            scope_type="namespace",
+        )
         is None
     )
 
@@ -318,38 +349,56 @@ def test_normalize_memory_compaction_source_mode_rejects_invalid_values() -> Non
 def test_purge_memory_payload_delegates_and_serializes() -> None:
     client, memories, _artifacts = _client_with_mocks()
     memories.purge.return_value = PurgeResult(
-        versions_deleted=3, keys_affected=1, scope="repo"
+        versions_deleted=3,
+        keys_affected=1,
+        scope="repo",
+        scope_type="namespace",
     )
 
     result = purge_memory_payload(
         cast(KitaruClient, client),
         key="prefs",
         scope="repo",
+        scope_type="namespace",
         keep=2,
     )
 
     assert result["versions_deleted"] == 3
     assert result["keys_affected"] == 1
     assert result["scope"] == "repo"
-    memories.purge.assert_called_once_with("prefs", scope="repo", keep=2)
+    assert result["scope_type"] == "namespace"
+    memories.purge.assert_called_once_with(
+        "prefs",
+        scope="repo",
+        scope_type="namespace",
+        keep=2,
+    )
 
 
 def test_purge_scope_memory_payload_delegates() -> None:
     client, memories, _artifacts = _client_with_mocks()
     memories.purge_scope.return_value = PurgeResult(
-        versions_deleted=5, keys_affected=2, scope="repo"
+        versions_deleted=5,
+        keys_affected=2,
+        scope="repo",
+        scope_type="namespace",
     )
 
     result = purge_scope_memory_payload(
         cast(KitaruClient, client),
         scope="repo",
+        scope_type="namespace",
         keep=1,
         include_deleted=True,
     )
 
     assert result["versions_deleted"] == 5
+    assert result["scope_type"] == "namespace"
     memories.purge_scope.assert_called_once_with(
-        scope="repo", keep=1, include_deleted=True
+        scope="repo",
+        scope_type="namespace",
+        keep=1,
+        include_deleted=True,
     )
 
 
@@ -364,6 +413,7 @@ def test_compact_memory_payload_delegates_with_source_mode() -> None:
     record = CompactionRecord(
         operation="compact",
         scope="repo",
+        scope_type="namespace",
         timestamp=datetime(2026, 4, 1, tzinfo=UTC),
         source_keys=["prefs"],
         source_versions=[3],
@@ -380,20 +430,25 @@ def test_compact_memory_payload_delegates_with_source_mode() -> None:
         entry=entry,
         sources_read=1,
         scope="repo",
+        scope_type="namespace",
         compaction_record=record,
     )
 
     result = compact_memory_payload(
         cast(KitaruClient, client),
         scope="repo",
+        scope_type="namespace",
         key="prefs",
         source_mode="current",
     )
 
     assert result["entry"]["key"] == "prefs"
+    assert result["scope_type"] == "namespace"
+    assert result["compaction_record"]["scope_type"] == "namespace"
     assert result["compaction_record"]["source_mode"] == "current"
     memories.compact.assert_called_once_with(
         scope="repo",
+        scope_type="namespace",
         key="prefs",
         keys=None,
         source_mode="current",
@@ -414,6 +469,7 @@ def test_compaction_log_memory_payload_delegates() -> None:
     record = CompactionRecord(
         operation="purge",
         scope="repo",
+        scope_type="namespace",
         timestamp=datetime(2026, 4, 1, tzinfo=UTC),
         source_keys=["k1"],
         source_versions=[1, 2],
@@ -430,10 +486,15 @@ def test_compaction_log_memory_payload_delegates() -> None:
     result = compaction_log_memory_payload(
         cast(KitaruClient, client),
         scope="repo",
+        scope_type="namespace",
     )
 
     assert len(result) == 1
     assert result[0]["operation"] == "purge"
+    assert result[0]["scope_type"] == "namespace"
     assert result[0]["versions_deleted"] == 2
     assert result[0]["source_mode"] is None
-    memories.compaction_log.assert_called_once_with(scope="repo")
+    memories.compaction_log.assert_called_once_with(
+        scope="repo",
+        scope_type="namespace",
+    )

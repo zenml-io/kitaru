@@ -1991,19 +1991,36 @@ def test_model_list_reads_transported_registry(
 
 
 @pytest.mark.parametrize(
-    "args",
+    ("args", "expected_flag"),
     [
-        ["memory", "list"],
-        ["memory", "get", "some_key"],
-        ["memory", "set", "some_key", "some_value"],
-        ["memory", "delete", "some_key"],
-        ["memory", "history", "some_key"],
+        (["memory", "list"], "--scope"),
+        (["memory", "list", "--scope", "demo"], "--scope-type"),
+        (["memory", "get", "some_key"], "--scope"),
+        (["memory", "get", "some_key", "--scope", "demo"], "--scope-type"),
+        (["memory", "set", "some_key", "value"], "--scope"),
+        (["memory", "set", "some_key", "value", "--scope", "demo"], "--scope-type"),
+        (["memory", "delete", "some_key"], "--scope"),
+        (["memory", "delete", "some_key", "--scope", "demo"], "--scope-type"),
+        (["memory", "history", "some_key"], "--scope"),
+        (["memory", "history", "some_key", "--scope", "demo"], "--scope-type"),
     ],
-    ids=["list", "get", "set", "delete", "history"],
+    ids=[
+        "list-missing-scope",
+        "list-missing-scope-type",
+        "get-missing-scope",
+        "get-missing-scope-type",
+        "set-missing-scope",
+        "set-missing-scope-type",
+        "delete-missing-scope",
+        "delete-missing-scope-type",
+        "history-missing-scope",
+        "history-missing-scope-type",
+    ],
 )
 def test_memory_missing_scope_shows_helpful_error(
     capsys: pytest.CaptureFixture[str],
     args: list[str],
+    expected_flag: str,
 ) -> None:
     """Omitting `--scope` should suggest `kitaru memory scopes`."""
     with pytest.raises(SystemExit) as exc_info:
@@ -2012,7 +2029,7 @@ def test_memory_missing_scope_shows_helpful_error(
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
     assert "kitaru memory scopes" in err
-    assert "--scope" in err
+    assert expected_flag in err
 
 
 def test_memory_list_renders_entries(capsys: pytest.CaptureFixture[str]) -> None:
@@ -2041,13 +2058,17 @@ def test_memory_list_renders_entries(capsys: pytest.CaptureFixture[str]) -> None
         ) as mock_list_memory,
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "list", "--scope", "my_repo"])
+        app(["memory", "list", "--scope", "my_repo", "--scope-type", "namespace"])
 
     assert exc_info.value.code == 0
     client_cls.assert_called_once_with()
-    mock_list_memory.assert_called_once_with(fake_client, scope="my_repo")
+    mock_list_memory.assert_called_once_with(
+        fake_client,
+        scope="my_repo",
+        scope_type="namespace",
+    )
     output = capsys.readouterr().out
-    assert "Kitaru memory (my_repo)" in output
+    assert "Kitaru memory (my_repo (namespace))" in output
     assert "repo_conventions" in output
     assert "style_guide" in output
     assert "kr-123" in output
@@ -2065,7 +2086,16 @@ def test_memory_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "list", "--scope", "my_repo", "--output", "json"])
+        app([
+            "memory",
+            "list",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+            "--output",
+            "json",
+        ])
 
     assert exc_info.value.code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -2083,7 +2113,14 @@ def test_memory_list_empty_scope_suggests_scopes_command(
         patch("kitaru.cli.list_memory_payload", return_value=[]),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "list", "--scope", "unknown_repo"])
+        app([
+            "memory",
+            "list",
+            "--scope",
+            "unknown_repo",
+            "--scope-type",
+            "namespace",
+        ])
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
@@ -2172,13 +2209,22 @@ def test_memory_get_renders_value_sections(capsys: pytest.CaptureFixture[str]) -
         ) as mock_get_memory,
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "get", "repo_conventions", "--scope", "my_repo"])
+        app([
+            "memory",
+            "get",
+            "repo_conventions",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "flow",
+        ])
 
     assert exc_info.value.code == 0
     mock_get_memory.assert_called_once_with(
         fake_client,
         key="repo_conventions",
         scope="my_repo",
+        scope_type="flow",
     )
     output = capsys.readouterr().out
     assert "Kitaru memory" in output
@@ -2207,7 +2253,15 @@ def test_memory_get_execution_scope_shows_flow_context(
         patch("kitaru.cli.get_memory_payload", return_value=payload),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "get", "scratch", "--scope", "exec-123"])
+        app([
+            "memory",
+            "get",
+            "scratch",
+            "--scope",
+            "exec-123",
+            "--scope-type",
+            "execution",
+        ])
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
@@ -2224,11 +2278,19 @@ def test_memory_get_errors_when_missing(capsys: pytest.CaptureFixture[str]) -> N
         patch("kitaru.cli.get_memory_payload", return_value=None),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "get", "prefs", "--scope", "my_repo"])
+        app([
+            "memory",
+            "get",
+            "prefs",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+        ])
 
     assert exc_info.value.code == 1
     assert (
-        "No memory entry found for key `prefs` in scope `my_repo`."
+        "No memory entry found for key `prefs` in scope `my_repo (namespace)`."
         in capsys.readouterr().err
     )
 
@@ -2261,6 +2323,8 @@ def test_memory_set_parses_json_value_and_reports_success(
                 '{"test_framework": "pytest"}',
                 "--scope",
                 "my_repo",
+                "--scope-type",
+                "namespace",
             ]
         )
 
@@ -2270,7 +2334,7 @@ def test_memory_set_parses_json_value_and_reports_success(
         key="repo_conventions",
         value={"test_framework": "pytest"},
         scope="my_repo",
-        scope_type=None,
+        scope_type="namespace",
     )
     output = capsys.readouterr().out
     assert "Saved memory: repo_conventions" in output
@@ -2340,7 +2404,17 @@ def test_memory_get_json_output(capsys: pytest.CaptureFixture[str]) -> None:
         patch("kitaru.cli.get_memory_payload", return_value=payload),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "get", "repo_conventions", "--scope", "my_repo", "-o", "json"])
+        app([
+            "memory",
+            "get",
+            "repo_conventions",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+            "-o",
+            "json",
+        ])
 
     assert exc_info.value.code == 0
     envelope = json.loads(capsys.readouterr().out)
@@ -2367,13 +2441,22 @@ def test_memory_delete_renders_success(capsys: pytest.CaptureFixture[str]) -> No
         ) as mock_delete_memory,
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "delete", "obsolete_prefs", "--scope", "my_repo"])
+        app([
+            "memory",
+            "delete",
+            "obsolete_prefs",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+        ])
 
     assert exc_info.value.code == 0
     mock_delete_memory.assert_called_once_with(
         fake_client,
         key="obsolete_prefs",
         scope="my_repo",
+        scope_type="namespace",
     )
     output = capsys.readouterr().out
     assert "Deleted memory: obsolete_prefs" in output
@@ -2387,11 +2470,19 @@ def test_memory_delete_errors_when_missing(capsys: pytest.CaptureFixture[str]) -
         patch("kitaru.cli.delete_memory_payload", return_value=None),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "delete", "prefs", "--scope", "my_repo"])
+        app([
+            "memory",
+            "delete",
+            "prefs",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+        ])
 
     assert exc_info.value.code == 1
     assert (
-        "No memory entry found for key `prefs` in scope `my_repo`."
+        "No memory entry found for key `prefs` in scope `my_repo (namespace)`."
         in capsys.readouterr().err
     )
 
@@ -2410,7 +2501,17 @@ def test_memory_delete_json_output(capsys: pytest.CaptureFixture[str]) -> None:
         patch("kitaru.cli.delete_memory_payload", return_value=payload),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "delete", "obsolete_prefs", "--scope", "my_repo", "-o", "json"])
+        app([
+            "memory",
+            "delete",
+            "obsolete_prefs",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+            "-o",
+            "json",
+        ])
 
     assert exc_info.value.code == 0
     envelope = json.loads(capsys.readouterr().out)
@@ -2446,16 +2547,25 @@ def test_memory_history_renders_versions(capsys: pytest.CaptureFixture[str]) -> 
         ) as mock_history_memory,
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "history", "repo_conventions", "--scope", "my_repo"])
+        app([
+            "memory",
+            "history",
+            "repo_conventions",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+        ])
 
     assert exc_info.value.code == 0
     mock_history_memory.assert_called_once_with(
         fake_client,
         key="repo_conventions",
         scope="my_repo",
+        scope_type="namespace",
     )
     output = capsys.readouterr().out
-    assert "Kitaru memory history (my_repo/repo_conventions)" in output
+    assert "Kitaru memory history (my_repo (namespace)/repo_conventions)" in output
     assert "kr-333" in output
     assert "yes" in output.lower()
 
@@ -2472,7 +2582,17 @@ def test_memory_history_json_output(capsys: pytest.CaptureFixture[str]) -> None:
         patch("kitaru.cli.history_memory_payload", return_value=history),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "history", "prefs", "--scope", "my_repo", "-o", "json"])
+        app([
+            "memory",
+            "history",
+            "prefs",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+            "-o",
+            "json",
+        ])
 
     assert exc_info.value.code == 0
     envelope = json.loads(capsys.readouterr().out)
@@ -2488,11 +2608,19 @@ def test_memory_history_errors_when_empty(capsys: pytest.CaptureFixture[str]) ->
         patch("kitaru.cli.history_memory_payload", return_value=[]),
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["memory", "history", "prefs", "--scope", "my_repo"])
+        app([
+            "memory",
+            "history",
+            "prefs",
+            "--scope",
+            "my_repo",
+            "--scope-type",
+            "namespace",
+        ])
 
     assert exc_info.value.code == 1
     assert (
-        "No memory history found for key `prefs` in scope `my_repo`."
+        "No memory history found for key `prefs` in scope `my_repo (namespace)`."
         in capsys.readouterr().err
     )
 
@@ -2585,10 +2713,12 @@ class TestMemoryMaintenance:
             "entry": {
                 "key": "conventions/test_runner",
                 "scope": "repo_docs",
+                "scope_type": "namespace",
                 "version": 3,
             },
             "sources_read": 1,
             "scope": "repo_docs",
+            "scope_type": "namespace",
             "compaction_record": {
                 "source_mode": "current",
                 "source_keys": ["conventions/test_runner"],
@@ -2608,6 +2738,8 @@ class TestMemoryMaintenance:
                     "compact",
                     "--scope",
                     "repo_docs",
+                    "--scope-type",
+                    "namespace",
                     "--key",
                     "conventions/test_runner",
                 ]
@@ -2620,9 +2752,10 @@ class TestMemoryMaintenance:
     def test_compact_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
         """`kitaru memory compact --output json` should emit a JSON item."""
         compact_payload = {
-            "entry": {"key": "k", "scope": "s", "version": 1},
+            "entry": {"key": "k", "scope": "s", "scope_type": "namespace", "version": 1},
             "sources_read": 1,
             "scope": "s",
+            "scope_type": "namespace",
             "compaction_record": {"source_mode": "current"},
         }
         with (
@@ -2639,6 +2772,8 @@ class TestMemoryMaintenance:
                     "compact",
                     "--scope",
                     "s",
+                    "--scope-type",
+                    "namespace",
                     "--key",
                     "k",
                     "--output",
@@ -2655,6 +2790,7 @@ class TestMemoryMaintenance:
         """`kitaru memory purge` should delegate and exit zero."""
         purge_payload = {
             "scope": "repo_docs",
+            "scope_type": "namespace",
             "versions_deleted": 2,
             "keys_affected": 1,
         }
@@ -2673,6 +2809,8 @@ class TestMemoryMaintenance:
                     "conventions/test_runner",
                     "--scope",
                     "repo_docs",
+                    "--scope-type",
+                    "namespace",
                     "--keep",
                     "1",
                 ]
@@ -2703,6 +2841,8 @@ class TestMemoryMaintenance:
                     "purge-scope",
                     "--scope",
                     "repo_docs",
+                    "--scope-type",
+                    "namespace",
                     "--keep",
                     "1",
                 ]
@@ -2720,6 +2860,7 @@ class TestMemoryMaintenance:
             {
                 "operation": "compact",
                 "scope": "repo_docs",
+                "scope_type": "namespace",
                 "target_key": "summaries/conventions",
                 "target_version": 1,
                 "source_keys": [
@@ -2743,7 +2884,14 @@ class TestMemoryMaintenance:
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
-            app(["memory", "compaction-log", "--scope", "repo_docs"])
+            app([
+                "memory",
+                "compaction-log",
+                "--scope",
+                "repo_docs",
+                "--scope-type",
+                "namespace",
+            ])
 
         assert exc_info.value.code == 0
         output = capsys.readouterr().out
@@ -2757,6 +2905,7 @@ class TestMemoryMaintenance:
             {
                 "operation": "purge",
                 "scope": "repo_docs",
+                "scope_type": "namespace",
                 "versions_deleted": 3,
                 "keep": 1,
                 "timestamp": "2026-04-03T13:00:00+00:00",
@@ -2776,6 +2925,8 @@ class TestMemoryMaintenance:
                     "compaction-log",
                     "--scope",
                     "repo_docs",
+                    "--scope-type",
+                    "namespace",
                     "--output",
                     "json",
                 ]
