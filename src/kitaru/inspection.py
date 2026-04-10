@@ -573,6 +573,7 @@ def serialize_execution_summary(execution: Execution) -> dict[str, Any]:
     """Serialize execution list-item details."""
     return {
         "exec_id": execution.exec_id,
+        "flow_id": execution.flow_id,
         "flow_name": execution.flow_name,
         "status": execution.status.value,
         "started_at": to_jsonable(execution.started_at, fallback_repr=True),

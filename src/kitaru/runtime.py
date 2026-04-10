@@ -24,6 +24,7 @@ class _FlowScope:
     """Internal runtime context for the currently executing flow."""
 
     name: str | None
+    flow_id: str | None = None
     execution_id: str | None = None
 
 
@@ -81,12 +82,33 @@ def _get_zenml_flow_name() -> str | None:
         if flow_name := _shared_normalize_flow_name(getattr(pipeline, "name", None)):
             return flow_name
 
-    if (run_context := DynamicPipelineRunContext.get()) and (
-        flow_name := _shared_normalize_flow_name(
+    if run_context := DynamicPipelineRunContext.get():
+        run_pipeline = getattr(getattr(run_context, "run", None), "pipeline", None)
+        if flow_name := _shared_normalize_flow_name(getattr(run_pipeline, "name", None)):
+            return flow_name
+
+        if flow_name := _shared_normalize_flow_name(
             getattr(run_context.pipeline, "name", None)
-        )
-    ):
-        return flow_name
+        ):
+            return flow_name
+
+    return None
+
+
+def _get_zenml_flow_id() -> str | None:
+    """Resolve the active flow ID from ZenML runtime contexts, if available."""
+    if step_context := StepContext.get():
+        pipeline = getattr(step_context.pipeline_run, "pipeline", None)
+        if flow_id := _to_optional_str(getattr(pipeline, "id", None)):
+            return flow_id
+
+    if run_context := DynamicPipelineRunContext.get():
+        run_pipeline = getattr(getattr(run_context, "run", None), "pipeline", None)
+        if flow_id := _to_optional_str(getattr(run_pipeline, "id", None)):
+            return flow_id
+
+        if flow_id := _to_optional_str(getattr(run_context.pipeline, "id", None)):
+            return flow_id
 
     return None
 
@@ -95,14 +117,20 @@ def _get_zenml_flow_name() -> str | None:
 def _flow_scope(
     *,
     name: str | None,
+    flow_id: str | None = None,
     execution_id: str | None = None,
 ) -> Iterator[None]:
     """Set flow runtime scope for the active execution context."""
+    resolved_flow_id = flow_id if flow_id is not None else _get_zenml_flow_id()
     resolved_execution_id = (
         execution_id if execution_id is not None else _get_zenml_execution_id()
     )
     flow_token = _CURRENT_FLOW_SCOPE.set(
-        _FlowScope(name=name, execution_id=resolved_execution_id)
+        _FlowScope(
+            name=name,
+            flow_id=resolved_flow_id,
+            execution_id=resolved_execution_id,
+        )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
     try:
@@ -161,6 +189,13 @@ def _suspend_checkpoint_scope() -> Iterator[None]:
 def _get_current_flow() -> _FlowScope | None:
     """Get the currently active flow scope, if any."""
     return _CURRENT_FLOW_SCOPE.get()
+
+
+def _get_current_flow_id() -> str | None:
+    """Get the durable ID for the active flow from Kitaru or ZenML context."""
+    if (flow_scope := _get_current_flow()) and flow_scope.flow_id is not None:
+        return flow_scope.flow_id
+    return _get_zenml_flow_id()
 
 
 def _is_inside_flow() -> bool:

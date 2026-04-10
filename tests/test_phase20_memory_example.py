@@ -56,6 +56,8 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
         snapshot = run_workflow(topic="memory-browser", namespace_scope=namespace_scope)
 
     execution_id = cast(str, snapshot["execution_id"])
+    flow_scope_id = cast(str, snapshot["flow_scope"])
+    flow_name = cast(str, snapshot["flow_name"])
     flow_snapshot = cast(dict[str, Any], snapshot["flow_snapshot"])
     execution_snapshot = cast(dict[str, Any], snapshot["execution_snapshot"])
     client_snapshot = cast(dict[str, Any], snapshot["client_snapshot"])
@@ -64,7 +66,8 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
 
     assert execution_id
     assert snapshot["namespace_scope"] == namespace_scope
-    assert snapshot["flow_scope"] == FLOW_SCOPE
+    assert flow_scope_id
+    assert flow_name == FLOW_SCOPE
 
     # --- Seed phase assertions ---
     assert "conventions/test_runner" in seed_snapshot["active_keys"]
@@ -128,7 +131,7 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     # Flow scope
     flow_entry = client.memories.get(
         "summaries/latest",
-        scope=FLOW_SCOPE,
+        scope=flow_scope_id,
         scope_type="flow",
     )
     assert flow_entry is not None
@@ -138,10 +141,12 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
         entry.version
         for entry in client.memories.history(
             "summaries/latest",
-            scope=FLOW_SCOPE,
+            scope=flow_scope_id,
             scope_type="flow",
         )
     ] == [1]
+    assert flow_entry.flow_id == flow_scope_id
+    assert flow_entry.flow_name == FLOW_SCOPE
 
     # Execution scope — in-flow entries
     execution_entries = client.memories.list(
@@ -213,7 +218,7 @@ def test_phase20_memory_example_runs_end_to_end(primed_zenml) -> None:
     # Scopes
     scopes = _scope_map(cast(list[dict[str, Any]], client_snapshot["scopes"]))
     assert scopes[namespace_scope]["scope_type"] == "namespace"
-    assert scopes[FLOW_SCOPE]["scope_type"] == "flow"
+    assert scopes[flow_scope_id]["scope_type"] == "flow"
     assert scopes[execution_id]["scope_type"] == "execution"
 
     # --- Maintenance phase assertions ---
@@ -254,7 +259,8 @@ def test_phase20_memory_without_maintenance(primed_zenml) -> None:
     )
 
     assert snapshot["maintenance_snapshot"] is None
-    assert snapshot["flow_scope"] == FLOW_SCOPE
+    assert snapshot["flow_name"] == FLOW_SCOPE
+    assert snapshot["flow_scope"]
 
     # Core runtime claims still hold.
     seed = snapshot["seed_snapshot"]

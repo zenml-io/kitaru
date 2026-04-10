@@ -208,6 +208,7 @@ def _sample_checkpoint_call() -> CheckpointCall:
 def _sample_execution() -> Execution:
     return Execution(
         exec_id="kr-123",
+        flow_id="flow-123",
         flow_name="content_pipeline",
         status=ExecutionStatus.WAITING,
         started_at=datetime(2026, 3, 14, 9, 55, tzinfo=UTC),
@@ -542,6 +543,7 @@ def test_serialize_execution_summary_contract() -> None:
 
     assert payload == {
         "exec_id": "kr-123",
+        "flow_id": "flow-123",
         "flow_name": "content_pipeline",
         "status": "waiting",
         "started_at": "2026-03-14T09:55:00+00:00",
@@ -568,6 +570,7 @@ def test_serialize_execution_contract() -> None:
 
     assert set(payload) == {
         "exec_id",
+        "flow_id",
         "flow_name",
         "status",
         "started_at",
