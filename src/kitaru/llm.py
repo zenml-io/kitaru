@@ -658,6 +658,7 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         AnalyticsEvent.LLM_CALLED,
         {
             "resolved_model": model_selection.resolved_model,
+            "model": model_selection.resolved_model,  # dashboard compat alias
             "credential_source": credential_source,
             "mocked": is_mocked,
         },

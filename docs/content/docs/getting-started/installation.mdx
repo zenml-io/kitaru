@@ -39,6 +39,11 @@ uv add "kitaru[mcp,pydantic-ai,local]"
 # or: pip install "kitaru[mcp,pydantic-ai,local]"
 ```
 
+If you use Claude Code or another MCP-capable assistant, install
+`kitaru[mcp]` so your assistant can query executions, inspect logs and
+artifacts, provide input to waiting runs, and start replays through structured
+tool calls. See [MCP Server](/agent-native/mcp-server) for setup.
+
 ## Verify Installation
 
 <Tabs items={["uv project", "pip environment"]}>
