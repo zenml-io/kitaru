@@ -527,6 +527,22 @@ def build_cleanup_plan(
     )
 
 
+def build_cleanup_preview_result(plan: CleanupPlan) -> CleanupResult:
+    """Build a dry-run CleanupResult from a resolved plan."""
+    warnings: tuple[str, ...] = ()
+    if plan.custom_config_path_warning:
+        warnings = (plan.custom_config_path_warning,)
+    return CleanupResult(
+        scope=plan.scope,
+        dry_run=True,
+        preview_entries=plan.preview_entries,
+        total_bytes=plan.total_bytes,
+        local_server_status=plan.local_server_status,
+        active_environment_overrides=plan.active_environment_overrides,
+        warnings=warnings,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Execution
 # ---------------------------------------------------------------------------

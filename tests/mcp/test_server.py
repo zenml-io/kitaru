@@ -30,6 +30,7 @@ from kitaru.mcp.server import (
     get_execution_logs,
     kitaru_artifacts_get,
     kitaru_artifacts_list,
+    kitaru_clean_preview,
     kitaru_executions_cancel,
     kitaru_executions_get,
     kitaru_executions_input,
@@ -38,6 +39,7 @@ from kitaru.mcp.server import (
     kitaru_executions_replay,
     kitaru_executions_retry,
     kitaru_executions_run,
+    kitaru_info,
     kitaru_stacks_list,
     kitaru_start_local_server,
     kitaru_status,
@@ -1884,3 +1886,231 @@ def test_start_local_server_fires_analytics_on_failure() -> None:
             "error_type": "RuntimeError",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# kitaru_info
+# ---------------------------------------------------------------------------
+
+
+class TestKitaruInfo:
+    """Tests for the kitaru_info MCP tool."""
+
+    def test_delegates_to_snapshot_builder_and_serializer(self) -> None:
+        """Default call builds snapshot, serializes it, returns the dict."""
+        snapshot = RuntimeSnapshot(
+            sdk_version="0.2.0",
+            connection="local Kitaru server",
+            connection_target="http://127.0.0.1:9000",
+            config_directory="/tmp/kitaru",
+        )
+
+        with (
+            patch(
+                "kitaru.inspection.build_runtime_snapshot",
+                return_value=snapshot,
+            ) as mock_build,
+            patch(
+                "kitaru.inspection.serialize_runtime_snapshot",
+                return_value={"sdk_version": "0.2.0"},
+            ) as mock_serialize,
+        ):
+            payload = kitaru_info()
+
+        mock_build.assert_called_once_with(
+            include_packages=False,
+            package_names=None,
+            include_environment_type=False,
+        )
+        mock_serialize.assert_called_once_with(snapshot)
+        assert payload == {"sdk_version": "0.2.0"}
+
+    @pytest.mark.parametrize(
+        ("call_kwargs", "expected_build_kwargs"),
+        [
+            pytest.param(
+                {"all": True},
+                {
+                    "include_packages": True,
+                    "package_names": None,
+                    "include_environment_type": True,
+                },
+                id="all_includes_packages_and_env",
+            ),
+            pytest.param(
+                {"all_packages": True},
+                {
+                    "include_packages": True,
+                    "package_names": None,
+                    "include_environment_type": False,
+                },
+                id="all_packages_without_env",
+            ),
+            pytest.param(
+                {"packages": ["zenml", "kitaru"]},
+                {
+                    "include_packages": False,
+                    "package_names": ["zenml", "kitaru"],
+                    "include_environment_type": False,
+                },
+                id="specific_packages",
+            ),
+            pytest.param(
+                {"all": True, "packages": ["zenml"]},
+                {
+                    "include_packages": True,
+                    "package_names": None,
+                    "include_environment_type": True,
+                },
+                id="all_overrides_specific_packages",
+            ),
+        ],
+    )
+    def test_flag_combinations(
+        self,
+        call_kwargs: dict[str, Any],
+        expected_build_kwargs: dict[str, Any],
+    ) -> None:
+        """Flag combinations map correctly to build_runtime_snapshot args."""
+        snapshot = RuntimeSnapshot(
+            sdk_version="0.2.0",
+            connection="local",
+            connection_target="http://127.0.0.1:9000",
+            config_directory="/tmp/kitaru",
+        )
+
+        with (
+            patch(
+                "kitaru.inspection.build_runtime_snapshot",
+                return_value=snapshot,
+            ) as mock_build,
+            patch(
+                "kitaru.inspection.serialize_runtime_snapshot",
+                return_value={},
+            ),
+        ):
+            kitaru_info(**call_kwargs)
+
+        mock_build.assert_called_once_with(**expected_build_kwargs)
+
+
+# ---------------------------------------------------------------------------
+# kitaru_clean_preview
+# ---------------------------------------------------------------------------
+
+
+class TestKitaruCleanPreview:
+    """Tests for the kitaru_clean_preview MCP tool."""
+
+    def test_returns_dry_run_result_for_project_scope(self) -> None:
+        """Preview of project scope returns serialized dry-run payload."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            CleanupPreviewEntry,
+            PreviewEntryType,
+        )
+
+        plan = CleanupPlan(
+            scope=CleanScope.PROJECT,
+            repo_root="/repo",
+            project_config_path="/repo/.kitaru",
+            preview_entries=(
+                CleanupPreviewEntry(
+                    path="/repo/.kitaru",
+                    entry_type=PreviewEntryType.DIRECTORY,
+                    size_bytes=1024,
+                ),
+            ),
+            total_bytes=1024,
+        )
+
+        with patch(
+            "kitaru.mcp.server.cleanup.build_cleanup_plan",
+            return_value=plan,
+        ) as mock_plan:
+            payload = kitaru_clean_preview(scope="project")
+
+        mock_plan.assert_called_once_with(CleanScope.PROJECT)
+        assert payload["dry_run"] is True
+        assert payload["scope"] == "project"
+        assert payload["total_bytes"] == 1024
+        assert len(payload["preview"]) == 1
+        assert payload["preview"][0]["path"] == "/repo/.kitaru"
+
+    def test_returns_dry_run_result_for_global_scope(self) -> None:
+        """Preview of global scope works and includes warnings."""
+        from kitaru._cleanup import CleanScope, CleanupPlan
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root="/custom/kitaru",
+            total_bytes=5000,
+            custom_config_path_warning=(
+                "Cleaning custom config path /custom/kitaru (set by KITARU_CONFIG_PATH)"
+            ),
+        )
+
+        with patch(
+            "kitaru.mcp.server.cleanup.build_cleanup_plan",
+            return_value=plan,
+        ):
+            payload = kitaru_clean_preview(scope="global")
+
+        assert payload["dry_run"] is True
+        assert payload["scope"] == "global"
+        assert len(payload["warnings"]) == 1
+        assert "KITARU_CONFIG_PATH" in payload["warnings"][0]
+
+    def test_all_scope_accepted(self) -> None:
+        """scope='all' is a valid scope."""
+        from kitaru._cleanup import CleanScope, CleanupPlan
+
+        plan = CleanupPlan(scope=CleanScope.ALL, total_bytes=0)
+
+        with patch(
+            "kitaru.mcp.server.cleanup.build_cleanup_plan",
+            return_value=plan,
+        ) as mock_plan:
+            payload = kitaru_clean_preview(scope="all")
+
+        mock_plan.assert_called_once_with(CleanScope.ALL)
+        assert payload["scope"] == "all"
+        assert payload["dry_run"] is True
+
+    def test_never_executes_cleanup(self) -> None:
+        """The preview tool must never call execute_cleanup_plan."""
+        from kitaru._cleanup import CleanScope, CleanupPlan
+
+        plan = CleanupPlan(scope=CleanScope.GLOBAL, total_bytes=0)
+
+        with (
+            patch(
+                "kitaru.mcp.server.cleanup.build_cleanup_plan",
+                return_value=plan,
+            ),
+            patch(
+                "kitaru.mcp.server.cleanup.execute_cleanup_plan",
+            ) as mock_execute,
+        ):
+            kitaru_clean_preview(scope="global")
+
+        mock_execute.assert_not_called()
+
+    def test_invalid_scope_raises(self) -> None:
+        """Invalid scope string raises ValueError."""
+        with pytest.raises(ValueError, match="workspace"):
+            kitaru_clean_preview(scope="workspace")
+
+    def test_no_project_raises_for_project_scope(self) -> None:
+        """Missing project raises KitaruUsageError for project scope."""
+        from kitaru.errors import KitaruUsageError
+
+        with (
+            patch(
+                "kitaru.mcp.server.cleanup.build_cleanup_plan",
+                side_effect=KitaruUsageError("No Kitaru project found."),
+            ),
+            pytest.raises(KitaruUsageError, match="No Kitaru project found"),
+        ):
+            kitaru_clean_preview(scope="project")

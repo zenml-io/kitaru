@@ -12,6 +12,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, Literal, TypeVar
 
+import kitaru._cleanup as cleanup
 import kitaru._interface_executions as execution_interface
 import kitaru._interface_stacks as stack_interface
 import kitaru.client as client_api
@@ -417,6 +418,53 @@ def manage_stack(
         return inspection.serialize_stack_delete_result(result)
 
     return run_with_mcp_error_boundary(_manage_stack)
+
+
+@tracked_mcp_tool
+def kitaru_info(
+    all: bool = False,
+    all_packages: bool = False,
+    packages: list[str] | None = None,
+) -> dict[str, Any]:
+    """Return detailed environment diagnostics for the current Kitaru setup.
+
+    Equivalent to `kitaru info --output json`. Use `all=True` for the full
+    diagnostic including all packages and environment type.
+    """
+
+    def _info() -> dict[str, Any]:
+        include_packages = all or all_packages
+        package_names = None if include_packages else (packages if packages else None)
+        include_environment_type = all
+
+        snapshot = inspection.build_runtime_snapshot(
+            include_packages=include_packages,
+            package_names=package_names,
+            include_environment_type=include_environment_type,
+        )
+        return inspection.serialize_runtime_snapshot(snapshot)
+
+    return run_with_mcp_error_boundary(_info)
+
+
+@tracked_mcp_tool
+def kitaru_clean_preview(
+    scope: Literal["project", "global", "all"] = "project",
+) -> dict[str, Any]:
+    """Preview what `kitaru clean <scope>` would delete (dry-run only).
+
+    Returns the same payload as `kitaru clean <scope> --dry-run --output json`.
+    This tool is strictly read-only and never performs actual cleanup.
+    To execute cleanup, use the CLI: `kitaru clean <scope> --yes`.
+    """
+
+    def _preview() -> dict[str, Any]:
+        clean_scope = cleanup.CleanScope(scope)
+        plan = cleanup.build_cleanup_plan(clean_scope)
+        result = cleanup.build_cleanup_preview_result(plan)
+        return cleanup.serialize_cleanup_result(result)
+
+    return run_with_mcp_error_boundary(_preview)
 
 
 def main() -> None:

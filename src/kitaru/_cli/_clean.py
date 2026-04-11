@@ -13,6 +13,7 @@ from kitaru._cleanup import (
     CleanupResult,
     PreviewEntryType,
     build_cleanup_plan,
+    build_cleanup_preview_result,
     execute_cleanup_plan,
     format_size,
     serialize_cleanup_result,
@@ -163,18 +164,7 @@ def _run_clean(
     from kitaru.analytics import AnalyticsEvent, track
 
     if dry_run:
-        dry_warnings: tuple[str, ...] = ()
-        if plan.custom_config_path_warning:
-            dry_warnings = (plan.custom_config_path_warning,)
-        dry_result = CleanupResult(
-            scope=scope,
-            dry_run=True,
-            preview_entries=plan.preview_entries,
-            total_bytes=plan.total_bytes,
-            local_server_status=plan.local_server_status,
-            active_environment_overrides=plan.active_environment_overrides,
-            warnings=dry_warnings,
-        )
+        dry_result = build_cleanup_preview_result(plan)
 
         track(
             AnalyticsEvent.CLEAN_COMPLETED,
