@@ -620,7 +620,6 @@ def _dispatch_provider_call(
     raise KitaruUsageError(f"Provider `{target.provider}` is not supported.")
 
 
-
 def _track_llm_call_analytics(
     *,
     model_selection: ResolvedModelSelection,
@@ -642,7 +641,6 @@ def _track_llm_call_analytics(
             {key: value for key, value in extra_metadata.items() if value is not None}
         )
     track(AnalyticsEvent.LLM_CALLED, metadata)
-
 
 
 def _execute_llm_call(request: _LLMRequest) -> str:

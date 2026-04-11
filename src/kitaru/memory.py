@@ -229,7 +229,6 @@ _CURRENT_MEMORY_SCOPE: ContextVar[_MemoryScope | None] = ContextVar(
 logger = logging.getLogger(__name__)
 
 
-
 def _track_memory_event(
     event_name: AnalyticsEvent,
     *,
@@ -594,7 +593,6 @@ def _resolve_execution_flow_context(
     return None
 
 
-
 def _resolve_active_flow_scope_context(
     scope: _MemoryScope,
 ) -> _ExecutionFlowContext | None:
@@ -613,7 +611,6 @@ def _resolve_active_flow_scope_context(
         flow_id=resolved_flow_id,
         flow_name=normalize_flow_name(flow_scope.name),
     )
-
 
 
 def _memory_tags(
