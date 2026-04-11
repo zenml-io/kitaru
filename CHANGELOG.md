@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-04-11
+
 ### Added
 - `kitaru analytics` CLI command group with `opt-in`, `opt-out`, and `status` subcommands for managing anonymous usage analytics preferences — persists to config file so the preference is respected by all surfaces including MCP servers
 
