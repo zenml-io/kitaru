@@ -28,7 +28,7 @@ from kitaru import KitaruClient, checkpoint, flow, memory
 from kitaru.memory import MemoryEntry, MemoryScopeInfo
 
 FLOW_SCOPE = "repo_memory_demo"
-"""The flow scope name, derived from the ``@flow`` function name below."""
+"""The human-readable flow name, derived from the ``@flow`` function name below."""
 
 # ---------------------------------------------------------------------------
 # Checkpoints — the durable work units
@@ -296,6 +296,10 @@ def run_workflow(
 
     client = KitaruClient()
     execution_scope = handle.exec_id
+    execution = client.executions.get(handle.exec_id)
+    flow_scope_id = execution.flow_id
+    if flow_scope_id is None:
+        raise RuntimeError("Expected execution to expose a flow_id for flow memory.")
 
     # --- Post-flow detached execution-scope writes (annotation pattern) ---
     client.memories.set(
@@ -327,7 +331,7 @@ def run_workflow(
         scope=namespace_scope,
         scope_type="namespace",
     )
-    flow_entries = client.memories.list(scope=FLOW_SCOPE, scope_type="flow")
+    flow_entries = client.memories.list(scope=flow_scope_id, scope_type="flow")
     execution_entries = client.memories.list(
         scope=execution_scope,
         scope_type="execution",
@@ -363,13 +367,13 @@ def run_workflow(
 
     flow_summary_entry = client.memories.get(
         "summaries/latest",
-        scope=FLOW_SCOPE,
+        scope=flow_scope_id,
         scope_type="flow",
     )
     flow_summary_value = _load_value(client, flow_summary_entry)
     flow_summary_history = client.memories.history(
         "summaries/latest",
-        scope=FLOW_SCOPE,
+        scope=flow_scope_id,
         scope_type="flow",
     )
 
@@ -483,7 +487,8 @@ def run_workflow(
     return {
         "execution_id": execution_scope,
         "namespace_scope": namespace_scope,
-        "flow_scope": FLOW_SCOPE,
+        "flow_scope": flow_scope_id,
+        "flow_name": execution.flow_name or FLOW_SCOPE,
         "seed_snapshot": seed_snapshot,
         "flow_snapshot": flow_snapshot,
         "execution_snapshot": execution_snapshot,
@@ -541,7 +546,8 @@ def _render_text(
     lines.append("=== Memory Walkthrough ===")
     lines.append("")
     lines.append(f"Namespace scope: {snapshot['namespace_scope']}")
-    lines.append(f"Flow scope:      {snapshot['flow_scope']}")
+    lines.append(f"Flow name:       {snapshot['flow_name']}")
+    lines.append(f"Flow scope ID:   {snapshot['flow_scope']}")
     lines.append(f"Execution:       {snapshot['execution_id']}")
 
     # --- Seeding ---

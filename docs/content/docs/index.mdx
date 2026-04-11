@@ -1,11 +1,12 @@
 ---
 title: Overview
-description: Durable execution for AI agents
+description: Durable execution and memory for long-running agents
 ---
 
-Kitaru is an orchestration layer that makes AI agent workflows
-**persistent**, **replayable**, and **observable** — without requiring you to
-learn a graph DSL or change your Python control flow.
+Kitaru is an open-source runtime and orchestration layer for long-running
+Python agents. It keeps agent workflows **persistent**, **replayable**,
+**observable**, and **stateful** without requiring you to learn a graph DSL or
+change your Python control flow.
 
 ## Create a durable agent
 
@@ -39,16 +40,18 @@ See the [Quickstart](/getting-started/quickstart) to install and run this yourse
 
 ## What your agent can do with Kitaru
 
-Add these primitives to any Python agent code — no rewrites required.
+These are the shipped primitives Kitaru adds to ordinary Python agent code — no rewrites required.
 
-- **Crash recovery:** Wrap steps in [`@checkpoint`](/concepts/checkpoints) and your agent picks up where it left off — no re-running expensive LLM calls
-- **Human-in-the-loop:** Add [`kitaru.wait()`](/guides/wait-and-resume) and let agents hand off to a human while compute is released — resume minutes or months later
+- **Durable execution:** Wrap steps in [`@checkpoint`](/concepts/checkpoints) and your agent picks up where it left off without re-running expensive work
+- **Replay from failure:** Re-run only the failed part of a flow by replaying from a checkpoint instead of starting from scratch
+- **Wait and resume:** Add [`kitaru.wait()`](/guides/wait-and-resume) and let agents pause for a human, another system, or later input while compute is released
+- **Durable memory:** [`kitaru.memory`](/guides/memory) stores scoped, versioned key-value state you can seed, inspect, compact, and reuse across executions
+- **Execution management:** [`KitaruClient`](/guides/execution-management) lets you inspect, replay, retry, resume, and cancel executions from code or CLI
 - **Tracked LLM calls:** Use [`kitaru.llm()`](/guides/llm-calls) and every call gets automatic secret resolution, prompt/response capture, and cost tracking
 - **Persistent data:** [`kitaru.save()` / `kitaru.load()`](/guides/artifacts) let agents store and retrieve files, objects, and results across executions
-- **Durable memory:** [`kitaru.memory`](/guides/memory) stores versioned key-value state you can seed, inspect, and reuse across executions
 - **Structured observability:** [`kitaru.log()`](/concepts/logging) attaches key-value metadata to any checkpoint or flow for debugging and the UI
 - **Runtime configuration:** [`kitaru.configure()`](/guides/configuration) sets your model, log store, and stack defaults in one call
-- **Execution management:** [`KitaruClient`](/guides/execution-management) lets you inspect, replay, retry, resume, and cancel any execution from code or CLI
+- **Framework and infrastructure portability:** Keep your Python control flow, use your preferred framework, and run locally or on remote stacks across Kubernetes, Vertex, SageMaker, and AzureML
 
 ## Next Steps
 
@@ -70,7 +73,7 @@ Add these primitives to any Python agent code — no rewrites required.
   />
   <Card
     title="Core Concepts"
-    description="Understand flows, checkpoints, and the execution model"
+    description="Understand flows, checkpoints, and the execution model for long-running agents"
     href="/concepts"
   />
   <Card
@@ -80,7 +83,7 @@ Add these primitives to any Python agent code — no rewrites required.
   />
   <Card
     title="Memory"
-    description="Seed and inspect durable key-value state across Python, CLI, and MCP"
+    description="Seed and inspect durable, versioned key-value state across Python, CLI, and MCP"
     href="/guides/memory"
   />
   <Card
@@ -105,7 +108,7 @@ Add these primitives to any Python agent code — no rewrites required.
   />
   <Card
     title="Stacks"
-    description="Create, inspect, switch, and clean up local, Kubernetes, Vertex, SageMaker, and AzureML stacks"
+    description="Create, inspect, switch, and clean up local and remote stacks across Kubernetes, Vertex, SageMaker, and AzureML"
     href="/stacks"
   />
   <Card
@@ -125,7 +128,7 @@ Add these primitives to any Python agent code — no rewrites required.
   />
   <Card
     title="Blog"
-    description="Read essays on durable execution, agent infrastructure, and Kitaru's design"
+    description="Read essays on durable execution, long-running agents, and Kitaru's design"
     href="https://kitaru.ai/blog"
   />
 </Cards>

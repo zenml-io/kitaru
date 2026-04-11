@@ -31,6 +31,8 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
     KitaruUserCodeError,
+    build_recovery_command,
+    format_recovery_hint,
 )
 from kitaru.flow import (
     FlowHandle,
@@ -828,7 +830,13 @@ def test_flow_runtime_scope_sets_execution_id_from_zenml_run_context() -> None:
 
     with patch(
         "kitaru.runtime.DynamicPipelineRunContext.get",
-        return_value=SimpleNamespace(run=SimpleNamespace(id="exec-123")),
+        return_value=SimpleNamespace(
+            run=SimpleNamespace(
+                id="exec-123",
+                pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+            ),
+            pipeline=SimpleNamespace(id=None, name=None),
+        ),
     ):
         result = wrapped()
 
@@ -859,6 +867,8 @@ def test_flow_runtime_scope_keeps_execution_id_none_without_zenml_context() -> N
 
 
 def test_wrapped_flow_resets_memory_scope_between_invocations() -> None:
+    flow_id = "flow-reset-test"
+
     def first_flow() -> None:
         memory.configure(scope="repo_a")
         memory.list()
@@ -871,7 +881,15 @@ def test_wrapped_flow_resets_memory_scope_between_invocations() -> None:
 
     with (
         patch("kitaru.runtime.StepContext.get", return_value=None),
-        patch("kitaru.runtime.DynamicPipelineRunContext.get", return_value=None),
+        patch(
+            "kitaru.runtime.DynamicPipelineRunContext.get",
+            return_value=SimpleNamespace(
+                run=SimpleNamespace(
+                    pipeline=SimpleNamespace(id=flow_id, name="test_flow"),
+                ),
+                pipeline=SimpleNamespace(id=None, name=None),
+            ),
+        ),
         patch("kitaru.memory._memory_list_step", return_value=[]) as memory_list_step,
     ):
         wrapped_first()
@@ -879,7 +897,7 @@ def test_wrapped_flow_resets_memory_scope_between_invocations() -> None:
 
     assert memory_list_step.call_args_list == [
         call("repo_a", "namespace"),
-        call("second_flow", "flow"),
+        call(flow_id, "flow"),
     ]
 
 
@@ -1229,3 +1247,82 @@ def test_flow_handle_wait_still_raises_when_classify_fails() -> None:
             "failure_origin": FailureOrigin.UNKNOWN.value,
         },
     )
+
+
+class TestRecoveryHintHelpers:
+    """Tests for the recovery hint formatting helpers in errors.py."""
+
+    def test_build_recovery_command_for_failed(self) -> None:
+        assert build_recovery_command("kr-abc", status="failed") == (
+            "kitaru executions retry kr-abc"
+        )
+
+    def test_build_recovery_command_returns_none_for_completed(self) -> None:
+        assert build_recovery_command("kr-abc", status="completed") is None
+
+    def test_build_recovery_command_returns_none_for_running(self) -> None:
+        assert build_recovery_command("kr-abc", status="running") is None
+
+    def test_format_recovery_hint_for_failed(self) -> None:
+        hint = format_recovery_hint("kr-abc", status="failed")
+        assert hint is not None
+        assert "kitaru executions retry kr-abc" in hint
+        assert "To retry" in hint
+
+    def test_build_recovery_command_returns_none_for_cancelled(self) -> None:
+        assert build_recovery_command("kr-abc", status="cancelled") is None
+
+    def test_format_recovery_hint_returns_none_for_completed(self) -> None:
+        assert format_recovery_hint("kr-abc", status="completed") is None
+
+    def test_format_recovery_hint_returns_none_for_cancelled(self) -> None:
+        assert format_recovery_hint("kr-abc", status="cancelled") is None
+
+
+def test_flow_handle_get_includes_retry_hint_on_failure() -> None:
+    """FlowHandle.get() error message should include a retry CLI hint."""
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        run_id=run_id,
+        status_reason="upstream failure",
+        traceback="Traceback\nValueError: boom",
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.track"),
+        pytest.raises(KitaruUserCodeError, match="kitaru executions retry") as exc_info,
+    ):
+        handle.get()
+
+    message = str(exc_info.value)
+    assert f"kitaru executions retry {run_id}" in message
+    assert "To retry this failed execution" in message
+
+
+def test_flow_handle_wait_includes_retry_hint_on_failure() -> None:
+    """FlowHandle.wait() error message should include a retry CLI hint."""
+    run_id = uuid4()
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        run_id=run_id,
+        traceback="Traceback\nRuntimeError: connection lost",
+    )
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = failed
+
+    handle = FlowHandle(_as_pipeline_run(failed))
+    with (
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.sleep"),
+        patch("kitaru.flow.track"),
+        pytest.raises(KitaruExecutionError) as exc_info,
+    ):
+        handle.wait()
+
+    message = str(exc_info.value)
+    assert f"kitaru executions retry {run_id}" in message

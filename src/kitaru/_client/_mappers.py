@@ -531,8 +531,11 @@ def _map_execution(
 
     metadata = _to_plain_dict(run.run_metadata)
 
+    flow_id: str | None = None
     flow_name: str | None = None
     if run.pipeline is not None:
+        raw_id = getattr(run.pipeline, "id", None)
+        flow_id = str(raw_id) if raw_id is not None else None
         flow_name = _normalize_flow_name(run.pipeline.name)
 
     original_exec_id: str | None = None
@@ -545,6 +548,7 @@ def _map_execution(
 
     return Execution(
         exec_id=str(run.id),
+        flow_id=flow_id,
         flow_name=flow_name,
         status=status,
         started_at=run.start_time,

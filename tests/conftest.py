@@ -50,6 +50,11 @@ for _env_name in list(os.environ):
     if _env_name.startswith(ENV_ZENML_STORE_PREFIX):
         os.environ.pop(_env_name, None)
 
+# Immediately disable analytics after stripping env vars.
+# ZenML defaults analytics_opt_in to True, so without this the test suite
+# sends real events to Mixpanel under randomly-generated user IDs.
+os.environ["ZENML_ANALYTICS_OPT_IN"] = "false"
+
 _SRC_PATH = str(Path(__file__).resolve().parent.parent / "src")
 if _SRC_PATH not in sys.path:
     sys.path.insert(0, _SRC_PATH)
@@ -92,6 +97,7 @@ def isolated_zenml_global_config(
     monkeypatch.setattr("click.get_app_dir", lambda app_name: str(config_dir))
 
     monkeypatch.setenv(ENV_ZENML_CONFIG_PATH, str(config_dir))
+    monkeypatch.setenv("ZENML_ANALYTICS_OPT_IN", "false")
 
     for env_name in (
         ENV_ZENML_ACTIVE_PROJECT_ID,

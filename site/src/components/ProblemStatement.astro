@@ -4,9 +4,9 @@
 
 <section class="section-pad problem-section">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>THE PROBLEM</span>
+    <span class="section-eyebrow" data-reveal>WHAT BREAKS FIRST</span>
     <h2 class="section-title problem-headline" data-reveal data-reveal-delay="1">
-      Your agents work. But they're trapped.
+      Long-running agents fail in boring, expensive ways.
     </h2>
 
     <div class="problem-grid">
@@ -17,8 +17,8 @@
           <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Agents die when your laptop sleeps" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>They die when your laptop sleeps</h3>
-          <p>One crash, one timeout, or one closed lid and hours of LLM calls vanish. You start over from scratch.</p>
+          <h3>Hours of work disappear on routine failures</h3>
+          <p>A laptop sleep, pod eviction, or API timeout can wipe a run that took hours to build. You burn tokens and start over.</p>
         </div>
       </div>
 
@@ -28,8 +28,8 @@
           <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="Agents can't coordinate" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>They can't coordinate with other agents</h3>
-          <p>No pause, no resume, no human-in-the-loop. Every agent is a fire-and-forget black box.</p>
+          <h3>They need to wait on humans and other systems</h3>
+          <p>Real agents pause for approvals, webhooks, and other agents. Fire-and-forget loops do not handle that well.</p>
         </div>
       </div>
 
@@ -39,15 +39,15 @@
           <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Results vanish when agents crash" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>Their intermediate results vanish when they crash</h3>
-          <p>No checkpoints, no artifacts, no audit trail. When something goes wrong you have nothing to debug.</p>
+          <h3>State either vanishes or gets stitched together by hand</h3>
+          <p>Without checkpoints, artifacts, and memory, you lose context when things go wrong and debugging becomes guesswork.</p>
         </div>
       </div>
 
     </div>
 
     <p class="problem-conclusion" data-reveal data-reveal-delay="5">
-      Kitaru moves your agents from your machine to your infrastructure.
+      That is why Kitaru focuses on runtime primitives: checkpoints, replay, wait/resume, and durable state on real infrastructure.
     </p>
   </div>
 </section>

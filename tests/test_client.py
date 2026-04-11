@@ -105,6 +105,7 @@ class _DummyRun:
         *,
         status: Any,
         flow_name: str,
+        flow_id: str | None = None,
         run_metadata: dict[str, Any] | None = None,
         steps: dict[str, _DummyStep] | None = None,
         stack_name: str | None = "local",
@@ -120,7 +121,7 @@ class _DummyRun:
         self.start_time = None
         self.end_time = None
         self.run_metadata = run_metadata or {}
-        self.pipeline = SimpleNamespace(name=flow_name)
+        self.pipeline = SimpleNamespace(name=flow_name, id=flow_id or uuid4())
         self.stack = SimpleNamespace(name=stack_name) if stack_name else None
         self.snapshot = snapshot
         self.original_run = None
@@ -489,6 +490,7 @@ def test_get_maps_execution_details() -> None:
         execution = client.executions.get(str(run.id))
 
     assert execution.exec_id == str(run.id)
+    assert execution.flow_id == str(run.pipeline.id)
     assert execution.flow_name == "content_flow"
     assert execution.status == ExecutionStatus.COMPLETED
     assert execution.frozen_execution_spec is not None

@@ -36,6 +36,7 @@ from zenml.steps.step_context import StepContext
 from zenml.steps.step_decorator import step
 
 from kitaru._source_aliases import normalize_flow_name
+from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
@@ -47,6 +48,7 @@ from kitaru.errors import (
 from kitaru.runtime import (
     _get_current_execution_id,
     _get_current_flow,
+    _get_current_flow_id,
     _is_inside_checkpoint,
     _is_inside_flow,
 )
@@ -212,7 +214,7 @@ class _MemoryScope:
 
 @dataclass(frozen=True)
 class _ExecutionFlowContext:
-    """Resolved logical flow context for an execution-scoped memory write."""
+    """Resolved logical flow context for a memory write."""
 
     flow_id: str
     flow_name: str | None = None
@@ -225,6 +227,25 @@ _CURRENT_MEMORY_SCOPE: ContextVar[_MemoryScope | None] = ContextVar(
 )
 
 logger = logging.getLogger(__name__)
+
+
+
+def _track_memory_event(
+    event_name: AnalyticsEvent,
+    *,
+    scope: _MemoryScope,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Emit one semantic memory analytics event with shared low-risk metadata."""
+    base_metadata: dict[str, Any] = {
+        "inside_flow": _is_inside_flow(),
+        "scope_type": scope.scope_type,
+    }
+    if metadata is not None:
+        base_metadata.update(
+            {key: value for key, value in metadata.items() if value is not None}
+        )
+    track(event_name, base_metadata)
 
 
 def _validate_memory_identifier(
@@ -310,17 +331,24 @@ def _require_memory_boundary(api_name: str) -> None:
 
 
 def _implicit_flow_memory_scope(api_name: str) -> _MemoryScope:
-    """Resolve the implicit flow-name-backed memory scope."""
+    """Resolve the implicit flow-ID-backed memory scope."""
     qualified_name = f"kitaru.memory.{api_name}()"
 
     flow_scope = _get_current_flow()
-    if flow_scope is None or flow_scope.name is None:
+    resolved_flow_id = _get_current_flow_id()
+    if flow_scope is None:
         raise KitaruStateError(
-            f"{qualified_name} requires an active flow name inside @flow."
+            f"{qualified_name} requires an active flow scope inside @flow."
+        )
+    if resolved_flow_id is None:
+        raise KitaruStateError(
+            f"{qualified_name} could not resolve a durable flow ID from the "
+            f"ZenML runtime. This typically means the pipeline has not been "
+            f"registered yet or the runtime context is not fully initialized."
         )
 
     return _MemoryScope(
-        scope=_validate_memory_identifier(flow_scope.name, kind="scope"),
+        scope=_validate_memory_identifier(resolved_flow_id, kind="scope"),
         scope_type="flow",
     )
 
@@ -566,6 +594,28 @@ def _resolve_execution_flow_context(
     return None
 
 
+
+def _resolve_active_flow_scope_context(
+    scope: _MemoryScope,
+) -> _ExecutionFlowContext | None:
+    """Resolve current runtime flow metadata for a flow-scoped write."""
+    if scope.scope_type != "flow":
+        return None
+
+    flow_scope = _get_current_flow()
+    resolved_flow_id = _get_current_flow_id()
+    if flow_scope is None or resolved_flow_id is None:
+        return None
+    if resolved_flow_id != scope.scope:
+        return None
+
+    return _ExecutionFlowContext(
+        flow_id=resolved_flow_id,
+        flow_name=normalize_flow_name(flow_scope.name),
+    )
+
+
+
 def _memory_tags(
     scope: str,
     key: str,
@@ -580,7 +630,12 @@ def _memory_tags(
         _memory_key_tag(key),
         _memory_scope_type_tag(scope_type),
     ]
-    if flow_context is not None:
+    # Flow-ID tag is only added for execution-scoped entries as a cross-reference
+    # back to the parent flow.  For flow-scoped entries the scope itself *is*
+    # the flow ID (encoded in the kitaru:memory:scope:<id> tag), so a separate
+    # flow_id tag would be redundant.  Metadata still records flow_id/flow_name
+    # unconditionally for auditability.
+    if scope_type == "execution" and flow_context is not None:
         tags.append(_memory_flow_id_tag(flow_context.flow_id))
     return tags
 
@@ -1139,7 +1194,7 @@ def _reindex_impl(
         if added_flow_tag:
             counts.flow_tags_added += 1
 
-    return MemoryReindexResult(
+    result = MemoryReindexResult(
         dry_run=dry_run,
         versions_scanned=counts.versions_scanned,
         execution_scope_versions_scanned=counts.execution_scope_versions_scanned,
@@ -1153,6 +1208,19 @@ def _reindex_impl(
         issues_count=counts.issues_count,
         issue_samples=issue_samples,
     )
+    # Reindex is a global operation without a per-scope context, so it
+    # calls track() directly instead of _track_memory_event().
+    track(
+        AnalyticsEvent.MEMORY_REINDEX_RUN,
+        {
+            "inside_flow": _is_inside_flow(),
+            "dry_run": result.dry_run,
+            "versions_scanned": result.versions_scanned,
+            "versions_updated": result.versions_updated,
+            "issues_count": result.issues_count,
+        },
+    )
+    return result
 
 
 def _get_entry_impl(
@@ -1224,6 +1292,8 @@ def _set_entry_impl(
                 scope=scope,
                 project=project,
             )
+        elif resolved_scope_type == "flow":
+            flow_context = _resolve_active_flow_scope_context(scope)
 
         created = _save_memory_artifact(
             client=client,
@@ -1247,8 +1317,17 @@ def _set_entry_impl(
 
 def _set_impl(scope: _MemoryScope, key: str, value: Any) -> None:
     """Persist a new version of a memory key for the resolved scope."""
-    _set_entry_impl(scope, key, value)
-    return None
+    entry = _set_entry_impl(scope, key, value)
+    _track_memory_event(
+        AnalyticsEvent.MEMORY_WRITTEN,
+        scope=scope,
+        metadata={
+            "value_type": entry.value_type,
+            "execution_flow_indexed": (
+                entry.flow_id is not None if scope.scope_type == "execution" else False
+            ),
+        },
+    )
 
 
 def _get_impl(
@@ -1422,7 +1501,13 @@ def _delete_impl(
             return None
 
         if _is_deleted_artifact(latest_current):
-            return _artifact_to_memory_entry(latest_current)
+            entry = _artifact_to_memory_entry(latest_current)
+            _track_memory_event(
+                AnalyticsEvent.MEMORY_DELETED,
+                scope=scope,
+                metadata={"already_deleted": True},
+            )
+            return entry
 
         resolved_scope_type = _validate_memory_scope_type(
             _resolve_scope_type(latest_current),
@@ -1435,6 +1520,8 @@ def _delete_impl(
                 scope=scope,
                 project=project,
             )
+        elif resolved_scope_type == "flow":
+            flow_context = _resolve_active_flow_scope_context(scope)
 
         tombstone = _save_memory_artifact(
             client=client,
@@ -1446,7 +1533,13 @@ def _delete_impl(
             project=project,
             flow_context=flow_context,
         )
-        return _artifact_to_memory_entry(tombstone)
+        entry = _artifact_to_memory_entry(tombstone)
+        _track_memory_event(
+            AnalyticsEvent.MEMORY_DELETED,
+            scope=scope,
+            metadata={"already_deleted": False},
+        )
+        return entry
     except KitaruError:
         raise
     except Exception as exc:
@@ -1473,6 +1566,8 @@ def _write_compaction_record(
                 scope=scope,
                 project=project,
             )
+        elif scope.scope_type == "flow":
+            flow_context = _resolve_active_flow_scope_context(scope)
 
         _save_memory_artifact(
             client=client,
@@ -1779,6 +1874,16 @@ def _purge_impl(
             project=project,
         )
 
+    _track_memory_event(
+        AnalyticsEvent.MEMORY_PURGED,
+        scope=scope,
+        metadata={
+            "operation": "purge",
+            "versions_deleted": result.versions_deleted,
+            "keys_affected": result.keys_affected,
+            "keep_provided": keep is not None,
+        },
+    )
     return result
 
 
@@ -1890,6 +1995,17 @@ def _purge_scope_impl(
             project=project,
         )
 
+    _track_memory_event(
+        AnalyticsEvent.MEMORY_PURGED,
+        scope=scope,
+        metadata={
+            "operation": "purge_scope",
+            "versions_deleted": result.versions_deleted,
+            "keys_affected": result.keys_affected,
+            "keep_provided": keep is not None,
+            "include_deleted": include_deleted,
+        },
+    )
     return result
 
 
@@ -1977,16 +2093,26 @@ def _compact_impl(
     from kitaru.llm import (
         _dispatch_provider_call,
         _normalize_messages,
+        _resolve_credential_overlay,
+        _track_llm_call_analytics,
         resolve_model_selection,
     )
 
     model_selection = resolve_model_selection(model)
     messages = _normalize_messages(prompt, system=None)
+    env_overlay, credential_source = _resolve_credential_overlay(model_selection)
     result = _dispatch_provider_call(
         model_selection=model_selection,
         messages=messages,
         temperature=None,
         max_tokens=max_tokens,
+        env_overlay=env_overlay,
+    )
+    _track_llm_call_analytics(
+        model_selection=model_selection,
+        credential_source=credential_source,
+        mocked=False,
+        extra_metadata={"usage_context": "memory_compaction"},
     )
 
     summary_text = result.response_text
@@ -2024,13 +2150,26 @@ def _compact_impl(
         project=project,
     )
 
-    return CompactResult(
+    result_payload = CompactResult(
         entry=new_entry,
         sources_read=len(source_entries),
         scope=scope.scope,
         scope_type=scope.scope_type,
         compaction_record=record,
     )
+    _track_memory_event(
+        AnalyticsEvent.MEMORY_COMPACTED,
+        scope=scope,
+        metadata={
+            "source_mode": source_mode,
+            "sources_read": result_payload.sources_read,
+            "multi_key": keys is not None,
+            "target_overridden": target_key is not None,
+            "custom_instruction": instruction is not None,
+            "model_provided": model is not None,
+        },
+    )
+    return result_payload
 
 
 def _memory_step(*, name: str, operation: str):

@@ -7,7 +7,7 @@
 <h3 align="center">You build your agents. We make them durable.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") — open-source agent infrastructure for Python. Any framework. Any cloud. Built on <a href="https://zenml.io">ZenML</a>.
+  Kitaru (来る, "to arrive") helps you run long-running Python agents reliably: checkpoint state, replay from failure, wait for input, and keep durable memory. It is an open-source runtime for agents &mdash; any framework, any cloud &mdash; built on <a href="https://zenml.io">ZenML</a> foundations.
 </p>
 
 <p align="center">
@@ -30,10 +30,11 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-Your agent crashed at step 7. Kitaru replays from step 7 — not from scratch.
+Your long-running agent crashed at step 7. Kitaru replays from step 7 — not
+from scratch.
 Add two decorators to your existing Python agent and get crash recovery, human
-approval gates, cost tracking, and a full dashboard. No rewrite. No framework
-lock-in. No distributed systems overhead.
+approval gates, durable memory, cost tracking, and a full dashboard. No rewrite.
+No graph DSL. No framework lock-in. No distributed systems overhead.
 
 ## Why Kitaru?
 
@@ -61,6 +62,14 @@ def writing_agent(topic: str) -> str:
 
 result = writing_agent.run("quantum computing").wait()
 ```
+
+### Durable execution and memory
+
+Kitaru keeps agent state on disk and in infrastructure, not just in process
+memory. Checkpoints persist intermediate outputs so you can replay from failure,
+resume waiting runs, and inspect what happened. Durable memory adds scoped,
+versioned state for long-running agents across Python, CLI, client, and MCP
+surfaces.
 
 ### Deployment flexibility
 
@@ -165,6 +174,7 @@ kitaru executions replay <EXECUTION_ID> --from process_data
 |---|---|
 | [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
 | [Documentation](https://kitaru.ai/docs) | Complete reference and guides |
+| [Memory guide](https://kitaru.ai/docs/guides/memory) | Durable memory concepts, scopes, history, and compaction |
 | [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
 | [Stack Selection Guide](https://kitaru.ai/docs/getting-started/stack-selection) | Deploy to Kubernetes, Vertex AI, SageMaker, or AzureML |
 
