@@ -10,8 +10,9 @@ import logging
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from datetime import datetime
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
 
@@ -39,6 +40,7 @@ from kitaru.config import (
     _read_env_model_registry,
     _read_model_registry_config,
     build_frozen_execution_spec,
+    classify_stack_deployment_type,
     image_settings_to_docker_settings,
     persist_frozen_execution_spec,
     resolve_connection_config,
@@ -396,6 +398,72 @@ def _safe_classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
         return FailureOrigin.UNKNOWN
 
 
+def _deployment_metadata_for_stack(stack_name_or_id: str | None) -> dict[str, str]:
+    """Return privacy-safe flow analytics deployment metadata.
+
+    The metadata deliberately contains only the coarse Kitaru-owned deployment
+    class and a diagnostic source. It never includes stack names, stack IDs,
+    project names, server URLs, or other user-controlled selectors.
+    """
+    try:
+        deployment_type = classify_stack_deployment_type(stack_name_or_id)
+    except Exception:
+        logger.debug(
+            "Failed to classify stack deployment type for analytics (selector=%r).",
+            stack_name_or_id,
+            exc_info=True,
+        )
+        return {
+            "kitaru_deployment_type": "unknown",
+            "deployment_type_source": "kitaru_stack_inference_failed",
+        }
+
+    return {
+        "kitaru_deployment_type": deployment_type,
+        "deployment_type_source": "kitaru_stack_inference",
+    }
+
+
+def _duration_metadata_from_run(
+    run: PipelineRunResponse,
+    *,
+    observed_started_at: float | None,
+) -> dict[str, Any]:
+    """Return best-effort terminal duration metadata for a run."""
+    start_time = getattr(run, "start_time", None)
+    end_time = getattr(run, "end_time", None)
+    if isinstance(start_time, datetime) and isinstance(end_time, datetime):
+        duration_seconds = max((end_time - start_time).total_seconds(), 0.0)
+        return {
+            "duration_seconds": round(duration_seconds, 3),
+            "duration_source": "backend_timestamps",
+        }
+
+    if observed_started_at is None:
+        return {}
+
+    duration_seconds = max(time.perf_counter() - observed_started_at, 0.0)
+    return {
+        "duration_seconds": round(duration_seconds, 3),
+        "duration_source": "sdk_observed",
+    }
+
+
+def _checkpoint_count_from_run(run: PipelineRunResponse) -> int | None:
+    """Return a best-effort count of hydrated run steps as checkpoint proxy."""
+    try:
+        hydrated_run = run.get_hydrated_version()
+        steps = getattr(hydrated_run, "steps", None)
+        if isinstance(steps, Mapping):
+            return len(steps)
+    except Exception:
+        logger.debug(
+            "Failed to derive checkpoint count for terminal analytics.",
+            exc_info=True,
+        )
+    return None
+
+
 def _raise_for_unsuccessful_run(
     run: PipelineRunResponse,
     *,
@@ -431,15 +499,29 @@ def _raise_for_unsuccessful_run(
 class FlowHandle:
     """Handle for a running or finished flow execution."""
 
-    def __init__(self, run: PipelineRunResponse) -> None:
+    def __init__(
+        self,
+        run: PipelineRunResponse,
+        *,
+        observed_started_at: float | None = None,
+        analytics_metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Initialize a flow handle.
 
         Args:
             run: Initial pipeline run response.
+            observed_started_at: SDK-observed start time from ``time.perf_counter``.
+            analytics_metadata: Privacy-safe metadata captured at submission time.
         """
         self._run = run
         self._run_id = run.id
         self._terminal_event_emitted = False
+        self._observed_started_at = (
+            observed_started_at
+            if observed_started_at is not None
+            else time.perf_counter()
+        )
+        self._analytics_metadata = dict(analytics_metadata or {})
 
     @property
     def exec_id(self) -> str:
@@ -461,11 +543,29 @@ class FlowHandle:
         if self._terminal_event_emitted:
             return
         self._terminal_event_emitted = True
-        metadata: dict[str, Any] = {
-            "status": run.status.value,
-        }
+        metadata: dict[str, Any] = dict(self._analytics_metadata)
+        metadata["status"] = run.status.value
         if failure_origin is not None:
             metadata["failure_origin"] = failure_origin.value
+
+        try:
+            metadata.update(
+                _duration_metadata_from_run(
+                    run,
+                    observed_started_at=self._observed_started_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "Failed to derive duration metadata for terminal analytics.",
+                exc_info=True,
+            )
+
+        checkpoint_count = _checkpoint_count_from_run(run)
+        if checkpoint_count is not None:
+            metadata["checkpoint_count"] = checkpoint_count
+            metadata["checkpoint_count_source"] = "hydrated_run_steps"
+
         track(AnalyticsEvent.FLOW_TERMINAL, metadata)
 
     def wait(self) -> Any:
@@ -686,13 +786,18 @@ class _FlowDefinition:
             settings=_build_settings(transport_image),
         )
 
-        replay_metadata = {
-            "from_checkpoint": from_,
-            "replay_path": "flow_wrapper",
-        }
-        track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
-
         with _temporary_active_stack(resolved_execution.stack):
+            deployment_metadata = _deployment_metadata_for_stack(
+                resolved_execution.stack
+            )
+            replay_metadata = {
+                "from_checkpoint": from_,
+                "replay_path": "flow_wrapper",
+                **deployment_metadata,
+            }
+            track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+
+            observed_started_at = time.perf_counter()
             try:
                 replayed_run = configured_pipeline.replay(
                     pipeline_run=original_run.id,
@@ -742,8 +847,15 @@ class _FlowDefinition:
             frozen_execution_spec=frozen_execution_spec,
         )
 
-        track(AnalyticsEvent.FLOW_REPLAYED, {"replay_path": "flow_wrapper"})
-        return FlowHandle(replayed_run)
+        track(
+            AnalyticsEvent.FLOW_REPLAYED,
+            {"replay_path": "flow_wrapper", **deployment_metadata},
+        )
+        return FlowHandle(
+            replayed_run,
+            observed_started_at=observed_started_at,
+            analytics_metadata=deployment_metadata,
+        )
 
     def _submit(
         self,
@@ -783,17 +895,25 @@ class _FlowDefinition:
         )
 
         with _temporary_active_stack(resolved_execution.stack):
+            deployment_metadata = _deployment_metadata_for_stack(
+                resolved_execution.stack
+            )
+            observed_started_at = time.perf_counter()
             run = configured_pipeline(*args, **kwargs)
 
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
-        track(AnalyticsEvent.FLOW_SUBMITTED, {})
+        track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
         persist_frozen_execution_spec(
             run_id=run.id,
             frozen_execution_spec=frozen_execution_spec,
         )
-        return FlowHandle(run)
+        return FlowHandle(
+            run,
+            observed_started_at=observed_started_at,
+            analytics_metadata=deployment_metadata,
+        )
 
 
 @overload

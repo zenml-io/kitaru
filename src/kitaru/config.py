@@ -477,6 +477,16 @@ def _list_stack_entries() -> list[_StackListEntry]:
     return _config_stacks._list_stack_entries(client_factory=Client)
 
 
+def classify_stack_deployment_type(
+    name_or_id: str | None = None,
+) -> _config_stacks._StackShowType:
+    """Classify a stack into Kitaru's low-cardinality deployment taxonomy."""
+    return _config_stacks.classify_stack_deployment_type(
+        name_or_id,
+        client_factory=Client,
+    )
+
+
 def _show_stack_operation(name_or_id: str) -> StackDetails:
     """Inspect one stack and translate its component metadata for CLI display."""
     return _config_stacks._show_stack_operation(
