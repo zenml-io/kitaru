@@ -215,6 +215,8 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 | Secrets CLI (`kitaru secrets set/show/list/delete`) | Implemented |
 | `KitaruClient.executions.replay()` | Implemented |
 | `kitaru init` (project initialization, creates `.kitaru/`) | Implemented |
+| `kitaru clean` (`project` / `global` / `all` — reset Kitaru state with dry-run, backup, and model registry protection) | Implemented |
+| Enhanced `kitaru info` (`--all`, `--all-packages`, `--packages`, `--file` — config provenance, connection sources, system info) | Implemented |
 
 ### Key design patterns
 
@@ -277,6 +279,8 @@ Kitaru collects anonymous usage analytics for users who have opted in (via ZenML
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
 - **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
 - **Before opening a PR or making a large commit**, always run `/simplify` to review changed code for reuse opportunities, quality issues, and efficiency improvements. Fix any issues it finds before committing.
+- **Update the smoke test** (`scripts/smoke-test.sh`) when adding new CLI commands, MCP tools, or SDK features that can be exercised non-interactively. New commands should have at least a `--dry-run` or `--help` invocation in the smoke script so pre-release validation catches regressions. Use `--dry-run` where available to keep the smoke test non-destructive.
+- **Review analytics coverage** when expanding the CLI, MCP, or SDK surface. Check whether the new feature needs a tracking event in `AnalyticsEvent` and whether the event is wired into the appropriate surface (CLI handler, `@tracked_mcp_tool`, or SDK lifecycle point). See the [Analytics instrumentation](#analytics-instrumentation) section for patterns. If multi-word CLI commands are added, update `_MULTI_TOKEN_COMMANDS` in `cli.py` to avoid leaking positional arguments into analytics.
 
 ## CLI
 

@@ -100,6 +100,11 @@ Agent-facing commands should keep the shared `--output json` / `-o json` contrac
 - `kitaru executions logs --follow --output json` emits JSONL event objects instead of one final document
 - Document login consistently: bare `kitaru login` starts the local server, while `kitaru login <server>` is the remote-login path. Local server support requires the `kitaru[local]` extra.
 
+### Diagnostics and cleanup
+
+- `kitaru info` shows a multi-section diagnostic overview (connection, config provenance, connection sources, system info). Use `--all` for a full dump including all installed packages and environment type. Use `--file debug.json` (or `.yaml`) to export diagnostics to a file (environment variable secrets are masked).
+- `kitaru clean project|global|all` resets Kitaru state. The `project` subcommand removes `.kitaru/`, `global` removes the global config directory (with auto-backup and local server teardown), and `all` does both. Use `--dry-run` to preview, `--force` when model registry aliases exist (global/all only). The `clean` command is bootstrap-safe — it works even when the store is broken.
+
 ## Testing Guidelines
 
 Use `pytest` for unit and integration tests. Name files `test_*.py` and test functions `test_*`. Mirror source paths (example: `src/kitaru/runtime.py` -> `tests/test_runtime.py`). Every bug fix should include a regression test that fails before the fix and passes after it.
@@ -127,6 +132,13 @@ For pull requests, use a clear human-readable title and include:
 - reviewer focus areas
 
 Link related issues (for example `Fixes #123`) when applicable.
+
+### Feature completion checklist
+
+When adding a new CLI command, MCP tool, or SDK feature:
+
+- **Smoke test**: add a non-destructive invocation to `scripts/smoke-test.sh` (e.g. `kitaru <command> --dry-run` or `kitaru <command> --help`). The smoke test runs before every release, so new features should be exercised there to catch regressions.
+- **Analytics**: check whether the feature needs a tracking event. Add the event to `AnalyticsEvent` in `src/kitaru/analytics.py` and wire it into the appropriate surface (CLI handler via `track()`, MCP tool via `@tracked_mcp_tool`, or SDK lifecycle point). If the CLI command is multi-word (e.g. `clean project`), add it to `_MULTI_TOKEN_COMMANDS` in `cli.py`.
 
 ## CI/CD
 

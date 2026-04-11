@@ -291,6 +291,95 @@ def start_or_connect_local_server(
     return result
 
 
+@dataclass(frozen=True)
+class LocalServerCleanupResult:
+    """Structured result for cleanup-specific local-server teardown."""
+
+    stopped: bool
+    url: str | None = None
+    force_killed_pid: int | None = None
+
+
+def _force_kill_server_process(local_server: Any) -> int | None:
+    """Attempt to force-kill the local server daemon process.
+
+    Returns the killed PID, or None if the PID could not be resolved
+    or the kill failed.
+    """
+    import signal
+
+    pid: int | None = None
+
+    status = getattr(local_server, "status", None)
+    if status is not None:
+        pid = getattr(status, "pid", None)
+
+    if pid is None:
+        config = getattr(local_server, "config", None)
+        if config is not None:
+            pid = getattr(config, "pid", None)
+
+    if pid is None or not isinstance(pid, int) or pid <= 0:
+        return None
+
+    # Verify the process still exists before sending SIGKILL.
+    # Note: this cannot confirm it's the *same* server process (the PID
+    # may have been recycled), but it avoids killing a non-existent PID.
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        logger.debug("Server PID %d no longer exists", pid)
+        return None
+    except OSError:
+        pass  # EPERM means the process exists but we may not own it
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+        return pid
+    except ProcessLookupError:
+        # Process already exited — don't claim we killed it
+        return None
+    except OSError:
+        logger.warning("Could not force-kill server process %d", pid, exc_info=True)
+        return None
+
+
+def stop_registered_local_server_for_cleanup(
+    *,
+    timeout: int = 10,
+) -> LocalServerCleanupResult:
+    """Stop the registered local server for cleanup, with force-kill fallback.
+
+    Unlike ``stop_registered_local_server``, this function:
+    - uses a timeout on graceful shutdown
+    - force-kills the daemon if graceful stop fails
+    - never raises; always returns a result
+    """
+    try:
+        local_server_deployer_cls, _, _, get_local_server = _load_local_server_runtime()
+    except ImportError:
+        return LocalServerCleanupResult(stopped=False, url=None)
+
+    local_server = get_local_server()
+    if local_server is None:
+        return LocalServerCleanupResult(stopped=False, url=None)
+
+    url = _existing_local_server_url(local_server)
+
+    try:
+        local_server_deployer_cls().remove_server(timeout=timeout)
+        return LocalServerCleanupResult(stopped=True, url=url)
+    except Exception:
+        logger.warning("Graceful local server shutdown failed; attempting force-kill")
+
+    killed_pid = _force_kill_server_process(local_server)
+    return LocalServerCleanupResult(
+        stopped=killed_pid is not None,
+        url=url,
+        force_killed_pid=killed_pid,
+    )
+
+
 def stop_registered_local_server() -> LocalServerStopResult:
     """Stop the registered local server if one exists."""
     try:

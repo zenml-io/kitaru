@@ -52,6 +52,7 @@ class TestBuildCommandTree:
 
         tree = build_command_tree(app)
         assert [sub.name for sub in tree.subcommands] == [
+            "clean",
             "executions",
             "info",
             "init",
@@ -306,6 +307,7 @@ class TestWriteDocsTree:
         meta = json.loads((output_dir / "meta.json").read_text())
         assert meta["title"] == "CLI Reference"
         assert meta["pages"] == [
+            "clean",
             "executions",
             "info",
             "init",

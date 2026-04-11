@@ -37,6 +37,10 @@ memory_app = cyclopts.App(
     name="memory",
     help="Inspect and manage persisted memory entries.",
 )
+clean_app = cyclopts.App(
+    name="clean",
+    help="Reset Kitaru state.",
+)
 
 app.command(log_store_app)
 app.command(stack_app)
@@ -44,6 +48,7 @@ app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
 app.command(memory_app)
+app.command(clean_app)
 
 
 @app.default
@@ -53,6 +58,7 @@ def main() -> None:
 
 
 from . import (  # noqa: F401,E402
+    _clean,
     _executions,
     _init,
     _memory,
@@ -65,6 +71,7 @@ from . import (  # noqa: F401,E402
 __all__ = [
     "_UNKNOWN_VERSION",
     "app",
+    "clean_app",
     "executions_app",
     "log_store_app",
     "main",

@@ -12,9 +12,18 @@ from zenml.exceptions import EntityExistsError, ZenKeyError
 from zenml.login.credentials_store import get_credentials_store
 from zenml.zen_server.deploy.deployer import LocalServerDeployer
 
+from kitaru._cleanup import (
+    CleanScope,
+    CleanupPlan,
+    CleanupResult,
+    build_cleanup_plan,
+    execute_cleanup_plan,
+    serialize_cleanup_result,
+)
 from kitaru._cli import (
     _UNKNOWN_VERSION,
     app,
+    clean_app,
     executions_app,
     log_store_app,
     main,
@@ -23,6 +32,7 @@ from kitaru._cli import (
     secrets_app,
     stack_app,
 )
+from kitaru._cli._clean import all_, global_, project
 from kitaru._cli._executions import (
     _auto_detect_single_pending_wait,
     _checkpoint_summary,
@@ -124,7 +134,10 @@ from kitaru._cli._stacks import (
 )
 from kitaru._cli._status import (
     LogoutResult,
+    _build_info_sections,
     _clear_persisted_store_configuration,
+    _config_provenance_rows,
+    _connection_source_rows,
     _describe_local_server,
     _ensure_no_auth_environment_overrides,
     _environment_rows,
@@ -136,7 +149,9 @@ from kitaru._cli._status import (
     _logout_current_connection,
     _logout_result_message,
     _logout_result_payload,
+    _package_rows,
     _status_rows,
+    _system_rows,
     info,
     login,
     logout,
@@ -196,9 +211,12 @@ app.version = _UNKNOWN_VERSION
 # store.  Matching is on the first non-option token in sys.argv.
 _DEFERRED_BOOTSTRAP_COMMANDS: frozenset[str] = frozenset(
     {
+        "clean",
+        "info",
         "init",
         "login",
         "logout",
+        "status",
     }
 )
 
@@ -238,7 +256,7 @@ def _apply_runtime_version() -> None:
 
 
 _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
-    {"executions", "secrets", "log-store", "stack", "model", "memory"}
+    {"clean", "executions", "secrets", "log-store", "stack", "model", "memory"}
 )
 
 
@@ -275,6 +293,9 @@ __all__ = [
     "_STACK_CREATE_FILE_STRING_KEYS",
     "_STACK_CREATE_FILE_SUPPORTED_KEYS",
     "_UNKNOWN_VERSION",
+    "CleanScope",
+    "CleanupPlan",
+    "CleanupResult",
     "Client",
     "EntityExistsError",
     "Execution",
@@ -294,12 +315,15 @@ __all__ = [
     "_StackCreateInputs",
     "_apply_runtime_version",
     "_auto_detect_single_pending_wait",
+    "_build_info_sections",
     "_build_runtime_snapshot",
     "_checkpoint_summary",
     "_clear_persisted_store_configuration",
     "_collect_interactive_wait_candidates",
     "_combine_warnings",
+    "_config_provenance_rows",
     "_connected_to_local_server",
+    "_connection_source_rows",
     "_create_stack_operation",
     "_current_stack_rows",
     "_delete_stack_operation",
@@ -347,6 +371,7 @@ __all__ = [
     "_merge_stack_create_inputs",
     "_model_rows",
     "_normalize_stack_create_file_mapping",
+    "_package_rows",
     "_parse_json_object",
     "_parse_json_value",
     "_parse_memory_cli_value",
@@ -375,9 +400,13 @@ __all__ = [
     "_status_label",
     "_status_rows",
     "_stringify_memory_value",
+    "_system_rows",
     "_value_style",
+    "all_",
     "app",
+    "build_cleanup_plan",
     "cancel_",
+    "clean_app",
     "cli",
     "compact_memory_payload",
     "compaction_log_memory_payload",
@@ -386,12 +415,14 @@ __all__ = [
     "delete",
     "delete_",
     "delete_memory_payload",
+    "execute_cleanup_plan",
     "executions_app",
     "get_",
     "get_available_stacks",
     "get_credentials_store",
     "get_current_stack",
     "get_memory_payload",
+    "global_",
     "history_memory_payload",
     "info",
     "init",
@@ -410,6 +441,7 @@ __all__ = [
     "main",
     "memory_app",
     "model_app",
+    "project",
     "purge_memory_payload",
     "purge_scope_memory_payload",
     "register",
@@ -424,6 +456,7 @@ __all__ = [
     "retry_",
     "scopes_memory_payload",
     "secrets_app",
+    "serialize_cleanup_result",
     "set",
     "set_",
     "set_active_stack",
