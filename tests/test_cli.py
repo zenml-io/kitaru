@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, call, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from zenml.exceptions import EntityExistsError
@@ -34,6 +34,7 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
+from kitaru.errors import KitaruUsageError
 
 
 class _BrokenGlobalConfig:
@@ -217,6 +218,7 @@ def test_help_flag_lists_available_commands(
         "logout",
         "status",
         "info",
+        "clean",
         "log-store",
         "stack",
         "secrets",
@@ -1394,10 +1396,12 @@ def test_local_login_warns_for_auth_environment_overrides(
         app(["login"])
 
     assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "Auth environment variables are active (KITARU_SERVER_URL)." in output
-    assert "runtime connections may still use those environment variables" in output
-    assert "Connected to local Kitaru server." in output
+    captured = capsys.readouterr()
+    # Warnings go to stderr in non-interactive mode
+    combined = captured.out + captured.err
+    assert "Auth environment variables are active (KITARU_SERVER_URL)." in combined
+    assert "runtime connections may still use those environment variables" in combined
+    assert "Connected to local Kitaru server." in combined
 
 
 def test_local_login_warns_when_switching_from_remote(
@@ -1422,9 +1426,11 @@ def test_local_login_warns_when_switching_from_remote(
         app(["login"])
 
     assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "Disconnecting from remote server: https://prod.kitaru.io" in output
-    assert "Connected to local Kitaru server." in output
+    captured = capsys.readouterr()
+    # Warnings go to stderr in non-interactive mode
+    combined = captured.out + captured.err
+    assert "Disconnecting from remote server: https://prod.kitaru.io" in combined
+    assert "Connected to local Kitaru server." in combined
 
 
 def test_logout_rejects_kitaru_auth_environment_overrides(
@@ -5114,7 +5120,7 @@ class TestExecuteCleanupPlan:
         assert any("re-initialize" in w.lower() for w in result.warnings)
 
     def test_deletion_failure_produces_warning(self, tmp_path: Path) -> None:
-        """OSError during deletion should produce a warning, not a crash."""
+        """OSError during project deletion should produce a warning, not a crash."""
         from kitaru._cleanup import (
             CleanScope,
             CleanupPlan,
@@ -5138,6 +5144,356 @@ class TestExecuteCleanupPlan:
             )
 
         assert any("permission denied" in w.lower() for w in result.warnings)
+
+    def test_user_declines_confirmation_aborts(self, tmp_path: Path) -> None:
+        """When prompt_confirm returns False, result should be aborted."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("data\n")
+
+        plan = CleanupPlan(
+            scope=CleanScope.PROJECT,
+            repo_root=str(tmp_path),
+            project_config_path=str(project_dir),
+        )
+
+        result = execute_cleanup_plan(
+            plan,
+            yes=False,
+            force=False,
+            prompt_confirm=lambda _: False,
+        )
+
+        assert result.aborted
+        assert project_dir.exists(), "Directory must NOT be deleted when user declines"
+
+    def test_non_interactive_without_yes_raises(self, tmp_path: Path) -> None:
+        """Missing prompt_confirm with yes=False should raise."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        plan = CleanupPlan(
+            scope=CleanScope.PROJECT,
+            repo_root=str(tmp_path),
+            project_config_path=str(tmp_path / ".kitaru"),
+        )
+
+        with pytest.raises(KitaruUsageError, match="Non-interactive"):
+            execute_cleanup_plan(plan, yes=False, force=False, prompt_confirm=None)
+
+    def test_backup_failure_blocks_cleanup(self, tmp_path: Path) -> None:
+        """When backup fails, cleanup should abort and leave config intact."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+        (config_root / "keep-me.txt").write_text("important")
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root=str(config_root),
+            backup_path=str(tmp_path / "backups" / "backup.db"),
+            model_registry_alias_count=0,
+        )
+
+        with (
+            patch(
+                "kitaru._cleanup._create_backup",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(KitaruUsageError, match="backup"),
+        ):
+            execute_cleanup_plan(plan, yes=True, force=False)
+
+        assert config_root.exists(), "Config dir must survive when backup fails"
+
+    def test_global_deletion_failure_raises_error(self, tmp_path: Path) -> None:
+        """OSError during global config deletion should raise, not warn."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root=str(config_root),
+            model_registry_alias_count=0,
+        )
+
+        with (
+            patch(
+                "kitaru._cleanup._delete_directory",
+                side_effect=OSError("Permission denied"),
+            ),
+            pytest.raises(KitaruUsageError, match="delete config directory"),
+        ):
+            execute_cleanup_plan(plan, yes=True, force=False)
+
+    def test_path_safety_refuses_home_directory(self, tmp_path: Path) -> None:
+        """Cleanup should refuse to delete the home directory."""
+        from kitaru._cleanup import (
+            CleanScope,
+            CleanupPlan,
+            execute_cleanup_plan,
+        )
+
+        plan = CleanupPlan(
+            scope=CleanScope.GLOBAL,
+            global_config_root=str(Path.home()),
+            model_registry_alias_count=0,
+        )
+
+        with pytest.raises(KitaruUsageError, match="home directory"):
+            execute_cleanup_plan(plan, yes=True, force=True)
+
+
+class TestForceKillServerProcess:
+    """Tests for _force_kill_server_process."""
+
+    def test_kill_succeeds_returns_pid(self) -> None:
+        """Successful kill returns the PID."""
+        from kitaru._local_server import _force_kill_server_process
+
+        server = SimpleNamespace(
+            status=SimpleNamespace(pid=12345),
+            config=None,
+        )
+
+        with patch("os.kill") as mock_kill:
+            result = _force_kill_server_process(server)
+
+        assert result == 12345
+        # Signal 0 probe + SIGKILL
+        assert mock_kill.call_count == 2
+
+    def test_pid_from_config_fallback(self) -> None:
+        """PID should be resolved from config when status.pid is missing."""
+        from kitaru._local_server import _force_kill_server_process
+
+        server = SimpleNamespace(
+            status=SimpleNamespace(pid=None),
+            config=SimpleNamespace(pid=99999),
+        )
+
+        with patch("os.kill") as mock_kill:
+            result = _force_kill_server_process(server)
+
+        assert result == 99999
+        assert mock_kill.call_count == 2
+
+    def test_no_pid_returns_none(self) -> None:
+        """When no PID is available, should return None without killing."""
+        from kitaru._local_server import _force_kill_server_process
+
+        server = SimpleNamespace(status=None, config=None)
+
+        with patch("os.kill") as mock_kill:
+            result = _force_kill_server_process(server)
+
+        assert result is None
+        mock_kill.assert_not_called()
+
+    def test_pid_zero_returns_none(self) -> None:
+        """PID <= 0 should be rejected to prevent os.kill(0, SIGKILL)."""
+        from kitaru._local_server import _force_kill_server_process
+
+        server = SimpleNamespace(
+            status=SimpleNamespace(pid=0),
+            config=None,
+        )
+
+        with patch("os.kill") as mock_kill:
+            result = _force_kill_server_process(server)
+
+        assert result is None
+        mock_kill.assert_not_called()
+
+    def test_negative_pid_returns_none(self) -> None:
+        """Negative PIDs should be rejected."""
+        from kitaru._local_server import _force_kill_server_process
+
+        server = SimpleNamespace(
+            status=SimpleNamespace(pid=-1),
+            config=None,
+        )
+
+        with patch("os.kill") as mock_kill:
+            result = _force_kill_server_process(server)
+
+        assert result is None
+        mock_kill.assert_not_called()
+
+    def test_process_already_exited_returns_none(self) -> None:
+        """ProcessLookupError on probe means process is gone."""
+        from kitaru._local_server import _force_kill_server_process
+
+        server = SimpleNamespace(
+            status=SimpleNamespace(pid=12345),
+            config=None,
+        )
+
+        with patch("os.kill", side_effect=ProcessLookupError):
+            result = _force_kill_server_process(server)
+
+        assert result is None
+
+    def test_permission_error_returns_none(self) -> None:
+        """OSError (e.g. EPERM) on kill returns None."""
+        import signal
+
+        from kitaru._local_server import _force_kill_server_process
+
+        server = SimpleNamespace(
+            status=SimpleNamespace(pid=12345),
+            config=None,
+        )
+
+        def selective_kill(pid: int, sig: int) -> None:
+            if sig == signal.SIGKILL:
+                raise PermissionError("Operation not permitted")
+
+        with patch("os.kill", side_effect=selective_kill):
+            result = _force_kill_server_process(server)
+
+        assert result is None
+
+
+class TestStopRegisteredLocalServerForCleanup:
+    """Tests for stop_registered_local_server_for_cleanup."""
+
+    def test_graceful_stop_succeeds(self) -> None:
+        """When graceful shutdown works, should return stopped=True."""
+        from kitaru._local_server import stop_registered_local_server_for_cleanup
+
+        mock_deployer = MagicMock()
+        mock_server = SimpleNamespace(
+            status=SimpleNamespace(url="http://localhost:8383"),
+            config=None,
+        )
+
+        with patch(
+            "kitaru._local_server._load_local_server_runtime",
+            return_value=(mock_deployer, None, None, lambda: mock_server),
+        ):
+            result = stop_registered_local_server_for_cleanup(timeout=5)
+
+        assert result.stopped is True
+        assert result.force_killed_pid is None
+
+    def test_graceful_fails_force_kill_succeeds(self) -> None:
+        """When graceful fails but force-kill works, stopped=True with PID."""
+        from kitaru._local_server import stop_registered_local_server_for_cleanup
+
+        mock_deployer_cls = MagicMock()
+        mock_deployer_cls.return_value.remove_server.side_effect = RuntimeError("fail")
+        mock_server = SimpleNamespace(
+            status=SimpleNamespace(url="http://localhost:8383", pid=42),
+            config=None,
+        )
+
+        with (
+            patch(
+                "kitaru._local_server._load_local_server_runtime",
+                return_value=(mock_deployer_cls, None, None, lambda: mock_server),
+            ),
+            patch("os.kill"),
+        ):
+            result = stop_registered_local_server_for_cleanup(timeout=5)
+
+        assert result.stopped is True
+        assert result.force_killed_pid == 42
+
+    def test_graceful_fails_force_kill_fails_stopped_false(self) -> None:
+        """When both graceful and force-kill fail, stopped=False."""
+        from kitaru._local_server import stop_registered_local_server_for_cleanup
+
+        mock_deployer_cls = MagicMock()
+        mock_deployer_cls.return_value.remove_server.side_effect = RuntimeError("fail")
+        mock_server = SimpleNamespace(
+            status=SimpleNamespace(url="http://localhost:8383", pid=None),
+            config=None,
+        )
+
+        with patch(
+            "kitaru._local_server._load_local_server_runtime",
+            return_value=(mock_deployer_cls, None, None, lambda: mock_server),
+        ):
+            result = stop_registered_local_server_for_cleanup(timeout=5)
+
+        assert result.stopped is False
+        assert result.force_killed_pid is None
+
+    def test_import_error_returns_not_stopped(self) -> None:
+        """ImportError from loading runtime should return stopped=False."""
+        from kitaru._local_server import stop_registered_local_server_for_cleanup
+
+        with patch(
+            "kitaru._local_server._load_local_server_runtime",
+            side_effect=ImportError("no module"),
+        ):
+            result = stop_registered_local_server_for_cleanup(timeout=5)
+
+        assert result.stopped is False
+
+    def test_no_server_returns_not_stopped(self) -> None:
+        """When no server is registered, should return stopped=False."""
+        from kitaru._local_server import stop_registered_local_server_for_cleanup
+
+        mock_deployer = MagicMock()
+
+        with patch(
+            "kitaru._local_server._load_local_server_runtime",
+            return_value=(mock_deployer, None, None, lambda: None),
+        ):
+            result = stop_registered_local_server_for_cleanup(timeout=5)
+
+        assert result.stopped is False
+
+
+class TestPathSafety:
+    """Tests for _validate_deletion_target."""
+
+    def test_refuses_root(self) -> None:
+        from kitaru._cleanup import _validate_deletion_target
+
+        with pytest.raises(KitaruUsageError, match="filesystem root"):
+            _validate_deletion_target(Path("/"))
+
+    def test_refuses_home(self) -> None:
+        from kitaru._cleanup import _validate_deletion_target
+
+        with pytest.raises(KitaruUsageError, match="home directory"):
+            _validate_deletion_target(Path.home())
+
+    def test_refuses_cwd(self) -> None:
+        from kitaru._cleanup import _validate_deletion_target
+
+        with pytest.raises(KitaruUsageError, match="working directory"):
+            _validate_deletion_target(Path.cwd())
+
+    def test_accepts_subdirectory(self, tmp_path: Path) -> None:
+        from kitaru._cleanup import _validate_deletion_target
+
+        subdir = tmp_path / "safe-to-delete"
+        subdir.mkdir()
+        _validate_deletion_target(subdir)  # should not raise
 
 
 # ---------------------------------------------------------------------------

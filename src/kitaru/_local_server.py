@@ -303,7 +303,8 @@ class LocalServerCleanupResult:
 def _force_kill_server_process(local_server: Any) -> int | None:
     """Attempt to force-kill the local server daemon process.
 
-    Returns the killed PID, or None if PID could not be resolved.
+    Returns the killed PID, or None if the PID could not be resolved
+    or the kill failed.
     """
     import signal
 
@@ -321,6 +322,17 @@ def _force_kill_server_process(local_server: Any) -> int | None:
     if pid is None or not isinstance(pid, int) or pid <= 0:
         return None
 
+    # Verify the process still exists before sending SIGKILL.
+    # Note: this cannot confirm it's the *same* server process (the PID
+    # may have been recycled), but it avoids killing a non-existent PID.
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        logger.debug("Server PID %d no longer exists", pid)
+        return None
+    except OSError:
+        pass  # EPERM means the process exists but we may not own it
+
     try:
         os.kill(pid, signal.SIGKILL)
         return pid
@@ -328,7 +340,7 @@ def _force_kill_server_process(local_server: Any) -> int | None:
         # Process already exited — don't claim we killed it
         return None
     except OSError:
-        logger.warning("Could not force-kill server process %d", pid)
+        logger.warning("Could not force-kill server process %d", pid, exc_info=True)
         return None
 
 
@@ -362,7 +374,7 @@ def stop_registered_local_server_for_cleanup(
 
     killed_pid = _force_kill_server_process(local_server)
     return LocalServerCleanupResult(
-        stopped=True,
+        stopped=killed_pid is not None,
         url=url,
         force_killed_pid=killed_pid,
     )

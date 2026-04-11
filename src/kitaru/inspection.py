@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import importlib.metadata
+import logging
 import os
 import platform
 import sys
@@ -47,6 +47,8 @@ from kitaru.config import (
     resolve_log_store,
 )
 
+logger = logging.getLogger(__name__)
+
 _LOCALHOST_NAMES = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -84,7 +86,6 @@ class RuntimeSnapshot:
 
     # Active project
     active_project: str | None = None
-    active_project_source: str | None = None
 
     # System info
     python_version: str | None = None
@@ -503,8 +504,10 @@ def build_runtime_snapshot(
     )
 
     # Connection source breakdown
-    with contextlib.suppress(Exception):
+    try:
         snapshot.connection_sources = _collect_connection_sources()
+    except Exception:
+        logger.debug("Could not collect connection sources", exc_info=True)
 
     if uses_stale_local_server_url(server_url, snapshot.local_server_status):
         snapshot.warning = combine_warnings(
@@ -535,10 +538,12 @@ def build_runtime_snapshot(
         snapshot.server_deployment_type = str(store_info.deployment_type)
 
         # Active project
-        with contextlib.suppress(Exception):
+        try:
             snapshot.active_project = client.active_project.name
+        except Exception:
+            logger.debug("Could not read active project", exc_info=True)
 
-        with contextlib.suppress(Exception):
+        try:
             provenance = _collect_config_provenance(
                 gc,
                 repository_root=snapshot.repository_root,
@@ -548,6 +553,8 @@ def build_runtime_snapshot(
             snapshot.local_stores_path = provenance.local_stores
             snapshot.repository_config_path = provenance.repository_config
             snapshot.uses_repo_local_config = provenance.uses_repo_local
+        except Exception:
+            logger.debug("Could not collect config provenance", exc_info=True)
 
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         snapshot.warning = f"Unable to query the configured store: {exc}"

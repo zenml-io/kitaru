@@ -35,8 +35,9 @@ kitaru info --all --file debug.json
 ```
 
 <Callout type="info">
-Environment variable secrets are automatically masked in the exported file,
-so it's safe to share.
+Environment variables with secret-like names (containing TOKEN, KEY, SECRET,
+PASSWORD, CREDENTIAL, or AUTH) are automatically masked in the exported file.
+Review other fields such as server URL before sharing publicly.
 </Callout>
 
 You can also get JSON output directly for pasting into an issue:

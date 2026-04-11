@@ -399,8 +399,14 @@ def reset_global_log_store(
 
 
 def _mask_environment_value(name: str, value: str) -> str:
-    """Mask secret-like environment values for status surfaces."""
-    if name not in {KITARU_AUTH_TOKEN_ENV, KITARU_LOG_STORE_API_KEY_ENV}:
+    """Mask secret-like environment values for status surfaces.
+
+    Reuses the canonical secret-name regex from ``_core`` so the two
+    redaction surfaces stay in sync.
+    """
+    from kitaru._config._core import _SECRET_ENV_KEY_PATTERN
+
+    if not _SECRET_ENV_KEY_PATTERN.search(name):
         return value
 
     if len(value) >= 8:

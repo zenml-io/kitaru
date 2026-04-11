@@ -838,8 +838,13 @@ def _write_info_file(
 
             yaml_utils.write_yaml(str(path), data)
         except ImportError:
-            import yaml
-
+            try:
+                import yaml  # PyYAML — transitive ZenML dependency
+            except ImportError:
+                raise ValueError(
+                    "YAML export requires PyYAML. "
+                    "Install it with: uv pip install pyyaml"
+                ) from None
             with open(path, "w") as f:
                 yaml.dump(data, f, default_flow_style=False, sort_keys=False)
     else:

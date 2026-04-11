@@ -51,8 +51,6 @@ def _render_preview_entry(
 
     if entry.entry_type == PreviewEntryType.BACKUP:
         lines.append(f"{prefix}Backup: {entry.path}{note_str}")
-    elif entry.entry_type == PreviewEntryType.SERVER:
-        lines.append(f"{prefix}Local server: {entry.note or entry.path}")
     else:
         lines.append(f"{prefix}{entry.path}{size_str}{note_str}")
 

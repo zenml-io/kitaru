@@ -636,7 +636,6 @@ def test_serialize_runtime_snapshot_contract() -> None:
         "uses_repo_local_config": False,
         "connection_sources": None,
         "active_project": None,
-        "active_project_source": None,
         "python_version": None,
         "system_info": None,
         "environment_type": None,

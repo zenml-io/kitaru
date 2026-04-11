@@ -7,7 +7,7 @@ import logging
 import os
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -38,7 +38,6 @@ class PreviewEntryType(StrEnum):
     FILE = "file"
     DIRECTORY = "directory"
     BACKUP = "backup"
-    SERVER = "server"
 
 
 @dataclass(frozen=True)
@@ -61,15 +60,13 @@ class CleanupPlan:
     project_config_path: str | None = None
     global_config_root: str | None = None
     backup_path: str | None = None
-    preview_entries: list[CleanupPreviewEntry] = field(default_factory=list)
+    preview_entries: tuple[CleanupPreviewEntry, ...] = ()
     total_bytes: int = 0
     model_registry_alias_count: int | None = None
     local_server_status: str | None = None
     local_server_would_stop: bool = False
     custom_config_path_warning: str | None = None
-    active_environment_overrides: list[ActiveEnvironmentVariable] = field(
-        default_factory=list,
-    )
+    active_environment_overrides: tuple[ActiveEnvironmentVariable, ...] = ()
     can_reinitialize_project: bool = False
 
 
@@ -81,15 +78,13 @@ class CleanupResult:
     dry_run: bool = False
     aborted: bool = False
     backup_path: str | None = None
-    deleted_paths: list[str] = field(default_factory=list)
+    deleted_paths: tuple[str, ...] = ()
     local_server_stopped: bool = False
     local_server_force_killed_pid: int | None = None
     reinitialized_project: bool = False
-    warnings: list[str] = field(default_factory=list)
-    active_environment_overrides: list[ActiveEnvironmentVariable] = field(
-        default_factory=list,
-    )
-    preview_entries: list[CleanupPreviewEntry] = field(default_factory=list)
+    warnings: tuple[str, ...] = ()
+    active_environment_overrides: tuple[ActiveEnvironmentVariable, ...] = ()
+    preview_entries: tuple[CleanupPreviewEntry, ...] = ()
     total_bytes: int = 0
     local_server_status: str | None = None
 
@@ -227,9 +222,12 @@ def _build_global_preview(
         # Compute per-child sizes once, then sum for the parent total
         # to avoid walking the tree twice.
         child_sizes = [(d, _dir_size(d)) for d in store_dirs]
-        top_level_files_size = sum(
-            _file_size(f) for f in local_stores.iterdir() if f.is_file()
-        )
+        try:
+            top_level_files_size = sum(
+                _file_size(f) for f in local_stores.iterdir() if f.is_file()
+            )
+        except OSError:
+            top_level_files_size = 0
         ls_size = sum(s for _, s in child_sizes) + top_level_files_size
         total += ls_size
 
@@ -323,14 +321,29 @@ def _build_global_preview(
 
 
 def _resolve_repo_root() -> Path | None:
-    """Resolve the Kitaru project root by walking up the directory tree."""
+    """Resolve the Kitaru project root by walking up the directory tree.
+
+    Falls back to a manual directory search if the Client cannot read
+    the repository — the cleanup tool must work on broken projects.
+    """
     from zenml.client import Client
 
     try:
         root = Client.find_repository()
+        if isinstance(root, Path):
+            return root
     except Exception:
-        return None
-    return root if isinstance(root, Path) else None
+        logger.debug(
+            "Client.find_repository() failed; trying manual search", exc_info=True
+        )
+
+    # Manual fallback: walk up from cwd looking for the .kitaru/ marker.
+    cwd = Path.cwd()
+    for parent in (cwd, *cwd.parents):
+        marker = parent / KITARU_REPOSITORY_DIRECTORY_NAME
+        if marker.is_dir():
+            return parent
+    return None
 
 
 def _resolve_config_root() -> Path:
@@ -501,13 +514,13 @@ def build_cleanup_plan(
         project_config_path=project_config_path,
         global_config_root=global_config_root,
         backup_path=backup_path,
-        preview_entries=preview_entries,
+        preview_entries=tuple(preview_entries),
         total_bytes=total_bytes,
         model_registry_alias_count=alias_count,
         local_server_status=local_server_status,
         local_server_would_stop=local_server_would_stop,
         custom_config_path_warning=custom_config_warning,
-        active_environment_overrides=env_overrides,
+        active_environment_overrides=tuple(env_overrides),
         can_reinitialize_project=can_reinit,
     )
 
@@ -529,10 +542,42 @@ def _create_backup(backup_path: str, config_root: Path) -> None:
     shutil.copy2(db_path, backup)
 
 
+_DANGEROUS_PATH_NAMES = frozenset({"/", ""})
+
+
+def _validate_deletion_target(path: Path) -> None:
+    """Raise if *path* is a dangerous deletion target.
+
+    Guards against misconfigured KITARU_CONFIG_PATH pointing at /, $HOME,
+    the repo root, or other high-value directories.
+    """
+    resolved = path.resolve()
+
+    if str(resolved) in _DANGEROUS_PATH_NAMES:
+        raise KitaruUsageError(
+            f"Refusing to delete '{path}': resolves to filesystem root."
+        )
+
+    home = Path.home().resolve()
+    if resolved == home:
+        raise KitaruUsageError(
+            f"Refusing to delete '{path}': resolves to home directory ({home})."
+        )
+
+    # Refuse to delete the current working directory or its parents
+    cwd = Path.cwd().resolve()
+    if resolved == cwd or cwd.is_relative_to(resolved):
+        raise KitaruUsageError(
+            f"Refusing to delete '{path}': contains the current working "
+            f"directory ({cwd})."
+        )
+
+
 def _delete_directory(path: Path) -> bool:
     """Delete a directory tree. Returns True if deleted."""
     if not path.exists():
         return False
+    _validate_deletion_target(path)
     shutil.rmtree(path)
     return True
 
@@ -543,6 +588,8 @@ def _reset_global_config() -> None:
     from zenml.config.global_config import GlobalConfiguration
 
     old_gc = GlobalConfiguration()
+    # Preserve identity and opt-in preference so analytics continuity is
+    # maintained and the user's tracking consent is not silently reset.
     user_id = getattr(old_gc, "user_id", None)
     analytics_opt_in = getattr(old_gc, "analytics_opt_in", None)
 
@@ -576,7 +623,9 @@ def _reinitialize_project(repo_root: Path) -> bool:
         Client.initialize(root=repo_root)
         return True
     except Exception:
-        logger.warning("Could not re-initialize project at %s", repo_root)
+        logger.warning(
+            "Could not re-initialize project at %s", repo_root, exc_info=True
+        )
         return False
 
 
@@ -624,7 +673,12 @@ def execute_cleanup_plan(
             raise KitaruUsageError(
                 "Non-interactive environment requires --yes to proceed."
             )
-        config_label = plan.global_config_root or plan.project_config_path or "unknown"
+        if plan.global_config_root and plan.project_config_path:
+            config_label = f"{plan.global_config_root} and {plan.project_config_path}"
+        else:
+            config_label = (
+                plan.global_config_root or plan.project_config_path or "unknown"
+            )
         if not prompt_confirm(
             f"This will delete Kitaru state at {config_label}. Continue?"
         ):
@@ -633,14 +687,8 @@ def execute_cleanup_plan(
     if scope in (CleanScope.GLOBAL, CleanScope.ALL) and plan.global_config_root:
         config_root = Path(plan.global_config_root)
 
-        if plan.backup_path:
-            try:
-                _create_backup(plan.backup_path, config_root)
-            except Exception as exc:
-                raise KitaruUsageError(
-                    f"Failed to create database backup: {exc}"
-                ) from exc
-
+        # Stop the local server BEFORE backing up, so the SQLite database
+        # is quiesced and the backup captures all committed data.
         if plan.local_server_would_stop:
             from kitaru._local_server import stop_registered_local_server_for_cleanup
 
@@ -652,14 +700,29 @@ def execute_cleanup_plan(
                     "Local server did not shut down gracefully. "
                     f"Force-killed process {force_killed_pid}."
                 )
+            elif not server_result.stopped:
+                warnings.append(
+                    "Could not stop the local server. The database backup "
+                    "may be incomplete if the server is still writing."
+                )
+
+        if plan.backup_path:
+            try:
+                _create_backup(plan.backup_path, config_root)
+            except Exception as exc:
+                raise KitaruUsageError(
+                    f"Failed to create database backup: {exc}"
+                ) from exc
 
         try:
             if _delete_directory(config_root):
                 deleted_paths.append(str(config_root))
             else:
                 warnings.append(f"Config directory already absent: {config_root}")
-        except OSError as exc:
-            warnings.append(f"Failed to delete config directory {config_root}: {exc}")
+        except (OSError, KitaruUsageError) as exc:
+            raise KitaruUsageError(
+                f"Failed to delete config directory {config_root}: {exc}"
+            ) from exc
 
         try:
             _reset_global_config()
@@ -706,11 +769,11 @@ def execute_cleanup_plan(
         dry_run=False,
         aborted=False,
         backup_path=plan.backup_path,
-        deleted_paths=deleted_paths,
+        deleted_paths=tuple(deleted_paths),
         local_server_stopped=server_stopped,
         local_server_force_killed_pid=force_killed_pid,
         reinitialized_project=reinitialized,
-        warnings=warnings,
+        warnings=tuple(warnings),
         active_environment_overrides=plan.active_environment_overrides,
         preview_entries=plan.preview_entries,
         total_bytes=plan.total_bytes,
