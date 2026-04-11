@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+import logging
 import os
+import platform
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
@@ -43,6 +47,8 @@ from kitaru.config import (
     resolve_log_store,
 )
 
+logger = logging.getLogger(__name__)
+
 _LOCALHOST_NAMES = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -68,6 +74,28 @@ class RuntimeSnapshot:
     log_store_warning: str | None = None
     environment: list[ActiveEnvironmentVariable] = field(default_factory=list)
 
+    # Config provenance
+    kitaru_global_config_path: str | None = None
+    zenml_global_config_path: str | None = None
+    local_stores_path: str | None = None
+    repository_config_path: str | None = None
+    uses_repo_local_config: bool = False
+
+    # Connection source breakdown
+    connection_sources: dict[str, str] | None = None
+
+    # Active project
+    active_project: str | None = None
+
+    # System info
+    python_version: str | None = None
+    system_info: dict[str, str] | None = None
+    environment_type: str | None = None
+    zenml_version: str | None = None
+
+    # Package info (--all / --packages only)
+    packages: dict[str, str] | None = None
+
 
 def _sdk_version() -> str:
     """Resolve the installed SDK version lazily."""
@@ -80,10 +108,16 @@ def describe_local_server() -> str:
         local_server = get_local_server()
     except ImportError:
         return "unavailable (local runtime support not installed)"
+    except Exception:
+        logger.debug("Could not query local server", exc_info=True)
+        return "unknown (query failed)"
     if local_server is None:
         return "not started"
 
-    provider = local_server.config.provider.value
+    try:
+        provider = local_server.config.provider.value
+    except Exception:
+        provider = "unknown"
     if local_server.status and local_server.status.url:
         return f"running at {local_server.status.url} ({provider})"
 
@@ -233,14 +267,240 @@ def combine_warnings(*warnings: str | None) -> str | None:
     return "\n".join(rendered)
 
 
-def build_runtime_snapshot() -> RuntimeSnapshot:
+def _collect_zenml_version() -> str | None:
+    """Read the installed ZenML version, or None if unavailable."""
+    try:
+        return importlib.metadata.version("zenml")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _collect_python_system_info(
+    *,
+    include_environment_type: bool = False,
+) -> tuple[str, dict[str, str], str | None]:
+    """Collect Python version, system info, and optional environment type."""
+    python_version = (
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
+    system_info = {
+        "os": platform.platform(),
+        "architecture": platform.machine(),
+    }
+    environment_type: str | None = None
+    if include_environment_type:
+        environment_type = _detect_environment_type()
+    return python_version, system_info, environment_type
+
+
+def _detect_environment_type() -> str:
+    """Detect the current execution environment type."""
+    if os.environ.get("KUBERNETES_SERVICE_HOST"):
+        return "kubernetes"
+    if os.environ.get("GITHUB_ACTIONS"):
+        return "github_actions"
+    if os.environ.get("GITLAB_CI"):
+        return "gitlab_ci"
+    if os.environ.get("CIRCLECI"):
+        return "circleci"
+    if os.path.exists("/.dockerenv") or os.environ.get("CONTAINER"):
+        return "docker"
+    return "native"
+
+
+@dataclass(frozen=True)
+class ConfigProvenance:
+    """Resolved config file paths for provenance display."""
+
+    kitaru_global_config: str | None = None
+    zenml_global_config: str | None = None
+    local_stores: str | None = None
+    repository_config: str | None = None
+    uses_repo_local: bool = False
+
+
+def _collect_config_provenance(
+    gc: GlobalConfiguration,
+    *,
+    repository_root: str | None,
+) -> ConfigProvenance:
+    """Collect config file path provenance."""
+    from kitaru._config._log_store import _kitaru_global_config_path
+
+    config_dir = Path(gc.config_directory)
+
+    kitaru_config = _kitaru_global_config_path()
+    kitaru_config_str = str(kitaru_config) if kitaru_config.exists() else None
+
+    zenml_config = config_dir / "config.yaml"
+    zenml_config_str = str(zenml_config) if zenml_config.exists() else None
+
+    local_stores = config_dir / "local_stores"
+    local_stores_str = str(local_stores) if local_stores.exists() else None
+
+    repo_config_str: str | None = None
+    uses_repo = False
+    if repository_root:
+        from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
+
+        repo_config = (
+            Path(repository_root) / KITARU_REPOSITORY_DIRECTORY_NAME / "config.yaml"
+        )
+        if repo_config.exists():
+            repo_config_str = str(repo_config)
+            uses_repo = True
+
+    return ConfigProvenance(
+        kitaru_global_config=kitaru_config_str,
+        zenml_global_config=zenml_config_str,
+        local_stores=local_stores_str,
+        repository_config=repo_config_str,
+        uses_repo_local=uses_repo,
+    )
+
+
+def _collect_connection_sources() -> dict[str, str]:
+    """Build a per-parameter source breakdown for the current connection."""
+    from kitaru._env import (
+        KITARU_AUTH_TOKEN_ENV,
+        KITARU_SERVER_URL_ENV,
+        ZENML_STORE_API_KEY_ENV,
+        ZENML_STORE_URL_ENV,
+    )
+
+    sources: dict[str, str] = {}
+    runtime_conn = _read_runtime_connection_config()
+
+    # server_url source
+    if os.environ.get(KITARU_SERVER_URL_ENV):
+        sources["server_url"] = f"environment ({KITARU_SERVER_URL_ENV})"
+    elif os.environ.get(ZENML_STORE_URL_ENV):
+        sources["server_url"] = f"environment ({ZENML_STORE_URL_ENV})"
+    elif runtime_conn.server_url:
+        sources["server_url"] = "runtime override (kitaru.configure)"
+    else:
+        sources["server_url"] = "global config"
+
+    # auth_token source
+    if os.environ.get(KITARU_AUTH_TOKEN_ENV):
+        sources["auth_token"] = f"environment ({KITARU_AUTH_TOKEN_ENV})"
+    elif os.environ.get(ZENML_STORE_API_KEY_ENV):
+        sources["auth_token"] = f"environment ({ZENML_STORE_API_KEY_ENV})"
+    else:
+        sources["auth_token"] = "global config"
+
+    # project source
+    if os.environ.get(KITARU_PROJECT_ENV):
+        sources["project"] = f"environment ({KITARU_PROJECT_ENV})"
+    elif runtime_conn.project:
+        sources["project"] = "runtime override (kitaru.configure)"
+    else:
+        try:
+            client = Client()
+            if client.root:
+                from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
+
+                repo_config = (
+                    Path(str(client.root))
+                    / KITARU_REPOSITORY_DIRECTORY_NAME
+                    / "config.yaml"
+                )
+                if repo_config.exists():
+                    sources["project"] = "repo-local config (.kitaru/)"
+                else:
+                    sources["project"] = "global config"
+            else:
+                sources["project"] = "global config"
+        except Exception:
+            sources["project"] = "global config"
+
+    return sources
+
+
+def _collect_packages(
+    *,
+    include_all: bool = False,
+    package_names: Sequence[str] | None = None,
+) -> dict[str, str] | None:
+    """Collect installed package versions."""
+    if not include_all and not package_names:
+        return None
+
+    if include_all:
+        packages: dict[str, str] = {}
+        for dist in importlib.metadata.distributions():
+            try:
+                name = dist.metadata["Name"]
+                if name:
+                    normalized = name.lower().replace("_", "-")
+                    packages[normalized] = dist.version
+            except (KeyError, TypeError, ValueError):
+                continue
+        return dict(sorted(packages.items()))
+
+    if package_names:
+        packages = {}
+        for name in package_names:
+            normalized = name.lower().replace("_", "-")
+            try:
+                version = importlib.metadata.version(name)
+                packages[normalized] = version
+            except importlib.metadata.PackageNotFoundError:
+                packages[normalized] = "not installed"
+        return dict(sorted(packages.items()))
+
+    return None
+
+
+def build_runtime_snapshot(
+    *,
+    include_packages: bool = False,
+    package_names: Sequence[str] | None = None,
+    include_environment_type: bool = False,
+) -> RuntimeSnapshot:
     """Resolve the current Kitaru runtime state from ZenML-backed config."""
-    gc = GlobalConfiguration()
+    # Collect non-network diagnostics early so they're available even in
+    # degraded snapshots that return before reaching the Client.
+    zenml_version = _collect_zenml_version()
+    python_ver, sys_info, env_type = _collect_python_system_info(
+        include_environment_type=include_environment_type,
+    )
+    packages = _collect_packages(
+        include_all=include_packages,
+        package_names=package_names,
+    )
+
+    try:
+        gc = GlobalConfiguration()
+    except Exception as exc:
+        logger.debug("GlobalConfiguration() failed", exc_info=True)
+        snapshot = RuntimeSnapshot(
+            sdk_version=_sdk_version(),
+            connection="unavailable",
+            connection_target="unavailable",
+            config_directory="unknown",
+            warning=f"Could not load global configuration: {exc}",
+            environment=list_active_kitaru_environment_variables(),
+            zenml_version=zenml_version,
+            python_version=python_ver,
+            system_info=sys_info,
+            environment_type=env_type,
+            packages=packages,
+        )
+        return snapshot
+
     try:
         store_cfg = gc.store_configuration
         uses_local_store = gc.uses_local_store
-    except ImportError as exc:
-        return _build_snapshot_without_local_store(gc, exc)
+    except Exception as exc:
+        logger.debug("Could not read store configuration", exc_info=True)
+        snapshot = _build_snapshot_without_local_store(gc, exc)
+        snapshot.zenml_version = zenml_version
+        snapshot.python_version = python_ver
+        snapshot.system_info = sys_info
+        snapshot.environment_type = env_type
+        snapshot.packages = packages
+        return snapshot
 
     if uses_local_store:
         connection = "local database"
@@ -260,6 +520,11 @@ def build_runtime_snapshot() -> RuntimeSnapshot:
         config_directory=gc.config_directory,
         local_server_status=describe_local_server(),
         environment=list_active_kitaru_environment_variables(),
+        zenml_version=zenml_version,
+        python_version=python_ver,
+        system_info=sys_info,
+        environment_type=env_type,
+        packages=packages,
     )
 
     if uses_stale_local_server_url(server_url, snapshot.local_server_status):
@@ -272,6 +537,13 @@ def build_runtime_snapshot() -> RuntimeSnapshot:
             _legacy_runner_env_warning(),
         )
         return snapshot
+
+    # Connection source breakdown — after stale-server check so we don't
+    # instantiate Client() against a server we already know is down.
+    try:
+        snapshot.connection_sources = _collect_connection_sources()
+    except Exception:
+        logger.debug("Could not collect connection sources", exc_info=True)
 
     project_env = os.environ.get(KITARU_PROJECT_ENV)
     runtime_conn = _read_runtime_connection_config()
@@ -289,6 +561,26 @@ def build_runtime_snapshot() -> RuntimeSnapshot:
         snapshot.server_version = str(store_info.version)
         snapshot.server_database = str(store_info.database_type)
         snapshot.server_deployment_type = str(store_info.deployment_type)
+
+        # Active project
+        try:
+            snapshot.active_project = client.active_project.name
+        except Exception:
+            logger.debug("Could not read active project", exc_info=True)
+
+        try:
+            provenance = _collect_config_provenance(
+                gc,
+                repository_root=snapshot.repository_root,
+            )
+            snapshot.kitaru_global_config_path = provenance.kitaru_global_config
+            snapshot.zenml_global_config_path = provenance.zenml_global_config
+            snapshot.local_stores_path = provenance.local_stores
+            snapshot.repository_config_path = provenance.repository_config
+            snapshot.uses_repo_local_config = provenance.uses_repo_local
+        except Exception:
+            logger.debug("Could not collect config provenance", exc_info=True)
+
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
         snapshot.warning = f"Unable to query the configured store: {exc}"
 
