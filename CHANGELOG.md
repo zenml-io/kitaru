@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-04-11
+
+### Added
+- `kitaru analytics` CLI command group with `opt-in`, `opt-out`, and `status` subcommands for managing anonymous usage analytics preferences — persists to config file so the preference is respected by all surfaces including MCP servers
+
+### Fixed
+- Analytics events leaking from smoke test runs to Mixpanel (disabled via `ZENML_ANALYTICS_OPT_IN=false` export)
+- MCP server ignoring user's analytics opt-out when launched via stdio transport (env vars stripped by MCP SDK; `kitaru analytics opt-out` persists preference to config file as the fix)
+- `kitaru analytics` commands no longer eagerly bootstrap the ZenML store (added to `_DEFERRED_BOOTSTRAP_COMMANDS`)
+
 ## [0.3.4] - 2026-04-11
 
 ### Added
