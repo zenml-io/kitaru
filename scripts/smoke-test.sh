@@ -230,6 +230,20 @@ run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
 run_test "kitaru model list"             $UV_RUN kitaru model list
 run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
+run_test "kitaru analytics opt-in --help"  $UV_RUN kitaru analytics opt-in --help
+run_test "kitaru analytics opt-out --help" $UV_RUN kitaru analytics opt-out --help
+ANALYTICS_OUT=$($UV_RUN kitaru analytics status -o json 2>&1) || true
+ANALYTICS_DISABLED=$(echo "$ANALYTICS_OUT" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['item']['analytics_opt_in'])" 2>/dev/null) || true
+if [[ "${ANALYTICS_DISABLED:-}" == "False" ]]; then
+    printf "  ${GREEN}✓${RESET} analytics disabled in smoke test\n"
+    PASSED+=("analytics disabled in smoke test")
+else
+    printf "  ${RED}✗${RESET} analytics disabled in smoke test\n"
+    echo "    Expected analytics_opt_in=False, got: ${ANALYTICS_DISABLED:-<parse error>}" | sed 's/^/    /'
+    echo "    Raw output: ${ANALYTICS_OUT:0:200}" | sed 's/^/    /'
+    FAILED+=("analytics disabled in smoke test")
+fi
 
 # ---------------------------------------------------------------------------
 # Project init

@@ -6038,3 +6038,143 @@ class TestCleanAnalytics:
         metadata = track_mock.call_args.args[1]
         assert set(metadata.keys()) == {"scope", "dry_run"}
         assert metadata["scope"] in ("project", "global", "all")
+
+
+# ---------------------------------------------------------------------------
+# Analytics CLI
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyticsStatus:
+    """Tests for kitaru analytics status."""
+
+    @pytest.mark.parametrize(
+        ("opt_in", "expected_label"),
+        [(True, "enabled"), (False, "disabled")],
+    )
+    def test_status_text_output(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        opt_in: bool,
+        expected_label: str,
+    ) -> None:
+        with (
+            patch(
+                "kitaru._cli._analytics._get_analytics_opt_in",
+                return_value=opt_in,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["analytics", "status"])
+
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert expected_label in output
+
+    def test_status_json_output(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        with (
+            patch(
+                "kitaru._cli._analytics._get_analytics_opt_in",
+                return_value=False,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["analytics", "status", "-o", "json"])
+
+        assert exc_info.value.code == 0
+        envelope = json.loads(capsys.readouterr().out)
+        assert envelope["command"] == "analytics.status"
+        assert envelope["item"]["analytics_opt_in"] is False
+
+
+class TestAnalyticsOptIn:
+    """Tests for kitaru analytics opt-in."""
+
+    def test_opt_in_text_output(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        with (
+            patch(
+                "kitaru._cli._analytics._set_analytics_opt_in",
+            ) as mock_set,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["analytics", "opt-in"])
+
+        assert exc_info.value.code == 0
+        mock_set.assert_called_once_with(True)
+        output = capsys.readouterr().out
+        assert "Analytics enabled." in output
+
+    def test_opt_in_json_output(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        with (
+            patch("kitaru._cli._analytics._set_analytics_opt_in"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["analytics", "opt-in", "-o", "json"])
+
+        assert exc_info.value.code == 0
+        envelope = json.loads(capsys.readouterr().out)
+        assert envelope["command"] == "analytics.opt-in"
+        assert envelope["item"]["analytics_opt_in"] is True
+
+
+class TestAnalyticsOptOut:
+    """Tests for kitaru analytics opt-out."""
+
+    def test_opt_out_text_output(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        with (
+            patch(
+                "kitaru._cli._analytics._set_analytics_opt_in",
+            ) as mock_set,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["analytics", "opt-out"])
+
+        assert exc_info.value.code == 0
+        mock_set.assert_called_once_with(False)
+        output = capsys.readouterr().out
+        assert "Analytics disabled." in output
+        assert "MCP" in output
+
+    def test_opt_out_json_output(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        with (
+            patch("kitaru._cli._analytics._set_analytics_opt_in"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["analytics", "opt-out", "-o", "json"])
+
+        assert exc_info.value.code == 0
+        envelope = json.loads(capsys.readouterr().out)
+        assert envelope["command"] == "analytics.opt-out"
+        assert envelope["item"]["analytics_opt_in"] is False
+
+    def test_opt_out_surfaces_config_error(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        with (
+            patch(
+                "kitaru._cli._analytics._set_analytics_opt_in",
+                side_effect=RuntimeError("Config file corrupted"),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["analytics", "opt-out"])
+
+        assert exc_info.value.code == 1
+        output = capsys.readouterr().err
+        assert "Config file corrupted" in output
