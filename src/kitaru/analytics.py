@@ -54,7 +54,9 @@ class AnalyticsEvent(StrEnum):
     MODEL_ALIAS_REGISTERED = "Kitaru model alias registered"
     LOG_STORE_CONFIGURED = "Kitaru log store configured"
     CLEAN_COMPLETED = "Kitaru clean completed"
+    INFO_VIEWED = "Kitaru info viewed"
     INFO_EXPORTED = "Kitaru info exported"
+    STATUS_VIEWED = "Kitaru status viewed"
 
     # Adapter
     PYDANTIC_AI_WRAPPED = "Kitaru PydanticAI wrapped"

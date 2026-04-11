@@ -160,6 +160,8 @@ def _run_clean(
         handled_exceptions=(Exception,),
     )
 
+    from kitaru.analytics import AnalyticsEvent, track
+
     if dry_run:
         dry_warnings: tuple[str, ...] = ()
         if plan.custom_config_path_warning:
@@ -173,6 +175,12 @@ def _run_clean(
             active_environment_overrides=plan.active_environment_overrides,
             warnings=dry_warnings,
         )
+
+        track(
+            AnalyticsEvent.CLEAN_COMPLETED,
+            {"scope": scope.value, "dry_run": True},
+        )
+
         if output_format == CLIOutputFormat.JSON:
             _emit_json_item(
                 command,
@@ -210,8 +218,6 @@ def _run_clean(
     )
 
     if not result.aborted:
-        from kitaru.analytics import AnalyticsEvent, track
-
         track(
             AnalyticsEvent.CLEAN_COMPLETED,
             {"scope": scope.value, "dry_run": False},

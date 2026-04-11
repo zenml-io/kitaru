@@ -799,6 +799,11 @@ def status(output: OutputFormatOption = "text") -> None:
     """Show the current connection state and active stack context."""
     output_format = _resolve_output_format(output)
     snapshot = _facade_module()._build_runtime_snapshot()
+
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(AnalyticsEvent.STATUS_VIEWED)
+
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             "status",
@@ -897,6 +902,16 @@ def info(
         include_environment_type=include_environment_type,
     )
 
+    from kitaru.analytics import AnalyticsEvent, track
+
+    track(
+        AnalyticsEvent.INFO_VIEWED,
+        {
+            "all": all,
+            "packages_requested": include_packages or bool(packages),
+        },
+    )
+
     if file is not None:
         run_with_cli_error_boundary(
             lambda: _write_info_file(snapshot, file),
@@ -905,8 +920,6 @@ def info(
             exit_with_error=_exit_with_error,
             handled_exceptions=(OSError, ValueError),
         )
-
-        from kitaru.analytics import AnalyticsEvent, track
 
         file_format = (
             "yaml" if Path(file).suffix.lower() in (".yaml", ".yml") else "json"

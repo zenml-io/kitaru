@@ -5841,3 +5841,200 @@ class TestCLIAnalytics:
                 "key_count": 1,
             },
         )
+
+
+# ---------------------------------------------------------------------------
+# Analytics: info / status / clean feature-level tracking
+# ---------------------------------------------------------------------------
+
+
+class TestStatusAnalytics:
+    """Verify status command fires STATUS_VIEWED."""
+
+    def test_status_fires_status_viewed(self) -> None:
+        """kitaru status should emit STATUS_VIEWED."""
+        snapshot = RuntimeSnapshot(
+            sdk_version="0.3.0",
+            connection="local database",
+            connection_target="sqlite:///...",
+            config_directory="/tmp/config",
+        )
+        with (
+            patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["status"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(AnalyticsEvent.STATUS_VIEWED)
+
+
+class TestInfoAnalytics:
+    """Verify info command fires INFO_VIEWED with correct metadata."""
+
+    def test_info_fires_info_viewed(self) -> None:
+        """kitaru info (no flags) should emit INFO_VIEWED."""
+        snapshot = RuntimeSnapshot(
+            sdk_version="0.3.0",
+            connection="local database",
+            connection_target="sqlite:///...",
+            config_directory="/tmp/config",
+        )
+        with (
+            patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["info"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.INFO_VIEWED,
+            {"all": False, "packages_requested": False},
+        )
+
+    def test_info_all_tracks_correctly(self) -> None:
+        """kitaru info --all should include all=True in metadata."""
+        snapshot = RuntimeSnapshot(
+            sdk_version="0.3.0",
+            connection="local database",
+            connection_target="sqlite:///...",
+            config_directory="/tmp/config",
+        )
+        with (
+            patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["info", "--all"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.INFO_VIEWED,
+            {"all": True, "packages_requested": True},
+        )
+
+    def test_info_file_export_fires_both_events(self, tmp_path: Path) -> None:
+        """kitaru info --file should fire INFO_VIEWED and INFO_EXPORTED."""
+        snapshot = RuntimeSnapshot(
+            sdk_version="0.3.0",
+            connection="local database",
+            connection_target="sqlite:///...",
+            config_directory="/tmp/config",
+        )
+        export_path = tmp_path / "debug.json"
+        with (
+            patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["info", "--file", str(export_path)])
+
+        assert exc_info.value.code == 0
+        assert track_mock.call_count == 2
+
+        viewed_call = track_mock.call_args_list[0]
+        assert viewed_call.args[0] == AnalyticsEvent.INFO_VIEWED
+
+        exported_call = track_mock.call_args_list[1]
+        assert exported_call.args[0] == AnalyticsEvent.INFO_EXPORTED
+        assert exported_call.args[1] == {"format": "json"}
+
+    def test_info_metadata_contains_no_paths(self) -> None:
+        """INFO_VIEWED metadata must not leak file paths or user data."""
+        snapshot = RuntimeSnapshot(
+            sdk_version="0.3.0",
+            connection="local database",
+            connection_target="sqlite:///...",
+            config_directory="/tmp/config",
+        )
+        with (
+            patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["info", "-p", "numpy"])
+
+        assert exc_info.value.code == 0
+        metadata = track_mock.call_args.args[1]
+        for value in metadata.values():
+            assert not isinstance(value, str) or "/" not in value
+
+
+class TestCleanAnalytics:
+    """Verify clean command analytics coverage."""
+
+    def test_dry_run_fires_clean_completed_with_dry_run_true(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """clean project --dry-run should fire CLEAN_COMPLETED(dry_run=True)."""
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("active_stack: default\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=tmp_path,
+            ),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "project", "--dry-run"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.CLEAN_COMPLETED,
+            {"scope": "project", "dry_run": True},
+        )
+
+    def test_actual_clean_fires_clean_completed_with_dry_run_false(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """clean project --yes should fire CLEAN_COMPLETED(dry_run=False)."""
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("active_stack: default\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=tmp_path,
+            ),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "project", "--yes"])
+
+        assert exc_info.value.code == 0
+        track_mock.assert_called_once_with(
+            AnalyticsEvent.CLEAN_COMPLETED,
+            {"scope": "project", "dry_run": False},
+        )
+
+    def test_clean_metadata_contains_no_user_data(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """CLEAN_COMPLETED metadata should only have scope and dry_run."""
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("active_stack: default\n")
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=tmp_path,
+            ),
+            patch("kitaru.analytics.track") as track_mock,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "project", "--dry-run"])
+
+        assert exc_info.value.code == 0
+        metadata = track_mock.call_args.args[1]
+        assert set(metadata.keys()) == {"scope", "dry_run"}
+        assert metadata["scope"] in ("project", "global", "all")
