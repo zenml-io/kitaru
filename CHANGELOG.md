@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-04-11
+
+### Added
+- Copy-paste prompt examples in MCP server documentation for common workflows (status checks, flow execution, replay, artifact inspection)
+- MCP extra mentioned earlier in the installation guide
+- Troubleshooting guidance for MCP environment variable configuration
+
+### Changed
+- Improved anonymous telemetry metadata for opted-in users (richer flow lifecycle context, version stamping, deployment classification)
+
 ## [0.3.5] - 2026-04-11
 
 ### Added
