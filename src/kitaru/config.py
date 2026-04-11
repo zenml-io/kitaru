@@ -186,9 +186,6 @@ _delete_unshared_service_connectors_best_effort = (
 _resolve_stack_for_show = _config_stacks._resolve_stack_for_show
 _stack_component_details_from_model = _config_stacks._stack_component_details_from_model
 _infer_stack_details_type = _config_stacks._infer_stack_details_type
-_stack_component_details_from_stack_model = (
-    _config_stacks._stack_component_details_from_stack_model
-)
 _stack_info_from_model = _config_stacks._stack_info_from_model
 _iter_available_stacks = _config_stacks._iter_available_stacks
 

@@ -1281,7 +1281,7 @@ def test_flow_handle_wait_still_raises_when_classify_fails() -> None:
         ),
         patch(
             "kitaru.flow._checkpoint_count_from_run",
-            side_effect=RuntimeError("bad steps"),
+            return_value=None,
         ),
         pytest.raises(KitaruExecutionError, match="finished with status"),
     ):

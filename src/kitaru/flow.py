@@ -559,14 +559,7 @@ class FlowHandle:
                 exc_info=True,
             )
 
-        try:
-            checkpoint_count = _checkpoint_count_from_run(run)
-        except Exception:
-            logger.debug(
-                "Failed to derive checkpoint count for terminal analytics.",
-                exc_info=True,
-            )
-            checkpoint_count = None
+        checkpoint_count = _checkpoint_count_from_run(run)
         if checkpoint_count is not None:
             metadata["checkpoint_count"] = checkpoint_count
             metadata["checkpoint_count_source"] = "hydrated_run_steps"
