@@ -108,10 +108,16 @@ def describe_local_server() -> str:
         local_server = get_local_server()
     except ImportError:
         return "unavailable (local runtime support not installed)"
+    except Exception:
+        logger.debug("Could not query local server", exc_info=True)
+        return "unknown (query failed)"
     if local_server is None:
         return "not started"
 
-    provider = local_server.config.provider.value
+    try:
+        provider = local_server.config.provider.value
+    except Exception:
+        provider = "unknown"
     if local_server.status and local_server.status.url:
         return f"running at {local_server.status.url} ({provider})"
 
@@ -453,8 +459,6 @@ def build_runtime_snapshot(
     include_environment_type: bool = False,
 ) -> RuntimeSnapshot:
     """Resolve the current Kitaru runtime state from ZenML-backed config."""
-    gc = GlobalConfiguration()
-
     # Collect non-network diagnostics early so they're available even in
     # degraded snapshots that return before reaching the Client.
     zenml_version = _collect_zenml_version()
@@ -467,9 +471,29 @@ def build_runtime_snapshot(
     )
 
     try:
+        gc = GlobalConfiguration()
+    except Exception as exc:
+        logger.debug("GlobalConfiguration() failed", exc_info=True)
+        snapshot = RuntimeSnapshot(
+            sdk_version=_sdk_version(),
+            connection="unavailable",
+            connection_target="unavailable",
+            config_directory="unknown",
+            warning=f"Could not load global configuration: {exc}",
+            environment=list_active_kitaru_environment_variables(),
+            zenml_version=zenml_version,
+            python_version=python_ver,
+            system_info=sys_info,
+            environment_type=env_type,
+            packages=packages,
+        )
+        return snapshot
+
+    try:
         store_cfg = gc.store_configuration
         uses_local_store = gc.uses_local_store
-    except ImportError as exc:
+    except Exception as exc:
+        logger.debug("Could not read store configuration", exc_info=True)
         snapshot = _build_snapshot_without_local_store(gc, exc)
         snapshot.zenml_version = zenml_version
         snapshot.python_version = python_ver
@@ -503,12 +527,6 @@ def build_runtime_snapshot(
         packages=packages,
     )
 
-    # Connection source breakdown
-    try:
-        snapshot.connection_sources = _collect_connection_sources()
-    except Exception:
-        logger.debug("Could not collect connection sources", exc_info=True)
-
     if uses_stale_local_server_url(server_url, snapshot.local_server_status):
         snapshot.warning = combine_warnings(
             (
@@ -519,6 +537,13 @@ def build_runtime_snapshot(
             _legacy_runner_env_warning(),
         )
         return snapshot
+
+    # Connection source breakdown — after stale-server check so we don't
+    # instantiate Client() against a server we already know is down.
+    try:
+        snapshot.connection_sources = _collect_connection_sources()
+    except Exception:
+        logger.debug("Could not collect connection sources", exc_info=True)
 
     project_env = os.environ.get(KITARU_PROJECT_ENV)
     runtime_conn = _read_runtime_connection_config()

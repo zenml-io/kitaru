@@ -186,9 +186,11 @@ app.version = _UNKNOWN_VERSION
 _DEFERRED_BOOTSTRAP_COMMANDS: frozenset[str] = frozenset(
     {
         "clean",
+        "info",
         "init",
         "login",
         "logout",
+        "status",
     }
 )
 

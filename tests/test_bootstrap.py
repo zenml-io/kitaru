@@ -108,6 +108,10 @@ class TestShouldBootstrapStore:
             ["logout"],
             ["init"],
             ["init", "--path", "/tmp/project"],
+            ["status"],
+            ["info"],
+            ["info", "--all"],
+            ["clean", "project", "--dry-run"],
             ["stack", "--help"],
             ["executions", "-h"],
             ["--help", "status"],
@@ -123,6 +127,10 @@ class TestShouldBootstrapStore:
             "logout",
             "init-bare",
             "init-with-args",
+            "status",
+            "info",
+            "info-all",
+            "clean-project",
             "subcommand-help",
             "subcommand-help-short",
             "help-before-command",
@@ -136,13 +144,11 @@ class TestShouldBootstrapStore:
     @pytest.mark.parametrize(
         "argv",
         [
-            ["status"],
-            ["info"],
             ["stack", "list"],
             ["executions", "get", "kr-123"],
             ["secrets", "list"],
         ],
-        ids=["status", "info", "stack-list", "executions-get", "secrets-list"],
+        ids=["stack-list", "executions-get", "secrets-list"],
     )
     def test_eager_cases(self, argv: list[str]) -> None:
         from kitaru.cli import _should_bootstrap_store
@@ -190,14 +196,14 @@ class TestCliStartupResilience:
         assert not mock_gc_class.called, "GlobalConfiguration() should not be called"
 
     def test_store_backed_command_bootstraps_store(self) -> None:
-        """Commands like 'status' should still eagerly initialize the store."""
+        """Store-backed commands like 'stack list' should eagerly bootstrap."""
         import kitaru.cli as cli_module
 
         mock_gc = MagicMock()
         mock_gc_class = MagicMock(return_value=mock_gc)
 
         with (
-            patch("sys.argv", ["kitaru", "status"]),
+            patch("sys.argv", ["kitaru", "stack", "list"]),
             patch.object(cli_module, "GlobalConfiguration", mock_gc_class),
             patch.object(cli_module, "app"),
             patch.object(cli_module, "_apply_runtime_version"),
@@ -209,6 +215,24 @@ class TestCliStartupResilience:
         mock_gc_class.assert_called_once()
         # zen_store attribute was accessed
         _ = mock_gc.zen_store
+
+    def test_status_skips_store_bootstrap(self) -> None:
+        """Diagnostic commands should skip eager bootstrap."""
+        import kitaru.cli as cli_module
+
+        mock_gc_class = MagicMock()
+
+        with (
+            patch("sys.argv", ["kitaru", "status"]),
+            patch.object(cli_module, "GlobalConfiguration", mock_gc_class),
+            patch.object(cli_module, "app"),
+            patch.object(cli_module, "_apply_runtime_version"),
+            patch("kitaru.analytics.track", return_value=True),
+            patch("kitaru.analytics.set_source"),
+        ):
+            cli_module.cli()
+
+        assert not mock_gc_class.called, "status should not eagerly bootstrap the store"
 
     def test_analytics_still_attempted_for_deferred_commands(self) -> None:
         """Even deferred commands should attempt analytics tracking."""

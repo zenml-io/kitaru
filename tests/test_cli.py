@@ -4953,6 +4953,37 @@ class TestCleanGlobal:
         assert "3 aliases" in output
         assert "--force" in output
 
+    def test_non_interactive_without_yes_exits_nonzero(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Non-interactive clean without --yes should fail, not silently abort."""
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=None,
+            ),
+            patch(
+                "kitaru._cleanup._resolve_config_root",
+                return_value=config_root,
+            ),
+            patch(
+                "kitaru._cleanup._read_alias_count",
+                return_value=0,
+            ),
+            patch(
+                "kitaru._cleanup._describe_local_server_for_cleanup",
+                return_value=("not running", False),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "global"])  # no --yes, non-interactive stdin
+        assert exc_info.value.code == 1
+        output = capsys.readouterr().err
+        assert "--yes" in output
+
     def test_dry_run_shows_backup_path(
         self, capsys: pytest.CaptureFixture[str], tmp_path: Path
     ) -> None:

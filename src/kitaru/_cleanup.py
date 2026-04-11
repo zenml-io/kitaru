@@ -189,7 +189,9 @@ def _build_global_preview(
         size = _file_size(kitaru_yaml)
         total += size
         note = None
-        if alias_count is not None and alias_count > 0:
+        if alias_count is None:
+            note = "model_registry: unreadable (use --force to proceed)"
+        elif alias_count > 0:
             note = f"model_registry: {alias_count} aliases (use --force to proceed)"
         children.append(
             CleanupPreviewEntry(

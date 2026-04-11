@@ -161,6 +161,9 @@ def _run_clean(
     )
 
     if dry_run:
+        dry_warnings: tuple[str, ...] = ()
+        if plan.custom_config_path_warning:
+            dry_warnings = (plan.custom_config_path_warning,)
         dry_result = CleanupResult(
             scope=scope,
             dry_run=True,
@@ -168,6 +171,7 @@ def _run_clean(
             total_bytes=plan.total_bytes,
             local_server_status=plan.local_server_status,
             active_environment_overrides=plan.active_environment_overrides,
+            warnings=dry_warnings,
         )
         if output_format == CLIOutputFormat.JSON:
             _emit_json_item(
@@ -176,8 +180,17 @@ def _run_clean(
                 output=output_format,
             )
             return
+        if plan.custom_config_path_warning:
+            _print_warning(plan.custom_config_path_warning)
         _render_cleanup_preview(plan)
         return
+
+    if not yes and not _is_input_interactive():
+        _exit_with_error(
+            command,
+            "Non-interactive environment requires --yes to proceed with cleanup.",
+            output=output_format,
+        )
 
     if plan.custom_config_path_warning:
         _print_warning(plan.custom_config_path_warning)

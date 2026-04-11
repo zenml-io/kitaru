@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -963,3 +963,70 @@ def test_serialize_resolved_log_store_contract() -> None:
         "active_stack_name": "prod",
         "warning": "stack backend differs",
     }
+
+
+# ---------------------------------------------------------------------------
+# Degraded diagnostic snapshot tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_runtime_snapshot_degrades_on_corrupt_global_config() -> None:
+    """Corrupt GlobalConfiguration should produce a degraded snapshot."""
+    with (
+        patch(
+            "kitaru.inspection.GlobalConfiguration",
+            side_effect=RuntimeError("corrupt config"),
+        ),
+        patch("kitaru.inspection.resolve_installed_version", return_value="0.5.0"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+    ):
+        snapshot = build_runtime_snapshot()
+
+    assert snapshot.connection == "unavailable"
+    assert snapshot.warning is not None
+    assert "corrupt config" in snapshot.warning
+    assert snapshot.sdk_version == "0.5.0"
+
+
+def test_build_runtime_snapshot_degrades_on_store_config_error() -> None:
+    """Non-ImportError from store_configuration should degrade gracefully."""
+    from unittest.mock import PropertyMock
+
+    fake_gc = MagicMock()
+    fake_gc.config_directory = "/tmp/fake"
+    type(fake_gc).store_configuration = PropertyMock(
+        side_effect=ValueError("bad store config")
+    )
+
+    with (
+        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.inspection.resolve_installed_version", return_value="0.5.0"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+        patch(
+            "kitaru.inspection.describe_local_server",
+            return_value="not started",
+        ),
+    ):
+        snapshot = build_runtime_snapshot()
+
+    assert snapshot.connection == "local mode (unavailable)"
+    assert snapshot.warning is not None
+
+
+def test_describe_local_server_handles_non_import_error() -> None:
+    """Non-ImportError from get_local_server should degrade, not crash."""
+    from kitaru.inspection import describe_local_server
+
+    with patch(
+        "kitaru.inspection.get_local_server",
+        side_effect=RuntimeError("corrupt server metadata"),
+    ):
+        result = describe_local_server()
+
+    assert "query failed" in result
