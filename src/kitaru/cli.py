@@ -230,7 +230,7 @@ def _apply_runtime_version() -> None:
 
 
 _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
-    {"clean", "executions", "secrets", "log-store", "stack", "model"}
+    {"analytics", "clean", "executions", "secrets", "log-store", "stack", "model"}
 )
 
 

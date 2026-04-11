@@ -37,6 +37,10 @@ clean_app = cyclopts.App(
     name="clean",
     help="Reset Kitaru state.",
 )
+analytics_app = cyclopts.App(
+    name="analytics",
+    help="Manage anonymous usage analytics preferences.",
+)
 
 app.command(log_store_app)
 app.command(stack_app)
@@ -44,6 +48,7 @@ app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
 app.command(clean_app)
+app.command(analytics_app)
 
 
 @app.default
@@ -53,6 +58,7 @@ def main() -> None:
 
 
 from . import (  # noqa: F401,E402
+    _analytics,
     _clean,
     _executions,
     _init,
@@ -64,6 +70,7 @@ from . import (  # noqa: F401,E402
 
 __all__ = [
     "_UNKNOWN_VERSION",
+    "analytics_app",
     "app",
     "clean_app",
     "executions_app",

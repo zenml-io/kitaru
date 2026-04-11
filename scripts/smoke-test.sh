@@ -14,6 +14,9 @@
 # No -e: we deliberately continue past failures to collect all results.
 set -uo pipefail
 
+# Disable analytics so smoke-test runs don't leak events to Mixpanel.
+export ZENML_ANALYTICS_OPT_IN=false
+
 PY="3.12"
 UV_RUN="uv run --python $PY"
 DASHBOARD_URL="http://127.0.0.1:8383"
@@ -226,6 +229,7 @@ run_test "kitaru status -o json"         $UV_RUN kitaru status -o json
 run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
 run_test "kitaru model list"             $UV_RUN kitaru model list
+run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
 
 # ---------------------------------------------------------------------------
 # Project init
