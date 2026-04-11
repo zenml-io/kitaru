@@ -7,9 +7,13 @@ references the same canonical string.  Add new events to
 
 from __future__ import annotations
 
+import functools
+import importlib.metadata
 import logging
 from enum import StrEnum
 from typing import Any
+
+from kitaru._version import resolve_installed_version
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +91,15 @@ def set_source(suffix_or_source: str) -> None:
         )
 
 
+@functools.lru_cache(maxsize=1)
+def resolve_zenml_version() -> str:
+    """Resolve the installed ZenML version lazily."""
+    try:
+        return importlib.metadata.version("zenml")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
 def track(event_name: AnalyticsEvent, metadata: dict[str, Any] | None = None) -> bool:
     """Track a Kitaru analytics event via ZenML's pipeline.
 
@@ -95,13 +108,21 @@ def track(event_name: AnalyticsEvent, metadata: dict[str, Any] | None = None) ->
     ``StrEnum``, so it works as a ``str`` at the ZenML boundary while giving
     callers type-checked event names.
 
+    The caller metadata is copied before central Kitaru fields are added. This
+    keeps call sites from mutating shared dictionaries and makes
+    ``kitaru_version`` / ``zenml_version`` authoritative for every event.
+
     Silently returns False if analytics are disabled or if tracking fails.
     """
+    enriched_metadata = dict(metadata or {})
+    enriched_metadata["kitaru_version"] = resolve_installed_version()
+    enriched_metadata["zenml_version"] = resolve_zenml_version()
+
     try:
         from zenml.analytics import track as _zenml_track
 
         return _zenml_track(
-            event=event_name, metadata=metadata or {}
+            event=event_name, metadata=enriched_metadata
         )  # ZenML accepts Union[AnalyticsEvent, str]
     except Exception:
         logger.debug("Analytics tracking failed", exc_info=True)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 import threading
+from contextlib import nullcontext
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, call, patch
@@ -84,9 +86,13 @@ class _DummyRun:
         run_id: UUID | None = None,
         status_reason: str | None = None,
         traceback: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
     ) -> None:
         self.id = run_id or uuid4()
         self.status = status
+        self.start_time = start_time
+        self.end_time = end_time
         self.status_reason = status_reason
         self.exception_info = (
             SimpleNamespace(traceback=traceback) if traceback else None
@@ -887,6 +893,7 @@ def test_submit_emits_flow_submitted_event() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
         patch("kitaru.flow.track") as track_mock,
     ):
         wrapped = flow(lambda x: x)
@@ -894,8 +901,50 @@ def test_submit_emits_flow_submitted_event() -> None:
 
     track_mock.assert_called_once_with(
         AnalyticsEvent.FLOW_SUBMITTED,
-        {},
+        {
+            "kitaru_deployment_type": "local",
+            "deployment_type_source": "kitaru_stack_inference",
+        },
     )
+
+
+def test_submit_classification_failure_does_not_break_flow_execution() -> None:
+    """Deployment classification failures should become unknown metadata only."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="private-stack-name"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch(
+            "kitaru.flow.classify_stack_deployment_type",
+            side_effect=RuntimeError("backend unavailable"),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        handle = wrapped.run(123)
+
+    assert isinstance(handle, FlowHandle)
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.FLOW_SUBMITTED,
+        {
+            "kitaru_deployment_type": "unknown",
+            "deployment_type_source": "kitaru_stack_inference_failed",
+        },
+    )
+    metadata = track_mock.call_args.args[1]
+    assert "private-stack-name" not in metadata.values()
 
 
 def test_submit_does_not_emit_when_run_is_none() -> None:
@@ -914,6 +963,7 @@ def test_submit_does_not_emit_when_run_is_none() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
         patch("kitaru.flow.track") as track_mock,
         pytest.raises(KitaruRuntimeError, match="did not produce"),
     ):
@@ -943,6 +993,7 @@ def test_replay_success_emits_requested_and_replayed_events() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="kubernetes"),
         patch(
             "kitaru.flow.build_replay_plan",
             return_value=ReplayPlan(
@@ -963,10 +1014,14 @@ def test_replay_success_emits_requested_and_replayed_events() -> None:
     assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
     assert requested_call.args[1]["replay_path"] == "flow_wrapper"
     assert requested_call.args[1]["from_checkpoint"] == "write"
+    assert requested_call.args[1]["kitaru_deployment_type"] == "kubernetes"
+    assert requested_call.args[1]["deployment_type_source"] == "kitaru_stack_inference"
 
     replayed_call = track_mock.call_args_list[1]
     assert replayed_call.args[0] == AnalyticsEvent.FLOW_REPLAYED
     assert replayed_call.args[1]["replay_path"] == "flow_wrapper"
+    assert replayed_call.args[1]["kitaru_deployment_type"] == "kubernetes"
+    assert replayed_call.args[1]["deployment_type_source"] == "kitaru_stack_inference"
 
 
 def test_replay_failure_emits_requested_then_failed_events() -> None:
@@ -987,6 +1042,7 @@ def test_replay_failure_emits_requested_then_failed_events() -> None:
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="kubernetes"),
         patch(
             "kitaru.flow.build_replay_plan",
             return_value=ReplayPlan(
@@ -1006,10 +1062,14 @@ def test_replay_failure_emits_requested_then_failed_events() -> None:
     assert track_mock.call_count == 2
     requested_call = track_mock.call_args_list[0]
     assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
+    assert requested_call.args[1]["kitaru_deployment_type"] == "kubernetes"
+    assert requested_call.args[1]["deployment_type_source"] == "kitaru_stack_inference"
 
     failed_call = track_mock.call_args_list[1]
     assert failed_call.args[0] == AnalyticsEvent.REPLAY_FAILED
     assert failed_call.args[1]["error_type"] == "RuntimeError"
+    assert failed_call.args[1]["kitaru_deployment_type"] == "kubernetes"
+    assert failed_call.args[1]["deployment_type_source"] == "kitaru_stack_inference"
     assert "failure_origin" in failed_call.args[1]
 
 
@@ -1031,6 +1091,7 @@ def test_replay_none_run_emits_replay_failed_with_runtime_origin() -> None:
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="kubernetes"),
         patch(
             "kitaru.flow.build_replay_plan",
             return_value=ReplayPlan(
@@ -1048,24 +1109,40 @@ def test_replay_none_run_emits_replay_failed_with_runtime_origin() -> None:
         wrapped.replay(str(source_run.id), from_="write")
 
     assert track_mock.call_count == 2
+    requested_call = track_mock.call_args_list[0]
+    assert requested_call.args[0] == AnalyticsEvent.REPLAY_REQUESTED
+    assert requested_call.args[1]["kitaru_deployment_type"] == "kubernetes"
+    assert requested_call.args[1]["deployment_type_source"] == "kitaru_stack_inference"
+
     failed_call = track_mock.call_args_list[1]
     assert failed_call.args[0] == AnalyticsEvent.REPLAY_FAILED
     assert failed_call.args[1]["error_type"] == "KitaruRuntimeError"
     assert failed_call.args[1]["failure_origin"] == FailureOrigin.RUNTIME.value
+    assert failed_call.args[1]["kitaru_deployment_type"] == "kubernetes"
+    assert failed_call.args[1]["deployment_type_source"] == "kitaru_stack_inference"
 
 
 def test_flow_handle_wait_emits_flow_terminal_on_success() -> None:
-    """FlowHandle.wait() should emit FLOW_TERMINAL when run completes."""
+    """FlowHandle.wait() should emit enriched FLOW_TERMINAL metadata."""
     run_id = uuid4()
+    started_at = datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
     finished = _DummyRun(
         status=ExecutionStatus.COMPLETED,
         run_id=run_id,
         outputs=[("step", "output", 42)],
+        start_time=started_at,
+        end_time=started_at + timedelta(seconds=2.3456),
     )
     client_mock = MagicMock()
     client_mock.get_pipeline_run.return_value = finished
 
-    handle = FlowHandle(_as_pipeline_run(finished))
+    handle = FlowHandle(
+        _as_pipeline_run(finished),
+        analytics_metadata={
+            "kitaru_deployment_type": "local",
+            "deployment_type_source": "kitaru_stack_inference",
+        },
+    )
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
         patch("kitaru.flow.time.sleep"),
@@ -1073,25 +1150,40 @@ def test_flow_handle_wait_emits_flow_terminal_on_success() -> None:
     ):
         handle.wait()
 
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_TERMINAL,
-        {"status": "completed"},
-    )
+    track_mock.assert_called_once()
+    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    metadata = track_mock.call_args.args[1]
+    assert metadata["status"] == "completed"
+    assert metadata["kitaru_deployment_type"] == "local"
+    assert metadata["deployment_type_source"] == "kitaru_stack_inference"
+    assert metadata["duration_seconds"] == 2.346
+    assert metadata["duration_source"] == "backend_timestamps"
+    assert metadata["checkpoint_count"] == 1
+    assert metadata["checkpoint_count_source"] == "hydrated_run_steps"
 
 
 def test_flow_handle_wait_emits_flow_terminal_on_failure() -> None:
     """FlowHandle.wait() should emit FLOW_TERMINAL with failure_origin on failure."""
     run_id = uuid4()
+    started_at = datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
     failed = _DummyRun(
         status=ExecutionStatus.FAILED,
         run_id=run_id,
         status_reason="user error",
         traceback="Traceback\nValueError: boom",
+        start_time=started_at,
+        end_time=started_at + timedelta(seconds=1.0),
     )
     client_mock = MagicMock()
     client_mock.get_pipeline_run.return_value = failed
 
-    handle = FlowHandle(_as_pipeline_run(failed))
+    handle = FlowHandle(
+        _as_pipeline_run(failed),
+        analytics_metadata={
+            "kitaru_deployment_type": "kubernetes",
+            "deployment_type_source": "kitaru_stack_inference",
+        },
+    )
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
         patch("kitaru.flow.time.sleep"),
@@ -1100,17 +1192,18 @@ def test_flow_handle_wait_emits_flow_terminal_on_failure() -> None:
     ):
         handle.wait()
 
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_TERMINAL,
-        {
-            "status": "failed",
-            "failure_origin": FailureOrigin.USER_CODE.value,
-        },
-    )
+    track_mock.assert_called_once()
+    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    metadata = track_mock.call_args.args[1]
+    assert metadata["status"] == "failed"
+    assert metadata["failure_origin"] == FailureOrigin.USER_CODE.value
+    assert metadata["kitaru_deployment_type"] == "kubernetes"
+    assert metadata["duration_seconds"] == 1.0
+    assert metadata["duration_source"] == "backend_timestamps"
 
 
 def test_flow_handle_get_emits_flow_terminal_on_success() -> None:
-    """FlowHandle.get() should emit FLOW_TERMINAL once."""
+    """FlowHandle.get() should fall back to SDK-observed duration."""
     run_id = uuid4()
     finished = _DummyRun(
         status=ExecutionStatus.COMPLETED,
@@ -1120,17 +1213,22 @@ def test_flow_handle_get_emits_flow_terminal_on_success() -> None:
     client_mock = MagicMock()
     client_mock.get_pipeline_run.return_value = finished
 
-    handle = FlowHandle(_as_pipeline_run(finished))
+    handle = FlowHandle(_as_pipeline_run(finished), observed_started_at=10.0)
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.time.perf_counter", return_value=12.345),
         patch("kitaru.flow.track") as track_mock,
     ):
         handle.get()
 
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_TERMINAL,
-        {"status": "completed"},
-    )
+    track_mock.assert_called_once()
+    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    metadata = track_mock.call_args.args[1]
+    assert metadata["status"] == "completed"
+    assert metadata["duration_seconds"] == 2.345
+    assert metadata["duration_source"] == "sdk_observed"
+    assert metadata["checkpoint_count"] == 1
+    assert metadata["checkpoint_count_source"] == "hydrated_run_steps"
 
 
 def test_flow_handle_terminal_event_emitted_only_once() -> None:
@@ -1177,17 +1275,26 @@ def test_flow_handle_wait_still_raises_when_classify_fails() -> None:
             "kitaru.flow._classify_run_failure",
             side_effect=RuntimeError("unexpected shape"),
         ),
+        patch(
+            "kitaru.flow._duration_metadata_from_run",
+            side_effect=RuntimeError("bad timestamps"),
+        ),
+        patch(
+            "kitaru.flow._checkpoint_count_from_run",
+            side_effect=RuntimeError("bad steps"),
+        ),
         pytest.raises(KitaruExecutionError, match="finished with status"),
     ):
         handle.wait()
 
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.FLOW_TERMINAL,
-        {
-            "status": "failed",
-            "failure_origin": FailureOrigin.UNKNOWN.value,
-        },
-    )
+    track_mock.assert_called_once()
+    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    metadata = track_mock.call_args.args[1]
+    assert metadata["status"] == "failed"
+    assert metadata["failure_origin"] == FailureOrigin.UNKNOWN.value
+    assert "duration_seconds" not in metadata
+    assert "checkpoint_count" not in metadata
+    assert "checkpoint_count_source" not in metadata
 
 
 class TestRecoveryHintHelpers:

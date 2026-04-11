@@ -186,6 +186,9 @@ _delete_unshared_service_connectors_best_effort = (
 _resolve_stack_for_show = _config_stacks._resolve_stack_for_show
 _stack_component_details_from_model = _config_stacks._stack_component_details_from_model
 _infer_stack_details_type = _config_stacks._infer_stack_details_type
+_stack_component_details_from_stack_model = (
+    _config_stacks._stack_component_details_from_stack_model
+)
 _stack_info_from_model = _config_stacks._stack_info_from_model
 _iter_available_stacks = _config_stacks._iter_available_stacks
 
@@ -475,6 +478,14 @@ def current_stack() -> StackInfo:
 def _list_stack_entries() -> list[_StackListEntry]:
     """List stacks with active + managed metadata for structured output."""
     return _config_stacks._list_stack_entries(client_factory=Client)
+
+
+def classify_stack_deployment_type(name_or_id: str | None = None) -> str:
+    """Classify a stack into Kitaru's low-cardinality deployment taxonomy."""
+    return _config_stacks.classify_stack_deployment_type(
+        name_or_id,
+        client_factory=Client,
+    )
 
 
 def _show_stack_operation(name_or_id: str) -> StackDetails:
