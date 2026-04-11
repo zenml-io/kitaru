@@ -133,6 +133,13 @@ For pull requests, use a clear human-readable title and include:
 
 Link related issues (for example `Fixes #123`) when applicable.
 
+### Feature completion checklist
+
+When adding a new CLI command, MCP tool, or SDK feature:
+
+- **Smoke test**: add a non-destructive invocation to `scripts/smoke-test.sh` (e.g. `kitaru <command> --dry-run` or `kitaru <command> --help`). The smoke test runs before every release, so new features should be exercised there to catch regressions.
+- **Analytics**: check whether the feature needs a tracking event. Add the event to `AnalyticsEvent` in `src/kitaru/analytics.py` and wire it into the appropriate surface (CLI handler via `track()`, MCP tool via `@tracked_mcp_tool`, or SDK lifecycle point). If the CLI command is multi-word (e.g. `clean project`), add it to `_MULTI_TOKEN_COMMANDS` in `cli.py`.
+
 ## CI/CD
 
 ### Python CI (`ci.yml`)
