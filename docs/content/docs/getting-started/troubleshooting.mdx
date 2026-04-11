@@ -104,6 +104,30 @@ kitaru init
 kitaru login
 ```
 
+## Analytics
+
+Kitaru collects anonymous usage analytics to help improve the product.
+You can check your current preference and opt out at any time:
+
+```bash
+kitaru analytics status      # Show current preference
+kitaru analytics opt-out     # Disable analytics
+kitaru analytics opt-in      # Re-enable analytics
+```
+
+The preference is persisted to your config file, so it applies to all
+surfaces — CLI, SDK, and MCP servers. This is important because MCP
+clients launch `kitaru-mcp` in a sanitized environment where shell
+environment variables (like `ZENML_ANALYTICS_OPT_IN`) are not
+available.
+
+<Callout type="info">
+If you previously disabled analytics via the `ZENML_ANALYTICS_OPT_IN=false`
+environment variable, run `kitaru analytics opt-out` to persist the
+preference to your config file. The environment variable alone does not
+reach MCP server subprocesses.
+</Callout>
+
 ## Getting help
 
 - [GitHub Issues](https://github.com/zenml-io/kitaru/issues) — bug reports
