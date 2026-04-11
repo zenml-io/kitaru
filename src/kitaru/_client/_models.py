@@ -116,6 +116,7 @@ class Execution:
     """Public view of a Kitaru execution."""
 
     exec_id: str
+    flow_id: str | None
     flow_name: str | None
     status: ExecutionStatus
     started_at: datetime | None

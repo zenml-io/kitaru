@@ -92,6 +92,7 @@ def sample_execution(
 
     return Execution(
         exec_id="kr-a8f3c2",
+        flow_id="flow-123",
         flow_name="content_pipeline",
         status=ExecutionStatus.WAITING,
         started_at=started_at,

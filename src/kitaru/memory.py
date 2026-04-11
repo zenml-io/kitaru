@@ -48,6 +48,7 @@ from kitaru.errors import (
 from kitaru.runtime import (
     _get_current_execution_id,
     _get_current_flow,
+    _get_current_flow_id,
     _is_inside_checkpoint,
     _is_inside_flow,
 )
@@ -213,7 +214,7 @@ class _MemoryScope:
 
 @dataclass(frozen=True)
 class _ExecutionFlowContext:
-    """Resolved logical flow context for an execution-scoped memory write."""
+    """Resolved logical flow context for a memory write."""
 
     flow_id: str
     flow_name: str | None = None
@@ -329,17 +330,24 @@ def _require_memory_boundary(api_name: str) -> None:
 
 
 def _implicit_flow_memory_scope(api_name: str) -> _MemoryScope:
-    """Resolve the implicit flow-name-backed memory scope."""
+    """Resolve the implicit flow-ID-backed memory scope."""
     qualified_name = f"kitaru.memory.{api_name}()"
 
     flow_scope = _get_current_flow()
-    if flow_scope is None or flow_scope.name is None:
+    resolved_flow_id = _get_current_flow_id()
+    if flow_scope is None:
         raise KitaruStateError(
-            f"{qualified_name} requires an active flow name inside @flow."
+            f"{qualified_name} requires an active flow scope inside @flow."
+        )
+    if resolved_flow_id is None:
+        raise KitaruStateError(
+            f"{qualified_name} could not resolve a durable flow ID from the "
+            f"ZenML runtime. This typically means the pipeline has not been "
+            f"registered yet or the runtime context is not fully initialized."
         )
 
     return _MemoryScope(
-        scope=_validate_memory_identifier(flow_scope.name, kind="scope"),
+        scope=_validate_memory_identifier(resolved_flow_id, kind="scope"),
         scope_type="flow",
     )
 
@@ -585,6 +593,26 @@ def _resolve_execution_flow_context(
     return None
 
 
+def _resolve_active_flow_scope_context(
+    scope: _MemoryScope,
+) -> _ExecutionFlowContext | None:
+    """Resolve current runtime flow metadata for a flow-scoped write."""
+    if scope.scope_type != "flow":
+        return None
+
+    flow_scope = _get_current_flow()
+    resolved_flow_id = _get_current_flow_id()
+    if flow_scope is None or resolved_flow_id is None:
+        return None
+    if resolved_flow_id != scope.scope:
+        return None
+
+    return _ExecutionFlowContext(
+        flow_id=resolved_flow_id,
+        flow_name=normalize_flow_name(flow_scope.name),
+    )
+
+
 def _memory_tags(
     scope: str,
     key: str,
@@ -599,7 +627,12 @@ def _memory_tags(
         _memory_key_tag(key),
         _memory_scope_type_tag(scope_type),
     ]
-    if flow_context is not None:
+    # Flow-ID tag is only added for execution-scoped entries as a cross-reference
+    # back to the parent flow.  For flow-scoped entries the scope itself *is*
+    # the flow ID (encoded in the kitaru:memory:scope:<id> tag), so a separate
+    # flow_id tag would be redundant.  Metadata still records flow_id/flow_name
+    # unconditionally for auditability.
+    if scope_type == "execution" and flow_context is not None:
         tags.append(_memory_flow_id_tag(flow_context.flow_id))
     return tags
 
@@ -1256,6 +1289,8 @@ def _set_entry_impl(
                 scope=scope,
                 project=project,
             )
+        elif resolved_scope_type == "flow":
+            flow_context = _resolve_active_flow_scope_context(scope)
 
         created = _save_memory_artifact(
             client=client,
@@ -1482,6 +1517,8 @@ def _delete_impl(
                 scope=scope,
                 project=project,
             )
+        elif resolved_scope_type == "flow":
+            flow_context = _resolve_active_flow_scope_context(scope)
 
         tombstone = _save_memory_artifact(
             client=client,
@@ -1526,6 +1563,8 @@ def _write_compaction_record(
                 scope=scope,
                 project=project,
             )
+        elif scope.scope_type == "flow":
+            flow_context = _resolve_active_flow_scope_context(scope)
 
         _save_memory_artifact(
             client=client,

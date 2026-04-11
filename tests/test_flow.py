@@ -830,7 +830,13 @@ def test_flow_runtime_scope_sets_execution_id_from_zenml_run_context() -> None:
 
     with patch(
         "kitaru.runtime.DynamicPipelineRunContext.get",
-        return_value=SimpleNamespace(run=SimpleNamespace(id="exec-123")),
+        return_value=SimpleNamespace(
+            run=SimpleNamespace(
+                id="exec-123",
+                pipeline=SimpleNamespace(id="flow-abc", name="_user_flow"),
+            ),
+            pipeline=SimpleNamespace(id=None, name=None),
+        ),
     ):
         result = wrapped()
 
@@ -861,6 +867,8 @@ def test_flow_runtime_scope_keeps_execution_id_none_without_zenml_context() -> N
 
 
 def test_wrapped_flow_resets_memory_scope_between_invocations() -> None:
+    flow_id = "flow-reset-test"
+
     def first_flow() -> None:
         memory.configure(scope="repo_a")
         memory.list()
@@ -873,7 +881,15 @@ def test_wrapped_flow_resets_memory_scope_between_invocations() -> None:
 
     with (
         patch("kitaru.runtime.StepContext.get", return_value=None),
-        patch("kitaru.runtime.DynamicPipelineRunContext.get", return_value=None),
+        patch(
+            "kitaru.runtime.DynamicPipelineRunContext.get",
+            return_value=SimpleNamespace(
+                run=SimpleNamespace(
+                    pipeline=SimpleNamespace(id=flow_id, name="test_flow"),
+                ),
+                pipeline=SimpleNamespace(id=None, name=None),
+            ),
+        ),
         patch("kitaru.memory._memory_list_step", return_value=[]) as memory_list_step,
     ):
         wrapped_first()
@@ -881,7 +897,7 @@ def test_wrapped_flow_resets_memory_scope_between_invocations() -> None:
 
     assert memory_list_step.call_args_list == [
         call("repo_a", "namespace"),
-        call("second_flow", "flow"),
+        call(flow_id, "flow"),
     ]
 
 
