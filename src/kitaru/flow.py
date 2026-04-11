@@ -52,6 +52,7 @@ from kitaru.errors import (
     KitaruUsageError,
     classify_failure_origin,
     execution_error_from_failure,
+    format_recovery_hint,
     traceback_last_line,
 )
 from kitaru.replay import build_replay_plan
@@ -410,10 +411,16 @@ def _raise_for_unsuccessful_run(
     if traceback_tail:
         details.append(traceback_tail)
 
+    message = " ".join(details)
+
+    hint = format_recovery_hint(str(run.id), status=run.status.value)
+    if hint:
+        message = f"{message}\n\n{hint}"
+
     if failure_origin is None:
         failure_origin = _safe_classify_run_failure(run)
     raise execution_error_from_failure(
-        " ".join(details),
+        message,
         exec_id=str(run.id),
         status=run.status.value,
         origin=failure_origin,
