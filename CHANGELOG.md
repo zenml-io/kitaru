@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.3.6] - 2026-04-11
 
+## [0.3.6] - 2026-04-11
+
 ### Added
 - Copy-paste prompt examples in MCP server documentation for common workflows (status checks, flow execution, replay, artifact inspection)
 - MCP extra mentioned earlier in the installation guide
