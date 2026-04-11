@@ -1979,7 +1979,9 @@ def classify_stack_deployment_type(
     try:
         hydrated_stack = client.get_stack(resolved_stack.id, hydrate=True)
     except Exception as exc:
-        raise KitaruBackendError("Unable to classify stack deployment type.") from exc
+        raise KitaruBackendError(
+            f"Unable to classify stack deployment type for '{selector}'."
+        ) from exc
 
     component_details = _stack_component_details_from_stack_model(
         hydrated_stack,

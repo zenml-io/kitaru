@@ -106,6 +106,45 @@ def test_track_returns_false_when_zenml_tracking_fails() -> None:
         assert track(AnalyticsEvent.CLI_INVOKED, {"command": "status"}) is False
 
 
+def test_track_returns_false_when_version_enrichment_raises() -> None:
+    """Version resolution failures must not propagate to callers."""
+    with (
+        patch(
+            "kitaru.analytics.resolve_installed_version",
+            side_effect=RuntimeError("broken metadata"),
+        ),
+        patch("kitaru.analytics.resolve_zenml_version", return_value="4.5.6"),
+        patch("zenml.analytics.track", return_value=True) as track_mock,
+    ):
+        result = track(AnalyticsEvent.CLI_INVOKED, {"command": "status"})
+
+    assert result is True
+    sent_metadata = track_mock.call_args.kwargs["metadata"]
+    assert sent_metadata["kitaru_version"] == "unknown"
+    assert sent_metadata["zenml_version"] == "4.5.6"
+
+
+def test_track_returns_false_when_both_version_helpers_raise() -> None:
+    """Both version helpers failing should still track with unknown versions."""
+    with (
+        patch(
+            "kitaru.analytics.resolve_installed_version",
+            side_effect=RuntimeError("bad"),
+        ),
+        patch(
+            "kitaru.analytics.resolve_zenml_version",
+            side_effect=RuntimeError("bad"),
+        ),
+        patch("zenml.analytics.track", return_value=True) as track_mock,
+    ):
+        result = track(AnalyticsEvent.CLI_INVOKED, {"command": "status"})
+
+    assert result is True
+    sent_metadata = track_mock.call_args.kwargs["metadata"]
+    assert sent_metadata["kitaru_version"] == "unknown"
+    assert sent_metadata["zenml_version"] == "unknown"
+
+
 def test_flow_lifecycle_event_canonical_strings() -> None:
     """Flow-lifecycle events should carry the expected canonical strings."""
     assert AnalyticsEvent.FLOW_SUBMITTED == "Kitaru flow submitted"

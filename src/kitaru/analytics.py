@@ -100,6 +100,22 @@ def resolve_zenml_version() -> str:
         return "unknown"
 
 
+def _safe_kitaru_version() -> str:
+    """Kitaru version with fallback — never raises."""
+    try:
+        return resolve_installed_version()
+    except Exception:
+        return "unknown"
+
+
+def _safe_zenml_version() -> str:
+    """ZenML version with fallback — never raises."""
+    try:
+        return resolve_zenml_version()
+    except Exception:
+        return "unknown"
+
+
 def track(event_name: AnalyticsEvent, metadata: dict[str, Any] | None = None) -> bool:
     """Track a Kitaru analytics event via ZenML's pipeline.
 
@@ -114,11 +130,11 @@ def track(event_name: AnalyticsEvent, metadata: dict[str, Any] | None = None) ->
 
     Silently returns False if analytics are disabled or if tracking fails.
     """
-    enriched_metadata = dict(metadata or {})
-    enriched_metadata["kitaru_version"] = resolve_installed_version()
-    enriched_metadata["zenml_version"] = resolve_zenml_version()
-
     try:
+        enriched_metadata = dict(metadata or {})
+        enriched_metadata["kitaru_version"] = _safe_kitaru_version()
+        enriched_metadata["zenml_version"] = _safe_zenml_version()
+
         from zenml.analytics import track as _zenml_track
 
         return _zenml_track(

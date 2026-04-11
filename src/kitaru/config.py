@@ -477,7 +477,9 @@ def _list_stack_entries() -> list[_StackListEntry]:
     return _config_stacks._list_stack_entries(client_factory=Client)
 
 
-def classify_stack_deployment_type(name_or_id: str | None = None) -> str:
+def classify_stack_deployment_type(
+    name_or_id: str | None = None,
+) -> _config_stacks._StackShowType:
     """Classify a stack into Kitaru's low-cardinality deployment taxonomy."""
     return _config_stacks.classify_stack_deployment_type(
         name_or_id,

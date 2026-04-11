@@ -408,7 +408,8 @@ def _deployment_metadata_for_stack(stack_name_or_id: str | None) -> dict[str, st
         deployment_type = classify_stack_deployment_type(stack_name_or_id)
     except Exception:
         logger.debug(
-            "Failed to classify stack deployment type for analytics.",
+            "Failed to classify stack deployment type for analytics (selector=%r).",
+            stack_name_or_id,
             exc_info=True,
         )
         return {
@@ -784,16 +785,18 @@ class _FlowDefinition:
             settings=_build_settings(transport_image),
         )
 
-        deployment_metadata = _deployment_metadata_for_stack(resolved_execution.stack)
-        replay_metadata = {
-            "from_checkpoint": from_,
-            "replay_path": "flow_wrapper",
-            **deployment_metadata,
-        }
-        track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
-
-        observed_started_at = time.perf_counter()
         with _temporary_active_stack(resolved_execution.stack):
+            deployment_metadata = _deployment_metadata_for_stack(
+                resolved_execution.stack
+            )
+            replay_metadata = {
+                "from_checkpoint": from_,
+                "replay_path": "flow_wrapper",
+                **deployment_metadata,
+            }
+            track(AnalyticsEvent.REPLAY_REQUESTED, replay_metadata)
+
+            observed_started_at = time.perf_counter()
             try:
                 replayed_run = configured_pipeline.replay(
                     pipeline_run=original_run.id,
@@ -890,9 +893,11 @@ class _FlowDefinition:
             settings=_build_settings(transport_image),
         )
 
-        deployment_metadata = _deployment_metadata_for_stack(resolved_execution.stack)
-        observed_started_at = time.perf_counter()
         with _temporary_active_stack(resolved_execution.stack):
+            deployment_metadata = _deployment_metadata_for_stack(
+                resolved_execution.stack
+            )
+            observed_started_at = time.perf_counter()
             run = configured_pipeline(*args, **kwargs)
 
         if run is None:

@@ -37,6 +37,8 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     FlowHandle,
+    _checkpoint_count_from_run,
+    _duration_metadata_from_run,
     _inject_model_registry_env,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
@@ -1295,6 +1297,105 @@ def test_flow_handle_wait_still_raises_when_classify_fails() -> None:
     assert "duration_seconds" not in metadata
     assert "checkpoint_count" not in metadata
     assert "checkpoint_count_source" not in metadata
+
+
+# ---------------------------------------------------------------------------
+# Direct unit tests for analytics helper functions
+# ---------------------------------------------------------------------------
+
+
+class TestDurationMetadataFromRun:
+    """Direct tests for _duration_metadata_from_run edge cases."""
+
+    def test_backend_timestamps_produce_backend_source(self) -> None:
+        start = datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
+        run = SimpleNamespace(
+            start_time=start,
+            end_time=start + timedelta(seconds=5.678),
+        )
+        result = _duration_metadata_from_run(
+            cast(PipelineRunResponse, run), observed_started_at=0.0
+        )
+        assert result == {
+            "duration_seconds": 5.678,
+            "duration_source": "backend_timestamps",
+        }
+
+    def test_negative_backend_duration_clamped_to_zero(self) -> None:
+        start = datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
+        run = SimpleNamespace(
+            start_time=start,
+            end_time=start - timedelta(seconds=1),
+        )
+        result = _duration_metadata_from_run(
+            cast(PipelineRunResponse, run), observed_started_at=0.0
+        )
+        assert result["duration_seconds"] == 0.0
+        assert result["duration_source"] == "backend_timestamps"
+
+    def test_missing_timestamps_falls_back_to_sdk_observed(self) -> None:
+        run = SimpleNamespace(start_time=None, end_time=None)
+        with patch("kitaru.flow.time.perf_counter", return_value=15.0):
+            result = _duration_metadata_from_run(
+                cast(PipelineRunResponse, run), observed_started_at=10.0
+            )
+        assert result == {
+            "duration_seconds": 5.0,
+            "duration_source": "sdk_observed",
+        }
+
+    def test_no_timestamps_and_no_observed_returns_empty(self) -> None:
+        run = SimpleNamespace(start_time=None, end_time=None)
+        result = _duration_metadata_from_run(
+            cast(PipelineRunResponse, run), observed_started_at=None
+        )
+        assert result == {}
+
+    def test_non_datetime_timestamps_fall_back_to_sdk(self) -> None:
+        run = SimpleNamespace(start_time="not-a-datetime", end_time="also-not")
+        with patch("kitaru.flow.time.perf_counter", return_value=20.0):
+            result = _duration_metadata_from_run(
+                cast(PipelineRunResponse, run), observed_started_at=18.0
+            )
+        assert result["duration_source"] == "sdk_observed"
+
+    def test_missing_start_time_attr_falls_back(self) -> None:
+        run = SimpleNamespace()
+        result = _duration_metadata_from_run(
+            cast(PipelineRunResponse, run), observed_started_at=None
+        )
+        assert result == {}
+
+
+class TestCheckpointCountFromRun:
+    """Direct tests for _checkpoint_count_from_run edge cases."""
+
+    def test_returns_step_count_from_hydrated_run(self) -> None:
+        hydrated = SimpleNamespace(steps={"step_a": object(), "step_b": object()})
+        run = SimpleNamespace(get_hydrated_version=lambda: hydrated)
+        assert _checkpoint_count_from_run(cast(PipelineRunResponse, run)) == 2
+
+    def test_returns_none_when_steps_not_a_mapping(self) -> None:
+        hydrated = SimpleNamespace(steps="not-a-mapping")
+        run = SimpleNamespace(get_hydrated_version=lambda: hydrated)
+        assert _checkpoint_count_from_run(cast(PipelineRunResponse, run)) is None
+
+    def test_returns_none_when_steps_attr_missing(self) -> None:
+        hydrated = SimpleNamespace()
+        run = SimpleNamespace(get_hydrated_version=lambda: hydrated)
+        assert _checkpoint_count_from_run(cast(PipelineRunResponse, run)) is None
+
+    def test_returns_none_when_hydration_raises(self) -> None:
+        def explode() -> None:
+            raise RuntimeError("backend unavailable")
+
+        run = SimpleNamespace(get_hydrated_version=explode)
+        assert _checkpoint_count_from_run(cast(PipelineRunResponse, run)) is None
+
+    def test_returns_zero_for_empty_steps(self) -> None:
+        hydrated = SimpleNamespace(steps={})
+        run = SimpleNamespace(get_hydrated_version=lambda: hydrated)
+        assert _checkpoint_count_from_run(cast(PipelineRunResponse, run)) == 0
 
 
 class TestRecoveryHintHelpers:
