@@ -6,9 +6,9 @@
   <!-- Header scrolls away normally -->
   <div class="features-header">
     <div class="section-inner">
-      <span class="section-eyebrow" data-reveal>How it works</span>
-      <h2 class="section-title" data-reveal data-reveal-delay="1">Four things. Not forty.</h2>
-      <p class="section-desc" data-reveal data-reveal-delay="2">Everything your agents need to ship. Nothing extra to learn.</p>
+      <span class="section-eyebrow" data-reveal>CORE RUNTIME PRIMITIVES</span>
+      <h2 class="section-title" data-reveal data-reveal-delay="1">The primitives long-running agents keep needing.</h2>
+      <p class="section-desc" data-reveal data-reveal-delay="2">These are the runtime basics teams keep rebuilding once agents leave the laptop.</p>
     </div>
   </div>
 
@@ -20,9 +20,9 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">01 — Pause & Resume</div>
-          <h3>Pause. Get input. Continue.</h3>
-          <p>Suspends at decision points, releases compute, and picks up when input arrives from a human, another agent, or a webhook. Hours or days later.</p>
+          <div class="feature-number">01 — Wait & Resume</div>
+          <h3>Pause. Get input. Continue later.</h3>
+          <p>Suspends at decision points, releases compute, and resumes when input arrives from a human, another agent, or a webhook &mdash; even hours or days later.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-pause-resume" id="animPause">
@@ -50,7 +50,7 @@
         <div class="feature-text">
           <div class="feature-number">02 — Replay from Failure</div>
           <h3>Crash at step 6? Resume from step 6.</h3>
-          <p>Every step is checkpointed. Fix the issue and pick up where you left off; no re-burning tokens.</p>
+          <p>Every step is checkpointed. Fix the issue and replay from the point of failure instead of re-burning tokens.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-replay" id="animReplay">
@@ -75,9 +75,9 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">03 — Bring Your Framework</div>
-          <h3>PydanticAI. CrewAI. Whatever.</h3>
-          <p>Wrap it with Kitaru and it becomes durable. No lock-in. No opinions. Your framework, our infrastructure.</p>
+          <div class="feature-number">03 — Framework Portability</div>
+          <h3>Keep your framework. Add durability.</h3>
+          <p>PydanticAI, CrewAI, or raw Python &mdash; wrap it with Kitaru and get checkpointed execution without rewriting your agent.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-framework" id="animFramework">
@@ -97,9 +97,9 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">04 — Parallel Branches</div>
-          <h3>Fan out. Each branch checkpoints independently.</h3>
-          <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each has its own checkpoint history. Replay just the failed branch.</p>
+          <div class="feature-number">04 — Parallel Recovery</div>
+          <h3>Fan out work without losing recovery.</h3>
+          <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each keeps its own checkpoint history, so you can replay only the failed branch.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-parallel" id="animParallel">

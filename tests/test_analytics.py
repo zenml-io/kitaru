@@ -171,6 +171,11 @@ def test_feature_adoption_event_canonical_strings() -> None:
     assert AnalyticsEvent.LLM_CALLED == "Kitaru LLM called"
     assert AnalyticsEvent.ARTIFACT_SAVED == "Kitaru artifact saved"
     assert AnalyticsEvent.ARTIFACT_LOADED == "Kitaru artifact loaded"
+    assert AnalyticsEvent.MEMORY_WRITTEN == "Kitaru memory written"
+    assert AnalyticsEvent.MEMORY_DELETED == "Kitaru memory deleted"
+    assert AnalyticsEvent.MEMORY_PURGED == "Kitaru memory purged"
+    assert AnalyticsEvent.MEMORY_COMPACTED == "Kitaru memory compacted"
+    assert AnalyticsEvent.MEMORY_REINDEX_RUN == "Kitaru memory reindex run"
     assert AnalyticsEvent.SECRET_UPSERTED == "Kitaru secret upserted"
     assert AnalyticsEvent.STACK_CREATED == "Kitaru stack created"
     assert AnalyticsEvent.STACK_ACTIVATED == "Kitaru stack activated"
@@ -203,6 +208,27 @@ def test_cli_entrypoint_tracks_two_token_command_granularity() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.CLI_INVOKED,
         {"command": "executions logs"},
+    )
+
+
+def test_cli_entrypoint_tracks_memory_subcommand_granularity() -> None:
+    """Memory commands should track command + subcommand from argv."""
+    with (
+        patch("kitaru.analytics.set_source"),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        patch("kitaru.cli.GlobalConfiguration") as gc_mock,
+        patch("kitaru.cli._apply_runtime_version"),
+        patch("kitaru.cli.app"),
+        patch("sys.argv", ["kitaru", "memory", "compact", "--scope", "demo"]),
+    ):
+        gc_mock.return_value = MagicMock()
+        from kitaru.cli import cli
+
+        cli()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CLI_INVOKED,
+        {"command": "memory compact"},
     )
 
 

@@ -33,6 +33,10 @@ executions_app = cyclopts.App(
     name="executions",
     help="Inspect and manage flow executions.",
 )
+memory_app = cyclopts.App(
+    name="memory",
+    help="Inspect and manage persisted memory entries.",
+)
 clean_app = cyclopts.App(
     name="clean",
     help="Reset Kitaru state.",
@@ -47,6 +51,7 @@ app.command(stack_app)
 app.command(secrets_app)
 app.command(model_app)
 app.command(executions_app)
+app.command(memory_app)
 app.command(clean_app)
 app.command(analytics_app)
 
@@ -62,6 +67,7 @@ from . import (  # noqa: F401,E402
     _clean,
     _executions,
     _init,
+    _memory,
     _models,
     _secrets,
     _stacks,
@@ -76,6 +82,7 @@ __all__ = [
     "executions_app",
     "log_store_app",
     "main",
+    "memory_app",
     "model_app",
     "secrets_app",
     "stack_app",

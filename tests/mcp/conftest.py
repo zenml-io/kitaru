@@ -21,10 +21,11 @@ from kitaru.errors import FailureOrigin
 
 @pytest.fixture
 def mock_kitaru_client() -> MagicMock:
-    """Mocked `KitaruClient` with executions/artifacts namespaces."""
+    """Mocked `KitaruClient` with executions/artifacts/memories namespaces."""
     client = MagicMock()
     client.executions = MagicMock()
     client.artifacts = MagicMock()
+    client.memories = MagicMock()
     return client
 
 
@@ -91,6 +92,7 @@ def sample_execution(
 
     return Execution(
         exec_id="kr-a8f3c2",
+        flow_id="flow-123",
         flow_name="content_pipeline",
         status=ExecutionStatus.WAITING,
         started_at=started_at,

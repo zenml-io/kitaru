@@ -1,15 +1,15 @@
 ---
-// SocialProof.astro — Editorial heritage proof with dramatic stats
+// SocialProof.astro — Lineage proof, capability proof, and background links
 ---
 
 <section id="social-proof" class="social-proof-section">
   <div class="social-proof-inner">
-    <h2 class="sr-only">Why teams trust Kitaru</h2>
+    <h2 class="sr-only">Foundations and proof for Kitaru</h2>
 
-    <!-- Top: eyebrow + company row -->
     <div class="sp-header" data-reveal>
-      <span class="section-eyebrow">TRUSTED IN PRODUCTION</span>
+      <span class="section-eyebrow">FOUNDATIONS & PROOF</span>
       <div class="sp-companies">
+        <span class="sp-label">ZenML lineage</span>
         <a class="sp-company" href="https://www.zenml.io/case-study/jetbrains" target="_blank" rel="noopener">JetBrains</a>
         <span class="sp-sep" aria-hidden="true"></span>
         <a class="sp-company" href="https://www.zenml.io/case-study/adeo-leroy-merlin" target="_blank" rel="noopener">Adeo</a>
@@ -18,28 +18,37 @@
       </div>
     </div>
 
-    <!-- Hero tagline -->
     <p class="sp-tagline" data-reveal data-reveal-delay="1">
-      Built on the same ZenML infrastructure running production ML at scale for 5+&nbsp;years.
+      From production-proven foundations to purpose-built agent primitives.
+    </p>
+    <p class="sp-subtext" data-reveal data-reveal-delay="1">
+      Kitaru inherits orchestration foundations from ZenML and provides its own concrete primitives &mdash; durable execution, replay, wait/resume, durable memory, and portability.
     </p>
 
-    <!-- Stats grid — dramatic oversized numbers -->
     <div class="sp-stats">
       <div class="sp-stat" data-reveal="scale-up" data-reveal-delay="2">
         <div class="sp-stat-accent" aria-hidden="true"></div>
         <span class="sp-stat-number" data-count-to="5" data-suffix="+">5+</span>
-        <span class="sp-stat-unit">years</span>
-        <span class="sp-stat-desc">of production ML orchestration under the hood</span>
+        <span class="sp-stat-unit">years of ZenML lineage</span>
+        <span class="sp-stat-desc">These reference customers are lineage proof for the orchestration foundations underneath Kitaru &mdash; not direct Kitaru adoption proof.</span>
       </div>
 
       <div class="sp-stat" data-reveal="scale-up" data-reveal-delay="3">
         <div class="sp-stat-accent" aria-hidden="true"></div>
-        <span class="sp-stat-number sp-stat-text">Apache 2.0</span>
-        <span class="sp-stat-unit">license</span>
-        <span class="sp-stat-desc">Fully open source. No paid tiers. No gotchas.</span>
+        <span class="sp-stat-number sp-stat-text">Built</span>
+        <span class="sp-stat-unit">in Kitaru today</span>
+        <span class="sp-stat-desc">Checkpointed execution, replay from failure, human-in-the-loop wait/resume, durable memory, framework portability, and infrastructure portability are live product capabilities.</span>
       </div>
     </div>
 
+    <div class="sp-links" data-reveal data-reveal-delay="4">
+      <span class="sp-links-label">Background and research</span>
+      <div class="sp-links-list">
+        <a class="sp-proof-link" href="/blog/from-zenml-to-kitaru">From ZenML to Kitaru</a>
+        <a class="sp-proof-link" href="/blog/why-agents-need-durable-execution">Why agents need durable execution</a>
+        <a class="sp-proof-link" href="/blog/agents-need-more-than-traces">Why agents need more than traces</a>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -51,7 +60,6 @@
     overflow: hidden;
   }
 
-  /* Subtle warm gradient overlay for depth */
   .social-proof-section::before {
     content: '';
     position: absolute;
@@ -70,12 +78,11 @@
     position: relative;
   }
 
-  /* ── Header: eyebrow + companies ── */
   .sp-header {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
+    gap: 10px;
     margin-bottom: 20px;
   }
 
@@ -83,6 +90,16 @@
     display: flex;
     align-items: center;
     gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .sp-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
   }
 
   .sp-company {
@@ -107,18 +124,25 @@
     flex-shrink: 0;
   }
 
-  /* ── Tagline ── */
   .sp-tagline {
     font-size: clamp(26px, 3.5vw, 42px);
     font-weight: 600;
     color: var(--color-primary);
     letter-spacing: -0.03em;
     line-height: 1.15;
+    margin: 0 0 16px;
+    max-width: 860px;
+  }
+
+  .sp-subtext {
+    font-size: clamp(15px, 1.8vw, 18px);
+    font-weight: 400;
+    color: var(--color-secondary);
+    line-height: 1.6;
     margin: 0 0 56px;
     max-width: 720px;
   }
 
-  /* ── Stats grid ── */
   .sp-stats {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -178,27 +202,73 @@
   }
 
   .sp-stat-desc {
-    font-size: 0.85rem;
-    line-height: 1.55;
+    font-size: 0.9rem;
+    line-height: 1.6;
     color: var(--color-secondary);
     font-weight: 300;
-    max-width: 280px;
+    max-width: 360px;
   }
 
-  /* ── Mobile ── */
+  .sp-links {
+    margin-top: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .sp-links-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .sp-links-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .sp-proof-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-primary);
+    text-decoration: none;
+    font-size: 0.85rem;
+    transition: border-color 0.2s, transform 0.2s, background 0.2s;
+  }
+
+  .sp-proof-link::after {
+    content: '→';
+    color: var(--color-accent);
+  }
+
+  .sp-proof-link:hover {
+    border-color: oklch(0.65 0.16 45 / 0.3);
+    background: oklch(1 0 0 / 0.8);
+    transform: translateY(-1px);
+  }
+
   @media (max-width: 768px) {
     .social-proof-section {
       padding: 80px 0;
     }
 
-    .sp-header {
-      gap: 12px;
-    }
-
     .sp-tagline {
       font-size: 22px;
       line-height: 1.25;
-      margin-bottom: 40px;
+      margin-bottom: 12px;
+    }
+
+    .sp-subtext {
+      margin-bottom: 36px;
     }
 
     .sp-stats {
@@ -225,7 +295,8 @@
 
   @media (max-width: 480px) {
     .social-proof-section { padding: 60px 0; }
-    .sp-tagline { font-size: 19px; margin-bottom: 32px; }
+    .sp-tagline { font-size: 19px; margin-bottom: 10px; }
+    .sp-subtext { font-size: 14px; margin-bottom: 28px; }
     .sp-stat { padding: 24px 20px; }
     .sp-stat-number { font-size: 44px; }
     .sp-stat-text { font-size: 28px; }
@@ -234,7 +305,6 @@
 </style>
 
 <script>
-  // Count-up animation for stat numbers
   const counters = document.querySelectorAll<HTMLElement>('.sp-stat-number[data-count-to]');
   if (counters.length && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const observer = new IntersectionObserver((entries) => {

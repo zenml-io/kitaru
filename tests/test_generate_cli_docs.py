@@ -60,6 +60,7 @@ class TestBuildCommandTree:
             "log-store",
             "login",
             "logout",
+            "memory",
             "model",
             "secrets",
             "stack",
@@ -315,6 +316,7 @@ class TestWriteDocsTree:
             "log-store",
             "login",
             "logout",
+            "memory",
             "model",
             "secrets",
             "stack",
@@ -392,8 +394,16 @@ class TestWriteDocsTree:
         status_page = (output_dir / "status.mdx").read_text()
         assert "`--output`, `-o`" in status_page
 
-        # executions, log-store, model, secrets, and stack have nested subcommands.
-        for command in ("executions", "log-store", "model", "secrets", "stack"):
+        # executions, log-store, memory, model, secrets, and stack all
+        # have nested subcommands.
+        for command in (
+            "executions",
+            "log-store",
+            "memory",
+            "model",
+            "secrets",
+            "stack",
+        ):
             assert (output_dir / command / "index.mdx").exists()
             assert (output_dir / command / "meta.json").exists()
 
@@ -414,6 +424,21 @@ class TestWriteDocsTree:
             assert (output_dir / "log-store" / f"{command}.mdx").exists()
             assert f"log-store/{command}.mdx" in files
 
+        for command in (
+            "compact",
+            "compaction-log",
+            "delete",
+            "get",
+            "history",
+            "list",
+            "purge",
+            "purge-scope",
+            "scopes",
+            "set",
+        ):
+            assert (output_dir / "memory" / f"{command}.mdx").exists()
+            assert f"memory/{command}.mdx" in files
+
         for command in ("list", "register"):
             assert (output_dir / "model" / f"{command}.mdx").exists()
             assert f"model/{command}.mdx" in files
@@ -421,6 +446,29 @@ class TestWriteDocsTree:
         for command in ("delete", "list", "set", "show"):
             assert (output_dir / "secrets" / f"{command}.mdx").exists()
             assert f"secrets/{command}.mdx" in files
+
+        memory_get_content = (output_dir / "memory" / "get.mdx").read_text()
+        assert "kitaru memory get KEY [OPTIONS]" in memory_get_content
+        assert "| `KEY` | `str` | Yes |  | Memory key to read. |" in memory_get_content
+
+        compact_content = (output_dir / "memory" / "compact.mdx").read_text()
+        assert "`--key`" in compact_content
+        assert "`--keys`" in compact_content
+        assert "`--source-mode`" in compact_content
+        assert "`--target-key`" in compact_content
+        assert "`--model`" in compact_content
+
+        purge_content = (output_dir / "memory" / "purge.mdx").read_text()
+        assert "`KEY`" in purge_content
+        assert "`--keep`" in purge_content
+
+        purge_scope_content = (output_dir / "memory" / "purge-scope.mdx").read_text()
+        assert "`--include-deleted`" in purge_scope_content
+
+        compaction_log_content = (
+            output_dir / "memory" / "compaction-log.mdx"
+        ).read_text()
+        assert "`--scope`" in compaction_log_content
 
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content
