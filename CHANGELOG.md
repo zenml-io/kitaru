@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-12
+
 ### Added
 - **Durable agent memory** (`kitaru.memory`) — a new core primitive for durable, artifact-backed agent memory with typed scopes (`namespace` for cross-flow sharing, `flow` for per-flow state, `execution` for per-run state). Values persist through restarts, replays, and cross-execution workflows. Inside flows, reads and writes are captured via private non-cacheable synthetic steps so they remain replayable; outside flows, `kitaru.memory.configure(scope=..., scope_type=...)` unlocks the same API for seeding and inspection scripts (#82)
 - **Memory compaction** — `kitaru memory compact`, `KitaruClient.memories.compact(...)`, and MCP `kitaru_memory_compact` summarize one or many memory values using an LLM and write the summary back as a new version. Supports single-key or multi-key compaction, current-value or full-history source modes, and records every operation in a per-scope audit log viewable via `kitaru memory compaction-log`

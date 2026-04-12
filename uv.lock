@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-04-08T15:35:01.907886121Z"
+exclude-newer = "2026-04-09T20:09:58.373492903Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -1091,7 +1091,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.3.6"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
