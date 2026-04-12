@@ -6,9 +6,11 @@ Schemas are auto-generated from these models and sent to the LLM.
 """
 
 import copy
+import os
 import re
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,10 @@ import kitaru
 
 _MAX_CHARS = 12_000
 _READ_LIMIT = 400
+
+_TOOL_TRANSIENT_RETRIES: int = max(
+    1, int(os.environ.get("CODING_AGENT_TOOL_TRANSIENT_RETRIES", "2"))
+)
 
 ToolResult = str | HTMLString | MarkdownString | JSONString
 
@@ -38,6 +44,43 @@ def _resolve(cwd: str, path: str) -> Path:
     if not target.is_relative_to(base):
         raise ValueError(f"Path escapes working directory: {path}")
     return target
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Return True for network-ish failures that may succeed on retry."""
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return True
+    name = type(exc).__name__
+    if "Timeout" in name or "Connection" in name:
+        return True
+    module = type(exc).__module__
+    if module.startswith(("httpx", "httpcore", "urllib3", "requests")):
+        return name in (
+            "ConnectError",
+            "ReadTimeout",
+            "ConnectTimeout",
+            "RemoteProtocolError",
+            "ProtocolError",
+        )
+    return False
+
+
+def dispatch_tool_with_retries(
+    cwd: str, tool_name: str, arguments: dict[str, Any]
+) -> Any:
+    """Run ``dispatch_tool`` with retries on transient failures."""
+    last_error: Exception | None = None
+    for attempt in range(_TOOL_TRANSIENT_RETRIES):
+        try:
+            return dispatch_tool(cwd, tool_name, arguments)
+        except Exception as exc:
+            last_error = exc
+            if attempt < _TOOL_TRANSIENT_RETRIES - 1 and _is_transient_error(exc):
+                time.sleep(min(2**attempt, 8))
+                continue
+            raise
+    assert last_error is not None
+    raise last_error
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +377,26 @@ class WebSearchParams(BaseModel):
     query: str = Field(description="Search query")
 
 
+class RememberParams(BaseModel):
+    key: str = Field(
+        description=(
+            "Memory key (supports / namespacing, e.g. 'prefs/style', 'facts/api_url')"
+        )
+    )
+    value: str = Field(description="The fact, preference, or note to remember")
+
+
+class RecallParams(BaseModel):
+    key: str = Field(description="Memory key to recall")
+
+
+class ListMemoriesParams(BaseModel):
+    prefix: str = Field(
+        default="",
+        description="Optional key prefix to filter results (e.g. 'prefs/')",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Schema generation + dispatch
 # ---------------------------------------------------------------------------
@@ -348,6 +411,11 @@ _TOOL_MODELS: dict[str, type[BaseModel]] = {
     "python_exec": PythonExecParams,
     "web_fetch": WebFetchParams,
     "web_search": WebSearchParams,
+    # Memory tools — schemas only; execution happens in the flow body
+    # because memory ops are forbidden inside checkpoints.
+    "remember": RememberParams,
+    "recall": RecallParams,
+    "list_memories": ListMemoriesParams,
 }
 
 _TOOL_DESCRIPTIONS: dict[str, str] = {
@@ -382,6 +450,21 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "Search the web using a text query. "
         "Returns titles, URLs, and snippets from top results. "
         "Use web_fetch to read a specific result page."
+    ),
+    "remember": (
+        "Save a fact, preference, or convention to persistent memory. "
+        "Memories survive across sessions — use this to remember user preferences, "
+        "project conventions, useful URLs, or anything worth keeping for next time. "
+        "Keys support / namespacing (e.g. 'prefs/output_format', 'facts/api_base')."
+    ),
+    "recall": (
+        "Recall a previously saved memory by its exact key. "
+        "Returns the stored value, or a message if the key does not exist."
+    ),
+    "list_memories": (
+        "List all stored memory keys. Optionally filter by a key prefix "
+        "(e.g. 'prefs/' to see all preferences). Use this to check what "
+        "you've remembered from previous sessions."
     ),
 }
 
