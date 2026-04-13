@@ -47,7 +47,19 @@ The server uses stdio transport by default.
 
 ## Configure in Claude Code
 
-Add this to `.mcp.json` in your project root:
+<Callout type="info">
+  `kitaru-mcp` has to resolve to the Python environment where you installed
+  `kitaru[mcp]`. Claude Code inherits the PATH of the shell that launched it,
+  not whatever virtualenv you activate later — so either activate your venv
+  *before* starting Claude, or point `command` at the absolute path to
+  `kitaru-mcp` inside that venv (e.g. `/path/to/project/.venv/bin/kitaru-mcp`).
+  The absolute-path form is the most reliable.
+</Callout>
+
+### Option 1: project `.mcp.json`
+
+Add this to `.mcp.json` in your project root (committed to the repo, so the
+whole team picks it up):
 
 ```json
 {
@@ -59,6 +71,45 @@ Add this to `.mcp.json` in your project root:
   }
 }
 ```
+
+Or, using an absolute venv path:
+
+```json
+{
+  "mcpServers": {
+    "kitaru": {
+      "command": "/absolute/path/to/.venv/bin/kitaru-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### Option 2: `claude mcp add` CLI
+
+Claude Code can register the server for you. Scope controls where the
+registration lives:
+
+```bash
+# Just you, just this project (default scope: local)
+claude mcp add kitaru -- kitaru-mcp
+
+# Shared with the team via .mcp.json in this repo
+claude mcp add -s project kitaru -- kitaru-mcp
+
+# Available in every project on your machine
+claude mcp add -s user kitaru -- kitaru-mcp
+```
+
+Verify with `claude mcp list`. If `kitaru-mcp` isn't on PATH, pass the
+absolute venv path instead:
+
+```bash
+claude mcp add -s project kitaru -- /absolute/path/to/.venv/bin/kitaru-mcp
+```
+
+You can also just ask Claude: *"add the Kitaru MCP server to this project"* —
+it will run `claude mcp add` for you.
 
 ## Tool set
 
