@@ -737,21 +737,51 @@ class _ExecutionsAPI:
         flow: str | None = None,
         status: ExecutionStatus | str | None = None,
         limit: int | None = None,
+        page: int | None = None,
+        size: int | None = None,
     ) -> builtins.list[Execution]:
-        """List executions with optional flow/status filters."""
+        """List executions with optional flow/status filters and pagination."""
         status_filter = _coerce_status_filter(status)
 
-        if limit is not None and limit < 1:
-            raise KitaruUsageError("`limit` must be >= 1 when provided.")
+        if limit is not None:
+            if isinstance(limit, bool) or limit < 1:
+                raise KitaruUsageError("`limit` must be >= 1 when provided.")
+            if page is not None or size is not None:
+                raise KitaruUsageError(
+                    "`limit` cannot be combined with `page` or `size`."
+                )
+        if page is not None and (isinstance(page, bool) or page < 1):
+            raise KitaruUsageError("`page` must be >= 1 when provided.")
+        if size is not None and (isinstance(size, bool) or size < 1):
+            raise KitaruUsageError("`size` must be >= 1 when provided.")
+        if page is not None and size is None:
+            raise KitaruUsageError("`size` is required when `page` is provided.")
+        if size is not None and page is None:
+            page = 1
+
+        start_index = 0
+        stop_index: int | None = None
+        if limit is not None:
+            stop_index = limit
+        elif size is not None:
+            assert page is not None
+            start_index = (page - 1) * size
+            stop_index = start_index + size
 
         results: list[Execution] = []
-        page = 1
-        page_size = 50 if limit is None else max(50, limit)
+        matched_count = 0
+        backend_page = 1
+        if limit is not None:
+            page_size = max(50, limit)
+        elif size is not None:
+            page_size = max(50, size)
+        else:
+            page_size = 50
 
         while True:
             run_page = self._client_ref._client().list_pipeline_runs(
                 sort_by="desc:created",
-                page=page,
+                page=backend_page,
                 size=page_size,
                 project=self._client_ref._project,
                 hydrate=True,
@@ -772,13 +802,16 @@ class _ExecutionsAPI:
                 if status_filter is not None and execution.status != status_filter:
                     continue
 
-                results.append(execution)
-                if limit is not None and len(results) >= limit:
+                if matched_count >= start_index:
+                    results.append(execution)
+                matched_count += 1
+
+                if stop_index is not None and matched_count >= stop_index:
                     return results
 
             if len(runs) < page_size:
                 break
-            page += 1
+            backend_page += 1
 
         return results
 

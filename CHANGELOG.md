@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- CLI list commands now default to paginated windows (`--page 1 --size 20`) for executions, memory, stacks, models, and secrets. `kitaru executions list` also shows compact `Started` and `Ended` columns, while JSON output keeps the existing `{command, items, count}` envelope shape (#122)
+
 ## [0.4.0] - 2026-04-12
 
 ### Added

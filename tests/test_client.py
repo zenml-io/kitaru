@@ -679,6 +679,122 @@ def test_list_filters_flow_status_and_limit() -> None:
     assert executions[0].exec_id == str(run_1.id)
 
 
+def test_list_paginates_after_client_side_filters() -> None:
+    """Execution pagination should apply after Kitaru flow/status filters."""
+    run_1 = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    run_2 = _DummyRun(
+        status=ZenMLExecutionStatus.FAILED,
+        flow_name="flow_a",
+    )
+    run_3 = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    run_4 = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_b",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[
+                _as_pipeline_run(run_1),
+                _as_pipeline_run(run_2),
+                _as_pipeline_run(run_3),
+                _as_pipeline_run(run_4),
+            ]
+        )
+
+        client = KitaruClient()
+        executions = client.executions.list(
+            flow="flow_a",
+            status="completed",
+            page=2,
+            size=1,
+        )
+
+    assert len(executions) == 1
+    assert executions[0].exec_id == str(run_3.id)
+
+
+def test_list_pagination_finds_matches_across_backend_pages() -> None:
+    """Execution pagination should keep scanning backend pages for matches."""
+    non_matching_runs = [
+        _DummyRun(status=ZenMLExecutionStatus.COMPLETED, flow_name="flow_b")
+        for _ in range(50)
+    ]
+    matching_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.side_effect = [
+            SimpleNamespace(items=[_as_pipeline_run(run) for run in non_matching_runs]),
+            SimpleNamespace(items=[_as_pipeline_run(matching_run)]),
+        ]
+
+        client = KitaruClient()
+        executions = client.executions.list(
+            flow="flow_a",
+            status="completed",
+            page=1,
+            size=1,
+        )
+
+    assert len(executions) == 1
+    assert executions[0].exec_id == str(matching_run.id)
+    client_mock.list_pipeline_runs.assert_has_calls(
+        [
+            call(
+                sort_by="desc:created",
+                page=1,
+                size=50,
+                project=None,
+                hydrate=True,
+            ),
+            call(
+                sort_by="desc:created",
+                page=2,
+                size=50,
+                project=None,
+                hydrate=True,
+            ),
+        ]
+    )
+
+
+def test_list_rejects_conflicting_limit_and_pagination() -> None:
+    """The SDK should not compose legacy limit with page/size."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client"),
+    ):
+        client = KitaruClient()
+        with pytest.raises(KitaruUsageError, match="cannot be combined"):
+            client.executions.list(limit=1, page=1, size=1)
+
+
 def test_latest_raises_when_no_execution_matches() -> None:
     with (
         patch(

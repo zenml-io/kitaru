@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,6 +18,7 @@ from kitaru.cli import (
     RuntimeSnapshot,
     _build_runtime_snapshot,
     _describe_local_server,
+    _format_table_timestamp,
     _logout_current_connection,
     _parse_secret_assignments,
     app,
@@ -196,6 +197,21 @@ def _write_stack_create_file(tmp_path: Path, content: str) -> Path:
     path = tmp_path / "stack.yaml"
     path.write_text(content)
     return path
+
+
+def test_format_table_timestamp_compact_cases() -> None:
+    """List/table timestamps should be compact, stable, and forgiving."""
+    assert _format_table_timestamp(None) == "-"
+    assert _format_table_timestamp("") == "-"
+    assert _format_table_timestamp("   ") == "-"
+    assert _format_table_timestamp(datetime(2026, 3, 7, 10, 0, 5)) == (
+        "2026-03-07 10:00:05"
+    )
+    assert _format_table_timestamp(datetime(2026, 3, 7, 10, 0, 5, tzinfo=UTC)) == (
+        "2026-03-07 10:00:05"
+    )
+    assert _format_table_timestamp("2026-04-13T14:05:30Z") == ("2026-04-13 14:05:30")
+    assert _format_table_timestamp("not-a-timestamp") == "not-a-timestamp"
 
 
 def test_importing_cli_does_not_resolve_version_metadata() -> None:
@@ -475,11 +491,85 @@ def test_executions_list_applies_filters(
     assert "ID" in header_lines[1]
     assert "Flow" in header_lines[1]
     assert "Status" in header_lines[1]
+    assert "Started" in header_lines[1]
+    assert "Ended" in header_lines[1]
     assert "Stack" in header_lines[1]
+    assert "2026-03-07 10:00:00" in output
+    assert "2026-03-07 10:01:00" in output
     assert "kr-200" in output
     assert "content_pipeline" in output
     assert "waiting" in output
     assert "prod" in output
+
+
+def test_executions_list_uses_default_page_size() -> None:
+    """`kitaru executions list` should default to the first 20-item page."""
+    fake_client = Mock()
+    fake_client.executions.list.return_value = []
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "list"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.list.assert_called_once_with(
+        status=None,
+        flow=None,
+        page=1,
+        size=20,
+    )
+
+
+def test_executions_list_accepts_page_and_size() -> None:
+    """`kitaru executions list` should pass explicit page/size to the client."""
+    fake_client = Mock()
+    fake_client.executions.list.return_value = []
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "list", "--page", "2", "--size", "10"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.list.assert_called_once_with(
+        status=None,
+        flow=None,
+        page=2,
+        size=10,
+    )
+
+
+def test_executions_list_rejects_limit_with_page(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Legacy `--limit` should not compose with explicit pagination."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "list", "--limit", "5", "--page", "2"])
+
+    assert exc_info.value.code == 1
+    assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_list_pagination_validation_json_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid list pagination should respect JSON error output."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["model", "list", "--page", "0", "--output", "json"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload == {
+        "command": "model.list",
+        "error": {
+            "message": "`--page` must be >= 1.",
+        },
+    }
 
 
 def test_executions_logs_renders_default_output(
@@ -2182,6 +2272,44 @@ def test_memory_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["items"][0]["key"] == "repo_conventions"
 
 
+def test_memory_list_json_paginates_entries(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`memory list --output json` should emit only the requested page."""
+    entries = [
+        _memory_payload(key="first", scope="my_repo", version=1),
+        _memory_payload(key="second", scope="my_repo", version=2),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.list_memory_payload", return_value=entries),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "memory",
+                "list",
+                "--scope",
+                "my_repo",
+                "--scope-type",
+                "namespace",
+                "--page",
+                "2",
+                "--size",
+                "1",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {"command", "items", "count"}
+    assert payload["count"] == 1
+    assert payload["items"][0]["key"] == "second"
+
+
 def test_memory_list_empty_scope_suggests_scopes_command(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -3261,6 +3389,34 @@ def test_secrets_list_renders_all_pages_sorted(
     assert output.index("alpha: secret-a (private)") < output.index(
         "zeta: secret-z (public)"
     )
+
+
+def test_secrets_list_paginates_after_sorting(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`secrets list` should slice after deterministic name/id ordering."""
+    secret_z = SimpleNamespace(name="zeta", id="secret-z", private=False)
+    secret_b = SimpleNamespace(name="beta", id="secret-b", private=False)
+    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=True)
+    fake_client = Mock()
+    fake_client.list_secrets.return_value = SimpleNamespace(
+        items=[secret_z, secret_b, secret_a],
+        total_pages=1,
+        max_size=3,
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list", "--page", "1", "--size", "2"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "alpha: secret-a (private)" in output
+    assert "beta: secret-b (public)" in output
+    assert "zeta" not in output
+    assert "Page 1 (size 2, showing 2 of 3)" in output
 
 
 def test_secrets_list_surfaces_client_errors(
@@ -5721,6 +5877,38 @@ def test_model_list_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["command"] == "model.list"
     assert payload["items"][0]["alias"] == "fast"
     assert payload["items"][0]["is_default"] is True
+
+
+def test_model_list_json_paginates_without_metadata(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Paginated list JSON should keep the existing envelope shape."""
+    with (
+        patch("kitaru.cli.list_model_aliases") as mock_list_models,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_list_models.return_value = [
+            SimpleNamespace(
+                alias="fast",
+                model="openai/gpt-4o-mini",
+                secret=None,
+                is_default=True,
+            ),
+            SimpleNamespace(
+                alias="smart",
+                model="anthropic/claude-sonnet-4-20250514",
+                secret=None,
+                is_default=False,
+            ),
+        ]
+        app(["model", "list", "--page", "2", "--size", "1", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {"command", "items", "count"}
+    assert payload["command"] == "model.list"
+    assert payload["count"] == 1
+    assert payload["items"][0]["alias"] == "smart"
 
 
 def test_secrets_set_json_output_accepts_output_before_assignments(
