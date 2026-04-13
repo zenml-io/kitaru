@@ -54,6 +54,9 @@ DEFAULT_INTERESTS: list[str] = [
 
 HN_ENDPOINT = "http://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=30"
 GOOGLE_NEWS_ENDPOINT = "https://news.google.com/rss/search"
+JUDGE_MODEL = os.environ.get(
+    "KITARU_JUDGE_MODEL", "anthropic/claude-sonnet-4-20250514"
+)
 GROK_MODEL = "grok-4-latest"
 GROK_BASE_URL = "https://api.x.ai/v1"
 GROK_MAX_ITEMS = 8
@@ -408,6 +411,7 @@ def judge(
     try:
         content = kitaru.llm(
             prompt=prompt,
+            model=JUDGE_MODEL,
             name="judge_llm_call",
             temperature=0.1,
         )
