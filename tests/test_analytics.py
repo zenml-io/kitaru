@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from kitaru import analytics
 from kitaru.analytics import AnalyticsEvent, set_source, track
 
 
@@ -37,18 +38,111 @@ def test_set_source_accepts_full_kitaru_source() -> None:
     source_context_mock.set.assert_called_once_with("normalized:kitaru-mcp")
 
 
-def test_track_passes_metadata_through_unchanged() -> None:
-    """track() should delegate metadata without injecting interface fields."""
-    metadata = {"command": "status"}
+def test_track_enriches_metadata_with_authoritative_versions() -> None:
+    """track() should copy caller metadata and add central version fields."""
+    metadata = {
+        "command": "status",
+        "kitaru_version": "caller-value",
+        "zenml_version": "caller-value",
+    }
 
-    with patch("zenml.analytics.track", return_value=True) as track_mock:
+    with (
+        patch("kitaru.analytics.resolve_installed_version", return_value="1.2.3"),
+        patch("kitaru.analytics.resolve_zenml_version", return_value="4.5.6"),
+        patch("zenml.analytics.track", return_value=True) as track_mock,
+    ):
         result = track(AnalyticsEvent.CLI_INVOKED, metadata)
 
     assert result is True
+    track_mock.assert_called_once()
+    sent_metadata = track_mock.call_args.kwargs["metadata"]
+    assert sent_metadata == {
+        "command": "status",
+        "kitaru_version": "1.2.3",
+        "zenml_version": "4.5.6",
+    }
+    assert sent_metadata is not metadata
+    assert metadata == {
+        "command": "status",
+        "kitaru_version": "caller-value",
+        "zenml_version": "caller-value",
+    }
+
+
+def test_track_supports_metadata_none() -> None:
+    """track() should still work when callers have no metadata to add."""
+    with (
+        patch("kitaru.analytics.resolve_installed_version", return_value="1.2.3"),
+        patch("kitaru.analytics.resolve_zenml_version", return_value="4.5.6"),
+        patch("zenml.analytics.track", return_value=True) as track_mock,
+    ):
+        result = track(AnalyticsEvent.STATUS_VIEWED, None)
+
+    assert result is True
     track_mock.assert_called_once_with(
-        event=AnalyticsEvent.CLI_INVOKED,
-        metadata=metadata,
+        event=AnalyticsEvent.STATUS_VIEWED,
+        metadata={"kitaru_version": "1.2.3", "zenml_version": "4.5.6"},
     )
+
+
+def test_resolve_zenml_version_falls_back_to_unknown() -> None:
+    """Missing ZenML package metadata should produce the analytics fallback value."""
+    analytics.resolve_zenml_version.cache_clear()
+    with patch(
+        "kitaru.analytics.importlib.metadata.version",
+        side_effect=analytics.importlib.metadata.PackageNotFoundError,
+    ):
+        assert analytics.resolve_zenml_version() == "unknown"
+    analytics.resolve_zenml_version.cache_clear()
+
+
+def test_track_returns_false_when_zenml_tracking_fails() -> None:
+    """Analytics failures should never raise into user-facing code."""
+    with (
+        patch("kitaru.analytics.resolve_installed_version", return_value="1.2.3"),
+        patch("kitaru.analytics.resolve_zenml_version", return_value="4.5.6"),
+        patch("zenml.analytics.track", side_effect=RuntimeError("boom")),
+    ):
+        assert track(AnalyticsEvent.CLI_INVOKED, {"command": "status"}) is False
+
+
+def test_track_returns_false_when_version_enrichment_raises() -> None:
+    """Version resolution failures must not propagate to callers."""
+    with (
+        patch(
+            "kitaru.analytics.resolve_installed_version",
+            side_effect=RuntimeError("broken metadata"),
+        ),
+        patch("kitaru.analytics.resolve_zenml_version", return_value="4.5.6"),
+        patch("zenml.analytics.track", return_value=True) as track_mock,
+    ):
+        result = track(AnalyticsEvent.CLI_INVOKED, {"command": "status"})
+
+    assert result is True
+    sent_metadata = track_mock.call_args.kwargs["metadata"]
+    assert sent_metadata["kitaru_version"] == "unknown"
+    assert sent_metadata["zenml_version"] == "4.5.6"
+
+
+def test_track_returns_false_when_both_version_helpers_raise() -> None:
+    """Both version helpers failing should still track with unknown versions."""
+    with (
+        patch(
+            "kitaru.analytics.resolve_installed_version",
+            side_effect=RuntimeError("bad"),
+        ),
+        patch(
+            "kitaru.analytics.resolve_zenml_version",
+            side_effect=RuntimeError("bad"),
+        ),
+        patch("zenml.analytics.track", return_value=True) as track_mock,
+    ):
+        result = track(AnalyticsEvent.CLI_INVOKED, {"command": "status"})
+
+    assert result is True
+    sent_metadata = track_mock.call_args.kwargs["metadata"]
+    assert sent_metadata["kitaru_version"] == "unknown"
+    assert sent_metadata["zenml_version"] == "unknown"
 
 
 def test_flow_lifecycle_event_canonical_strings() -> None:

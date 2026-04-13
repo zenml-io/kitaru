@@ -1835,72 +1835,13 @@ def _stack_component_details_from_model(
     )
 
 
-def _infer_stack_details_type(
-    components: tuple[StackComponentDetails, ...],
-) -> _StackShowType:
-    """Infer a user-facing stack type from translated stack components."""
-    if any(
-        component.role == "runner"
-        and component.backend == GCP_VERTEX_ORCHESTRATOR_FLAVOR
-        for component in components
-    ):
-        return "vertex"
-
-    if any(
-        component.role == "runner"
-        and component.backend == AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR
-        for component in components
-    ):
-        return "sagemaker"
-
-    if any(
-        component.role == "runner" and component.backend == AZUREML_ORCHESTRATOR_FLAVOR
-        for component in components
-    ):
-        return "azureml"
-
-    if any(
-        component.role == "runner" and component.backend == "kubernetes"
-        for component in components
-    ):
-        return "kubernetes"
-
-    if components and all(
-        component.role in {"runner", "storage"} for component in components
-    ):
-        backends = {
-            component.backend
-            for component in components
-            if component.backend is not None
-        }
-        if backends.issubset({"local"}):
-            return "local"
-
-    return "custom"
-
-
-def _show_stack_operation(
-    name_or_id: str,
+def _stack_component_details_from_stack_model(
+    stack_model: Any,
     *,
-    client_factory: Callable[[], Any] = Client,
-) -> StackDetails:
-    """Inspect one stack and translate its component metadata for CLI display."""
-    selector = _normalize_stack_selector(name_or_id)
-    client = client_factory()
-    resolved_stack = _resolve_stack_for_show(client, selector)
-
-    try:
-        hydrated_stack = client.get_stack(resolved_stack.id, hydrate=True)
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Unable to inspect stack '{selector}': {exc}"
-        ) from exc
-
-    active_stack_id = str(client.active_stack_model.id)
-    stack = _stack_info_from_model(hydrated_stack, active_stack_id=active_stack_id)
-    is_managed = _stack_is_managed(hydrated_stack)
-
-    raw_components = getattr(hydrated_stack, "components", None)
+    selector: str,
+) -> tuple[StackComponentDetails, ...]:
+    """Translate hydrated stack component metadata into Kitaru details."""
+    raw_components = getattr(stack_model, "components", None)
     if not isinstance(raw_components, Mapping):
         raise KitaruStateError(
             f"Stack '{selector}' returned malformed component metadata."
@@ -1961,7 +1902,122 @@ def _show_stack_operation(
                 _stack_component_details_from_model(component_type, component_model)
             )
 
-    component_details = tuple(ordered_components)
+    return tuple(ordered_components)
+
+
+def _infer_stack_details_type(
+    components: tuple[StackComponentDetails, ...],
+) -> _StackShowType:
+    """Infer a user-facing stack type from translated stack components."""
+    if any(
+        component.role == "runner"
+        and component.backend == GCP_VERTEX_ORCHESTRATOR_FLAVOR
+        for component in components
+    ):
+        return "vertex"
+
+    if any(
+        component.role == "runner"
+        and component.backend == AWS_SAGEMAKER_ORCHESTRATOR_FLAVOR
+        for component in components
+    ):
+        return "sagemaker"
+
+    if any(
+        component.role == "runner" and component.backend == AZUREML_ORCHESTRATOR_FLAVOR
+        for component in components
+    ):
+        return "azureml"
+
+    if any(
+        component.role == "runner" and component.backend == "kubernetes"
+        for component in components
+    ):
+        return "kubernetes"
+
+    if components and all(
+        component.role in {"runner", "storage"} for component in components
+    ):
+        backends = {
+            component.backend
+            for component in components
+            if component.backend is not None
+        }
+        if backends.issubset({"local"}):
+            return "local"
+
+    return "custom"
+
+
+def classify_stack_deployment_type(
+    name_or_id: str | None = None,
+    *,
+    client_factory: Callable[[], Any] = Client,
+) -> _StackShowType:
+    """Classify a stack using the same component translation as stack show.
+
+    Args:
+        name_or_id: Optional stack selector. When omitted, the active stack is
+            classified.
+        client_factory: Factory for a ZenML client.
+
+    Returns:
+        Low-cardinality stack deployment type.
+    """
+    client = client_factory()
+    if name_or_id is None:
+        resolved_stack = client.active_stack_model
+        selector = (
+            _normalize_stack_detail_value(getattr(resolved_stack, "id", None))
+            or _normalize_stack_detail_value(getattr(resolved_stack, "name", None))
+            or "<active stack>"
+        )
+    else:
+        selector = _normalize_stack_selector(name_or_id)
+        resolved_stack = _resolve_stack_for_show(client, selector)
+
+    try:
+        hydrated_stack = client.get_stack(resolved_stack.id, hydrate=True)
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Unable to classify stack deployment type for '{selector}'."
+        ) from exc
+
+    component_details = _stack_component_details_from_stack_model(
+        hydrated_stack,
+        selector=selector,
+    )
+    if not component_details or all(
+        component.backend is None for component in component_details
+    ):
+        raise KitaruStateError("Stack components did not include backend metadata.")
+    return _infer_stack_details_type(component_details)
+
+
+def _show_stack_operation(
+    name_or_id: str,
+    *,
+    client_factory: Callable[[], Any] = Client,
+) -> StackDetails:
+    """Inspect one stack and translate its component metadata for CLI display."""
+    selector = _normalize_stack_selector(name_or_id)
+    client = client_factory()
+    resolved_stack = _resolve_stack_for_show(client, selector)
+
+    try:
+        hydrated_stack = client.get_stack(resolved_stack.id, hydrate=True)
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Unable to inspect stack '{selector}': {exc}"
+        ) from exc
+
+    active_stack_id = str(client.active_stack_model.id)
+    stack = _stack_info_from_model(hydrated_stack, active_stack_id=active_stack_id)
+    is_managed = _stack_is_managed(hydrated_stack)
+    component_details = _stack_component_details_from_stack_model(
+        hydrated_stack,
+        selector=selector,
+    )
     return StackDetails(
         stack=stack,
         is_managed=is_managed,

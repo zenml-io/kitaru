@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from kitaru.analytics import AnalyticsEvent
 from kitaru.config import ResolvedModelSelection
 from kitaru.errors import (
     KitaruContextError,
@@ -41,6 +42,15 @@ def _simple_selection(
         resolved_model=model,
         secret=secret,
     )
+
+
+def _tracked_llm_metadata(track_mock: MagicMock) -> dict[str, object]:
+    """Return the analytics metadata emitted by one LLM call."""
+    track_mock.assert_called_once()
+    event, metadata = track_mock.call_args.args
+    assert event == AnalyticsEvent.LLM_CALLED
+    assert isinstance(metadata, dict)
+    return metadata
 
 
 @contextmanager
@@ -608,6 +618,70 @@ def test_llm_mock_response_works_with_unsupported_provider(
         output = llm("hello", model="gemini/gemini-2.0-flash", name="mock_call")
 
     assert output == "mocked"
+
+
+# ---------------------------------------------------------------------------
+# Analytics metadata
+# ---------------------------------------------------------------------------
+
+
+def test_llm_analytics_includes_model_alias_for_explicit_model() -> None:
+    """LLM analytics should expose `model` as an alias for `resolved_model`."""
+    fake_result = _ProviderCallResult(response_text="ok", usage=_LLMUsage())
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.llm._call_openai", return_value=fake_result),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+    ):
+        llm(
+            "private prompt text",
+            model="openai/gpt-4o-mini",
+            system="private system text",
+            name="private_call_name",
+        )
+
+    metadata = _tracked_llm_metadata(track_mock)
+    assert metadata["resolved_model"] == "openai/gpt-4o-mini"
+    assert metadata["model"] == "openai/gpt-4o-mini"
+    assert metadata["model"] == metadata["resolved_model"]
+    assert "prompt" not in metadata
+    assert "system" not in metadata
+    assert "call_name" not in metadata
+    assert "name" not in metadata
+    assert "private prompt text" not in metadata.values()
+    assert "private system text" not in metadata.values()
+    assert "private_call_name" not in metadata.values()
+
+
+def test_llm_analytics_includes_model_alias_in_mock_alias_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mock/default-alias calls should still emit safe model metadata."""
+    monkeypatch.setenv("KITARU_LLM_MOCK_RESPONSE", "mocked")
+    model_selection = ResolvedModelSelection(
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-4o-mini",
+        secret=None,
+    )
+
+    with (
+        _llm_execution_scope(model_selection=model_selection),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+    ):
+        llm("private prompt text", name="private_call_name")
+
+    metadata = _tracked_llm_metadata(track_mock)
+    assert metadata["resolved_model"] == "openai/gpt-4o-mini"
+    assert metadata["model"] == "openai/gpt-4o-mini"
+    assert metadata["model"] == metadata["resolved_model"]
+    assert metadata["mocked"] is True
+    assert "prompt" not in metadata
+    assert "system" not in metadata
+    assert "call_name" not in metadata
+    assert "name" not in metadata
+    assert "private prompt text" not in metadata.values()
+    assert "private_call_name" not in metadata.values()
 
 
 # ---------------------------------------------------------------------------

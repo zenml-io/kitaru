@@ -632,6 +632,7 @@ def _track_llm_call_analytics(
 
     metadata: dict[str, Any] = {
         "resolved_model": model_selection.resolved_model,
+        "model": model_selection.resolved_model,  # dashboard compat alias
         "credential_source": credential_source,
         "mocked": mocked,
     }

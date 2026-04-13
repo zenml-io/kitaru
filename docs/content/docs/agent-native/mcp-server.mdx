@@ -99,6 +99,47 @@ Connection tools:
 - `kitaru_stacks_list`
 - `manage_stack`
 
+## Copy-paste prompts
+
+Use prompts like these in an MCP-capable assistant after you configure the
+Kitaru MCP server.
+
+Read-only status check:
+
+```text
+Check my Kitaru status and list the five latest executions. Summarize anything waiting for input.
+```
+
+Start and watch a flow:
+
+```text
+Run `examples/basic_flow/first_working_flow.py:research_agent` with topic="durable execution", then watch the execution until it finishes.
+```
+
+Resolve a waiting execution safely:
+
+```text
+Find executions waiting for input. If exactly one is waiting, show me the question and ask me for the value before calling the input tool.
+```
+
+Plan and run a replay:
+
+```text
+Replay the latest failed execution from the checkpoint before the failing one. Explain the replay plan before running it.
+```
+
+Inspect results from a completed execution:
+
+```text
+Get the latest completed execution and show me its response artifacts.
+```
+
+Manage a local stack:
+
+```text
+Create a local Kitaru stack named local-dev if it does not already exist, then show me the current Kitaru status.
+```
+
 ## Starting executions with `kitaru_executions_run`
 
 The `kitaru_executions_run` tool requires a `target` string in the format:

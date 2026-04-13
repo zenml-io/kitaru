@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-12
+
+### Added
+- **Durable agent memory** (`kitaru.memory`) — a new core primitive for durable, artifact-backed agent memory with typed scopes (`namespace` for cross-flow sharing, `flow` for per-flow state, `execution` for per-run state). Values persist through restarts, replays, and cross-execution workflows. Inside flows, reads and writes are captured via private non-cacheable synthetic steps so they remain replayable; outside flows, `kitaru.memory.configure(scope=..., scope_type=...)` unlocks the same API for seeding and inspection scripts (#82)
+- **Memory compaction** — `kitaru memory compact`, `KitaruClient.memories.compact(...)`, and MCP `kitaru_memory_compact` summarize one or many memory values using an LLM and write the summary back as a new version. Supports single-key or multi-key compaction, current-value or full-history source modes, and records every operation in a per-scope audit log viewable via `kitaru memory compaction-log`
+- **Memory purging** — `kitaru memory purge` deletes old versions of a single key while keeping the latest; `kitaru memory purge-scope` reclaims an entire scope (optionally including tombstoned keys) and records audit entries alongside compaction events. The internal compaction log is never itself purged
+- Full `kitaru memory` CLI command group: `scopes`, `get`, `set`, `delete`, `history`, `purge`, `purge-scope`, `compact`, `compaction-log`, and `reindex`
+- `KitaruClient.memories` typed namespace for `get/list/history/set/delete` plus maintenance operations (`purge`, `compact`, `reindex`) by explicit scope
+- Nine MCP memory tools (`kitaru_memory_list/get/set/delete/history/purge/purge_scope/compact/compaction_log`) for agent-facing access from Claude, Cursor, and other MCP clients
+- Automatic flow-membership indexing for new execution-scoped memory writes, plus `kitaru memory reindex` / `KitaruClient.memories.reindex(apply=...)` for dry-run-first backfilling of historical memory tags in existing projects
+- Shared memory transport helpers (`kitaru._interface_memory`, `kitaru.inspection.serialize_memory_*`) so CLI, MCP, and SDK surfaces share one payload/validation layer
+- Dedicated memory docs: concept page (`/concepts/memory`) and full guide (`/guides/memory`) covering typed scopes, in-flow vs outside-flow usage, durability semantics, and maintenance workflows
+- Runnable memory example under `examples/memory/flow_with_memory.py` with narrated text output
+
+### Changed
+- `kitaru.memory.set/get/list/history/delete()` outside flows now require a configured scope via `kitaru.memory.configure(...)` and raise `KitaruStateError` with setup guidance when no scope has been configured. Inside flows, no configuration is needed — the execution scope is inferred automatically
+- `memory.*` remains forbidden inside `@checkpoint` — the replay boundary is preserved by routing all memory operations through flow-scope synthetic steps
+- Memory writes re-fetch the exact created artifact version by ID before returning typed metadata, so the client surface reports the concrete written version rather than guessing from "latest by name"
+
+### Fixed
+- Memory artifact version queries now use the correct `desc:version_number` sort order (was `version_number:desc`)
+
+## [0.3.6] - 2026-04-11
+
+### Added
+- Copy-paste prompt examples in MCP server documentation for common workflows (status checks, flow execution, replay, artifact inspection)
+- MCP extra mentioned earlier in the installation guide
+- Troubleshooting guidance for MCP environment variable configuration
+
+### Changed
+- Improved anonymous telemetry metadata for opted-in users (richer flow lifecycle context, version stamping, deployment classification)
+
 ## [0.3.5] - 2026-04-11
 
 ### Added

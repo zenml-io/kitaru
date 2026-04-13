@@ -62,6 +62,7 @@ from kitaru.config import (
     _show_stack_operation,
     _StackComponent,
     build_frozen_execution_spec,
+    classify_stack_deployment_type,
     configure,
     create_stack,
     current_stack,
@@ -1115,6 +1116,106 @@ def test_list_stack_entries_include_managed_flag() -> None:
         ("default", False),
         ("dev", True),
     ]
+
+
+@pytest.mark.parametrize(
+    ("hydrated_stack", "expected_stack_type"),
+    [
+        (
+            _stack_model(
+                stack_id="stack-local-id",
+                name="local-dev",
+                components={
+                    StackComponentType.ORCHESTRATOR: [
+                        _stack_component("orc-id", "local-runner", flavor="local")
+                    ],
+                    StackComponentType.ARTIFACT_STORE: [
+                        _stack_component("art-id", "local-storage", flavor="local")
+                    ],
+                },
+            ),
+            "local",
+        ),
+        (
+            _kubernetes_stack_model(stack_id="stack-k8s-id", name="k8s-dev"),
+            "kubernetes",
+        ),
+        (_vertex_stack_model(stack_id="stack-vertex-id", name="vertex-dev"), "vertex"),
+        (
+            _sagemaker_stack_model(stack_id="stack-sagemaker-id", name="sagemaker-dev"),
+            "sagemaker",
+        ),
+        (_azureml_stack_model(stack_id="stack-azure-id", name="azure-dev"), "azureml"),
+        (
+            _stack_model(
+                stack_id="stack-custom-id",
+                name="custom-dev",
+                components={
+                    StackComponentType.ORCHESTRATOR: [
+                        _stack_component("orc-id", "custom-runner", flavor="airflow")
+                    ]
+                },
+            ),
+            "custom",
+        ),
+    ],
+)
+def test_classify_stack_deployment_type_matches_show_inference(
+    hydrated_stack: SimpleNamespace,
+    expected_stack_type: str,
+) -> None:
+    """Classification-only helper should share stack show's inferred taxonomy."""
+    stack_summary = _stack_model(
+        stack_id=hydrated_stack.id,
+        name=hydrated_stack.name,
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = stack_summary
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        deployment_type = classify_stack_deployment_type(hydrated_stack.name)
+        details = _show_stack_operation(hydrated_stack.name)
+
+    assert deployment_type == expected_stack_type
+    assert details.stack_type == expected_stack_type
+
+
+def test_classify_stack_deployment_type_uses_active_stack_when_selector_omitted() -> (
+    None
+):
+    """Omitting a selector should classify the currently active stack."""
+    hydrated_stack = _kubernetes_stack_model(stack_id="stack-active-id", name="active")
+    client_mock = Mock()
+    client_mock.active_stack_model = hydrated_stack
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        deployment_type = classify_stack_deployment_type()
+
+    assert deployment_type == "kubernetes"
+    client_mock.get_stack.assert_called_once_with("stack-active-id", hydrate=True)
+
+
+def test_classify_stack_deployment_type_rejects_unclassifiable_components() -> None:
+    """Malformed component details should fail classification instead of custom."""
+    stack_summary = _stack_model(stack_id="stack-bad-id", name="bad")
+    hydrated_stack = _stack_model(
+        stack_id="stack-bad-id",
+        name="bad",
+        components={StackComponentType.ORCHESTRATOR: [SimpleNamespace()]},
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = stack_summary
+    client_mock.list_stacks.return_value = [stack_summary]
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruStateError, match="backend metadata"),
+    ):
+        classify_stack_deployment_type("bad")
 
 
 def test_show_stack_operation_returns_local_stack_details() -> None:
