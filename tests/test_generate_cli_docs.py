@@ -13,6 +13,7 @@ import pytest
 from generate_cli_docs import (
     CommandDoc,
     ParameterDoc,
+    _get_description,
     build_command_tree,
     render_command_page,
     render_meta,
@@ -36,6 +37,75 @@ def output_dir() -> Generator[Path]:
     shutil.rmtree(d, ignore_errors=True)
 
 
+class TestGetDescription:
+    """Tests for docstring summary/body extraction."""
+
+    @staticmethod
+    def _app(help_text: str | None = None, default_doc: str | None = None) -> object:
+        """Build a minimal cyclopts-shaped app for `_get_description()`."""
+        from types import SimpleNamespace
+
+        default_command = None
+        if default_doc is not None:
+
+            def fn() -> None:
+                """placeholder"""
+
+            fn.__doc__ = default_doc
+            default_command = fn
+        return SimpleNamespace(help=help_text, default_command=default_command)
+
+    def test_no_help_and_no_default_command(self) -> None:
+        assert _get_description(self._app()) == ("", "")
+
+    def test_summary_only(self) -> None:
+        app = self._app("Start the local server.")
+        assert _get_description(app) == ("Start the local server.", "")
+
+    def test_summary_plus_body(self) -> None:
+        app = self._app("Summary line.\n\nDetail paragraph explaining the nuance.")
+        assert _get_description(app) == (
+            "Summary line.",
+            "Detail paragraph explaining the nuance.",
+        )
+
+    def test_multiple_body_paragraphs_preserved(self) -> None:
+        app = self._app("Summary.\n\nFirst detail paragraph.\n\nSecond paragraph.")
+        summary, body = _get_description(app)
+        assert summary == "Summary."
+        assert body == "First detail paragraph.\n\nSecond paragraph."
+
+    def test_args_section_stripped_from_body(self) -> None:
+        app = self._app(
+            "Summary.\n\nDetail explaining flags.\n\n"
+            "Args:\n    foo: the foo parameter.\n    bar: the bar parameter."
+        )
+        summary, body = _get_description(app)
+        assert summary == "Summary."
+        assert body == "Detail explaining flags."
+
+    def test_docstring_is_only_args_section(self) -> None:
+        app = self._app("Args:\n    foo: the foo parameter.")
+        assert _get_description(app) == ("", "")
+
+    def test_returns_section_also_stripped(self) -> None:
+        app = self._app("Summary.\n\nReturns:\n    int: the result.")
+        assert _get_description(app) == ("Summary.", "")
+
+    def test_falls_back_to_default_command_docstring(self) -> None:
+        app = self._app(default_doc="Fallback summary.\n\nFallback body.")
+        assert _get_description(app) == (
+            "Fallback summary.",
+            "Fallback body.",
+        )
+
+    def test_collapses_hard_wrapped_summary_whitespace(self) -> None:
+        app = self._app("Summary that is\nhard-wrapped across\nmultiple lines.")
+        summary, body = _get_description(app)
+        assert summary == "Summary that is hard-wrapped across multiple lines."
+        assert body == ""
+
+
 class TestBuildCommandTree:
     """Tests for cyclopts command tree extraction."""
 
@@ -45,7 +115,7 @@ class TestBuildCommandTree:
         tree = build_command_tree(app)
         assert tree.name == "kitaru"
         assert tree.invocation == "kitaru"
-        assert tree.description
+        assert tree.summary
 
     def test_root_has_current_subcommands(self) -> None:
         from kitaru.cli import app
@@ -245,8 +315,11 @@ class TestRenderCommandPage:
         page = render_command_page(cmd, is_root=False)
         assert 'description: "Summarize memory values."' in page
         assert "Use --key for single-key mode" in page
-        # Body text should appear exactly once (summary stays in frontmatter only)
+        # Guard against duplication in both directions:
+        # - summary must stay in frontmatter only (not copied to body)
+        # - body must stay in body only (not promoted to frontmatter)
         assert page.count("Summarize memory values.") == 1
+        assert page.count("Use --key for single-key mode") == 1
 
     def test_renders_parameters_table(self) -> None:
         cmd = CommandDoc(
@@ -293,6 +366,31 @@ class TestRenderCommandPage:
         page = render_command_page(cmd, is_root=False)
         assert "## Commands" in page
         assert "[`run`](./run)" in page
+
+    def test_subcommand_table_omits_body(self) -> None:
+        # Markdown tables can't contain block-level content, so the child's
+        # body must NEVER appear in the parent's subcommand table — only
+        # its summary. The body stays on the child's own page.
+        child = CommandDoc(
+            slug="compact",
+            name="compact",
+            invocation="kitaru memory compact",
+            summary="Summarize memory values.",
+            body="Use --key for single-key mode.",
+            usage="kitaru memory compact [OPTIONS]",
+        )
+        parent = CommandDoc(
+            slug="memory",
+            name="memory",
+            invocation="kitaru memory",
+            summary="Manage memory.",
+            body="",
+            usage="kitaru memory COMMAND",
+            subcommands=[child],
+        )
+        page = render_command_page(parent, is_root=False)
+        assert "Summarize memory values." in page
+        assert "Use --key for single-key mode" not in page
 
     def test_escapes_mdx_special_chars(self) -> None:
         cmd = CommandDoc(

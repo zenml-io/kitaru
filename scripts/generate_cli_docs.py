@@ -60,13 +60,6 @@ class CommandDoc:
     parameters: list[ParameterDoc] = field(default_factory=list)
     subcommands: list[CommandDoc] = field(default_factory=list)
 
-    @property
-    def description(self) -> str:
-        """Combined summary and body (used for subcommand tables)."""
-        if self.body:
-            return f"{self.summary} {self.body}".strip()
-        return self.summary
-
 
 # ---------------------------------------------------------------------------
 # Extraction — cyclopts introspection
@@ -419,7 +412,10 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
         lines.append("| Command | Description |")
         lines.append("| --- | --- |")
         for sub in cmd.subcommands:
-            desc_text = _escape_mdx(sub.description) if sub.description else ""
+            # Use summary only: markdown tables can't contain block-level
+            # content, so a body with lists or code fences would break the
+            # table. The detail body is already on the subcommand's own page.
+            desc_text = _escape_mdx(sub.summary) if sub.summary else ""
             lines.append(f"| [`{sub.name}`](./{sub.slug}) | {desc_text} |")
         lines.append("")
 
