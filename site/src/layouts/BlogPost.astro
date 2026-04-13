@@ -136,6 +136,7 @@ const ogImageUrl = ogImage
     )}
   </main>
   <Footer />
+  <script src="../scripts/image-lightbox.ts"></script>
 </Base>
 
 <style>
@@ -258,6 +259,18 @@ const ogImageUrl = ogImage
     border-radius: 10px;
     display: block;
     border: 1px solid var(--color-border);
+  }
+
+  /* ── Click-to-expand affordance for blog images ── */
+  .blog-post-body :global(img.is-zoomable),
+  :global(.blog-post-image.is-zoomable) {
+    cursor: zoom-in;
+    transition: opacity 0.15s ease;
+  }
+
+  .blog-post-body :global(img.is-zoomable:hover),
+  :global(.blog-post-image.is-zoomable:hover) {
+    opacity: 0.92;
   }
 
   /* ── Body + TOC wrapper ── */
@@ -494,5 +507,66 @@ const ogImageUrl = ogImage
       margin-right: -16px;
       border-radius: 0;
     }
+  }
+</style>
+
+<style is:global>
+  /* Lightbox dialog is appended to <body> at runtime, so it lives outside
+     Astro's scoped styles. */
+  dialog.image-lightbox {
+    border: none;
+    padding: 0;
+    background: transparent;
+    max-width: 100vw;
+    max-height: 100vh;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  dialog.image-lightbox::backdrop {
+    background: rgba(15, 12, 10, 0.88);
+    backdrop-filter: blur(4px);
+  }
+
+  dialog.image-lightbox[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .image-lightbox__img {
+    max-width: 96vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 6px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+
+  .image-lightbox__close {
+    position: fixed;
+    top: 16px;
+    right: 20px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease;
+  }
+
+  .image-lightbox__close:hover,
+  .image-lightbox__close:focus-visible {
+    background: rgba(255, 255, 255, 0.25);
+    outline: none;
   }
 </style>
