@@ -54,10 +54,18 @@ class CommandDoc:
     slug: str
     name: str
     invocation: str
-    description: str
+    summary: str
+    body: str
     usage: str
     parameters: list[ParameterDoc] = field(default_factory=list)
     subcommands: list[CommandDoc] = field(default_factory=list)
+
+    @property
+    def description(self) -> str:
+        """Combined summary and body (used for subcommand tables)."""
+        if self.body:
+            return f"{self.summary} {self.body}".strip()
+        return self.summary
 
 
 # ---------------------------------------------------------------------------
@@ -231,28 +239,48 @@ def _extract_parameters(app: Any) -> list[ParameterDoc]:
     return params
 
 
-def _get_description(app: Any) -> str:
-    """Extract a description from a cyclopts App."""
-    if app.help:
-        # Take the first paragraph (before any Args: section)
-        lines: list[str] = []
-        for line in str(app.help).splitlines():
-            stripped = line.strip()
-            if stripped.lower().startswith(
-                ("args:", "arguments:", "returns:", "raises:")
-            ):
-                break
-            lines.append(stripped)
-        desc = " ".join(lines).strip()
-        if desc:
-            return desc
+def _get_description(app: Any) -> tuple[str, str]:
+    """Extract (summary, body) from a cyclopts App's docstring.
 
-    if app.default_command and callable(app.default_command):
-        doc = inspect.getdoc(app.default_command)
-        if doc:
-            return doc.split("\n\n")[0].strip()
+    Google-style docstrings lead with a one-line summary, followed by a
+    blank line and then optional detail paragraphs.  We surface the
+    summary as the page's frontmatter description (short subtitle) and
+    keep the remaining paragraphs as body prose.
+    """
+    raw = str(app.help) if app.help else ""
+    if not raw and app.default_command and callable(app.default_command):
+        raw = inspect.getdoc(app.default_command) or ""
+    if not raw:
+        return ("", "")
 
-    return ""
+    # Drop Args:/Returns:/Raises: sections — cyclopts renders these as
+    # parameter help separately.
+    kept_lines: list[str] = []
+    for line in raw.splitlines():
+        if (
+            line.strip()
+            .lower()
+            .startswith(("args:", "arguments:", "returns:", "raises:"))
+        ):
+            break
+        kept_lines.append(line)
+
+    text = "\n".join(kept_lines).strip()
+    if not text:
+        return ("", "")
+
+    # Split on the first blank line: summary vs detail paragraphs.
+    parts = text.split("\n\n", 1)
+    summary = " ".join(parts[0].split()).strip()
+    body = ""
+    if len(parts) == 2:
+        body_paragraphs = [
+            " ".join(para.split()).strip()
+            for para in parts[1].split("\n\n")
+            if para.strip()
+        ]
+        body = "\n\n".join(body_paragraphs)
+    return (summary, body)
 
 
 def build_command_tree(
@@ -267,7 +295,7 @@ def build_command_tree(
     invocation = f"{parent_invocation} {name}".strip() if parent_invocation else name
     slug = name
 
-    description = _get_description(app)
+    summary, body = _get_description(app)
 
     params = _extract_parameters(app)
     registered = getattr(app, "_registered_commands", {})
@@ -283,7 +311,8 @@ def build_command_tree(
         slug=slug,
         name=name,
         invocation=invocation,
-        description=description,
+        summary=summary,
+        body=body,
         usage=usage,
         parameters=params,
         subcommands=subcommands,
@@ -310,7 +339,7 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
 
     # Frontmatter
     title = "CLI Reference" if is_root else cmd.invocation
-    desc = cmd.description or f"Reference for the `{cmd.invocation}` command."
+    desc = cmd.summary or f"Reference for the `{cmd.invocation}` command."
     # Escape YAML special characters in description
     safe_desc = desc.replace('"', '\\"')
     lines.append("---")
@@ -319,9 +348,11 @@ def render_command_page(cmd: CommandDoc, *, is_root: bool = False) -> str:
     lines.append("---")
     lines.append("")
 
-    # Description
-    if cmd.description:
-        lines.append(_escape_mdx(cmd.description))
+    # FumaDocs renders the frontmatter description as the page subtitle.
+    # Detail paragraphs (if any) go in the body as normal prose so long
+    # descriptions don't become a wall of text under the h1.
+    if cmd.body:
+        lines.append(_escape_mdx(cmd.body))
         lines.append("")
 
     # Usage

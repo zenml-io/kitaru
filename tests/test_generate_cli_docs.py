@@ -184,7 +184,8 @@ class TestRenderCommandPage:
             slug="kitaru",
             name="kitaru",
             invocation="kitaru",
-            description="Test description.",
+            summary="Test description.",
+            body="",
             usage="kitaru",
         )
         page = render_command_page(cmd, is_root=True)
@@ -197,7 +198,8 @@ class TestRenderCommandPage:
             slug="kitaru",
             name="kitaru",
             invocation="kitaru",
-            description="Test.",
+            summary="Test.",
+            body="",
             usage="kitaru",
         )
         page = render_command_page(cmd, is_root=True)
@@ -210,7 +212,8 @@ class TestRenderCommandPage:
             slug="kitaru",
             name="kitaru",
             invocation="kitaru",
-            description="Test.",
+            summary="Test.",
+            body="",
             usage="kitaru",
         )
         page = render_command_page(cmd, is_root=True)
@@ -223,18 +226,35 @@ class TestRenderCommandPage:
             slug="serve",
             name="serve",
             invocation="kitaru serve",
-            description="Start server.",
+            summary="Start server.",
+            body="",
             usage="kitaru serve",
         )
         page = render_command_page(cmd, is_root=False)
         assert "## Global Flags" not in page
+
+    def test_body_renders_below_frontmatter(self) -> None:
+        cmd = CommandDoc(
+            slug="compact",
+            name="compact",
+            invocation="kitaru memory compact",
+            summary="Summarize memory values.",
+            body="Use --key for single-key mode or --keys for multi-key mode.",
+            usage="kitaru memory compact [OPTIONS]",
+        )
+        page = render_command_page(cmd, is_root=False)
+        assert 'description: "Summarize memory values."' in page
+        assert "Use --key for single-key mode" in page
+        # Body text should appear exactly once (summary stays in frontmatter only)
+        assert page.count("Summarize memory values.") == 1
 
     def test_renders_parameters_table(self) -> None:
         cmd = CommandDoc(
             slug="serve",
             name="serve",
             invocation="kitaru serve",
-            description="Start.",
+            summary="Start.",
+            body="",
             usage="kitaru serve [OPTIONS]",
             parameters=[
                 ParameterDoc(
@@ -257,14 +277,16 @@ class TestRenderCommandPage:
             slug="run",
             name="run",
             invocation="kitaru agent run",
-            description="Run an agent.",
+            summary="Run an agent.",
+            body="",
             usage="kitaru agent run",
         )
         cmd = CommandDoc(
             slug="agent",
             name="agent",
             invocation="kitaru agent",
-            description="Manage agents.",
+            summary="Manage agents.",
+            body="",
             usage="kitaru agent COMMAND",
             subcommands=[child],
         )
@@ -277,7 +299,8 @@ class TestRenderCommandPage:
             slug="test",
             name="test",
             invocation="test",
-            description="Uses <angle> and {braces}.",
+            summary="Summary.",
+            body="Uses <angle> and {braces}.",
             usage="test",
         )
         page = render_command_page(cmd, is_root=False)
@@ -556,14 +579,16 @@ class TestRenderMeta:
                 slug="serve",
                 name="serve",
                 invocation="kitaru serve",
-                description="",
+                summary="",
+                body="",
                 usage="",
             ),
             CommandDoc(
                 slug="agent",
                 name="agent",
                 invocation="kitaru agent",
-                description="",
+                summary="",
+                body="",
                 usage="",
             ),
         ]

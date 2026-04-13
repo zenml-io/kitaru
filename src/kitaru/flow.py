@@ -940,15 +940,17 @@ def flow(
 ) -> _FlowDefinition | Callable[[Callable[..., Any]], _FlowDefinition]:
     """Mark a function as a durable flow.
 
-    Can be used as a bare decorator or with arguments::
+    Can be used as a bare decorator or with arguments:
 
-        @flow
-        def my_flow(...):
-            ...
+    ```python
+    @flow
+    def my_flow(...):
+        ...
 
-        @flow(stack="prod", retries=2)
-        def my_other_flow(...):
-            ...
+    @flow(stack="prod", retries=2)
+    def my_other_flow(...):
+        ...
+    ```
 
     Args:
         func: Optional function for bare decorator use.

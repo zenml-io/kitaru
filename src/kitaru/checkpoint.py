@@ -293,18 +293,20 @@ def checkpoint(
 ) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]:
     """Mark a function as a durable checkpoint.
 
-    Can be used as a bare decorator or with arguments::
+    Can be used as a bare decorator or with arguments:
 
-        from kitaru import checkpoint
+    ```python
+    from kitaru import checkpoint
 
-        @checkpoint
-        def my_step(): ...
+    @checkpoint
+    def my_step(): ...
 
-        @checkpoint(retries=3, type="llm_call")
-        def my_step(): ...
+    @checkpoint(retries=3, type="llm_call")
+    def my_step(): ...
 
-        @checkpoint(runtime="isolated")
-        def heavy_step(): ...
+    @checkpoint(runtime="isolated")
+    def heavy_step(): ...
+    ```
 
     Args:
         func: Optional function for bare decorator use.
