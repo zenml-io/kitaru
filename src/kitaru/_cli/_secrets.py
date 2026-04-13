@@ -15,14 +15,21 @@ from kitaru.inspection import serialize_secret_detail, serialize_secret_summary
 
 from . import secrets_app
 from ._helpers import (
+    DEFAULT_LIST_PAGE,
+    DEFAULT_LIST_SIZE,
     OutputFormatOption,
+    PaginationPageOption,
+    PaginationSizeOption,
     _emit_json_item,
     _emit_json_items,
+    _emit_pagination_note,
     _emit_snapshot,
     _exit_with_error,
     _facade_module,
+    _paginate_items,
     _print_success,
     _resolve_output_format,
+    _validate_pagination,
 )
 
 _SECRET_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -148,15 +155,19 @@ def _secret_show_rows(
     return rows
 
 
+def _order_secrets(secrets: list[SecretResponse]) -> list[SecretResponse]:
+    """Return secrets in deterministic CLI display order."""
+    return sorted(secrets, key=lambda secret: (secret.name.lower(), str(secret.id)))
+
+
 def _secret_list_rows(secrets: list[SecretResponse]) -> list[tuple[str, str]]:
     """Build label/value rows for `kitaru secrets list`."""
     if not secrets:
         return [("Secrets", "none found")]
 
-    ordered = sorted(secrets, key=lambda secret: (secret.name.lower(), str(secret.id)))
     return [
         (secret.name, f"{secret.id} ({_secret_visibility(secret)})")
-        for secret in ordered
+        for secret in secrets
     ]
 
 
@@ -267,10 +278,21 @@ def show_(
 
 
 @secrets_app.command
-def list__(output: OutputFormatOption = "text") -> None:
+def list__(
+    *,
+    page: PaginationPageOption = DEFAULT_LIST_PAGE,
+    size: PaginationSizeOption = DEFAULT_LIST_SIZE,
+    output: OutputFormatOption = "text",
+) -> None:
     """List all secrets visible to the current user context."""
     command = "secrets.list"
     output_format = _resolve_output_format(output)
+    page, size = _validate_pagination(
+        page=page,
+        size=size,
+        command=command,
+        output=output_format,
+    )
     secrets = run_with_cli_error_boundary(
         lambda: _list_accessible_secrets(_facade_module().Client()),
         command=command,
@@ -278,18 +300,29 @@ def list__(output: OutputFormatOption = "text") -> None:
         exit_with_error=_exit_with_error,
     )
 
+    ordered = _order_secrets(secrets)
+    visible_secrets = _paginate_items(ordered, page=page, size=size)
+
     if output_format == CLIOutputFormat.JSON:
-        ordered = sorted(
-            secrets, key=lambda secret: (secret.name.lower(), str(secret.id))
-        )
         _emit_json_items(
             command,
-            [serialize_secret_summary(secret) for secret in ordered],
+            [serialize_secret_summary(secret) for secret in visible_secrets],
             output=output_format,
         )
         return
 
-    _emit_snapshot("Kitaru secrets", _secret_list_rows(secrets))
+    if ordered and not visible_secrets:
+        rows: list[tuple[str, str]] = [("Secrets", f"no items on page {page}")]
+    else:
+        rows = _secret_list_rows(visible_secrets)
+    _emit_snapshot("Kitaru secrets", rows)
+    _emit_pagination_note(
+        page=page,
+        size=size,
+        returned_count=len(visible_secrets),
+        total_count=len(ordered),
+        output=output_format,
+    )
 
 
 @secrets_app.command

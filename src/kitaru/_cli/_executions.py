@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Annotated, Any
 
 from cyclopts import Parameter
@@ -22,18 +21,23 @@ from kitaru.inspection import (
 
 from . import executions_app
 from ._helpers import (
+    DEFAULT_LIST_PAGE,
+    DEFAULT_LIST_SIZE,
     OutputFormatOption,
     _emit_json_item,
     _emit_json_items,
+    _emit_pagination_note,
     _emit_snapshot,
     _emit_table,
     _exit_with_error,
     _facade_module,
+    _format_table_timestamp,
     _format_timestamp,
     _is_input_interactive,
     _is_interactive,
     _print_success,
     _resolve_output_format,
+    _validate_pagination,
 )
 
 
@@ -124,6 +128,8 @@ def _execution_list_table(executions: list[Execution]) -> list[list[str]]:
             execution.exec_id,
             execution.flow_name or "unknown flow",
             execution.status.value,
+            _format_table_timestamp(execution.started_at),
+            _format_table_timestamp(execution.ended_at),
             execution.stack_name or "not set",
         ]
         for execution in executions
@@ -132,23 +138,7 @@ def _execution_list_table(executions: list[Execution]) -> list[list[str]]:
 
 def _format_log_timestamp(value: str | None) -> str:
     """Render an optional ISO timestamp in a compact CLI-friendly shape."""
-    if value is None:
-        return "-"
-
-    raw_value = value.strip()
-    if not raw_value:
-        return "-"
-
-    normalized = raw_value
-    if normalized.endswith("Z"):
-        normalized = normalized[:-1] + "+00:00"
-
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return raw_value
-
-    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    return _format_table_timestamp(value)
 
 
 def _format_log_entry(entry: LogEntry, *, verbosity: int) -> str:
@@ -410,23 +400,63 @@ def list____(
     ] = None,
     limit: Annotated[
         int | None,
-        Parameter(help="Maximum number of executions to return."),
+        Parameter(
+            help=(
+                "Legacy shortcut for the first page size. Cannot be combined "
+                "with `--page` or `--size`."
+            ),
+        ),
+    ] = None,
+    page: Annotated[
+        int | None, Parameter(help="1-based page number to return.")
+    ] = None,
+    size: Annotated[
+        int | None, Parameter(help="Number of items to return per page.")
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """List executions with optional filters."""
     command = "executions.list"
     output_format = _resolve_output_format(output)
-    executions = run_with_cli_error_boundary(
-        lambda: (
-            _facade_module()
-            .KitaruClient()
-            .executions.list(
-                status=status,
-                flow=flow,
-                limit=limit,
+    if limit is not None:
+        if isinstance(limit, bool) or limit < 1:
+            _exit_with_error(
+                command,
+                "`--limit` must be >= 1 when provided.",
+                output=output_format,
             )
-        ),
+        if page is not None or size is not None:
+            _exit_with_error(
+                command,
+                (
+                    "`--limit` cannot be combined with `--page` or `--size`; "
+                    "use either `--limit N` or `--page 1 --size N`."
+                ),
+                output=output_format,
+            )
+
+    resolved_page = DEFAULT_LIST_PAGE if page is None else page
+    resolved_size = DEFAULT_LIST_SIZE if size is None else size
+    resolved_page, resolved_size = _validate_pagination(
+        page=resolved_page,
+        size=resolved_size,
+        command=command,
+        output=output_format,
+    )
+
+    def _list_executions() -> list[Execution]:
+        client = _facade_module().KitaruClient()
+        if limit is not None:
+            return client.executions.list(status=status, flow=flow, limit=limit)
+        return client.executions.list(
+            status=status,
+            flow=flow,
+            page=resolved_page,
+            size=resolved_size,
+        )
+
+    executions = run_with_cli_error_boundary(
+        _list_executions,
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -442,9 +472,16 @@ def list____(
 
     _emit_table(
         "Kitaru executions",
-        ["ID", "Flow", "Status", "Stack"],
+        ["ID", "Flow", "Status", "Started", "Ended", "Stack"],
         _execution_list_table(executions),
     )
+    if limit is None:
+        _emit_pagination_note(
+            page=resolved_page,
+            size=resolved_size,
+            returned_count=len(executions),
+            output=output_format,
+        )
 
 
 @executions_app.command

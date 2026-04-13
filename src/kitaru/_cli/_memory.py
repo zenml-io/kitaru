@@ -12,16 +12,24 @@ from kitaru.cli_output import CLIOutputFormat
 
 from . import memory_app
 from ._helpers import (
+    DEFAULT_LIST_PAGE,
+    DEFAULT_LIST_SIZE,
     OutputFormatOption,
+    PaginationPageOption,
+    PaginationSizeOption,
     SnapshotSection,
     _emit_json_item,
     _emit_json_items,
+    _emit_pagination_note,
     _emit_snapshot_sections,
     _emit_table,
     _exit_with_error,
     _facade_module,
+    _format_table_timestamp,
+    _paginate_items,
     _print_success,
     _resolve_output_format,
+    _validate_pagination,
 )
 
 
@@ -68,7 +76,9 @@ def _memory_scope_label(scope: str, scope_type: str) -> str:
 
 def _memory_timestamp(value: str | None) -> str:
     """Render an optional serialized timestamp for CLI output."""
-    return value or "not available"
+    if not value or not value.strip():
+        return "not available"
+    return _format_table_timestamp(value)
 
 
 def _memory_execution_label(execution_id: str | None) -> str:
@@ -291,11 +301,19 @@ def list_(
         Literal["namespace", "flow", "execution"] | None,
         Parameter(help="Memory scope type to inspect. [required]", show_default=False),
     ] = None,
+    page: PaginationPageOption = DEFAULT_LIST_PAGE,
+    size: PaginationSizeOption = DEFAULT_LIST_SIZE,
     output: OutputFormatOption = "text",
 ) -> None:
     """List active memory entries for one explicit scope."""
     command = "memory.list"
     output_format = _resolve_output_format(output)
+    page, size = _validate_pagination(
+        page=page,
+        size=size,
+        command=command,
+        output=output_format,
+    )
     scope = _require_scope(scope, command=command, output=output_format)
     scope_type = _require_scope_type(
         scope_type,
@@ -314,18 +332,31 @@ def list_(
         exit_with_error=_exit_with_error,
     )
 
+    visible_entries = _paginate_items(entries, page=page, size=size)
+
     if output_format == CLIOutputFormat.JSON:
-        _emit_json_items(command, entries, output=output_format)
+        _emit_json_items(command, visible_entries, output=output_format)
         return
+
+    empty_message = (
+        f"none found for scope `{_memory_scope_label(scope, scope_type)}`. "
+        "Run `kitaru memory scopes` to see available scopes."
+    )
+    if entries and not visible_entries:
+        empty_message = f"no items on page {page}"
 
     _emit_table(
         f"Kitaru memory ({_memory_scope_label(scope, scope_type)})",
         ["Key", "Type", "Version", "Updated", "Scope Type", "Execution"],
-        _memory_list_rows(entries),
-        empty_message=(
-            f"none found for scope `{_memory_scope_label(scope, scope_type)}`. "
-            "Run `kitaru memory scopes` to see available scopes."
-        ),
+        _memory_list_rows(visible_entries),
+        empty_message=empty_message,
+    )
+    _emit_pagination_note(
+        page=page,
+        size=size,
+        returned_count=len(visible_entries),
+        total_count=len(entries),
+        output=output_format,
     )
 
 
