@@ -20,6 +20,39 @@ Use `kitaru.save()` and `kitaru.load()` for inline artifact handling:
 
 Both are checkpoint-only. Calling them outside `@checkpoint` raises an error.
 
+## In flow bodies
+
+Checkpoint calls inside a flow body produce durable checkpoint outputs. Flow-body
+`kitaru.llm()` calls behave similarly because they run as durable call
+boundaries. When you pass one output directly into another checkpoint, Kitaru
+keeps the data flow between those checkpoints intact:
+
+```python
+summary = research(topic)
+return write_report(summary)
+```
+
+If the flow body itself needs the actual Python value — for example to build a
+human-facing wait question, print a preview, use an f-string, or branch on the
+value — materialize it with `.load()` first:
+
+```python
+summary = research(topic)
+summary_text = summary.load()
+
+approved = kitaru.wait(
+    name="approve_summary",
+    question=f"Approve this summary?\n\n{summary_text}",
+    schema=bool,
+)
+
+return write_report(summary)
+```
+
+Use the loaded value for flow-body text or control flow. Keep passing the
+original checkpoint output to downstream checkpoints unless you intentionally
+want to create a new value in the flow body.
+
 ## Outside checkpoints
 
 Use the client APIs for browsing artifacts from completed executions:
