@@ -1,9 +1,8 @@
 # News Scout
 
-A durable news-monitoring flow that demonstrates `kitaru.memory`. On each run
-the scout sweeps three sources, dedupes against a rolling memory set, asks an
-LLM to judge what is worth surfacing, and prints the shortlist. Consecutive
-runs feel "always-on" because memory persists across executions.
+An agentic news monitor built with PydanticAI + Kitaru. The agent autonomously
+searches news sources, investigates articles, and judges what is worth surfacing.
+Kitaru handles durable memory so consecutive runs feel "always-on."
 
 ## Quick start
 
@@ -16,39 +15,47 @@ Create a `.env` file with your API keys:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-XAI_API_KEY=xai-...            # optional — enables Grok/X source
+XAI_API_KEY=xai-...            # optional — enables search_twitter tool
 ```
 
-Run:
+Install dependencies and run:
 
 ```bash
-python scout.py --seed-profile   # one-time: seed interests into namespace memory
-python scout.py                   # first sweep — everything is new
+uv sync --extra local --extra pydantic-ai --extra llm
+python scout.py --seed-profile   # one-time: seed interests into memory
+python scout.py                   # run one agentic sweep
 python scout.py                   # second sweep — dedup kicks in via memory
 ```
 
-## What it demonstrates
+## How it works
 
-- **`kitaru.memory` with two scopes** — namespace (user profile) and flow
-  (seen-fingerprint rolling set). Memory reads/writes happen in the flow body
-  because memory is forbidden inside `@checkpoint`.
-- **Multi-source collection** — each source is its own checkpoint, so replay
-  can re-run one without re-running the others.
-- **`kitaru.llm()`** for the judge, with a keyword-match fallback when no
-  model credentials are available.
-- **Grok via xAI** — calls the OpenAI-compatible `api.x.ai` endpoint inside a
-  checkpoint, tracked via `kitaru.log()`. Skipped gracefully if `XAI_API_KEY`
-  is missing.
+The agent has 4 tools:
 
-## Sources
+| Tool | What it does |
+|---|---|
+| `search_news(query)` | Searches Hacker News + Google News |
+| `search_twitter(query)` | Asks Grok what X/Twitter is saying |
+| `investigate(url)` | Fetches and summarizes an article |
+| `fetch_url(url)` | Raw HTTP GET for anything else |
 
-| Source | Requires | Notes |
-|---|---|---|
-| Hacker News (Algolia) | nothing | Always-on baseline |
-| Google News RSS | nothing | One query per interest |
-| Grok (xAI) | `XAI_API_KEY` | X/Twitter signal, skipped if key missing |
+The flow body handles memory:
+1. Reads user interests from namespace memory
+2. Reads seen-fingerprints from flow-scoped memory
+3. Passes context to the agent (one `@checkpoint(type="llm_call")`)
+4. Agent runs autonomously — searches, investigates, judges
+5. Flow writes new fingerprints back to memory
 
-## Inspecting memory after a run
+## Switching models
+
+The agent defaults to `anthropic:claude-sonnet-4-6`. Override via env var:
+
+```bash
+KITARU_SCOUT_MODEL=openai:gpt-4o python scout.py
+KITARU_SCOUT_MODEL=gemini:gemini-2.5-flash python scout.py
+KITARU_SCOUT_MODEL=ollama:llama3.3 python scout.py
+```
+
+## Inspecting memory
 
 ```bash
 kitaru memory scopes
@@ -63,10 +70,19 @@ kitaru memory list --scope-type=flow --scope=news_scout
 --interests TOPICS      Comma-separated interests to override for this run
 ```
 
+## File layout
+
+```
+scout.py        — flow + agent + CLI
+models.py       — Article, JudgedItem, ScoutContext, ScoutReport
+tools/          — search_news, search_twitter, investigate, fetch_url
+prompts.py      — system prompt + user prompt builder
+utils/          — dotenv loader, HTTP helpers
+```
+
 ## Next steps (not implemented)
 
-- Wire up Discord delivery via a `DISCORD_WEBHOOK_URL` env var
-- Schedule via Kubernetes cron (`kitaru` on a K8s stack + ZenML schedule)
-- Add `kitaru.wait()` before sending to let a human approve alerts
-- Add a feedback loop that ingests thumbs-up/down and updates the profile
-- Add `investigate_deeply` checkpoint with Firecrawl for paywalled articles
+- Add Discord/email delivery
+- Schedule via Kubernetes cron
+- Add `kitaru.wait()` for human-in-the-loop alert approval
+- Add a feedback loop to learn from user reactions

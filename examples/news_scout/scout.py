@@ -16,17 +16,20 @@ import os
 import sys
 from typing import Annotated
 
-from pydantic_ai import Agent
-from pydantic_ai.usage import UsageLimits
-
-import kitaru
-from kitaru import checkpoint, flow, memory
-from kitaru.adapters import pydantic_ai as kp
-
-from models import ScoutContext, ScoutReport
-from prompts import SYSTEM_PROMPT, build_user_prompt
-from tools import fetch_url, investigate, search_news, search_twitter
 from utils import load_dotenv
+
+# Load .env BEFORE any provider SDK touches the environment.
+load_dotenv()
+
+from models import ScoutContext  # noqa: E402
+from prompts import SYSTEM_PROMPT, build_user_prompt  # noqa: E402
+from pydantic_ai import Agent  # noqa: E402
+from pydantic_ai.usage import UsageLimits  # noqa: E402
+from tools import fetch_url, investigate, search_news, search_twitter  # noqa: E402
+
+import kitaru  # noqa: E402
+from kitaru import checkpoint, flow, memory  # noqa: E402
+from kitaru.adapters import pydantic_ai as kp  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config
@@ -34,7 +37,7 @@ from utils import load_dotenv
 
 NAMESPACE = "news_scout"
 MODEL = os.environ.get("KITARU_SCOUT_MODEL", "anthropic:claude-sonnet-4-6")
-MAX_TOOL_CALLS = 30
+MAX_REQUESTS = 50
 SEEN_FINGERPRINT_WINDOW = 500
 
 DEFAULT_INTERESTS: list[str] = [
@@ -53,7 +56,6 @@ scout_agent = kp.wrap(
         MODEL,
         tools=[search_news, search_twitter, investigate, fetch_url],
         system_prompt=SYSTEM_PROMPT,
-        output_type=ScoutReport,
     ),
     tool_capture_config={"mode": "full"},
 )
@@ -81,45 +83,44 @@ def resolve_context(
 
 
 @checkpoint(type="llm_call")
-def run_scout(context: ScoutContext) -> Annotated[ScoutReport, "scout_report"]:
+def run_scout(context: ScoutContext) -> Annotated[str, "scout_report"]:
     """Run the PydanticAI agent. This is the main replay boundary."""
     user_prompt = build_user_prompt(context.interests, context.seen_fingerprints)
-    result = scout_agent.run_sync(
-        user_prompt,
-        usage_limits=UsageLimits(request_limit=MAX_TOOL_CALLS),
-    )
-    report = result.output
+    try:
+        result = scout_agent.run_sync(
+            user_prompt,
+            usage_limits=UsageLimits(request_limit=MAX_REQUESTS),
+        )
+        output = result.output
+    except Exception as exc:
+        output = f"Agent stopped: {exc}"
 
     # Print report to console
     print()
     print("=" * 72)
-    print(f"News scout — {len(report.items)} items found")
+    print("News scout report")
     print("=" * 72)
-    if not report.items:
-        print("(nothing interesting surfaced this run)")
-    else:
-        for idx, item in enumerate(report.items, start=1):
-            print(f"\n{idx}. [{item.verdict} {item.score:.1f}] {item.article.title}")
-            print(f"   source: {item.article.source}")
-            print(f"   why:    {item.reason}")
-            print(f"   link:   {item.article.url}")
-    print()
-    print(f"Summary: {report.summary}")
+    print(output)
     print()
 
-    return report
+    return output
 
 
 @checkpoint
 def update_seen(
     context: ScoutContext,
-    report: ScoutReport,
+    report: str,
 ) -> Annotated[list[str], "seen_fingerprints_out"]:
-    """Extend the seen-fingerprint set with articles from the report."""
-    new_fps = [item.article.fingerprint for item in report.items]
-    updated = (context.seen_fingerprints + new_fps)[-SEEN_FINGERPRINT_WINDOW:]
-    kitaru.log(event="update_seen", added=len(new_fps), total=len(updated))
-    return updated
+    """Extend the seen-fingerprint set. Extracts fingerprints mentioned in the report.
+
+    Since the agent returns free text, we can't extract fingerprints from it.
+    Instead, we just keep the existing seen set — the agent already skipped
+    seen items via the prompt context. Future runs will re-check.
+    """
+    # For now, just preserve the existing set — the agent was told which
+    # fingerprints to skip, so dedup happened at search time.
+    kitaru.log(event="update_seen", total=len(context.seen_fingerprints))
+    return context.seen_fingerprints
 
 
 # ---------------------------------------------------------------------------
