@@ -109,7 +109,6 @@ from kitaru._cli._models import _model_rows, list___, register
 from kitaru._cli._secrets import (
     _SECRET_KEY_PATTERN,
     _list_accessible_secrets,
-    _order_secrets,
     _parse_secret_assignments,
     _resolve_secret_exact,
     _secret_list_rows,
@@ -396,7 +395,6 @@ __all__ = [
     "_merge_stack_create_inputs",
     "_model_rows",
     "_normalize_stack_create_file_mapping",
-    "_order_secrets",
     "_package_rows",
     "_paginate_items",
     "_parse_json_object",

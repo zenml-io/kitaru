@@ -471,12 +471,13 @@ def list____(
         ["ID", "Flow", "Status", "Started", "Ended", "Stack"],
         _execution_list_table(executions),
     )
-    _emit_pagination_note(
-        page=DEFAULT_LIST_PAGE if limit is not None else page,
-        size=limit if limit is not None else size,
-        returned_count=len(executions),
-        output=output_format,
-    )
+    if limit is None:
+        _emit_pagination_note(
+            page=page,
+            size=size,
+            returned_count=len(executions),
+            output=output_format,
+        )
 
 
 @executions_app.command
