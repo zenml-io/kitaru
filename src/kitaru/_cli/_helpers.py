@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from types import ModuleType
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any, NoReturn, TypeVar
 
 from cyclopts import Parameter
 from rich import box
@@ -41,6 +42,11 @@ class SnapshotSection:
     rows: list[tuple[str, str]]
 
 
+_T = TypeVar("_T")
+
+DEFAULT_LIST_PAGE = 1
+DEFAULT_LIST_SIZE = 20
+
 OutputFormatOption = Annotated[
     str,
     Parameter(
@@ -49,12 +55,42 @@ OutputFormatOption = Annotated[
     ),
 ]
 
+PaginationPageOption = Annotated[
+    int,
+    Parameter(help="1-based page number to return."),
+]
+
+PaginationSizeOption = Annotated[
+    int,
+    Parameter(help="Number of items to return per page."),
+]
+
 
 def _format_timestamp(value: datetime | None) -> str:
     """Format optional timestamps for CLI output."""
     if value is None:
         return "not available"
     return value.isoformat(timespec="seconds")
+
+
+def _format_table_timestamp(value: datetime | str | None) -> str:
+    """Format optional timestamps compactly for list/table output."""
+    if value is None:
+        return "-"
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw_value = str(value).strip()
+        if not raw_value:
+            return "-"
+        normalized = raw_value[:-1] + "+00:00" if raw_value.endswith("Z") else raw_value
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return raw_value
+
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _is_interactive(*, stderr: bool = False) -> bool:
@@ -215,6 +251,59 @@ def _exit_with_error(
     else:
         print(f"Error: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def _validate_pagination(
+    *,
+    page: int,
+    size: int,
+    command: str,
+    output: CLIOutputFormat,
+) -> tuple[int, int]:
+    """Validate common 1-based CLI pagination parameters."""
+    if isinstance(page, bool) or page < 1:
+        _exit_with_error(command, "`--page` must be >= 1.", output=output)
+    if isinstance(size, bool) or size < 1:
+        _exit_with_error(command, "`--size` must be >= 1.", output=output)
+    return page, size
+
+
+def _paginate_items(items: Sequence[_T], *, page: int, size: int) -> list[_T]:
+    """Return one 1-based page from an already materialized item sequence."""
+    start = (page - 1) * size
+    end = start + size
+    return list(items[start:end])
+
+
+def _emit_pagination_note(
+    *,
+    page: int,
+    size: int,
+    returned_count: int,
+    output: CLIOutputFormat,
+    total_count: int | None = None,
+) -> None:
+    """Emit a text-only pagination note for list commands when useful."""
+    if output == CLIOutputFormat.JSON:
+        return
+
+    if total_count is not None:
+        if page == DEFAULT_LIST_PAGE and total_count <= size:
+            return
+        message = (
+            f"Page {page} (size {size}, showing {returned_count} of {total_count})"
+        )
+    else:
+        if page == DEFAULT_LIST_PAGE and returned_count < size:
+            return
+        message = f"Page {page} (size {size}, returned {returned_count})"
+        if returned_count == size:
+            message += " — there may be more items"
+
+    if _is_interactive():
+        Console().print(Text(message, style="dim"))
+    else:
+        print(message)
 
 
 def _render_plain_snapshot(

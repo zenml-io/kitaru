@@ -33,14 +33,21 @@ from kitaru.inspection import (
 
 from . import stack_app
 from ._helpers import (
+    DEFAULT_LIST_PAGE,
+    DEFAULT_LIST_SIZE,
     OutputFormatOption,
+    PaginationPageOption,
+    PaginationSizeOption,
     _emit_json_item,
     _emit_json_items,
+    _emit_pagination_note,
     _emit_snapshot,
     _exit_with_error,
     _facade_module,
+    _paginate_items,
     _print_success,
     _resolve_output_format,
+    _validate_pagination,
 )
 
 
@@ -360,10 +367,21 @@ def _stack_show_rows(details: Any) -> list[tuple[str, str]]:
 
 
 @stack_app.command
-def list_(output: OutputFormatOption = "text") -> None:
+def list_(
+    *,
+    page: PaginationPageOption = DEFAULT_LIST_PAGE,
+    size: PaginationSizeOption = DEFAULT_LIST_SIZE,
+    output: OutputFormatOption = "text",
+) -> None:
     """List stacks visible to the current user."""
     command = "stack.list"
     output_format = _resolve_output_format(output)
+    page, size = _validate_pagination(
+        page=page,
+        size=size,
+        command=command,
+        output=output_format,
+    )
     facade = _facade_module()
 
     def _list_stacks() -> tuple[list[StackInfo], list[Any] | None]:
@@ -384,17 +402,30 @@ def list_(output: OutputFormatOption = "text") -> None:
 
     if output_format == CLIOutputFormat.JSON:
         assert stack_entries is not None
+        visible_entries = _paginate_items(stack_entries, page=page, size=size)
         _emit_json_items(
             command,
             [
                 serialize_stack(entry.stack, is_managed=entry.is_managed)
-                for entry in stack_entries
+                for entry in visible_entries
             ],
             output=output_format,
         )
         return
 
-    _emit_snapshot("Kitaru stacks", _stack_list_rows(stacks))
+    visible_stacks = _paginate_items(stacks, page=page, size=size)
+    if stacks and not visible_stacks:
+        rows: list[tuple[str, str]] = [("Stacks", f"no items on page {page}")]
+    else:
+        rows = _stack_list_rows(visible_stacks)
+    _emit_snapshot("Kitaru stacks", rows)
+    _emit_pagination_note(
+        page=page,
+        size=size,
+        returned_count=len(visible_stacks),
+        total_count=len(stacks),
+        output=output_format,
+    )
 
 
 @stack_app.command

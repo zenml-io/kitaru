@@ -473,6 +473,17 @@ class TestWriteDocsTree:
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content
 
+        for list_page in (
+            output_dir / "executions" / "list.mdx",
+            output_dir / "memory" / "list.mdx",
+            output_dir / "model" / "list.mdx",
+            output_dir / "secrets" / "list.mdx",
+            output_dir / "stack" / "list.mdx",
+        ):
+            list_content = list_page.read_text()
+            assert "`--page`" in list_content
+            assert "`--size`" in list_content
+
         for command in ("create", "current", "delete", "list", "use"):
             assert (output_dir / "stack" / f"{command}.mdx").exists()
             assert f"stack/{command}.mdx" in files

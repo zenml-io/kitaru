@@ -13,14 +13,21 @@ from kitaru.inspection import serialize_model_alias
 
 from . import model_app
 from ._helpers import (
+    DEFAULT_LIST_PAGE,
+    DEFAULT_LIST_SIZE,
     OutputFormatOption,
+    PaginationPageOption,
+    PaginationSizeOption,
     _emit_json_item,
     _emit_json_items,
+    _emit_pagination_note,
     _emit_snapshot,
     _exit_with_error,
     _facade_module,
+    _paginate_items,
     _print_success,
     _resolve_output_format,
+    _validate_pagination,
 )
 
 
@@ -102,10 +109,21 @@ def register(
 
 
 @model_app.command
-def list___(output: OutputFormatOption = "text") -> None:
+def list___(
+    *,
+    page: PaginationPageOption = DEFAULT_LIST_PAGE,
+    size: PaginationSizeOption = DEFAULT_LIST_SIZE,
+    output: OutputFormatOption = "text",
+) -> None:
     """List model aliases available to `kitaru.llm()` in this environment."""
     command = "model.list"
     output_format = _resolve_output_format(output)
+    page, size = _validate_pagination(
+        page=page,
+        size=size,
+        command=command,
+        output=output_format,
+    )
     aliases = run_with_cli_error_boundary(
         _facade_module().list_model_aliases,
         command=command,
@@ -113,12 +131,25 @@ def list___(output: OutputFormatOption = "text") -> None:
         exit_with_error=_exit_with_error,
     )
 
+    visible_aliases = _paginate_items(aliases, page=page, size=size)
+
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(
             command,
-            [serialize_model_alias(entry) for entry in aliases],
+            [serialize_model_alias(entry) for entry in visible_aliases],
             output=output_format,
         )
         return
 
-    _emit_snapshot("Kitaru models", _model_rows(aliases))
+    if aliases and not visible_aliases:
+        rows: list[tuple[str, str]] = [("Models", f"no items on page {page}")]
+    else:
+        rows = _model_rows(visible_aliases)
+    _emit_snapshot("Kitaru models", rows)
+    _emit_pagination_note(
+        page=page,
+        size=size,
+        returned_count=len(visible_aliases),
+        total_count=len(aliases),
+        output=output_format,
+    )
