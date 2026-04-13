@@ -42,7 +42,7 @@ As Sarah Wooders [put it](https://x.com/sarahwooders/status/2040121230473457921)
 
 That is why we built memory into Kitaru's durability layer. Not as a separate database. Not as a bolt-on scratchpad. Memory uses the same artifact-backed storage substrate that already backs checkpoint outputs, with a retrieval model designed for durable agent state.
 
-{/* Screenshot placeholder: dashboard view showing a run/checkpoints alongside memory available at each stage. Good place for the first "photo-worthy" UI screenshot. */}
+![Kitaru dashboard execution view: the middle pane lists an execution's checkpoints — LLM calls and tool calls including kitaru_memory_set — and the right pane shows the Memory tab with namespaces, the active key's scope, version, and the JSON value the agent stored.](https://assets.kitaru.ai/content/blog/bcd04b33/dashboard-execution-with-memory.avif)
 
 ## What shipped
 
@@ -85,8 +85,6 @@ There are two storage patterns in Kitaru, and the distinction matters.
 **Artifacts** are labeled boxes tied to a particular execution or checkpoint. You fetch them later by saying, in effect: "give me the output from that run."
 
 **Memory** is a labeled shelf. You put a value under a stable key and later ask for "the current value on the `conventions/test_runner` shelf." You do not need to know which run last put it there. You ask by key, inside a typed scope, and get the latest live value.
-
-{/* Diagram placeholder: "boxes vs shelves" diagram. Left side: checkpoint artifacts as boxes attached to specific runs. Right side: memory as stable shelves keyed by scope_type + scope + key, with versions stacked behind each shelf label. */}
 
 | Use this | When |
 |---|---|
@@ -217,7 +215,7 @@ After a delete, `get()` returns `None` and `list()` hides the key. `history()` s
 
 That gives you an audit trail today and leaves room for richer workflows later. You can ask what the agent believed three runs ago. You can see when a value changed. You can tell whether a key disappeared because it was explicitly deleted, not because somebody lost a file.
 
-{/* Diagram placeholder: version timeline for one key. Show v1 seeded, v2 updated by execution, v3 tombstone; latest get() points to None after tombstone while history still shows all versions. */}
+![Kitaru dashboard memory namespace view: a single sessions/pending_compact entry shown alongside its full version history sidebar, listing every previous version with timestamps so you can see exactly when each value was written.](https://assets.kitaru.ai/content/blog/c586cc55/dashboard-memory-version-history.avif)
 
 ## Four surfaces, one memory
 
@@ -255,6 +253,8 @@ kitaru memory list --scope repo_docs --scope-type namespace
 kitaru memory get style/release_notes --scope repo_docs --scope-type namespace
 ```
 
+![Terminal output of `kitaru memory history sessions/pending_compact`: a versioned table of values for one memory key, with a hint pointing at how to replay the specific run that wrote a given version.](https://assets.kitaru.ai/content/blog/2076ba51/cli-memory-history.avif)
+
 MCP tools:
 
 ```text
@@ -267,8 +267,6 @@ kitaru_memory_get(
 ```
 
 That last surface is especially interesting for agent development. An assistant can inspect what an agent knows, read a specific entry, or seed memory before a run without writing Python at all.
-
-{/* Screenshot placeholder: MCP/tooling view where an assistant lists or reads memory entries. This is the second likely "photo-worthy" UI screenshot if available. */}
 
 | Surface | Scope | Version reads | Admin ops |
 |---|---|---|---|
