@@ -781,6 +781,36 @@ def test_list_pagination_finds_matches_across_backend_pages() -> None:
     )
 
 
+def test_list_pagination_returns_correct_window_for_page_three_size_two() -> None:
+    """`page=3, size=2` must return items at zero-based indices 4 and 5."""
+    runs = [
+        _DummyRun(status=ZenMLExecutionStatus.COMPLETED, flow_name="flow_a")
+        for _ in range(7)
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_pipeline_runs.return_value = SimpleNamespace(
+            items=[_as_pipeline_run(run) for run in runs],
+        )
+
+        client = KitaruClient()
+        executions = client.executions.list(
+            flow="flow_a",
+            status="completed",
+            page=3,
+            size=2,
+        )
+
+    assert [ex.exec_id for ex in executions] == [str(runs[4].id), str(runs[5].id)]
+
+
 def test_list_rejects_conflicting_limit_and_pagination() -> None:
     """The SDK should not compose legacy limit with page/size."""
     with (

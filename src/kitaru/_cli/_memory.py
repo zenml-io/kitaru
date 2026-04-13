@@ -76,6 +76,8 @@ def _memory_scope_label(scope: str, scope_type: str) -> str:
 
 def _memory_timestamp(value: str | None) -> str:
     """Render an optional serialized timestamp for CLI output."""
+    if not value or not value.strip():
+        return "not available"
     return _format_table_timestamp(value)
 
 

@@ -141,7 +141,11 @@ def list___(
         )
         return
 
-    _emit_snapshot("Kitaru models", _model_rows(visible_aliases))
+    if aliases and not visible_aliases:
+        rows: list[tuple[str, str]] = [("Models", f"no items on page {page}")]
+    else:
+        rows = _model_rows(visible_aliases)
+    _emit_snapshot("Kitaru models", rows)
     _emit_pagination_note(
         page=page,
         size=size,

@@ -572,6 +572,215 @@ def test_list_pagination_validation_json_error(
     }
 
 
+def test_executions_list_rejects_limit_with_explicit_default_page(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--limit` + any explicit `--page`/`--size` should error, even at defaults."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["executions", "list", "--limit", "5", "--page", "1"])
+
+    assert exc_info.value.code == 1
+    assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_executions_list_emits_pagination_note_when_full_page_returned(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A returned page at full size should advertise that more items may exist."""
+    fake_client = Mock()
+    fake_client.executions.list.return_value = [
+        _execution_stub(
+            exec_id=f"kr-{i:02d}", flow_name="f", status=ExecutionStatus.COMPLETED
+        )
+        for i in range(20)
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "list"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Page 1 (size 20, returned 20)" in output
+    assert "there may be more items" in output
+
+
+def test_executions_list_suppresses_pagination_note_on_partial_first_page(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Short first page should suppress the pagination note entirely."""
+    fake_client = Mock()
+    fake_client.executions.list.return_value = [
+        _execution_stub(
+            exec_id=f"kr-{i}", flow_name="f", status=ExecutionStatus.COMPLETED
+        )
+        for i in range(3)
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "list"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Page " not in output
+
+
+def test_executions_list_note_has_no_more_items_suffix_on_short_later_page(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A later page with fewer results than size is definitively the tail."""
+    fake_client = Mock()
+    fake_client.executions.list.return_value = [
+        _execution_stub(
+            exec_id=f"kr-{i}", flow_name="f", status=ExecutionStatus.COMPLETED
+        )
+        for i in range(7)
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "list", "--page", "2", "--size", "20"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Page 2 (size 20, returned 7)" in output
+    assert "there may be more items" not in output
+
+
+def test_memory_list_reports_empty_page_distinct_from_empty_scope(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Paging past the end shows a page-specific empty message, not the scope hint."""
+    entries = [
+        _memory_payload(key="first", scope="my_repo", version=1),
+        _memory_payload(key="second", scope="my_repo", version=2),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.list_memory_payload", return_value=entries),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "memory",
+                "list",
+                "--scope",
+                "my_repo",
+                "--scope-type",
+                "namespace",
+                "--page",
+                "5",
+                "--size",
+                "1",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "no items on page 5" in output
+    assert "kitaru memory scopes" not in output
+
+
+def test_secrets_list_past_end_does_not_claim_none_found(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Paging past the end of a non-empty secret list must not say 'none found'."""
+    secret_a = SimpleNamespace(name="alpha", id="secret-a", private=False)
+    secret_b = SimpleNamespace(name="beta", id="secret-b", private=False)
+    fake_client = Mock()
+    fake_client.list_secrets.return_value = SimpleNamespace(
+        items=[secret_a, secret_b],
+        total_pages=1,
+        max_size=2,
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["secrets", "list", "--page", "9", "--size", "1"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "no items on page 9" in output
+    assert "none found" not in output
+    assert "Page 9 (size 1, showing 0 of 2)" in output
+
+
+def test_stack_list_paginates_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text-mode stack list should slice to the requested window."""
+    stacks = [
+        SimpleNamespace(id="stack-a-id", name="alpha", is_active=False),
+        SimpleNamespace(id="stack-b-id", name="beta", is_active=True),
+        SimpleNamespace(id="stack-c-id", name="gamma", is_active=False),
+    ]
+
+    with (
+        patch("kitaru.cli.get_available_stacks", return_value=stacks),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["stack", "list", "--page", "2", "--size", "1"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "beta: stack-b-id (active)" in output
+    assert "alpha" not in output
+    assert "gamma" not in output
+    assert "Page 2 (size 1, showing 1 of 3)" in output
+
+
+def test_stack_list_paginates_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON-mode stack list should slice the same window as text mode."""
+    entries = [
+        SimpleNamespace(
+            stack=SimpleNamespace(id="stack-a-id", name="alpha", is_active=False),
+            is_managed=False,
+        ),
+        SimpleNamespace(
+            stack=SimpleNamespace(id="stack-b-id", name="beta", is_active=True),
+            is_managed=False,
+        ),
+        SimpleNamespace(
+            stack=SimpleNamespace(id="stack-c-id", name="gamma", is_active=False),
+            is_managed=True,
+        ),
+    ]
+
+    with (
+        patch("kitaru.cli._list_stack_entries", return_value=entries),
+        patch(
+            "kitaru._cli._stacks.serialize_stack",
+            side_effect=lambda s, *, is_managed: {
+                "id": s.id,
+                "name": s.name,
+                "is_active": s.is_active,
+                "is_managed": is_managed,
+            },
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["stack", "list", "--page", "2", "--size", "1", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {"command", "items", "count"}
+    assert payload["command"] == "stack.list"
+    assert payload["count"] == 1
+    assert payload["items"][0]["name"] == "beta"
+
+
 def test_executions_logs_renders_default_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -24,8 +24,6 @@ from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
     OutputFormatOption,
-    PaginationPageOption,
-    PaginationSizeOption,
     _emit_json_item,
     _emit_json_items,
     _emit_pagination_note,
@@ -405,23 +403,21 @@ def list____(
         Parameter(
             help=(
                 "Legacy shortcut for the first page size. Cannot be combined "
-                "with non-default `--page` or `--size`."
+                "with `--page` or `--size`."
             ),
         ),
     ] = None,
-    page: PaginationPageOption = DEFAULT_LIST_PAGE,
-    size: PaginationSizeOption = DEFAULT_LIST_SIZE,
+    page: Annotated[
+        int | None, Parameter(help="1-based page number to return.")
+    ] = None,
+    size: Annotated[
+        int | None, Parameter(help="Number of items to return per page.")
+    ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
     """List executions with optional filters."""
     command = "executions.list"
     output_format = _resolve_output_format(output)
-    page, size = _validate_pagination(
-        page=page,
-        size=size,
-        command=command,
-        output=output_format,
-    )
     if limit is not None:
         if isinstance(limit, bool) or limit < 1:
             _exit_with_error(
@@ -429,16 +425,24 @@ def list____(
                 "`--limit` must be >= 1 when provided.",
                 output=output_format,
             )
-        if page != DEFAULT_LIST_PAGE or size != DEFAULT_LIST_SIZE:
+        if page is not None or size is not None:
             _exit_with_error(
                 command,
                 (
-                    "`--limit` cannot be combined with non-default `--page` "
-                    "or `--size`; use either `--limit N` or "
-                    "`--page 1 --size N`."
+                    "`--limit` cannot be combined with `--page` or `--size`; "
+                    "use either `--limit N` or `--page 1 --size N`."
                 ),
                 output=output_format,
             )
+
+    resolved_page = DEFAULT_LIST_PAGE if page is None else page
+    resolved_size = DEFAULT_LIST_SIZE if size is None else size
+    resolved_page, resolved_size = _validate_pagination(
+        page=resolved_page,
+        size=resolved_size,
+        command=command,
+        output=output_format,
+    )
 
     def _list_executions() -> list[Execution]:
         client = _facade_module().KitaruClient()
@@ -447,8 +451,8 @@ def list____(
         return client.executions.list(
             status=status,
             flow=flow,
-            page=page,
-            size=size,
+            page=resolved_page,
+            size=resolved_size,
         )
 
     executions = run_with_cli_error_boundary(
@@ -473,8 +477,8 @@ def list____(
     )
     if limit is None:
         _emit_pagination_note(
-            page=page,
-            size=size,
+            page=resolved_page,
+            size=resolved_size,
             returned_count=len(executions),
             output=output_format,
         )

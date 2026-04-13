@@ -414,7 +414,11 @@ def list_(
         return
 
     visible_stacks = _paginate_items(stacks, page=page, size=size)
-    _emit_snapshot("Kitaru stacks", _stack_list_rows(visible_stacks))
+    if stacks and not visible_stacks:
+        rows: list[tuple[str, str]] = [("Stacks", f"no items on page {page}")]
+    else:
+        rows = _stack_list_rows(visible_stacks)
+    _emit_snapshot("Kitaru stacks", rows)
     _emit_pagination_note(
         page=page,
         size=size,

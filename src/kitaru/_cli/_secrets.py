@@ -311,7 +311,11 @@ def list__(
         )
         return
 
-    _emit_snapshot("Kitaru secrets", _secret_list_rows(visible_secrets))
+    if ordered and not visible_secrets:
+        rows: list[tuple[str, str]] = [("Secrets", f"no items on page {page}")]
+    else:
+        rows = _secret_list_rows(visible_secrets)
+    _emit_snapshot("Kitaru secrets", rows)
     _emit_pagination_note(
         page=page,
         size=size,
