@@ -18,7 +18,12 @@ from kitaru.errors import (
     KitaruUsageError,
 )
 from kitaru.llm import (
+    LLMResponse,
+    LLMToolCall,
+    LLMUsage,
     _LLMUsage,
+    _parse_anthropic_response,
+    _parse_openai_compatible_response,
     _parse_provider_target,
     _ProviderCallResult,
     _resolve_credential_overlay,
@@ -188,6 +193,368 @@ class TestParseProviderTarget:
     def test_empty_model_name_raises(self) -> None:
         with pytest.raises(KitaruUsageError, match="empty model name"):
             _parse_provider_target("openai/")
+
+
+# ---------------------------------------------------------------------------
+# Rich LLM response model and parser fixtures
+# ---------------------------------------------------------------------------
+
+
+def test_llm_response_models_round_trip_and_expose_text_convenience() -> None:
+    """The rich response models should be serializable Pydantic models."""
+    response = LLMResponse(
+        content="done",
+        tool_calls=[
+            LLMToolCall(
+                id="call_1",
+                name="search_documents",
+                arguments_json='{"query":"cats"}',
+                arguments={"query": "cats"},
+            )
+        ],
+        finish_reason="tool_calls",
+        provider_finish_reason="tool_calls",
+        usage=LLMUsage(prompt_tokens=3, completion_tokens=5, total_tokens=8),
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-4o-mini",
+    )
+
+    restored = LLMResponse.model_validate(response.model_dump())
+
+    assert restored.text == "done"
+    assert str(restored) == "done"
+    assert restored.has_tool_calls is True
+    assert restored.tool_calls[0].arguments == {"query": "cats"}
+    assert restored.usage.total_tokens == 8
+
+
+def test_parse_openai_compatible_text_only_dict_response() -> None:
+    """OpenAI-compatible dict responses should normalize text and usage."""
+    raw_response = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "hello world"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 7,
+            "completion_tokens": 11,
+            "total_tokens": 18,
+        },
+    }
+
+    response = _parse_openai_compatible_response(
+        raw_response,
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-4o-mini",
+    )
+
+    assert response.content == "hello world"
+    assert response.tool_calls == []
+    assert response.finish_reason == "completed"
+    assert response.provider_finish_reason == "stop"
+    assert response.usage.prompt_tokens == 7
+    assert response.usage.completion_tokens == 11
+    assert response.usage.total_tokens == 18
+    assert response.requested_model == "fast"
+    assert response.alias == "fast"
+    assert response.resolved_model == "openai/gpt-4o-mini"
+
+
+def test_parse_openai_compatible_mixed_multiple_object_tool_calls() -> None:
+    """OpenAI-compatible object responses may contain text plus many tool calls."""
+    raw_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=[{"type": "text", "text": "I need to check two places."}],
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_1",
+                            function=SimpleNamespace(
+                                name="search_documents",
+                                arguments='{"query":"kitaru llm"}',
+                            ),
+                        ),
+                        SimpleNamespace(
+                            id="call_2",
+                            function=SimpleNamespace(
+                                name="lookup_record",
+                                arguments={"record_id": 42},
+                            ),
+                        ),
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens="10",
+            completion_tokens=20,
+            total_tokens=30,
+        ),
+    )
+
+    response = _parse_openai_compatible_response(
+        raw_response,
+        resolved_model="openai/gpt-4o-mini",
+    )
+
+    assert response.content == "I need to check two places."
+    assert response.finish_reason == "tool_calls"
+    assert response.provider_finish_reason == "tool_calls"
+    assert response.has_tool_calls is True
+    assert [call.name for call in response.tool_calls] == [
+        "search_documents",
+        "lookup_record",
+    ]
+    assert response.tool_calls[0].arguments_json == '{"query":"kitaru llm"}'
+    assert response.tool_calls[0].arguments == {"query": "kitaru llm"}
+    assert response.tool_calls[1].arguments_json == '{"record_id":42}'
+    assert response.tool_calls[1].arguments == {"record_id": 42}
+    assert response.usage.prompt_tokens == 10
+    assert response.usage.total_tokens == 30
+
+
+def test_parse_openai_compatible_tool_only_preserves_invalid_arguments() -> None:
+    """Malformed OpenAI tool arguments should remain inspectable as raw JSON."""
+    raw_response = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_bad",
+                            "type": "function",
+                            "function": {
+                                "name": "search_documents",
+                                "arguments": '{"query":',
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+    }
+
+    response = _parse_openai_compatible_response(
+        raw_response,
+        resolved_model="openai/gpt-4o-mini",
+    )
+
+    assert response.content is None
+    assert response.finish_reason == "tool_calls"
+    assert len(response.tool_calls) == 1
+    tool_call = response.tool_calls[0]
+    assert tool_call.name == "search_documents"
+    assert tool_call.arguments_json == '{"query":'
+    assert tool_call.arguments is None
+    assert tool_call.arguments_parse_error is not None
+
+
+def test_parse_anthropic_text_only_dict_response() -> None:
+    """Anthropic dict responses should collect text blocks and map usage."""
+    raw_response = {
+        "content": [{"type": "text", "text": "hello from claude"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 4, "output_tokens": 6},
+    }
+
+    response = _parse_anthropic_response(
+        raw_response,
+        requested_model="claude",
+        alias="claude",
+        resolved_model="anthropic/claude-sonnet-4-20250514",
+    )
+
+    assert response.content == "hello from claude"
+    assert response.tool_calls == []
+    assert response.finish_reason == "completed"
+    assert response.provider_finish_reason == "end_turn"
+    assert response.usage.prompt_tokens == 4
+    assert response.usage.completion_tokens == 6
+    assert response.usage.total_tokens == 10
+    assert response.requested_model == "claude"
+    assert response.alias == "claude"
+
+
+def test_parse_anthropic_tool_only_dict_response() -> None:
+    """Anthropic tool-only responses should normalize tool_use blocks."""
+    raw_response = {
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "search_documents",
+                "input": {"query": "cats"},
+            }
+        ],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 8, "output_tokens": 5},
+    }
+
+    response = _parse_anthropic_response(
+        raw_response,
+        resolved_model="anthropic/claude-sonnet-4-20250514",
+    )
+
+    assert response.content is None
+    assert response.finish_reason == "tool_calls"
+    assert response.provider_finish_reason == "tool_use"
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].id == "toolu_1"
+    assert response.tool_calls[0].name == "search_documents"
+    assert response.tool_calls[0].arguments_json == '{"query":"cats"}'
+    assert response.tool_calls[0].arguments == {"query": "cats"}
+    assert response.tool_calls[0].arguments_parse_error is None
+
+
+def test_parse_anthropic_mixed_multiple_object_tool_calls() -> None:
+    """Anthropic object responses may mix text and many tool_use blocks."""
+    raw_response = SimpleNamespace(
+        content=[
+            SimpleNamespace(type="text", text="I will check a couple of things."),
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="search_documents",
+                input={"query": "kitaru"},
+            ),
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_2",
+                name="lookup_record",
+                input={"record_id": 7},
+            ),
+        ],
+        stop_reason="pause_turn",
+        usage=SimpleNamespace(input_tokens=9, output_tokens=12),
+    )
+
+    response = _parse_anthropic_response(
+        raw_response,
+        resolved_model="anthropic/claude-sonnet-4-20250514",
+    )
+
+    assert response.content == "I will check a couple of things."
+    assert response.finish_reason == "pause"
+    assert response.provider_finish_reason == "pause_turn"
+    assert [call.name for call in response.tool_calls] == [
+        "search_documents",
+        "lookup_record",
+    ]
+    assert response.tool_calls[0].arguments == {"query": "kitaru"}
+    assert response.tool_calls[1].arguments == {"record_id": 7}
+    assert response.usage.total_tokens == 21
+
+
+@pytest.mark.parametrize("raw_response", [{}, {"choices": []}])
+def test_parse_openai_compatible_rejects_missing_choices(
+    raw_response: dict[str, object],
+) -> None:
+    """OpenAI-compatible parser should fail loudly without choices."""
+    with pytest.raises(KitaruRuntimeError, match="OpenAI returned no response choices"):
+        _parse_openai_compatible_response(
+            raw_response,
+            resolved_model="openai/gpt-4o-mini",
+        )
+
+
+@pytest.mark.parametrize(
+    "raw_response",
+    [
+        {},
+        {"content": []},
+        {"content": "not a block list"},
+    ],
+)
+def test_parse_anthropic_rejects_missing_or_invalid_content(
+    raw_response: dict[str, object],
+) -> None:
+    """Anthropic parser should fail loudly without usable content blocks."""
+    with pytest.raises(
+        KitaruRuntimeError,
+        match="Anthropic returned no response content",
+    ):
+        _parse_anthropic_response(
+            raw_response,
+            resolved_model="anthropic/claude-sonnet-4-20250514",
+        )
+
+
+@pytest.mark.parametrize(
+    ("raw_reason", "normalized_reason"),
+    [
+        ("stop", "completed"),
+        ("length", "max_tokens"),
+        ("tool_calls", "tool_calls"),
+        ("content_filter", "content_filter"),
+        ("something_new", "unknown"),
+        (None, "unknown"),
+    ],
+)
+def test_parse_openai_compatible_finish_reason_mapping(
+    raw_reason: str | None,
+    normalized_reason: str,
+) -> None:
+    """OpenAI-compatible finish reasons should follow the normalized taxonomy."""
+    raw_response = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": raw_reason,
+            }
+        ]
+    }
+
+    response = _parse_openai_compatible_response(
+        raw_response,
+        resolved_model="openai/gpt-4o-mini",
+    )
+
+    assert response.finish_reason == normalized_reason
+    assert response.provider_finish_reason == (
+        None if raw_reason is None else raw_reason
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw_reason", "normalized_reason"),
+    [
+        ("end_turn", "completed"),
+        ("max_tokens", "max_tokens"),
+        ("tool_use", "tool_calls"),
+        ("pause_turn", "pause"),
+        ("something_new", "unknown"),
+        (None, "unknown"),
+    ],
+)
+def test_parse_anthropic_finish_reason_mapping(
+    raw_reason: str | None,
+    normalized_reason: str,
+) -> None:
+    """Anthropic stop reasons should follow the normalized taxonomy."""
+    raw_response = {
+        "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": raw_reason,
+    }
+
+    response = _parse_anthropic_response(
+        raw_response,
+        resolved_model="anthropic/claude-sonnet-4-20250514",
+    )
+
+    assert response.finish_reason == normalized_reason
+    assert response.provider_finish_reason == (
+        None if raw_reason is None else raw_reason
+    )
 
 
 # ---------------------------------------------------------------------------

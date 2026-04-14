@@ -6,6 +6,7 @@ and ``openrouter/*`` models. Ollama and OpenRouter use the OpenAI-compatible
 API and require the ``openai`` package (``pip install kitaru[openai]``).
 """
 
+import json
 import os
 import re
 import time
@@ -14,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from zenml.client import Client
 
 from kitaru._safe_save import _safe_save
@@ -48,12 +49,72 @@ _MODEL_PROVIDER_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
-class _LLMUsage(BaseModel):
-    """Normalized usage details from a provider SDK response."""
+LLMFinishReason = Literal[
+    "completed",
+    "tool_calls",
+    "max_tokens",
+    "content_filter",
+    "pause",
+    "unknown",
+]
+
+
+class LLMUsage(BaseModel):
+    """Normalized token usage details from a provider SDK response."""
 
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+
+
+class LLMToolCall(BaseModel):
+    """Normalized model-requested tool call intent.
+
+    ``arguments_json`` preserves the provider's raw JSON string whenever the
+    provider supplied one. ``arguments_parse_error`` records parse failures so
+    callers can inspect or repair malformed arguments without losing data.
+    """
+
+    id: str | None = None
+    name: str
+    arguments_json: str
+    arguments: dict[str, Any] | None = None
+    arguments_parse_error: str | None = None
+
+
+class LLMResponse(BaseModel):
+    """Normalized assistant response returned by provider parsers.
+
+    The public ``llm()`` function still returns plain text for now; this model
+    is the Package 1 foundation for the later rich-response switch.
+    """
+
+    role: Literal["assistant"] = "assistant"
+    content: str | None = None
+    tool_calls: list[LLMToolCall] = Field(default_factory=list)
+    finish_reason: LLMFinishReason
+    provider_finish_reason: str | None = None
+    usage: LLMUsage = Field(default_factory=LLMUsage)
+    requested_model: str | None = None
+    alias: str | None = None
+    resolved_model: str
+
+    @property
+    def has_tool_calls(self) -> bool:
+        """Whether the response includes one or more tool-call intents."""
+        return bool(self.tool_calls)
+
+    @property
+    def text(self) -> str:
+        """Text content convenience alias that never returns ``None``."""
+        return self.content or ""
+
+    def __str__(self) -> str:
+        """Return response text for lightweight display convenience."""
+        return self.text
+
+
+_LLMUsage = LLMUsage
 
 
 class _LLMRequest(BaseModel):
@@ -433,6 +494,245 @@ def _call_anthropic(
 # ---------------------------------------------------------------------------
 
 
+_OPENAI_FINISH_REASON_MAP: dict[str, LLMFinishReason] = {
+    "stop": "completed",
+    "length": "max_tokens",
+    "tool_calls": "tool_calls",
+    "content_filter": "content_filter",
+}
+
+_ANTHROPIC_FINISH_REASON_MAP: dict[str, LLMFinishReason] = {
+    "end_turn": "completed",
+    "max_tokens": "max_tokens",
+    "tool_use": "tool_calls",
+    "pause_turn": "pause",
+}
+
+
+def _read_field(payload: Any, key: str, default: Any = None) -> Any:
+    """Read one field from a dict-like or object-like payload."""
+    if payload is None:
+        return default
+    if isinstance(payload, Mapping):
+        return payload.get(key, default)
+    return getattr(payload, key, default)
+
+
+def _provider_finish_reason(raw_reason: Any) -> str | None:
+    """Stringify provider finish reasons while preserving missing values."""
+    if raw_reason is None:
+        return None
+    return str(raw_reason)
+
+
+def _normalize_openai_finish_reason(raw_reason: Any) -> LLMFinishReason:
+    """Normalize OpenAI-compatible finish reasons into Kitaru's taxonomy."""
+    if raw_reason is None:
+        return "unknown"
+    return _OPENAI_FINISH_REASON_MAP.get(str(raw_reason), "unknown")
+
+
+def _normalize_anthropic_finish_reason(raw_reason: Any) -> LLMFinishReason:
+    """Normalize Anthropic stop reasons into Kitaru's taxonomy."""
+    if raw_reason is None:
+        return "unknown"
+    return _ANTHROPIC_FINISH_REASON_MAP.get(str(raw_reason), "unknown")
+
+
+def _is_non_string_sequence(value: Any) -> bool:
+    """Return whether ``value`` is a sequence but not text/bytes."""
+    return isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    )
+
+
+def _normalize_text_content(content: Any) -> str | None:
+    """Normalize provider text/content block shapes into a single string."""
+    if isinstance(content, str):
+        return content
+    if not _is_non_string_sequence(content):
+        return None
+
+    text_parts: list[str] = []
+    for part in content:
+        if isinstance(part, str):
+            text_parts.append(part)
+            continue
+        part_type = _read_field(part, "type")
+        part_text = _read_field(part, "text")
+        if (
+            part_type in {None, "text", "output_text"}
+            and isinstance(part_text, str)
+            and part_text
+        ):
+            text_parts.append(part_text)
+    return "\n".join(text_parts) if text_parts else None
+
+
+def _normalize_tool_arguments(
+    raw_arguments: Any,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Normalize tool arguments while preserving malformed raw JSON.
+
+    Providers do not agree on argument shape: OpenAI-compatible chat
+    completions usually return a JSON string, while Anthropic ``tool_use``
+    blocks return a structured object. The normalized model keeps both the raw
+    JSON representation and a parsed dict when parsing succeeds.
+    """
+    if isinstance(raw_arguments, str):
+        try:
+            parsed_arguments = json.loads(raw_arguments)
+        except json.JSONDecodeError as exc:
+            return raw_arguments, None, str(exc)
+        if isinstance(parsed_arguments, Mapping):
+            return raw_arguments, dict(parsed_arguments), None
+        return (
+            raw_arguments,
+            None,
+            "Tool call arguments must decode to a JSON object; "
+            f"got {type(parsed_arguments).__name__}.",
+        )
+
+    if isinstance(raw_arguments, Mapping):
+        arguments = dict(raw_arguments)
+        return (
+            json.dumps(arguments, ensure_ascii=False, separators=(",", ":")),
+            arguments,
+            None,
+        )
+
+    if raw_arguments is None:
+        return "", None, "Tool call arguments are missing."
+
+    try:
+        arguments_json = json.dumps(
+            raw_arguments,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    except TypeError:
+        arguments_json = repr(raw_arguments)
+    return (
+        arguments_json,
+        None,
+        "Tool call arguments must be a JSON object or JSON string; "
+        f"got {type(raw_arguments).__name__}.",
+    )
+
+
+def _parse_openai_tool_call(tool_call: Any) -> LLMToolCall:
+    """Normalize one OpenAI-compatible function tool call."""
+    function_payload = _read_field(tool_call, "function")
+    name = _read_field(function_payload, "name")
+    if not isinstance(name, str) or not name:
+        name = "unknown"
+    raw_arguments = _read_field(function_payload, "arguments")
+    arguments_json, arguments, parse_error = _normalize_tool_arguments(raw_arguments)
+
+    tool_call_id = _read_field(tool_call, "id")
+    return LLMToolCall(
+        id=str(tool_call_id) if tool_call_id is not None else None,
+        name=name,
+        arguments_json=arguments_json,
+        arguments=arguments,
+        arguments_parse_error=parse_error,
+    )
+
+
+def _parse_anthropic_tool_call(block: Any) -> LLMToolCall:
+    """Normalize one Anthropic ``tool_use`` content block."""
+    name = _read_field(block, "name")
+    if not isinstance(name, str) or not name:
+        name = "unknown"
+    raw_arguments = _read_field(block, "input")
+    arguments_json, arguments, parse_error = _normalize_tool_arguments(raw_arguments)
+
+    tool_call_id = _read_field(block, "id")
+    return LLMToolCall(
+        id=str(tool_call_id) if tool_call_id is not None else None,
+        name=name,
+        arguments_json=arguments_json,
+        arguments=arguments,
+        arguments_parse_error=parse_error,
+    )
+
+
+def _parse_openai_compatible_response(
+    raw_response: Any,
+    *,
+    resolved_model: str,
+    requested_model: str | None = None,
+    alias: str | None = None,
+) -> LLMResponse:
+    """Normalize an OpenAI-compatible Chat Completions response."""
+    choices = _read_field(raw_response, "choices")
+    if not _is_non_string_sequence(choices) or not choices:
+        raise KitaruRuntimeError("OpenAI returned no response choices.")
+
+    first_choice = choices[0]
+    message = _read_field(first_choice, "message")
+    if message is None:
+        content = _read_field(first_choice, "text")
+        tool_calls_payload = _read_field(first_choice, "tool_calls")
+    else:
+        content = _read_field(message, "content")
+        tool_calls_payload = _read_field(message, "tool_calls")
+
+    tool_calls: list[LLMToolCall] = []
+    if _is_non_string_sequence(tool_calls_payload):
+        tool_calls = [
+            _parse_openai_tool_call(tool_call) for tool_call in tool_calls_payload
+        ]
+
+    raw_finish_reason = _read_field(first_choice, "finish_reason")
+    return LLMResponse(
+        content=_normalize_text_content(content),
+        tool_calls=tool_calls,
+        finish_reason=_normalize_openai_finish_reason(raw_finish_reason),
+        provider_finish_reason=_provider_finish_reason(raw_finish_reason),
+        usage=_extract_usage_openai(raw_response),
+        requested_model=requested_model,
+        alias=alias,
+        resolved_model=resolved_model,
+    )
+
+
+def _parse_anthropic_response(
+    raw_response: Any,
+    *,
+    resolved_model: str,
+    requested_model: str | None = None,
+    alias: str | None = None,
+) -> LLMResponse:
+    """Normalize an Anthropic Messages API response."""
+    content_blocks = _read_field(raw_response, "content")
+    if not _is_non_string_sequence(content_blocks) or not content_blocks:
+        raise KitaruRuntimeError("Anthropic returned no response content.")
+
+    text_blocks: list[str] = []
+    tool_calls: list[LLMToolCall] = []
+    for block in content_blocks:
+        block_type = _read_field(block, "type")
+        if block_type == "text":
+            text = _read_field(block, "text")
+            if isinstance(text, str) and text:
+                text_blocks.append(text)
+        elif block_type == "tool_use":
+            tool_calls.append(_parse_anthropic_tool_call(block))
+
+    raw_stop_reason = _read_field(raw_response, "stop_reason")
+    return LLMResponse(
+        content="\n".join(text_blocks) if text_blocks else None,
+        tool_calls=tool_calls,
+        finish_reason=_normalize_anthropic_finish_reason(raw_stop_reason),
+        provider_finish_reason=_provider_finish_reason(raw_stop_reason),
+        usage=_extract_usage_anthropic(raw_response),
+        requested_model=requested_model,
+        alias=alias,
+        resolved_model=resolved_model,
+    )
+
+
 def _extract_response_text_openai(raw_response: Any) -> str:
     """Extract text from an OpenAI Chat Completions response."""
     choices = getattr(raw_response, "choices", None)
@@ -537,7 +837,7 @@ def _read_usage_int(usage_payload: Any, key: str) -> int | None:
 
 def _extract_usage_openai(raw_response: Any) -> _LLMUsage:
     """Extract usage from an OpenAI Chat Completions response."""
-    usage = getattr(raw_response, "usage", None)
+    usage = _read_field(raw_response, "usage")
     return _LLMUsage(
         prompt_tokens=_read_usage_int(usage, "prompt_tokens"),
         completion_tokens=_read_usage_int(usage, "completion_tokens"),
@@ -547,7 +847,7 @@ def _extract_usage_openai(raw_response: Any) -> _LLMUsage:
 
 def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
     """Extract usage from an Anthropic Messages response."""
-    usage = getattr(raw_response, "usage", None)
+    usage = _read_field(raw_response, "usage")
     input_tokens = _read_usage_int(usage, "input_tokens")
     output_tokens = _read_usage_int(usage, "output_tokens")
     total = None
