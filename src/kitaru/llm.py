@@ -216,6 +216,14 @@ class _LLMRequest(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    @model_validator(mode="after")
+    def _snapshot_mutable_inputs(self) -> "_LLMRequest":
+        """Detach request payloads from caller-owned mutable objects."""
+        self.prompt = deepcopy(self.prompt)
+        self.tools = deepcopy(self.tools)
+        self.tool_choice = deepcopy(self.tool_choice)
+        return self
+
 
 @dataclass(frozen=True)
 class _ProviderTarget:

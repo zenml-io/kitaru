@@ -30,6 +30,7 @@ from kitaru.llm import (
     LLMUsage,
     _LLMRequest,
     _LLMUsage,
+    _normalize_tools,
     _parse_anthropic_response,
     _parse_openai_compatible_response,
     _parse_provider_target,
@@ -996,6 +997,51 @@ def test_llm_accepts_tools_and_tool_choice_on_public_signature() -> None:
     request = mock_synthetic.call_args.args[0]
     assert request.tools == [tool]
     assert request.tool_choice == "search_documents"
+
+
+def test_llm_snapshots_typed_tool_schema_before_flow_body_mutation() -> None:
+    """Later mutations to caller-owned nested tool schema must not affect requests."""
+    required = ["query"]
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": required,
+    }
+    tool = LLMToolDefinition(
+        name="search_documents",
+        description="Search documents by query.",
+        parameters=parameters,
+    )
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=str(uuid4())),
+        patch(
+            "kitaru.llm._llm_checkpoint_call",
+            return_value=_fake_response("ok"),
+        ) as mock_synthetic,
+    ):
+        output = llm(
+            "hello",
+            model="fast",
+            tools=[tool],
+            tool_choice="search_documents",
+            name="tool_call",
+        )
+
+    assert output.content == "ok"
+    request = mock_synthetic.call_args.args[0]
+    assert isinstance(request, _LLMRequest)
+
+    tool.parameters["properties"]["query"]["type"] = "integer"
+    tool.parameters["properties"]["later"] = {"type": "number"}
+    required.append("later")
+
+    assert request.tools is not None
+    request_tool = request.tools[0]
+    assert isinstance(request_tool, LLMToolDefinition)
+    assert request_tool.parameters["properties"] == {"query": {"type": "string"}}
+    assert request_tool.parameters["required"] == ["query"]
+    assert _normalize_tools(request.tools) == [_search_tool()]
 
 
 def test_llm_normalizes_typed_tool_definition_and_named_choice_for_dispatch() -> None:
