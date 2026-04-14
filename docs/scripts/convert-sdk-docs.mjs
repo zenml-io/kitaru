@@ -60,6 +60,13 @@ if (!rootModule) {
 const normalizedBase = baseUrl.replace(/\/+$/, "");
 const apiPrefix = `${normalizedBase}/reference/python`;
 
+// fumadocs-python's convert() renders mod.description (summary) but drops
+// mod.docstring (structured sections like Google-style "Example:" blocks)
+// for modules. Functions get both. Inline any module-level docstring items
+// into description so "Example:" / "Note:" / "Warning:" sections actually
+// render on module pages.
+inlineModuleDocstrings(mod);
+
 console.log(`Converting ${rootModule} API to MDX...`);
 const files = convert(mod, { baseUrl: apiPrefix });
 console.log(`Generated ${files.length} MDX file(s)`);
@@ -103,6 +110,56 @@ await write(files, { outDir: outputDir });
 await generateMetaFiles(files, outputDir);
 
 console.log(`Wrote ${files.length} MDX files + meta.json to ${outputDir}`);
+
+/**
+ * Inline a module's structured docstring items (admonitions, code, text)
+ * into its description field as markdown. Recurses into submodules.
+ *
+ * MUTATES the input: appends to `module.description` and clears
+ * `module.docstring` on every module in the tree.
+ *
+ * Griffe emits Google-style sections like `Example:` as admonition items
+ * on `mod.docstring`; fumadocs-python's module converter ignores that
+ * field (only `mod.description` is rendered). Without this, any "Example:"
+ * section on a module docstring silently disappears from the generated
+ * page. We render admonitions as `**Title**\n\n<body>` so fenced code
+ * blocks inside them stay intact.
+ */
+function inlineModuleDocstrings(module) {
+  const extra = renderDocstringItems(module.docstring);
+  if (extra) {
+    module.description = module.description
+      ? `${module.description}\n\n${extra}`
+      : extra;
+  }
+  // Clear so convert() doesn't try to re-render these on the module itself
+  module.docstring = [];
+
+  for (const sub of Object.values(module.modules ?? {})) {
+    inlineModuleDocstrings(sub);
+  }
+}
+
+// Deliberately not reusing fumadocs-python's internal convertDoc() (dist/index.js:96):
+// it's unexported, emits MDX <Callout> JSX (which wouldn't round-trip through
+// the downstream encodeText() call on description), and has a bug where `code`
+// items are console.log'd instead of emitted. Keeping this local + markdown-only.
+function renderDocstringItems(items) {
+  if (!items || items.length === 0) return "";
+  const parts = [];
+  for (const item of items) {
+    if (item.kind === "text" && item.value) {
+      parts.push(item.value);
+    } else if (item.kind === "admonition") {
+      const title = item.title || item.value?.annotation || "Note";
+      const body = item.value?.description ?? "";
+      parts.push(`**${title}**\n\n${body}`);
+    } else if (item.kind === "code" && item.value) {
+      parts.push("```\n" + item.value + "\n```");
+    }
+  }
+  return parts.filter(Boolean).join("\n\n");
+}
 
 /**
  * Flatten singleton module directories into flat files.

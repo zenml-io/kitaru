@@ -6,8 +6,8 @@ replayable, and observable. Decorate your orchestration function with
 ``@flow`` and your work units with ``@checkpoint`` to get automatic
 durability.
 
-Example::
-
+Example:
+    ```python
     from kitaru import flow, checkpoint
 
     @checkpoint
@@ -18,6 +18,7 @@ Example::
     def my_agent(url: str) -> str:
         data = fetch_data(url)
         return data.upper()
+    ```
 
 Current status:
 
