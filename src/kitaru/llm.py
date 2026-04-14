@@ -95,30 +95,45 @@ class LLMToolCall(BaseModel):
     """
 
     id: str | None = None
-    name: Any
+    # ``name`` is ``None`` when the provider omitted a name entirely; when the
+    # provider returned something non-string (unusual) the value is reprd into
+    # a string and ``name_parse_error`` is set so callers can detect it.
+    name: str | None
     name_parse_error: str | None = None
     arguments_json: str
     arguments: dict[str, Any] | None = None
     arguments_parse_error: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_arguments_from_json(cls, data: Any) -> Any:
+        """Parse ``arguments_json`` into ``arguments`` when only JSON was given.
+
+        Runs before field validation so downstream invariant checks see a
+        consistent view; lets callers construct ``LLMToolCall`` from the raw
+        provider shape without pre-parsing.
+        """
+        if not isinstance(data, Mapping):
+            return data
+        if data.get("arguments") is not None or data.get("arguments_parse_error"):
+            return data
+        arguments_json = data.get("arguments_json")
+        if not isinstance(arguments_json, str):
+            return data
+        normalized = dict(data)
+        json_text, arguments, parse_error = _normalize_tool_arguments(arguments_json)
+        normalized["arguments_json"] = json_text
+        normalized["arguments"] = arguments
+        normalized["arguments_parse_error"] = parse_error
+        return normalized
+
     @model_validator(mode="after")
     def _enforce_argument_parse_invariant(self) -> "LLMToolCall":
         """Keep parsed arguments and parse errors mutually exclusive."""
-        if self.arguments_parse_error is not None:
-            if self.arguments is not None:
-                raise ValueError(
-                    "`arguments` must be None when `arguments_parse_error` is set."
-                )
-            return self
-
-        if self.arguments is None:
-            arguments_json, arguments, parse_error = _normalize_tool_arguments(
-                self.arguments_json
+        if self.arguments_parse_error is not None and self.arguments is not None:
+            raise ValueError(
+                "`arguments` must be None when `arguments_parse_error` is set."
             )
-            self.arguments_json = arguments_json
-            self.arguments = arguments
-            self.arguments_parse_error = parse_error
-
         if self.arguments_parse_error is None and self.arguments is None:
             raise ValueError(
                 "`arguments` must be present when `arguments_parse_error` is None."
@@ -622,10 +637,13 @@ def _normalize_messages(
 
 def _normalize_tool_definition(tool: Any) -> dict[str, Any]:
     """Normalize one tool definition into OpenAI function-tool shape."""
+    # `_LLMRequest._snapshot_mutable_inputs` already deepcopied the tools list
+    # at the request boundary, so callers own the data from here on — shallow
+    # dict() is sufficient for the subsequent restructuring.
     if isinstance(tool, LLMToolDefinition):
         function: dict[str, Any] = {
             "name": tool.name,
-            "parameters": deepcopy(tool.parameters),
+            "parameters": dict(tool.parameters),
         }
         if tool.description is not None:
             function["description"] = tool.description
@@ -637,7 +655,7 @@ def _normalize_tool_definition(tool: Any) -> dict[str, Any]:
             if set(tool_payload).issubset(helper_keys) and "name" in tool_payload:
                 function = {
                     "name": tool_payload["name"],
-                    "parameters": deepcopy(
+                    "parameters": dict(
                         tool_payload.get(
                             "parameters",
                             {"type": "object", "properties": {}},
@@ -678,7 +696,7 @@ def _normalize_tool_definition(tool: Any) -> dict[str, Any]:
     )
     if not isinstance(parameters, Mapping):
         raise KitaruUsageError("Function tool parameters must be a JSON-schema object.")
-    normalized_function["parameters"] = deepcopy(dict(parameters))
+    normalized_function["parameters"] = dict(parameters)
     return {"type": "function", "function": normalized_function}
 
 
@@ -856,21 +874,27 @@ def _provider_error_message(
     )
 
 
+def _tool_choice_disables_tools(tool_choice: Any) -> bool:
+    """Whether the caller's ``tool_choice`` explicitly forbids tool use."""
+    return tool_choice == "none" or (
+        isinstance(tool_choice, dict) and tool_choice.get("type") == "none"
+    )
+
+
 def _is_network_or_timeout_error(exc: Exception) -> bool:
-    """Best-effort classifier for transport failures across provider SDKs."""
+    """Best-effort classifier for transport failures across provider SDKs.
+
+    Matches transport/connectivity hints in the exception's class/module name.
+    Does NOT match ``apierror`` — that substring hits 4xx/5xx base classes in
+    the OpenAI/Anthropic SDKs, which already have their ``status_code`` routed
+    to specific error types by the caller.
+    """
     class_name = type(exc).__name__.lower()
     module_name = type(exc).__module__.lower()
     text = f"{class_name} {module_name}"
     return any(
         hint in text
-        for hint in (
-            "timeout",
-            "connection",
-            "connect",
-            "network",
-            "transport",
-            "apierror",
-        )
+        for hint in ("timeout", "connection", "connect", "network", "transport")
     )
 
 
@@ -1013,12 +1037,14 @@ def _tools_to_anthropic(
     if not tools:
         return None
 
+    # Tools come from `_normalize_tool_definition`, which built fresh dicts
+    # from an already-snapshotted request payload — no further copy needed.
     anthropic_tools: list[dict[str, Any]] = []
     for tool in tools:
         function = tool["function"]
         anthropic_tool: dict[str, Any] = {
             "name": function["name"],
-            "input_schema": deepcopy(function["parameters"]),
+            "input_schema": function["parameters"],
         }
         if "description" in function:
             anthropic_tool["description"] = function["description"]
@@ -1157,9 +1183,7 @@ def _call_openai(
         kwargs["temperature"] = temperature
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
-    tools_disabled = tool_choice == "none" or (
-        isinstance(tool_choice, dict) and tool_choice.get("type") == "none"
-    )
+    tools_disabled = _tool_choice_disables_tools(tool_choice)
     if tools and not tools_disabled:
         kwargs["tools"] = tools
     if tool_choice is not None:
@@ -1215,9 +1239,7 @@ def _call_anthropic(
     system_parts, anthropic_messages = _messages_to_anthropic(messages)
     anthropic_tools = _tools_to_anthropic(tools)
     anthropic_tool_choice = _tool_choice_to_anthropic(tool_choice)
-    tools_disabled = tool_choice == "none" or (
-        isinstance(tool_choice, dict) and tool_choice.get("type") == "none"
-    )
+    tools_disabled = _tool_choice_disables_tools(tool_choice)
 
     kwargs: dict[str, Any] = {
         "model": model,
@@ -1397,13 +1419,10 @@ def _normalize_tool_call_name(raw_name: Any) -> tuple[Any, str | None]:
         return raw_name, None
     if raw_name is None:
         return None, "Tool call name is missing."
-    try:
-        json.dumps(raw_name)
-        safe_raw_name = raw_name
-    except TypeError:
-        safe_raw_name = repr(raw_name)
+    # Stringify non-string values so the field stays type-consistent (str | None)
+    # while the raw shape is still observable via `name_parse_error`.
     return (
-        safe_raw_name,
+        repr(raw_name),
         f"Tool call name must be a non-empty string; got {type(raw_name).__name__}.",
     )
 
@@ -1700,28 +1719,27 @@ def _warn_if_mock_env_active() -> None:
 
 def _tool_parse_issue_metadata(response: LLMResponse) -> dict[str, Any]:
     """Summarize malformed tool-call fields from a provider response."""
-    argument_error_ids = [
-        tool_call.id
-        for tool_call in response.tool_calls
-        if tool_call.arguments_parse_error is not None
-    ]
-    name_error_ids = [
-        tool_call.id
-        for tool_call in response.tool_calls
-        if tool_call.name_parse_error is not None
-    ]
+    argument_error_ids: list[str | None] = []
+    name_error_ids: list[str | None] = []
+    raw_tool_names: list[str | None] = []
+    for tool_call in response.tool_calls:
+        if tool_call.arguments_parse_error is not None:
+            argument_error_ids.append(tool_call.id)
+        if tool_call.name_parse_error is not None:
+            name_error_ids.append(tool_call.id)
+            raw_tool_names.append(tool_call.name)
     return {
         "tool_arguments_parse_error_count": len(argument_error_ids),
         "tool_arguments_parse_error_ids": argument_error_ids,
         "tool_name_parse_error_count": len(name_error_ids),
         "tool_name_parse_error_ids": name_error_ids,
+        "tool_name_parse_error_raw_names": raw_tool_names,
     }
 
 
 def _warn_for_tool_parse_issues(
     *,
     call_name: str,
-    response: LLMResponse,
     issue_metadata: Mapping[str, Any],
 ) -> None:
     """Log malformed tool-call fields without hiding the provider response."""
@@ -1743,11 +1761,7 @@ def _warn_for_tool_parse_issues(
                 "call_name": call_name,
                 "tool_call_ids": issue_metadata["tool_name_parse_error_ids"],
                 "tool_call_count": name_count,
-                "raw_tool_names": [
-                    tool_call.name
-                    for tool_call in response.tool_calls
-                    if tool_call.name_parse_error is not None
-                ],
+                "raw_tool_names": issue_metadata["tool_name_parse_error_raw_names"],
             },
         )
 
@@ -1937,7 +1951,6 @@ def _execute_llm_call(request: _LLMRequest) -> LLMResponse:
     parse_issue_metadata = _tool_parse_issue_metadata(response)
     _warn_for_tool_parse_issues(
         call_name=request.call_name,
-        response=response,
         issue_metadata=parse_issue_metadata,
     )
 
@@ -2090,20 +2103,11 @@ def llm_text(*args: Any, **kwargs: Any) -> str:
         result = llm(*args, **kwargs)
     finally:
         _LLM_DEPRECATION_WARNED = previous_warning_state
-    if isinstance(result, LLMResponse):
-        return result.content or ""
 
+    # In flow-body scope `llm()` returns a durable handle whose `.load()`
+    # materializes the response; inside a checkpoint it's already the response.
     load = getattr(result, "load", None)
-    if callable(load):
-        loaded = load()
-        if isinstance(loaded, LLMResponse):
-            return loaded.content or ""
-        content = getattr(loaded, "content", None)
-        if content is None:
-            return ""
-        return str(content)
-
-    content = getattr(result, "content", None)
-    if content is None:
-        return ""
-    return str(content)
+    response = load() if callable(load) else result
+    if isinstance(response, LLMResponse):
+        return response.content or ""
+    return str(getattr(response, "content", None) or "")

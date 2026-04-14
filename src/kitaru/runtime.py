@@ -47,9 +47,13 @@ _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
     default=None,
 )
 _LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", default=0)
-_EXPLICIT_LLM_CALL_NAMES: ContextVar[frozenset[str]] = ContextVar(
+_EMPTY_LLM_CALL_NAMES: frozenset[str] = frozenset()
+# Scopes install a mutable `set[str]` at entry so registration is O(1); the
+# frozenset default outside any scope makes membership checks safe without
+# allowing mutation through an unscoped register call.
+_EXPLICIT_LLM_CALL_NAMES: ContextVar[set[str] | frozenset[str]] = ContextVar(
     "kitaru_explicit_llm_call_names",
-    default=frozenset(),
+    default=_EMPTY_LLM_CALL_NAMES,
 )
 
 
@@ -139,7 +143,7 @@ def _flow_scope(
         )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
-    explicit_llm_names_token = _EXPLICIT_LLM_CALL_NAMES.set(frozenset())
+    explicit_llm_names_token = _EXPLICIT_LLM_CALL_NAMES.set(set())
     try:
         yield
     finally:
@@ -172,7 +176,7 @@ def _checkpoint_scope(
         )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
-    explicit_llm_names_token = _EXPLICIT_LLM_CALL_NAMES.set(frozenset())
+    explicit_llm_names_token = _EXPLICIT_LLM_CALL_NAMES.set(set())
     try:
         yield
     finally:
@@ -264,7 +268,12 @@ def _register_llm_call_name(name: str) -> bool:
     used_names = _EXPLICIT_LLM_CALL_NAMES.get()
     if name in used_names:
         return False
-    _EXPLICIT_LLM_CALL_NAMES.set(used_names | {name})
+    if isinstance(used_names, set):
+        used_names.add(name)
+    else:
+        # No active scope installed a mutable set (edge case: direct calls in
+        # tests or pre-flow init). Fall back to immutable rebind.
+        _EXPLICIT_LLM_CALL_NAMES.set(frozenset(used_names | {name}))
     return True
 
 
