@@ -34,6 +34,7 @@ from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_cal
 
 _LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @flow."
 _MOCK_RESPONSE_ENV = "KITARU_LLM_MOCK_RESPONSE"
+_STRUCTURED_MOCK_RESPONSE_ENV = "KITARU_LLM_MOCK_RESPONSE_JSON"
 _ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
 _OLLAMA_HOST_ENV = "OLLAMA_HOST"
 _OLLAMA_DEFAULT_HOST = "http://localhost:11434"
@@ -99,11 +100,7 @@ class LLMToolDefinition(BaseModel):
 
 
 class LLMResponse(BaseModel):
-    """Normalized assistant response returned by provider parsers.
-
-    The public ``llm()`` function still returns plain text for now; this model
-    is the Package 1 foundation for the later rich-response switch.
-    """
+    """Normalized assistant response returned by ``kitaru.llm()``."""
 
     role: Literal["assistant"] = "assistant"
     content: str | None = None
@@ -157,12 +154,48 @@ class _ProviderTarget:
     resolved_model: str
 
 
-@dataclass(frozen=True)
 class _ProviderCallResult:
-    """Normalized boundary between provider SDK response and Kitaru persistence."""
+    """Normalized boundary between provider SDK response and Kitaru persistence.
 
-    response_text: str
-    usage: _LLMUsage
+    ``response_text`` and ``usage`` remain as compatibility properties for
+    internal callers that only need text, such as memory compaction.
+    """
+
+    def __init__(
+        self,
+        response: LLMResponse | None = None,
+        *,
+        response_text: str | None = None,
+        usage: LLMUsage | None = None,
+    ) -> None:
+        if response is None:
+            if response_text is None:
+                raise TypeError(
+                    "_ProviderCallResult requires response or response_text."
+                )
+            response = LLMResponse(
+                content=response_text,
+                finish_reason="completed",
+                usage=usage or LLMUsage(),
+                resolved_model="unknown",
+            )
+        if not isinstance(response, LLMResponse):
+            raise TypeError("_ProviderCallResult response must be an LLMResponse.")
+        self.response = response
+
+    @property
+    def response_text(self) -> str:
+        """Backward-compatible text view that requires actual text content."""
+        if self.response.content is None:
+            raise KitaruRuntimeError(
+                "Provider returned no text content for a text-only internal caller."
+            )
+        return self.response.content
+
+    @property
+    def usage(self) -> LLMUsage:
+        """Backward-compatible usage view of the normalized response."""
+        return self.response.usage
 
 
 # ---------------------------------------------------------------------------
@@ -853,8 +886,10 @@ def _call_openai(
             ) from exc
 
     return _ProviderCallResult(
-        response_text=_extract_response_text_openai(response),
-        usage=_extract_usage_openai(response),
+        response=_parse_openai_compatible_response(
+            response,
+            resolved_model=f"{provider_label}/{model}",
+        )
     )
 
 
@@ -911,8 +946,10 @@ def _call_anthropic(
             ) from exc
 
     return _ProviderCallResult(
-        response_text=_extract_response_text_anthropic(response),
-        usage=_extract_usage_anthropic(response),
+        response=_parse_anthropic_response(
+            response,
+            resolved_model=f"anthropic/{model}",
+        )
     )
 
 
@@ -1288,6 +1325,110 @@ def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
 
 
 # ---------------------------------------------------------------------------
+# Rich response persistence helpers
+# ---------------------------------------------------------------------------
+
+
+def _response_payload(response: LLMResponse) -> dict[str, Any]:
+    """Return the serializable artifact payload for a normalized response."""
+    return response.model_dump(mode="json")
+
+
+def _request_envelope(
+    *,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    tool_choice: str | dict[str, Any] | None,
+    temperature: float | None,
+    max_tokens: int | None,
+) -> dict[str, Any]:
+    """Return the serializable prompt artifact envelope for an LLM call."""
+    return {
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": tool_choice,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+
+
+def _finalize_response_metadata(
+    response: LLMResponse,
+    model_selection: ResolvedModelSelection,
+) -> LLMResponse:
+    """Attach request/model selection metadata to a parsed response."""
+    return response.model_copy(
+        update={
+            "requested_model": model_selection.requested_model,
+            "alias": model_selection.alias,
+            "resolved_model": model_selection.resolved_model,
+        }
+    )
+
+
+def _response_kind(response: LLMResponse) -> str:
+    """Classify a normalized response for low-cardinality metadata."""
+    has_content = bool(response.content)
+    has_tools = bool(response.tool_calls)
+    if has_content and has_tools:
+        return "mixed"
+    if has_content:
+        return "text_only"
+    if has_tools:
+        return "tool_calls_only"
+    return "empty"
+
+
+def _structured_mock_response(raw_mock: str, resolved_model: str) -> LLMResponse:
+    """Parse a structured mock response from JSON into ``LLMResponse``."""
+    try:
+        payload = json.loads(raw_mock)
+    except json.JSONDecodeError as exc:
+        raise KitaruUsageError(
+            f"{_STRUCTURED_MOCK_RESPONSE_ENV} must contain valid JSON."
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise KitaruUsageError(
+            f"{_STRUCTURED_MOCK_RESPONSE_ENV} must contain a JSON object."
+        )
+
+    response_payload = dict(payload)
+    allowed_keys = set(LLMResponse.model_fields)
+    unknown_keys = set(response_payload) - allowed_keys
+    if unknown_keys:
+        formatted_keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise KitaruUsageError(
+            f"{_STRUCTURED_MOCK_RESPONSE_ENV} contains unsupported keys: "
+            f"{formatted_keys}."
+        )
+    if "content" not in response_payload and "tool_calls" not in response_payload:
+        raise KitaruUsageError(
+            f"{_STRUCTURED_MOCK_RESPONSE_ENV} requires `content`, `tool_calls`, "
+            "or both."
+        )
+
+    response_payload.setdefault("finish_reason", "completed")
+    response_payload.setdefault("resolved_model", resolved_model)
+    try:
+        return LLMResponse.model_validate(response_payload)
+    except ValidationError as exc:
+        raise KitaruUsageError(
+            f"{_STRUCTURED_MOCK_RESPONSE_ENV} must match the LLMResponse shape."
+        ) from exc
+
+
+def _text_mock_response(mock_response: str, resolved_model: str) -> LLMResponse:
+    """Build a text-only ``LLMResponse`` from the legacy mock env var."""
+    return LLMResponse(
+        content=mock_response,
+        finish_reason="completed",
+        provider_finish_reason="mock",
+        usage=LLMUsage(),
+        resolved_model=resolved_model,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Core execution
 # ---------------------------------------------------------------------------
 
@@ -1378,17 +1519,40 @@ def _track_llm_call_analytics(
     track(AnalyticsEvent.LLM_CALLED, metadata)
 
 
-def _execute_llm_call(request: _LLMRequest) -> str:
+def _execute_llm_call(request: _LLMRequest) -> LLMResponse:
     """Execute one normalized LLM call and persist artifacts/metadata."""
     model_selection = resolve_model_selection(request.model)
     messages = _normalize_messages(request.prompt, system=request.system)
     tools = _normalize_tools(request.tools)
     tool_choice = _normalize_tool_choice(request.tool_choice, tools)
+    request_envelope = _request_envelope(
+        messages=messages,
+        tools=tools,
+        tool_choice=tool_choice,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+    )
 
     # Mock short-circuit: skip credential resolution and provider SDK entirely
-    if (mock_response := os.environ.get(_MOCK_RESPONSE_ENV)) is not None:
-        result = _ProviderCallResult(response_text=mock_response, usage=_LLMUsage())
-        env_overlay: dict[str, str] = {}
+    structured_mock = os.environ.get(_STRUCTURED_MOCK_RESPONSE_ENV)
+    text_mock = os.environ.get(_MOCK_RESPONSE_ENV)
+    if structured_mock is not None:
+        result = _ProviderCallResult(
+            response=_structured_mock_response(
+                structured_mock,
+                resolved_model=model_selection.resolved_model,
+            )
+        )
+        credential_source = "environment"
+        latency_ms = 0.0
+        is_mocked = True
+    elif text_mock is not None:
+        result = _ProviderCallResult(
+            response=_text_mock_response(
+                text_mock,
+                resolved_model=model_selection.resolved_model,
+            )
+        )
         credential_source = "environment"
         latency_ms = 0.0
         is_mocked = True
@@ -1407,23 +1571,26 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
         is_mocked = False
 
-    response_text = result.response_text
-    usage = result.usage
+    response = _finalize_response_metadata(result.response, model_selection)
+    usage = response.usage
+    response_kind = _response_kind(response)
+    tool_call_names = [tool_call.name for tool_call in response.tool_calls]
 
     _safe_save(
         f"{request.call_name}_prompt",
-        messages,
+        request_envelope,
         artifact_type="prompt",
         save_func=save,
     )
     _safe_save(
         f"{request.call_name}_response",
-        response_text,
+        _response_payload(response),
         artifact_type="response",
         save_func=save,
     )
 
     llm_metadata: dict[str, Any] = {
+        "api_mode": "response",
         "requested_model": model_selection.requested_model,
         "alias": model_selection.alias,
         "resolved_model": model_selection.resolved_model,
@@ -1432,6 +1599,12 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         "tokens_input": usage.prompt_tokens,
         "tokens_output": usage.completion_tokens,
         "total_tokens": usage.total_tokens,
+        "finish_reason": response.finish_reason,
+        "provider_finish_reason": response.provider_finish_reason,
+        "response_kind": response_kind,
+        "tool_call_count": len(response.tool_calls),
+        "tool_call_names": tool_call_names,
+        "has_content": bool(response.content),
     }
     filtered_metadata = {
         key: value for key, value in llm_metadata.items() if value is not None
@@ -1442,13 +1615,21 @@ def _execute_llm_call(request: _LLMRequest) -> str:
         model_selection=model_selection,
         credential_source=credential_source,
         mocked=is_mocked,
+        extra_metadata={
+            "api_mode": "response",
+            "tools_supplied": bool(tools),
+            "tool_count": len(tools or []),
+            "tool_calls_returned": bool(response.tool_calls),
+            "tool_call_count": len(response.tool_calls),
+            "finish_reason": response.finish_reason,
+        },
     )
 
-    return response_text
+    return response
 
 
 @checkpoint(type="llm_call")
-def _llm_checkpoint_call(request: _LLMRequest) -> str:
+def _llm_checkpoint_call(request: _LLMRequest) -> LLMResponse:
     """Synthetic checkpoint used for flow-body `kitaru.llm()` calls."""
     return _execute_llm_call(request)
 
@@ -1463,7 +1644,7 @@ def llm(
     tools: list[LLMToolDefinition | dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
     name: str | None = None,
-) -> str:
+) -> LLMResponse:
     """Make a tracked LLM call.
 
     Args:
@@ -1480,7 +1661,8 @@ def llm(
         name: Optional display name for this call.
 
     Returns:
-        The model response text.
+        A normalized assistant response with text, tool calls, finish reason,
+        and usage details.
 
     Raises:
         KitaruContextError: If called outside a flow.

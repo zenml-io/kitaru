@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -75,6 +76,26 @@ def _search_tool(name: str = "search_documents") -> dict[str, object]:
     }
 
 
+def _fake_response(
+    content: str | None = "ok",
+    *,
+    usage: LLMUsage | None = None,
+    tool_calls: list[LLMToolCall] | None = None,
+    finish_reason: str = "completed",
+    provider_finish_reason: str | None = "stop",
+    resolved_model: str = "openai/gpt-4o-mini",
+) -> LLMResponse:
+    """Build a normalized response for tests."""
+    return LLMResponse(
+        content=content,
+        tool_calls=tool_calls or [],
+        finish_reason=finish_reason,  # type: ignore[arg-type]
+        provider_finish_reason=provider_finish_reason,
+        usage=usage or LLMUsage(),
+        resolved_model=resolved_model,
+    )
+
+
 @contextmanager
 def _llm_execution_scope(
     *,
@@ -129,12 +150,15 @@ def test_llm_uses_inline_execution_inside_checkpoint() -> None:
             execution_id=execution_id,
             checkpoint_id=checkpoint_id,
         ),
-        patch("kitaru.llm._execute_llm_call", return_value="ok") as mock_execute,
+        patch(
+            "kitaru.llm._execute_llm_call",
+            return_value=_fake_response("ok"),
+        ) as mock_execute,
         patch("kitaru.llm._llm_checkpoint_call") as mock_synthetic,
     ):
         response = llm("hello", model="fast")
 
-    assert response == "ok"
+    assert response.content == "ok"
     mock_execute.assert_called_once()
     mock_synthetic.assert_not_called()
 
@@ -143,11 +167,14 @@ def test_llm_dispatches_through_synthetic_checkpoint_in_flow_scope() -> None:
     """In flow scope (outside checkpoints), llm should call the synthetic boundary."""
     with (
         _flow_scope(name="demo_flow", execution_id=str(uuid4())),
-        patch("kitaru.llm._llm_checkpoint_call", return_value="ok") as mock_synthetic,
+        patch(
+            "kitaru.llm._llm_checkpoint_call",
+            return_value=_fake_response("ok"),
+        ) as mock_synthetic,
     ):
         response = llm("hello", model="fast", name="outline")
 
-    assert response == "ok"
+    assert response.content == "ok"
     mock_synthetic.assert_called_once()
     request = mock_synthetic.call_args.args[0]
     assert request.call_name == "outline"
@@ -159,7 +186,10 @@ def test_llm_auto_names_calls_sequentially_within_flow_scope() -> None:
     """Unnamed calls should receive deterministic runtime-local names."""
     with (
         _flow_scope(name="demo_flow", execution_id=str(uuid4())),
-        patch("kitaru.llm._llm_checkpoint_call", return_value="ok") as mock_synthetic,
+        patch(
+            "kitaru.llm._llm_checkpoint_call",
+            return_value=_fake_response("ok"),
+        ) as mock_synthetic,
     ):
         llm("first")
         llm("second")
@@ -217,6 +247,17 @@ class TestParseProviderTarget:
 # ---------------------------------------------------------------------------
 
 
+def test_llm_models_are_exported_from_public_package() -> None:
+    """Rich LLM response models should be public package exports."""
+    import kitaru
+
+    assert kitaru.LLMFinishReason is not None
+    assert kitaru.LLMResponse is LLMResponse
+    assert kitaru.LLMToolCall is LLMToolCall
+    assert kitaru.LLMToolDefinition is LLMToolDefinition
+    assert kitaru.LLMUsage is LLMUsage
+
+
 def test_llm_response_models_round_trip_and_expose_text_convenience() -> None:
     """The rich response models should be serializable Pydantic models."""
     response = LLMResponse(
@@ -244,6 +285,28 @@ def test_llm_response_models_round_trip_and_expose_text_convenience() -> None:
     assert restored.has_tool_calls is True
     assert restored.tool_calls[0].arguments == {"query": "cats"}
     assert restored.usage.total_tokens == 8
+
+
+def test_provider_call_result_response_text_requires_content() -> None:
+    """Internal text compatibility should still fail for tool-only responses."""
+    result = _ProviderCallResult(
+        response=LLMResponse(
+            tool_calls=[
+                LLMToolCall(
+                    id="call_1",
+                    name="search_documents",
+                    arguments_json='{"query":"cats"}',
+                    arguments={"query": "cats"},
+                )
+            ],
+            finish_reason="tool_calls",
+            resolved_model="openai/gpt-4o-mini",
+        )
+    )
+
+    assert result.response.has_tool_calls is True
+    with pytest.raises(KitaruRuntimeError, match="no text content"):
+        _ = result.response_text
 
 
 def test_parse_openai_compatible_text_only_dict_response() -> None:
@@ -584,7 +647,10 @@ def test_llm_accepts_tools_and_tool_choice_on_public_signature() -> None:
     tool = _search_tool()
     with (
         _flow_scope(name="demo_flow", execution_id=str(uuid4())),
-        patch("kitaru.llm._llm_checkpoint_call", return_value="ok") as mock_synthetic,
+        patch(
+            "kitaru.llm._llm_checkpoint_call",
+            return_value=_fake_response("ok"),
+        ) as mock_synthetic,
     ):
         output = llm(
             "hello",
@@ -594,7 +660,7 @@ def test_llm_accepts_tools_and_tool_choice_on_public_signature() -> None:
             name="tool_call",
         )
 
-    assert output == "ok"
+    assert output.content == "ok"
     request = mock_synthetic.call_args.args[0]
     assert request.tools == [tool]
     assert request.tool_choice == "search_documents"
@@ -625,7 +691,7 @@ def test_llm_normalizes_typed_tool_definition_and_named_choice_for_dispatch() ->
             name="tools_call",
         )
 
-    assert output == "ok"
+    assert output.content == "ok"
     call_kwargs = mock_call.call_args.kwargs
     assert call_kwargs["tools"] == [_search_tool()]
     assert call_kwargs["tool_choice"] == {
@@ -661,7 +727,7 @@ def test_llm_normalizes_dict_tool_choice_modes_for_openai_dispatch(
             name="tools_call",
         )
 
-    assert output == "ok"
+    assert output.content == "ok"
     assert mock_call.call_args.kwargs["tool_choice"] == expected_choice
 
 
@@ -834,6 +900,7 @@ def test_call_openai_passes_tools_tool_choice_and_canonical_messages() -> None:
             env_overlay={},
         )
 
+    assert result.response.content == "done"
     assert result.response_text == "done"
     mock_client.chat.completions.create.assert_called_once_with(
         model="gpt-4o-mini",
@@ -903,6 +970,7 @@ def test_call_anthropic_translates_tools_choice_and_tool_messages() -> None:
             env_overlay={},
         )
 
+    assert result.response.content == "done"
     assert result.response_text == "done"
     mock_client.messages.create.assert_called_once_with(
         model="claude-sonnet-4-20250514",
@@ -987,8 +1055,10 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
     """OpenAI path: normalized prompts, artifacts, and metadata persisted."""
     execution_id, checkpoint_id = _flow_checkpoint_scope()
     fake_result = _ProviderCallResult(
-        response_text="hello world",
-        usage=_LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+        response=_fake_response(
+            "hello world",
+            usage=LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+        )
     )
 
     with (
@@ -1024,7 +1094,7 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
             name="summary_call",
         )
 
-    assert output == "hello world"
+    assert output.content == "hello world"
     mock_resolve_model.assert_called_once_with("fast")
     mock_call_openai.assert_called_once()
     call_kwargs = mock_call_openai.call_args.kwargs
@@ -1034,19 +1104,36 @@ def test_llm_executes_openai_with_normalized_messages_and_tracking() -> None:
 
     mock_save.assert_any_call(
         "summary_call_prompt",
-        [
-            {"role": "system", "content": "You are concise."},
-            {"role": "user", "content": "Summarize this"},
-        ],
+        {
+            "messages": [
+                {"role": "system", "content": "You are concise."},
+                {"role": "user", "content": "Summarize this"},
+            ],
+            "tools": None,
+            "tool_choice": None,
+            "temperature": 0.1,
+            "max_tokens": 200,
+        },
         type="prompt",
     )
-    mock_save.assert_any_call("summary_call_response", "hello world", type="response")
+    mock_save.assert_any_call(
+        "summary_call_response",
+        output.model_dump(mode="json"),
+        type="response",
+    )
     mock_log.assert_called_once()
     logged_payload = mock_log.call_args.kwargs["llm_calls"]["summary_call"]
     assert logged_payload["resolved_model"] == "openai/gpt-4o-mini"
     assert logged_payload["tokens_input"] == 10
     assert logged_payload["tokens_output"] == 20
     assert logged_payload["total_tokens"] == 30
+    assert logged_payload["api_mode"] == "response"
+    assert logged_payload["finish_reason"] == "completed"
+    assert logged_payload["provider_finish_reason"] == "stop"
+    assert logged_payload["response_kind"] == "text_only"
+    assert logged_payload["tool_call_count"] == 0
+    assert logged_payload["tool_call_names"] == []
+    assert logged_payload["has_content"] is True
     # cost_usd should be absent (not provided by direct SDK calls)
     assert "cost_usd" not in logged_payload
 
@@ -1060,8 +1147,11 @@ def test_llm_executes_anthropic_with_system_separation_and_tracking() -> None:
     """Anthropic path: system separated, usage mapped, artifacts persisted."""
     execution_id, checkpoint_id = _flow_checkpoint_scope()
     fake_result = _ProviderCallResult(
-        response_text="bonjour",
-        usage=_LLMUsage(prompt_tokens=5, completion_tokens=15, total_tokens=20),
+        response=_fake_response(
+            "bonjour",
+            usage=LLMUsage(prompt_tokens=5, completion_tokens=15, total_tokens=20),
+            resolved_model="anthropic/claude-sonnet-4-20250514",
+        )
     )
 
     with (
@@ -1097,17 +1187,23 @@ def test_llm_executes_anthropic_with_system_separation_and_tracking() -> None:
             name="translate_call",
         )
 
-    assert output == "bonjour"
+    assert output.content == "bonjour"
     mock_call_anthropic.assert_called_once()
     call_kwargs = mock_call_anthropic.call_args.kwargs
     assert call_kwargs["model"] == "claude-sonnet-4-20250514"
 
-    mock_save.assert_any_call("translate_call_response", "bonjour", type="response")
+    mock_save.assert_any_call(
+        "translate_call_response",
+        output.model_dump(mode="json"),
+        type="response",
+    )
     mock_log.assert_called_once()
     logged_payload = mock_log.call_args.kwargs["llm_calls"]["translate_call"]
     assert logged_payload["tokens_input"] == 5
     assert logged_payload["tokens_output"] == 15
     assert logged_payload["total_tokens"] == 20
+    assert logged_payload["response_kind"] == "text_only"
+    assert logged_payload["finish_reason"] == "completed"
     assert "cost_usd" not in logged_payload
 
 
@@ -1128,7 +1224,7 @@ def test_llm_executes_ollama_via_openai_compatible_path() -> None:
     ):
         output = llm("hello", model="ollama/qwen3.5", name="ollama_call")
 
-    assert output == "ollama response"
+    assert output.content == "ollama response"
     mock_call.assert_called_once()
     call_kwargs = mock_call.call_args.kwargs
     assert "localhost:11434/v1" in call_kwargs["base_url"]
@@ -1180,7 +1276,7 @@ def test_llm_executes_openrouter_via_openai_compatible_path(
             name="or_call",
         )
 
-    assert output == "openrouter response"
+    assert output.content == "openrouter response"
     mock_call.assert_called_once()
     call_kwargs = mock_call.call_args.kwargs
     assert call_kwargs["base_url"] == "https://openrouter.ai/api/v1"
@@ -1365,7 +1461,7 @@ def test_llm_mock_response_skips_provider_sdk(
     ):
         output = llm("hello", model="fast", name="mock_call")
 
-    assert output == "mocked answer"
+    assert output.content == "mocked answer"
     mock_openai.assert_not_called()
     mock_anthropic.assert_not_called()
     # Artifacts and metadata should still be persisted
@@ -1405,7 +1501,103 @@ def test_llm_mock_response_works_with_unsupported_provider(
     ):
         output = llm("hello", model="gemini/gemini-2.0-flash", name="mock_call")
 
-    assert output == "mocked"
+    assert output.content == "mocked"
+
+
+@pytest.mark.parametrize(
+    ("mock_value", "match"),
+    [
+        ("not-json", "valid JSON"),
+        ("[]", "JSON object"),
+        (json.dumps({"text": "hello"}), "unsupported keys"),
+        (json.dumps({}), "requires `content`, `tool_calls`, or both"),
+    ],
+)
+def test_llm_structured_mock_response_rejects_invalid_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_value: str,
+    match: str,
+) -> None:
+    """Structured mock mode should fail loudly for invalid response JSON."""
+    monkeypatch.setenv("KITARU_LLM_MOCK_RESPONSE_JSON", mock_value)
+
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        pytest.raises(KitaruUsageError, match=match),
+    ):
+        llm("hello", model="openai/gpt-4o-mini", name="bad_structured_mock")
+
+
+def test_llm_structured_mock_response_can_return_tool_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Structured mock mode should produce a rich LLMResponse with tool calls."""
+    tool_call_payload = {
+        "id": "call_1",
+        "name": "search_documents",
+        "arguments_json": '{"query":"cats"}',
+        "arguments": {"query": "cats"},
+    }
+    monkeypatch.setenv(
+        "KITARU_LLM_MOCK_RESPONSE_JSON",
+        json.dumps(
+            {
+                "content": "I need to search.",
+                "tool_calls": [tool_call_payload],
+                "finish_reason": "tool_calls",
+                "provider_finish_reason": "mock_tool_calls",
+                "usage": {
+                    "prompt_tokens": 2,
+                    "completion_tokens": 3,
+                    "total_tokens": 5,
+                },
+            }
+        ),
+    )
+    model_selection = ResolvedModelSelection(
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-4o-mini",
+        secret=None,
+    )
+
+    with _llm_execution_scope(model_selection=model_selection) as (mock_save, mock_log):
+        output = llm(
+            "private prompt text",
+            model="fast",
+            tools=[_search_tool()],
+            tool_choice="search_documents",
+            name="structured_mock",
+        )
+
+    assert output.content == "I need to search."
+    assert output.finish_reason == "tool_calls"
+    assert output.tool_calls[0].name == "search_documents"
+    assert output.tool_calls[0].arguments == {"query": "cats"}
+    mock_save.assert_any_call(
+        "structured_mock_prompt",
+        {
+            "messages": [{"role": "user", "content": "private prompt text"}],
+            "tools": [_search_tool()],
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": "search_documents"},
+            },
+            "temperature": None,
+            "max_tokens": None,
+        },
+        type="prompt",
+    )
+    mock_save.assert_any_call(
+        "structured_mock_response",
+        output.model_dump(mode="json"),
+        type="response",
+    )
+    logged_payload = mock_log.call_args.kwargs["llm_calls"]["structured_mock"]
+    assert logged_payload["response_kind"] == "mixed"
+    assert logged_payload["tool_call_count"] == 1
+    assert logged_payload["tool_call_names"] == ["search_documents"]
+    assert "cats" not in logged_payload.values()
 
 
 # ---------------------------------------------------------------------------
@@ -1464,12 +1656,64 @@ def test_llm_analytics_includes_model_alias_in_mock_alias_mode(
     assert metadata["model"] == "openai/gpt-4o-mini"
     assert metadata["model"] == metadata["resolved_model"]
     assert metadata["mocked"] is True
+    assert metadata["api_mode"] == "response"
+    assert metadata["tools_supplied"] is False
+    assert metadata["tool_count"] == 0
+    assert metadata["tool_calls_returned"] is False
+    assert metadata["tool_call_count"] == 0
+    assert metadata["finish_reason"] == "completed"
     assert "prompt" not in metadata
     assert "system" not in metadata
     assert "call_name" not in metadata
     assert "name" not in metadata
     assert "private prompt text" not in metadata.values()
     assert "private_call_name" not in metadata.values()
+
+
+def test_llm_analytics_excludes_tool_names_and_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Analytics flags should stay low-cardinality for tool-capable calls."""
+    monkeypatch.setenv(
+        "KITARU_LLM_MOCK_RESPONSE_JSON",
+        json.dumps(
+            {
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "name": "search_documents",
+                        "arguments_json": '{"query":"cats"}',
+                        "arguments": {"query": "cats"},
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "provider_finish_reason": "mock_tool_calls",
+            }
+        ),
+    )
+
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+    ):
+        llm(
+            "private prompt text",
+            model="openai/gpt-4o-mini",
+            tools=[_search_tool()],
+            tool_choice="search_documents",
+            name="private_call_name",
+        )
+
+    metadata = _tracked_llm_metadata(track_mock)
+    assert metadata["api_mode"] == "response"
+    assert metadata["tools_supplied"] is True
+    assert metadata["tool_count"] == 1
+    assert metadata["tool_calls_returned"] is True
+    assert metadata["tool_call_count"] == 1
+    assert metadata["finish_reason"] == "tool_calls"
+    assert "search_documents" not in metadata.values()
+    assert "cats" not in metadata.values()
+    assert "private prompt text" not in metadata.values()
 
 
 # ---------------------------------------------------------------------------
@@ -1554,8 +1798,10 @@ def test_llm_falls_back_to_blob_when_artifact_save_fails() -> None:
     """LLM tracking should fall back to blob artifacts when save serialization fails."""
     execution_id, checkpoint_id = _flow_checkpoint_scope()
     fake_result = _ProviderCallResult(
-        response_text="hello world",
-        usage=_LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+        response=_fake_response(
+            "hello world",
+            usage=LLMUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+        )
     )
     save_attempts: list[tuple[str, str, object]] = []
 
@@ -1590,29 +1836,27 @@ def test_llm_falls_back_to_blob_when_artifact_save_fails() -> None:
     ):
         output = llm("Summarize this", model="fast", name="summary_call")
 
-    assert output == "hello world"
+    assert output.content == "hello world"
+    prompt_envelope = {
+        "messages": [{"role": "user", "content": "Summarize this"}],
+        "tools": None,
+        "tool_choice": None,
+        "temperature": None,
+        "max_tokens": None,
+    }
+    response_payload = output.model_dump(mode="json")
     assert save_attempts == [
-        (
-            "summary_call_prompt",
-            "prompt",
-            [{"role": "user", "content": "Summarize this"}],
-        ),
+        ("summary_call_prompt", "prompt", prompt_envelope),
         (
             "summary_call_prompt",
             "blob",
-            {
-                "repr": repr([{"role": "user", "content": "Summarize this"}]),
-                "python_type": "list",
-            },
+            {"repr": repr(prompt_envelope), "python_type": "dict"},
         ),
-        ("summary_call_response", "response", "hello world"),
+        ("summary_call_response", "response", response_payload),
         (
             "summary_call_response",
             "blob",
-            {
-                "repr": repr("hello world"),
-                "python_type": "str",
-            },
+            {"repr": repr(response_payload), "python_type": "dict"},
         ),
     ]
     mock_log.assert_called_once()
@@ -1765,6 +2009,90 @@ def test_resolve_credential_overlay_errors_without_known_credentials(
 # ---------------------------------------------------------------------------
 
 
+def test_call_openai_returns_rich_tool_only_response() -> None:
+    """_call_openai should preserve provider tool-call-only responses."""
+    from kitaru.llm import _call_openai
+
+    mock_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_1",
+                            function=SimpleNamespace(
+                                name="search_documents",
+                                arguments='{"query":"cats"}',
+                            ),
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=3, total_tokens=8),
+    )
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}):
+        result = _call_openai(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={},
+        )
+
+    assert result.response.content is None
+    assert result.response.has_tool_calls is True
+    assert result.response.finish_reason == "tool_calls"
+    assert result.response.tool_calls[0].arguments == {"query": "cats"}
+    with pytest.raises(KitaruRuntimeError, match="no text content"):
+        _ = result.response_text
+
+
+def test_call_anthropic_returns_rich_tool_only_response() -> None:
+    """_call_anthropic should preserve provider tool-use-only responses."""
+    from kitaru.llm import _call_anthropic
+
+    mock_response = SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="search_documents",
+                input={"query": "cats"},
+            )
+        ],
+        stop_reason="tool_use",
+        usage=SimpleNamespace(input_tokens=8, output_tokens=4),
+    )
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    mock_anthropic_cls = MagicMock(return_value=mock_client)
+
+    with patch.dict(
+        "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_cls)}
+    ):
+        result = _call_anthropic(
+            model="claude-sonnet-4-20250514",
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={},
+        )
+
+    assert result.response.content is None
+    assert result.response.has_tool_calls is True
+    assert result.response.finish_reason == "tool_calls"
+    assert result.response.tool_calls[0].arguments == {"query": "cats"}
+    with pytest.raises(KitaruRuntimeError, match="no text content"):
+        _ = result.response_text
+
+
 def test_call_openai_passes_correct_parameters() -> None:
     """_call_openai should invoke OpenAI chat completions with correct args."""
     from kitaru.llm import _call_openai
@@ -1786,6 +2114,7 @@ def test_call_openai_passes_correct_parameters() -> None:
             env_overlay={},
         )
 
+    assert result.response.content == "hi"
     assert result.response_text == "hi"
     assert result.usage.prompt_tokens == 5
     assert result.usage.completion_tokens == 3
@@ -1823,6 +2152,7 @@ def test_call_anthropic_separates_system_and_maps_usage() -> None:
             env_overlay={},
         )
 
+    assert result.response.content == "bonjour"
     assert result.response_text == "bonjour"
     assert result.usage.prompt_tokens == 8
     assert result.usage.completion_tokens == 4

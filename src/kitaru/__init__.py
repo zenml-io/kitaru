@@ -91,7 +91,14 @@ from kitaru.errors import (
     KitaruWaitValidationError,
 )
 from kitaru.flow import FlowHandle, flow
-from kitaru.llm import llm
+from kitaru.llm import (
+    LLMFinishReason,
+    LLMResponse,
+    LLMToolCall,
+    LLMToolDefinition,
+    LLMUsage,
+    llm,
+)
 from kitaru.logging import log
 from kitaru.wait import wait
 
@@ -113,6 +120,11 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "LLMFinishReason",
+    "LLMResponse",
+    "LLMToolCall",
+    "LLMToolDefinition",
+    "LLMUsage",
     "StackInfo",
     "checkpoint",
     "configure",
