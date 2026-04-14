@@ -8,16 +8,19 @@ package (``pip install kitaru[openai]``).
 """
 
 import json
+import logging
 import os
 import re
 import time
+import uuid
+import warnings
 from collections.abc import Mapping, Sequence
-from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from email.utils import parsedate_to_datetime
+from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from zenml.client import Client
 
 from kitaru._safe_save import _safe_save
@@ -27,11 +30,17 @@ from kitaru.config import ResolvedModelSelection, resolve_model_selection
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
+    KitaruLLMRateLimitError,
     KitaruRuntimeError,
     KitaruUsageError,
 )
 from kitaru.logging import log
-from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow, _next_llm_call_name
+from kitaru.runtime import (
+    _is_inside_checkpoint,
+    _is_inside_flow,
+    _next_llm_call_name,
+    _register_llm_call_name,
+)
 
 _LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @flow."
 _MOCK_RESPONSE_ENV = "KITARU_LLM_MOCK_RESPONSE"
@@ -41,8 +50,15 @@ _OLLAMA_HOST_ENV = "OLLAMA_HOST"
 _OLLAMA_DEFAULT_HOST = "http://localhost:11434"
 _OLLAMA_DUMMY_API_KEY = "ollama"  # Ollama needs no auth; prevents OpenAI SDK env lookup
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+_LLM_RESPONSE_DEPRECATION_DOCS_URL = (
+    "https://kitaru.ai/docs/guides/llm-calls#migrating-from-string-responses"
+)
 
 _SUPPORTED_PROVIDERS = ("openai", "anthropic", "ollama", "openrouter")
+
+logger = logging.getLogger(__name__)
+_LLM_DEPRECATION_WARNED = False
+_MOCK_ENV_WARNED = False
 
 _MODEL_PROVIDER_HINTS: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
@@ -79,10 +95,35 @@ class LLMToolCall(BaseModel):
     """
 
     id: str | None = None
-    name: str
+    name: Any
+    name_parse_error: str | None = None
     arguments_json: str
     arguments: dict[str, Any] | None = None
     arguments_parse_error: str | None = None
+
+    @model_validator(mode="after")
+    def _enforce_argument_parse_invariant(self) -> "LLMToolCall":
+        """Keep parsed arguments and parse errors mutually exclusive."""
+        if self.arguments_parse_error is not None:
+            if self.arguments is not None:
+                raise ValueError(
+                    "`arguments` must be None when `arguments_parse_error` is set."
+                )
+            return self
+
+        if self.arguments is None:
+            arguments_json, arguments, parse_error = _normalize_tool_arguments(
+                self.arguments_json
+            )
+            self.arguments_json = arguments_json
+            self.arguments = arguments
+            self.arguments_parse_error = parse_error
+
+        if self.arguments_parse_error is None and self.arguments is None:
+            raise ValueError(
+                "`arguments` must be present when `arguments_parse_error` is None."
+            )
+        return self
 
 
 class LLMToolDefinition(BaseModel):
@@ -98,6 +139,7 @@ class LLMToolDefinition(BaseModel):
     parameters: dict[str, Any] = Field(
         default_factory=lambda: {"type": "object", "properties": {}}
     )
+    model_config = ConfigDict(frozen=True)
 
 
 class LLMResponse(BaseModel):
@@ -119,6 +161,33 @@ class LLMResponse(BaseModel):
     alias: str | None = None
     resolved_model: str
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_empty_content(cls, data: Any) -> Any:
+        """Treat empty response text as absent content."""
+        if isinstance(data, Mapping) and data.get("content") == "":
+            normalized = dict(data)
+            normalized["content"] = None
+            return normalized
+        return data
+
+    @model_validator(mode="after")
+    def _enforce_non_empty_response(self) -> "LLMResponse":
+        """Reject impossible empty responses while allowing provider stops."""
+        allowed_empty_reasons = {"content_filter", "max_tokens", "unknown"}
+        if self.finish_reason == "tool_calls" and not self.tool_calls:
+            raise ValueError("`finish_reason='tool_calls'` requires tool calls.")
+        if (
+            self.content is None
+            and not self.tool_calls
+            and self.finish_reason not in allowed_empty_reasons
+        ):
+            raise ValueError(
+                "`content` or `tool_calls` is required unless the provider "
+                "stopped for content filtering, max tokens, or an unknown reason."
+            )
+        return self
+
     @property
     def has_tool_calls(self) -> bool:
         """Whether the response includes one or more tool-call intents."""
@@ -128,10 +197,6 @@ class LLMResponse(BaseModel):
     def text(self) -> str:
         """Text content convenience alias that never returns ``None``."""
         return self.content or ""
-
-    def __str__(self) -> str:
-        """Return response text for lightweight display convenience."""
-        return self.text
 
 
 _LLMUsage = LLMUsage
@@ -402,6 +467,8 @@ def _coerce_openai_message_tool_call(raw_tool_call: Mapping[str, Any]) -> LLMToo
         raise KitaruUsageError(
             "Assistant tool-call function arguments must be a JSON string."
         )
+    if arguments_json == "":
+        arguments_json = "{}"
 
     tool_call = LLMToolCall(
         id=tool_call_id,
@@ -415,7 +482,7 @@ def _validate_request_tool_call(tool_call: LLMToolCall) -> LLMToolCall:
     """Validate assistant-history tool calls before provider dispatch."""
     if not tool_call.id:
         raise KitaruUsageError("Assistant tool calls require a non-empty `id`.")
-    if not tool_call.name:
+    if not isinstance(tool_call.name, str) or not tool_call.name:
         raise KitaruUsageError("Assistant tool calls require a non-empty name.")
 
     _, arguments, parse_error = _normalize_tool_arguments(tool_call.arguments_json)
@@ -557,6 +624,21 @@ def _normalize_tool_definition(tool: Any) -> dict[str, Any]:
         tool_payload: dict[str, Any] = {"type": "function", "function": function}
     elif isinstance(tool, Mapping):
         tool_payload = dict(tool)
+        if "type" not in tool_payload and "function" not in tool_payload:
+            helper_keys = {"name", "description", "parameters"}
+            if set(tool_payload).issubset(helper_keys) and "name" in tool_payload:
+                function = {
+                    "name": tool_payload["name"],
+                    "parameters": deepcopy(
+                        tool_payload.get(
+                            "parameters",
+                            {"type": "object", "properties": {}},
+                        )
+                    ),
+                }
+                if tool_payload.get("description") is not None:
+                    function["description"] = tool_payload["description"]
+                tool_payload = {"type": "function", "function": function}
     else:
         raise KitaruUsageError(
             "Tools must be OpenAI-style dicts or LLMToolDefinition objects."
@@ -567,7 +649,9 @@ def _normalize_tool_definition(tool: Any) -> dict[str, Any]:
     function_payload_raw = tool_payload.get("function")
     if not isinstance(function_payload_raw, Mapping):
         raise KitaruUsageError("Function tools require a `function` object.")
-    function_payload: dict[str, Any] = dict(function_payload_raw)
+    function_payload: dict[str, Any] = dict(
+        cast(Mapping[Any, Any], function_payload_raw)
+    )
 
     name = function_payload.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -661,22 +745,209 @@ def _normalize_tool_choice(
 # ---------------------------------------------------------------------------
 
 
-@contextmanager
-def _temporary_env(additions: Mapping[str, str]) -> Any:
-    """Temporarily add/override environment variables for one call."""
-    previous_values: dict[str, str | None] = {}
-    for key, value in additions.items():
-        previous_values[key] = os.environ.get(key)
-        os.environ[key] = value
+def _credential_value(env_overlay: Mapping[str, str], key: str) -> str | None:
+    """Resolve a provider credential from an overlay first, then the env."""
+    return env_overlay.get(key) or os.environ.get(key)
 
+
+def _header_value(headers: Any, key: str) -> str | None:
+    """Read a provider response header from common SDK header containers."""
+    if headers is None:
+        return None
+    value: Any
     try:
-        yield
-    finally:
-        for key, previous in previous_values.items():
-            if previous is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = previous
+        value = headers.get(key) or headers.get(key.lower()) or headers.get(key.title())
+    except AttributeError:
+        return None
+    if value is None:
+        return None
+    return str(value)
+
+
+def _retry_after_value(headers: Any) -> str | None:
+    """Extract Retry-After information without guessing retry policy."""
+    raw_value = _header_value(headers, "retry-after")
+    if raw_value is None:
+        return None
+    try:
+        return str(float(raw_value))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(raw_value)
+        except (TypeError, ValueError):
+            return raw_value
+        return str(max(0.0, (retry_at.timestamp() - time.time())))
+
+
+def _provider_error_metadata(
+    exc: Exception,
+) -> tuple[int | None, str | None, str | None]:
+    """Extract status code, request ID, and Retry-After from SDK exceptions."""
+    response = getattr(exc, "response", None)
+    headers = getattr(exc, "headers", None) or getattr(response, "headers", None)
+
+    raw_status = getattr(exc, "status_code", None)
+    if raw_status is None:
+        raw_status = getattr(response, "status_code", None)
+    try:
+        status_code = int(raw_status) if raw_status is not None else None
+    except (TypeError, ValueError):
+        status_code = None
+
+    request_id = (
+        getattr(exc, "request_id", None)
+        or getattr(exc, "x_request_id", None)
+        or _header_value(headers, "x-request-id")
+        or _header_value(headers, "request-id")
+    )
+    return (
+        status_code,
+        str(request_id) if request_id is not None else None,
+        _retry_after_value(headers),
+    )
+
+
+def _with_provider_error_metadata(
+    error: Exception,
+    *,
+    status_code: int | None,
+    request_id: str | None,
+) -> Exception:
+    """Attach provider status/request metadata to a Kitaru exception."""
+    if status_code is not None:
+        error.__dict__["status_code"] = status_code
+    if request_id is not None:
+        error.__dict__["request_id"] = request_id
+    return error
+
+
+def _provider_error_message(
+    *,
+    provider_label: str,
+    model: str,
+    exc: Exception,
+    status_code: int | None,
+    request_id: str | None,
+    error_id: str | None = None,
+) -> str:
+    """Build a provider error message that preserves useful SDK metadata."""
+    parts = [
+        f"kitaru.llm() failed while calling {provider_label} for model "
+        f"`{provider_label}/{model}`: {exc}"
+    ]
+    if status_code is not None:
+        parts.append(f"status_code={status_code}")
+    if request_id is not None:
+        parts.append(f"request_id={request_id}")
+    if error_id is not None:
+        parts.append(f"error_id={error_id}")
+    return (
+        " (".join([parts[0], ", ".join(parts[1:]) + ")"])
+        if len(parts) > 1
+        else parts[0]
+    )
+
+
+def _is_network_or_timeout_error(exc: Exception) -> bool:
+    """Best-effort classifier for transport failures across provider SDKs."""
+    class_name = type(exc).__name__.lower()
+    module_name = type(exc).__module__.lower()
+    text = f"{class_name} {module_name}"
+    return any(
+        hint in text
+        for hint in (
+            "timeout",
+            "connection",
+            "connect",
+            "network",
+            "transport",
+            "apierror",
+        )
+    )
+
+
+def _provider_exception_to_kitaru_error(
+    exc: Exception,
+    *,
+    provider_label: str,
+    model: str,
+) -> Exception:
+    """Map provider SDK exceptions into actionable Kitaru error classes."""
+    status_code, request_id, retry_after = _provider_error_metadata(exc)
+
+    if status_code in {401, 403}:
+        error = KitaruRuntimeError(
+            _provider_error_message(
+                provider_label=provider_label,
+                model=model,
+                exc=exc,
+                status_code=status_code,
+                request_id=request_id,
+            )
+        )
+    elif status_code == 429:
+        error = KitaruLLMRateLimitError(
+            _provider_error_message(
+                provider_label=provider_label,
+                model=model,
+                exc=exc,
+                status_code=status_code,
+                request_id=request_id,
+            ),
+            retry_after=retry_after,
+            status_code=status_code,
+            request_id=request_id,
+        )
+    elif status_code == 400:
+        error = KitaruUsageError(
+            _provider_error_message(
+                provider_label=provider_label,
+                model=model,
+                exc=exc,
+                status_code=status_code,
+                request_id=request_id,
+            )
+        )
+    elif (
+        status_code is not None and status_code >= 500
+    ) or _is_network_or_timeout_error(exc):
+        error = KitaruBackendError(
+            _provider_error_message(
+                provider_label=provider_label,
+                model=model,
+                exc=exc,
+                status_code=status_code,
+                request_id=request_id,
+            )
+        )
+    else:
+        error_id = uuid.uuid4().hex
+        logger.exception(
+            "Unknown LLM provider exception.",
+            extra={
+                "error_id": error_id,
+                "provider": provider_label,
+                "model": f"{provider_label}/{model}",
+                "status_code": status_code,
+                "request_id": request_id,
+            },
+        )
+        error = KitaruBackendError(
+            _provider_error_message(
+                provider_label=provider_label,
+                model=model,
+                exc=exc,
+                status_code=status_code,
+                request_id=request_id,
+                error_id=error_id,
+            )
+        )
+
+    return _with_provider_error_metadata(
+        error,
+        status_code=status_code,
+        request_id=request_id,
+    )
 
 
 def _tool_call_to_openai(tool_call_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -771,6 +1042,13 @@ def _messages_to_anthropic(
     system_parts: list[str] = []
     anthropic_messages: list[dict[str, Any]] = []
     seen_non_system = False
+
+    def flush_tool_results(tool_results: list[dict[str, Any]]) -> None:
+        if tool_results:
+            anthropic_messages.append({"role": "user", "content": tool_results.copy()})
+            tool_results.clear()
+
+    pending_tool_results: list[dict[str, Any]] = []
     for message in messages:
         role = message["role"]
         if role == "system":
@@ -785,8 +1063,10 @@ def _messages_to_anthropic(
 
         seen_non_system = True
         if role == "user":
+            flush_tool_results(pending_tool_results)
             anthropic_messages.append({"role": "user", "content": message["content"]})
         elif role == "assistant":
+            flush_tool_results(pending_tool_results)
             content_blocks: list[dict[str, Any]] = []
             if message.get("content"):
                 content_blocks.append({"type": "text", "text": message["content"]})
@@ -796,20 +1076,16 @@ def _messages_to_anthropic(
             )
             anthropic_messages.append({"role": "assistant", "content": content_blocks})
         elif role == "tool":
-            anthropic_messages.append(
+            pending_tool_results.append(
                 {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": message["tool_call_id"],
-                            "content": message["content"],
-                        }
-                    ],
-                }
+                    "type": "tool_result",
+                    "tool_use_id": message["tool_call_id"],
+                    "content": message["content"],
+                },
             )
         else:  # pragma: no cover - _normalize_messages catches this first.
             raise KitaruUsageError(f"Unsupported message role `{role}`.")
+    flush_tool_results(pending_tool_results)
     return system_parts, anthropic_messages
 
 
@@ -873,7 +1149,10 @@ def _call_openai(
         kwargs["temperature"] = temperature
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
-    if tools:
+    tools_disabled = tool_choice == "none" or (
+        isinstance(tool_choice, dict) and tool_choice.get("type") == "none"
+    )
+    if tools and not tools_disabled:
         kwargs["tools"] = tools
     if tool_choice is not None:
         kwargs["tool_choice"] = tool_choice
@@ -883,16 +1162,20 @@ def _call_openai(
         client_kwargs["base_url"] = base_url
     if api_key is not None:
         client_kwargs["api_key"] = api_key
+    elif provider_label == "openai":
+        openai_api_key = _credential_value(env_overlay, "OPENAI_API_KEY")
+        if openai_api_key is not None:
+            client_kwargs["api_key"] = openai_api_key
 
-    with _temporary_env(env_overlay):
+    try:
         client = OpenAI(**client_kwargs)
-        try:
-            response = client.chat.completions.create(**kwargs)
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"kitaru.llm() failed while calling {provider_label} for "
-                f"model `{provider_label}/{model}`: {exc}"
-            ) from exc
+        response = client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        raise _provider_exception_to_kitaru_error(
+            exc,
+            provider_label=provider_label,
+            model=model,
+        ) from exc
 
     return _ProviderCallResult(
         response=_parse_openai_compatible_response(
@@ -944,15 +1227,20 @@ def _call_anthropic(
     if anthropic_tool_choice is not None:
         kwargs["tool_choice"] = anthropic_tool_choice
 
-    with _temporary_env(env_overlay):
-        client = Anthropic()
-        try:
-            response = client.messages.create(**kwargs)
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"kitaru.llm() failed while calling Anthropic for model "
-                f"`anthropic/{model}`: {exc}"
-            ) from exc
+    client_kwargs: dict[str, Any] = {}
+    anthropic_api_key = _credential_value(env_overlay, "ANTHROPIC_API_KEY")
+    if anthropic_api_key is not None:
+        client_kwargs["api_key"] = anthropic_api_key
+
+    try:
+        client = Anthropic(**client_kwargs)
+        response = client.messages.create(**kwargs)
+    except Exception as exc:
+        raise _provider_exception_to_kitaru_error(
+            exc,
+            provider_label="anthropic",
+            model=model,
+        ) from exc
 
     return _ProviderCallResult(
         response=_parse_anthropic_response(
@@ -1022,7 +1310,7 @@ def _is_non_string_sequence(value: Any) -> bool:
 def _normalize_text_content(content: Any) -> str | None:
     """Normalize provider text/content block shapes into a single string."""
     if isinstance(content, str):
-        return content
+        return content or None
     if not _is_non_string_sequence(content):
         return None
 
@@ -1053,6 +1341,8 @@ def _normalize_tool_arguments(
     JSON representation and a parsed dict when parsing succeeds.
     """
     if isinstance(raw_arguments, str):
+        if raw_arguments == "":
+            return "{}", {}, None
         try:
             parsed_arguments = json.loads(raw_arguments)
         except json.JSONDecodeError as exc:
@@ -1093,12 +1383,29 @@ def _normalize_tool_arguments(
     )
 
 
+def _normalize_tool_call_name(raw_name: Any) -> tuple[Any, str | None]:
+    """Preserve provider tool-call names while surfacing malformed values."""
+    if isinstance(raw_name, str) and raw_name:
+        return raw_name, None
+    if raw_name is None:
+        return None, "Tool call name is missing."
+    try:
+        json.dumps(raw_name)
+        safe_raw_name = raw_name
+    except TypeError:
+        safe_raw_name = repr(raw_name)
+    return (
+        safe_raw_name,
+        f"Tool call name must be a non-empty string; got {type(raw_name).__name__}.",
+    )
+
+
 def _parse_openai_tool_call(tool_call: Any) -> LLMToolCall:
     """Normalize one OpenAI-compatible function tool call."""
     function_payload = _read_field(tool_call, "function")
-    name = _read_field(function_payload, "name")
-    if not isinstance(name, str) or not name:
-        name = "unknown"
+    name, name_parse_error = _normalize_tool_call_name(
+        _read_field(function_payload, "name")
+    )
     raw_arguments = _read_field(function_payload, "arguments")
     arguments_json, arguments, parse_error = _normalize_tool_arguments(raw_arguments)
 
@@ -1106,6 +1413,7 @@ def _parse_openai_tool_call(tool_call: Any) -> LLMToolCall:
     return LLMToolCall(
         id=str(tool_call_id) if tool_call_id is not None else None,
         name=name,
+        name_parse_error=name_parse_error,
         arguments_json=arguments_json,
         arguments=arguments,
         arguments_parse_error=parse_error,
@@ -1114,9 +1422,7 @@ def _parse_openai_tool_call(tool_call: Any) -> LLMToolCall:
 
 def _parse_anthropic_tool_call(block: Any) -> LLMToolCall:
     """Normalize one Anthropic ``tool_use`` content block."""
-    name = _read_field(block, "name")
-    if not isinstance(name, str) or not name:
-        name = "unknown"
+    name, name_parse_error = _normalize_tool_call_name(_read_field(block, "name"))
     raw_arguments = _read_field(block, "input")
     arguments_json, arguments, parse_error = _normalize_tool_arguments(raw_arguments)
 
@@ -1124,10 +1430,21 @@ def _parse_anthropic_tool_call(block: Any) -> LLMToolCall:
     return LLMToolCall(
         id=str(tool_call_id) if tool_call_id is not None else None,
         name=name,
+        name_parse_error=name_parse_error,
         arguments_json=arguments_json,
         arguments=arguments,
         arguments_parse_error=parse_error,
     )
+
+
+def _build_provider_response(provider_label: str, **fields: Any) -> LLMResponse:
+    """Build an LLMResponse and wrap provider-shape drift as Kitaru errors."""
+    try:
+        return LLMResponse(**fields)
+    except ValidationError as exc:
+        raise KitaruRuntimeError(
+            f"{provider_label} returned an invalid LLM response shape: {exc}"
+        ) from exc
 
 
 def _parse_openai_compatible_response(
@@ -1158,7 +1475,8 @@ def _parse_openai_compatible_response(
         ]
 
     raw_finish_reason = _read_field(first_choice, "finish_reason")
-    return LLMResponse(
+    return _build_provider_response(
+        "OpenAI-compatible provider",
         content=_normalize_text_content(content),
         tool_calls=tool_calls,
         finish_reason=_normalize_openai_finish_reason(raw_finish_reason),
@@ -1194,7 +1512,8 @@ def _parse_anthropic_response(
             tool_calls.append(_parse_anthropic_tool_call(block))
 
     raw_stop_reason = _read_field(raw_response, "stop_reason")
-    return LLMResponse(
+    return _build_provider_response(
+        "Anthropic",
         content="\n".join(text_blocks) if text_blocks else None,
         tool_calls=tool_calls,
         finish_reason=_normalize_anthropic_finish_reason(raw_stop_reason),
@@ -1203,86 +1522,6 @@ def _parse_anthropic_response(
         requested_model=requested_model,
         alias=alias,
         resolved_model=resolved_model,
-    )
-
-
-def _extract_response_text_openai(raw_response: Any) -> str:
-    """Extract text from an OpenAI Chat Completions response."""
-    choices = getattr(raw_response, "choices", None)
-    if choices is None and isinstance(raw_response, Mapping):
-        choices = raw_response.get("choices")
-
-    if not isinstance(choices, Sequence) or not choices:
-        raise KitaruRuntimeError(
-            "OpenAI returned no response choices. kitaru.llm() is a "
-            "text-only primitive."
-        )
-    first_choice = choices[0]
-    if isinstance(first_choice, Mapping):
-        message = first_choice.get("message")
-        if isinstance(message, Mapping):
-            content = message.get("content")
-        else:
-            content = first_choice.get("text")
-    else:
-        message = getattr(first_choice, "message", None)
-        content = getattr(message, "content", None)
-        if content is None:
-            content = getattr(first_choice, "text", None)
-
-    if isinstance(content, str):
-        return content
-
-    if isinstance(content, Sequence):
-        text_parts: list[str] = []
-        for part in content:
-            if isinstance(part, Mapping) and isinstance(part.get("text"), str):
-                text_parts.append(part["text"])
-            elif isinstance(part, str):
-                text_parts.append(part)
-        if text_parts:
-            return "\n".join(text_parts)
-
-    raise KitaruRuntimeError(
-        "OpenAI returned no text content. kitaru.llm() is a text-only "
-        "primitive — for tool calling or structured output, call the "
-        "provider SDK directly inside a @checkpoint."
-    )
-
-
-def _extract_response_text_anthropic(raw_response: Any) -> str:
-    """Extract text from an Anthropic Messages response."""
-    content = getattr(raw_response, "content", None)
-    if content is None and isinstance(raw_response, Mapping):
-        content = raw_response.get("content")
-
-    if not isinstance(content, Sequence) or not content:
-        raise KitaruRuntimeError(
-            "Anthropic returned no response content. kitaru.llm() is a "
-            "text-only primitive."
-        )
-
-    text_parts: list[str] = []
-    for block in content:
-        block_type: str | None = None
-        block_text: str | None = None
-        if isinstance(block, Mapping):
-            block_type = block.get("type")
-            block_text = block.get("text")
-        else:
-            block_type = getattr(block, "type", None)
-            block_text = getattr(block, "text", None)
-
-        if block_type == "text" and isinstance(block_text, str) and block_text:
-            text_parts.append(block_text)
-
-    if text_parts:
-        return "\n".join(text_parts)
-
-    raise KitaruRuntimeError(
-        "Anthropic returned no text content. kitaru.llm() is a text-only "
-        "primitive — for tool calling or structured output, call the "
-        "provider SDK directly inside a @checkpoint."
     )
 
 
@@ -1410,12 +1649,6 @@ def _structured_mock_response(raw_mock: str, resolved_model: str) -> LLMResponse
             f"{_STRUCTURED_MOCK_RESPONSE_ENV} contains unsupported keys: "
             f"{formatted_keys}."
         )
-    if "content" not in response_payload and "tool_calls" not in response_payload:
-        raise KitaruUsageError(
-            f"{_STRUCTURED_MOCK_RESPONSE_ENV} requires `content`, `tool_calls`, "
-            "or both."
-        )
-
     response_payload.setdefault("finish_reason", "completed")
     response_payload.setdefault("resolved_model", resolved_model)
     try:
@@ -1435,6 +1668,113 @@ def _text_mock_response(mock_response: str, resolved_model: str) -> LLMResponse:
         usage=LLMUsage(),
         resolved_model=resolved_model,
     )
+
+
+def _warn_if_mock_env_active() -> None:
+    """Emit a one-shot process warning when mock LLM env vars hijack calls."""
+    global _MOCK_ENV_WARNED
+    if _MOCK_ENV_WARNED:
+        return
+    active_mock_vars = [
+        name
+        for name in (_STRUCTURED_MOCK_RESPONSE_ENV, _MOCK_RESPONSE_ENV)
+        if os.environ.get(name) is not None
+    ]
+    if not active_mock_vars:
+        return
+    _MOCK_ENV_WARNED = True
+    logger.warning(
+        "Kitaru LLM mock environment variable(s) are active; provider calls "
+        "will be skipped.",
+        extra={"mock_env_vars": active_mock_vars},
+    )
+
+
+def _tool_parse_issue_metadata(response: LLMResponse) -> dict[str, Any]:
+    """Summarize malformed tool-call fields from a provider response."""
+    argument_error_ids = [
+        tool_call.id
+        for tool_call in response.tool_calls
+        if tool_call.arguments_parse_error is not None
+    ]
+    name_error_ids = [
+        tool_call.id
+        for tool_call in response.tool_calls
+        if tool_call.name_parse_error is not None
+    ]
+    return {
+        "tool_arguments_parse_error_count": len(argument_error_ids),
+        "tool_arguments_parse_error_ids": argument_error_ids,
+        "tool_name_parse_error_count": len(name_error_ids),
+        "tool_name_parse_error_ids": name_error_ids,
+    }
+
+
+def _warn_for_tool_parse_issues(
+    *,
+    call_name: str,
+    response: LLMResponse,
+    issue_metadata: Mapping[str, Any],
+) -> None:
+    """Log malformed tool-call fields without hiding the provider response."""
+    argument_count = int(issue_metadata["tool_arguments_parse_error_count"])
+    name_count = int(issue_metadata["tool_name_parse_error_count"])
+    if argument_count:
+        logger.warning(
+            "LLM provider returned tool-call arguments that Kitaru could not parse.",
+            extra={
+                "call_name": call_name,
+                "tool_call_ids": issue_metadata["tool_arguments_parse_error_ids"],
+                "tool_call_count": argument_count,
+            },
+        )
+    if name_count:
+        logger.warning(
+            "LLM provider returned tool-call names that Kitaru could not parse.",
+            extra={
+                "call_name": call_name,
+                "tool_call_ids": issue_metadata["tool_name_parse_error_ids"],
+                "tool_call_count": name_count,
+                "raw_tool_names": [
+                    tool_call.name
+                    for tool_call in response.tool_calls
+                    if tool_call.name_parse_error is not None
+                ],
+            },
+        )
+
+
+def _warn_once_for_llm_response_migration() -> None:
+    """Emit the one-shot migration warning for the rich LLMResponse return."""
+    global _LLM_DEPRECATION_WARNED
+    if _LLM_DEPRECATION_WARNED:
+        return
+    _LLM_DEPRECATION_WARNED = True
+    warnings.warn(
+        "kitaru.llm() now returns LLMResponse instead of str. Use "
+        "`response.text`/`response.content`, or `kitaru.llm_text()` for the "
+        f"compatibility helper. See {_LLM_RESPONSE_DEPRECATION_DOCS_URL}.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _reserve_llm_call_name(name: str | None) -> str:
+    """Normalize and reserve a call name in the active runtime scope."""
+    if name is not None:
+        call_name = _normalize_call_name(name)
+        if not _register_llm_call_name(call_name):
+            raise KitaruUsageError(
+                f"Duplicate LLM call name `{call_name}` in the same runtime scope. "
+                "Use unique `name=` values or omit `name` to let Kitaru "
+                "auto-number calls."
+            )
+        return call_name
+
+    while True:
+        call_name = _normalize_call_name(None)
+        if _register_llm_call_name(call_name):
+            return call_name
 
 
 # ---------------------------------------------------------------------------
@@ -1546,6 +1886,7 @@ def _execute_llm_call(request: _LLMRequest) -> LLMResponse:
     structured_mock = os.environ.get(_STRUCTURED_MOCK_RESPONSE_ENV)
     text_mock = os.environ.get(_MOCK_RESPONSE_ENV)
     if structured_mock is not None:
+        _warn_if_mock_env_active()
         result = _ProviderCallResult(
             response=_structured_mock_response(
                 structured_mock,
@@ -1556,6 +1897,7 @@ def _execute_llm_call(request: _LLMRequest) -> LLMResponse:
         latency_ms = 0.0
         is_mocked = True
     elif text_mock is not None:
+        _warn_if_mock_env_active()
         result = _ProviderCallResult(
             response=_text_mock_response(
                 text_mock,
@@ -1584,6 +1926,12 @@ def _execute_llm_call(request: _LLMRequest) -> LLMResponse:
     usage = response.usage
     response_kind = _response_kind(response)
     tool_call_names = [tool_call.name for tool_call in response.tool_calls]
+    parse_issue_metadata = _tool_parse_issue_metadata(response)
+    _warn_for_tool_parse_issues(
+        call_name=request.call_name,
+        response=response,
+        issue_metadata=parse_issue_metadata,
+    )
 
     _safe_save(
         f"{request.call_name}_prompt",
@@ -1613,6 +1961,7 @@ def _execute_llm_call(request: _LLMRequest) -> LLMResponse:
         "response_kind": response_kind,
         "tool_call_count": len(response.tool_calls),
         "tool_call_names": tool_call_names,
+        **parse_issue_metadata,
         "has_content": bool(response.content),
     }
     filtered_metadata = {
@@ -1630,6 +1979,12 @@ def _execute_llm_call(request: _LLMRequest) -> LLMResponse:
             "tool_count": len(tools or []),
             "tool_calls_returned": bool(response.tool_calls),
             "tool_call_count": len(response.tool_calls),
+            "tool_arguments_parse_error_count": parse_issue_metadata[
+                "tool_arguments_parse_error_count"
+            ],
+            "tool_name_parse_error_count": parse_issue_metadata[
+                "tool_name_parse_error_count"
+            ],
             "finish_reason": response.finish_reason,
         },
     )
@@ -1653,8 +2008,16 @@ def llm(
     tools: list[LLMToolDefinition | dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
     name: str | None = None,
-) -> LLMResponse:
-    """Make a tracked LLM call and return a rich response.
+) -> Any:
+    """Make a tracked LLM call.
+
+    ``kitaru.llm()`` has two concrete runtime shapes:
+
+    - inside a ``@checkpoint`` body, it executes immediately and returns an
+      :class:`LLMResponse`;
+    - inside a ``@flow`` body but outside a checkpoint, it creates a synthetic
+      durable checkpoint and returns that checkpoint's output handle. Call
+      ``handle.load()`` to retrieve the :class:`LLMResponse`.
 
     Args:
         prompt: User prompt text or a chat-style message list.
@@ -1684,6 +2047,10 @@ def llm(
     """
     if not _is_inside_flow():
         raise KitaruContextError(_LLM_OUTSIDE_FLOW_ERROR)
+    _warn_once_for_llm_response_migration()
+
+    call_name = _reserve_llm_call_name(name)
+
     request = _LLMRequest(
         prompt=prompt,
         model=model,
@@ -1692,10 +2059,43 @@ def llm(
         max_tokens=max_tokens,
         tools=tools,
         tool_choice=tool_choice,
-        call_name=_normalize_call_name(name),
+        call_name=call_name,
     )
 
     if _is_inside_checkpoint():
         return _execute_llm_call(request)
 
     return _llm_checkpoint_call(request, id=request.call_name)
+
+
+def llm_text(*args: Any, **kwargs: Any) -> str:
+    """Compatibility helper that returns text from ``kitaru.llm()``.
+
+    Inside a checkpoint this unwraps the immediate :class:`LLMResponse`. Inside
+    a flow body this loads the synthetic checkpoint handle first. Tool-only
+    responses return ``""``.
+    """
+    global _LLM_DEPRECATION_WARNED
+    previous_warning_state = _LLM_DEPRECATION_WARNED
+    _LLM_DEPRECATION_WARNED = True
+    try:
+        result = llm(*args, **kwargs)
+    finally:
+        _LLM_DEPRECATION_WARNED = previous_warning_state
+    if isinstance(result, LLMResponse):
+        return result.content or ""
+
+    load = getattr(result, "load", None)
+    if callable(load):
+        loaded = load()
+        if isinstance(loaded, LLMResponse):
+            return loaded.content or ""
+        content = getattr(loaded, "content", None)
+        if content is None:
+            return ""
+        return str(content)
+
+    content = getattr(result, "content", None)
+    if content is None:
+        return ""
+    return str(content)

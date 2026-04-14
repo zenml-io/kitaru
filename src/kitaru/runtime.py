@@ -47,6 +47,10 @@ _CURRENT_CHECKPOINT_SCOPE: ContextVar[_CheckpointScope | None] = ContextVar(
     default=None,
 )
 _LLM_CALL_COUNTER: ContextVar[int] = ContextVar("kitaru_llm_call_counter", default=0)
+_EXPLICIT_LLM_CALL_NAMES: ContextVar[frozenset[str]] = ContextVar(
+    "kitaru_explicit_llm_call_names",
+    default=frozenset(),
+)
 
 
 def _to_optional_str(value: Any) -> str | None:
@@ -135,9 +139,11 @@ def _flow_scope(
         )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
+    explicit_llm_names_token = _EXPLICIT_LLM_CALL_NAMES.set(frozenset())
     try:
         yield
     finally:
+        _EXPLICIT_LLM_CALL_NAMES.reset(explicit_llm_names_token)
         _LLM_CALL_COUNTER.reset(llm_counter_token)
         _CURRENT_FLOW_SCOPE.reset(flow_token)
 
@@ -166,9 +172,11 @@ def _checkpoint_scope(
         )
     )
     llm_counter_token = _LLM_CALL_COUNTER.set(0)
+    explicit_llm_names_token = _EXPLICIT_LLM_CALL_NAMES.set(frozenset())
     try:
         yield
     finally:
+        _EXPLICIT_LLM_CALL_NAMES.reset(explicit_llm_names_token)
         _LLM_CALL_COUNTER.reset(llm_counter_token)
         _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
 
@@ -244,6 +252,20 @@ def _next_llm_call_name(prefix: str = "llm") -> str:
     next_index = _LLM_CALL_COUNTER.get() + 1
     _LLM_CALL_COUNTER.set(next_index)
     return f"{normalized_prefix}_{next_index}"
+
+
+def _register_llm_call_name(name: str) -> bool:
+    """Register an LLM call name in the current flow/checkpoint scope.
+
+    Returns:
+        ``True`` when the name was newly registered, or ``False`` when the
+        current scope had already used it.
+    """
+    used_names = _EXPLICIT_LLM_CALL_NAMES.get()
+    if name in used_names:
+        return False
+    _EXPLICIT_LLM_CALL_NAMES.set(used_names | {name})
+    return True
 
 
 def _not_implemented(name: str) -> NoReturn:

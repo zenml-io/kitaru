@@ -84,6 +84,7 @@ from kitaru.errors import (
     KitaruError,
     KitaruExecutionError,
     KitaruFeatureNotAvailableError,
+    KitaruLLMRateLimitError,
     KitaruLogRetrievalError,
     KitaruRuntimeError,
     KitaruStateError,
@@ -99,6 +100,7 @@ from kitaru.llm import (
     LLMToolDefinition,
     LLMUsage,
     llm,
+    llm_text,
 )
 from kitaru.logging import log
 from kitaru.wait import wait
@@ -115,6 +117,7 @@ __all__ = [
     "KitaruError",
     "KitaruExecutionError",
     "KitaruFeatureNotAvailableError",
+    "KitaruLLMRateLimitError",
     "KitaruLogRetrievalError",
     "KitaruRuntimeError",
     "KitaruStateError",
@@ -136,6 +139,7 @@ __all__ = [
     "flow",
     "list_stacks",
     "llm",
+    "llm_text",
     "load",
     "log",
     "memory",

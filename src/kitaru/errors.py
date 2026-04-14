@@ -66,6 +66,27 @@ class KitaruBackendError(KitaruRuntimeError):
     """Raised when Kitaru cannot communicate with the backend."""
 
 
+class KitaruLLMRateLimitError(KitaruBackendError):
+    """Raised when an LLM provider rejects a request due to rate limits."""
+
+    retry_after: str | None
+    status_code: int | None
+    request_id: str | None
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after: str | None = None,
+        status_code: int | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.status_code = status_code
+        self.request_id = request_id
+
+
 class KitaruLogRetrievalError(KitaruBackendError):
     """Raised when runtime logs cannot be retrieved from the backend."""
 
@@ -213,6 +234,7 @@ __all__ = [
     "KitaruError",
     "KitaruExecutionError",
     "KitaruFeatureNotAvailableError",
+    "KitaruLLMRateLimitError",
     "KitaruLogRetrievalError",
     "KitaruRuntimeError",
     "KitaruStateError",

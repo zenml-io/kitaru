@@ -2112,7 +2112,13 @@ def _compact_impl(
         extra_metadata={"usage_context": "memory_compaction"},
     )
 
-    summary_text = result.response_text
+    summary_text = result.response.content
+    if summary_text is None:
+        raise KitaruRuntimeError(
+            "Memory compaction expected text from kitaru.llm(), but the "
+            "provider returned a tool-only response. Use a text-capable model "
+            "or adjust the compaction instruction so the model returns summary text."
+        )
 
     # Write the summary as a new version of the target key
     new_entry = _set_entry_impl(
