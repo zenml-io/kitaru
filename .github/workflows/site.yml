@@ -49,10 +49,7 @@ jobs:
           cache-dependency-path: |
             docs/pnpm-lock.yaml
             site/pnpm-lock.yaml
-      - run: >-
-          pnpm install --frozen-lockfile
-          --config.only-built-dependencies=esbuild
-          --config.only-built-dependencies=sharp
+      - run: pnpm install --frozen-lockfile
         working-directory: docs
 
       # --- Generate SDK reference (needs both Python griffe + Node fumadocs-python) ---
@@ -64,11 +61,7 @@ jobs:
         working-directory: docs
 
       # --- Build site (Astro) ---
-      - run: >-
-          pnpm install --frozen-lockfile
-          --config.only-built-dependencies=esbuild
-          --config.only-built-dependencies=sharp
-          --config.only-built-dependencies=workerd
+      - run: pnpm install --frozen-lockfile
         working-directory: site
       - run: pnpm run build
         working-directory: site
