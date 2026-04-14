@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import warnings
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -14,7 +17,9 @@ import pytest
 from kitaru.analytics import AnalyticsEvent
 from kitaru.config import ResolvedModelSelection
 from kitaru.errors import (
+    KitaruBackendError,
     KitaruContextError,
+    KitaruLLMRateLimitError,
     KitaruRuntimeError,
     KitaruUsageError,
 )
@@ -23,6 +28,7 @@ from kitaru.llm import (
     LLMToolCall,
     LLMToolDefinition,
     LLMUsage,
+    _LLMRequest,
     _LLMUsage,
     _parse_anthropic_response,
     _parse_openai_compatible_response,
@@ -30,6 +36,7 @@ from kitaru.llm import (
     _ProviderCallResult,
     _resolve_credential_overlay,
     llm,
+    llm_text,
 )
 from kitaru.runtime import _checkpoint_scope, _flow_scope
 
@@ -182,6 +189,89 @@ def test_llm_dispatches_through_synthetic_checkpoint_in_flow_scope() -> None:
     assert mock_synthetic.call_args.kwargs["id"] == "outline"
 
 
+def test_llm_flow_body_synthetic_checkpoint_round_trips_typed_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flow-body calls should preserve typed tools across the synthetic boundary."""
+
+    class LoadedHandle:
+        def __init__(self, value: LLMResponse) -> None:
+            self._value = value
+
+        def load(self) -> LLMResponse:
+            return self._value
+
+    def fake_synthetic_call(request: _LLMRequest, *, id: str) -> LoadedHandle:
+        # Simulate ZenML's durable step serialization boundary: Pydantic models
+        # become JSON-like dicts before the checkpoint function sees them again.
+        assert id == "tool_request"
+        serialized_request = request.model_dump(mode="json")
+        rehydrated_request = _LLMRequest.model_validate(serialized_request)
+        _, checkpoint_id = _flow_checkpoint_scope()
+        with _checkpoint_scope(
+            name="_llm_checkpoint_call",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ):
+            from kitaru.llm import _execute_llm_call
+
+            return LoadedHandle(_execute_llm_call(rehydrated_request))
+
+    execution_id = str(uuid4())
+    monkeypatch.setenv(
+        "KITARU_LLM_MOCK_RESPONSE_JSON",
+        json.dumps(
+            {
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "name": "search_documents",
+                        "arguments_json": '{"query":"cats"}',
+                        "arguments": {"query": "cats"},
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "provider_finish_reason": "mock_tool_calls",
+            }
+        ),
+    )
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        patch(
+            "kitaru.llm.resolve_model_selection",
+            return_value=_simple_selection("openai/gpt-4o-mini"),
+        ),
+        patch("kitaru.llm.save"),
+        patch("kitaru.llm.log"),
+        patch("kitaru.llm._llm_checkpoint_call", side_effect=fake_synthetic_call),
+    ):
+        first_handle = llm(
+            [{"role": "user", "content": "Need search"}],
+            model="openai/gpt-4o-mini",
+            tools=[
+                LLMToolDefinition(
+                    name="search_documents",
+                    description="Search documents.",
+                    parameters={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                )
+            ],
+            tool_choice="auto",
+            name="tool_request",
+        )
+
+    first = first_handle.load()
+    assert isinstance(first, LLMResponse)
+    assert first.finish_reason == "tool_calls"
+    assert first.tool_calls[0].name == "search_documents"
+    assert first.tool_calls[0].arguments == {"query": "cats"}
+
+
 def test_llm_auto_names_calls_sequentially_within_flow_scope() -> None:
     """Unnamed calls should receive deterministic runtime-local names."""
     with (
@@ -198,6 +288,45 @@ def test_llm_auto_names_calls_sequentially_within_flow_scope() -> None:
     second_request = mock_synthetic.call_args_list[1].args[0]
     assert first_request.call_name == "llm_1"
     assert second_request.call_name == "llm_2"
+
+
+def test_llm_duplicate_explicit_name_in_checkpoint_raises() -> None:
+    """Two explicit LLM names in one checkpoint scope should not collide."""
+    execution_id, checkpoint_id = _flow_checkpoint_scope()
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type=None,
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+        patch("kitaru.llm._execute_llm_call", return_value=_fake_response("ok")),
+    ):
+        llm("first", model="fast", name="same")
+        with pytest.raises(KitaruUsageError, match="Duplicate LLM call name"):
+            llm("second", model="fast", name="same")
+
+
+def test_llm_explicit_name_collision_with_auto_name_raises() -> None:
+    """Explicit names should also reserve auto-generated names in the scope."""
+    execution_id, checkpoint_id = _flow_checkpoint_scope()
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type=None,
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+        patch("kitaru.llm._execute_llm_call", return_value=_fake_response("ok")),
+    ):
+        llm("first", model="fast", name="llm_1")
+        llm("second", model="fast")
+        with pytest.raises(KitaruUsageError, match="Duplicate LLM call name"):
+            llm("third", model="fast", name="llm_2")
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +385,8 @@ def test_llm_models_are_exported_from_public_package() -> None:
     assert kitaru.LLMToolCall is LLMToolCall
     assert kitaru.LLMToolDefinition is LLMToolDefinition
     assert kitaru.LLMUsage is LLMUsage
+    assert kitaru.KitaruLLMRateLimitError is KitaruLLMRateLimitError
+    assert kitaru.llm_text is llm_text
 
 
 def test_llm_response_models_round_trip_and_expose_text_convenience() -> None:
@@ -281,10 +412,157 @@ def test_llm_response_models_round_trip_and_expose_text_convenience() -> None:
     restored = LLMResponse.model_validate(response.model_dump())
 
     assert restored.text == "done"
-    assert str(restored) == "done"
+    assert str(restored) != "done"
+    assert "LLMToolCall" in str(restored)
     assert restored.has_tool_calls is True
     assert restored.tool_calls[0].arguments == {"query": "cats"}
     assert restored.usage.total_tokens == 8
+
+
+def test_llm_response_json_round_trip_preserves_tool_parse_errors() -> None:
+    """LLMResponse should survive JSON artifact round-trips with rich tool data."""
+    response = LLMResponse(
+        content=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_good",
+                name="get_time",
+                arguments_json="{}",
+                arguments={},
+            ),
+            LLMToolCall(
+                id="call_bad",
+                name="search_documents",
+                arguments_json='{"query":',
+                arguments=None,
+                arguments_parse_error="Expecting value",
+            ),
+        ],
+        finish_reason="tool_calls",
+        provider_finish_reason="tool_calls",
+        usage=LLMUsage(
+            prompt_tokens=None,
+            completion_tokens=7,
+            total_tokens=None,
+        ),
+        requested_model="fast",
+        alias="fast",
+        resolved_model="openai/gpt-4o-mini",
+    )
+
+    restored = LLMResponse.model_validate(response.model_dump(mode="json"))
+
+    assert restored.content is None
+    assert restored.text == ""
+    assert restored.has_tool_calls is True
+    assert restored.tool_calls[0].arguments == {}
+    assert restored.tool_calls[0].arguments_parse_error is None
+    assert restored.tool_calls[1].arguments is None
+    assert restored.tool_calls[1].arguments_parse_error == "Expecting value"
+    assert restored.usage.prompt_tokens is None
+    assert restored.usage.completion_tokens == 7
+    assert restored.usage.total_tokens is None
+
+
+def test_llm_response_invariants_reject_empty_completed_response() -> None:
+    """Completed responses need text or tool calls at the model boundary."""
+    with pytest.raises(ValueError, match=r"content.*tool_calls"):
+        LLMResponse(
+            content=None,
+            tool_calls=[],
+            finish_reason="completed",
+            resolved_model="openai/gpt-4o-mini",
+        )
+    with pytest.raises(ValueError, match=r"tool_calls.*requires tool calls"):
+        LLMResponse(
+            content="I forgot the tool call payload.",
+            tool_calls=[],
+            finish_reason="tool_calls",
+            resolved_model="openai/gpt-4o-mini",
+        )
+
+
+def test_llm_tool_call_arguments_invariant_rejects_dual_state() -> None:
+    """Tool calls cannot carry parsed arguments and a parse error together."""
+    with pytest.raises(ValueError, match=r"arguments.*arguments_parse_error"):
+        LLMToolCall(
+            id="call_bad",
+            name="search_documents",
+            arguments_json='{"query":',
+            arguments={"query": "cats"},
+            arguments_parse_error="bad json",
+        )
+
+
+def test_llm_response_empty_content_normalizes_to_none() -> None:
+    """Empty provider text should not count as real response content."""
+    response = LLMResponse(
+        content="",
+        tool_calls=[],
+        finish_reason="max_tokens",
+        resolved_model="openai/gpt-4o-mini",
+    )
+
+    assert response.content is None
+    assert response.text == ""
+
+
+def test_llm_migration_contract_returns_response_not_string() -> None:
+    """llm() should return LLMResponse; callers use `.text` for string behavior."""
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch(
+            "kitaru.llm._call_openai",
+            return_value=_ProviderCallResult(response_text="hello"),
+        ),
+        patch("kitaru.llm._LLM_DEPRECATION_WARNED", False),
+        pytest.warns(DeprecationWarning, match="LLMResponse instead of str"),
+    ):
+        response = llm("hello", model="openai/gpt-4o-mini", name="migration")
+
+    assert isinstance(response, LLMResponse)
+    assert not isinstance(response, str)
+    assert response.text == "hello"
+    assert str(response) != "hello"
+
+
+def test_llm_deprecation_warning_is_one_shot() -> None:
+    """The migration warning should only fire once per process."""
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch(
+            "kitaru.llm._call_openai",
+            return_value=_ProviderCallResult(response_text="hello"),
+        ),
+        patch("kitaru.llm._LLM_DEPRECATION_WARNED", False),
+        pytest.warns(DeprecationWarning) as caught,
+    ):
+        llm("first", model="openai/gpt-4o-mini", name="warning_one")
+        llm("second", model="openai/gpt-4o-mini", name="warning_two")
+
+    assert len(caught) == 1
+
+
+def test_llm_text_returns_string_compat_helper_without_warning() -> None:
+    """llm_text() should be the quiet string-returning compatibility path."""
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch(
+            "kitaru.llm._call_openai",
+            return_value=_ProviderCallResult(response_text="hello"),
+        ),
+        patch("kitaru.llm._LLM_DEPRECATION_WARNED", False),
+        warnings.catch_warnings(record=True) as caught,
+    ):
+        warnings.simplefilter("always")
+        text = llm_text("hello", model="openai/gpt-4o-mini", name="llm_text_call")
+
+    assert text == "hello"
+    assert [
+        warning
+        for warning in caught
+        if issubclass(warning.category, DeprecationWarning)
+    ] == []
 
 
 def test_provider_call_result_response_text_requires_content() -> None:
@@ -439,6 +717,41 @@ def test_parse_openai_compatible_tool_only_preserves_invalid_arguments() -> None
     assert tool_call.arguments_parse_error is not None
 
 
+def test_parse_openai_empty_tool_arguments_as_zero_arg_call() -> None:
+    """OpenAI `arguments=""` should round-trip as a zero-argument tool call."""
+    raw_response = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_time",
+                            "type": "function",
+                            "function": {
+                                "name": "get_time",
+                                "arguments": "",
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+    }
+
+    response = _parse_openai_compatible_response(
+        raw_response,
+        resolved_model="openai/gpt-4o-mini",
+    )
+
+    assert response.tool_calls[0].name == "get_time"
+    assert response.tool_calls[0].arguments_json == "{}"
+    assert response.tool_calls[0].arguments == {}
+    assert response.tool_calls[0].arguments_parse_error is None
+
+
 def test_parse_anthropic_text_only_dict_response() -> None:
     """Anthropic dict responses should collect text blocks and map usage."""
     raw_response = {
@@ -585,10 +898,19 @@ def test_parse_openai_compatible_finish_reason_mapping(
     normalized_reason: str,
 ) -> None:
     """OpenAI-compatible finish reasons should follow the normalized taxonomy."""
+    message: dict[str, object] = {"role": "assistant", "content": "ok"}
+    if normalized_reason == "tool_calls":
+        message["tool_calls"] = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "get_time", "arguments": "{}"},
+            }
+        ]
     raw_response = {
         "choices": [
             {
-                "message": {"role": "assistant", "content": "ok"},
+                "message": message,
                 "finish_reason": raw_reason,
             }
         ]
@@ -621,8 +943,18 @@ def test_parse_anthropic_finish_reason_mapping(
     normalized_reason: str,
 ) -> None:
     """Anthropic stop reasons should follow the normalized taxonomy."""
+    content: list[dict[str, object]] = [{"type": "text", "text": "ok"}]
+    if normalized_reason == "tool_calls":
+        content.append(
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "get_time",
+                "input": {},
+            }
+        )
     raw_response = {
-        "content": [{"type": "text", "text": "ok"}],
+        "content": content,
         "stop_reason": raw_reason,
     }
 
@@ -1014,6 +1346,70 @@ def test_call_anthropic_translates_tools_choice_and_tool_messages() -> None:
         ],
         tool_choice={"type": "tool", "name": "search_documents"},
     )
+
+
+def test_call_anthropic_batches_consecutive_tool_results() -> None:
+    """Consecutive canonical tool messages should become one Anthropic user turn."""
+    from kitaru.llm import _call_anthropic
+
+    mock_response = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="done")],
+        usage=SimpleNamespace(input_tokens=8, output_tokens=4),
+    )
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    mock_anthropic_cls = MagicMock(return_value=mock_client)
+
+    with patch.dict(
+        "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_cls)}
+    ):
+        _call_anthropic(
+            model="claude-sonnet-4-20250514",
+            messages=[
+                {"role": "user", "content": "Need two lookups"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        LLMToolCall(
+                            id="call_1",
+                            name="search_documents",
+                            arguments_json='{"query":"cats"}',
+                        ).model_dump(),
+                        LLMToolCall(
+                            id="call_2",
+                            name="lookup_record",
+                            arguments_json='{"record_id":7}',
+                        ).model_dump(),
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "cats"},
+                {"role": "tool", "tool_call_id": "call_2", "content": "record"},
+                {"role": "user", "content": "continue"},
+            ],
+            temperature=None,
+            max_tokens=None,
+            tools=[_search_tool(), _search_tool("lookup_record")],
+            tool_choice="auto",
+            env_overlay={},
+        )
+
+    messages = mock_client.messages.create.call_args.kwargs["messages"]
+    assert messages[2] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "cats",
+            },
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_2",
+                "content": "record",
+            },
+        ],
+    }
+    assert messages[3] == {"role": "user", "content": "continue"}
 
 
 def test_call_anthropic_translates_auto_tool_choice_mode() -> None:
@@ -1510,7 +1906,7 @@ def test_llm_mock_response_works_with_unsupported_provider(
         ("not-json", "valid JSON"),
         ("[]", "JSON object"),
         (json.dumps({"text": "hello"}), "unsupported keys"),
-        (json.dumps({}), "requires `content`, `tool_calls`, or both"),
+        (json.dumps({}), "LLMResponse shape"),
     ],
 )
 def test_llm_structured_mock_response_rejects_invalid_payloads(
@@ -2007,6 +2403,192 @@ def test_resolve_credential_overlay_errors_without_known_credentials(
 # ---------------------------------------------------------------------------
 # Direct provider SDK integration (verifies correct SDK invocation)
 # ---------------------------------------------------------------------------
+
+
+class _FakeProviderStatusError(RuntimeError):
+    """Small SDK-like exception carrying provider response metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        request_id: str = "req_123",
+        retry_after: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.request_id = request_id
+        self.headers = {}
+        if retry_after is not None:
+            self.headers["retry-after"] = retry_after
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_error"),
+    [
+        (400, KitaruUsageError),
+        (401, KitaruRuntimeError),
+        (403, KitaruRuntimeError),
+        (429, KitaruLLMRateLimitError),
+        (500, KitaruBackendError),
+    ],
+)
+def test_call_openai_classifies_provider_status_errors(
+    status_code: int,
+    expected_error: type[Exception],
+) -> None:
+    """Provider status codes should map to actionable Kitaru exception types."""
+    from kitaru.llm import _call_openai
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = _FakeProviderStatusError(
+        "provider exploded",
+        status_code=status_code,
+        retry_after="3" if status_code == 429 else None,
+    )
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with (
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(expected_error) as exc_info,
+    ):
+        _call_openai(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={},
+        )
+
+    assert getattr(exc_info.value, "status_code", None) == status_code
+    assert getattr(exc_info.value, "request_id", None) == "req_123"
+    if status_code == 429:
+        assert isinstance(exc_info.value, KitaruLLMRateLimitError)
+        assert exc_info.value.retry_after == "3.0"
+
+
+def test_llm_wraps_openai_sdk_failure_without_response_artifact() -> None:
+    """OpenAI SDK failures should be KitaruBackendError and save no response."""
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = RuntimeError("boom")
+    mock_openai_cls = MagicMock(return_value=mock_client)
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("openai/gpt-4o-mini")
+        ) as (mock_save, _),
+        patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}),
+        pytest.raises(KitaruBackendError, match="boom"),
+    ):
+        llm("hello", model="openai/gpt-4o-mini", name="openai_failure")
+
+    assert [
+        call_args.args[0]
+        for call_args in mock_save.call_args_list
+        if call_args.args[0].endswith("_response")
+    ] == []
+
+
+def test_llm_wraps_anthropic_sdk_failure_without_response_artifact() -> None:
+    """Anthropic SDK failures should be KitaruBackendError and save no response."""
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = RuntimeError("boom")
+    mock_anthropic_cls = MagicMock(return_value=mock_client)
+
+    with (
+        _llm_execution_scope(
+            model_selection=_simple_selection("anthropic/claude-sonnet-4-20250514")
+        ) as (mock_save, _),
+        patch.dict(
+            "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_cls)}
+        ),
+        pytest.raises(KitaruBackendError, match="boom"),
+    ):
+        llm(
+            "hello",
+            model="anthropic/claude-sonnet-4-20250514",
+            name="anthropic_failure",
+        )
+
+    assert [
+        call_args.args[0]
+        for call_args in mock_save.call_args_list
+        if call_args.args[0].endswith("_response")
+    ] == []
+
+
+def test_call_openai_uses_direct_api_keys_without_env_leakage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent calls should pass per-call API keys without mutating environ."""
+    from kitaru.llm import _call_openai
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    seen_client_keys: list[str] = []
+
+    def openai_factory(**kwargs: object) -> MagicMock:
+        seen_client_keys.append(str(kwargs["api_key"]))
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(),
+        )
+        return mock_client
+
+    def run_call(api_key: str) -> str:
+        result = _call_openai(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": api_key}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={"OPENAI_API_KEY": api_key},
+        )
+        return result.response.text
+
+    with (
+        patch.dict(
+            "sys.modules",
+            {"openai": MagicMock(OpenAI=MagicMock(side_effect=openai_factory))},
+        ),
+        ThreadPoolExecutor(max_workers=2) as executor,
+    ):
+        results = list(executor.map(run_call, ["key-a", "key-b"]))
+
+    assert results == ["ok", "ok"]
+    assert sorted(seen_client_keys) == ["key-a", "key-b"]
+    assert os.environ.get("OPENAI_API_KEY") is None
+
+
+def test_call_anthropic_uses_direct_api_key_without_env_leakage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anthropic should receive secret-overlay API keys as constructor kwargs."""
+    from kitaru.llm import _call_anthropic
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    mock_response = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="ok")],
+        usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+    )
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    mock_anthropic_cls = MagicMock(return_value=mock_client)
+
+    with patch.dict(
+        "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_cls)}
+    ):
+        result = _call_anthropic(
+            model="claude-sonnet-4-20250514",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=None,
+            max_tokens=None,
+            env_overlay={"ANTHROPIC_API_KEY": "secret-anthropic"},
+        )
+
+    assert result.response.text == "ok"
+    mock_anthropic_cls.assert_called_once_with(api_key="secret-anthropic")
+    assert os.environ.get("ANTHROPIC_API_KEY") is None
 
 
 def test_call_openai_returns_rich_tool_only_response() -> None:

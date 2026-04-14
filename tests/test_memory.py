@@ -21,6 +21,7 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
 )
+from kitaru.llm import LLMResponse, LLMToolCall
 from kitaru.memory import (
     _COMPACTION_LOG_PREFIX,
     _MEMORY_ARTIFACT_PREFIX,
@@ -1617,7 +1618,13 @@ class TestCompactImpl:
             ),
             patch(
                 "kitaru.llm._dispatch_provider_call",
-                return_value=SimpleNamespace(response_text="Compacted latest value"),
+                return_value=SimpleNamespace(
+                    response=LLMResponse(
+                        content="Compacted latest value",
+                        finish_reason="completed",
+                        resolved_model="resolved-model",
+                    )
+                ),
             ),
             patch("kitaru.llm._track_llm_call_analytics") as llm_track_mock,
             patch("kitaru.memory.track") as track_mock,
@@ -1715,7 +1722,13 @@ class TestCompactImpl:
             ),
             patch(
                 "kitaru.llm._dispatch_provider_call",
-                return_value=SimpleNamespace(response_text="History summary"),
+                return_value=SimpleNamespace(
+                    response=LLMResponse(
+                        content="History summary",
+                        finish_reason="completed",
+                        resolved_model="resolved-model",
+                    )
+                ),
             ),
         ):
             result = _compact_impl(
@@ -1734,6 +1747,56 @@ class TestCompactImpl:
         assert "version 1" not in prompt
         record = write_record.call_args.args[1]
         assert record.source_mode == "history"
+
+    def test_compact_reports_clean_error_for_no_text_llm_response(self) -> None:
+        """Compaction should fail clearly when the LLM response has no content."""
+        latest = _memory_artifact(
+            scope="s",
+            scope_type="namespace",
+            key="prefs",
+            version=3,
+            value="latest summary candidate",
+        )
+        tool_only_response = LLMResponse(
+            content=None,
+            tool_calls=[
+                LLMToolCall(
+                    id="call_1",
+                    name="search_documents",
+                    arguments_json='{"query":"prefs"}',
+                    arguments={"query": "prefs"},
+                )
+            ],
+            finish_reason="tool_calls",
+            resolved_model="resolved-model",
+        )
+
+        with (
+            patch("kitaru.memory._fetch_memory_artifact", return_value=latest),
+            patch(
+                "kitaru.llm.resolve_model_selection",
+                return_value=SimpleNamespace(resolved_model="resolved-model"),
+            ),
+            patch(
+                "kitaru.llm._normalize_messages",
+                return_value=[{"role": "user", "content": "prompt"}],
+            ),
+            patch(
+                "kitaru.llm._resolve_credential_overlay",
+                return_value=({}, "environment"),
+            ),
+            patch(
+                "kitaru.llm._dispatch_provider_call",
+                return_value=SimpleNamespace(response=tool_only_response),
+            ),
+            patch("kitaru.llm._track_llm_call_analytics"),
+            pytest.raises(KitaruRuntimeError, match="provider returned a tool-only"),
+        ):
+            _compact_impl(
+                _MemoryScope(scope="s", scope_type="namespace"),
+                key="prefs",
+                client_factory=lambda: MagicMock(),
+            )
 
     def test_multi_key_compact_keeps_current_value_behavior(self) -> None:
         runner = _memory_artifact(
@@ -1790,7 +1853,13 @@ class TestCompactImpl:
             ),
             patch(
                 "kitaru.llm._dispatch_provider_call",
-                return_value=SimpleNamespace(response_text="Merged summary"),
+                return_value=SimpleNamespace(
+                    response=LLMResponse(
+                        content="Merged summary",
+                        finish_reason="completed",
+                        resolved_model="resolved-model",
+                    )
+                ),
             ),
         ):
             result = _compact_impl(

@@ -317,6 +317,61 @@ section_header "LLM flow"
 run_test "LLM manual tool loop (mock)" \
     timed 30 $UV_RUN examples/llm/manual_tool_loop.py
 
+LLM_TOOL_SMOKE=$(mktemp "${TMPDIR:-/tmp}/kitaru-llm-tool-smoke.XXXXXX.py")
+cat > "$LLM_TOOL_SMOKE" <<'PY'
+import json
+import os
+
+from kitaru import LLMResponse, LLMToolDefinition, flow, llm
+
+os.environ["KITARU_LLM_MOCK_RESPONSE_JSON"] = json.dumps(
+    {
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "name": "search_documents",
+                "arguments_json": '{"query":"cats"}',
+                "arguments": {"query": "cats"},
+            }
+        ],
+        "finish_reason": "tool_calls",
+        "provider_finish_reason": "mock_tool_calls",
+    }
+)
+
+
+@flow
+def llm_tool_smoke() -> None:
+    handle = llm(
+        [{"role": "user", "content": "Find cat notes"}],
+        model="openai/gpt-4o-mini",
+        tools=[
+            LLMToolDefinition(
+                name="search_documents",
+                description="Search documents by query.",
+                parameters={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            )
+        ],
+        tool_choice="auto",
+        name="smoke_tool_request",
+    )
+    response = handle.load()
+    assert isinstance(response, LLMResponse)
+    assert response.finish_reason == "tool_calls"
+    assert response.tool_calls[0].name == "search_documents"
+    assert response.tool_calls[0].arguments == {"query": "cats"}
+
+
+llm_tool_smoke()
+PY
+run_test "LLM flow-body tool request (mock)" \
+    timed 60 $UV_RUN "$LLM_TOOL_SMOKE"
+rm -f "$LLM_TOOL_SMOKE"
+
 if [[ "$HAS_OPENAI" == true ]]; then
     run_test "LLM flow (flow_with_llm)" \
         timed 30 $UV_RUN examples/llm/flow_with_llm.py
