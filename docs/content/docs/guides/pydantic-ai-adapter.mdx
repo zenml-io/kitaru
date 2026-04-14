@@ -24,15 +24,17 @@ uv sync --extra local --extra pydantic-ai
 from kitaru import flow, checkpoint
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
-from kitaru.adapters import pydantic_ai as kp
+from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent
 
-researcher = kp.wrap(
+researcher = KitaruAgent(
     Agent(TestModel(), name="researcher"),
-    tool_capture_config={"mode": "full"},
-    tool_capture_config_by_name={
-        "quick_check": {"mode": "metadata_only"},
-        "noop": {"mode": "off"},
-    },
+    capture=CapturePolicy(
+        tool_capture="full",
+        tool_capture_overrides={
+            "quick_check": "metadata",
+            "noop": None,  # None fully opts this tool out of tracking
+        },
+    ),
 )
 
 @checkpoint(type="llm_call")
@@ -50,29 +52,31 @@ The outer checkpoint remains the replay boundary. Adapter-internal model/tool ca
 
 Capture policy is observability-only (it does not change tool execution):
 
-- `full` (default): metadata + args/result artifacts + timings
-- `metadata_only`: metadata + timings, no args/result artifacts
-- `off`: no adapter child event or artifacts for that tool
+- `"full"` (default): metadata + args/result artifacts + timings
+- `"metadata"`: metadata + timings, no args/result artifacts
+- `None`: no adapter child event or artifacts for that tool (HITL interception still works)
 
-You can set a global default with `tool_capture_config` and override individual tools with `tool_capture_config_by_name`.
+Set a global default via `CapturePolicy.tool_capture` and override individual tools via `CapturePolicy.tool_capture_overrides`.
 
 ## 4) Add adapter-level HITL tools (optional)
 
 ```python
-@kp.hitl_tool(question="Approve publish?", schema=bool)
+from kitaru.adapters.pydantic_ai import hitl_tool
+
+@hitl_tool(question="Approve publish?", schema=bool)
 def approve_publish(summary: str) -> bool:
     # Body is skipped in HITL mode.
     return False
 ```
 
-When the agent invokes this tool, the adapter translates it to a flow-level `kitaru.wait(...)` under the hood.
+When the agent invokes this tool, the adapter translates it to a flow-level `kitaru.wait(...)` under the hood. PydanticAI's native `requires_approval=True` flag and `ApprovalRequired` / `CallDeferred` exceptions are also auto-bridged to `kitaru.wait(...)` without needing the `@hitl_tool` decorator.
 
 ## Runtime behavior and guardrails
 
 - No nested checkpoint replay boundaries are introduced by adapter internals.
 - Adapter child events stay child events; they do not become standalone durable calls.
-- `run()` / `run_sync()` at flow scope (outside checkpoints) use one synthetic checkpoint so tracking still works.
-- Outside a flow, wrapped agents run as plain PydanticAI calls (no Kitaru tracking).
+- `run()` / `run_sync()` at flow scope (outside checkpoints) use one synthetic checkpoint so tracking still works. Tune it via `KitaruAgent(..., turn_checkpoint_config={"runtime": "isolated"})`.
+- `run()` / `run_sync()` outside any flow auto-opens a local flow (in-process only; on remote stacks, wrap explicitly with `@kitaru.flow`).
 - Streamed model requests record a transcript artifact (`*_stream_transcript`) for replay/inspection.
 
 ## Example in this repository
@@ -80,7 +84,6 @@ When the agent invokes this tool, the adapter translates it to a flow-level `kit
 ```bash
 uv sync --extra local --extra pydantic-ai
 uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py
-uv run pytest tests/test_phase17_pydantic_ai_example.py
 ```
 
 The example prints:

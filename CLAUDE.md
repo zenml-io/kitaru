@@ -229,9 +229,9 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ### Framework adapters
 
-The first framework adapter is implemented: `kitaru.adapters.pydantic_ai.wrap(agent)`.
+The first framework adapter is implemented: `kitaru.adapters.pydantic_ai.KitaruAgent(agent, ...)`.
 
-It keeps the enclosing checkpoint as the replay boundary, while tracking PydanticAI model requests and tool calls as child events/metadata under that checkpoint. At flow scope, `run()` / `run_sync()` automatically use a synthetic `llm_call` checkpoint so tracking still works without an explicit outer checkpoint. The adapter also supports per-tool capture modes (`full`, `metadata_only`, `off`) and HITL marker tools via `kitaru.adapters.pydantic_ai.hitl_tool(...)`.
+It keeps the enclosing checkpoint as the replay boundary while tracking PydanticAI model requests and tool calls as child events/artifacts under that checkpoint. At flow scope, `run()` / `run_sync()` automatically open a synthetic checkpoint per turn so tracking still works without an explicit outer checkpoint; outside any flow they auto-open a local flow (remote stacks require an explicit `@kitaru.flow`). Capture is controlled via a `CapturePolicy` (`tool_capture="full"|"metadata"|None` plus per-tool overrides). HITL is auto-bridged: PydanticAI's native `requires_approval=True`, `ApprovalRequired`, and `CallDeferred` all route through `kitaru.wait(...)` with no decorator. For explicit HITL markers, use `kitaru.adapters.pydantic_ai.hitl_tool(...)`. Per-turn checkpoint behavior (runtime, retries, type) is configurable via `KitaruAgent(..., turn_checkpoint_config={"runtime": "isolated"})`.
 
 ### Observability (current MVP + planned)
 

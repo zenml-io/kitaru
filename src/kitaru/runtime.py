@@ -179,12 +179,15 @@ def _suspend_checkpoint_scope() -> Iterator[None]:
 
     This internal helper is used by framework adapters that need to trigger
     flow-level operations (for example `kitaru.wait()`) during framework-internal
-    execution that otherwise runs inside a checkpoint.
+    execution that otherwise runs inside a checkpoint. Also clears ZenML's
+    `StepContext` ContextVar so `zenml.wait()`'s step-scope guard passes.
     """
     checkpoint_token = _CURRENT_CHECKPOINT_SCOPE.set(None)
+    step_ctx_token = StepContext.__context_var__.set(None)
     try:
         yield
     finally:
+        StepContext.__context_var__.reset(step_ctx_token)
         _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
 
 

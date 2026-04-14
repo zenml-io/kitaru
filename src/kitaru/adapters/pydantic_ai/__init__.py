@@ -2,74 +2,33 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
-
 from kitaru.errors import KitaruFeatureNotAvailableError
 
-CaptureMode = Literal["full", "metadata_only", "off"]
+try:
+    import pydantic_ai  # noqa: F401
+except ImportError as exc:  # pragma: no cover - import-time guard only
+    raise KitaruFeatureNotAvailableError(
+        "kitaru.adapters.pydantic_ai requires optional dependency "
+        "`pydantic-ai-slim`. Install with `uv sync --extra pydantic-ai`."
+    ) from exc
 
+from ._agent import KitaruAgent
+from ._function_toolset import KitaruFunctionToolset
+from ._hitl import hitl_tool
+from ._model import KitaruModel
+from ._policy import CaptureMode, CapturePolicy
+from ._toolset import KitaruToolset, kitaruify_toolset
+from ._utils import CheckpointConfig, CheckpointRuntime
 
-class CaptureConfig(TypedDict, total=False):
-    """Capture policy for adapter-managed tool call observability."""
-
-    mode: CaptureMode
-    enabled: bool
-    save_args: bool
-    save_result: bool
-    include_timings: bool
-
-
-def _require_pydantic_ai() -> None:
-    """Ensure optional PydanticAI dependencies are available."""
-    try:
-        import pydantic_ai  # noqa: F401
-    except ImportError as exc:  # pragma: no cover - depends on installation mode
-        raise KitaruFeatureNotAvailableError(
-            "kitaru.adapters.pydantic_ai requires optional dependency "
-            "`pydantic-ai-slim`. Install with `uv sync --extra pydantic-ai`."
-        ) from exc
-
-
-def wrap(
-    agent: Any,
-    *,
-    name: str | None = None,
-    tool_capture_config: CaptureConfig | None = None,
-    tool_capture_config_by_name: dict[str, CaptureConfig | None] | None = None,
-) -> Any:
-    """Wrap a PydanticAI agent for checkpoint child-event tracking."""
-    _require_pydantic_ai()
-    from ._agent import KitaruAgent
-
-    wrapped = KitaruAgent(
-        agent,
-        name=name,
-        tool_capture_config=tool_capture_config,
-        tool_capture_config_by_name=tool_capture_config_by_name,
-    )
-
-    from kitaru.analytics import AnalyticsEvent, track
-
-    track(
-        AnalyticsEvent.PYDANTIC_AI_WRAPPED,
-        {
-            "toolset_count": len(wrapped.toolsets),
-        },
-    )
-    return wrapped
-
-
-def hitl_tool(
-    *,
-    question: str | None = None,
-    name: str | None = None,
-    schema: Any = None,
-) -> Any:
-    """Mark a PydanticAI tool for flow-level HITL waits when invoked."""
-    _require_pydantic_ai()
-    from ._hitl import hitl_tool as _hitl_tool
-
-    return _hitl_tool(question=question, name=name, schema=schema)
-
-
-__all__ = ["CaptureConfig", "CaptureMode", "hitl_tool", "wrap"]
+__all__ = [
+    "CaptureMode",
+    "CapturePolicy",
+    "CheckpointConfig",
+    "CheckpointRuntime",
+    "KitaruAgent",
+    "KitaruFunctionToolset",
+    "KitaruModel",
+    "KitaruToolset",
+    "hitl_tool",
+    "kitaruify_toolset",
+]
