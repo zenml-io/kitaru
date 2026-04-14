@@ -20,6 +20,7 @@ from kitaru.errors import (
 from kitaru.llm import (
     LLMResponse,
     LLMToolCall,
+    LLMToolDefinition,
     LLMUsage,
     _LLMUsage,
     _parse_anthropic_response,
@@ -56,6 +57,22 @@ def _tracked_llm_metadata(track_mock: MagicMock) -> dict[str, object]:
     assert event == AnalyticsEvent.LLM_CALLED
     assert isinstance(metadata, dict)
     return metadata
+
+
+def _search_tool(name: str = "search_documents") -> dict[str, object]:
+    """Return a small canonical OpenAI-style function tool definition."""
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": "Search documents by query.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    }
 
 
 @contextmanager
@@ -555,6 +572,410 @@ def test_parse_anthropic_finish_reason_mapping(
     assert response.provider_finish_reason == (
         None if raw_reason is None else raw_reason
     )
+
+
+# ---------------------------------------------------------------------------
+# Tool request validation and provider translation
+# ---------------------------------------------------------------------------
+
+
+def test_llm_accepts_tools_and_tool_choice_on_public_signature() -> None:
+    """Flow-body calls should carry tools/tool_choice into the internal request."""
+    tool = _search_tool()
+    with (
+        _flow_scope(name="demo_flow", execution_id=str(uuid4())),
+        patch("kitaru.llm._llm_checkpoint_call", return_value="ok") as mock_synthetic,
+    ):
+        output = llm(
+            "hello",
+            model="fast",
+            tools=[tool],
+            tool_choice="search_documents",
+            name="tool_call",
+        )
+
+    assert output == "ok"
+    request = mock_synthetic.call_args.args[0]
+    assert request.tools == [tool]
+    assert request.tool_choice == "search_documents"
+
+
+def test_llm_normalizes_typed_tool_definition_and_named_choice_for_dispatch() -> None:
+    """Typed tool helpers should normalize before provider dispatch."""
+    fake_result = _ProviderCallResult(response_text="ok", usage=_LLMUsage())
+    typed_tool = LLMToolDefinition(
+        name="search_documents",
+        description="Search documents by query.",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    )
+
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.llm._call_openai", return_value=fake_result) as mock_call,
+    ):
+        output = llm(
+            "hello",
+            model="openai/gpt-4o-mini",
+            tools=[typed_tool],
+            tool_choice="search_documents",
+            name="tools_call",
+        )
+
+    assert output == "ok"
+    call_kwargs = mock_call.call_args.kwargs
+    assert call_kwargs["tools"] == [_search_tool()]
+    assert call_kwargs["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "search_documents"},
+    }
+
+
+@pytest.mark.parametrize(
+    ("tool_choice", "expected_choice"),
+    [
+        ({"type": "auto"}, "auto"),
+        ({"type": "required"}, "required"),
+        ({"type": "none"}, "none"),
+    ],
+)
+def test_llm_normalizes_dict_tool_choice_modes_for_openai_dispatch(
+    tool_choice: dict[str, str],
+    expected_choice: str,
+) -> None:
+    """Dict mode choices should normalize to OpenAI-compatible strings."""
+    fake_result = _ProviderCallResult(response_text="ok", usage=_LLMUsage())
+
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.llm._call_openai", return_value=fake_result) as mock_call,
+    ):
+        output = llm(
+            "hello",
+            model="openai/gpt-4o-mini",
+            tools=[_search_tool()],
+            tool_choice=tool_choice,
+            name="tools_call",
+        )
+
+    assert output == "ok"
+    assert mock_call.call_args.kwargs["tool_choice"] == expected_choice
+
+
+@pytest.mark.parametrize(
+    ("tools", "tool_choice", "match"),
+    [
+        (
+            [_search_tool("search_documents"), _search_tool("search_documents")],
+            None,
+            "Duplicate",
+        ),
+        ([{"type": "function", "function": {"name": ""}}], None, "non-empty name"),
+        ([_search_tool("search_documents")], "lookup_record", "does not match"),
+        (None, "search_documents", "does not match"),
+        (None, "auto", "requires tools"),
+        (None, "required", "requires tools"),
+    ],
+)
+def test_llm_rejects_invalid_tools_before_provider_dispatch(
+    tools: list[object] | None,
+    tool_choice: str | None,
+    match: str,
+) -> None:
+    """Tool validation failures should happen before provider SDK dispatch."""
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.llm._dispatch_provider_call") as mock_dispatch,
+        pytest.raises(KitaruUsageError, match=match),
+    ):
+        llm(
+            "hello",
+            model="openai/gpt-4o-mini",
+            tools=tools,  # type: ignore[arg-type]
+            tool_choice=tool_choice,
+            name="invalid_tools",
+        )
+
+    mock_dispatch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("messages", "match"),
+    [
+        ([{"role": "developer", "content": "nope"}], "Unsupported message role"),
+        ([{"role": "user"}], "user.*content"),
+        ([{"role": "assistant"}], "Assistant messages require"),
+        ([{"role": "assistant", "content": ""}], "non-empty"),
+        ([{"role": "assistant", "content": "   "}], "non-empty"),
+        ([{"role": "assistant", "tool_calls": "not a list"}], "tool_calls.*list"),
+        (
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "search_documents",
+                                "arguments": "{}",
+                            },
+                        }
+                    ],
+                }
+            ],
+            "id",
+        ),
+        (
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"arguments": "{}"},
+                        }
+                    ],
+                }
+            ],
+            "name",
+        ),
+        (
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "search_documents"},
+                        }
+                    ],
+                }
+            ],
+            "arguments",
+        ),
+        (
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "search_documents",
+                            "arguments_json": "not json",
+                        }
+                    ],
+                }
+            ],
+            "valid JSON",
+        ),
+        ([{"role": "tool", "content": "result"}], "tool_call_id"),
+    ],
+)
+def test_llm_rejects_invalid_messages_before_provider_dispatch(
+    messages: list[dict[str, object]],
+    match: str,
+) -> None:
+    """Canonical message validation should fail before provider SDK dispatch."""
+    with (
+        _llm_execution_scope(model_selection=_simple_selection("openai/gpt-4o-mini")),
+        patch("kitaru.llm._dispatch_provider_call") as mock_dispatch,
+        pytest.raises(KitaruUsageError, match=match),
+    ):
+        llm(
+            messages,  # type: ignore[arg-type]
+            model="openai/gpt-4o-mini",
+            name="invalid_messages",
+        )
+
+    mock_dispatch.assert_not_called()
+
+
+def test_call_openai_passes_tools_tool_choice_and_canonical_messages() -> None:
+    """OpenAI-compatible calls should receive tools, choice, and tool messages."""
+    from kitaru.llm import _call_openai
+
+    mock_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="done"))],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=3, total_tokens=8),
+    )
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_openai_cls = MagicMock(return_value=mock_client)
+    tool = _search_tool()
+    tool_choice = {"type": "function", "function": {"name": "search_documents"}}
+
+    with patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}):
+        result = _call_openai(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": "Need search"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        LLMToolCall(
+                            id="call_1",
+                            name="search_documents",
+                            arguments_json='{"query":"cats"}',
+                            arguments={"query": "cats"},
+                        ).model_dump()
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "result"},
+            ],
+            temperature=None,
+            max_tokens=None,
+            tools=[tool],
+            tool_choice=tool_choice,
+            env_overlay={},
+        )
+
+    assert result.response_text == "done"
+    mock_client.chat.completions.create.assert_called_once_with(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "user", "content": "Need search"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "search_documents",
+                            "arguments": '{"query":"cats"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "result"},
+        ],
+        tools=[tool],
+        tool_choice=tool_choice,
+    )
+
+
+def test_call_anthropic_translates_tools_choice_and_tool_messages() -> None:
+    """Anthropic calls should receive translated tool and tool-result shapes."""
+    from kitaru.llm import _call_anthropic
+
+    mock_response = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="done")],
+        usage=SimpleNamespace(input_tokens=8, output_tokens=4),
+    )
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    mock_anthropic_cls = MagicMock(return_value=mock_client)
+    tool = _search_tool()
+    tool_choice = {"type": "function", "function": {"name": "search_documents"}}
+
+    with patch.dict(
+        "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_cls)}
+    ):
+        result = _call_anthropic(
+            model="claude-sonnet-4-20250514",
+            messages=[
+                {"role": "system", "content": "You help."},
+                {"role": "user", "content": "Need search"},
+                {
+                    "role": "assistant",
+                    "content": "I will search.",
+                    "tool_calls": [
+                        LLMToolCall(
+                            id="call_1",
+                            name="search_documents",
+                            arguments_json='{"query":"cats"}',
+                            arguments={"query": "cats"},
+                        ).model_dump()
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "result"},
+            ],
+            temperature=None,
+            max_tokens=None,
+            tools=[tool],
+            tool_choice=tool_choice,
+            env_overlay={},
+        )
+
+    assert result.response_text == "done"
+    mock_client.messages.create.assert_called_once_with(
+        model="claude-sonnet-4-20250514",
+        messages=[
+            {"role": "user", "content": "Need search"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I will search."},
+                    {
+                        "type": "tool_use",
+                        "id": "call_1",
+                        "name": "search_documents",
+                        "input": {"query": "cats"},
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_1",
+                        "content": "result",
+                    }
+                ],
+            },
+        ],
+        max_tokens=4096,
+        system="You help.",
+        tools=[
+            {
+                "name": "search_documents",
+                "description": "Search documents by query.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            }
+        ],
+        tool_choice={"type": "tool", "name": "search_documents"},
+    )
+
+
+def test_call_anthropic_translates_auto_tool_choice_mode() -> None:
+    """Anthropic auto tool choice should use Anthropic's mode shape."""
+    from kitaru.llm import _call_anthropic
+
+    mock_response = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="done")],
+        usage=SimpleNamespace(input_tokens=8, output_tokens=4),
+    )
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    mock_anthropic_cls = MagicMock(return_value=mock_client)
+
+    with patch.dict(
+        "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_cls)}
+    ):
+        _call_anthropic(
+            model="claude-sonnet-4-20250514",
+            messages=[{"role": "user", "content": "Need search"}],
+            temperature=None,
+            max_tokens=None,
+            tools=[_search_tool()],
+            tool_choice="auto",
+            env_overlay={},
+        )
+
+    assert mock_client.messages.create.call_args.kwargs["tool_choice"] == {
+        "type": "auto"
+    }
 
 
 # ---------------------------------------------------------------------------

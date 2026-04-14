@@ -12,10 +12,11 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from zenml.client import Client
 
 from kitaru._safe_save import _safe_save
@@ -82,6 +83,21 @@ class LLMToolCall(BaseModel):
     arguments_parse_error: str | None = None
 
 
+class LLMToolDefinition(BaseModel):
+    """OpenAI-style function tool definition accepted by ``kitaru.llm()``.
+
+    Raw OpenAI-style dictionaries are also accepted. This helper is lightweight
+    sugar for callers who prefer a typed object while the internal provider
+    request format remains the same canonical dictionary shape.
+    """
+
+    name: str
+    description: str | None = None
+    parameters: dict[str, Any] = Field(
+        default_factory=lambda: {"type": "object", "properties": {}}
+    )
+
+
 class LLMResponse(BaseModel):
     """Normalized assistant response returned by provider parsers.
 
@@ -125,6 +141,8 @@ class _LLMRequest(BaseModel):
     system: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    tools: list[Any] | None = None
+    tool_choice: Any = None
     call_name: str
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -310,8 +328,85 @@ def _resolve_credential_overlay(
 
 
 # ---------------------------------------------------------------------------
-# Message normalization
+# Request normalization
 # ---------------------------------------------------------------------------
+
+
+_TOOL_CHOICE_MODES = {"auto", "none", "required"}
+
+
+def _require_text_content(message: Mapping[str, Any], role: str) -> str:
+    """Read required text content from a canonical chat message."""
+    content = message.get("content")
+    if not isinstance(content, str) or not content:
+        raise KitaruUsageError(f"`{role}` messages require non-empty text content.")
+    return content
+
+
+def _coerce_openai_message_tool_call(raw_tool_call: Mapping[str, Any]) -> LLMToolCall:
+    """Strictly normalize one OpenAI-style assistant-history tool call."""
+    tool_call_id = raw_tool_call.get("id")
+    if not isinstance(tool_call_id, str) or not tool_call_id:
+        raise KitaruUsageError("Assistant tool calls require a non-empty `id`.")
+
+    function_payload = raw_tool_call.get("function")
+    if not isinstance(function_payload, Mapping):
+        raise KitaruUsageError("Assistant tool calls require a `function` object.")
+
+    name = function_payload.get("name")
+    if not isinstance(name, str) or not name:
+        raise KitaruUsageError("Assistant tool calls require a non-empty name.")
+
+    arguments_json = function_payload.get("arguments")
+    if not isinstance(arguments_json, str):
+        raise KitaruUsageError(
+            "Assistant tool-call function arguments must be a JSON string."
+        )
+
+    tool_call = LLMToolCall(
+        id=tool_call_id,
+        name=name,
+        arguments_json=arguments_json,
+    )
+    return _validate_request_tool_call(tool_call)
+
+
+def _validate_request_tool_call(tool_call: LLMToolCall) -> LLMToolCall:
+    """Validate assistant-history tool calls before provider dispatch."""
+    if not tool_call.id:
+        raise KitaruUsageError("Assistant tool calls require a non-empty `id`.")
+    if not tool_call.name:
+        raise KitaruUsageError("Assistant tool calls require a non-empty name.")
+
+    _, arguments, parse_error = _normalize_tool_arguments(tool_call.arguments_json)
+    if parse_error is not None or arguments is None:
+        raise KitaruUsageError(
+            "Assistant tool-call arguments must be valid JSON objects."
+        )
+    return tool_call.model_copy(
+        update={"arguments": arguments, "arguments_parse_error": None}
+    )
+
+
+def _coerce_message_tool_call(raw_tool_call: Any) -> LLMToolCall:
+    """Normalize assistant-message tool call payloads into ``LLMToolCall``."""
+    if isinstance(raw_tool_call, LLMToolCall):
+        return _validate_request_tool_call(raw_tool_call)
+    if isinstance(raw_tool_call, Mapping):
+        if isinstance(raw_tool_call.get("function"), Mapping):
+            return _coerce_openai_message_tool_call(raw_tool_call)
+        try:
+            tool_call = LLMToolCall.model_validate(dict(raw_tool_call))
+        except ValidationError as exc:
+            raise KitaruUsageError(
+                "Assistant `tool_calls` entries must match the LLMToolCall shape."
+            ) from exc
+        return _validate_request_tool_call(tool_call)
+
+    raise KitaruUsageError(
+        "Assistant `tool_calls` entries must be LLMToolCall objects or "
+        "dict-like payloads."
+    )
 
 
 def _normalize_messages(
@@ -338,18 +433,186 @@ def _normalize_messages(
     for message in prompt:
         if not isinstance(message, Mapping):
             raise KitaruUsageError(
-                "Prompt message lists must contain dict-like items with `role` and "
-                "`content` keys."
+                "Prompt message lists must contain dict-like items with `role` keys."
             )
-        if "role" not in message or "content" not in message:
-            raise KitaruUsageError(
-                "Each prompt message must contain `role` and `content` keys."
+        role = message.get("role")
+        if not isinstance(role, str):
+            raise KitaruUsageError("Each prompt message must contain a string `role`.")
+
+        if role in {"system", "user"}:
+            messages.append(
+                {"role": role, "content": _require_text_content(message, role)}
             )
-        messages.append(dict(message))
+            continue
+
+        if role == "assistant":
+            normalized_message: dict[str, Any] = {"role": "assistant"}
+            content = message.get("content")
+            if content is not None:
+                if not isinstance(content, str):
+                    raise KitaruUsageError(
+                        "Assistant message `content` must be text when provided."
+                    )
+                if content.strip():
+                    normalized_message["content"] = content
+
+            raw_tool_calls = message.get("tool_calls")
+            if raw_tool_calls is not None:
+                if not _is_non_string_sequence(raw_tool_calls):
+                    raise KitaruUsageError(
+                        "Assistant message `tool_calls` must be a list when provided."
+                    )
+                tool_calls = [
+                    _coerce_message_tool_call(tool_call).model_dump()
+                    for tool_call in raw_tool_calls
+                ]
+                if tool_calls:
+                    normalized_message["tool_calls"] = tool_calls
+
+            if (
+                "content" not in normalized_message
+                and "tool_calls" not in normalized_message
+            ):
+                raise KitaruUsageError(
+                    "Assistant messages require non-empty `content`, "
+                    "`tool_calls`, or both."
+                )
+            messages.append(normalized_message)
+            continue
+
+        if role == "tool":
+            tool_call_id = message.get("tool_call_id")
+            if not isinstance(tool_call_id, str) or not tool_call_id:
+                raise KitaruUsageError(
+                    "Tool messages require a non-empty `tool_call_id`."
+                )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": _require_text_content(message, role),
+                }
+            )
+            continue
+
+        raise KitaruUsageError(
+            "Unsupported message role "
+            f"`{role}`. Supported roles are: system, user, assistant, tool."
+        )
 
     if not messages:
         raise KitaruUsageError("Prompt message list cannot be empty.")
     return messages
+
+
+def _normalize_tool_definition(tool: Any) -> dict[str, Any]:
+    """Normalize one tool definition into OpenAI function-tool shape."""
+    if isinstance(tool, LLMToolDefinition):
+        function: dict[str, Any] = {
+            "name": tool.name,
+            "parameters": deepcopy(tool.parameters),
+        }
+        if tool.description is not None:
+            function["description"] = tool.description
+        tool_payload: Mapping[str, Any] = {"type": "function", "function": function}
+    elif isinstance(tool, Mapping):
+        tool_payload = tool
+    else:
+        raise KitaruUsageError(
+            "Tools must be OpenAI-style dicts or LLMToolDefinition objects."
+        )
+
+    if tool_payload.get("type") != "function":
+        raise KitaruUsageError("Only function tools are supported.")
+    function_payload = tool_payload.get("function")
+    if not isinstance(function_payload, Mapping):
+        raise KitaruUsageError("Function tools require a `function` object.")
+
+    name = function_payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise KitaruUsageError("Function tools require a non-empty name.")
+
+    normalized_function: dict[str, Any] = {"name": name.strip()}
+    description = function_payload.get("description")
+    if description is not None:
+        if not isinstance(description, str):
+            raise KitaruUsageError("Function tool descriptions must be text.")
+        normalized_function["description"] = description
+
+    parameters = function_payload.get(
+        "parameters",
+        {"type": "object", "properties": {}},
+    )
+    if not isinstance(parameters, Mapping):
+        raise KitaruUsageError("Function tool parameters must be a JSON-schema object.")
+    normalized_function["parameters"] = deepcopy(dict(parameters))
+    return {"type": "function", "function": normalized_function}
+
+
+def _normalize_tools(tools: list[Any] | None) -> list[dict[str, Any]] | None:
+    """Validate and normalize request tools into canonical OpenAI shape."""
+    if tools is None:
+        return None
+    if not _is_non_string_sequence(tools):
+        raise KitaruUsageError("`tools` must be a list when provided.")
+
+    normalized_tools = [_normalize_tool_definition(tool) for tool in tools]
+    seen_names: set[str] = set()
+    for tool in normalized_tools:
+        name = tool["function"]["name"]
+        if name in seen_names:
+            raise KitaruUsageError(f"Duplicate tool name `{name}` is not allowed.")
+        seen_names.add(name)
+    return normalized_tools
+
+
+def _normalize_tool_choice(
+    tool_choice: Any,
+    tools: list[dict[str, Any]] | None,
+) -> str | dict[str, Any] | None:
+    """Validate and normalize request ``tool_choice`` into canonical shape."""
+    if tool_choice is None:
+        return None
+
+    tool_names = {tool["function"]["name"] for tool in tools or []}
+    if isinstance(tool_choice, str):
+        normalized_choice = tool_choice.strip()
+        if not normalized_choice:
+            raise KitaruUsageError("`tool_choice` cannot be empty.")
+        if normalized_choice in _TOOL_CHOICE_MODES:
+            if normalized_choice in {"auto", "required"} and not tool_names:
+                raise KitaruUsageError(
+                    f"`tool_choice='{normalized_choice}'` requires tools."
+                )
+            return normalized_choice
+        if normalized_choice not in tool_names:
+            raise KitaruUsageError(
+                f"Named tool_choice `{normalized_choice}` does not match any tool."
+            )
+        return {"type": "function", "function": {"name": normalized_choice}}
+
+    if not isinstance(tool_choice, Mapping):
+        raise KitaruUsageError("`tool_choice` must be a string or dict when provided.")
+
+    choice_type = tool_choice.get("type")
+    if choice_type in _TOOL_CHOICE_MODES:
+        if choice_type in {"auto", "required"} and not tool_names:
+            raise KitaruUsageError(f"`tool_choice='{choice_type}'` requires tools.")
+        return str(choice_type)
+    if choice_type != "function":
+        raise KitaruUsageError("Only function tool_choice dictionaries are supported.")
+
+    function_payload = tool_choice.get("function")
+    if not isinstance(function_payload, Mapping):
+        raise KitaruUsageError("Function tool_choice requires a `function` object.")
+    name = function_payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise KitaruUsageError("Function tool_choice requires a non-empty tool name.")
+    if name.strip() not in tool_names:
+        raise KitaruUsageError(
+            f"Named tool_choice `{name.strip()}` does not match any tool."
+        )
+    return {"type": "function", "function": {"name": name.strip()}}
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +638,165 @@ def _temporary_env(additions: Mapping[str, str]) -> Any:
                 os.environ[key] = previous
 
 
+def _tool_call_to_openai(tool_call_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert canonical assistant tool-call payload into OpenAI shape."""
+    tool_call = _validate_request_tool_call(
+        LLMToolCall.model_validate(dict(tool_call_payload))
+    )
+    openai_tool_call: dict[str, Any] = {
+        "type": "function",
+        "function": {
+            "name": tool_call.name,
+            "arguments": tool_call.arguments_json,
+        },
+    }
+    openai_tool_call["id"] = tool_call.id
+    return openai_tool_call
+
+
+def _messages_to_openai(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert canonical chat messages into OpenAI-compatible shape."""
+    openai_messages: list[dict[str, Any]] = []
+    for message in messages:
+        role = message["role"]
+        if role in {"system", "user"}:
+            openai_messages.append({"role": role, "content": message["content"]})
+        elif role == "assistant":
+            openai_message: dict[str, Any] = {"role": "assistant"}
+            if "content" in message:
+                openai_message["content"] = message["content"]
+            elif "tool_calls" in message:
+                openai_message["content"] = None
+            if "tool_calls" in message:
+                openai_message["tool_calls"] = [
+                    _tool_call_to_openai(tool_call)
+                    for tool_call in message["tool_calls"]
+                ]
+            openai_messages.append(openai_message)
+        elif role == "tool":
+            openai_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": message["tool_call_id"],
+                    "content": message["content"],
+                }
+            )
+        else:  # pragma: no cover - _normalize_messages catches this first.
+            raise KitaruUsageError(f"Unsupported message role `{role}`.")
+    return openai_messages
+
+
+def _tools_to_anthropic(
+    tools: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    """Convert canonical OpenAI-style tools into Anthropic tool definitions."""
+    if not tools:
+        return None
+
+    anthropic_tools: list[dict[str, Any]] = []
+    for tool in tools:
+        function = tool["function"]
+        anthropic_tool: dict[str, Any] = {
+            "name": function["name"],
+            "input_schema": deepcopy(function["parameters"]),
+        }
+        if "description" in function:
+            anthropic_tool["description"] = function["description"]
+        anthropic_tools.append(anthropic_tool)
+    return anthropic_tools
+
+
+def _tool_call_to_anthropic(tool_call_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert canonical assistant tool-call payload into Anthropic tool_use."""
+    tool_call = _validate_request_tool_call(
+        LLMToolCall.model_validate(dict(tool_call_payload))
+    )
+    arguments = tool_call.arguments
+    tool_use: dict[str, Any] = {
+        "type": "tool_use",
+        "id": tool_call.id,
+        "name": tool_call.name,
+        "input": arguments,
+    }
+    if tool_use["id"] is None:
+        raise KitaruUsageError("Anthropic assistant tool calls require an `id`.")
+    return tool_use
+
+
+def _messages_to_anthropic(
+    messages: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Convert canonical chat messages into Anthropic system/messages shape."""
+    system_parts: list[str] = []
+    anthropic_messages: list[dict[str, Any]] = []
+    seen_non_system = False
+    for message in messages:
+        role = message["role"]
+        if role == "system":
+            if seen_non_system:
+                raise KitaruUsageError(
+                    "System messages must appear at the beginning of the "
+                    "message list. Anthropic does not support interleaved "
+                    "system messages."
+                )
+            system_parts.append(message["content"])
+            continue
+
+        seen_non_system = True
+        if role == "user":
+            anthropic_messages.append({"role": "user", "content": message["content"]})
+        elif role == "assistant":
+            content_blocks: list[dict[str, Any]] = []
+            if message.get("content"):
+                content_blocks.append({"type": "text", "text": message["content"]})
+            content_blocks.extend(
+                _tool_call_to_anthropic(tool_call)
+                for tool_call in message.get("tool_calls", [])
+            )
+            anthropic_messages.append({"role": "assistant", "content": content_blocks})
+        elif role == "tool":
+            anthropic_messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": message["tool_call_id"],
+                            "content": message["content"],
+                        }
+                    ],
+                }
+            )
+        else:  # pragma: no cover - _normalize_messages catches this first.
+            raise KitaruUsageError(f"Unsupported message role `{role}`.")
+    return system_parts, anthropic_messages
+
+
+def _tool_choice_to_anthropic(
+    tool_choice: str | dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Convert canonical tool choice into Anthropic's tool_choice shape."""
+    if tool_choice is None or tool_choice == "none":
+        return None
+    if tool_choice == "auto":
+        return {"type": "auto"}
+    if tool_choice == "required":
+        return {"type": "any"}
+    if isinstance(tool_choice, Mapping):
+        choice_type = tool_choice.get("type")
+        if choice_type == "none":
+            return None
+        if choice_type == "auto":
+            return {"type": "auto"}
+        if choice_type == "required":
+            return {"type": "any"}
+        if choice_type == "function":
+            function_payload = tool_choice.get("function")
+            if isinstance(function_payload, Mapping):
+                return {"type": "tool", "name": function_payload["name"]}
+    raise KitaruUsageError("Unsupported tool_choice for Anthropic requests.")
+
+
 def _call_openai(
     *,
     model: str,
@@ -382,6 +804,8 @@ def _call_openai(
     temperature: float | None,
     max_tokens: int | None,
     env_overlay: Mapping[str, str],
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
     provider_label: str = "openai",
@@ -399,11 +823,18 @@ def _call_openai(
             "Install with: pip install kitaru[openai]"
         ) from None
 
-    kwargs: dict[str, Any] = {"model": model, "messages": messages}
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": _messages_to_openai(messages),
+    }
     if temperature is not None:
         kwargs["temperature"] = temperature
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    if tools:
+        kwargs["tools"] = tools
+    if tool_choice is not None:
+        kwargs["tool_choice"] = tool_choice
 
     client_kwargs: dict[str, Any] = {}
     if base_url is not None:
@@ -434,6 +865,8 @@ def _call_anthropic(
     temperature: float | None,
     max_tokens: int | None,
     env_overlay: Mapping[str, str],
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
 ) -> _ProviderCallResult:
     """Execute one Anthropic Messages API call."""
     try:
@@ -444,22 +877,12 @@ def _call_anthropic(
             "Install with: pip install kitaru[anthropic]"
         ) from None
 
-    # Separate system messages from the conversation
-    system_parts: list[str] = []
-    anthropic_messages: list[dict[str, Any]] = []
-    seen_non_system = False
-    for msg in messages:
-        if msg["role"] == "system":
-            if seen_non_system:
-                raise KitaruUsageError(
-                    "System messages must appear at the beginning of the "
-                    "message list. Anthropic does not support interleaved "
-                    "system messages."
-                )
-            system_parts.append(msg["content"])
-        else:
-            seen_non_system = True
-            anthropic_messages.append(msg)
+    system_parts, anthropic_messages = _messages_to_anthropic(messages)
+    anthropic_tools = _tools_to_anthropic(tools)
+    anthropic_tool_choice = _tool_choice_to_anthropic(tool_choice)
+    tools_disabled = tool_choice == "none" or (
+        isinstance(tool_choice, Mapping) and tool_choice.get("type") == "none"
+    )
 
     kwargs: dict[str, Any] = {
         "model": model,
@@ -472,6 +895,10 @@ def _call_anthropic(
         kwargs["system"] = "\n\n".join(system_parts)
     if temperature is not None:
         kwargs["temperature"] = temperature
+    if anthropic_tools is not None and not tools_disabled:
+        kwargs["tools"] = anthropic_tools
+    if anthropic_tool_choice is not None:
+        kwargs["tool_choice"] = anthropic_tool_choice
 
     with _temporary_env(env_overlay):
         client = Anthropic()
@@ -868,9 +1295,11 @@ def _extract_usage_anthropic(raw_response: Any) -> _LLMUsage:
 def _dispatch_provider_call(
     *,
     model_selection: ResolvedModelSelection,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     temperature: float | None,
     max_tokens: int | None,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
     env_overlay: dict[str, str] | None = None,
 ) -> _ProviderCallResult:
     """Route a normalized LLM call to the correct provider SDK.
@@ -888,6 +1317,8 @@ def _dispatch_provider_call(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
             env_overlay=env_overlay,
         )
     if target.provider == "anthropic":
@@ -896,6 +1327,8 @@ def _dispatch_provider_call(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
             env_overlay=env_overlay,
         )
     if target.provider in ("ollama", "openrouter"):
@@ -912,6 +1345,8 @@ def _dispatch_provider_call(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
             env_overlay=env_overlay,
             base_url=compat_base_url,
             api_key=compat_api_key,
@@ -947,6 +1382,8 @@ def _execute_llm_call(request: _LLMRequest) -> str:
     """Execute one normalized LLM call and persist artifacts/metadata."""
     model_selection = resolve_model_selection(request.model)
     messages = _normalize_messages(request.prompt, system=request.system)
+    tools = _normalize_tools(request.tools)
+    tool_choice = _normalize_tool_choice(request.tool_choice, tools)
 
     # Mock short-circuit: skip credential resolution and provider SDK entirely
     if (mock_response := os.environ.get(_MOCK_RESPONSE_ENV)) is not None:
@@ -963,6 +1400,8 @@ def _execute_llm_call(request: _LLMRequest) -> str:
             messages=messages,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
             env_overlay=env_overlay,
         )
         latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
@@ -1021,6 +1460,8 @@ def llm(
     system: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    tools: list[LLMToolDefinition | dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
     name: str | None = None,
 ) -> str:
     """Make a tracked LLM call.
@@ -1032,6 +1473,10 @@ def llm(
         system: Optional system prompt.
         temperature: Optional sampling temperature.
         max_tokens: Optional maximum response tokens.
+        tools: Optional OpenAI-style function tool definitions. These are
+            passed through to OpenAI-compatible providers and translated for
+            Anthropic.
+        tool_choice: Optional tool-choice mode or named tool selection.
         name: Optional display name for this call.
 
     Returns:
@@ -1052,6 +1497,8 @@ def llm(
         system=system,
         temperature=temperature,
         max_tokens=max_tokens,
+        tools=tools,
+        tool_choice=tool_choice,
         call_name=_normalize_call_name(name),
     )
 
