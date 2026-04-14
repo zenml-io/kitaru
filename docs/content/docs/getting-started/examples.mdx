@@ -49,7 +49,8 @@ kitaru status
 | Inspect and manage past executions | `execution_management/` | `python client_execution_management.py` |
 | Pause for human input and resume later | `execution_management/` | `python wait_and_resume.py` |
 | Replay from a checkpoint with overrides | `replay/` | `python replay_with_overrides.py` |
-| Track a model call inside a flow | `llm/` | `python flow_with_llm.py` |
+| Track rich model responses inside a flow | `llm/` | `python flow_with_llm.py` |
+| Manually handle one LLM tool-call turn | `llm/` | `python manual_tool_loop.py` |
 | Wrap a PydanticAI agent | `pydantic_ai_agent/` | `python pydantic_ai_adapter.py` |
 | Query executions from an MCP client | `mcp/` | `python mcp_query_tools.py` |
 
@@ -87,7 +88,8 @@ python first_working_flow.py
 
 | Example | Demonstrates | Related docs |
 |---|---|---|
-| `llm/flow_with_llm.py` | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
+| `llm/flow_with_llm.py` | `kitaru.llm()` rich responses with request/response artifacts and usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
+| `llm/manual_tool_loop.py` | Mock-safe two-turn tool loop with `tools=`, `tool_calls`, a local tool result, and a second model turn | [Tracked LLM Calls](/guides/llm-calls) |
 | `pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with Kitaru replay boundaries | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
 | `mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
 
@@ -108,5 +110,6 @@ If you are learning Kitaru from scratch:
 6. `execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
 7. `replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
 8. `llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
-9. `pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
-10. `mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)
+9. `llm/manual_tool_loop.py` — [Tracked LLM Calls](/guides/llm-calls)
+10. `pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
+11. `mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)

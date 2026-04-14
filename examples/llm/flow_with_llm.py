@@ -13,28 +13,30 @@ the provider key:
 """
 
 import kitaru
-from kitaru import checkpoint, flow
+from kitaru import LLMResponse, checkpoint, flow
 
 
 @checkpoint
-def write_draft(topic: str, outline: str) -> str:
+def write_draft(topic: str, outline_response: LLMResponse) -> str:
     """Expand an outline into a short draft paragraph."""
-    return kitaru.llm(
+    outline = outline_response.content or ""
+    response = kitaru.llm(
         f"Write a short paragraph about {topic} using this outline:\n{outline}",
         model="fast",
         name="draft_call",
     )
+    return response.content or ""
 
 
 @flow
 def llm_writer(topic: str) -> str:
     """Generate an outline and then a draft using tracked LLM calls."""
-    outline = kitaru.llm(
+    outline_response = kitaru.llm(
         f"Create a 3-bullet outline about {topic}.",
         model="fast",
         name="outline_call",
     )
-    return write_draft(topic, outline)
+    return write_draft(topic, outline_response)
 
 
 def run_workflow(topic: str = "kitaru") -> tuple[str, str]:

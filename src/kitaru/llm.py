@@ -1,9 +1,10 @@
 """LLM call primitive for tracked model interactions.
 
-`kitaru.llm()` wraps one provider SDK completion call with Kitaru tracking.
-Built-in runtime support covers ``openai/*``, ``anthropic/*``, ``ollama/*``,
-and ``openrouter/*`` models. Ollama and OpenRouter use the OpenAI-compatible
-API and require the ``openai`` package (``pip install kitaru[openai]``).
+`kitaru.llm()` wraps one provider SDK completion call with Kitaru tracking and
+returns a normalized :class:`LLMResponse`. Built-in runtime support covers
+``openai/*``, ``anthropic/*``, ``ollama/*``, and ``openrouter/*`` models.
+Ollama and OpenRouter use the OpenAI-compatible API and require the ``openai``
+package (``pip install kitaru[openai]``).
 """
 
 import json
@@ -100,7 +101,13 @@ class LLMToolDefinition(BaseModel):
 
 
 class LLMResponse(BaseModel):
-    """Normalized assistant response returned by ``kitaru.llm()``."""
+    """Normalized assistant response returned by ``kitaru.llm()``.
+
+    Text-only responses set ``content``. Tool-only responses set
+    ``tool_calls`` and may leave ``content`` as ``None``. Mixed responses may
+    include both. Kitaru does not execute tools automatically; callers inspect
+    ``tool_calls`` and decide how to continue the conversation.
+    """
 
     role: Literal["assistant"] = "assistant"
     content: str | None = None
@@ -547,9 +554,9 @@ def _normalize_tool_definition(tool: Any) -> dict[str, Any]:
         }
         if tool.description is not None:
             function["description"] = tool.description
-        tool_payload: Mapping[str, Any] = {"type": "function", "function": function}
+        tool_payload: dict[str, Any] = {"type": "function", "function": function}
     elif isinstance(tool, Mapping):
-        tool_payload = tool
+        tool_payload = dict(tool)
     else:
         raise KitaruUsageError(
             "Tools must be OpenAI-style dicts or LLMToolDefinition objects."
@@ -557,9 +564,10 @@ def _normalize_tool_definition(tool: Any) -> dict[str, Any]:
 
     if tool_payload.get("type") != "function":
         raise KitaruUsageError("Only function tools are supported.")
-    function_payload = tool_payload.get("function")
-    if not isinstance(function_payload, Mapping):
+    function_payload_raw = tool_payload.get("function")
+    if not isinstance(function_payload_raw, Mapping):
         raise KitaruUsageError("Function tools require a `function` object.")
+    function_payload: dict[str, Any] = dict(function_payload_raw)
 
     name = function_payload.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -815,7 +823,7 @@ def _tool_choice_to_anthropic(
         return {"type": "auto"}
     if tool_choice == "required":
         return {"type": "any"}
-    if isinstance(tool_choice, Mapping):
+    if isinstance(tool_choice, dict):
         choice_type = tool_choice.get("type")
         if choice_type == "none":
             return None
@@ -824,8 +832,9 @@ def _tool_choice_to_anthropic(
         if choice_type == "required":
             return {"type": "any"}
         if choice_type == "function":
-            function_payload = tool_choice.get("function")
-            if isinstance(function_payload, Mapping):
+            function_payload_raw = tool_choice.get("function")
+            if isinstance(function_payload_raw, Mapping):
+                function_payload = dict(function_payload_raw)
                 return {"type": "tool", "name": function_payload["name"]}
     raise KitaruUsageError("Unsupported tool_choice for Anthropic requests.")
 
@@ -916,7 +925,7 @@ def _call_anthropic(
     anthropic_tools = _tools_to_anthropic(tools)
     anthropic_tool_choice = _tool_choice_to_anthropic(tool_choice)
     tools_disabled = tool_choice == "none" or (
-        isinstance(tool_choice, Mapping) and tool_choice.get("type") == "none"
+        isinstance(tool_choice, dict) and tool_choice.get("type") == "none"
     )
 
     kwargs: dict[str, Any] = {
@@ -1645,7 +1654,7 @@ def llm(
     tool_choice: str | dict[str, Any] | None = None,
     name: str | None = None,
 ) -> LLMResponse:
-    """Make a tracked LLM call.
+    """Make a tracked LLM call and return a rich response.
 
     Args:
         prompt: User prompt text or a chat-style message list.
@@ -1661,8 +1670,10 @@ def llm(
         name: Optional display name for this call.
 
     Returns:
-        A normalized assistant response with text, tool calls, finish reason,
-        and usage details.
+        Inside a checkpoint, a concrete LLMResponse. Inside a flow body, a
+        durable output handle whose `.load()` returns an LLMResponse; load it
+        before inspecting `.content`, `.tool_calls`, `.usage`, or
+        `.finish_reason`.
 
     Raises:
         KitaruContextError: If called outside a flow.

@@ -1,19 +1,55 @@
 ---
 title: Tracked LLM Calls
-description: Use kitaru.llm() with model aliases, transported runtime config, and optional secret-backed credentials
+description: Use kitaru.llm() with rich responses, tool-call intents, model aliases, and secret-backed credentials
 ---
 
-`kitaru.llm()` lets you make a single tracked model call with automatic:
+`kitaru.llm()` makes one tracked model call and returns a rich
+`LLMResponse` object. Kitaru records the request, normalized response, token
+usage, latency, and credential source for the call.
 
-- prompt artifact capture
-- response artifact capture
-- usage/latency metadata logging
+```python
+response = kitaru.llm("Write a haiku about checkpoints.", model="fast")
+text = response.content or ""
+
+response.finish_reason  # "completed", "tool_calls", "max_tokens", ...
+response.usage          # LLMUsage(prompt_tokens=..., ...)
+response.tool_calls     # list[LLMToolCall]
+```
+
+<Callout type="warning">
+  Breaking change: `kitaru.llm()` now returns `LLMResponse`, not a plain
+  string. Use `response.content` when you want text.
+</Callout>
 
 <Callout type="info">
   If you want the full setup path from stored credentials to an actual flow run,
   start with
   [Secrets + Model Registration](/guides/secrets-and-model-registration).
 </Callout>
+
+## The response model
+
+`LLMResponse` is a Pydantic model with these main fields:
+
+| Field | Meaning |
+|---|---|
+| `content` | Text returned by the assistant, or `None` for tool-only responses. |
+| `tool_calls` | Tool-call intents requested by the model. Kitaru returns these; your code executes tools. |
+| `finish_reason` | Normalized reason: `completed`, `tool_calls`, `max_tokens`, `content_filter`, `pause`, or `unknown`. |
+| `provider_finish_reason` | Raw provider finish reason when available. |
+| `usage` | Normalized token counts: `prompt_tokens`, `completion_tokens`, `total_tokens`. |
+| `requested_model` / `alias` / `resolved_model` | Model selection metadata after alias resolution. |
+
+Each `LLMToolCall` includes:
+
+- `id` — provider tool-call ID, when supplied
+- `name` — function/tool name
+- `arguments_json` — raw JSON argument string
+- `arguments` — parsed argument object when parsing succeeds
+- `arguments_parse_error` — parse failure text when arguments are malformed
+
+That last pair is important: Kitaru preserves the raw argument JSON even when it
+cannot parse it, so the data is not silently dropped.
 
 ## Model selection order
 
@@ -102,37 +138,70 @@ secret at runtime if the required environment variable is not already set.
 
 ## Call `kitaru.llm()` inside a flow
 
+Flow-body `kitaru.llm()` calls are durable call boundaries. In flow-body Python,
+the call returns the normal durable output handle. Use `.load()` only when the
+flow body itself needs to inspect the concrete `LLMResponse`.
+
 ```python
 from kitaru import flow
 import kitaru
 
 @flow
 def writer(topic: str) -> str:
-    outline = kitaru.llm(
+    outline_handle = kitaru.llm(
         f"Create a 3-bullet outline about {topic}.",
         model="fast",
         name="outline_call",
     )
-    outline_text = outline.load()
-    return kitaru.llm(
+
+    # Load only because the flow body needs the text to build the next prompt.
+    outline = outline_handle.load()
+    outline_text = outline.content or ""
+
+    draft_handle = kitaru.llm(
         f"Write a short paragraph using this outline:\n{outline_text}",
         model="fast",
         name="draft_call",
     )
+    draft = draft_handle.load()
+    return draft.content or ""
 ```
 
-Flow-body `kitaru.llm()` calls are durable call boundaries. Use `.load()` when
-you need the text in flow-body Python, such as composing the next prompt. If you
-pass a checkpoint or LLM output into a downstream checkpoint, keep passing the
-original output handle. See [In flow bodies](/guides/artifacts#in-flow-bodies)
-for the general pattern.
-
-## Advanced options
-
-`kitaru.llm()` also accepts `system=`, `temperature=`, and `max_tokens=`:
+If you pass an LLM output into a downstream checkpoint, keep passing the
+original output handle. Kitaru will preserve the durable data flow and the
+checkpoint receives the concrete `LLMResponse` when it runs.
 
 ```python
-reply = kitaru.llm(
+from kitaru import LLMResponse, checkpoint, flow
+import kitaru
+
+@checkpoint
+def write_draft(topic: str, outline_response: LLMResponse) -> str:
+    outline = outline_response.content or ""
+    response = kitaru.llm(
+        f"Write a paragraph about {topic} using this outline:\n{outline}",
+        model="fast",
+    )
+    return response.content or ""
+
+@flow
+def writer(topic: str) -> str:
+    outline_handle = kitaru.llm(f"Outline {topic}.", model="fast")
+    return write_draft(topic, outline_handle)
+```
+
+Inside an existing `@checkpoint`, `kitaru.llm()` returns the concrete
+`LLMResponse` immediately. The enclosing checkpoint remains the replay boundary.
+
+See [In flow bodies](/guides/artifacts#in-flow-bodies) for the general handle
+and `.load()` pattern.
+
+## Text options
+
+`kitaru.llm()` accepts `system=`, `temperature=`, and `max_tokens=`:
+
+```python
+response = kitaru.llm(
     "Summarize this document in 3 bullets.",
     model="fast",
     system="You are a concise technical editor.",
@@ -140,6 +209,7 @@ reply = kitaru.llm(
     max_tokens=200,
     name="summary_call",
 )
+summary = response.content or ""
 ```
 
 ### Chat-style message lists
@@ -147,7 +217,7 @@ reply = kitaru.llm(
 Instead of a plain string, you can pass a chat-style message list:
 
 ```python
-reply = kitaru.llm(
+response = kitaru.llm(
     [
         {"role": "user", "content": "Draft a release note headline."},
         {"role": "assistant", "content": "Kitaru adds durable replay controls."},
@@ -158,74 +228,182 @@ reply = kitaru.llm(
 )
 ```
 
-Each message must include `role` and `content` keys. If `system=` is provided
-alongside a message list, Kitaru prepends a system message automatically.
+Supported message roles are `system`, `user`, `assistant`, and `tool`:
 
-## When to use `kitaru.llm()` vs your own client
+- `system` and `user` messages require `content`.
+- `assistant` messages may include `content`, `tool_calls`, or both.
+- `tool` messages require `tool_call_id` and `content`.
 
-`kitaru.llm()` is designed for simple text-in/text-out model calls. It handles
-credential resolution, prompt/response capture, and usage tracking automatically.
-Built-in runtime support covers `openai/*`, `anthropic/*`, `ollama/*`, and
-`openrouter/*` models.
+If `system=` is provided alongside a message list, Kitaru prepends a system
+message automatically.
 
-<Callout type="info">
-  `kitaru.llm()` requires a provider SDK to be installed. Install with
-  `pip install kitaru[openai]` (also covers Ollama and OpenRouter),
-  `pip install kitaru[anthropic]`, or `pip install kitaru[llm]` for both.
-</Callout>
+## Tool calling
 
-For advanced patterns — tool calling, structured outputs, streaming, vision
-inputs, or multi-turn conversation management — use your provider SDK directly
-inside a `@checkpoint`. You still get durable checkpointing and replay; you
-just manage the model interaction yourself:
+Kitaru supports single-turn provider tool calls through `tools=` and
+`tool_choice=`. It does **not** execute tools automatically. The model returns
+intent (`response.tool_calls`), and your code owns tool execution and the next
+model turn.
+
+Use OpenAI-style function tool dictionaries:
 
 ```python
-from openai import OpenAI
-from kitaru import checkpoint
-
-@checkpoint
-def agent_step(messages: list[dict]) -> str:
-    client = OpenAI()
-    resp = client.chat.completions.create(
-        model="gpt-5-nano",
-        messages=messages,
-        tools=[...],  # tool calling, structured output, etc.
-    )
-    return resp.choices[0].message.content
+search_tool = {
+    "type": "function",
+    "function": {
+        "name": "search_documents",
+        "description": "Search documents by query.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+            },
+            "required": ["query"],
+        },
+    },
+}
 ```
 
-For a full example of a tool-calling agent built this way, see
-[`examples/coding_agent/`](https://github.com/zenml-io/kitaru/tree/develop/examples/coding_agent).
+Or use the typed helper:
 
-<Callout type="info">
-  Tool calling and structured output support for `kitaru.llm()` is on the
-  roadmap. For now, use your provider SDK directly inside checkpoints for
-  these patterns.
-</Callout>
+```python
+from kitaru import LLMToolDefinition
+
+search_tool = LLMToolDefinition(
+    name="search_documents",
+    description="Search documents by query.",
+    parameters={
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    },
+)
+```
+
+Then inspect returned tool-call intents:
+
+```python
+response = kitaru.llm(
+    "Find notes about Acme and summarize them.",
+    model="fast",
+    tools=[search_tool],
+    tool_choice="auto",
+)
+
+if response.finish_reason == "tool_calls":
+    for call in response.tool_calls:
+        print(call.name, call.arguments)
+```
+
+`tool_choice=` accepts provider-style modes such as `"auto"`, `"required"`,
+and `"none"`, plus named tool choices using OpenAI-style dictionaries. Kitaru
+validates empty names, duplicate tool names, and named choices that do not match
+the provided tools before dispatching to the provider.
+
+### Manual two-turn loop
+
+A tool loop has four concrete steps:
+
+1. Send user messages plus `tools=`.
+2. Read `response.tool_calls`.
+3. Execute those tools in your code and append `tool` messages.
+4. Call `kitaru.llm()` again for the final assistant answer.
+
+```python
+messages = [{"role": "user", "content": "Search notes about Acme."}]
+
+first = kitaru.llm(messages, model="fast", tools=[search_tool])
+
+messages.append(
+    {
+        "role": "assistant",
+        "content": first.content,
+        "tool_calls": [call.model_dump() for call in first.tool_calls],
+    }
+)
+
+for call in first.tool_calls:
+    tool_result = search_documents(**(call.arguments or {}))
+    messages.append(
+        {
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": tool_result,
+        }
+    )
+
+second = kitaru.llm(messages, model="fast", tools=[search_tool])
+final_answer = second.content or ""
+```
+
+In a flow body, remember that each `kitaru.llm()` returns a durable handle, so
+load each response before branching on `tool_calls`:
+
+```python
+first_handle = kitaru.llm(messages, model="fast", tools=[search_tool])
+first = first_handle.load()
+```
+
+For a runnable mock-safe version, see
+[`examples/llm/manual_tool_loop.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/llm/manual_tool_loop.py).
 
 ## Runtime behavior by context
 
-- **Inside a flow (outside checkpoints):** `kitaru.llm()` runs as a synthetic durable call boundary.
-- **Inside a checkpoint:** it is tracked as a child event; the enclosing checkpoint remains the replay boundary.
+- **Inside a flow body:** `kitaru.llm()` runs as a synthetic durable call boundary and returns a durable output handle.
+- **Inside a checkpoint:** `kitaru.llm()` returns a concrete `LLMResponse`; the enclosing checkpoint remains the replay boundary.
 
 ## What Kitaru records
 
 Each `kitaru.llm()` call records:
 
-- prompt artifacts
-- response artifacts
-- token usage
-- latency
-- credential source metadata (`environment` or `secret`)
+- `{call_name}_prompt` artifact — request envelope with `messages`, `tools`,
+  `tool_choice`, `temperature`, and `max_tokens`
+- `{call_name}_response` artifact — normalized `LLMResponse` payload
+- `llm_calls` metadata — model selection, credential source, latency, token
+  counts, finish reasons, response kind, and tool-call names/counts
+
+Tool arguments are stored in the response artifact, not in summary metadata.
+Analytics receives only low-cardinality flags such as whether tools were
+supplied and whether tool calls were returned.
+
+## Mock responses for tests and demos
+
+`KITARU_LLM_MOCK_RESPONSE` produces a text-only `LLMResponse` and skips provider
+SDK calls and credential resolution:
+
+```bash
+export KITARU_LLM_MOCK_RESPONSE="Mocked answer."
+```
+
+For tool-call fixtures, use `KITARU_LLM_MOCK_RESPONSE_JSON` with an
+`LLMResponse`-shaped JSON object:
+
+```bash
+export KITARU_LLM_MOCK_RESPONSE_JSON='{
+  "content": null,
+  "tool_calls": [
+    {
+      "id": "call_1",
+      "name": "search_documents",
+      "arguments_json": "{\"query\": \"Acme\"}",
+      "arguments": {"query": "Acme"}
+    }
+  ],
+  "finish_reason": "tool_calls"
+}'
+```
 
 ## Example in this repository
 
 ```bash
 uv sync --extra local --extra llm
 
-# Register an alias (with or without a linked secret) before running the example.
+# Register an alias (with or without a linked secret) before running the text example.
 uv run kitaru model register fast --model openai/gpt-5-nano
 uv run examples/llm/flow_with_llm.py
+
+# Runs without provider credentials because it uses structured mock responses.
+uv run examples/llm/manual_tool_loop.py
+
 uv run pytest tests/test_phase12_llm_example.py
 ```
 

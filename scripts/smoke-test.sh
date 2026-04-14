@@ -314,6 +314,9 @@ fi
 # ---------------------------------------------------------------------------
 section_header "LLM flow"
 
+run_test "LLM manual tool loop (mock)" \
+    timed 30 $UV_RUN examples/llm/manual_tool_loop.py
+
 if [[ "$HAS_OPENAI" == true ]]; then
     run_test "LLM flow (flow_with_llm)" \
         timed 30 $UV_RUN examples/llm/flow_with_llm.py

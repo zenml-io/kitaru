@@ -853,7 +853,7 @@ def test_llm_rejects_invalid_messages_before_provider_dispatch(
         pytest.raises(KitaruUsageError, match=match),
     ):
         llm(
-            messages,  # type: ignore[arg-type]
+            messages,
             model="openai/gpt-4o-mini",
             name="invalid_messages",
         )

@@ -23,7 +23,8 @@ Example:
 Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
-  ``save()``, ``load()``, ``wait()``, ``llm()``,
+  ``save()``, ``load()``, ``wait()``, rich ``llm()`` responses,
+  ``LLMResponse`` / ``LLMToolCall`` / ``LLMUsage``,
   ``memory.configure/set/get/list/history/delete()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,

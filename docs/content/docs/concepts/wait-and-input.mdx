@@ -15,11 +15,13 @@ from kitaru import checkpoint, flow
 
 @checkpoint
 def research(topic: str) -> str:
-    return kitaru.llm(f"Summarize the latest developments in {topic}.")
+    response = kitaru.llm(f"Summarize the latest developments in {topic}.")
+    return response.content or ""
 
 @checkpoint
 def write_report(summary: str) -> str:
-    return kitaru.llm(f"Write a short report based on:\n\n{summary}")
+    response = kitaru.llm(f"Write a short report based on:\n\n{summary}")
+    return response.content or ""
 
 @flow
 def research_agent(topic: str) -> str:

@@ -25,8 +25,9 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Inspect and manage past executions:** `examples/execution_management/client_execution_management.py`
 - **Pause for human input and resume later:** `examples/execution_management/wait_and_resume.py`
 - **Replay from a checkpoint with overrides:** `examples/replay/replay_with_overrides.py`
-- **Track a model call inside a flow:** `examples/llm/flow_with_llm.py`
+- **Track rich LLM responses inside a flow:** `examples/llm/flow_with_llm.py`
 - **Wrap an existing PydanticAI agent:** `examples/pydantic_ai_agent/pydantic_ai_adapter.py`
+- **Manually handle one LLM tool-call turn:** `examples/llm/manual_tool_loop.py`
 - **Build a full coding agent with tool calling and HITL:** `examples/coding_agent/agent.py`
 - **Explore Kitaru through MCP tools:** `examples/mcp/mcp_query_tools.py`
 
@@ -39,7 +40,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | Goal | Install command |
 |---|---|
 | Core workflow, execution, replay, and configuration examples | `uv sync --extra local` |
-| LLM examples (tracked `kitaru.llm()` calls) | `uv sync --extra local --extra llm` |
+| LLM examples (rich `kitaru.llm()` responses and tool calls) | `uv sync --extra local --extra llm` |
 | PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
 | Coding agent example | `uv sync --extra local` + model alias / provider credentials |
 | MCP query tools example | `uv sync --extra local --extra mcp` |
@@ -83,7 +84,8 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 
 | Example | Run | Requires | What it demonstrates | Docs | Test |
 |---|---|---|---|---|---|
-| [Tracked LLM calls](llm/flow_with_llm.py) | `uv run examples/llm/flow_with_llm.py` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | [tests/test_phase12_llm_example.py](../tests/test_phase12_llm_example.py) |
+| [Tracked LLM calls](llm/flow_with_llm.py) | `uv run examples/llm/flow_with_llm.py` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` rich responses with request/response artifacts and usage metadata | [Tracked LLM Calls](https://kitaru.ai/docs/guides/llm-calls) | [tests/test_phase12_llm_example.py](../tests/test_phase12_llm_example.py) |
+| [Manual LLM tool loop](llm/manual_tool_loop.py) | `uv run examples/llm/manual_tool_loop.py` | `uv sync --extra local` | Mock-safe two-turn loop using `tools=`, `tool_calls`, a local tool result, and a second model turn | [Tracked LLM Calls](https://kitaru.ai/docs/guides/llm-calls) | — |
 | [PydanticAI adapter](pydantic_ai_agent/pydantic_ai_adapter.py) | `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py` | `uv sync --extra local --extra pydantic-ai` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](https://kitaru.ai/docs/getting-started/pydantic-ai-adapter) | [tests/test_phase17_pydantic_ai_example.py](../tests/test_phase17_pydantic_ai_example.py) |
 | [Coding agent](coding_agent/agent.py) | `cd examples/coding_agent && uv run python agent.py "Your task"` | `uv sync --extra local` + model alias / provider credentials | Full agent loop with provider SDK tool calling, `kitaru.wait()` HITL, custom materializers, and artifact persistence | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | — |
 | [MCP query tools](mcp/mcp_query_tools.py) | `uv run examples/mcp/mcp_query_tools.py` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/mcp/test_phase19_mcp_example.py](../tests/mcp/test_phase19_mcp_example.py) |
@@ -101,8 +103,9 @@ If you are new to Kitaru, this is the smoothest path:
 7. `uv run examples/replay/replay_with_overrides.py`
 8. `uv run examples/llm/flow_with_llm.py`
 9. `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py`
-10. `cd examples/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
-11. `uv run examples/mcp/mcp_query_tools.py`
+10. `uv run examples/llm/manual_tool_loop.py` *(manual tool-call loop)*
+11. `cd examples/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
+12. `uv run examples/mcp/mcp_query_tools.py`
 
 If you prefer the hosted docs view, start with the
 [Examples page](https://kitaru.ai/docs/getting-started/examples).

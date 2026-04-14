@@ -74,13 +74,15 @@ from kitaru import checkpoint, flow
 
 @checkpoint
 def research(topic: str) -> str:
-    return kitaru.llm(f"Summarize {topic} in two sentences.")
+    response = kitaru.llm(f"Summarize {topic} in two sentences.")
+    return response.content or ""
 
 @checkpoint
 def draft_report(summary: str) -> str:
-    return kitaru.llm(
+    response = kitaru.llm(
         f"Write a short report based on this summary:\n\n{summary}"
     )
+    return response.content or ""
 
 @flow
 def research_agent(topic: str) -> str:
@@ -110,7 +112,7 @@ What happens here:
 
 1. `@flow` marks the top-level execution boundary — everything inside is tracked
 2. Each `@checkpoint` persists its return value automatically
-3. `kitaru.llm()` picks up your API key from the environment, calls the model, and captures the prompt, response, token usage, and cost
+3. `kitaru.llm()` picks up your API key from the environment, returns a rich `LLMResponse`, and captures the request, response, token usage, and latency
 4. `.run()` starts the execution and blocks until completion
 
 ## Why checkpoints matter
@@ -193,7 +195,7 @@ fits what you want to learn:
   />
   <Card
     title="Tracked LLM Calls"
-    description="Use kitaru.llm() with captured prompt/response artifacts"
+    description="Use kitaru.llm() with rich responses and tool-call intents"
     href="/guides/llm-calls"
   />
   <Card
