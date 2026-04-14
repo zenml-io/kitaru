@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - `kitaru.llm()` now supports rich provider responses and manual tool-calling workflows. It accepts OpenAI-style `tools=` and `tool_choice=`, normalizes OpenAI-compatible and Anthropic text/tool-call responses into `LLMResponse`, exposes `LLMToolCall` and `LLMUsage`, preserves raw tool-call argument JSON alongside parse errors, and includes structured mock support via `KITARU_LLM_MOCK_RESPONSE_JSON` for tool-call fixtures (#146)
+- Added `kitaru.llm_text()` as a text-returning compatibility helper for callers migrating from the previous string-returning `kitaru.llm()` behavior (#146)
 - Added `examples/llm/manual_tool_loop.py`, a mock-safe two-turn example that shows how user code can inspect `response.tool_calls`, execute a local tool, append a `tool` message, and call `kitaru.llm()` again for a final answer (#146)
 
 ### Changed
-- **Breaking:** `kitaru.llm()` now returns `LLMResponse` instead of `str`. Text callers should use `response.content or ""`; flow-body code should call `.load()` before inspecting the response, while checkpoints receive the concrete `LLMResponse` immediately. LLM prompt artifacts now store the full request envelope, response artifacts store the normalized response payload, and `llm_calls` metadata records summary fields without tool arguments (#146)
+- **Breaking:** `kitaru.llm()` now returns `LLMResponse` instead of `str`. Flow-body code receives a durable output handle whose `.load()` returns the `LLMResponse`; checkpoint code receives the concrete `LLMResponse` immediately. LLM prompt artifacts now store the full request envelope, response artifacts store the normalized response payload, and `llm_calls` metadata records summary fields without tool arguments (#146)
 - CLI list commands now default to paginated windows (`--page 1 --size 20`) for executions, memory, stacks, models, and secrets. `kitaru executions list` also shows compact `Started` and `Ended` columns, while JSON output keeps the existing `{command, items, count}` envelope shape. Paging past the end of a non-empty list now reports `no items on page N` across all five commands rather than a misleading "none found". `kitaru executions list --limit N` still works but no longer accepts any explicit `--page`/`--size`, so the two modes don't silently mix (#122)
+
+### Migration
+- Text callers should read `response.text` (or `response.content or ""`) instead of treating `kitaru.llm()` as a string. For example, replace `summary = kitaru.llm(...)` with `summary = kitaru.llm(...).text` in checkpoint code, or `summary = kitaru.llm(...).load().text` in flow-body code (#146)
+- String operations should move to `.text`: use `response.text.strip()`, `len(response.text)`, `response.text == "..."`, and `f"{response.text}"`. `LLMResponse.__str__` no longer returns text, so implicit f-string conversion is intentionally loud instead of dropping tool-call data (#146)
+- Checkpoint annotations should change from `-> str` to `-> LLMResponse` when returning the full response, or keep `-> str` only when the checkpoint explicitly returns `response.text` (#146)
+- Use `kitaru.llm_text(*args, **kwargs)` as a temporary compatibility helper for simple text-only migrations. It calls `kitaru.llm()` and returns `.content or ""`; tool-only responses therefore return an empty string (#146)
 
 ## [0.4.0] - 2026-04-12
 
@@ -217,7 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Local model alias registry persisted in Kitaru's user config file, including default alias behavior and model-resolution helpers for `kitaru.llm()`
 - Model registry CLI surface: `kitaru model register` and `kitaru model list`
 - Phase 12 example workflow: `examples/flow_with_llm.py`
-- Getting Started LLM docs page (`/getting-started/llm-calls`)
+- LLM docs page (`/guides/llm-calls`)
 - Secrets CLI surface: `kitaru secrets set/show/list/delete`
 - `kitaru secrets set` create-or-update behavior with private-by-default secret creation
 - Secret assignment parsing with env-var-style key validation (`--KEY=value`)

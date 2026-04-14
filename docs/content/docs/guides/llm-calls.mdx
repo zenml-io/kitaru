@@ -3,22 +3,31 @@ title: Tracked LLM Calls
 description: Use kitaru.llm() with rich responses, tool-call intents, model aliases, and secret-backed credentials
 ---
 
-`kitaru.llm()` makes one tracked model call and returns a rich
-`LLMResponse` object. Kitaru records the request, normalized response, token
-usage, latency, and credential source for the call.
+`kitaru.llm()` makes one tracked model call inside a Kitaru flow. Inside
+a checkpoint it returns a rich `LLMResponse` object. In a flow body it returns a
+durable output handle whose `.load()` method returns that `LLMResponse`. Kitaru
+records the request, normalized response, token usage, latency, and credential
+source for the call.
 
 ```python
-response = kitaru.llm("Write a haiku about checkpoints.", model="fast")
-text = response.content or ""
+from kitaru import LLMResponse, checkpoint
+import kitaru
 
-response.finish_reason  # "completed", "tool_calls", "max_tokens", ...
-response.usage          # LLMUsage(prompt_tokens=..., ...)
-response.tool_calls     # list[LLMToolCall]
+@checkpoint
+def write_haiku() -> LLMResponse:
+    response = kitaru.llm("Write a haiku about checkpoints.", model="fast")
+    text = response.text
+
+    response.finish_reason  # "completed", "tool_calls", "max_tokens", ...
+    response.usage          # LLMUsage(prompt_tokens=..., ...)
+    response.tool_calls     # list[LLMToolCall]
+    return response
 ```
 
 <Callout type="warning">
   Breaking change: `kitaru.llm()` now returns `LLMResponse`, not a plain
-  string. Use `response.content` when you want text.
+  string. Use `response.text` when you want a string, or
+  `response.content` when you need to distinguish text from `None`.
 </Callout>
 
 <Callout type="info">
@@ -43,13 +52,84 @@ response.tool_calls     # list[LLMToolCall]
 Each `LLMToolCall` includes:
 
 - `id` — provider tool-call ID, when supplied
-- `name` — function/tool name
+- `name` — function/tool name, or the raw malformed value if the provider returned one
+- `name_parse_error` — parse/validation failure text when the provider returned a missing or invalid tool name
 - `arguments_json` — raw JSON argument string
 - `arguments` — parsed argument object when parsing succeeds
 - `arguments_parse_error` — parse failure text when arguments are malformed
 
-That last pair is important: Kitaru preserves the raw argument JSON even when it
-cannot parse it, so the data is not silently dropped.
+Those parse-error fields are important: Kitaru preserves malformed tool-call
+arguments and surfaces malformed names instead of silently dropping provider
+output.
+
+## Migrating from string responses
+
+Earlier versions returned a plain `str` from `kitaru.llm()`. Current versions
+return `LLMResponse` so text, tool-call intents, finish reasons, and usage can
+travel together through Kitaru.
+
+For simple text-only checkpoint code, the main migration is:
+
+```python
+# Before, inside a checkpoint
+summary = kitaru.llm("Summarize this.", model="fast")
+
+# After, inside a checkpoint
+response = kitaru.llm("Summarize this.", model="fast")
+summary = response.text
+```
+
+Once you have an `LLMResponse`, use the same `.text` alias for string
+operations:
+
+```python
+title = response.text.strip()
+length = len(response.text)
+if response.text == "Approved":
+    ...
+message = f"Model said: {response.text}"
+```
+
+`response.text` is `response.content or ""`. If you need to know whether the
+provider returned no text because it made a tool-only response, inspect
+`response.content is None` and `response.tool_calls`.
+
+If you need a temporary compatibility helper while migrating text-only callers,
+use `kitaru.llm_text()` inside a checkpoint or flow body:
+
+```python
+title = kitaru.llm_text("Write a title.", model="fast")
+```
+
+`llm_text()` calls `kitaru.llm()` and returns `.content or ""`. In a flow body it
+loads the durable output handle for you, so prefer `llm()` when you want to keep
+the response handle and pass it to downstream checkpoints.
+
+Checkpoint return annotations should also move from `str` to `LLMResponse`
+unless the checkpoint explicitly converts the response to text:
+
+```python
+from kitaru import LLMResponse, checkpoint
+import kitaru
+
+@checkpoint
+def call_model(prompt: str) -> LLMResponse:
+    return kitaru.llm(prompt, model="fast")
+
+@checkpoint
+def call_model_text(prompt: str) -> str:
+    response = kitaru.llm(prompt, model="fast")
+    return response.text
+```
+
+In a flow body, remember that `kitaru.llm()` returns a durable output handle.
+Load it before reading the response:
+
+```python
+handle = kitaru.llm("Summarize this.", model="fast")
+response = handle.load()
+summary = response.text
+```
 
 ## Model selection order
 
@@ -198,7 +278,10 @@ and `.load()` pattern.
 
 ## Text options
 
-`kitaru.llm()` accepts `system=`, `temperature=`, and `max_tokens=`:
+`kitaru.llm()` accepts `system=`, `temperature=`, and `max_tokens=`. The
+following request-shape snippets show checkpoint-local calls; if you make the
+same call in a flow body, load the returned handle before inspecting the
+response:
 
 ```python
 response = kitaru.llm(
@@ -279,7 +362,8 @@ search_tool = LLMToolDefinition(
 )
 ```
 
-Then inspect returned tool-call intents:
+Then inspect returned tool-call intents. Inside a checkpoint, `kitaru.llm()`
+returns the concrete response directly:
 
 ```python
 response = kitaru.llm(
@@ -292,6 +376,18 @@ response = kitaru.llm(
 if response.finish_reason == "tool_calls":
     for call in response.tool_calls:
         print(call.name, call.arguments)
+```
+
+Inside a flow body, load the durable output handle before inspecting it:
+
+```python
+response_handle = kitaru.llm(
+    "Find notes about Acme and summarize them.",
+    model="fast",
+    tools=[search_tool],
+    tool_choice="auto",
+)
+response = response_handle.load()
 ```
 
 `tool_choice=` accepts provider-style modes such as `"auto"`, `"required"`,
@@ -309,47 +405,76 @@ A tool loop has four concrete steps:
 4. Call `kitaru.llm()` again for the final assistant answer.
 
 ```python
-messages = [{"role": "user", "content": "Search notes about Acme."}]
+from kitaru import flow
+import kitaru
 
-first = kitaru.llm(messages, model="fast", tools=[search_tool])
+@flow
+def answer_from_notes() -> str:
+    messages = [{"role": "user", "content": "Search notes about Acme."}]
 
-messages.append(
-    {
-        "role": "assistant",
-        "content": first.content,
-        "tool_calls": [call.model_dump() for call in first.tool_calls],
-    }
-)
+    first_handle = kitaru.llm(
+        messages,
+        model="fast",
+        tools=[search_tool],
+        tool_choice="auto",
+        name="tool_request",
+    )
+    first = first_handle.load()
 
-for call in first.tool_calls:
-    tool_result = search_documents(**(call.arguments or {}))
     messages.append(
         {
-            "role": "tool",
-            "tool_call_id": call.id,
-            "content": tool_result,
+            "role": "assistant",
+            "content": first.content,
+            "tool_calls": [call.model_dump() for call in first.tool_calls],
         }
     )
 
-second = kitaru.llm(messages, model="fast", tools=[search_tool])
-final_answer = second.content or ""
-```
+    for call in first.tool_calls:
+        if call.arguments_parse_error is not None:
+            raise ValueError(f"Bad tool arguments: {call.arguments_parse_error}")
+        tool_result = search_documents(**(call.arguments or {}))
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": tool_result,
+            }
+        )
 
-In a flow body, remember that each `kitaru.llm()` returns a durable handle, so
-load each response before branching on `tool_calls`:
-
-```python
-first_handle = kitaru.llm(messages, model="fast", tools=[search_tool])
-first = first_handle.load()
+    second_handle = kitaru.llm(
+        messages,
+        model="fast",
+        tools=[search_tool],
+        name="final_answer",
+    )
+    second = second_handle.load()
+    return second.text
 ```
 
 For a runnable mock-safe version, see
-[`examples/llm/manual_tool_loop.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/llm/manual_tool_loop.py).
+[`examples/llm/manual_tool_loop.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/llm/manual_tool_loop.py).
 
 ## Runtime behavior by context
 
 - **Inside a flow body:** `kitaru.llm()` runs as a synthetic durable call boundary and returns a durable output handle.
 - **Inside a checkpoint:** `kitaru.llm()` returns a concrete `LLMResponse`; the enclosing checkpoint remains the replay boundary.
+
+### Replay semantics for `kitaru.llm()`
+
+Where you place the call controls what Kitaru reuses during replay:
+
+- **Flow-body calls are cached as their own durable call.** On replay, Kitaru can
+  reuse the whole synthetic LLM call result, including the response artifact and
+  metadata. This is the best fit when each model call is a named step in the
+  flow's control logic.
+- **Checkpoint-internal calls re-run when the checkpoint re-runs.** If replay
+  needs to execute that checkpoint again, every `kitaru.llm()` inside it is
+  called again and its prompt/response artifacts are saved again under that
+  checkpoint attempt.
+
+If you pass an explicit `name=`, keep it unique within the current flow or
+checkpoint scope. Kitaru raises `KitaruUsageError` instead of silently
+overwriting prompt/response artifacts when names collide.
 
 ## What Kitaru records
 
@@ -404,7 +529,7 @@ uv run examples/llm/flow_with_llm.py
 # Runs without provider credentials because it uses structured mock responses.
 uv run examples/llm/manual_tool_loop.py
 
-uv run pytest tests/test_phase12_llm_example.py
+uv run pytest tests/test_llm.py
 ```
 
 If you want the full credential-backed setup path first, start with
