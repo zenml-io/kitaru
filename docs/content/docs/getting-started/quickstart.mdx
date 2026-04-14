@@ -18,13 +18,15 @@ This creates a `.kitaru/` directory that marks your project root.
 ## Set up a model
 
 `kitaru.llm()` needs to know which model to call and how to authenticate.
-Set your provider API key as an environment variable:
+Set your provider API key and a default model:
 
 ```bash
 export OPENAI_API_KEY=sk-...
+export KITARU_DEFAULT_MODEL=openai/gpt-5-nano
 ```
 
-That's it — `kitaru.llm()` will pick it up automatically.
+With both set, bare `kitaru.llm(...)` calls (no `model=` argument) resolve
+to `openai/gpt-5-nano` and pick up the key from the environment.
 
 <Callout type="info">
   For production, register a model alias so you can swap models or credentials
@@ -35,7 +37,10 @@ That's it — `kitaru.llm()` will pick it up automatically.
   kitaru model register fast --model openai/gpt-5-nano --secret openai-creds
   ```
 
-  See [Secrets + Model Registration](/guides/secrets-and-model-registration)
+  With a single registered alias, bare `kitaru.llm(...)` calls resolve to
+  that alias automatically. With multiple aliases, pass `model="fast"`
+  explicitly or keep `KITARU_DEFAULT_MODEL` set. See
+  [Secrets + Model Registration](/guides/secrets-and-model-registration)
   for the full setup.
 </Callout>
 

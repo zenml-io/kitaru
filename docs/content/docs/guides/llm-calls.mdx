@@ -390,10 +390,51 @@ response_handle = kitaru.llm(
 response = response_handle.load()
 ```
 
-`tool_choice=` accepts provider-style modes such as `"auto"`, `"required"`,
-and `"none"`, plus named tool choices using OpenAI-style dictionaries. Kitaru
-validates empty names, duplicate tool names, and named choices that do not match
-the provided tools before dispatching to the provider.
+### `tool_choice` shapes
+
+`tool_choice=` accepts several equivalent shapes, all normalized to the same
+canonical form before dispatch:
+
+| Shape | Example | Meaning |
+|---|---|---|
+| Mode string | `"auto"`, `"required"`, `"none"` | Let the model decide / force a tool call / forbid tool calls. |
+| Named tool string | `"search_documents"` | Force a specific registered tool. Must match a `tools=` entry. |
+| OpenAI-style dict | `{"type": "function", "function": {"name": "search_documents"}}` | Named choice in the provider-native shape. |
+| Mode dict | `{"type": "auto"}`, `{"type": "none"}` | Mode choice in dict form. |
+
+Omit `tool_choice` to use the provider default (equivalent to `"auto"` when
+`tools=` is present).
+
+Anthropic-specific quirks (`"required"` → `{"type": "any"}`,
+`"none"` suppressing the `tools` payload entirely) are translated at the edge.
+
+### Validation rules
+
+Kitaru validates requests before dispatch to catch common mistakes early:
+
+- **Tool definitions.** Each tool must be an OpenAI-style function tool with a
+  non-empty unique `name`. Parameters must be a JSON-Schema-like object; empty
+  `{}` is allowed.
+- **`tool_choice`.** Mode strings `"auto"` and `"required"` require `tools=` to
+  be provided. Named choices (string or dict) must match a tool in `tools=`.
+- **Assistant history.** Assistant messages carrying `tool_calls` must provide
+  a non-empty `id`, a non-empty string `name`, and an `arguments_json` string
+  that parses to a JSON object. Empty arguments (`""`) are treated as
+  zero-arg calls.
+- **Tool messages.** `tool` messages require a non-empty `tool_call_id` and
+  text `content`. They must follow an assistant turn that emitted the matching
+  `tool_call_id`.
+- **Anthropic ordering.** `system` messages must appear before any
+  non-`system` message. Multiple `system` messages are joined.
+
+### Strict requests, tolerant responses
+
+Outbound request validation is strict — bad history shapes raise
+`KitaruUsageError` locally rather than letting the provider reject the call.
+Inbound response parsing is deliberately tolerant: malformed provider values
+are preserved via `arguments_parse_error` (bad JSON) and `name_parse_error`
+(non-string tool names) rather than dropped, so your code can repair or log
+them without losing data.
 
 ### Manual two-turn loop
 

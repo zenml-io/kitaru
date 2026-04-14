@@ -13,7 +13,17 @@ uv pip install 'kitaru[local]'   # Install Kitaru with local runtime
 kitaru init                      # Initialize a Kitaru project in this directory
 ```
 
-For real provider calls, register a model alias and provide credentials:
+`kitaru[local]` is enough to run the mock-safe `manual_tool_loop.py`. Real
+provider calls need the provider SDK extras as well:
+
+```bash
+uv pip install 'kitaru[local,llm]'        # OpenAI + Anthropic SDKs
+# or, pick one
+uv pip install 'kitaru[local,openai]'
+uv pip install 'kitaru[local,anthropic]'
+```
+
+Then register a model alias and provide credentials:
 
 ```bash
 kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
