@@ -3,13 +3,14 @@
 `KitaruClient` provides a programmatic API for inspecting and managing
 executions, artifacts, and memories outside flow bodies.
 
-Example::
-
+Example:
+    ```python
     from kitaru import KitaruClient
 
     client = KitaruClient()
     execution = client.executions.get("exec-123")
     print(execution.status)
+    ```
 """
 
 from __future__ import annotations
