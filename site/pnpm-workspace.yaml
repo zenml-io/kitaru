@@ -1,6 +1,6 @@
 packages: []
 minimumReleaseAge: 4320
-onlyBuiltDependencies:
-  - esbuild
-  - sharp
-  - workerd
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
