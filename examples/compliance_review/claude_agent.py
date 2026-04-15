@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -191,24 +191,30 @@ async def run_agent_turn(
     """
     resolved_cwd = _resolve_cwd(cwd)
     final: ResultMessage | None = None
+    stderr_lines: list[str] = []
     options = ClaudeAgentOptions(
         mcp_servers={COMPANY_TOOLS_SERVER_NAME: company_tools},
         allowed_tools=allowed_tools or DEFAULT_ALLOWED_TOOLS,
         resume=resume,
         cwd=resolved_cwd,
         max_turns=max_turns,
+        stderr=_collect_stderr(stderr_lines),
     )
 
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
-            final = message
+    try:
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, ResultMessage):
+                final = message
+    except Exception as exc:
+        if final is not None and final.is_error:
+            raise RuntimeError(_format_result_error(final, stderr_lines)) from exc
+        raise RuntimeError(_format_transport_error(exc, stderr_lines)) from exc
 
     if final is None:
         raise RuntimeError("Claude Agent SDK did not return a final ResultMessage.")
 
     if final.is_error:
-        detail = final.result or final.stop_reason or final.subtype
-        raise RuntimeError(f"Claude Agent SDK turn failed: {detail}")
+        raise RuntimeError(_format_result_error(final, stderr_lines))
 
     transcript_path = resolve_claude_transcript_path(
         final.session_id,
@@ -283,6 +289,43 @@ def _resolve_cwd(cwd: str | Path | None) -> str:
 def _encode_claude_project_dir(cwd: str | Path) -> str:
     """Encode a cwd using the documented Claude Agent SDK project-dir rule."""
     return _NON_ALPHANUMERIC.sub("-", _resolve_cwd(cwd))
+
+
+def _collect_stderr(stderr_lines: list[str]) -> Callable[[str], None]:
+    """Collect Claude CLI stderr lines for clearer surfaced failures."""
+
+    def _append(line: str) -> None:
+        stderr_lines.append(line)
+
+    return _append
+
+
+def _format_result_error(
+    final: ResultMessage,
+    stderr_lines: list[str],
+) -> str:
+    """Format a Claude result-level error, preserving the meaningful cause."""
+    detail = final.result or final.stop_reason or final.subtype or "Unknown Claude error"
+    return _append_stderr(
+        f"Claude Agent SDK turn failed: {detail}",
+        stderr_lines,
+    )
+
+
+def _format_transport_error(exc: Exception, stderr_lines: list[str]) -> str:
+    """Format a transport/process failure with any collected stderr context."""
+    return _append_stderr(
+        f"Claude Agent SDK transport failed: {exc}",
+        stderr_lines,
+    )
+
+
+def _append_stderr(message: str, stderr_lines: list[str]) -> str:
+    """Attach a short stderr tail when the Claude CLI emitted one."""
+    if not stderr_lines:
+        return message
+    stderr_tail = "\n".join(stderr_lines[-20:])
+    return f"{message}\nClaude CLI stderr:\n{stderr_tail}"
 
 
 def _tool_json_response(data: Any) -> dict[str, Any]:

@@ -22,6 +22,7 @@ def install_fake_claude_agent_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
         resume: str | None = None
         cwd: str | Path | None = None
         max_turns: int | None = None
+        stderr: Any = None
 
     @dataclass
     class ResultMessage:

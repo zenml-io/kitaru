@@ -6,12 +6,13 @@ The finished example will show how to wrap a Claude Agent SDK document-review ag
 
 ## Current status
 
-This folder currently contains the **Phase 0 foundation plus the first two runnable stages**:
+This folder currently contains the **Phase 0 foundation plus the first three runnable stages**:
 
 - the example directory layout
 - the Stage 1 single-turn compliance check
 - the Stage 2 sequential multi-domain audit
-- placeholder entrypoints for Stages 3–5
+- the Stage 3 memory-backed HR + IT audit
+- placeholder entrypoints for Stages 4–5
 - deterministic JSON-backed retrieval helpers in `tools.py`
 - shared Claude Agent SDK helper wiring in `claude_agent.py`
 - an example-local dependency declaration
@@ -20,7 +21,6 @@ This folder currently contains the **Phase 0 foundation plus the first two runna
 
 It does **not** yet contain:
 
-- memory-backed audit flow
 - conversational wait/resume flow
 - deployment guidance
 
@@ -32,7 +32,7 @@ Those pieces are planned for later stages.
 |---|---|---|
 | 1. Single-turn compliance check | `stage_1_single_turn.py` | First runnable flow |
 | 2. Multi-domain audit | `stage_2_multi_domain.py` | Runnable sequential audit with saved report artifact |
-| 3. Memory-backed audit | `stage_3_memory.py` | Placeholder |
+| 3. Memory-backed audit | `stage_3_memory.py` | Runnable HR + IT audit with flow-level memory |
 | 4. Conversational wait/resume loop | `stage_4_conversational.py` | Placeholder |
 | 5. Deploy guidance/example | `stage_5_deploy.py` | Placeholder |
 
@@ -44,6 +44,37 @@ Replay story: because each domain is its own checkpoint, a replay from a later f
 
 ```bash
 kitaru executions replay <exec-id> --from check_insurance
+```
+
+Stage 3 narrows the audit back to HR + IT and adds cross-run continuity through Kitaru memory. It uses **flow-level memory**, so the `audit_with_memory` flow remembers its own prior findings across runs instead of publishing them into a broader named namespace.
+
+| Setting | Value |
+|---|---|
+| Scope | the `audit_with_memory` flow ID discovered from execution metadata |
+| Scope type | `flow` |
+| IT finding key | `findings/it_security` |
+| HR finding key | `findings/hr_compliance` |
+| Last-run key | `audit/last_run` |
+
+First run: flow memory is empty, so Claude performs a fresh HR + IT audit. After the checkpoints complete, the flow writes the latest findings into its flow-level memory. Second run: the flow reads those prior findings before the checkpoints and passes them into Claude as normal checkpoint inputs, so the agent can say whether the previous gaps are still present, resolved, or changed.
+
+Useful memory inspection and maintenance commands:
+
+```bash
+# See available memory scopes, including flow scopes
+kitaru memory scopes
+
+# Find the latest Stage 3 execution and copy its flow_id from the JSON output
+kitaru executions list --flow audit_with_memory --limit 1 --output json
+
+# List stored entries for this audit flow
+kitaru memory list --scope <flow-scope-id> --scope-type flow
+
+# Seed a known prior IT finding for this audit flow before a demo run
+kitaru memory set findings/it_security '{"status":"known_gap","summary":"Data retention schedule missing"}' --scope <flow-scope-id> --scope-type flow
+
+# Compact accumulated history for a key after repeated runs
+kitaru memory compact --scope <flow-scope-id> --scope-type flow --key findings/it_security --source-mode history
 ```
 
 ## Data layout
@@ -124,6 +155,12 @@ To run the Stage 2 multi-domain audit:
 uv run stage_2_multi_domain.py
 ```
 
+To run the Stage 3 memory-backed HR + IT audit:
+
+```bash
+uv run stage_3_memory.py
+```
+
 Or, from Python/tests, import and call:
 
 ```python
@@ -137,6 +174,15 @@ For Stage 2:
 
 ```python
 from examples.compliance_review.stage_2_multi_domain import run_workflow
+
+result = run_workflow()
+print(result.result)
+```
+
+For Stage 3:
+
+```python
+from examples.compliance_review.stage_3_memory import run_workflow
 
 result = run_workflow()
 print(result.result)
@@ -163,6 +209,14 @@ uv run pytest tests/test_phase2_compliance_review_stage2.py
 ```
 
 That Stage 2 test stubs the five Claude turns, runs the real decorated flow, and verifies the saved report artifact.
+
+The focused Stage 3 memory verification command is:
+
+```bash
+uv run pytest tests/test_phase3_compliance_review_stage3.py
+```
+
+That Stage 3 test stubs Claude, runs the real decorated flow twice, and verifies flow-level memory continuity through Kitaru's memory inspection API.
 
 ## Credentials
 
