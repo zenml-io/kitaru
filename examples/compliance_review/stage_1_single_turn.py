@@ -10,6 +10,7 @@ sees that whole turn as one durable checkpoint.
 """
 
 import asyncio
+import sys
 from pathlib import Path
 
 from rich.console import Console
@@ -18,20 +19,19 @@ from rich.markdown import Markdown
 import kitaru
 from kitaru import checkpoint, flow
 
-try:  # Support both package imports and `cd examples/compliance_review`.
-    from .claude_agent import (
-        DEFAULT_ALLOWED_TOOLS,
-        ClaudeAgentResult,
-        run_agent_turn,
-        to_claude_agent_result,
-    )
-except ImportError:  # pragma: no cover - exercised by direct script execution.
-    from claude_agent import (  # type: ignore[no-redef]
-        DEFAULT_ALLOWED_TOOLS,
-        ClaudeAgentResult,
-        run_agent_turn,
-        to_claude_agent_result,
-    )
+# Make `examples.compliance_review.*` importable when this file is run as a
+# script. Using the fully qualified path keeps ZenML's materializer and any
+# later package imports on the same sys.modules entry.
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from examples.compliance_review.claude_agent import (  # noqa: E402
+    DEFAULT_ALLOWED_TOOLS,
+    ClaudeAgentResult,
+    run_agent_turn,
+    to_claude_agent_result,
+)
 
 console = Console()
 
