@@ -5,10 +5,16 @@ real ``_turn``'s annotations and rejects string forms.
 """
 
 import asyncio
+import hashlib
+import json
+import sys
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, TypedDict
 
 import kitaru
+from kitaru._source_aliases import build_checkpoint_source_alias
+from kitaru.errors import KitaruUsageError
+from pydantic_core import to_jsonable_python
 
 CheckpointRuntime = Literal['inline', 'isolated']
 
@@ -23,6 +29,10 @@ class CheckpointConfig(TypedDict, total=False):
 
 ToolCheckpointOverride = CheckpointConfig | Literal[False]
 ToolCheckpointOverrides = Mapping[str, ToolCheckpointOverride]
+_ALLOWED_CHECKPOINT_CONFIG_KEYS = frozenset({'runtime', 'retries', 'type'})
+
+if f'src.{__name__}' not in sys.modules:
+    sys.modules[f'src.{__name__}'] = sys.modules[__name__]
 
 
 def with_default_type(config: CheckpointConfig, default_type: str) -> CheckpointConfig:
@@ -55,6 +65,55 @@ def materialize_step_output(value: Any) -> Any:
     return load() if callable(load) else value
 
 
+def checkpoint_cache_key(payload: Any) -> str:
+    """Return a stable hash for synthetic checkpoint inputs."""
+    try:
+        normalized = to_jsonable_python(payload, serialize_unknown=True)
+    except ValueError:
+        normalized = {'repr': repr(payload), 'python_type': type(payload).__name__}
+    encoded = json.dumps(normalized, sort_keys=True, separators=(',', ':'), default=repr).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_checkpoint_config(
+    config: CheckpointConfig | None,
+    *,
+    context: str,
+) -> CheckpointConfig | None:
+    """Return a validated shallow copy of ``config``."""
+    if config is None:
+        return None
+    unknown_keys = sorted(set(config) - _ALLOWED_CHECKPOINT_CONFIG_KEYS)
+    if unknown_keys:
+        unknown = ', '.join(unknown_keys)
+        raise KitaruUsageError(
+            f'Unsupported keys in {context}: {unknown}. '
+            "Allowed keys are: 'runtime', 'retries', 'type'."
+        )
+    validated = dict(config)
+    reject_isolated_runtime(validated)
+    return validated
+
+
+def validate_tool_checkpoint_overrides(
+    overrides: ToolCheckpointOverrides | None,
+    *,
+    context: str,
+) -> dict[str, ToolCheckpointOverride] | None:
+    """Return validated tool checkpoint overrides."""
+    if overrides is None:
+        return None
+    normalized: dict[str, ToolCheckpointOverride] = {}
+    for tool_name, override in overrides.items():
+        normalized[tool_name] = (
+            False
+            if override is False
+            else validate_checkpoint_config(override, context=f'{context}[{tool_name!r}]')
+            or {}
+        )
+    return normalized
+
+
 def reject_isolated_runtime(config: CheckpointConfig | dict[str, Any]) -> None:
     """Raise if ``config`` requests ``runtime='isolated'``.
 
@@ -63,8 +122,6 @@ def reject_isolated_runtime(config: CheckpointConfig | dict[str, Any]) -> None:
     that ``runtime='isolated'`` would trigger on remote stacks. Until
     :class:`KitaruRunContext` is wired through, accept only inline runtime.
     """
-    from kitaru.errors import KitaruUsageError
-
     if config.get('runtime') == 'isolated':
         raise KitaruUsageError(
             "The PydanticAI adapter does not yet support `runtime='isolated'` — "
@@ -78,6 +135,7 @@ async def run_async_in_checkpoint(
     config: CheckpointConfig,
     step_name: str,
     body: Callable[[], Awaitable[Any]],
+    cache_key: str | None = None,
 ) -> Any:
     """Run an async ``body`` inside a ``@kitaru.checkpoint(**config)`` step.
 
@@ -86,10 +144,18 @@ async def run_async_in_checkpoint(
     """
     reject_isolated_runtime(config)
 
-    def _turn() -> Any:
+    def _turn(_cache_key: str | None = None) -> Any:
         return asyncio.run(body())
 
     _turn.__name__ = step_name
-    step_call = kitaru.checkpoint(**config)(_turn)
-    step_output = await asyncio.to_thread(step_call)
+    checkpoint_def = kitaru.checkpoint(**config)(_turn)
+    step_obj = getattr(checkpoint_def, '_step', None)
+    if step_obj is not None:
+        alias = build_checkpoint_source_alias(_turn.__name__)
+        for module_name in {__name__, f'src.{__name__}'}:
+            module = sys.modules.get(module_name)
+            if module is not None:
+                setattr(module, alias, step_obj)
+    step_call = checkpoint_def
+    step_output = await asyncio.to_thread(step_call, cache_key)
     return materialize_step_output(step_output)

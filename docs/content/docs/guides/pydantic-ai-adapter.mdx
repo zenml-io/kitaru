@@ -5,6 +5,11 @@ description: Wrap existing PydanticAI agents so model/tool activity is tracked i
 
 Kitaru's PydanticAI adapter lets you reuse an existing PydanticAI agent with Kitaru durability.
 
+> Migration note:
+> `kp.wrap(...)` still works as a deprecated shim for one release.
+> Prefer `KitaruAgent(...)` directly.
+> Legacy capture values map as follows: `"metadata_only"` -> `"metadata"`, `"off"` -> `None`.
+
 Use it when you want:
 
 - an explicit outer `@checkpoint` replay boundary
@@ -75,7 +80,7 @@ When the agent invokes this tool, the adapter translates it to a flow-level `kit
 
 - No nested checkpoint replay boundaries are introduced by adapter internals.
 - Adapter child events stay child events; they do not become standalone durable calls.
-- `run()` / `run_sync()` at flow scope (outside checkpoints) use one synthetic checkpoint so tracking still works. Tune it via `KitaruAgent(..., turn_checkpoint_config={"runtime": "isolated"})`.
+- `run()` / `run_sync()` at flow scope (outside checkpoints) use one synthetic checkpoint so tracking still works. Tune it via `KitaruAgent(..., turn_checkpoint_config={"runtime": "inline"})`.
 - `run()` / `run_sync()` outside any flow auto-opens a local flow (in-process only; on remote stacks, wrap explicitly with `@kitaru.flow`).
 - Streamed model requests record a transcript artifact (`*_stream_transcript`) for replay/inspection.
 

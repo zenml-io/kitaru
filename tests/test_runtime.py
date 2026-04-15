@@ -5,10 +5,13 @@ from __future__ import annotations
 from unittest.mock import patch
 from uuid import uuid4
 
+from zenml.steps.step_context import StepContext
+
 from kitaru.runtime import (
     _checkpoint_scope,
     _flow_scope,
     _get_current_flow,
+    _get_step_context_var,
     _is_inside_checkpoint,
     _is_inside_flow,
     _suspend_checkpoint_scope,
@@ -92,6 +95,12 @@ def test_wait_runs_when_checkpoint_scope_is_suspended() -> None:
         _suspend_checkpoint_scope(),
     ):
         assert wait(name="approve") is None
+
+
+def test_get_step_context_var_matches_zenml_contract() -> None:
+    """Fail loudly if ZenML renames the private step-context ContextVar."""
+    step_context_var = _get_step_context_var()
+    assert step_context_var is StepContext.__context_var__
 
 
 def test_flow_scope_records_explicit_flow_id() -> None:

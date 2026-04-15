@@ -1,4 +1,7 @@
 import asyncio
+import os
+import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -10,6 +13,8 @@ from typing import Any
 
 import kitaru
 from kitaru.analytics import AnalyticsEvent, track
+from kitaru.errors import KitaruUsageError
+from kitaru._source_aliases import build_checkpoint_source_alias
 
 from pydantic_ai import _utils, messages as _messages, models, usage as _usage
 from pydantic_ai.agent import AbstractAgent, AgentRun, WrapperAgent
@@ -27,6 +32,7 @@ from pydantic_ai.tools import AgentDepsT, DeferredToolResults
 from pydantic_ai.toolsets import AbstractToolset
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
+from ._logging import logger
 from ._model import KitaruModel
 from ._policy import CapturePolicy
 from ._toolset import kitaruify_toolset
@@ -37,9 +43,12 @@ from ._utils import (
     materialize_step_output,
     reject_isolated_runtime,
     run_async_in_checkpoint,
+    validate_checkpoint_config,
+    validate_tool_checkpoint_overrides,
 )
 
 _TRACKING_ACTIVE: ContextVar[bool] = ContextVar('kitaru_tracking_active', default=False)
+_INTERNAL_ITER_ALLOWED: ContextVar[bool] = ContextVar('kitaru_internal_iter_allowed', default=False)
 
 # Auto-flow bodies keyed by uuid. The @kitaru.flow entrypoint must be module-
 # level for ZenML dynamic-pipeline source resolution, so it can't close over
@@ -47,6 +56,9 @@ _TRACKING_ACTIVE: ContextVar[bool] = ContextVar('kitaru_tracking_active', defaul
 # require an explicit @kitaru.flow.
 _AUTO_FLOW_BODIES: dict[str, '_AutoFlowSlot'] = {}
 _AUTO_FLOW_LOCK = threading.Lock()
+
+if f'src.{__name__}' not in sys.modules:
+    sys.modules[f'src.{__name__}'] = sys.modules[__name__]
 
 
 class _AutoFlowSlot:
@@ -59,12 +71,25 @@ class _AutoFlowSlot:
         self.has_result = False
 
 
+def _load_auto_flow_body(serialized_body_path: str) -> Callable[[], Any]:
+    try:
+        import cloudpickle
+    except ImportError as error:  # pragma: no cover - depends on env packaging
+        raise KitaruUsageError(
+            'Auto-flow requires `cloudpickle` in the local runtime environment.'
+        ) from error
+    with open(serialized_body_path, 'rb') as stream:
+        return cloudpickle.load(stream)
+
+
 @kitaru.flow
-def _kitaru_pydantic_ai_auto_flow(run_id: str) -> None:
+def _kitaru_pydantic_ai_auto_flow(run_id: str, serialized_body_path: str | None = None) -> Any:
     with _AUTO_FLOW_LOCK:
         slot = _AUTO_FLOW_BODIES.get(run_id)
+    if slot is None and serialized_body_path is not None:
+        slot = _AutoFlowSlot(_load_auto_flow_body(serialized_body_path))
     if slot is None:
-        raise RuntimeError(
+        raise KitaruUsageError(
             f'Kitaru auto-flow body {run_id!r} not found in registry. Auto-flow '
             'is local-only; wrap your agent call in an explicit `@kitaru.flow` '
             'for remote stacks.'
@@ -72,7 +97,8 @@ def _kitaru_pydantic_ai_auto_flow(run_id: str) -> None:
     try:
         slot.result = slot.body()
         slot.has_result = True
-    except BaseException as exc:
+        return slot.result
+    except Exception as exc:
         slot.error = exc
         raise
 
@@ -138,18 +164,53 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             )
         self._capture = capture or CapturePolicy()
         self._event_stream_handler = event_stream_handler
-        self._turn_checkpoint_config: dict[str, Any] = (
-            {**turn_checkpoint_config} if turn_checkpoint_config else {}
+        self._turn_checkpoint_config: CheckpointConfig = (
+            validate_checkpoint_config(turn_checkpoint_config, context='turn_checkpoint_config')
+            or {}
         )
         self._granular_checkpoints = granular_checkpoints
-        # Kitaru MVP forbids nested checkpoints, so these kwargs only apply in granular mode.
-        if granular_checkpoints:
-            self._model_checkpoint_config = model_checkpoint_config
-            self._tool_checkpoint_config = tool_checkpoint_config
-            self._tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = (
-                dict(tool_checkpoint_config_by_name) if tool_checkpoint_config_by_name else None
+        self._warned_streaming_fallback = False
+        has_granular_configs = any(
+            value is not None
+            for value in (
+                model_checkpoint_config,
+                tool_checkpoint_config,
+                tool_checkpoint_config_by_name,
+                mcp_checkpoint_config,
             )
-            self._mcp_checkpoint_config = mcp_checkpoint_config
+        )
+        if has_granular_configs and not granular_checkpoints:
+            raise KitaruUsageError(
+                'Per-call checkpoint configs require `granular_checkpoints=True`.'
+            )
+        if granular_checkpoints:
+            self._model_checkpoint_config = (
+                validate_checkpoint_config(
+                    model_checkpoint_config or {},
+                    context='model_checkpoint_config',
+                )
+                or {}
+            )
+            self._tool_checkpoint_config = (
+                validate_checkpoint_config(
+                    tool_checkpoint_config or {},
+                    context='tool_checkpoint_config',
+                )
+                or {}
+            )
+            self._tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = (
+                validate_tool_checkpoint_overrides(
+                    tool_checkpoint_config_by_name,
+                    context='tool_checkpoint_config_by_name',
+                )
+            )
+            self._mcp_checkpoint_config = (
+                validate_checkpoint_config(
+                    mcp_checkpoint_config or {},
+                    context='mcp_checkpoint_config',
+                )
+                or {}
+            )
         else:
             self._model_checkpoint_config = None
             self._tool_checkpoint_config = None
@@ -229,7 +290,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             error: BaseException | None = None
             try:
                 await effective_handler(ctx, stream)
-            except BaseException as exc:
+            except Exception as exc:
                 error = exc
                 raise
             finally:
@@ -288,7 +349,11 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             yield
 
     def _should_track(self) -> bool:
-        return is_inside_checkpoint() and not _TRACKING_ACTIVE.get()
+        if _TRACKING_ACTIVE.get():
+            return False
+        if is_inside_checkpoint():
+            return True
+        return self._granular_checkpoints and is_inside_flow()
 
     @contextmanager
     def _tracking_scope(self) -> Iterator[None]:
@@ -302,6 +367,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 yield
         finally:
             _TRACKING_ACTIVE.reset(token)
+
+    @contextmanager
+    def _allow_internal_iter(self) -> Iterator[None]:
+        token = _INTERNAL_ITER_ALLOWED.set(True)
+        try:
+            yield
+        finally:
+            _INTERNAL_ITER_ALLOWED.reset(token)
 
     async def _auto_checkpoint_async(self, body: Callable[[], Awaitable[Any]]) -> Any:
         return await run_async_in_checkpoint(
@@ -317,25 +390,59 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             return body()
 
         _turn.__name__ = self._name or 'agent'
-        step_output = kitaru.checkpoint(**self._turn_checkpoint_config)(_turn)()
+        checkpoint_def = kitaru.checkpoint(**self._turn_checkpoint_config)(_turn)
+        step_obj = getattr(checkpoint_def, '_step', None)
+        if step_obj is not None:
+            alias = build_checkpoint_source_alias(_turn.__name__)
+            for module_name in {__name__, f'src.{__name__}'}:
+                module = sys.modules.get(module_name)
+                if module is not None:
+                    setattr(module, alias, step_obj)
+        step_output = checkpoint_def()
         return materialize_step_output(step_output)
 
     def _invoke_in_auto_flow(self, body: Callable[[], Any]) -> Any:
         run_id = uuid.uuid4().hex
         slot = _AutoFlowSlot(body)
+        serialized_body_path: str | None = None
+        flow_result: Any = None
         with _AUTO_FLOW_LOCK:
             _AUTO_FLOW_BODIES[run_id] = slot
         try:
-            handle = _kitaru_pydantic_ai_auto_flow.run(run_id)
-            handle.wait()
+            try:
+                import cloudpickle
+            except ImportError:
+                cloudpickle = None
+            if cloudpickle is not None:
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False) as stream:
+                        cloudpickle.dump(body, stream)
+                        serialized_body_path = stream.name
+                except Exception as error:
+                    raise KitaruUsageError(
+                        'Auto-flow could not serialize the wrapped agent call for the '
+                        'current execution environment. Wrap the call in an explicit '
+                        '`@kitaru.flow` instead.'
+                    ) from error
+            handle = _kitaru_pydantic_ai_auto_flow.run(run_id, serialized_body_path)
+            flow_result = handle.wait()
         finally:
             with _AUTO_FLOW_LOCK:
                 _AUTO_FLOW_BODIES.pop(run_id, None)
+            if serialized_body_path is not None:
+                try:
+                    os.remove(serialized_body_path)
+                except FileNotFoundError:
+                    pass
 
         if slot.error is not None:
             raise slot.error
+        if slot.has_result:
+            return slot.result
+        if flow_result is not None:
+            return flow_result
         if not slot.has_result:
-            raise RuntimeError(
+            raise KitaruUsageError(
                 'Kitaru auto-flow finished without populating a result. This '
                 'is a bug in kitaru.adapters.pydantic_ai.'
             )
@@ -363,6 +470,45 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         # so model/tool events still land under a tracked boundary.
         return self._granular_checkpoints and not force_turn_checkpoint
 
+    def _log_streaming_fallback(self) -> None:
+        if self._warned_streaming_fallback:
+            return
+        dropped_configs = [
+            name
+            for name, config in (
+                ('model_checkpoint_config', self._model_checkpoint_config),
+                ('tool_checkpoint_config', self._tool_checkpoint_config),
+                ('tool_checkpoint_config_by_name', self._tool_checkpoint_config_by_name),
+                ('mcp_checkpoint_config', self._mcp_checkpoint_config),
+            )
+            if config
+        ]
+        if not dropped_configs:
+            return
+        self._warned_streaming_fallback = True
+        logger.warning(
+            'Falling back to turn checkpointing for a streamed PydanticAI run; '
+            'granular checkpoint configs are ignored for this call.',
+            extra={'dropped_configs': dropped_configs, 'agent_name': self._name},
+        )
+        if is_inside_flow() and not is_inside_checkpoint():
+            kitaru.log(
+                adapter='pydantic_ai',
+                streaming_fallback=True,
+                dropped_checkpoint_configs=dropped_configs,
+            )
+
+    @staticmethod
+    def _ensure_run_sync_safe() -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        raise KitaruUsageError(
+            '`KitaruAgent.run_sync()` cannot be called from a running event loop. '
+            'Use `await agent.run(...)` instead.'
+        )
+
     async def _run_async(
         self,
         body: Callable[[], Awaitable[Any]],
@@ -378,7 +524,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         # so we dispatch the flow to a worker thread (no running loop there,
         # so asyncio.run is safe for the agent coroutine).
         async def _await_body() -> Any:
-            return await body()
+            return await self._run_async(
+                body,
+                force_turn_checkpoint=force_turn_checkpoint,
+            )
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
@@ -396,9 +545,16 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
                 return body()
             return self._auto_checkpoint_sync(body)
-        return self._invoke_in_auto_flow(body)
+        return self._invoke_in_auto_flow(
+            lambda: self._run_sync(
+                body,
+                force_turn_checkpoint=force_turn_checkpoint,
+            )
+        )
 
     def _require_explicit_checkpoint(self, method_name: str) -> None:
+        if _INTERNAL_ITER_ALLOWED.get():
+            return
         if is_inside_checkpoint():
             return
         raise UserError(
@@ -431,11 +587,13 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._validate_model_override(model)
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
+        if wrapped_handler is not None and self._granular_checkpoints:
+            self._log_streaming_fallback()
         effective_history = self._effective_message_history(message_history)
 
         async def _body() -> Any:
-            with self._kitaru_overrides(), self._tracking_scope():
-                return await super(KitaruAgent, self).run(
+            with self._kitaru_overrides(), self._tracking_scope(), self._allow_internal_iter():
+                result = await super(KitaruAgent, self).run(
                     user_prompt,
                     output_type=output_type,
                     message_history=effective_history,
@@ -453,12 +611,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     event_stream_handler=wrapped_handler,
                     spec=spec,
                 )
+            self._remember_messages(result)
+            return result
 
         error: BaseException | None = None
         try:
-            result = await self._run_async(_body, force_turn_checkpoint=wrapped_handler is not None)
-            self._remember_messages(result)
-            return result
+            return await self._run_async(_body, force_turn_checkpoint=wrapped_handler is not None)
         except BaseException as exc:
             error = exc
             raise
@@ -485,14 +643,17 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         spec: dict[str, Any] | None = None,
     ) -> Any:
+        self._ensure_run_sync_safe()
         self._validate_model_override(model)
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
+        if wrapped_handler is not None and self._granular_checkpoints:
+            self._log_streaming_fallback()
         effective_history = self._effective_message_history(message_history)
 
         def _body() -> Any:
-            with self._kitaru_overrides(), self._tracking_scope():
-                return super(KitaruAgent, self).run_sync(
+            with self._kitaru_overrides(), self._tracking_scope(), self._allow_internal_iter():
+                result = super(KitaruAgent, self).run_sync(
                     user_prompt,
                     output_type=output_type,
                     message_history=effective_history,
@@ -510,12 +671,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     event_stream_handler=wrapped_handler,
                     spec=spec,
                 )
+            self._remember_messages(result)
+            return result
 
         error: BaseException | None = None
         try:
-            result = self._run_sync(_body, force_turn_checkpoint=wrapped_handler is not None)
-            self._remember_messages(result)
-            return result
+            return self._run_sync(_body, force_turn_checkpoint=wrapped_handler is not None)
         except BaseException as exc:
             error = exc
             raise
@@ -593,6 +754,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         # would require a checkpoint primitive that itself is a context manager, which
         # kitaru.checkpoint isn't. Wrap iter() in an explicit @kitaru.checkpoint instead.
         self._validate_model_override(model)
+        self._require_explicit_checkpoint('iter')
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         with self._kitaru_overrides(), self._tracking_scope():
             async with self.wrapped.iter(

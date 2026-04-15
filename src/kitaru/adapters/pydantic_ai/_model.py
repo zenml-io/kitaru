@@ -25,10 +25,11 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RequestUsage
 
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
+from ._logging import logger
 from ._otel import attach_model_correlation
 from ._policy import CapturePolicy
 from ._tracking import artifact_name, get_current_tracker
-from ._utils import CheckpointConfig, run_async_in_checkpoint, with_default_type
+from ._utils import CheckpointConfig, checkpoint_cache_key, run_async_in_checkpoint, with_default_type
 
 _MODEL_RESPONSE_ADAPTER = TypeAdapter(ModelResponse)
 _MODEL_STREAM_EVENT_ADAPTER = TypeAdapter(ModelResponseStreamEvent)
@@ -46,7 +47,12 @@ def _serialize_stream_event(event: Any) -> dict[str, Any]:
     try:
         return cast(dict[str, Any], _MODEL_STREAM_EVENT_ADAPTER.dump_python(event, mode='json'))
     except (TypeError, ValueError, PydanticSerializationError):
-        return {'event_type': type(event).__name__, 'repr': repr(event)}
+        logger.warning('Failed to serialize PydanticAI stream event; falling back to repr.', exc_info=True)
+        return {
+            'event_type': type(event).__name__,
+            'repr': repr(event),
+            'serialization_error': 'stream_event_serialization_failed',
+        }
 
 
 class KitaruStreamedResponse(StreamedResponse):
@@ -130,6 +136,13 @@ class KitaruModel(WrapperModel):
                 config=with_default_type(self._checkpoint_config, 'llm_call'),
                 step_name=f'{self._agent_name}_model_request',
                 body=_in_checkpoint,
+                cache_key=checkpoint_cache_key(
+                    {
+                        'messages': _serialize_messages(messages),
+                        'model_settings': model_settings,
+                        'model_request_parameters': model_request_parameters,
+                    }
+                ),
             )
         return await self._tracked_request(
             messages, model_settings, model_request_parameters
@@ -158,7 +171,7 @@ class KitaruModel(WrapperModel):
         started_at = time.perf_counter()
         try:
             response = await super().request(messages, model_settings, model_request_parameters)
-        except BaseException as error:
+        except Exception as error:
             tracker.record_model_event(
                 event_id,
                 event_context,
@@ -231,7 +244,7 @@ class KitaruModel(WrapperModel):
                 tracked_stream = KitaruStreamedResponse(streamed_response, on_event=_on_stream_event)
                 yield tracked_stream
             response = tracked_stream.get()
-        except BaseException as error:
+        except Exception as error:
             tracker.record_model_event(
                 event_id,
                 event_context,

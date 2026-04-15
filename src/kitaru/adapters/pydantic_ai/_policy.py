@@ -10,7 +10,8 @@ class CapturePolicy:
     """Controls what the Kitaru adapter persists and correlates per run.
 
     Pass `None` for `tool_capture` or any entry in `tool_capture_overrides` to
-    bypass tracking (no events, no artifacts, no wait correlation) for that scope.
+    bypass tool-call event/artifact capture for that scope. HITL interception
+    still runs so approval and deferred waits remain durable.
     """
 
     emit_child_events: bool = True

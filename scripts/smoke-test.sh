@@ -158,8 +158,8 @@ section_header "Install from source"
 if [[ "$SKIP_INSTALL" == true ]]; then
     skip_test "uv sync" "skipped via --skip-install"
 else
-    run_test "uv sync --python $PY --extra local --extra llm --extra mcp" \
-        uv sync --python "$PY" --extra local --extra llm --extra mcp
+    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai" \
+        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai
 fi
 
 # ---------------------------------------------------------------------------
@@ -257,6 +257,14 @@ if [[ -d .kitaru ]]; then
 else
     run_test "kitaru init" $UV_RUN kitaru init
 fi
+
+# ---------------------------------------------------------------------------
+# Adapter example
+# ---------------------------------------------------------------------------
+section_header "PydanticAI adapter"
+
+run_test "examples/pydantic_ai_agent/pydantic_ai_adapter.py" \
+    $UV_RUN python examples/pydantic_ai_agent/pydantic_ai_adapter.py
 
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).

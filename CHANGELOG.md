@@ -7,8 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking Changes
+- `kitaru.adapters.pydantic_ai.wrap(...)` is deprecated in favor of `KitaruAgent(...)`. A compatibility shim remains for one release.
+- Legacy adapter capture config names were renamed: `"metadata_only"` -> `"metadata"` and `"off"` -> `None`.
+- Legacy `tool_capture_config_by_name={"name": {"mode": "metadata_only"}}` now maps to `capture=CapturePolicy(tool_capture_overrides={"name": "metadata"})`.
+
+Migration snippet:
+
+```python
+from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent
+
+wrapped = KitaruAgent(
+    agent,
+    capture=CapturePolicy(
+        tool_capture="full",
+        tool_capture_overrides={"name": "metadata"},
+    ),
+)
+```
+
+### Added
+- Restored end-to-end PydanticAI adapter integration coverage for turn mode, granular mode, and auto-flow execution.
+- Granular checkpoint mode now installs a run-level tracker at flow scope and persists `pydantic_ai_events` plus `pydantic_ai_run_summaries` even when no turn checkpoint is opened.
+- `kitaru.adapters.pydantic_ai.wrap(...)` compatibility shim with deprecation warning to ease migration to `KitaruAgent(...)`.
+
 ### Changed
 - CLI list commands now default to paginated windows (`--page 1 --size 20`) for executions, memory, stacks, models, and secrets. `kitaru executions list` also shows compact `Started` and `Ended` columns, while JSON output keeps the existing `{command, items, count}` envelope shape. Paging past the end of a non-empty list now reports `no items on page N` across all five commands rather than a misleading "none found". `kitaru executions list --limit N` still works but no longer accepts any explicit `--page`/`--size`, so the two modes don't silently mix (#122)
+- PydanticAI adapter auto-flow now re-enters the normal run path so turn checkpoints, tracking, and message-history capture apply outside explicit flows.
+- PydanticAI granular mode now defaults its per-call checkpoint configs on, rejects invalid config combinations eagerly, keeps HITL interception active when capture is disabled, and raises clear usage errors for unsupported deferred-tool schemas.
+- PydanticAI adapter docs, README examples, and migration guidance now match the shipped runtime: `runtime="inline"` only for adapter-managed checkpoints, explicit deprecation path for `wrap(...)`, and corrected capture-policy examples.
 
 ## [0.4.0] - 2026-04-12
 

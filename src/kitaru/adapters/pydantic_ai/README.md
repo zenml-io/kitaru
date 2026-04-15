@@ -13,7 +13,9 @@ result = durable_agent.run_sync('Summarize quantum error correction.')
 print(result.output)
 ```
 
-That's it. No flow decorator, no checkpoint annotations, no graph DSL — the adapter auto-opens a Kitaru flow and checkpoint the first time you call `run()` / `run_sync()` outside of one. The dashboard at `http://localhost:8080` (or your deployed Kitaru server) shows every turn, tool call, model response, and wait point.
+That's it. No flow decorator, no checkpoint annotations, no graph DSL — the adapter auto-opens a Kitaru flow and a turn checkpoint when you call `run()` / `run_sync()` outside of an existing flow. The dashboard at `http://localhost:8080` (or your deployed Kitaru server) shows every turn, tool call, model response, and wait point.
+
+Migration note: `kp.wrap(...)` remains available as a deprecated shim for one release. Prefer `KitaruAgent(...)` directly. Legacy capture values map as `"metadata_only"` -> `"metadata"` and `"off"` -> `None`.
 
 ## Concepts in 30 seconds
 

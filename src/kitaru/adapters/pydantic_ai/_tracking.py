@@ -11,6 +11,7 @@ import kitaru
 
 from pydantic_ai.usage import RequestUsage
 
+from ._logging import logger
 from ._events import (
     AgentEvent,
     DeferredEvent,
@@ -26,7 +27,12 @@ from ._events import (
     dump_agent_events,
     error_from_exception,
 )
-from ._kitaru_internal import get_current_checkpoint, get_current_execution_id, is_inside_checkpoint
+from ._kitaru_internal import (
+    get_current_checkpoint,
+    get_current_checkpoint_name,
+    get_current_execution_id,
+    is_inside_checkpoint,
+)
 from ._policy import CaptureMode
 
 _NON_WORD_PATTERN = re.compile(r'\W+')
@@ -80,8 +86,8 @@ class EventTracker:
     def __post_init__(self) -> None:
         self.agent_name = normalize_agent_name(self.agent_name)
         checkpoint = get_current_checkpoint()
-        self.checkpoint_name = getattr(checkpoint, 'name', None)
-        self.checkpoint_id = getattr(checkpoint, 'checkpoint_id', None)
+        self.checkpoint_name = get_current_checkpoint_name()
+        self.checkpoint_id = checkpoint.checkpoint_id if checkpoint is not None else None
         self.exec_id = get_current_execution_id()
 
     @property
@@ -243,6 +249,7 @@ class EventTracker:
         )
 
     def build_run_summary(self) -> RunSummary:
+        ordered_events = sorted(self._events, key=lambda event: event.sequence_index)
         event_stream_handler = None
         if self._event_stream_handler_call_count:
             event_stream_handler = EventStreamHandlerSummary(
@@ -257,7 +264,7 @@ class EventTracker:
             tool_call_count=self._tool_call_count,
             total_events=self._counter,
             turn_count=self._turn_index,
-            event_ids_in_order=[event.event_id for event in self._events],
+            event_ids_in_order=[event.event_id for event in ordered_events],
             duration_ms=round((time.perf_counter() - self._started_at) * 1000, 3),
             checkpoint_name=self.checkpoint_name,
             checkpoint_id=self.checkpoint_id,
@@ -267,12 +274,20 @@ class EventTracker:
         )
 
     def persist(self) -> None:
-        if not is_inside_checkpoint():
-            return
-        kitaru.save(self.event_log_artifact_name, dump_agent_events(self._events), type='context')
+        events_dump = dump_agent_events(self._events)
         summary_dump = self.build_run_summary().model_dump(mode='json')
-        kitaru.save(self.run_summary_artifact_name, summary_dump, type='context')
-        kitaru.log(pydantic_ai_run_summaries={self.run_label: summary_dump})
+        if is_inside_checkpoint():
+            kitaru.save(self.event_log_artifact_name, events_dump, type='context')
+            kitaru.save(self.run_summary_artifact_name, summary_dump, type='context')
+        else:
+            logger.debug(
+                'Persisting PydanticAI tracker outside a checkpoint; emitting flow-level metadata only.',
+                extra={'agent_name': self.agent_name, 'run_label': self.run_label},
+            )
+        kitaru.log(
+            pydantic_ai_events={self.run_label: events_dump},
+            pydantic_ai_run_summaries={self.run_label: summary_dump},
+        )
 
 
 _CURRENT_TRACKER: ContextVar[EventTracker | None] = ContextVar(
@@ -287,12 +302,19 @@ def tracker_scope(agent_name: str | None) -> Iterator[EventTracker]:
     token = _CURRENT_TRACKER.set(tracker)
     try:
         yield tracker
-    except BaseException as error:
+    except Exception as error:
         tracker.set_run_error(error)
         raise
     finally:
         try:
-            tracker.persist()
+            try:
+                tracker.persist()
+            except Exception:
+                logger.warning(
+                    'Failed to persist PydanticAI tracker state.',
+                    exc_info=True,
+                    extra={'agent_name': tracker.agent_name, 'run_label': tracker.run_label},
+                )
         finally:
             _CURRENT_TRACKER.reset(token)
 

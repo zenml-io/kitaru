@@ -71,18 +71,15 @@ class KitaruRunContext(RunContext[AgentDepsT]):
             if name in self.__dict__
         }
 
-    def __getattribute__(self, name: str) -> Any:
-        try:
-            return super().__getattribute__(name)
-        except AttributeError as error:
-            if name in RunContext.__dataclass_fields__:
-                raise UserError(
-                    f'{self.__class__.__name__!r} object has no attribute {name!r}. '
-                    'The attribute was not included in serialize_run_context; '
-                    'subclass KitaruRunContext and extend serialize_run_context to '
-                    'carry it across the Kitaru checkpoint boundary.'
-                ) from error
-            raise
+    def __getattr__(self, name: str) -> Any:
+        if name in RunContext.__dataclass_fields__:
+            raise UserError(
+                f'{self.__class__.__name__!r} object has no attribute {name!r}. '
+                'The attribute was not included in serialize_run_context; '
+                'subclass KitaruRunContext and extend serialize_run_context to '
+                'carry it across the Kitaru checkpoint boundary.'
+            )
+        raise AttributeError(name)
 
     @classmethod
     def serialize_run_context(cls, ctx: RunContext[Any]) -> dict[str, Any]:

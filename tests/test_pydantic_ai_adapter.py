@@ -117,6 +117,38 @@ class TestUseGranular:
         agent = self._make_agent(granular=True)
         assert agent._use_granular(force_turn_checkpoint=True) is False
 
+    def test_granular_defaults_enable_per_call_checkpoint_configs(self) -> None:
+        agent = self._make_agent(granular=True)
+        assert agent._model_checkpoint_config == {}
+        assert agent._tool_checkpoint_config == {}
+        assert agent._mcp_checkpoint_config == {}
+
+    def test_per_call_configs_require_granular_mode(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        inner = Agent(TestModel(), name="streamer")
+        with pytest.raises(KitaruUsageError, match="granular_checkpoints=True"):
+            KitaruAgent(inner, model_checkpoint_config={"retries": 1})
+
+    def test_wrap_compatibility_shim_translates_legacy_capture_modes(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters import pydantic_ai as kp
+
+        with pytest.deprecated_call():
+            wrapped = kp.wrap(
+                Agent(TestModel(), name="legacy"),
+                tool_capture_config={"mode": "metadata_only"},
+                tool_capture_config_by_name={"secret": {"mode": "off"}},
+            )
+
+        assert wrapped.capture.tool_capture == "metadata"
+        assert wrapped.capture.tool_capture_overrides["secret"] is None
+
 
 class TestPersistMessageHistory:
     """Instance-level conversation memory: opt-in, one instance = one conversation."""
@@ -160,3 +192,81 @@ class TestPersistMessageHistory:
         agent = self._make_agent(persist=True)
         agent._remember_messages(SimpleNamespace(all_messages=lambda: ["m1", "m2"]))
         assert agent._last_messages == ["m1", "m2"]
+
+
+@pytest.mark.anyio
+async def test_iter_requires_explicit_checkpoint() -> None:
+    from pydantic_ai import Agent
+    from pydantic_ai.exceptions import UserError
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import KitaruAgent
+
+    agent = KitaruAgent(Agent(TestModel(), name="iterer"))
+    with pytest.raises(UserError, match=r"explicit `@kitaru.checkpoint`"):
+        async with agent.iter("hello"):
+            pass
+
+
+@pytest.mark.anyio
+async def test_capture_off_still_routes_hitl(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, hitl_tool
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    @hitl_tool(schema=bool, question="Approve?")
+    def approve_release() -> str:
+        return "never reached"
+
+    wrapped = kitaruify_toolset(toolset, capture=CapturePolicy(tool_capture=None))
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["approve_release"]
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.wait",
+        lambda **_: True,
+    )
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("approve_release", {}, ctx, tool)
+
+    assert result is True
+
+
+@pytest.mark.anyio
+async def test_call_deferred_without_schema_raises_usage_error() -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.exceptions import CallDeferred
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def defer_release():
+        raise CallDeferred()
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["defer_release"]
+
+    with _flow_scope(name="demo_flow"), pytest.raises(
+        KitaruUsageError, match="Cannot infer a wait schema"
+    ):
+        await wrapped.call_tool("defer_release", {}, ctx, tool)

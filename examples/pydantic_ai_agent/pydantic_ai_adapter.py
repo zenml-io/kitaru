@@ -1,30 +1,37 @@
-"""Durable research agent built on Pydantic AI and Kitaru.
+"""Capability smoke test for the Kitaru PydanticAI adapter.
 
-A Pydantic AI `Agent` with a structured output, a dependency, and a tool,
-wrapped in a one-line `KitaruAgent(...)` and driven from inside a
-`@kitaru.flow` + `@kitaru.checkpoint` so the run is replayable, resumable,
-and observable via `kitaru executions`.
+Each ``demo_*`` function exercises one feature of ``KitaruAgent`` using
+``pydantic_ai.models.test.TestModel`` so the whole file runs end-to-end
+without API keys. ``main()`` runs them in sequence and prints pass/fail so a
+maintainer can spot regressions at a glance.
 
-The pydantic-ai side of this example is intentionally conventional —
-the durable-execution layer adds durability without changing the agent.
-
-Uses `pydantic_ai.models.test.TestModel` so no API keys are required;
-swap the model for e.g. `'openai:gpt-4o-mini'` in production.
+Auto-checkpoint caches the full ``AgentRunResult`` as the turn artifact;
+ZenML's dataclass materializer can't round-trip a generic ``AgentRunResult[X]``
+for a structured ``output_type``, so demos that rely on auto-checkpoint
+stick to ``output_type=str``. Use ``output_type=SomeModel`` only inside an
+explicit ``@checkpoint`` that returns the ``.output`` directly (demo 1).
 
 Run:
-    cd examples/pydantic_ai_agent
-    uv pip install 'kitaru[local,pydantic-ai]'
-    python pydantic_ai_adapter.py
+    uv sync --extra local --extra pydantic-ai
+    uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py
 """
 
+import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.exceptions import ApprovalRequired, CallDeferred
 from pydantic_ai.models.test import TestModel
 
 from kitaru import checkpoint, flow
-from kitaru.adapters.pydantic_ai import KitaruAgent, hitl_tool
+from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent, hitl_tool
+
+# Per-process suffix so each run uses fresh checkpoint names, sidestepping
+# stale cached artifacts from prior example runs (the adapter's checkpoint
+# cache key is currently agent-name scoped; see README follow-ups).
+_RUN_TAG = uuid.uuid4().hex[:8]
 
 
 @dataclass
@@ -38,64 +45,252 @@ class ResearchBrief(BaseModel):
     sources: list[str]
 
 
-# The `@hitl_tool` marker bridges tool invocations straight to
-# `kitaru.wait(...)`. When the model calls this tool the flow pauses for a
-# human decision (interactive terminal prompts in-line; remote stacks move
-# the execution to `waiting` status). The tool body is skipped — the wait
-# return value is what the model sees.
+def _make_structured_agent() -> Agent[ResearchDeps, ResearchBrief]:
+    """Structured output + a tool + deps; safe inside an explicit `@checkpoint`."""
+    agent = Agent(
+        TestModel(call_tools=[]),
+        name=f"structured_researcher_{_RUN_TAG}",
+        deps_type=ResearchDeps,
+        output_type=ResearchBrief,
+        instructions="Research the topic and cite a source.",
+    )
+
+    @agent.tool
+    def search_index(ctx: RunContext[ResearchDeps], query: str) -> list[str]:
+        return [
+            f"https://example.com/{tag}/{query}" for tag in ctx.deps.source_priority
+        ]
+
+    return agent
+
+
+def _make_str_agent(
+    name: str, *, call_tools: list[str] | str = "all"
+) -> Agent[ResearchDeps, str]:
+    """``str`` output — auto-checkpoint friendly (no generic in the cache)."""
+    agent = Agent(
+        TestModel(call_tools=call_tools),
+        name=f"{name}_{_RUN_TAG}",
+        deps_type=ResearchDeps,
+        output_type=str,
+    )
+
+    @agent.tool
+    def search_index(ctx: RunContext[ResearchDeps], query: str) -> list[str]:
+        return [f"https://example.com/{query}"]
+
+    return agent
+
+
+def demo_passthrough() -> ResearchBrief:
+    """Inside an explicit ``@checkpoint`` the adapter is a pure passthrough."""
+    researcher = KitaruAgent(_make_structured_agent())
+
+    @checkpoint(type="llm_call")
+    def run_research(topic: str) -> ResearchBrief:
+        deps = ResearchDeps(source_priority=["wiki", "news"])
+        return researcher.run_sync(f"Research {topic!r}.", deps=deps).output
+
+    @flow
+    def passthrough_flow(topic: str) -> ResearchBrief:
+        return run_research(topic)
+
+    return passthrough_flow.run("kitaru").wait()
+
+
+def demo_auto_checkpoint() -> str:
+    """Inside ``@flow`` without ``@checkpoint`` — adapter opens a turn checkpoint."""
+    researcher = KitaruAgent(_make_str_agent("auto_cp_agent", call_tools=[]))
+    deps = ResearchDeps(source_priority=["wiki"])
+
+    @flow
+    def auto_checkpoint_flow(topic: str) -> str:
+        return researcher.run_sync(f"Research {topic!r}.", deps=deps).output
+
+    return auto_checkpoint_flow.run("kitaru").wait()
+
+
+def demo_auto_flow() -> str:
+    """Outside any ``@flow`` — the adapter auto-opens one."""
+    researcher = KitaruAgent(_make_str_agent("auto_flow_agent", call_tools=[]))
+    deps = ResearchDeps(source_priority=["wiki"])
+    return researcher.run_sync("Research 'kitaru'.", deps=deps).output
+
+
+def demo_granular() -> str:
+    """Granular mode: each model / tool / MCP call becomes its own checkpoint.
+
+    With a real model, each call's cached response lets replay after a mid-turn
+    crash resume at the next pending call instead of restarting the turn. Per-
+    tool overrides (retries, opt-out via ``False``) are shown for API surface.
+    """
+    inner = Agent(
+        TestModel(call_tools=[]), name=f"granular_agent_{_RUN_TAG}", output_type=str
+    )
+
+    @inner.tool_plain
+    def lookup_price(sku: str) -> float:
+        return 9.99
+
+    researcher = KitaruAgent(
+        inner,
+        granular_checkpoints=True,
+        model_checkpoint_config={"retries": 2},
+        tool_checkpoint_config={"retries": 1},
+        tool_checkpoint_config_by_name={
+            "lookup_price": {"retries": 5},
+        },
+    )
+
+    @flow
+    def granular_flow(topic: str) -> str:
+        return researcher.run_sync(f"Research {topic!r}.").output
+
+    return granular_flow.run("kitaru").wait()
+
+
+def demo_turn_retries() -> str:
+    """``turn_checkpoint_config`` tunes the auto-opened turn checkpoint."""
+    researcher = KitaruAgent(
+        _make_str_agent("turn_retries_agent", call_tools=[]),
+        turn_checkpoint_config={"retries": 2, "type": "llm_call"},
+    )
+    deps = ResearchDeps(source_priority=["wiki"])
+
+    @flow
+    def turn_retries_flow(topic: str) -> str:
+        return researcher.run_sync(f"Research {topic!r}.", deps=deps).output
+
+    return turn_retries_flow.run("kitaru").wait()
+
+
+def demo_message_history() -> str:
+    """``persist_message_history`` threads message history across turns.
+
+    Both ``run_sync`` calls live inside a single ``@checkpoint`` so the flow
+    has one terminal step; the second call sees the first turn's messages
+    without the caller passing ``message_history=``.
+    """
+    chat_agent = Agent(
+        TestModel(call_tools=[]), name=f"chat_{_RUN_TAG}", output_type=str
+    )
+    chatter = KitaruAgent(chat_agent, persist_message_history=True)
+
+    @checkpoint
+    def converse() -> str:
+        first = chatter.run_sync("Hi, I am Alice.").output
+        second = chatter.run_sync("What's my name?").output
+        return f"{first!r} + {second!r}"
+
+    @flow
+    def message_history_flow() -> str:
+        return converse()
+
+    return message_history_flow.run().wait()
+
+
+def demo_capture_policy() -> str:
+    """Metadata-only tool capture + a per-tool override that drops capture entirely."""
+    policy = CapturePolicy(
+        save_prompts=True,
+        save_responses=True,
+        tool_capture="metadata",
+        tool_capture_overrides={"search_index": None},
+    )
+    researcher = KitaruAgent(_make_str_agent("capture_agent"), capture=policy)
+    deps = ResearchDeps(source_priority=["wiki"])
+
+    @flow
+    def capture_policy_flow(topic: str) -> str:
+        return researcher.run_sync(f"Research {topic!r}.", deps=deps).output
+
+    return capture_policy_flow.run("kitaru").wait()
+
+
+def demo_event_stream_handler() -> str:
+    """Construction-only: driving ``event_stream_handler`` against ``TestModel``
+    hits an upstream parts-manager ``IndexError`` that doesn't reproduce with
+    real providers, so this demo validates wiring only. The adapter wraps the
+    handler and forces the turn-checkpoint fallback when granular mode is on
+    (per-call checkpointing cannot drain an async stream inside a sync step).
+    """
+
+    async def handler(ctx: Any, stream: Any) -> None:
+        async for _event in stream:
+            pass
+
+    inner = Agent(
+        TestModel(call_tools=[]), name=f"stream_agent_{_RUN_TAG}", output_type=str
+    )
+    wrapped = KitaruAgent(inner, event_stream_handler=handler)
+    return f"wired handler on {wrapped.name}"
+
+
 @hitl_tool(question="Approve publishing this brief?", schema=bool)
-def publish_brief(headline: str, sources: list[str]) -> str:
+def publish_brief_hitl(headline: str, sources: list[str]) -> str:
     return f"published: {headline} ({len(sources)} sources)"
 
 
-agent = Agent(
-    TestModel(),
-    name="researcher",
-    deps_type=ResearchDeps,
-    output_type=ResearchBrief,
-    tools=[publish_brief],
-    instructions=(
-        "Research the given topic, cite at least one source, and call "
-        "`publish_brief` once you are ready to share it. Respect the "
-        "operator's source priority."
-    ),
-)
+def demo_hitl_wiring() -> str:
+    """All three HITL entry points wired onto one agent.
 
+    ``@hitl_tool``, ``ApprovalRequired``, and ``CallDeferred`` all route through
+    ``kitaru.wait()`` when the model triggers them. With ``TestModel(call_tools=[])``
+    none fire here; a real model drives the waits and callers resume via
+    ``kitaru executions input <exec_id>`` or ``KitaruClient.executions.input()``.
+    """
+    agent = Agent(
+        TestModel(call_tools=[]),
+        name=f"hitl_demo_{_RUN_TAG}",
+        output_type=str,
+        tools=[publish_brief_hitl],
+    )
 
-@agent.tool
-def search_index(ctx: RunContext[ResearchDeps], query: str) -> list[str]:
-    candidates = [
-        "https://example.com/wiki/{query}",
-        "https://example.com/news/{query}",
-        "https://example.com/blog/{query}",
-    ]
-    priority = ctx.deps.source_priority
+    @agent.tool_plain
+    def approval_required() -> str:
+        raise ApprovalRequired("Confirm before proceeding.")
 
-    def rank(url: str) -> int:
-        return next((i for i, tag in enumerate(priority) if tag in url), len(priority))
+    @agent.tool_plain
+    def deferred_side_effect() -> str:
+        raise CallDeferred("Queued for async completion.")
 
-    return [url.format(query=query) for url in sorted(candidates, key=rank)]
+    wired = KitaruAgent(agent)
 
+    @flow
+    def hitl_wiring_flow() -> str:
+        return wired.run_sync("Draft a brief.").output
 
-researcher = KitaruAgent(agent)
-
-
-@checkpoint(type="llm_call")
-def run_research(topic: str, deps: ResearchDeps) -> ResearchBrief:
-    return researcher.run_sync(f"Research {topic!r}.", deps=deps).output
-
-
-@flow
-def research_flow(topic: str) -> ResearchBrief:
-    deps = ResearchDeps(source_priority=["wiki", "news"])
-    return run_research(topic, deps)
+    return hitl_wiring_flow.run().wait()
 
 
 def main() -> None:
-    handle = research_flow.run("kitaru")
-    brief = handle.wait()
-    print(f"exec_id: {handle.exec_id}")
-    print(brief.model_dump_json(indent=2))
+    demos = [
+        ("passthrough (structured output)", demo_passthrough),
+        ("auto_checkpoint", demo_auto_checkpoint),
+        ("auto_flow", demo_auto_flow),
+        ("granular", demo_granular),
+        ("turn_retries", demo_turn_retries),
+        ("message_history", demo_message_history),
+        ("capture_policy", demo_capture_policy),
+        ("event_stream", demo_event_stream_handler),
+        ("hitl_wiring", demo_hitl_wiring),
+    ]
+    failures: list[tuple[str, Exception]] = []
+    for name, fn in demos:
+        print(f"--- {name} ---")
+        try:
+            fn()
+        except Exception as exc:
+            failures.append((name, exc))
+            print(f"  FAILED: {type(exc).__name__}: {exc}")
+            continue
+        print("  ok")
+
+    if failures:
+        print(f"\n{len(failures)} demo(s) failed:")
+        for name, exc in failures:
+            print(f"  - {name}: {type(exc).__name__}: {exc}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

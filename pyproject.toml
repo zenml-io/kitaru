@@ -61,6 +61,7 @@ local = [
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=1.75.0",
+    "typing_extensions>=4.12",
 ]
 mcp = [
     "mcp>=1.19.0,<1.20.0",
@@ -174,8 +175,13 @@ include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
 unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
-# Vendored adapter uses pyright upstream; skip ty rules that conflict with it.
-include = ["src/kitaru/adapters/pydantic_ai/**"]
+# The wrapper entrypoints still rely on a few pyright-specific patterns upstream.
+include = [
+    "src/kitaru/adapters/pydantic_ai/_agent.py",
+    "src/kitaru/adapters/pydantic_ai/_model.py",
+    "src/kitaru/adapters/pydantic_ai/_toolset.py",
+    "src/kitaru/adapters/pydantic_ai/_run_context.py",
+]
 
 [tool.ty.overrides.rules]
 invalid-method-override = "ignore"
