@@ -61,12 +61,15 @@ def install_fake_claude_agent_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("query() should not run in guarded compliance tests.")
         yield  # pragma: no cover
 
-    fake_sdk.ClaudeAgentOptions = ClaudeAgentOptions
-    fake_sdk.ResultMessage = ResultMessage
-    fake_sdk.ToolAnnotations = ToolAnnotations
-    fake_sdk.create_sdk_mcp_server = create_sdk_mcp_server
-    fake_sdk.query = query
-    fake_sdk.tool = tool
+    for name, value in {
+        "ClaudeAgentOptions": ClaudeAgentOptions,
+        "ResultMessage": ResultMessage,
+        "ToolAnnotations": ToolAnnotations,
+        "create_sdk_mcp_server": create_sdk_mcp_server,
+        "query": query,
+        "tool": tool,
+    }.items():
+        setattr(fake_sdk, name, value)
 
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
 

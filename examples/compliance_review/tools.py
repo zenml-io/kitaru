@@ -20,6 +20,12 @@ STANDARDS_DIR = DATA_DIR / "standards"
 SearchResult = dict[str, Any]
 JsonRecord = dict[str, Any]
 
+# Module-level caches. The shipped JSON corpus is static for the lifetime of a
+# process, so one disk read per file is enough even when Claude fires many tool
+# calls per turn. Tests that rewrite data/ on disk can call _reset_caches().
+_RECORDS_BY_DIR: dict[Path, list[JsonRecord]] = {}
+_COMPANY_CACHE: JsonRecord | None = None
+
 
 def search_documents(query: str) -> list[SearchResult]:
     """Search sections and requirements in the local synthetic JSON data.
@@ -112,7 +118,7 @@ def list_documents() -> list[dict[str, Any]]:
     readable by ID, but this listing mirrors the example's company-document
     catalog from `company.json`.
     """
-    company = _load_json(DATA_DIR / "company.json")
+    company = _get_company()
     documents_by_id = {
         record["id"]: record for record in _load_records_from_dir(DOCUMENTS_DIR)
     }
@@ -138,7 +144,7 @@ def list_documents() -> list[dict[str, Any]]:
 
 def get_company_info() -> dict[str, Any]:
     """Return the synthetic Acme Corp company profile."""
-    return _load_json(DATA_DIR / "company.json")
+    return _get_company()
 
 
 def _load_searchable_records() -> list[JsonRecord]:
@@ -152,7 +158,7 @@ def _load_searchable_records() -> list[JsonRecord]:
 def _load_record_by_id(record_id: str) -> JsonRecord:
     """Load one known JSON record by stable ID."""
     records = {
-        "acme_corp": _load_json(DATA_DIR / "company.json"),
+        "acme_corp": _get_company(),
         **{record["id"]: record for record in _load_records_from_dir(DOCUMENTS_DIR)},
         **{record["id"]: record for record in _load_records_from_dir(STANDARDS_DIR)},
     }
@@ -167,7 +173,27 @@ def _load_record_by_id(record_id: str) -> JsonRecord:
 
 def _load_records_from_dir(directory: Path) -> list[JsonRecord]:
     """Load JSON records from a directory in deterministic filename order."""
-    return [_load_json(path) for path in sorted(directory.glob("*.json"))]
+    cached = _RECORDS_BY_DIR.get(directory)
+    if cached is not None:
+        return cached
+    records = [_load_json(path) for path in sorted(directory.glob("*.json"))]
+    _RECORDS_BY_DIR[directory] = records
+    return records
+
+
+def _get_company() -> JsonRecord:
+    """Load and cache the Acme Corp company profile."""
+    global _COMPANY_CACHE
+    if _COMPANY_CACHE is None:
+        _COMPANY_CACHE = _load_json(DATA_DIR / "company.json")
+    return _COMPANY_CACHE
+
+
+def _reset_caches() -> None:
+    """Clear cached JSON records. Intended for tests that rewrite data/."""
+    global _COMPANY_CACHE
+    _RECORDS_BY_DIR.clear()
+    _COMPANY_CACHE = None
 
 
 def _load_json(path: Path) -> JsonRecord:

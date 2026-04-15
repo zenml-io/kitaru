@@ -51,14 +51,10 @@ def test_stage3_flow_preserves_memory_across_repeated_runs(
 
         if stage3_module.IT_BASE_PROMPT in prompt:
             run_number = 2 if "Previous audit memory" in prompt else 1
-            result = (
-                f"IT run {run_number}: SOC 2 data retention gap remains open."
-            )
+            result = f"IT run {run_number}: SOC 2 data retention gap remains open."
         elif stage3_module.HR_BASE_PROMPT in prompt:
             run_number = 2 if "Previous audit memory" in prompt else 1
-            result = (
-                f"HR run {run_number}: parental leave policy gap remains open."
-            )
+            result = f"HR run {run_number}: parental leave policy gap remains open."
         else:
             result = f"Change report run {2 if call_index >= 5 else 1}."
 

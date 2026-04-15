@@ -305,7 +305,9 @@ def _format_result_error(
     stderr_lines: list[str],
 ) -> str:
     """Format a Claude result-level error, preserving the meaningful cause."""
-    detail = final.result or final.stop_reason or final.subtype or "Unknown Claude error"
+    detail = (
+        final.result or final.stop_reason or final.subtype or "Unknown Claude error"
+    )
     return _append_stderr(
         f"Claude Agent SDK turn failed: {detail}",
         stderr_lines,

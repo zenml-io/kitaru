@@ -290,4 +290,3 @@ def test_stage4_flow_waits_resumes_and_reuses_session(
             "cwd": stage4_module.EXAMPLE_DIR,
         },
     ]
-
