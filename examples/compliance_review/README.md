@@ -6,11 +6,12 @@ The finished example will show how to wrap a Claude Agent SDK document-review ag
 
 ## Current status
 
-This folder currently contains the **Phase 0 foundation plus the first Phase 1 runnable flow**:
+This folder currently contains the **Phase 0 foundation plus the first two runnable stages**:
 
 - the example directory layout
 - the Stage 1 single-turn compliance check
-- placeholder entrypoints for Stages 2–5
+- the Stage 2 sequential multi-domain audit
+- placeholder entrypoints for Stages 3–5
 - deterministic JSON-backed retrieval helpers in `tools.py`
 - shared Claude Agent SDK helper wiring in `claude_agent.py`
 - an example-local dependency declaration
@@ -19,7 +20,6 @@ This folder currently contains the **Phase 0 foundation plus the first Phase 1 r
 
 It does **not** yet contain:
 
-- multi-domain audit flow
 - memory-backed audit flow
 - conversational wait/resume flow
 - deployment guidance
@@ -31,12 +31,20 @@ Those pieces are planned for later stages.
 | Stage | File | Status |
 |---|---|---|
 | 1. Single-turn compliance check | `stage_1_single_turn.py` | First runnable flow |
-| 2. Multi-domain audit | `stage_2_multi_domain.py` | Placeholder |
+| 2. Multi-domain audit | `stage_2_multi_domain.py` | Runnable sequential audit with saved report artifact |
 | 3. Memory-backed audit | `stage_3_memory.py` | Placeholder |
 | 4. Conversational wait/resume loop | `stage_4_conversational.py` | Placeholder |
 | 5. Deploy guidance/example | `stage_5_deploy.py` | Placeholder |
 
 Stage 1 is intentionally narrow: one Kitaru checkpoint wraps one Claude Agent SDK turn that reviews Acme Corp's IT security policy against the SOC 2 data retention requirement.
+
+Stage 2 repeats the Stage 1 pattern four times — HR, IT security, vendor contracts, and insurance — then runs one synthesis checkpoint. The synthesis checkpoint saves the final markdown report as `compliance_report.md` with `kitaru.save()`.
+
+Replay story: because each domain is its own checkpoint, a replay from a later failed checkpoint can reuse earlier durable results. For example, if the insurance checkpoint or synthesis checkpoint fails after HR, IT security, and vendor contracts have completed, replay can resume from the failed checkpoint instead of re-running all earlier Claude turns:
+
+```bash
+kitaru executions replay <exec-id> --from check_insurance
+```
 
 ## Data layout
 
@@ -110,10 +118,25 @@ Then run the first real flow from this directory:
 uv run stage_1_single_turn.py
 ```
 
+To run the Stage 2 multi-domain audit:
+
+```bash
+uv run stage_2_multi_domain.py
+```
+
 Or, from Python/tests, import and call:
 
 ```python
 from examples.compliance_review.stage_1_single_turn import run_workflow
+
+result = run_workflow()
+print(result.result)
+```
+
+For Stage 2:
+
+```python
+from examples.compliance_review.stage_2_multi_domain import run_workflow
 
 result = run_workflow()
 print(result.result)
@@ -132,6 +155,14 @@ uv run pytest tests/test_phase1_compliance_review_stage1.py
 ```
 
 That Stage 1 test stubs the Claude turn and does not call Anthropic.
+
+The focused Stage 2 multi-checkpoint verification command is:
+
+```bash
+uv run pytest tests/test_phase2_compliance_review_stage2.py
+```
+
+That Stage 2 test stubs the five Claude turns, runs the real decorated flow, and verifies the saved report artifact.
 
 ## Credentials
 

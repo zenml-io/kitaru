@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import importlib
-import sys
-import types
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
+
+from tests.compliance_review_fakes import (
+    clear_compliance_review_modules,
+    fake_claude_response,
+    install_fake_claude_agent_sdk,
+)
 
 
 @pytest.fixture
@@ -21,84 +24,21 @@ def stage1_module(monkeypatch):
     or a live Anthropic call just to verify the Kitaru boundary. These tests
     monkeypatch `run_agent_turn()` before it can call the SDK.
     """
-    fake_sdk = types.ModuleType("claude_agent_sdk")
-
-    @dataclass
-    class ClaudeAgentOptions:
-        mcp_servers: dict[str, Any] | None = None
-        allowed_tools: list[str] | None = None
-        resume: str | None = None
-        cwd: str | Path | None = None
-        max_turns: int | None = None
-
-    @dataclass
-    class ResultMessage:
-        subtype: str
-        duration_ms: int
-        duration_api_ms: int
-        is_error: bool
-        num_turns: int
-        session_id: str
-        total_cost_usd: float | None = None
-        usage: dict[str, Any] | None = None
-        result: str | None = None
-        stop_reason: str | None = None
-        model_usage: dict[str, Any] | None = None
-
-    @dataclass
-    class ToolAnnotations:
-        readOnlyHint: bool | None = None
-        destructiveHint: bool | None = None
-        openWorldHint: bool | None = None
-
-    def tool(name, description, input_schema, annotations=None):
-        def decorate(func):
-            func.name = name
-            func.description = description
-            func.input_schema = input_schema
-            func.annotations = annotations
-            return func
-
-        return decorate
-
-    def create_sdk_mcp_server(name, version="1.0.0", tools=None):
-        return {"type": "sdk", "name": name, "version": version, "tools": tools or []}
-
-    async def query(*, prompt, options=None):
-        raise AssertionError("query() should not run in guarded Stage 1 tests.")
-        yield  # pragma: no cover
-
-    fake_sdk.ClaudeAgentOptions = ClaudeAgentOptions
-    fake_sdk.ResultMessage = ResultMessage
-    fake_sdk.ToolAnnotations = ToolAnnotations
-    fake_sdk.create_sdk_mcp_server = create_sdk_mcp_server
-    fake_sdk.query = query
-    fake_sdk.tool = tool
-
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
-    for module_name in (
-        "examples.compliance_review.claude_agent",
+    install_fake_claude_agent_sdk(monkeypatch)
+    clear_compliance_review_modules(
         "examples.compliance_review.stage_1_single_turn",
-    ):
-        sys.modules.pop(module_name, None)
+    )
 
     return importlib.import_module("examples.compliance_review.stage_1_single_turn")
 
 
 def _fake_claude_response(*, prompt: str, cwd: Path) -> dict[str, Any]:
     """Build a Claude-shaped response without making a model call."""
-    return {
-        "session_id": "stage-1-test-session",
-        "cwd": str(cwd),
-        "transcript_path": "/tmp/stage-1-test-session.jsonl",
-        "result": f"Stubbed finding for: {prompt}",
-        "usage": {"input_tokens": 10, "output_tokens": 20},
-        "cost_usd": 0.0,
-        "model_usage": {"stub-model": {"inputTokens": 10, "outputTokens": 20}},
-        "stop_reason": "end_turn",
-        "subtype": "success",
-        "num_turns": 1,
-    }
+    return fake_claude_response(
+        prompt=prompt,
+        cwd=cwd,
+        session_id="stage-1-test-session",
+    )
 
 
 def test_stage1_checkpoint_wraps_one_stubbed_claude_turn(
