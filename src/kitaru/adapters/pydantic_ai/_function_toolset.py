@@ -4,6 +4,7 @@ from pydantic_ai import FunctionToolset
 from pydantic_ai._run_context import RunContext
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.tools import AgentDepsT
+from pydantic_ai.toolsets import ToolsetTool
 from pydantic_ai.toolsets.function import FunctionToolsetTool
 
 from ._events import ToolsetKind
@@ -15,9 +16,15 @@ from ._toolset import KitaruToolset
 class KitaruFunctionToolset(KitaruToolset[AgentDepsT]):
     toolset_kind: ToolsetKind = field(default='function', init=False)
 
-    async def get_tools(self, ctx: RunContext[AgentDepsT]) -> dict[str, FunctionToolsetTool[AgentDepsT]]:
+    # Signature matches `WrapperToolset.get_tools` so the LSP check passes.
+    # Values are `FunctionToolsetTool` (a `ToolsetTool` subclass) at runtime
+    # — concrete callers that need the subclass-specific shape should narrow
+    # via `isinstance`.
+    async def get_tools(
+        self, ctx: RunContext[AgentDepsT]
+    ) -> dict[str, ToolsetTool[AgentDepsT]]:
         assert isinstance(self.wrapped, FunctionToolset)
-        tools: dict[str, FunctionToolsetTool[AgentDepsT]] = {}
+        tools: dict[str, ToolsetTool[AgentDepsT]] = {}
         for original_name, source_tool in self.wrapped.tools.items():
             max_retries = source_tool.max_retries if source_tool.max_retries is not None else self.wrapped.max_retries
             run_context = replace(

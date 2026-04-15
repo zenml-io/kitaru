@@ -8,8 +8,8 @@ import asyncio
 import hashlib
 import json
 import sys
-from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal, TypedDict
+from collections.abc import Coroutine, Mapping
+from typing import Any, Callable, Literal, TypedDict, cast
 
 import kitaru
 from kitaru._source_aliases import build_checkpoint_source_alias
@@ -90,7 +90,7 @@ def validate_checkpoint_config(
             f'Unsupported keys in {context}: {unknown}. '
             "Allowed keys are: 'runtime', 'retries', 'type'."
         )
-    validated = dict(config)
+    validated = cast(CheckpointConfig, dict(config))
     reject_isolated_runtime(validated)
     return validated
 
@@ -105,12 +105,13 @@ def validate_tool_checkpoint_overrides(
         return None
     normalized: dict[str, ToolCheckpointOverride] = {}
     for tool_name, override in overrides.items():
-        normalized[tool_name] = (
-            False
-            if override is False
-            else validate_checkpoint_config(override, context=f'{context}[{tool_name!r}]')
-            or {}
+        if override is False:
+            normalized[tool_name] = False
+            continue
+        validated = validate_checkpoint_config(
+            override, context=f'{context}[{tool_name!r}]'
         )
+        normalized[tool_name] = validated if validated is not None else cast(CheckpointConfig, {})
     return normalized
 
 
@@ -134,7 +135,7 @@ async def run_async_in_checkpoint(
     *,
     config: CheckpointConfig,
     step_name: str,
-    body: Callable[[], Awaitable[Any]],
+    body: Callable[[], Coroutine[Any, Any, Any]],
     cache_key: str | None = None,
 ) -> Any:
     """Run an async ``body`` inside a ``@kitaru.checkpoint(**config)`` step.
