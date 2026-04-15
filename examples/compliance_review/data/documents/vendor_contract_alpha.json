@@ -1,0 +1,74 @@
+{
+  "id": "vendor_contract_alpha",
+  "kind": "company_document",
+  "title": "Vendor Contract Alpha",
+  "domain": "vendor_contracts",
+  "department": "Legal",
+  "effective_date": "2024-06-01",
+  "last_reviewed": "2024-06-12",
+  "status": "active",
+  "summary": "Synthetic vendor agreement with all required standard clauses present.",
+  "metadata": {
+    "owner": "Legal",
+    "vendor_name": "Alpha Supply Ltd.",
+    "document_type": "vendor_contract",
+    "related_standards": [
+      "contract_clause_requirements"
+    ],
+    "keywords": [
+      "vendor contract",
+      "indemnification",
+      "liability cap",
+      "confidentiality",
+      "termination"
+    ]
+  },
+  "sections": [
+    {
+      "id": "services",
+      "title": "Services",
+      "content": "Alpha Supply Ltd. will provide managed procurement data feeds and support services for Acme Corp's logistics automation platform."
+    },
+    {
+      "id": "confidentiality",
+      "title": "Confidentiality and data protection",
+      "content": "Each party must protect confidential information using reasonable administrative, technical, and physical safeguards. Alpha Supply Ltd. must process Acme Corp data only under Acme Corp's instructions and must notify Acme Corp of suspected unauthorized access within 48 hours."
+    },
+    {
+      "id": "indemnification",
+      "title": "Indemnification",
+      "content": "Alpha Supply Ltd. will indemnify and defend Acme Corp against third-party claims arising from Alpha's negligence, willful misconduct, confidentiality breach, data protection failure, or infringement of intellectual property rights."
+    },
+    {
+      "id": "limitation_of_liability",
+      "title": "Limitation of liability",
+      "content": "Each party's aggregate liability is capped at twelve months of fees paid under the agreement. The cap does not apply to confidentiality breaches, data protection obligations, indemnification obligations, fraud, willful misconduct, or payment obligations."
+    },
+    {
+      "id": "termination",
+      "title": "Termination",
+      "content": "Either party may terminate for material breach if the breach is not cured within 30 days after written notice. Acme Corp may terminate for convenience with 60 days' written notice."
+    }
+  ],
+  "known_planted_findings": [
+    {
+      "id": "finding_vendor_contract_alpha_all_clauses_present",
+      "status": "pass",
+      "severity": "none",
+      "standard_id": "contract_clause_requirements",
+      "summary": "All standard vendor contract clauses are present.",
+      "evidence_section_ids": [
+        "confidentiality",
+        "indemnification",
+        "limitation_of_liability",
+        "termination"
+      ],
+      "evidence": [
+        "The contract includes confidentiality and data protection language.",
+        "The contract includes indemnification.",
+        "The contract includes a liability cap with carve-outs.",
+        "The contract includes termination rights."
+      ]
+    }
+  ]
+}

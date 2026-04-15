@@ -1,0 +1,70 @@
+{
+  "id": "employee_handbook",
+  "kind": "company_document",
+  "title": "Employee Handbook",
+  "domain": "labor_law",
+  "department": "People Operations",
+  "effective_date": "2024-02-01",
+  "last_reviewed": "2024-03-15",
+  "status": "active",
+  "summary": "General employee policy handbook for Acme Corp. The planted finding is that the parental leave section still relies on expired pre-2024 language.",
+  "metadata": {
+    "owner": "People Operations",
+    "document_type": "policy",
+    "applies_to": "All employees",
+    "related_standards": [
+      "labor_law_requirements"
+    ],
+    "keywords": [
+      "employee handbook",
+      "parental leave",
+      "working hours",
+      "termination",
+      "grievance"
+    ]
+  },
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "This handbook describes Acme Corp's employment policies for regular employees. It covers conduct, working time, leave, grievance handling, and termination procedures."
+    },
+    {
+      "id": "working_hours",
+      "title": "Working hours and overtime",
+      "content": "The standard work week is 40 hours. Employees should coordinate normal working hours with their manager and record approved overtime in the HR system. Managers are responsible for monitoring excessive workload and ensuring rest periods between shifts."
+    },
+    {
+      "id": "parental_leave",
+      "title": "Parental leave",
+      "content": "New parents may request up to 12 weeks of unpaid family leave under the 2021 family leave policy. The paid parental leave pilot ended on 2023-12-31 and has not yet been replaced in this handbook. Employees with questions should email the general HR inbox while People Operations reviews the 2024 policy update."
+    },
+    {
+      "id": "conduct_and_grievances",
+      "title": "Conduct and grievances",
+      "content": "Employees should report workplace concerns to their manager, People Operations, or the anonymous ethics channel. People Operations will acknowledge grievances within five business days and assign an HR partner to review the concern."
+    },
+    {
+      "id": "termination",
+      "title": "Termination process",
+      "content": "Termination decisions require manager review, People Operations review, and written notice. Employees may request a review meeting with People Operations within ten business days of receiving notice."
+    }
+  ],
+  "known_planted_findings": [
+    {
+      "id": "finding_employee_handbook_parental_leave_2024",
+      "status": "gap",
+      "severity": "high",
+      "standard_id": "labor_law_requirements",
+      "requirement_id": "LAB-PL-2024",
+      "summary": "Missing updated parental leave policy required since 2024.",
+      "evidence_section_ids": [
+        "parental_leave"
+      ],
+      "evidence": [
+        "The section says the paid parental leave pilot ended on 2023-12-31.",
+        "The handbook says the 2024 policy update is still under review."
+      ]
+    }
+  ]
+}

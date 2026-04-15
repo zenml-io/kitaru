@@ -1,0 +1,13 @@
+[project]
+name = "kitaru-compliance-review-example"
+version = "0.1.0"
+description = "Example-local dependencies for the Kitaru compliance review canonical example."
+requires-python = ">=3.11"
+dependencies = [
+    "kitaru[local]",
+    "claude-agent-sdk",
+]
+
+[tool.uv]
+# This directory is a runnable example, not a package that should be built.
+package = false

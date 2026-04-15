@@ -1,0 +1,85 @@
+{
+  "id": "contract_clause_requirements",
+  "kind": "standard",
+  "title": "Vendor Contract Clause Requirements",
+  "domain": "vendor_contracts",
+  "version": "2025.1",
+  "effective_date": "2025-01-01",
+  "description": "Synthetic clause checklist for reviewing Acme Corp vendor agreements.",
+  "metadata": {
+    "owner": "Legal",
+    "applies_to_documents": [
+      "vendor_contract_alpha",
+      "vendor_contract_beta"
+    ]
+  },
+  "requirements": [
+    {
+      "id": "CONTRACT-INDEM-001",
+      "title": "Indemnification clause",
+      "severity": "high",
+      "keywords": [
+        "indemnification",
+        "indemnify",
+        "third-party claims"
+      ],
+      "requirement": "Vendor contracts must include indemnification protection for third-party claims, confidentiality breaches, data protection failures, and vendor negligence.",
+      "expected_evidence": [
+        "Mutual or vendor indemnification language",
+        "Covered claim categories"
+      ]
+    },
+    {
+      "id": "CONTRACT-LIAB-001",
+      "title": "Liability cap",
+      "severity": "high",
+      "keywords": [
+        "liability cap",
+        "limitation of liability",
+        "aggregate liability"
+      ],
+      "requirement": "Vendor contracts must include a liability cap with explicit carve-outs for confidentiality, data protection, fraud, willful misconduct, and indemnification obligations.",
+      "expected_evidence": [
+        "Aggregate liability cap",
+        "Carve-outs for high-risk obligations"
+      ]
+    },
+    {
+      "id": "CONTRACT-CONF-001",
+      "title": "Confidentiality and data protection",
+      "severity": "medium",
+      "keywords": [
+        "confidentiality",
+        "data protection",
+        "personal data"
+      ],
+      "requirement": "Vendor contracts must protect confidential information and define data protection obligations when the vendor handles Acme Corp or customer data.",
+      "expected_evidence": [
+        "Confidentiality clause",
+        "Data protection obligations"
+      ]
+    },
+    {
+      "id": "CONTRACT-TERM-001",
+      "title": "Termination rights",
+      "severity": "medium",
+      "keywords": [
+        "termination",
+        "breach",
+        "notice"
+      ],
+      "requirement": "Vendor contracts must define termination rights for material breach, insolvency, and convenience where commercially appropriate.",
+      "expected_evidence": [
+        "Termination for breach",
+        "Notice and cure period"
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Contract review overview",
+      "content": "This synthetic standard makes Vendor Contract Alpha compliant and Vendor Contract Beta non-compliant by omitting indemnification and liability-cap language from Beta."
+    }
+  ]
+}

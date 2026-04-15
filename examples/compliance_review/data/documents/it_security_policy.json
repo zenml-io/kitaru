@@ -1,0 +1,84 @@
+{
+  "id": "it_security_policy",
+  "kind": "company_document",
+  "title": "IT Security Policy",
+  "domain": "it_security",
+  "department": "Security",
+  "effective_date": "2024-01-10",
+  "last_reviewed": "2024-04-20",
+  "status": "active",
+  "summary": "Security policy for access control, data handling, and incident response. The planted findings are a missing data retention schedule and outdated incident response references.",
+  "metadata": {
+    "owner": "Security and Compliance",
+    "document_type": "policy",
+    "related_standards": [
+      "soc2_controls"
+    ],
+    "keywords": [
+      "SOC 2",
+      "data retention",
+      "incident response",
+      "access control",
+      "MFA"
+    ]
+  },
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "content": "This policy defines baseline security responsibilities for Acme Corp systems, employees, contractors, and production environments."
+    },
+    {
+      "id": "access_control",
+      "title": "Access control",
+      "content": "Production access requires single sign-on, multi-factor authentication, manager approval, and least-privilege role assignment. Access reviews occur quarterly and are tracked by Security and Compliance."
+    },
+    {
+      "id": "data_handling",
+      "title": "Data handling and retention",
+      "content": "Teams should keep customer data only as long as needed for business operations. Product, Support, and Finance teams may define local retention practices for their systems. This policy does not yet include a central data retention schedule, legal hold workflow, or standard deletion timetable by data category."
+    },
+    {
+      "id": "incident_response",
+      "title": "Incident response",
+      "content": "Security incidents should be reported to security@acme.example. Severity classification and escalation steps are described in the IR-2019 playbook stored in the legacy SharePoint incident-response folder. The security team plans to migrate the playbook into the current knowledge base during the next policy refresh."
+    },
+    {
+      "id": "vendor_access",
+      "title": "Vendor access",
+      "content": "Vendors receive time-limited accounts when access is approved by the system owner. Vendor accounts must use MFA and are reviewed during quarterly access certification."
+    }
+  ],
+  "known_planted_findings": [
+    {
+      "id": "finding_it_security_missing_retention_schedule",
+      "status": "gap",
+      "severity": "high",
+      "standard_id": "soc2_controls",
+      "requirement_id": "SOC2-RET-001",
+      "summary": "No documented data retention schedule.",
+      "evidence_section_ids": [
+        "data_handling"
+      ],
+      "evidence": [
+        "The policy says teams may define local retention practices.",
+        "The policy explicitly says it does not yet include a central data retention schedule."
+      ]
+    },
+    {
+      "id": "finding_it_security_outdated_incident_response",
+      "status": "gap",
+      "severity": "high",
+      "standard_id": "soc2_controls",
+      "requirement_id": "SOC2-IR-002",
+      "summary": "Incident response section references outdated procedures.",
+      "evidence_section_ids": [
+        "incident_response"
+      ],
+      "evidence": [
+        "The incident process points to an IR-2019 playbook.",
+        "The playbook still lives in a legacy SharePoint folder."
+      ]
+    }
+  ]
+}

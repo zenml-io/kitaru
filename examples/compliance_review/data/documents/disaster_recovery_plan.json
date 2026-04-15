@@ -1,0 +1,85 @@
+{
+  "id": "disaster_recovery_plan",
+  "kind": "company_document",
+  "title": "Disaster Recovery Plan",
+  "domain": "business_continuity",
+  "department": "Platform Engineering",
+  "effective_date": "2022-09-01",
+  "last_reviewed": "2022-10-10",
+  "status": "active",
+  "summary": "Synthetic disaster recovery plan. The planted findings are that the plan was last tested three years ago and has no documented cloud failover.",
+  "metadata": {
+    "owner": "Platform Engineering",
+    "document_type": "business_continuity_plan",
+    "related_standards": [
+      "soc2_controls"
+    ],
+    "keywords": [
+      "disaster recovery",
+      "business continuity",
+      "last tested",
+      "cloud failover",
+      "RTO",
+      "RPO"
+    ]
+  },
+  "sections": [
+    {
+      "id": "scope",
+      "title": "Scope",
+      "content": "This plan covers restoration of Acme Corp's customer-facing platform, internal support systems, and operational reporting systems after a major outage."
+    },
+    {
+      "id": "recovery_objectives",
+      "title": "Recovery objectives",
+      "content": "The target recovery time objective for the customer-facing platform is 24 hours. The target recovery point objective is four hours for production databases and 24 hours for internal reporting systems."
+    },
+    {
+      "id": "test_history",
+      "title": "Test history",
+      "content": "The last full disaster recovery exercise was completed on 2022-03-18. No full failover test was completed in 2023 or 2024. A tabletop exercise was proposed for 2025 but has not yet been scheduled."
+    },
+    {
+      "id": "recovery_strategy",
+      "title": "Recovery strategy",
+      "content": "The current recovery strategy restores database backups into the primary cloud region after incident containment. The plan does not document automated cloud-region failover, warm standby infrastructure, or a tested secondary-region cutover procedure."
+    },
+    {
+      "id": "communications",
+      "title": "Communications",
+      "content": "The incident commander is responsible for internal updates every two hours during a disaster recovery event. Customer communications are coordinated by Support and Legal."
+    }
+  ],
+  "known_planted_findings": [
+    {
+      "id": "finding_disaster_recovery_plan_not_recently_tested",
+      "status": "gap",
+      "severity": "high",
+      "standard_id": "soc2_controls",
+      "requirement_id": null,
+      "summary": "Last full disaster recovery test was three years ago.",
+      "evidence_section_ids": [
+        "test_history"
+      ],
+      "evidence": [
+        "The last full disaster recovery exercise was completed on 2022-03-18.",
+        "No full failover test was completed in 2023 or 2024."
+      ]
+    },
+    {
+      "id": "finding_disaster_recovery_plan_no_cloud_failover",
+      "status": "gap",
+      "severity": "high",
+      "standard_id": "soc2_controls",
+      "requirement_id": null,
+      "summary": "No cloud failover is documented.",
+      "evidence_section_ids": [
+        "recovery_strategy"
+      ],
+      "evidence": [
+        "The strategy restores backups into the primary cloud region.",
+        "The plan does not document automated cloud-region failover, warm standby infrastructure, or a tested secondary-region cutover procedure."
+      ]
+    }
+  ]
+}
