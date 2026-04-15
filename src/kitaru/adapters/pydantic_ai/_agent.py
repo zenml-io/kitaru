@@ -5,7 +5,6 @@ import tempfile
 import threading
 import time
 import uuid
-import weakref
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
@@ -82,6 +81,40 @@ def _load_auto_flow_body(serialized_body_path: str) -> Callable[[], Any]:
         return cloudpickle.load(stream)
 
 
+def _try_serialize_auto_flow_body(body: Callable[[], Any]) -> str | None:
+    """Cloudpickle ``body`` to a tempfile; return ``None`` on any failure.
+
+    Remote stacks need the serialized body to rebuild the closure on a worker.
+    Local stacks use the in-process registry and don't need this path. Failures
+    here are non-fatal — the remote-stack code raises a typed error on lookup
+    miss if serialization mattered.
+    """
+    try:
+        import cloudpickle
+    except ImportError:
+        return None
+    path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix='.kitaru-autoflow'
+        ) as stream:
+            path = stream.name
+            cloudpickle.dump(body, stream)
+        return path
+    except Exception:
+        logger.debug(
+            'Auto-flow body could not be cloudpickled; remote stacks will need '
+            'an explicit `@kitaru.flow` wrapper.',
+            exc_info=True,
+        )
+        if path is not None:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+        return None
+
+
 @kitaru.flow
 def _kitaru_pydantic_ai_auto_flow(run_id: str, serialized_body_path: str | None = None) -> Any:
     with _AUTO_FLOW_LOCK:
@@ -103,7 +136,7 @@ def _kitaru_pydantic_ai_auto_flow(run_id: str, serialized_body_path: str | None 
         raise
 
 
-def _track_run_completed(method: str, error: BaseException | None) -> None:
+def _track_run_completed(method: str, error: Exception | None) -> None:
     payload: dict[str, Any] = {
         'method': method,
         'status': 'failed' if error is not None else 'completed',
@@ -137,9 +170,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         after the agent; model/tool/MCP calls are recorded as child events.
 
         **Granular mode** (``granular_checkpoints=True``): no turn checkpoint;
-        each model/tool/MCP call opens its own checkpoint — true per-call retry
-        and cache at the cost of losing the aggregating run artifact. The
-        ``model_/tool_/mcp_checkpoint_config`` kwargs (and the per-tool
+        each top-level model/tool/MCP call per turn opens its own checkpoint —
+        true per-call retry and cache at the cost of losing the aggregating
+        run artifact. Sub-calls nested inside an already-open granular
+        checkpoint (for example tool calls inside the turn's model request)
+        fall back to inline tracking — they do *not* open a second checkpoint.
+        The ``model_/tool_/mcp_checkpoint_config`` kwargs (and the per-tool
         ``tool_checkpoint_config_by_name`` map, where ``False`` opts a tool
         out entirely) are only honored in this mode.
 
@@ -148,6 +184,18 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         it as ``message_history`` on the next call if the caller doesn't supply
         one — one instance then represents one conversation. Pass an explicit
         ``message_history=`` to override for a single call.
+
+        Limits of ``persist_message_history``:
+
+        - **In-memory only**: history lives on the Python instance; restarts
+          and replays of a prior flow start with no history.
+        - **Serial use**: concurrent ``run`` / ``run_sync`` calls on the same
+          instance race on the stored history. Gate concurrency externally or
+          use one instance per concurrent conversation.
+        - **Unbounded**: the list grows with each successful run; apply your
+          own truncation or summarization for long-lived conversations.
+        - **Success-only**: history is only updated after a successful run,
+          so a partial failure leaves the last-successful history in place.
         """
         super().__init__(wrapped)
 
@@ -223,7 +271,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             checkpoint_config=self._model_checkpoint_config,
         )
         self._toolsets = self._prepare_toolsets(list(wrapped.toolsets))
-        self._wrapped_handlers: weakref.WeakSet[EventStreamHandler[AgentDepsT]] = weakref.WeakSet()
         self._persist_message_history = persist_message_history
         self._last_messages: list[_messages.ModelMessage] | None = None
         self._message_history_lock = threading.Lock()
@@ -282,12 +329,18 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         event_stream_handler: EventStreamHandler[AgentDepsT] | None,
     ) -> EventStreamHandler[AgentDepsT] | None:
         effective_handler = event_stream_handler or self.event_stream_handler
-        if effective_handler is None or effective_handler in self._wrapped_handlers:
+        if effective_handler is None:
+            return None
+        # PydanticAI looks up `stream_handler_wrapped` on the handler to detect
+        # that it has already been wrapped (mirrors how `_prepare_toolsets`
+        # short-circuits on `KitaruToolset`). No WeakSet state — the marker
+        # travels with the object and survives GC of the adapter instance.
+        if getattr(effective_handler, '_kitaru_wrapped', False):
             return effective_handler
 
         async def _tracked_handler(ctx: Any, stream: AsyncIterable[Any]) -> None:
             started_at = time.perf_counter()
-            error: BaseException | None = None
+            error: Exception | None = None
             try:
                 await effective_handler(ctx, stream)
             except Exception as exc:
@@ -301,7 +354,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                         error=error,
                     )
 
-        self._wrapped_handlers.add(_tracked_handler)
+        try:
+            _tracked_handler._kitaru_wrapped = True  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            # Rare: built-in callable that forbids attribute assignment.
+            # Falling back means we may double-wrap in that edge case — the
+            # tracker still records only once per concrete call, just with
+            # a marginal extra frame.
+            pass
         return _tracked_handler
 
     def _validate_model_override(self, model: models.Model | models.KnownModelName | str | None) -> None:
@@ -409,21 +469,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         with _AUTO_FLOW_LOCK:
             _AUTO_FLOW_BODIES[run_id] = slot
         try:
-            try:
-                import cloudpickle
-            except ImportError:
-                cloudpickle = None
-            if cloudpickle is not None:
-                try:
-                    with tempfile.NamedTemporaryFile(delete=False) as stream:
-                        cloudpickle.dump(body, stream)
-                        serialized_body_path = stream.name
-                except Exception as error:
-                    raise KitaruUsageError(
-                        'Auto-flow could not serialize the wrapped agent call for the '
-                        'current execution environment. Wrap the call in an explicit '
-                        '`@kitaru.flow` instead.'
-                    ) from error
+            # Best-effort serialization: only required for remote stacks, which
+            # fetch the body from `serialized_body_path`. Local stacks use the
+            # in-process registry instead, so a cloudpickle failure here is
+            # tolerable — the remote-stack path will surface a clearer error
+            # from the worker if the body actually needs to cross a boundary.
+            serialized_body_path = _try_serialize_auto_flow_body(body)
             handle = _kitaru_pydantic_ai_auto_flow.run(run_id, serialized_body_path)
             flow_result = handle.wait()
         finally:
@@ -614,10 +665,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._remember_messages(result)
             return result
 
-        error: BaseException | None = None
+        error: Exception | None = None
         try:
             return await self._run_async(_body, force_turn_checkpoint=wrapped_handler is not None)
-        except BaseException as exc:
+        except Exception as exc:
             error = exc
             raise
         finally:
@@ -674,10 +725,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._remember_messages(result)
             return result
 
-        error: BaseException | None = None
+        error: Exception | None = None
         try:
             return self._run_sync(_body, force_turn_checkpoint=wrapped_handler is not None)
-        except BaseException as exc:
+        except Exception as exc:
             error = exc
             raise
         finally:

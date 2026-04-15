@@ -197,11 +197,11 @@ def _get_step_context_var() -> ContextVar[StepContext | None]:
     Keep the private-attribute reach-through in one place so a ZenML rename
     fails loudly and contract tests can pin the dependency.
     """
-    context_var = getattr(StepContext, '__context_var__', None)
+    context_var = getattr(StepContext, "__context_var__", None)
     if not isinstance(context_var, ContextVar):
         raise KitaruFeatureNotAvailableError(
-            'Installed ZenML build does not expose StepContext context state '
-            'required for adapter-managed waits.'
+            "Installed ZenML build does not expose StepContext context state "
+            "required for adapter-managed waits."
         )
     return cast(ContextVar[StepContext | None], context_var)
 
@@ -241,9 +241,7 @@ def _get_current_checkpoint() -> _CheckpointScope | None:
 
 def _get_current_checkpoint_name() -> str | None:
     """Get the current checkpoint name from active Kitaru scope."""
-    if (
-        checkpoint_scope := _get_current_checkpoint()
-    ) and checkpoint_scope.name:
+    if (checkpoint_scope := _get_current_checkpoint()) and checkpoint_scope.name:
         return checkpoint_scope.name
     return None
 

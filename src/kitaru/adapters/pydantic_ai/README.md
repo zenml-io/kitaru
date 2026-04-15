@@ -234,6 +234,13 @@ durable_agent.run_sync("What's my name?")  # sees the prior turn automatically
 
 With `persist_message_history=True` the adapter remembers `result.all_messages()` on the instance after each run and auto-injects it as `message_history` on the next call when the caller doesn't pass one. **One `KitaruAgent` instance = one conversation** — create separate instances for separate conversations. An explicit `message_history=` on a single call overrides the remembered history for that call only.
 
+**Limits to be aware of:**
+
+- **In-memory only.** History lives on the Python instance; a restart, new process, or replay of a prior flow starts with no history. For durable conversation state, persist `result.all_messages()` yourself (e.g. via `kitaru.memory`) and pass it explicitly.
+- **Serial use.** Concurrent `run` / `run_sync` calls on the same instance race on the stored history. Gate concurrency externally, or use one instance per conversation.
+- **Unbounded.** The list grows monotonically — apply your own truncation or summarization for long-lived conversations.
+- **Success-only.** The instance only updates its history after a successful run. A partial failure leaves the last-successful history in place.
+
 ## Requirements and constraints
 
 - **Concrete model at construction time.** The wrapped agent must have a bound `Model` — late model binding and per-run `model=` overrides are not supported. If you need a different model, wrap a different agent.

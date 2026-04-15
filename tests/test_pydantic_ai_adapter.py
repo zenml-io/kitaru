@@ -266,7 +266,8 @@ async def test_call_deferred_without_schema_raises_usage_error() -> None:
     ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
     tool = (await wrapped.get_tools(ctx))["defer_release"]
 
-    with _flow_scope(name="demo_flow"), pytest.raises(
-        KitaruUsageError, match="Cannot infer a wait schema"
+    with (
+        _flow_scope(name="demo_flow"),
+        pytest.raises(KitaruUsageError, match="Cannot infer a wait schema"),
     ):
         await wrapped.call_tool("defer_release", {}, ctx, tool)
