@@ -62,6 +62,9 @@ local = [
 pydantic-ai = [
     "pydantic-ai-slim>=1.75.0",
 ]
+claude-agent-sdk = [
+    "claude-agent-sdk",
+]
 mcp = [
     "mcp>=1.19.0,<1.20.0",
 ]

@@ -18,18 +18,15 @@ Each stage builds on the previous one. The Claude boundary is the same from Stag
 
 ## Quick start
 
+From the repository root:
+
 ```bash
-cd examples/compliance_review
-uv sync
+uv sync --extra local --extra claude-agent-sdk
 kitaru init
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-If you are developing inside the Kitaru repo and want the local checkout instead of the published wheel:
-
-```bash
-uv pip install -e '../..[local]'
-```
+The example runs from the repo's own venv — it does not have its own `pyproject.toml`. That keeps a single venv active so `zenml integration install …` lands in the same place the example runs.
 
 Pick a stage and run it:
 
@@ -42,8 +39,20 @@ Pick a stage and run it:
 | 5 | `stage_5_deploy.py` | Placeholder. |
 
 ```bash
-uv run stage_1_single_turn.py
+uv run examples/compliance_review/stage_1_single_turn.py
 ```
+
+### Running against a remote stack
+
+The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing:
+
+```bash
+kitaru stack use <your_remote_stack>
+zenml integration install s3          # or kubernetes, vertex, gcp, azure, …
+uv run examples/compliance_review/stage_2_multi_domain.py
+```
+
+Because there's only one venv, the integration install and the stage run see the same packages.
 
 Every stage also exposes a `run_workflow()` function, so you can drive it from Python or a test:
 
