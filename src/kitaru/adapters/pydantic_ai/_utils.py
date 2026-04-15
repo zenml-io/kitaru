@@ -131,6 +131,38 @@ def reject_isolated_runtime(config: CheckpointConfig | dict[str, Any]) -> None:
         )
 
 
+def _build_checkpoint_step(
+    *, config: CheckpointConfig, step_name: str, body: Callable[[], Any]
+) -> Callable[..., Any]:
+    reject_isolated_runtime(config)
+
+    def _turn(_cache_key: str | None = None) -> Any:
+        return body()
+
+    _turn.__name__ = step_name
+    checkpoint_def = kitaru.checkpoint(**config)(_turn)
+    step_obj = getattr(checkpoint_def, '_step', None)
+    if step_obj is not None:
+        alias = build_checkpoint_source_alias(_turn.__name__)
+        for module_name in {__name__, f'src.{__name__}'}:
+            module = sys.modules.get(module_name)
+            if module is not None:
+                setattr(module, alias, step_obj)
+    return checkpoint_def
+
+
+def run_sync_in_checkpoint(
+    *,
+    config: CheckpointConfig,
+    step_name: str,
+    body: Callable[[], Any],
+    cache_key: str | None = None,
+) -> Any:
+    """Run a sync ``body`` inside a ``@kitaru.checkpoint(**config)`` step."""
+    checkpoint_def = _build_checkpoint_step(config=config, step_name=step_name, body=body)
+    return materialize_step_output(checkpoint_def(cache_key))
+
+
 async def run_async_in_checkpoint(
     *,
     config: CheckpointConfig,
@@ -143,20 +175,35 @@ async def run_async_in_checkpoint(
     ``kitaru.checkpoint`` is sync-only; we bridge via ``asyncio.run`` inside a
     sync ``_turn`` dispatched to a worker thread so the caller's loop stays free.
     """
-    reject_isolated_runtime(config)
-
-    def _turn(_cache_key: str | None = None) -> Any:
-        return asyncio.run(body())
-
-    _turn.__name__ = step_name
-    checkpoint_def = kitaru.checkpoint(**config)(_turn)
-    step_obj = getattr(checkpoint_def, '_step', None)
-    if step_obj is not None:
-        alias = build_checkpoint_source_alias(_turn.__name__)
-        for module_name in {__name__, f'src.{__name__}'}:
-            module = sys.modules.get(module_name)
-            if module is not None:
-                setattr(module, alias, step_obj)
-    step_call = checkpoint_def
-    step_output = await asyncio.to_thread(step_call, cache_key)
+    checkpoint_def = _build_checkpoint_step(
+        config=config, step_name=step_name, body=lambda: asyncio.run(body())
+    )
+    step_output = await asyncio.to_thread(checkpoint_def, cache_key)
     return materialize_step_output(step_output)
+
+
+def turn_cache_key(
+    *,
+    agent_name: str | None,
+    user_prompt: Any,
+    message_history: Any,
+    deferred_tool_results: Any,
+    instructions: Any,
+    model_settings: Any,
+) -> str:
+    """Stable cache key for a ``KitaruAgent`` turn checkpoint.
+
+    The inputs live in `_body`'s closure and aren't visible to ZenML's step
+    cache — without an explicit key, different prompts collide on the cached
+    result of the previous call.
+    """
+    return checkpoint_cache_key(
+        {
+            'agent_name': agent_name,
+            'user_prompt': user_prompt,
+            'message_history': message_history,
+            'deferred_tool_results': deferred_tool_results,
+            'instructions': instructions,
+            'model_settings': model_settings,
+        }
+    )

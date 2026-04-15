@@ -56,9 +56,7 @@ class KitaruRunContext(RunContext[AgentDepsT]):
 
     Only the fields listed in :data:`_SERIALIZABLE_FIELDS` are carried by
     default. To expose additional fields, subclass and override
-    :meth:`serialize_run_context`, then pass the subclass to the part of the
-    adapter that opens the boundary (e.g. an isolated-runtime checkpoint
-    config in task 4).
+    :meth:`serialize_run_context`.
     """
 
     def __init__(self, deps: AgentDepsT, **kwargs: Any):

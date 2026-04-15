@@ -13,7 +13,6 @@ from typing import Any
 import kitaru
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruUsageError
-from kitaru._source_aliases import build_checkpoint_source_alias
 
 from pydantic_ai import _utils, messages as _messages, models, usage as _usage
 from pydantic_ai.agent import AbstractAgent, AgentRun, WrapperAgent
@@ -39,10 +38,9 @@ from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
     CheckpointConfig,
     ToolCheckpointOverrides,
-    checkpoint_cache_key,
-    materialize_step_output,
-    reject_isolated_runtime,
     run_async_in_checkpoint,
+    run_sync_in_checkpoint,
+    turn_cache_key,
     validate_checkpoint_config,
     validate_tool_checkpoint_overrides,
 )
@@ -83,15 +81,7 @@ def _load_auto_flow_body(serialized_body_path: str) -> Callable[[], Any]:
 
 
 def _try_serialize_auto_flow_body(body: Callable[[], Any]) -> str | None:
-    """Cloudpickle ``body`` to a tempfile; return ``None`` on any failure.
-
-    Remote stacks need the serialized body to rebuild the closure on a worker.
-    Local stacks satisfy the lookup from the in-process registry and don't
-    need this path, so failure here is silent locally. Remote stacks then
-    raise ``KitaruUsageError`` from ``_kitaru_pydantic_ai_auto_flow`` when
-    the registry miss can't be repaired — with a message pointing users at
-    the explicit ``@kitaru.flow`` escape hatch.
-    """
+    """Best-effort cloudpickle of ``body`` for remote-stack workers; returns ``None`` on failure."""
     try:
         import cloudpickle
     except ImportError:
@@ -140,7 +130,6 @@ def _kitaru_pydantic_ai_auto_flow(run_id: str, serialized_body_path: str | None 
 
 
 def _is_wrapped_handler(handler: Any) -> bool:
-    """Return True if ``handler`` (or its underlying callable) is adapter-wrapped."""
     if getattr(handler, '_kitaru_wrapped', False):
         return True
     inner = getattr(handler, 'func', None) or getattr(handler, '__func__', None)
@@ -148,9 +137,6 @@ def _is_wrapped_handler(handler: Any) -> bool:
 
 
 def _track_run_completed(method: str, error: BaseException | None) -> None:
-    # `asyncio.CancelledError` is `BaseException`, not `Exception` — callers
-    # must pass it through so cancelled runs aren't miscoded as 'completed'.
-    # `KeyboardInterrupt` / `SystemExit` follow the same rule.
     if error is None:
         status = 'completed'
     elif isinstance(error, asyncio.CancelledError):
@@ -348,11 +334,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         effective_handler = event_stream_handler or self.event_stream_handler
         if effective_handler is None:
             return None
-        # Detect already-wrapped handlers without per-instance bookkeeping.
-        # Check the handler itself plus `.func` (functools.partial) and
-        # `.__func__` (bound method) — attributes only stick reliably on
-        # regular functions, so partials/methods are detected via their
-        # underlying callable rather than a direct attribute.
         if _is_wrapped_handler(effective_handler):
             return effective_handler
 
@@ -372,8 +353,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                         error=error,
                     )
 
-        # `_tracked_handler` is a local `async def`; attribute assignment is
-        # always supported on Python-defined functions, so no guard needed.
         _tracked_handler._kitaru_wrapped = True  # type: ignore[attr-defined]
         return _tracked_handler
 
@@ -468,27 +447,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         *,
         cache_key: str | None = None,
     ) -> Any:
-        reject_isolated_runtime(self._turn_checkpoint_config)
-
-        # Accept a cache_key parameter so two `run_sync` calls with different
-        # inputs in the same flow get distinct ZenML step cache keys. Closures
-        # over `user_prompt` / `message_history` aren't visible to ZenML, so
-        # without this the step name alone drives caching and identical-name
-        # calls collide on the cache.
-        def _turn(_cache_key: str | None = None) -> Any:
-            return body()
-
-        _turn.__name__ = self._name or 'agent'
-        checkpoint_def = kitaru.checkpoint(**self._turn_checkpoint_config)(_turn)
-        step_obj = getattr(checkpoint_def, '_step', None)
-        if step_obj is not None:
-            alias = build_checkpoint_source_alias(_turn.__name__)
-            for module_name in {__name__, f'src.{__name__}'}:
-                module = sys.modules.get(module_name)
-                if module is not None:
-                    setattr(module, alias, step_obj)
-        step_output = checkpoint_def(cache_key)
-        return materialize_step_output(step_output)
+        return run_sync_in_checkpoint(
+            config=self._turn_checkpoint_config,
+            step_name=self._name or 'agent',
+            body=body,
+            cache_key=cache_key,
+        )
 
     def _invoke_in_auto_flow(self, body: Callable[[], Any]) -> Any:
         run_id = uuid.uuid4().hex
@@ -498,11 +462,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         with _AUTO_FLOW_LOCK:
             _AUTO_FLOW_BODIES[run_id] = slot
         try:
-            # Best-effort serialization: only required for remote stacks, which
-            # fetch the body from `serialized_body_path`. Local stacks use the
-            # in-process registry instead, so a cloudpickle failure here is
-            # tolerable — the remote-stack path will surface a clearer error
-            # from the worker if the body actually needs to cross a boundary.
             serialized_body_path = _try_serialize_auto_flow_body(body)
             handle = _kitaru_pydantic_ai_auto_flow.run(run_id, serialized_body_path)
             flow_result = handle.wait()
@@ -519,14 +478,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             raise slot.error
         if slot.has_result:
             return slot.result
-        if flow_result is not None:
-            return flow_result
-        if not slot.has_result:
-            raise KitaruUsageError(
-                'Kitaru auto-flow finished without populating a result. This '
-                'is a bug in kitaru.adapters.pydantic_ai.'
-            )
-        return slot.result
+        return flow_result
 
     def _effective_message_history(
         self,
@@ -549,33 +501,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         # the stream inside a sync ZenML step. Fall back to the turn checkpoint
         # so model/tool events still land under a tracked boundary.
         return self._granular_checkpoints and not force_turn_checkpoint
-
-    def _turn_cache_key(
-        self,
-        user_prompt: Any,
-        message_history: Any,
-        effective_history: Any,
-        deferred_tool_results: Any,
-        instructions: Any,
-        model_settings: Any,
-    ) -> str:
-        # Synthesize a cache key from the inputs that actually drive the
-        # agent's output. Closures over these live inside `_body`, invisible
-        # to ZenML's step cache; without an explicit key, two `run_sync`
-        # calls with the same step name collide on the cache regardless of
-        # prompt. Excludes `deps` / `usage` / `metadata` — those are runtime
-        # plumbing, not inputs to the cached result.
-        history = effective_history if effective_history is not None else message_history
-        return checkpoint_cache_key(
-            {
-                'agent_name': self._name,
-                'user_prompt': user_prompt,
-                'message_history': history,
-                'deferred_tool_results': deferred_tool_results,
-                'instructions': instructions,
-                'model_settings': model_settings,
-            }
-        )
 
     def _log_streaming_fallback(self) -> None:
         if self._warned_streaming_fallback:
@@ -725,24 +650,21 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._remember_messages(result)
             return result
 
-        turn_cache_key = self._turn_cache_key(
+        cache_key = turn_cache_key(
+            agent_name=self._name,
             user_prompt=user_prompt,
-            message_history=message_history,
-            effective_history=effective_history,
+            message_history=effective_history if effective_history is not None else message_history,
             deferred_tool_results=deferred_tool_results,
             instructions=instructions,
             model_settings=model_settings,
         )
 
-        # Catch BaseException so `asyncio.CancelledError`, `KeyboardInterrupt`,
-        # and `SystemExit` are recorded in analytics (classified separately
-        # from `Exception` in `_track_run_completed`) before propagating.
         error: BaseException | None = None
         try:
             return await self._run_async(
                 _body,
                 force_turn_checkpoint=wrapped_handler is not None,
-                cache_key=turn_cache_key,
+                cache_key=cache_key,
             )
         except BaseException as exc:
             error = exc
@@ -801,10 +723,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._remember_messages(result)
             return result
 
-        turn_cache_key = self._turn_cache_key(
+        cache_key = turn_cache_key(
+            agent_name=self._name,
             user_prompt=user_prompt,
-            message_history=message_history,
-            effective_history=effective_history,
+            message_history=effective_history if effective_history is not None else message_history,
             deferred_tool_results=deferred_tool_results,
             instructions=instructions,
             model_settings=model_settings,
@@ -815,7 +737,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             return self._run_sync(
                 _body,
                 force_turn_checkpoint=wrapped_handler is not None,
-                cache_key=turn_cache_key,
+                cache_key=cache_key,
             )
         except BaseException as exc:
             error = exc

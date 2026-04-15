@@ -145,17 +145,8 @@ def _invoke_shared_auto_flow_agent() -> str:
 
 
 def test_phase17_auto_flow_runs_end_to_end(primed_zenml) -> None:
-    """`run_sync()` outside any flow should auto-open a flow and complete.
-
-    Local stacks reuse the in-process auto-flow registry, so closures over
-    unpicklable state (models with live HTTP clients, toolsets, etc.) still
-    execute successfully — cloudpickle is best-effort and only needed for
-    remote stacks.
-    """
+    """`run_sync()` outside any flow auto-opens a flow and completes."""
     global _AUTO_FLOW_AGENT
-    assert _AUTO_FLOW_AGENT is None, (
-        "Module-global leaked from an earlier test — indicates a teardown bug."
-    )
     _AUTO_FLOW_AGENT = _make_wrapped_agent(name_prefix="auto_flow_agent")
     try:
         result = _invoke_shared_auto_flow_agent()
@@ -165,12 +156,7 @@ def test_phase17_auto_flow_runs_end_to_end(primed_zenml) -> None:
 
 
 def test_phase17_persist_message_history_extends_across_runs(primed_zenml) -> None:
-    """Two successive `run_sync` calls on the same instance accumulate history.
-
-    Exercises the cache-key fix: `_auto_checkpoint_sync` now derives the step
-    cache key from the prompt + history, so different prompts produce distinct
-    checkpoints (and `_remember_messages` runs on each).
-    """
+    """Two successive `run_sync` calls on the same instance accumulate history."""
     durable_agent = _make_wrapped_agent(name_prefix="chat_agent")
     durable_agent._persist_message_history = True
 
@@ -184,6 +170,4 @@ def test_phase17_persist_message_history_extends_across_runs(primed_zenml) -> No
     _wait_for_hydrated_run(handle.exec_id)
 
     assert durable_agent._last_messages is not None
-    # Two turns with a one-message TestModel response plus echoed user prompts
-    # always exceed a single-turn transcript length.
     assert len(durable_agent._last_messages) >= 4

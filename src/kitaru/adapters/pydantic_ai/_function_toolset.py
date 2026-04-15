@@ -16,10 +16,6 @@ from ._toolset import KitaruToolset
 class KitaruFunctionToolset(KitaruToolset[AgentDepsT]):
     toolset_kind: ToolsetKind = field(default='function', init=False)
 
-    # Signature matches `WrapperToolset.get_tools` so the LSP check passes.
-    # Values are `FunctionToolsetTool` (a `ToolsetTool` subclass) at runtime
-    # — concrete callers that need the subclass-specific shape should narrow
-    # via `isinstance`.
     async def get_tools(
         self, ctx: RunContext[AgentDepsT]
     ) -> dict[str, ToolsetTool[AgentDepsT]]:
