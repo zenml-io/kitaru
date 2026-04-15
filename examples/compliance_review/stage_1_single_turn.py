@@ -12,6 +12,9 @@ sees that whole turn as one durable checkpoint.
 import asyncio
 from pathlib import Path
 
+from rich.console import Console
+from rich.markdown import Markdown
+
 import kitaru
 from kitaru import checkpoint, flow
 
@@ -29,6 +32,8 @@ except ImportError:  # pragma: no cover - exercised by direct script execution.
         run_agent_turn,
         to_claude_agent_result,
     )
+
+console = Console()
 
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
@@ -75,7 +80,8 @@ def run_workflow(prompt: str = STAGE_1_PROMPT) -> ClaudeAgentResult:
 def main() -> None:
     """Run the Stage 1 flow as a script and print the finding."""
     result = run_workflow()
-    print(result.result or "Claude returned no text result.")
+    finding = result.result or "Claude returned no text result."
+    console.print(Markdown(finding))
 
 
 if __name__ == "__main__":

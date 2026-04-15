@@ -22,6 +22,9 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from rich.console import Console
+from rich.markdown import Markdown
+
 import kitaru
 from kitaru import checkpoint, flow
 from kitaru.runtime import _get_current_execution_id
@@ -41,6 +44,8 @@ except ImportError:  # pragma: no cover - exercised by direct script execution.
         to_claude_agent_result,
     )
 
+
+console = Console()
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONVERSATION_LABEL = "acme_corp_compliance_review"
@@ -202,8 +207,9 @@ def run_workflow(
 def main() -> None:
     """Run the Stage 4 conversational review as a script."""
     result = run_workflow()
-    print("\nFinal Claude result:\n")
-    print(result.result or "Claude returned no text result.")
+    console.rule("Final Claude result")
+    final = result.result or "Claude returned no text result."
+    console.print(Markdown(final))
 
 
 def _follow_up_question(result: ClaudeAgentResult, turn_number: int) -> str:
@@ -222,9 +228,10 @@ def _is_stop_command(value: str) -> bool:
 
 def _print_turn_result(result: ClaudeAgentResult, turn_number: int) -> None:
     """Print the latest response for local script runs and remote logs."""
-    print(f"\n--- Claude compliance turn {turn_number} ---")
-    print(f"Session: {result.session_id}")
-    print(result.result or "Claude returned no text result.")
+    console.rule(f"Claude compliance turn {turn_number}")
+    console.print(f"Session: {result.session_id}")
+    turn_text = result.result or "Claude returned no text result."
+    console.print(Markdown(turn_text))
 
 
 def _print_remote_input_instructions(exec_id: str | None) -> None:

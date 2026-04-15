@@ -15,6 +15,9 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from rich.console import Console
+from rich.markdown import Markdown
+
 import kitaru
 from kitaru import checkpoint, flow, memory
 
@@ -33,6 +36,8 @@ except ImportError:  # pragma: no cover - exercised by direct script execution.
         to_claude_agent_result,
     )
 
+
+console = Console()
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 MEMORY_SCOPE_TYPE = "flow"
@@ -218,7 +223,8 @@ def run_workflow() -> ClaudeAgentResult:
 def main() -> None:
     """Run the Stage 3 memory-aware audit as a script."""
     result = run_workflow()
-    print(result.result or "Claude returned no change report text.")
+    change_report = result.result or "Claude returned no change report text."
+    console.print(Markdown(change_report))
 
 
 def _submit_memory_set(key: str, value: Any) -> Any:

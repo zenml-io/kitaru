@@ -18,6 +18,9 @@ created.
 import asyncio
 from pathlib import Path
 
+from rich.console import Console
+from rich.markdown import Markdown
+
 import kitaru
 from kitaru import checkpoint, flow
 
@@ -36,6 +39,8 @@ except ImportError:  # pragma: no cover - exercised by direct script execution.
         to_claude_agent_result,
     )
 
+
+console = Console()
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 
@@ -224,7 +229,8 @@ def run_workflow() -> ClaudeAgentResult:
 def main() -> None:
     """Run the Stage 2 audit as a script and print the final report."""
     result = run_workflow()
-    print(result.result or "Claude returned no report text.")
+    report = result.result or "Claude returned no report text."
+    console.print(Markdown(report))
 
 
 def _required_result_text(result: ClaudeAgentResult, *, domain: str) -> str:
