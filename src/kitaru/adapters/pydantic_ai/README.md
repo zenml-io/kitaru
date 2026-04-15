@@ -172,7 +172,7 @@ durable_agent = KitaruAgent(
 
 Each config is a `CheckpointConfig` TypedDict accepting:
 
-- `runtime: 'inline'` — run in-process. **`runtime='isolated'` is not yet supported by the adapter** and raises `KitaruUsageError` — the adapter's checkpoint closures capture live `RunContext` / tool references that cannot cross process boundaries. `KitaruRunContext` is the future serialization shim; it is not wired through yet.
+- `runtime: 'inline'` — run in-process. `runtime='isolated'` is a planned follow-up and currently raises `KitaruUsageError`. Supporting it requires making every adapter wrapper (`KitaruModel`, `KitaruToolset`, `KitaruMCPServer`) reconstructible from serializable construction args on the far side of the process boundary and wiring `KitaruRunContext` through the granular dispatcher — the pydantic payloads already serialize via `TypeAdapter`, so most of the work is on the wrapper-identity side.
 - `retries: int` — auto-retry the step on failure.
 - `type: str` — dashboard grouping. Defaults to `'llm_call'`, `'tool_call'`, or `'mcp_call'` so adapter checkpoints group with native `kitaru.llm()` / `@kitaru.checkpoint(type='tool_call')` calls.
 
@@ -217,13 +217,25 @@ durable_agent = KitaruAgent(
 )
 ```
 
+## Message history
+
+Pass `message_history` explicitly like any PydanticAI agent, or let the adapter thread it for you:
+
+```python
+durable_agent = KitaruAgent(agent, persist_message_history=True)
+
+durable_agent.run_sync('Hi, I am Alice.')
+durable_agent.run_sync("What's my name?")  # sees the prior turn automatically
+```
+
+With `persist_message_history=True` the adapter remembers `result.all_messages()` on the instance after each run and auto-injects it as `message_history` on the next call when the caller doesn't pass one. **One `KitaruAgent` instance = one conversation** — create separate instances for separate conversations. An explicit `message_history=` on a single call overrides the remembered history for that call only.
+
 ## Requirements and constraints
 
 - **Concrete model at construction time.** The wrapped agent must have a bound `Model` — late model binding and per-run `model=` overrides are not supported. If you need a different model, wrap a different agent.
 - **Stable agent name.** A `name` is required; the adapter uses it for artifact keys and auto-created flow/checkpoint names. Changing it orphans existing executions.
 - **No nested checkpoints.** Kitaru's MVP forbids opening a checkpoint inside another. Granular mode therefore cannot coexist with an enclosing turn checkpoint — the adapter runs the agent body inline at flow scope when `granular_checkpoints=True`.
-- **Message history is your responsibility.** `KitaruAgent` does not auto-persist `message_history`; pass it explicitly across turns.
-- **Auto-flow is local-only.** When called outside any flow, `KitaruAgent` auto-opens one using an in-process registry. Remote stacks (Kubernetes, Vertex, SageMaker, AzureML) cannot see that registry — wrap the call in an explicit `@kitaru.flow` for those.
+- **Auto-flow is local-only.** When called outside any flow, `KitaruAgent` auto-opens one using an in-process registry. Remote stacks (Kubernetes, Vertex, SageMaker, AzureML) cannot see that registry — wrap the call in an explicit `@kitaru.flow` for those. Serializing an arbitrary agent closure isn't worth the machinery when a one-line decorator does the job.
 
 ## Advanced composition
 

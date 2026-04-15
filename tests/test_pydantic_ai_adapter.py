@@ -7,6 +7,8 @@ Full end-to-end agent runs are exercised by the example tests.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -114,3 +116,47 @@ class TestUseGranular:
     def test_granular_on_with_stream_handler_falls_back(self) -> None:
         agent = self._make_agent(granular=True)
         assert agent._use_granular(force_turn_checkpoint=True) is False
+
+
+class TestPersistMessageHistory:
+    """Instance-level conversation memory: opt-in, one instance = one conversation."""
+
+    def _make_agent(self, *, persist: bool):
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        inner = Agent(TestModel(), name="chat")
+        return KitaruAgent(inner, persist_message_history=persist)
+
+    def test_effective_history_returns_explicit_when_provided(self) -> None:
+        agent = self._make_agent(persist=True)
+        explicit = ["m1"]  # type: ignore[list-item]
+        assert agent._effective_message_history(explicit) is explicit
+
+    def test_effective_history_none_when_disabled(self) -> None:
+        agent = self._make_agent(persist=False)
+        assert agent._effective_message_history(None) is None
+
+    def test_effective_history_none_when_no_prior_run(self) -> None:
+        agent = self._make_agent(persist=True)
+        assert agent._effective_message_history(None) is None
+
+    def test_effective_history_returns_remembered(self) -> None:
+        agent = self._make_agent(persist=True)
+        stored = ["m1", "m2"]
+        agent._last_messages = stored  # type: ignore[assignment]
+        recalled = agent._effective_message_history(None)
+        assert recalled == stored
+        assert recalled is not stored
+
+    def test_remember_messages_noop_when_disabled(self) -> None:
+        agent = self._make_agent(persist=False)
+        agent._remember_messages(SimpleNamespace(all_messages=lambda: ["m"]))
+        assert agent._last_messages is None
+
+    def test_remember_messages_stores_all_messages(self) -> None:
+        agent = self._make_agent(persist=True)
+        agent._remember_messages(SimpleNamespace(all_messages=lambda: ["m1", "m2"]))
+        assert agent._last_messages == ["m1", "m2"]

@@ -101,6 +101,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         tool_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None,
         mcp_checkpoint_config: CheckpointConfig | None = None,
+        persist_message_history: bool = False,
     ) -> None:
         """Wrap an agent so its runs become durable under Kitaru.
 
@@ -115,6 +116,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         ``model_/tool_/mcp_checkpoint_config`` kwargs (and the per-tool
         ``tool_checkpoint_config_by_name`` map, where ``False`` opts a tool
         out entirely) are only honored in this mode.
+
+        When ``persist_message_history=True``, the adapter remembers the final
+        ``result.all_messages()`` of each run on the instance and auto-injects
+        it as ``message_history`` on the next call if the caller doesn't supply
+        one — one instance then represents one conversation. Pass an explicit
+        ``message_history=`` to override for a single call.
         """
         super().__init__(wrapped)
 
@@ -156,11 +163,15 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         )
         self._toolsets = self._prepare_toolsets(list(wrapped.toolsets))
         self._wrapped_handlers: weakref.WeakSet[EventStreamHandler[AgentDepsT]] = weakref.WeakSet()
+        self._persist_message_history = persist_message_history
+        self._last_messages: list[_messages.ModelMessage] | None = None
+        self._message_history_lock = threading.Lock()
         track(
             AnalyticsEvent.PYDANTIC_AI_WRAPPED,
             {
                 'toolset_count': len(self._toolsets),
                 'granular_checkpoints': granular_checkpoints,
+                'persist_message_history': persist_message_history,
             },
         )
 
@@ -330,6 +341,21 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             )
         return slot.result
 
+    def _effective_message_history(
+        self,
+        explicit: Sequence[_messages.ModelMessage] | None,
+    ) -> Sequence[_messages.ModelMessage] | None:
+        if explicit is not None or not self._persist_message_history:
+            return explicit
+        with self._message_history_lock:
+            return list(self._last_messages) if self._last_messages else None
+
+    def _remember_messages(self, result: Any) -> None:
+        if not self._persist_message_history:
+            return
+        with self._message_history_lock:
+            self._last_messages = list(result.all_messages())
+
     def _use_granular(self, force_turn_checkpoint: bool) -> bool:
         # Granular mode cannot apply to streaming turns: per-call checkpointing
         # a streamed ``request_stream`` would require draining and replaying
@@ -405,13 +431,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._validate_model_override(model)
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
+        effective_history = self._effective_message_history(message_history)
 
         async def _body() -> Any:
             with self._kitaru_overrides(), self._tracking_scope():
                 return await super(KitaruAgent, self).run(
                     user_prompt,
                     output_type=output_type,
-                    message_history=message_history,
+                    message_history=effective_history,
                     deferred_tool_results=deferred_tool_results,
                     model=None,
                     instructions=instructions,
@@ -429,7 +456,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         error: BaseException | None = None
         try:
-            return await self._run_async(_body, force_turn_checkpoint=wrapped_handler is not None)
+            result = await self._run_async(_body, force_turn_checkpoint=wrapped_handler is not None)
+            self._remember_messages(result)
+            return result
         except BaseException as exc:
             error = exc
             raise
@@ -459,13 +488,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._validate_model_override(model)
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
+        effective_history = self._effective_message_history(message_history)
 
         def _body() -> Any:
             with self._kitaru_overrides(), self._tracking_scope():
                 return super(KitaruAgent, self).run_sync(
                     user_prompt,
                     output_type=output_type,
-                    message_history=message_history,
+                    message_history=effective_history,
                     deferred_tool_results=deferred_tool_results,
                     model=None,
                     instructions=instructions,
@@ -483,7 +513,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         error: BaseException | None = None
         try:
-            return self._run_sync(_body, force_turn_checkpoint=wrapped_handler is not None)
+            result = self._run_sync(_body, force_turn_checkpoint=wrapped_handler is not None)
+            self._remember_messages(result)
+            return result
         except BaseException as exc:
             error = exc
             raise
