@@ -5,28 +5,26 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from pydantic_ai.exceptions import ApprovalRequired, CallDeferred
-from pydantic_ai.tools import AgentDepsT, RunContext
-from pydantic_ai.toolsets import (
-    AbstractToolset,
-    FunctionToolset,
-    ToolsetTool,
-    WrapperToolset,
-)
+import kitaru
 from pydantic_core import to_jsonable_python
 
-import kitaru
+from pydantic_ai.exceptions import ApprovalRequired, CallDeferred
+from pydantic_ai.tools import AgentDepsT, RunContext
+from pydantic_ai.toolsets import AbstractToolset, FunctionToolset, ToolsetTool, WrapperToolset
 
 from ._events import DeferredKind, ToolsetKind
 from ._hitl import HitlConfig, hitl_config_from_tool_metadata
-from ._kitaru_internal import (
-    is_inside_checkpoint,
-    is_inside_flow,
-    suspend_checkpoint_scope,
-)
+from ._kitaru_internal import is_inside_checkpoint, is_inside_flow, suspend_checkpoint_scope
 from ._otel import attach_tool_correlation
 from ._policy import CapturePolicy
 from ._tracking import EventTracker, artifact_name, get_current_tracker
+from ._utils import (
+    CheckpointConfig,
+    ToolCheckpointOverrides,
+    resolve_tool_checkpoint_config,
+    run_async_in_checkpoint,
+    with_default_type,
+)
 
 
 class _ToolApprovalDenied(Exception):
@@ -37,7 +35,7 @@ def _json_safe(value: Any) -> Any:
     try:
         return to_jsonable_python(value, serialize_unknown=True)
     except ValueError:  # circular reference
-        return {"repr": repr(value), "python_type": value.__class__.__name__}
+        return {'repr': repr(value), 'python_type': value.__class__.__name__}
 
 
 @dataclass(frozen=True)
@@ -52,18 +50,22 @@ class _DeferredRequest:
 
 @dataclass
 class KitaruToolset(WrapperToolset[AgentDepsT]):
-    """Wraps any toolset so Kitaru tracks tool calls and routes HITL waits."""
+    """Wraps any toolset so Kitaru tracks tool calls and routes HITL waits through the flow."""
 
-    toolset_kind: ToolsetKind = "generic"
+    toolset_kind: ToolsetKind = 'generic'
     capture: CapturePolicy = field(default_factory=CapturePolicy)
+    # Granular-mode: when set, each ``call_tool`` opens its own @kitaru.checkpoint.
+    # Per-name overrides can replace or disable (`False`) per-tool.
+    tool_checkpoint_config: CheckpointConfig | None = None
+    tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None
+    _default_checkpoint_type: str = field(default='tool_call', init=False)
 
     @property
     def id(self) -> str | None:
         return self.wrapped.id
 
     def visit_and_replace(
-        self,
-        visitor: Callable[[AbstractToolset[AgentDepsT]], AbstractToolset[AgentDepsT]],
+        self, visitor: Callable[[AbstractToolset[AgentDepsT]], AbstractToolset[AgentDepsT]]
     ) -> AbstractToolset[AgentDepsT]:
         return self
 
@@ -73,9 +75,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             return self
         return replace(self, wrapped=new_wrapped)
 
-    async def for_run_step(
-        self, ctx: RunContext[AgentDepsT]
-    ) -> AbstractToolset[AgentDepsT]:
+    async def for_run_step(self, ctx: RunContext[AgentDepsT]) -> AbstractToolset[AgentDepsT]:
         new_wrapped = await self.wrapped.for_run_step(ctx)
         if new_wrapped is self.wrapped:
             return self
@@ -88,48 +88,50 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         ctx: RunContext[AgentDepsT],
         tool: ToolsetTool[AgentDepsT],
     ) -> Any:
-        tracker = get_current_tracker()
-        capture_mode = self.capture.capture_mode_for_tool(name)
-        hitl_config = hitl_config_from_tool_metadata(tool.tool_def.metadata)
-
-        # HITL interception runs whenever we're inside a flow (so kitaru.wait
-        # is callable); tracking additionally requires a tracker, capture on,
-        # and an enclosing checkpoint.
-        intercept_hitl = is_inside_flow()
-        should_track = (
-            tracker is not None and capture_mode is not None and is_inside_checkpoint()
+        checkpoint_config = resolve_tool_checkpoint_config(
+            name,
+            default=self.tool_checkpoint_config,
+            by_name=self.tool_checkpoint_config_by_name,
         )
+        if (
+            checkpoint_config is not None
+            and is_inside_flow()
+            and not is_inside_checkpoint()
+        ):
+            async def _in_checkpoint() -> Any:
+                return await self._call_tool_tracked(name, tool_args, ctx, tool)
 
-        if not intercept_hitl and not should_track:
+            return await run_async_in_checkpoint(
+                config=with_default_type(checkpoint_config, self._default_checkpoint_type),
+                step_name=f'{name}_tool',
+                body=_in_checkpoint,
+            )
+        return await self._call_tool_tracked(name, tool_args, ctx, tool)
+
+    async def _call_tool_tracked(
+        self,
+        name: str,
+        tool_args: dict[str, Any],
+        ctx: RunContext[AgentDepsT],
+        tool: ToolsetTool[AgentDepsT],
+    ) -> Any:
+        capture_mode = self.capture.capture_mode_for_tool(name)
+        tracker = get_current_tracker()
+        if capture_mode is None or tracker is None or not is_inside_checkpoint():
             return await super().call_tool(name, tool_args, ctx, tool)
 
-        if not should_track:
-            return await self._call_with_hitl(
-                name=name,
-                tool_args=tool_args,
-                safe_args=_json_safe(tool_args) if hitl_config is not None else None,
-                ctx=ctx,
-                tool=tool,
-                hitl_config=hitl_config,
-                tracker=None,
-            )
-
-        assert tracker is not None and capture_mode is not None
         event_id, event_context = tracker.start_tool_event()
         if self.capture.correlate_otel_spans:
             attach_tool_correlation(event_id, event_context)
 
-        safe_args = (
-            _json_safe(tool_args)
-            if capture_mode == "full" or hitl_config is not None
-            else None
-        )
+        hitl_config = hitl_config_from_tool_metadata(tool.tool_def.metadata)
+        safe_args = _json_safe(tool_args) if capture_mode == 'full' or hitl_config is not None else None
 
         artifacts: dict[str, str] = {}
-        if capture_mode == "full":
-            args_key = artifact_name(event_id, "args")
-            kitaru.save(args_key, safe_args, type="input")
-            artifacts["args"] = args_key
+        if capture_mode == 'full':
+            args_key = artifact_name(event_id, 'args')
+            kitaru.save(args_key, safe_args, type='input')
+            artifacts['args'] = args_key
 
         started_at = time.perf_counter()
         try:
@@ -146,7 +148,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             tracker.record_tool_event(
                 event_id,
                 event_context,
-                status="failed",
+                status='failed',
                 name=name,
                 toolset_kind=self.toolset_kind,
                 capture_mode=capture_mode,
@@ -158,15 +160,15 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             raise
 
         duration_ms = _elapsed_ms(started_at)
-        if capture_mode == "full":
-            result_key = artifact_name(event_id, "result")
-            kitaru.save(result_key, _json_safe(result), type="output")
-            artifacts["result"] = result_key
+        if capture_mode == 'full':
+            result_key = artifact_name(event_id, 'result')
+            kitaru.save(result_key, _json_safe(result), type='output')
+            artifacts['result'] = result_key
 
         tracker.record_tool_event(
             event_id,
             event_context,
-            status="completed",
+            status='completed',
             name=name,
             toolset_kind=self.toolset_kind,
             capture_mode=capture_mode,
@@ -185,11 +187,11 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         ctx: RunContext[AgentDepsT],
         tool: ToolsetTool[AgentDepsT],
         hitl_config: HitlConfig | None,
-        tracker: EventTracker | None,
+        tracker: EventTracker,
     ) -> Any:
         if hitl_config is not None:
             request = _DeferredRequest(
-                kind="hitl",
+                kind='hitl',
                 wait_name=hitl_config.name or name,
                 schema=hitl_config.schema,
                 question=hitl_config.question,
@@ -197,43 +199,31 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                 run_after_wait=False,
             )
             return await self._handle_deferred(
-                request,
-                name=name,
-                tool_args=tool_args,
-                safe_args=safe_args,
-                ctx=ctx,
-                tool=tool,
-                tracker=tracker,
+                request, name=name, tool_args=tool_args, safe_args=safe_args, ctx=ctx, tool=tool, tracker=tracker
             )
 
         try:
             return await super().call_tool(name, tool_args, ctx, tool)
         except ApprovalRequired as error:
             request = _DeferredRequest(
-                kind="approval_required",
-                wait_name=f"approve_{name}",
+                kind='approval_required',
+                wait_name=f'approve_{name}',
                 schema=bool,
-                question=f"Approve tool call: {name}?",
+                question=f'Approve tool call: {name}?',
                 exception_metadata=error.metadata,
                 run_after_wait=True,
             )
         except CallDeferred as error:
             request = _DeferredRequest(
-                kind="call_deferred",
-                wait_name=f"defer_{name}",
+                kind='call_deferred',
+                wait_name=f'defer_{name}',
                 schema=None,
-                question=f"Provide result for deferred tool: {name}",
+                question=f'Provide result for deferred tool: {name}',
                 exception_metadata=error.metadata,
                 run_after_wait=False,
             )
         return await self._handle_deferred(
-            request,
-            name=name,
-            tool_args=tool_args,
-            safe_args=safe_args,
-            ctx=ctx,
-            tool=tool,
-            tracker=tracker,
+            request, name=name, tool_args=tool_args, safe_args=safe_args, ctx=ctx, tool=tool, tracker=tracker
         )
 
     async def _handle_deferred(
@@ -245,15 +235,12 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         safe_args: Any,
         ctx: RunContext[AgentDepsT],
         tool: ToolsetTool[AgentDepsT],
-        tracker: EventTracker | None,
+        tracker: EventTracker,
     ) -> Any:
         if safe_args is None:
             safe_args = _json_safe(tool_args)
         wait_metadata = self._wait_metadata(
-            name=name,
-            safe_args=safe_args,
-            ctx=ctx,
-            exception_metadata=request.exception_metadata,
+            name=name, safe_args=safe_args, ctx=ctx, exception_metadata=request.exception_metadata
         )
         wait_value = self._invoke_wait(
             schema=request.schema,
@@ -262,23 +249,18 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             metadata=wait_metadata,
         )
         approved = bool(wait_value) if request.schema is bool else None
-        if tracker is not None:
-            tracker.record_deferred_event(
-                tool_name=name,
-                deferred_kind=request.kind,
-                wait_name=request.wait_name,
-                metadata={"exception_metadata": request.exception_metadata}
-                if request.exception_metadata
-                else None,
-                approved=approved,
-            )
+        tracker.record_deferred_event(
+            tool_name=name,
+            deferred_kind=request.kind,
+            wait_name=request.wait_name,
+            metadata={'exception_metadata': request.exception_metadata} if request.exception_metadata else None,
+            approved=approved,
+        )
         if approved is False:
-            raise _ToolApprovalDenied(f"Tool {name!r} was not approved.")
+            raise _ToolApprovalDenied(f'Tool {name!r} was not approved.')
         if not request.run_after_wait:
             return wait_value
-        approved_ctx = replace(
-            ctx, tool_call_approved=True, tool_call_metadata=request.exception_metadata
-        )
+        approved_ctx = replace(ctx, tool_call_approved=True, tool_call_metadata=request.exception_metadata)
         return await super().call_tool(name, tool_args, approved_ctx, tool)
 
     def _wait_metadata(
@@ -290,13 +272,13 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         exception_metadata: dict[str, Any] | None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
-            "adapter": "pydantic_ai",
-            "tool_name": name,
-            "tool_call_id": ctx.tool_call_id,
-            "tool_args": safe_args,
+            'adapter': 'pydantic_ai',
+            'tool_name': name,
+            'tool_call_id': ctx.tool_call_id,
+            'tool_args': safe_args,
         }
         if exception_metadata:
-            metadata["exception_metadata"] = _json_safe(exception_metadata)
+            metadata['exception_metadata'] = _json_safe(exception_metadata)
         return metadata
 
     def _invoke_wait(
@@ -308,9 +290,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         metadata: dict[str, Any],
     ) -> Any:
         with suspend_checkpoint_scope():
-            return kitaru.wait(
-                schema=schema, name=wait_name, question=question, metadata=metadata
-            )
+            return kitaru.wait(schema=schema, name=wait_name, question=question, metadata=metadata)
 
 
 def _elapsed_ms(started_at: float) -> float:
@@ -321,19 +301,40 @@ def kitaruify_toolset(
     toolset: AbstractToolset[AgentDepsT],
     *,
     capture: CapturePolicy,
+    tool_checkpoint_config: CheckpointConfig | None = None,
+    tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None,
+    mcp_checkpoint_config: CheckpointConfig | None = None,
 ) -> AbstractToolset[AgentDepsT]:
     if isinstance(toolset, KitaruToolset):
         return toolset
 
+    common = {
+        'capture': capture,
+        'tool_checkpoint_config_by_name': tool_checkpoint_config_by_name,
+    }
+
     if isinstance(toolset, FunctionToolset):
         from ._function_toolset import KitaruFunctionToolset
 
-        return KitaruFunctionToolset(toolset, capture=capture)
+        return KitaruFunctionToolset(
+            toolset, tool_checkpoint_config=tool_checkpoint_config, **common
+        )
 
     try:
         from pydantic_ai.mcp import MCPServer
     except ImportError:  # pragma: no cover
-        return KitaruToolset(toolset, toolset_kind="generic", capture=capture)
+        MCPServer = None
 
-    kind: ToolsetKind = "mcp" if isinstance(toolset, MCPServer) else "generic"
-    return KitaruToolset(toolset, toolset_kind=kind, capture=capture)
+    if MCPServer is not None and isinstance(toolset, MCPServer):
+        from ._mcp_server import KitaruMCPServer
+
+        return KitaruMCPServer(
+            toolset, tool_checkpoint_config=mcp_checkpoint_config, **common
+        )
+
+    return KitaruToolset(
+        toolset,
+        toolset_kind='generic',
+        tool_checkpoint_config=tool_checkpoint_config,
+        **common,
+    )

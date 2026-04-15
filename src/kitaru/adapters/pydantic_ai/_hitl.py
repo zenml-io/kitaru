@@ -4,8 +4,8 @@ from typing import Any
 
 from pydantic_ai import Tool
 
-_HITL_MARKER = "_kitaru_hitl_config"
-_HITL_METADATA_KEY = "kitaru_hitl_config"
+_HITL_MARKER = '_kitaru_hitl_config'
+_HITL_METADATA_KEY = 'kitaru_hitl_config'
 
 
 @dataclass(frozen=True)
@@ -47,9 +47,7 @@ def hitl_metadata_for_tool(tool: Tool[Any]) -> dict[str, Any] | None:
     return {_HITL_METADATA_KEY: config}
 
 
-def hitl_config_from_tool_metadata(
-    metadata: dict[str, Any] | None,
-) -> HitlConfig | None:
+def hitl_config_from_tool_metadata(metadata: dict[str, Any] | None) -> HitlConfig | None:
     if metadata is None:
         return None
     config = metadata.get(_HITL_METADATA_KEY)

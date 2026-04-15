@@ -132,6 +132,15 @@ select = [
     "RUF",  # ruff-specific rules
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Vendored from upstream `pydantic_ai.durable_exec.kitaru`; upstream owns the style.
+# UP006/UP007/UP035/UP045: upstream uses `Dict`/`Optional`/`typing.List` aliases.
+# UP008: upstream uses explicit `super(Cls, self)` in WrapperAgent subclass.
+"src/kitaru/adapters/pydantic_ai/**" = ["E501", "I001", "UP006", "UP007", "UP008", "UP035", "UP045", "SIM105"]
+
+[tool.ruff.format]
+exclude = ["src/kitaru/adapters/pydantic_ai/**"]
+
 [tool.ruff.lint.pydocstyle]
 # Use Google-style docstrings.
 convention = "google"
@@ -163,6 +172,16 @@ include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+# Vendored adapter uses pyright upstream; skip ty rules that conflict with it.
+include = ["src/kitaru/adapters/pydantic_ai/**"]
+
+[tool.ty.overrides.rules]
+invalid-method-override = "ignore"
+invalid-assignment = "ignore"
+invalid-return-type = "ignore"
+invalid-argument-type = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,62 +1,58 @@
+"""PydanticAI Model wrapper that records each request as a Kitaru event.
+
+We do not route through ``kitaru.llm`` — it is a text-in/text-out facade over
+OpenAI and Anthropic only and would discard streaming, tool calls, structured
+output, and every other provider PydanticAI supports. Granular mode reuses the
+``type='llm_call'`` checkpoint convention so dashboards group native and adapter
+LLM calls uniformly.
+"""
+
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, cast
 
+import kitaru
 from pydantic import TypeAdapter
+from pydantic_core import PydanticSerializationError
+
 from pydantic_ai._run_context import RunContext
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelMessagesTypeAdapter,
-    ModelResponse,
-    ModelResponseStreamEvent,
-)
+from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter, ModelResponse, ModelResponseStreamEvent
 from pydantic_ai.models import ModelRequestParameters, StreamedResponse
 from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RequestUsage
-from pydantic_core import PydanticSerializationError
 
-import kitaru
-
-from ._kitaru_internal import is_inside_checkpoint
+from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._otel import attach_model_correlation
 from ._policy import CapturePolicy
 from ._tracking import artifact_name, get_current_tracker
+from ._utils import CheckpointConfig, run_async_in_checkpoint, with_default_type
 
 _MODEL_RESPONSE_ADAPTER = TypeAdapter(ModelResponse)
 _MODEL_STREAM_EVENT_ADAPTER = TypeAdapter(ModelResponseStreamEvent)
 
 
 def _serialize_messages(messages: list[ModelMessage]) -> list[dict[str, Any]]:
-    return cast(
-        list[dict[str, Any]],
-        ModelMessagesTypeAdapter.dump_python(messages, mode="json"),
-    )
+    return cast(list[dict[str, Any]], ModelMessagesTypeAdapter.dump_python(messages, mode='json'))
 
 
 def _serialize_model_response(response: ModelResponse) -> dict[str, Any]:
-    return cast(
-        dict[str, Any], _MODEL_RESPONSE_ADAPTER.dump_python(response, mode="json")
-    )
+    return cast(dict[str, Any], _MODEL_RESPONSE_ADAPTER.dump_python(response, mode='json'))
 
 
 def _serialize_stream_event(event: Any) -> dict[str, Any]:
     try:
-        return cast(
-            dict[str, Any], _MODEL_STREAM_EVENT_ADAPTER.dump_python(event, mode="json")
-        )
+        return cast(dict[str, Any], _MODEL_STREAM_EVENT_ADAPTER.dump_python(event, mode='json'))
     except (TypeError, ValueError, PydanticSerializationError):
-        return {"event_type": type(event).__name__, "repr": repr(event)}
+        return {'event_type': type(event).__name__, 'repr': repr(event)}
 
 
 class KitaruStreamedResponse(StreamedResponse):
     """`StreamedResponse` proxy that invokes `on_event` for each streamed event."""
 
-    def __init__(
-        self, wrapped: StreamedResponse, *, on_event: Callable[[Any], None]
-    ) -> None:
+    def __init__(self, wrapped: StreamedResponse, *, on_event: Callable[[Any], None]) -> None:
         super().__init__(wrapped.model_request_parameters)
         self._wrapped = wrapped
         self._on_event = on_event
@@ -81,7 +77,7 @@ class KitaruStreamedResponse(StreamedResponse):
 
     @property
     def provider_name(self) -> str:
-        return self._wrapped.provider_name or ""
+        return self._wrapped.provider_name or ''
 
     @property
     def provider_url(self) -> str | None:
@@ -93,14 +89,20 @@ class KitaruStreamedResponse(StreamedResponse):
 
 
 class KitaruModel(WrapperModel):
-    """Records each request as a ``ModelEvent`` when inside a checkpoint."""
+    """Wrapper model that records each request as a `ModelEvent` when inside a checkpoint."""
 
     def __init__(
-        self, wrapped: Any, *, capture: CapturePolicy, agent_name: str
+        self,
+        wrapped: Any,
+        *,
+        capture: CapturePolicy,
+        agent_name: str,
+        checkpoint_config: CheckpointConfig | None = None,
     ) -> None:
         super().__init__(wrapped)
         self._capture = capture
         self._agent_name = agent_name
+        self._checkpoint_config = checkpoint_config
 
     def _should_track(self) -> bool:
         return self._capture.emit_child_events and is_inside_checkpoint()
@@ -111,11 +113,37 @@ class KitaruModel(WrapperModel):
         model_settings: ModelSettings | None,
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
+        if (
+            self._checkpoint_config is not None
+            and is_inside_flow()
+            and not is_inside_checkpoint()
+        ):
+            # `_in_checkpoint` closes over live `messages` / `self`; safe only for
+            # inline runtime. `run_async_in_checkpoint` rejects `runtime='isolated'`
+            # to stop these references from hitting a pickling boundary.
+            async def _in_checkpoint() -> ModelResponse:
+                return await self._tracked_request(
+                    messages, model_settings, model_request_parameters
+                )
+
+            return await run_async_in_checkpoint(
+                config=with_default_type(self._checkpoint_config, 'llm_call'),
+                step_name=f'{self._agent_name}_model_request',
+                body=_in_checkpoint,
+            )
+        return await self._tracked_request(
+            messages, model_settings, model_request_parameters
+        )
+
+    async def _tracked_request(
+        self,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
         tracker = get_current_tracker()
         if tracker is None or not self._should_track():
-            return await super().request(
-                messages, model_settings, model_request_parameters
-            )
+            return await super().request(messages, model_settings, model_request_parameters)
 
         event_id, event_context = tracker.start_model_event()
         if self._capture.correlate_otel_spans:
@@ -123,20 +151,18 @@ class KitaruModel(WrapperModel):
 
         artifacts: dict[str, str] = {}
         if self._capture.save_prompts:
-            prompt_key = artifact_name(event_id, "prompt")
-            kitaru.save(prompt_key, _serialize_messages(messages), type="prompt")
-            artifacts["prompt"] = prompt_key
+            prompt_key = artifact_name(event_id, 'prompt')
+            kitaru.save(prompt_key, _serialize_messages(messages), type='prompt')
+            artifacts['prompt'] = prompt_key
 
         started_at = time.perf_counter()
         try:
-            response = await super().request(
-                messages, model_settings, model_request_parameters
-            )
+            response = await super().request(messages, model_settings, model_request_parameters)
         except BaseException as error:
             tracker.record_model_event(
                 event_id,
                 event_context,
-                status="failed",
+                status='failed',
                 duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
                 artifacts=artifacts,
                 error=error,
@@ -145,16 +171,14 @@ class KitaruModel(WrapperModel):
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
         if self._capture.save_responses:
-            response_key = artifact_name(event_id, "response")
-            kitaru.save(
-                response_key, _serialize_model_response(response), type="response"
-            )
-            artifacts["response"] = response_key
+            response_key = artifact_name(event_id, 'response')
+            kitaru.save(response_key, _serialize_model_response(response), type='response')
+            artifacts['response'] = response_key
 
         tracker.record_model_event(
             event_id,
             event_context,
-            status="completed",
+            status='completed',
             duration_ms=duration_ms,
             artifacts=artifacts,
             model_name=response.model_name,
@@ -184,9 +208,9 @@ class KitaruModel(WrapperModel):
 
         artifacts: dict[str, str] = {}
         if self._capture.save_prompts:
-            prompt_key = artifact_name(event_id, "prompt")
-            kitaru.save(prompt_key, _serialize_messages(messages), type="prompt")
-            artifacts["prompt"] = prompt_key
+            prompt_key = artifact_name(event_id, 'prompt')
+            kitaru.save(prompt_key, _serialize_messages(messages), type='prompt')
+            artifacts['prompt'] = prompt_key
 
         save_transcripts = self._capture.save_stream_transcripts
         save_responses = self._capture.save_responses
@@ -204,16 +228,14 @@ class KitaruModel(WrapperModel):
             async with super().request_stream(
                 messages, model_settings, model_request_parameters, run_context
             ) as streamed_response:
-                tracked_stream = KitaruStreamedResponse(
-                    streamed_response, on_event=_on_stream_event
-                )
+                tracked_stream = KitaruStreamedResponse(streamed_response, on_event=_on_stream_event)
                 yield tracked_stream
             response = tracked_stream.get()
         except BaseException as error:
             tracker.record_model_event(
                 event_id,
                 event_context,
-                status="failed",
+                status='failed',
                 duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
                 artifacts=artifacts,
                 error=error,
@@ -226,27 +248,27 @@ class KitaruModel(WrapperModel):
         if save_responses or save_transcripts:
             serialized_response = _serialize_model_response(response)
         if save_responses:
-            response_key = artifact_name(event_id, "response")
-            kitaru.save(response_key, serialized_response, type="response")
-            artifacts["response"] = response_key
+            response_key = artifact_name(event_id, 'response')
+            kitaru.save(response_key, serialized_response, type='response')
+            artifacts['response'] = response_key
         if save_transcripts:
-            transcript_key = artifact_name(event_id, "stream_transcript")
+            transcript_key = artifact_name(event_id, 'stream_transcript')
             kitaru.save(
                 transcript_key,
                 {
-                    "event_count": stream_event_count,
-                    "duration_ms": duration_ms,
-                    "events": stream_events,
-                    "final_response": serialized_response,
+                    'event_count': stream_event_count,
+                    'duration_ms': duration_ms,
+                    'events': stream_events,
+                    'final_response': serialized_response,
                 },
-                type="context",
+                type='context',
             )
-            artifacts["stream_transcript"] = transcript_key
+            artifacts['stream_transcript'] = transcript_key
 
         tracker.record_model_event(
             event_id,
             event_context,
-            status="completed",
+            status='completed',
             duration_ms=duration_ms,
             artifacts=artifacts,
             model_name=response.model_name,

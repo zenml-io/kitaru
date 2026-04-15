@@ -7,9 +7,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Literal
 
-from pydantic_ai.usage import RequestUsage
-
 import kitaru
+
+from pydantic_ai.usage import RequestUsage
 
 from ._events import (
     AgentEvent,
@@ -26,27 +26,21 @@ from ._events import (
     dump_agent_events,
     error_from_exception,
 )
-from ._kitaru_internal import (
-    get_current_checkpoint,
-    get_current_execution_id,
-    is_inside_checkpoint,
-)
+from ._kitaru_internal import get_current_checkpoint, get_current_execution_id, is_inside_checkpoint
 from ._policy import CaptureMode
 
-_NON_WORD_PATTERN = re.compile(r"\W+")
+_NON_WORD_PATTERN = re.compile(r'\W+')
 
-ArtifactKind = Literal[
-    "args", "result", "prompt", "response", "stream_transcript", "context"
-]
+ArtifactKind = Literal['args', 'result', 'prompt', 'response', 'stream_transcript', 'context']
 
 
 def normalize_agent_name(agent_name: str | None) -> str:
-    normalized = _NON_WORD_PATTERN.sub("_", (agent_name or "").strip()).strip("_")
-    return normalized or "agent"
+    normalized = _NON_WORD_PATTERN.sub('_', (agent_name or '').strip()).strip('_')
+    return normalized or 'agent'
 
 
 def artifact_name(event_id: str, kind: ArtifactKind) -> str:
-    return f"{event_id}_{kind}"
+    return f'{event_id}_{kind}'
 
 
 @dataclass(frozen=True)
@@ -75,7 +69,7 @@ class EventTracker:
     _current_model_event_id: str | None = None
     _pending_tool_event_ids: list[str] = field(default_factory=list)
     _events: list[AgentEvent] = field(default_factory=list)
-    _status: EventStatus = "completed"
+    _status: EventStatus = 'completed'
     _error: EventError | None = None
     _model_call_count: int = 0
     _tool_call_count: int = 0
@@ -86,8 +80,8 @@ class EventTracker:
     def __post_init__(self) -> None:
         self.agent_name = normalize_agent_name(self.agent_name)
         checkpoint = get_current_checkpoint()
-        self.checkpoint_name = getattr(checkpoint, "name", None)
-        self.checkpoint_id = getattr(checkpoint, "checkpoint_id", None)
+        self.checkpoint_name = getattr(checkpoint, 'name', None)
+        self.checkpoint_id = getattr(checkpoint, 'checkpoint_id', None)
         self.exec_id = get_current_execution_id()
 
     @property
@@ -96,23 +90,23 @@ class EventTracker:
 
     @property
     def event_log_artifact_name(self) -> str:
-        return f"{self.agent_name}_{self.run_label}_event_log"
+        return f'{self.agent_name}_{self.run_label}_event_log'
 
     @property
     def run_summary_artifact_name(self) -> str:
-        return f"{self.agent_name}_{self.run_label}_run_summary"
+        return f'{self.agent_name}_{self.run_label}_run_summary'
 
     def _next_event_id(self, event_kind: str) -> tuple[str, int]:
         self._counter += 1
-        event_id = f"{self.agent_name}_{self.run_label}_{event_kind}_{self._counter}"
+        event_id = f'{self.agent_name}_{self.run_label}_{event_kind}_{self._counter}'
         return event_id, self._counter
 
     def set_run_error(self, error: BaseException) -> None:
-        self._status = "failed"
+        self._status = 'failed'
         self._error = error_from_exception(error)
 
     def start_model_event(self) -> tuple[str, ModelEventContext]:
-        event_id, sequence_index = self._next_event_id("llm_call")
+        event_id, sequence_index = self._next_event_id('llm_call')
         self._model_call_count += 1
         self._turn_index += 1
         fan_in_from = list(self._pending_tool_event_ids)
@@ -136,7 +130,7 @@ class EventTracker:
         stream_event_count: int | None = None,
         error: BaseException | None = None,
     ) -> None:
-        if status == "completed":
+        if status == 'completed':
             self._current_model_event_id = event_id
         elif self._current_model_event_id == event_id:
             self._current_model_event_id = None
@@ -159,7 +153,7 @@ class EventTracker:
         )
 
     def start_tool_event(self) -> tuple[str, ToolEventContext]:
-        event_id, sequence_index = self._next_event_id("tool_call")
+        event_id, sequence_index = self._next_event_id('tool_call')
         self._tool_call_count += 1
         return event_id, ToolEventContext(
             sequence_index=sequence_index,
@@ -181,16 +175,12 @@ class EventTracker:
         artifacts: dict[str, str],
         error: BaseException | None = None,
     ) -> None:
-        if status == "completed":
+        if status == 'completed':
             self._pending_tool_event_ids.append(event_id)
         elif event_id in self._pending_tool_event_ids:
             self._pending_tool_event_ids.remove(event_id)
 
-        parent_event_ids = (
-            [event_context.fan_out_from]
-            if event_context.fan_out_from is not None
-            else []
-        )
+        parent_event_ids = [event_context.fan_out_from] if event_context.fan_out_from is not None else []
         self._events.append(
             ToolEvent(
                 event_id=event_id,
@@ -218,14 +208,12 @@ class EventTracker:
         metadata: dict[str, object] | None,
         approved: bool | None = None,
     ) -> None:
-        event_id, sequence_index = self._next_event_id("deferred")
-        parent_event_ids = (
-            [self._current_model_event_id] if self._current_model_event_id else []
-        )
+        event_id, sequence_index = self._next_event_id('deferred')
+        parent_event_ids = [self._current_model_event_id] if self._current_model_event_id else []
         self._events.append(
             DeferredEvent(
                 event_id=event_id,
-                status="completed",
+                status='completed',
                 sequence_index=sequence_index,
                 turn_index=self._turn_index,
                 parent_event_ids=parent_event_ids,
@@ -237,18 +225,14 @@ class EventTracker:
             )
         )
 
-    def record_stream_event(
-        self, *, duration_ms: float, error: BaseException | None
-    ) -> None:
+    def record_stream_event(self, *, duration_ms: float, error: BaseException | None) -> None:
         self._event_stream_handler_call_count += 1
-        self._event_stream_handler_duration_ms = round(
-            self._event_stream_handler_duration_ms + duration_ms, 3
-        )
-        event_id, sequence_index = self._next_event_id("event_stream")
+        self._event_stream_handler_duration_ms = round(self._event_stream_handler_duration_ms + duration_ms, 3)
+        event_id, sequence_index = self._next_event_id('event_stream')
         self._events.append(
             StreamEvent(
                 event_id=event_id,
-                status="failed" if error is not None else "completed",
+                status='failed' if error is not None else 'completed',
                 sequence_index=sequence_index,
                 turn_index=self._turn_index,
                 parent_event_ids=[],
@@ -285,25 +269,21 @@ class EventTracker:
     def persist(self) -> None:
         if not is_inside_checkpoint():
             return
-        kitaru.save(
-            self.event_log_artifact_name,
-            dump_agent_events(self._events),
-            type="context",
-        )
-        summary_dump = self.build_run_summary().model_dump(mode="json")
-        kitaru.save(self.run_summary_artifact_name, summary_dump, type="context")
+        kitaru.save(self.event_log_artifact_name, dump_agent_events(self._events), type='context')
+        summary_dump = self.build_run_summary().model_dump(mode='json')
+        kitaru.save(self.run_summary_artifact_name, summary_dump, type='context')
         kitaru.log(pydantic_ai_run_summaries={self.run_label: summary_dump})
 
 
 _CURRENT_TRACKER: ContextVar[EventTracker | None] = ContextVar(
-    "kitaru_pydantic_ai_event_tracker",
+    'kitaru_pydantic_ai_event_tracker',
     default=None,
 )
 
 
 @contextmanager
 def tracker_scope(agent_name: str | None) -> Iterator[EventTracker]:
-    tracker = EventTracker(agent_name=agent_name or "agent")
+    tracker = EventTracker(agent_name=agent_name or 'agent')
     token = _CURRENT_TRACKER.set(tracker)
     try:
         yield tracker
