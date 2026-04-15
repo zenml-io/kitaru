@@ -10,3 +10,7 @@ not_found_handling = "404-page"
 [[kv_namespaces]]
 binding = "WAITLIST_KV"
 id = "7a952406df5543418f0cb8c4552ee65f"
+
+[[kv_namespaces]]
+binding = "GET_STARTED_KV"
+id = "a6a7c01a20c841b092649453ef2e0365"

@@ -14,14 +14,15 @@
   <a href="https://pypi.org/project/kitaru/"><img alt="PyPI" src="https://img.shields.io/pypi/v/kitaru?color=blue"></a>
   <a href="https://pypi.org/project/kitaru/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/kitaru"></a>
   <a href="https://github.com/zenml-io/kitaru/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/zenml-io/kitaru"></a>
-  <a href="https://zenml.io/slack"><img alt="Slack" src="https://img.shields.io/badge/chat-on%20slack-blueviolet"></a>
 </p>
 
 <p align="center">
   <a href="https://kitaru.ai/docs">Docs</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="https://kitaru.ai/docs/getting-started/examples">Examples</a> &middot;
-  <a href="GETTING_STARTED.md">Getting Started Guide</a>
+  <a href="GETTING_STARTED.md">Getting Started Guide</a> &middot;
+  <a href="https://kitaru.ai/roadmap">Roadmap</a> &middot;
+  <a href="https://kitaru.ai/community">Community</a>
 </p>
 
 ---
@@ -186,9 +187,10 @@ all PRs should target it.
 
 ## Community and support
 
-- [Slack](https://zenml.io/slack) — chat with the team and other users
-- [GitHub Issues](https://github.com/zenml-io/kitaru/issues) — bug reports and feature requests
-- [kitaru.ai](https://kitaru.ai) — landing page and docs
+- [Discussions](https://kitaru.ai/community) — ask questions, share ideas
+- [Issues](https://github.com/zenml-io/kitaru/issues) — report bugs, request features
+- [Roadmap](https://kitaru.ai/roadmap) — see what's coming next
+- [Docs](https://kitaru.ai/docs) — guides and reference
 
 ## License
 
