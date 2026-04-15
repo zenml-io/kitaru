@@ -20,15 +20,14 @@ import Footer from '../components/Footer.astro';
           From zero to production agents in <span class="gs-accent">4&nbsp;weeks</span> — on&nbsp;us.
         </h1>
         <p class="gs-subtitle">
-          Our team will deploy Kitaru on your infrastructure, run your first durable flow, migrate existing agent code, and benchmark performance. Completely free.
+          Our engineers pair with your team to deploy Kitaru, migrate your agent code, and prove it works — on your infrastructure, with your data. No cost, no commitment.
         </p>
       </div>
     </section>
 
     <section class="gs-form-section" id="signup">
       <div class="gs-form-inner" data-reveal>
-        <h2>Start your free onboarding</h2>
-        <p class="gs-form-subtitle">Tell us a bit about yourself and we'll reach out within one business day.</p>
+        <h2>Talk to us</h2>
 
         <form id="getStartedForm" class="gs-form" novalidate>
           <div class="gs-field">
@@ -55,31 +54,84 @@ import Footer from '../components/Footer.astro';
       </div>
     </section>
 
+    <section class="gs-why">
+      <div class="gs-why-inner" data-reveal>
+        <div class="gs-why-item">
+          <strong>Free</strong> — No cost, no contract. We invest our time because every deployment makes Kitaru better.
+        </div>
+        <div class="gs-why-item">
+          <strong>Production-ready</strong> — Your actual infrastructure, your security policies, your data. Not a demo.
+        </div>
+        <div class="gs-why-item">
+          <strong>Battle-tested</strong> — Built by the ZenML team, who spent 5 years shipping ML infra for Adeo, Rivian, and JetBrains.
+        </div>
+        <div class="gs-why-item">
+          <strong>Yours to keep</strong> — Open source, Apache 2.0. Everything we set up belongs to you. Zero lock-in.
+        </div>
+      </div>
+    </section>
+
     <section class="gs-steps">
       <div class="gs-steps-header" data-reveal>
         <h2>What you get in 4 weeks</h2>
-        <p class="gs-steps-subtitle">Powered by 5 years of ZenML MLOps experience and hundreds of production deployments.</p>
+        <p class="gs-steps-subtitle">Powered by 5 years of ZenML MLOps experience, hundreds of production deployments, and a team that's shipped LLMOps and agent infrastructure for enterprise teams.</p>
       </div>
       <div class="gs-steps-grid">
         <div class="gs-step-card" data-reveal>
           <div class="gs-step-number">1</div>
           <h3>Deploy on your infra</h3>
-          <p>We deploy Kitaru on your cloud (AWS, GCP, Azure) or on-prem — you keep full control of your data and compute.</p>
+          <p>We deploy Kitaru on your cloud (AWS, GCP, Azure) or on-prem. We handle Kubernetes, networking, and storage config so your team doesn't have to context-switch.</p>
+          <span class="gs-step-time">Week 1</span>
         </div>
         <div class="gs-step-card" data-reveal data-reveal-delay="1">
           <div class="gs-step-number">2</div>
-          <h3>Run your first flow</h3>
-          <p>Build and run a durable agent flow end-to-end with checkpoints, replay, and observability from day one.</p>
+          <h3>Build a durable agent</h3>
+          <p>We pair-program a real agent workflow with your team — checkpoints, human-in-the-loop waits, LLM calls, and replay. Not a toy demo; something you'll actually ship.</p>
+          <span class="gs-step-time">Week 2</span>
         </div>
         <div class="gs-step-card" data-reveal data-reveal-delay="2">
           <div class="gs-step-number">3</div>
-          <h3>Migrate your code</h3>
-          <p>We help migrate your existing agent code to Kitaru primitives — no rewrites, just thin wrappers around your Python.</p>
+          <h3>Migrate your agents</h3>
+          <p>We take one of your production agents — LangChain, CrewAI, PydanticAI, or custom — and make it durable. No rewrites; thin decorators around your existing Python.</p>
+          <span class="gs-step-time">Week 3</span>
         </div>
         <div class="gs-step-card" data-reveal data-reveal-delay="3">
           <div class="gs-step-number">4</div>
           <h3>Benchmark</h3>
-          <p>Compare reliability, cost, and latency before and after. See exactly what durable execution changes for your agents.</p>
+          <p>Compare reliability, cost, and latency before and after. You get a written report showing exactly what durable execution changed for your agents.</p>
+          <span class="gs-step-time">Week 4</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="gs-faq">
+      <div class="gs-faq-inner">
+        <h2 data-reveal>Frequently asked questions</h2>
+        <div class="gs-faq-list">
+          <details class="gs-faq-item" data-reveal>
+            <summary>Is this really free? What's the catch?</summary>
+            <p>There is no catch. Kitaru is open source and we don't charge for this program. We do it because every real-world deployment teaches us something, and teams that go through onboarding tend to become long-term users and contributors. If you eventually need managed hosting or enterprise support, we offer that too — but there's zero obligation.</p>
+          </details>
+          <details class="gs-faq-item" data-reveal>
+            <summary>What kind of agents does Kitaru work with?</summary>
+            <p>Any Python-based agent — LangChain, CrewAI, PydanticAI, custom code, or raw API calls. Kitaru is framework-agnostic. It wraps your existing control flow with durable execution primitives. If your agent runs in Python, it works with Kitaru.</p>
+          </details>
+          <details class="gs-faq-item" data-reveal>
+            <summary>How much engineering time does our team need to invest?</summary>
+            <p>Roughly 2-4 hours per week for one engineer. We do the heavy lifting — infra setup, code migration, debugging. Your engineer joins pair-programming sessions and reviews PRs so the knowledge transfers to your team.</p>
+          </details>
+          <details class="gs-faq-item" data-reveal>
+            <summary>What clouds and infrastructure do you support?</summary>
+            <p>AWS, GCP, and Azure with Kubernetes. We also support on-prem Kubernetes clusters. Kitaru runs anywhere you can run a container — we just need cluster access and a storage backend (S3, GCS, or Azure Blob).</p>
+          </details>
+          <details class="gs-faq-item" data-reveal>
+            <summary>What happens after the 4 weeks?</summary>
+            <p>You have a working production deployment, migrated agent code, and a benchmark report. Your team keeps everything — it's your infrastructure, your code, your Kitaru instance. We offer optional ongoing support and managed hosting if you want it, but you're fully self-sufficient after onboarding.</p>
+          </details>
+          <details class="gs-faq-item" data-reveal>
+            <summary>Do you need access to our data or models?</summary>
+            <p>No. Kitaru runs on your infrastructure and your data never leaves your environment. We need cluster access to deploy and debug, but we don't need to see your training data, prompts, or model outputs. We can work under NDA if needed.</p>
+          </details>
         </div>
       </div>
     </section>
@@ -120,84 +172,6 @@ import Footer from '../components/Footer.astro';
     color: var(--color-secondary);
     max-width: 560px;
     margin: 0 auto;
-  }
-
-  /* ── Steps ── */
-  .gs-steps {
-    padding: 40px clamp(24px, 5vw, 80px) 120px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 40px;
-  }
-
-  .gs-steps-header {
-    text-align: center;
-    max-width: 560px;
-  }
-
-  .gs-steps-header h2 {
-    font-size: clamp(1.6rem, 3vw, 2.2rem);
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    color: var(--color-primary);
-    margin: 0 0 12px;
-  }
-
-  .gs-steps-subtitle {
-    font-size: 0.95rem;
-    color: var(--color-secondary);
-    line-height: 1.55;
-    margin: 0;
-  }
-
-  .gs-steps-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 24px;
-    max-width: 1000px;
-    width: 100%;
-  }
-
-  .gs-step-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
-    padding: 28px 24px;
-    transition: border-color 0.3s, box-shadow 0.3s;
-  }
-
-  .gs-step-card:hover {
-    border-color: oklch(0.65 0.16 45 / 0.3);
-    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.06);
-  }
-
-  .gs-step-number {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: var(--color-accent);
-    color: var(--color-dark-bg);
-    font-weight: 700;
-    font-size: 0.95rem;
-    margin-bottom: 16px;
-  }
-
-  .gs-step-card h3 {
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: var(--color-primary);
-    margin: 0 0 8px;
-  }
-
-  .gs-step-card p {
-    font-size: 0.9rem;
-    line-height: 1.55;
-    color: var(--color-secondary);
-    margin: 0;
   }
 
   /* ── Form section ── */
@@ -307,9 +281,199 @@ import Footer from '../components/Footer.astro';
     margin: 0;
   }
 
+  /* ── Why list ── */
+  .gs-why {
+    padding: 0 clamp(24px, 5vw, 80px) 80px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .gs-why-inner {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px 40px;
+    max-width: 720px;
+    width: 100%;
+  }
+
+  .gs-why-item {
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: var(--color-secondary);
+  }
+
+  .gs-why-item strong {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  /* ── Steps ── */
+  .gs-steps {
+    padding: 40px clamp(24px, 5vw, 80px) 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 40px;
+  }
+
+  .gs-steps-header {
+    text-align: center;
+    max-width: 560px;
+  }
+
+  .gs-steps-header h2 {
+    font-size: clamp(1.6rem, 3vw, 2.2rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--color-primary);
+    margin: 0 0 12px;
+  }
+
+  .gs-steps-subtitle {
+    font-size: 0.95rem;
+    color: var(--color-secondary);
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  .gs-steps-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    max-width: 1000px;
+    width: 100%;
+  }
+
+  .gs-step-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 28px 24px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .gs-step-card:hover {
+    border-color: oklch(0.65 0.16 45 / 0.3);
+    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.06);
+  }
+
+  .gs-step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    color: var(--color-dark-bg);
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 16px;
+  }
+
+  .gs-step-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    margin: 0 0 8px;
+  }
+
+  .gs-step-card p {
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--color-secondary);
+    margin: 0;
+    flex: 1;
+  }
+
+  .gs-step-time {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-accent);
+    margin-top: 14px;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── FAQ ── */
+  .gs-faq {
+    padding: 40px clamp(24px, 5vw, 80px) 120px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .gs-faq-inner {
+    max-width: 680px;
+    width: 100%;
+  }
+
+  .gs-faq-inner h2 {
+    font-size: clamp(1.6rem, 3vw, 2.2rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--color-primary);
+    margin: 0 0 32px;
+    text-align: center;
+  }
+
+  .gs-faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .gs-faq-item {
+    border-top: 1px solid var(--color-border);
+    padding: 0;
+  }
+
+  .gs-faq-item:last-child {
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .gs-faq-item summary {
+    padding: 20px 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .gs-faq-item summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .gs-faq-item summary::after {
+    content: '+';
+    font-size: 1.3rem;
+    font-weight: 300;
+    color: var(--color-muted);
+    flex-shrink: 0;
+    transition: transform 0.2s;
+  }
+
+  .gs-faq-item[open] summary::after {
+    content: '\2212';
+  }
+
+  .gs-faq-item p {
+    font-size: 0.9rem;
+    line-height: 1.65;
+    color: var(--color-secondary);
+    margin: 0;
+    padding: 0 0 20px;
+  }
+
   /* ── Responsive ── */
   @media (max-width: 768px) {
-    .gs-hero { padding: 120px 24px 48px; }
+    .gs-hero { padding: 120px 24px 0; }
 
     .gs-steps-grid {
       grid-template-columns: repeat(2, 1fr);
@@ -317,14 +481,20 @@ import Footer from '../components/Footer.astro';
   }
 
   @media (max-width: 480px) {
-    .gs-hero { padding: 100px 16px 36px; }
+    .gs-hero { padding: 100px 16px 0; }
     .gs-headline { font-size: clamp(2rem, 7vw, 2.6rem); }
+
+    .gs-why-inner {
+      grid-template-columns: 1fr;
+    }
 
     .gs-steps-grid {
       grid-template-columns: 1fr;
     }
 
-    .gs-form-section { padding: 40px 16px 80px; }
+
+    .gs-form-section { padding: 16px 16px 60px; }
+    .gs-faq { padding: 40px 16px 80px; }
   }
 </style>
 
