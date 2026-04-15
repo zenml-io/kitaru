@@ -154,13 +154,15 @@ The adapter offers two strategies for how agent work maps onto Kitaru checkpoint
 | **Turn** (default) | One checkpoint per agent run; model/tool/MCP calls are child events | The full turn | The full turn | Most agents — single aggregating artifact, clean run summary |
 | **Granular** | No turn checkpoint; each model/tool/MCP call becomes its own checkpoint | Per call | Per call | Expensive model calls, flaky tools, long tool-call chains where one failure shouldn't rewind everything |
 
+**Replay semantics in one sentence.** If a flow crashes on the 8th LLM call of a turn, turn mode re-runs all 7 completed calls from scratch on replay; granular mode serves those 7 from cache and resumes at call 8. Pick granular when wasted LLM spend on replay would hurt; pick turn when a single aggregated run artifact is more valuable than cache granularity.
+
 Turn mode is what you get by default. Granular mode trades the aggregating run artifact for per-call durability:
 
 ```python
 durable_agent = KitaruAgent(
     agent,
     granular_checkpoints=True,
-    model_checkpoint_config={'retries': 3, 'runtime': 'isolated'},
+    model_checkpoint_config={'retries': 3},
     tool_checkpoint_config={'retries': 2},
     tool_checkpoint_config_by_name={
         'lookup_price': {'retries': 5},       # flaky external API
