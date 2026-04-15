@@ -21,7 +21,9 @@
   <a href="https://kitaru.ai/docs">Docs</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="https://kitaru.ai/docs/getting-started/examples">Examples</a> &middot;
-  <a href="GETTING_STARTED.md">Getting Started Guide</a>
+  <a href="GETTING_STARTED.md">Getting Started Guide</a> &middot;
+  <a href="https://kitaru.ai/roadmap">Roadmap</a> &middot;
+  <a href="https://kitaru.ai/community">Community</a>
 </p>
 
 ---
@@ -187,7 +189,9 @@ all PRs should target it.
 ## Community and support
 
 - [Slack](https://zenml.io/slack) — chat with the team and other users
+- [GitHub Discussions](https://kitaru.ai/community) — questions and conversations
 - [GitHub Issues](https://github.com/zenml-io/kitaru/issues) — bug reports and feature requests
+- [Roadmap](https://kitaru.ai/roadmap) — see what we're building next
 - [kitaru.ai](https://kitaru.ai) — landing page and docs
 
 ## License
