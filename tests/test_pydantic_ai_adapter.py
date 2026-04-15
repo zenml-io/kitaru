@@ -132,7 +132,7 @@ class TestPersistMessageHistory:
 
     def test_effective_history_returns_explicit_when_provided(self) -> None:
         agent = self._make_agent(persist=True)
-        explicit = ["m1"]  # type: ignore[list-item]
+        explicit = ["m1"]
         assert agent._effective_message_history(explicit) is explicit
 
     def test_effective_history_none_when_disabled(self) -> None:
@@ -146,7 +146,7 @@ class TestPersistMessageHistory:
     def test_effective_history_returns_remembered(self) -> None:
         agent = self._make_agent(persist=True)
         stored = ["m1", "m2"]
-        agent._last_messages = stored  # type: ignore[assignment]
+        agent._last_messages = stored
         recalled = agent._effective_message_history(None)
         assert recalled == stored
         assert recalled is not stored
