@@ -242,6 +242,69 @@ async def test_capture_off_still_routes_hitl(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.anyio
+async def test_run_sync_refuses_inside_running_event_loop() -> None:
+    """Calling `run_sync` from inside an event loop must surface a typed error."""
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    from kitaru.adapters.pydantic_ai import KitaruAgent
+
+    agent = KitaruAgent(Agent(TestModel(), name="loop_refuser"))
+    with pytest.raises(KitaruUsageError, match="running event loop"):
+        agent.run_sync("anything")
+
+
+@pytest.mark.anyio
+async def test_approval_required_routes_through_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import Any
+
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.exceptions import ApprovalRequired
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    call_count = {"value": 0}
+    approve_state = {"approved": False}
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def publish() -> str:
+        call_count["value"] += 1
+        if not approve_state["approved"]:
+            raise ApprovalRequired(metadata={"channel": "prod"})
+        return "published"
+
+    wrapped = kitaruify_toolset(
+        toolset, capture=CapturePolicy(correlate_otel_spans=False)
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["publish"]
+
+    captured: dict[str, Any] = {}
+
+    def _fake_wait(**kwargs: Any) -> bool:
+        captured.update(kwargs.get("metadata") or {})
+        approve_state["approved"] = True
+        return True
+
+    monkeypatch.setattr("kitaru.adapters.pydantic_ai._toolset.kitaru.wait", _fake_wait)
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("publish", {}, ctx, tool)
+
+    assert result == "published"
+    assert captured.get("exception_metadata") == {"channel": "prod"}
+    assert call_count["value"] == 2
+
+
+@pytest.mark.anyio
 async def test_call_deferred_without_schema_raises_usage_error() -> None:
     from pydantic_ai import FunctionToolset
     from pydantic_ai.exceptions import CallDeferred

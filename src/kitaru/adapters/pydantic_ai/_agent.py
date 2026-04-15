@@ -39,6 +39,7 @@ from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
     CheckpointConfig,
     ToolCheckpointOverrides,
+    checkpoint_cache_key,
     materialize_step_output,
     reject_isolated_runtime,
     run_async_in_checkpoint,
@@ -85,9 +86,11 @@ def _try_serialize_auto_flow_body(body: Callable[[], Any]) -> str | None:
     """Cloudpickle ``body`` to a tempfile; return ``None`` on any failure.
 
     Remote stacks need the serialized body to rebuild the closure on a worker.
-    Local stacks use the in-process registry and don't need this path. Failures
-    here are non-fatal — the remote-stack code raises a typed error on lookup
-    miss if serialization mattered.
+    Local stacks satisfy the lookup from the in-process registry and don't
+    need this path, so failure here is silent locally. Remote stacks then
+    raise ``KitaruUsageError`` from ``_kitaru_pydantic_ai_auto_flow`` when
+    the registry miss can't be repaired — with a message pointing users at
+    the explicit ``@kitaru.flow`` escape hatch.
     """
     try:
         import cloudpickle
@@ -136,11 +139,25 @@ def _kitaru_pydantic_ai_auto_flow(run_id: str, serialized_body_path: str | None 
         raise
 
 
-def _track_run_completed(method: str, error: Exception | None) -> None:
-    payload: dict[str, Any] = {
-        'method': method,
-        'status': 'failed' if error is not None else 'completed',
-    }
+def _is_wrapped_handler(handler: Any) -> bool:
+    """Return True if ``handler`` (or its underlying callable) is adapter-wrapped."""
+    if getattr(handler, '_kitaru_wrapped', False):
+        return True
+    inner = getattr(handler, 'func', None) or getattr(handler, '__func__', None)
+    return bool(inner is not None and getattr(inner, '_kitaru_wrapped', False))
+
+
+def _track_run_completed(method: str, error: BaseException | None) -> None:
+    # `asyncio.CancelledError` is `BaseException`, not `Exception` — callers
+    # must pass it through so cancelled runs aren't miscoded as 'completed'.
+    # `KeyboardInterrupt` / `SystemExit` follow the same rule.
+    if error is None:
+        status = 'completed'
+    elif isinstance(error, asyncio.CancelledError):
+        status = 'cancelled'
+    else:
+        status = 'failed'
+    payload: dict[str, Any] = {'method': method, 'status': status}
     if error is not None:
         payload['error_type'] = type(error).__name__
     track(AnalyticsEvent.PYDANTIC_AI_RUN_COMPLETED, payload)
@@ -331,11 +348,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         effective_handler = event_stream_handler or self.event_stream_handler
         if effective_handler is None:
             return None
-        # PydanticAI looks up `stream_handler_wrapped` on the handler to detect
-        # that it has already been wrapped (mirrors how `_prepare_toolsets`
-        # short-circuits on `KitaruToolset`). No WeakSet state — the marker
-        # travels with the object and survives GC of the adapter instance.
-        if getattr(effective_handler, '_kitaru_wrapped', False):
+        # Detect already-wrapped handlers without per-instance bookkeeping.
+        # Check the handler itself plus `.func` (functools.partial) and
+        # `.__func__` (bound method) — attributes only stick reliably on
+        # regular functions, so partials/methods are detected via their
+        # underlying callable rather than a direct attribute.
+        if _is_wrapped_handler(effective_handler):
             return effective_handler
 
         async def _tracked_handler(ctx: Any, stream: AsyncIterable[Any]) -> None:
@@ -354,14 +372,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                         error=error,
                     )
 
-        try:
-            _tracked_handler._kitaru_wrapped = True  # type: ignore[attr-defined]
-        except (AttributeError, TypeError):
-            # Rare: built-in callable that forbids attribute assignment.
-            # Falling back means we may double-wrap in that edge case — the
-            # tracker still records only once per concrete call, just with
-            # a marginal extra frame.
-            pass
+        # `_tracked_handler` is a local `async def`; attribute assignment is
+        # always supported on Python-defined functions, so no guard needed.
+        _tracked_handler._kitaru_wrapped = True  # type: ignore[attr-defined]
         return _tracked_handler
 
     def _validate_model_override(self, model: models.Model | models.KnownModelName | str | None) -> None:
@@ -436,17 +449,33 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         finally:
             _INTERNAL_ITER_ALLOWED.reset(token)
 
-    async def _auto_checkpoint_async(self, body: Callable[[], Awaitable[Any]]) -> Any:
+    async def _auto_checkpoint_async(
+        self,
+        body: Callable[[], Awaitable[Any]],
+        *,
+        cache_key: str | None = None,
+    ) -> Any:
         return await run_async_in_checkpoint(
             config=self._turn_checkpoint_config,
             step_name=self._name or 'agent',
             body=body,
+            cache_key=cache_key,
         )
 
-    def _auto_checkpoint_sync(self, body: Callable[[], Any]) -> Any:
+    def _auto_checkpoint_sync(
+        self,
+        body: Callable[[], Any],
+        *,
+        cache_key: str | None = None,
+    ) -> Any:
         reject_isolated_runtime(self._turn_checkpoint_config)
 
-        def _turn() -> Any:
+        # Accept a cache_key parameter so two `run_sync` calls with different
+        # inputs in the same flow get distinct ZenML step cache keys. Closures
+        # over `user_prompt` / `message_history` aren't visible to ZenML, so
+        # without this the step name alone drives caching and identical-name
+        # calls collide on the cache.
+        def _turn(_cache_key: str | None = None) -> Any:
             return body()
 
         _turn.__name__ = self._name or 'agent'
@@ -458,7 +487,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 module = sys.modules.get(module_name)
                 if module is not None:
                     setattr(module, alias, step_obj)
-        step_output = checkpoint_def()
+        step_output = checkpoint_def(cache_key)
         return materialize_step_output(step_output)
 
     def _invoke_in_auto_flow(self, body: Callable[[], Any]) -> Any:
@@ -521,6 +550,33 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         # so model/tool events still land under a tracked boundary.
         return self._granular_checkpoints and not force_turn_checkpoint
 
+    def _turn_cache_key(
+        self,
+        user_prompt: Any,
+        message_history: Any,
+        effective_history: Any,
+        deferred_tool_results: Any,
+        instructions: Any,
+        model_settings: Any,
+    ) -> str:
+        # Synthesize a cache key from the inputs that actually drive the
+        # agent's output. Closures over these live inside `_body`, invisible
+        # to ZenML's step cache; without an explicit key, two `run_sync`
+        # calls with the same step name collide on the cache regardless of
+        # prompt. Excludes `deps` / `usage` / `metadata` — those are runtime
+        # plumbing, not inputs to the cached result.
+        history = effective_history if effective_history is not None else message_history
+        return checkpoint_cache_key(
+            {
+                'agent_name': self._name,
+                'user_prompt': user_prompt,
+                'message_history': history,
+                'deferred_tool_results': deferred_tool_results,
+                'instructions': instructions,
+                'model_settings': model_settings,
+            }
+        )
+
     def _log_streaming_fallback(self) -> None:
         if self._warned_streaming_fallback:
             return
@@ -565,11 +621,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         body: Callable[[], Awaitable[Any]],
         *,
         force_turn_checkpoint: bool = False,
+        cache_key: str | None = None,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
                 return await body()
-            return await self._auto_checkpoint_async(body)
+            return await self._auto_checkpoint_async(body, cache_key=cache_key)
 
         # Outside any flow: auto-open one. FlowHandle.wait() is sync-blocking,
         # so we dispatch the flow to a worker thread (no running loop there,
@@ -578,6 +635,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             return await self._run_async(
                 body,
                 force_turn_checkpoint=force_turn_checkpoint,
+                cache_key=cache_key,
             )
 
         loop = asyncio.get_running_loop()
@@ -591,15 +649,17 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         body: Callable[[], Any],
         *,
         force_turn_checkpoint: bool = False,
+        cache_key: str | None = None,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
                 return body()
-            return self._auto_checkpoint_sync(body)
+            return self._auto_checkpoint_sync(body, cache_key=cache_key)
         return self._invoke_in_auto_flow(
             lambda: self._run_sync(
                 body,
                 force_turn_checkpoint=force_turn_checkpoint,
+                cache_key=cache_key,
             )
         )
 
@@ -665,10 +725,26 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._remember_messages(result)
             return result
 
-        error: Exception | None = None
+        turn_cache_key = self._turn_cache_key(
+            user_prompt=user_prompt,
+            message_history=message_history,
+            effective_history=effective_history,
+            deferred_tool_results=deferred_tool_results,
+            instructions=instructions,
+            model_settings=model_settings,
+        )
+
+        # Catch BaseException so `asyncio.CancelledError`, `KeyboardInterrupt`,
+        # and `SystemExit` are recorded in analytics (classified separately
+        # from `Exception` in `_track_run_completed`) before propagating.
+        error: BaseException | None = None
         try:
-            return await self._run_async(_body, force_turn_checkpoint=wrapped_handler is not None)
-        except Exception as exc:
+            return await self._run_async(
+                _body,
+                force_turn_checkpoint=wrapped_handler is not None,
+                cache_key=turn_cache_key,
+            )
+        except BaseException as exc:
             error = exc
             raise
         finally:
@@ -725,10 +801,23 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             self._remember_messages(result)
             return result
 
-        error: Exception | None = None
+        turn_cache_key = self._turn_cache_key(
+            user_prompt=user_prompt,
+            message_history=message_history,
+            effective_history=effective_history,
+            deferred_tool_results=deferred_tool_results,
+            instructions=instructions,
+            model_settings=model_settings,
+        )
+
+        error: BaseException | None = None
         try:
-            return self._run_sync(_body, force_turn_checkpoint=wrapped_handler is not None)
-        except Exception as exc:
+            return self._run_sync(
+                _body,
+                force_turn_checkpoint=wrapped_handler is not None,
+                cache_key=turn_cache_key,
+            )
+        except BaseException as exc:
             error = exc
             raise
         finally:

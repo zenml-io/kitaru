@@ -13,10 +13,11 @@ subset of the run state, reattaches non-serializable fields (``agent``,
 users can extend the carried fields in subclasses without touching the
 adapter's wire protocol.
 
-The class is currently preparatory — the adapter runs checkpoints inline on
-the caller's process for local stacks, so RunContext does not yet cross a
-serialization boundary. Task 4 adds per-tool/per-model checkpoint configs
-(including ``runtime='isolated'``) and will be the first consumer.
+This class is dormant today — the adapter rejects ``runtime='isolated'`` via
+:func:`kitaru.adapters.pydantic_ai._utils.reject_isolated_runtime`, so no
+runtime path currently serializes a ``RunContext``. It is exported as a stable
+extension point for when cross-process checkpoint dispatch is wired up; until
+then, subclasses have no runtime effect.
 """
 
 from __future__ import annotations
