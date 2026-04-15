@@ -6,13 +6,14 @@ The finished example will show how to wrap a Claude Agent SDK document-review ag
 
 ## Current status
 
-This folder currently contains the **Phase 0 foundation plus the first three runnable stages**:
+This folder currently contains the **Phase 0 foundation plus the first four runnable stages**:
 
 - the example directory layout
 - the Stage 1 single-turn compliance check
 - the Stage 2 sequential multi-domain audit
 - the Stage 3 memory-backed HR + IT audit
-- placeholder entrypoints for Stages 4–5
+- the Stage 4 conversational wait/resume review
+- a placeholder entrypoint for Stage 5
 - deterministic JSON-backed retrieval helpers in `tools.py`
 - shared Claude Agent SDK helper wiring in `claude_agent.py`
 - an example-local dependency declaration
@@ -21,10 +22,9 @@ This folder currently contains the **Phase 0 foundation plus the first three run
 
 It does **not** yet contain:
 
-- conversational wait/resume flow
 - deployment guidance
 
-Those pieces are planned for later stages.
+That piece is planned for the final polish stage.
 
 ## Intended stage sequence
 
@@ -33,7 +33,7 @@ Those pieces are planned for later stages.
 | 1. Single-turn compliance check | `stage_1_single_turn.py` | First runnable flow |
 | 2. Multi-domain audit | `stage_2_multi_domain.py` | Runnable sequential audit with saved report artifact |
 | 3. Memory-backed audit | `stage_3_memory.py` | Runnable HR + IT audit with flow-level memory |
-| 4. Conversational wait/resume loop | `stage_4_conversational.py` | Placeholder |
+| 4. Conversational wait/resume loop | `stage_4_conversational.py` | Runnable wait/resume conversation |
 | 5. Deploy guidance/example | `stage_5_deploy.py` | Placeholder |
 
 Stage 1 is intentionally narrow: one Kitaru checkpoint wraps one Claude Agent SDK turn that reviews Acme Corp's IT security policy against the SOC 2 data retention requirement.
@@ -76,6 +76,15 @@ kitaru memory set findings/it_security '{"status":"known_gap","summary":"Data re
 # Compact accumulated history for a key after repeated runs
 kitaru memory compact --scope <flow-scope-id> --scope-type flow --key findings/it_security --source-mode history
 ```
+
+Stage 4 turns the compliance review into a durable conversation. The important shape is:
+
+1. run one Claude turn in the `run_claude_agent` checkpoint;
+2. pause in the `conversational_compliance_review` flow body with `kitaru.wait()`;
+3. accept the human's next message as wait input;
+4. run the next checkpoint with `resume=<previous Claude session ID>` so the same Claude session continues.
+
+The flow returns the latest `ClaudeAgentResult`; Stage 4 does **not** introduce a new conversation result object. To finish the conversation, provide `/done`, `/exit`, or `/quit` as the wait input.
 
 ## Data layout
 
@@ -161,6 +170,24 @@ To run the Stage 3 memory-backed HR + IT audit:
 uv run stage_3_memory.py
 ```
 
+To run the Stage 4 conversational wait/resume review:
+
+```bash
+uv run stage_4_conversational.py
+```
+
+After each Claude turn, the flow waits for your next message. In an interactive local terminal, Kitaru may prompt directly. For a non-interactive or remote run, use the printed execution ID in a second terminal:
+
+```bash
+# Continue with a follow-up. The value is a JSON string, so keep the inner quotes.
+kitaru executions input <exec-id> --value '"Please explain the highest-priority remediation."'
+kitaru executions resume <exec-id>
+
+# Finish and return the latest ClaudeAgentResult.
+kitaru executions input <exec-id> --value '"/done"'
+kitaru executions resume <exec-id>
+```
+
 Or, from Python/tests, import and call:
 
 ```python
@@ -183,6 +210,15 @@ For Stage 3:
 
 ```python
 from examples.compliance_review.stage_3_memory import run_workflow
+
+result = run_workflow()
+print(result.result)
+```
+
+For Stage 4:
+
+```python
+from examples.compliance_review.stage_4_conversational import run_workflow
 
 result = run_workflow()
 print(result.result)
@@ -217,6 +253,14 @@ uv run pytest tests/test_phase3_compliance_review_stage3.py
 ```
 
 That Stage 3 test stubs Claude, runs the real decorated flow twice, and verifies flow-level memory continuity through Kitaru's memory inspection API.
+
+The focused Stage 4 wait/resume verification command is:
+
+```bash
+uv run pytest tests/test_phase4_compliance_review_stage4.py
+```
+
+That Stage 4 test stubs Claude, runs the real decorated flow through two wait points, provides follow-up input through the Kitaru client API, and verifies the second Claude turn resumes the first turn's session ID.
 
 ## Credentials
 
