@@ -1,26 +1,7 @@
 import type { APIRoute } from 'astro';
+import { segmentCall } from '../../lib/segment';
 
 export const prerender = false;
-
-/** Send a single call to Segment's HTTP Tracking API. */
-async function segmentCall(
-  endpoint: 'identify' | 'track',
-  writeKey: string,
-  body: Record<string, unknown>,
-): Promise<void> {
-  const resp = await fetch(`https://api.segment.io/v1/${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Basic ${btoa(writeKey + ':')}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    console.error(`[segment:${endpoint}] ${resp.status}: ${text}`);
-  }
-}
 
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
@@ -52,7 +33,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const runtime = (locals as any).runtime;
     const env = runtime?.env;
-    const kv = env?.WAITLIST_KV;
+    const kv = env?.GET_STARTED_KV;
 
     if (!kv) {
       return new Response(JSON.stringify({ error: 'KV not configured' }), {
@@ -70,32 +51,29 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }));
 
     // Send identify + track to Segment server-side (fire-and-forget)
-    const segmentKey = env?.SEGMENT_WRITE_KEY;
-    if (segmentKey) {
-      const referer = request.headers.get('referer') ?? '';
-      const userAgent = request.headers.get('user-agent') ?? '';
-      const segmentContext = { page: { url: referer }, userAgent };
+    const referer = request.headers.get('referer') ?? '';
+    const userAgent = request.headers.get('user-agent') ?? '';
+    const segmentContext = { page: { url: referer }, userAgent };
 
-      const identifyCall = segmentCall('identify', segmentKey, {
-        userId: email,
-        traits: { name, company, email },
-        context: segmentContext,
-      });
-      const trackCall = segmentCall('track', segmentKey, {
-        userId: email,
-        event: 'Get Started Signup',
-        properties: {
-          name,
-          company,
-          email,
-          source: 'get-started',
-          formType: 'get-started',
-        },
-        context: segmentContext,
-      });
+    const identifyCall = segmentCall('identify', {
+      userId: email,
+      traits: { name, company, email },
+      context: segmentContext,
+    });
+    const trackCall = segmentCall('track', {
+      userId: email,
+      event: 'Get Started Signup',
+      properties: {
+        name,
+        company,
+        email,
+        source: 'get-started',
+        formType: 'get-started',
+      },
+      context: segmentContext,
+    });
 
-      runtime.ctx.waitUntil(Promise.all([identifyCall, trackCall]));
-    }
+    runtime.ctx.waitUntil(Promise.all([identifyCall, trackCall]));
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
