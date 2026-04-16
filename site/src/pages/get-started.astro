@@ -10,6 +10,7 @@ import Footer from '../components/Footer.astro';
 >
   <Nav />
   <main id="main-content">
+    <!-- ── Hero ── -->
     <section class="gs-hero">
       <div class="gs-hero-inner" data-reveal>
         <span class="pill-badge">
@@ -17,122 +18,178 @@ import Footer from '../components/Footer.astro';
           Free onboarding program
         </span>
         <h1 class="gs-headline">
-          From zero to production agents in <span class="gs-accent">4&nbsp;weeks</span> — on&nbsp;us.
+          From zero to production agents in <span class="accent-shimmer">4&nbsp;weeks</span> — on&nbsp;us.
         </h1>
         <p class="gs-subtitle">
           Our engineers pair with your team to deploy Kitaru, migrate your agent code, and prove it works — on your infrastructure, with your data. No cost, no commitment.
         </p>
+        <a href="#signup" class="btn-accent gs-hero-cta">Talk to us</a>
       </div>
     </section>
 
-    <section class="gs-form-section" id="signup">
-      <div class="gs-form-inner" data-reveal>
-        <h2>Talk to us</h2>
+    <div class="gradient-divider"></div>
 
-        <form id="getStartedForm" class="gs-form" novalidate>
-          <div class="gs-field">
-            <label for="gs-name">Name</label>
-            <input type="text" id="gs-name" name="name" required autocomplete="name" placeholder="Jane Smith" />
-          </div>
-          <div class="gs-field">
-            <label for="gs-company">Company</label>
-            <input type="text" id="gs-company" name="company" required autocomplete="organization" placeholder="Acme Inc." />
-          </div>
-          <div class="gs-field">
-            <label for="gs-email">Work email</label>
-            <input type="email" id="gs-email" name="email" required autocomplete="email" placeholder="jane@acme.com" />
-          </div>
-          <button type="submit" class="btn-accent gs-submit">Get started</button>
-          <p class="gs-error" id="gsError" aria-live="polite"></p>
-        </form>
-
-        <div id="gsSuccess" class="gs-success" hidden>
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="9 12 12 15 16 10"/></svg>
-          <h3>You're in!</h3>
-          <p>We'll be in touch within one business day to kick off your onboarding.</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="gs-why">
-      <div class="gs-why-inner" data-reveal>
-        <div class="gs-why-item">
-          <strong>Free</strong> — No cost, no contract. We invest our time because every deployment makes Kitaru better.
-        </div>
-        <div class="gs-why-item">
-          <strong>Production-ready</strong> — Your actual infrastructure, your security policies, your data. Not a demo.
-        </div>
-        <div class="gs-why-item">
-          <strong>Battle-tested</strong> — Built by the ZenML team, who spent 5 years shipping ML infra for Adeo, Rivian, and JetBrains.
-        </div>
-        <div class="gs-why-item">
-          <strong>Yours to keep</strong> — Open source, Apache 2.0. Everything we set up belongs to you. Zero lock-in.
-        </div>
-      </div>
-    </section>
-
+    <!-- ── Steps: What you get ── -->
     <section class="gs-steps">
       <div class="gs-steps-header" data-reveal>
+        <span class="section-eyebrow">The program</span>
         <h2>What you get in 4 weeks</h2>
         <p class="gs-steps-subtitle">Powered by 5 years of ZenML MLOps experience, hundreds of production deployments, and a team that's shipped LLMOps and agent infrastructure for enterprise teams.</p>
       </div>
       <div class="gs-steps-grid">
         <div class="gs-step-card" data-reveal>
+          <div class="card-glow" aria-hidden="true"></div>
           <div class="gs-step-number">1</div>
           <h3>Deploy on your infra</h3>
           <p>We deploy Kitaru on your cloud (AWS, GCP, Azure) or on-prem. We handle Kubernetes, networking, and storage config so your team doesn't have to context-switch.</p>
-          <span class="gs-step-time">Week 1</span>
+          <span class="gs-step-badge">Week 1</span>
         </div>
+        <div class="gs-step-connector" aria-hidden="true"></div>
         <div class="gs-step-card" data-reveal data-reveal-delay="1">
+          <div class="card-glow" aria-hidden="true"></div>
           <div class="gs-step-number">2</div>
           <h3>Build a durable agent</h3>
           <p>We pair-program a real agent workflow with your team — checkpoints, human-in-the-loop waits, LLM calls, and replay. Not a toy demo; something you'll actually ship.</p>
-          <span class="gs-step-time">Week 2</span>
+          <span class="gs-step-badge">Week 2</span>
         </div>
+        <div class="gs-step-connector" aria-hidden="true"></div>
         <div class="gs-step-card" data-reveal data-reveal-delay="2">
+          <div class="card-glow" aria-hidden="true"></div>
           <div class="gs-step-number">3</div>
           <h3>Migrate your agents</h3>
           <p>We take one of your production agents — LangChain, CrewAI, PydanticAI, or custom — and make it durable. No rewrites; thin decorators around your existing Python.</p>
-          <span class="gs-step-time">Week 3</span>
+          <span class="gs-step-badge">Week 3</span>
         </div>
+        <div class="gs-step-connector" aria-hidden="true"></div>
         <div class="gs-step-card" data-reveal data-reveal-delay="3">
+          <div class="card-glow" aria-hidden="true"></div>
           <div class="gs-step-number">4</div>
           <h3>Benchmark</h3>
           <p>Compare reliability, cost, and latency before and after. You get a written report showing exactly what durable execution changed for your agents.</p>
-          <span class="gs-step-time">Week 4</span>
+          <span class="gs-step-badge">Week 4</span>
         </div>
       </div>
     </section>
 
+    <!-- ── Form + Why (combined, tinted) ── -->
+    <section class="gs-form-section" id="signup">
+      <div class="gs-form-why-inner" data-reveal>
+        <!-- Form card (left) -->
+        <div class="gs-form-card">
+          <div class="card-glow" aria-hidden="true"></div>
+          <h2>Talk to us</h2>
+
+          <form id="getStartedForm" class="gs-form" novalidate>
+            <div class="gs-field">
+              <label for="gs-name">Name</label>
+              <input type="text" id="gs-name" name="name" required autocomplete="name" placeholder="Jane Smith" />
+            </div>
+            <div class="gs-field">
+              <label for="gs-company">Company</label>
+              <input type="text" id="gs-company" name="company" required autocomplete="organization" placeholder="Acme Inc." />
+            </div>
+            <div class="gs-field">
+              <label for="gs-email">Work email</label>
+              <input type="email" id="gs-email" name="email" required autocomplete="email" placeholder="jane@acme.com" />
+            </div>
+            <button type="submit" class="btn-accent gs-submit">Get started</button>
+            <p class="gs-error" id="gsError" aria-live="polite"></p>
+          </form>
+
+          <div id="gsSuccess" class="gs-success" hidden>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="9 12 12 15 16 10"/></svg>
+            <h3>You're in!</h3>
+            <p>We'll be in touch within one business day to kick off your onboarding.</p>
+          </div>
+        </div>
+
+        <!-- Why items (right, 2x2 grid) -->
+        <div class="gs-why-grid">
+          <div class="gs-why-item">
+            <svg class="gs-why-icon" width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><path d="M18.94,11.546c0-.188-.105-.36-.272-.445-.885-.451-1.835-.869-2.902-1.275-1.915-.736-3.369-2.215-4.094-4.162-.398-1.084-.809-2.049-1.254-2.951-.084-.171-.258-.279-.448-.279s-.364,.108-.448,.279c-.445,.904-.854,1.869-1.253,2.949-.725,1.948-2.179,3.427-4.092,4.163-1.069,.407-2.02,.825-2.904,1.276-.167,.085-.272,.257-.272,.445s.105,.36,.272,.445c.885,.451,1.835,.869,2.902,1.275,1.915,.737,3.369,2.216,4.094,4.163,.398,1.082,.809,2.047,1.253,2.95.084.171.258.279.448.279s.364-.108.448-.279c.444-.901,.854-1.866,1.254-2.949.725-1.948,2.179-3.427,4.092-4.163,1.069-.407,2.02-.825,2.904-1.276.167-.085.272-.257.272-.445Zm-3.534,.787c-2.187,.841-3.846,2.528-4.672,4.75-.249,.675-.502,1.302-.765,1.894-.263-.593-.515-1.22-.764-1.895-.826-2.222-2.485-3.908-4.674-4.75-.673-.256-1.297-.517-1.885-.787.588-.27,1.212-.53,1.887-.787,2.187-.841,3.846-2.527,4.672-4.75.249-.674.501-1.301.764-1.895.263.593.516,1.22.765,1.896.826,2.221,2.485,3.908,4.674,4.749.673.256,1.297.517,1.885.787-.588.27-1.212.53-1.887.787Z" fill="currentColor"/><path d="M17.599,5.76c.25,.127,.495,.232,.739,.325.365.14.632.412.771.784.092.249.193.498.318.75.084.171.257.279.447.279h0c.19,0,.363-.107.448-.278.125-.253.228-.502.319-.75.139-.374.405-.645.769-.785.246-.094.491-.198.741-.326.167-.085.271-.257.271-.445s-.105-.359-.272-.445c-.249-.127-.494-.231-.738-.325-.365-.14-.632-.412-.771-.784-.092-.25-.194-.499-.319-.751-.085-.17-.258-.278-.448-.278h0c-.19,0-.363.108-.447.279-.125.252-.227.501-.318.749-.139.374-.405.645-.771.785-.244.093-.488.197-.738.324-.168.085-.273.257-.273.445s.105.36.272.446Zm2.276-1.289c.203.353.488.64.838.843-.349.203-.635.491-.837.843-.203-.352-.489-.64-.838-.843.349-.203.635-.491.837-.844Z" fill="currentColor"/><path d="M22.728,17.952c-.314-.161-.624-.293-.934-.41-.506-.194-.875-.57-1.067-1.086-.115-.314-.246-.63-.403-.949-.168-.34-.729-.34-.896,0-.157.319-.286.634-.402.947-.192.517-.562.894-1.067,1.087-.31.118-.619.25-.934.411-.167.086-.272.258-.272.445s.105.359.272.445c.314.16.623.292.933.41.507.194.876.571,1.068,1.088.116.313.245.627.402.946.084.171.258.279.448.279s.364-.108.448-.279c.158-.32.288-.634.402-.945.193-.519.562-.895,1.068-1.089.31-.118.619-.25.934-.41.167-.086.272-.258.272-.445s-.105-.359-.272-.445Zm-2.853,1.832c-.284-.619-.764-1.102-1.377-1.387.613-.284,1.093-.768,1.377-1.386.285.618.764,1.101,1.377,1.386-.612.284-1.091.767-1.377,1.387Z" fill="currentColor"/></svg>
+            <strong>Free</strong>
+            <span>No cost, no contract. We invest our time because every deployment makes Kitaru better.</span>
+          </div>
+          <div class="gs-why-item">
+            <svg class="gs-why-icon" width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><path d="m21.908,8.507c.271-.517.822-1.752.822-3.291,0-2.013-.933-3.496-.972-3.558-.083-.129-.22-.213-.372-.229-.043-.004-4.392-.43-9.389-.43s-9.345.426-9.388.43c-.154.015-.292.101-.374.231-.04.063-.965,1.56-.965,3.555,0,1.561.554,2.794.822,3.302-.267.537-.822,1.846-.822,3.485,0,1.462.432,2.645.717,3.271-.127.209-.947,1.631-.947,3.514,0,2.011.933,3.493.972,3.555.083.129.22.213.372.229.043.004,4.392.43,9.389.43s9.345-.425,9.388-.43c.154-.015.292-.101.374-.231.04-.063.965-1.559.965-3.552,0-1.366-.424-2.474-.711-3.073.125-.218.94-1.721.94-3.711,0-1.66-.558-2.968-.822-3.495ZM2.961,15c-.23-.478-.691-1.611-.691-2.998,0-1.376.466-2.516.697-2.997h3.033v2.495c0,.276.224.5.5.5s.5-.224.5-.5v-2.495h3v2.495c0,.276.224.5.5.5s.5-.224.5-.5v-2.495h10.04c.23.475.69,1.602.69,2.997,0,1.376-.466,2.517-.697,2.998H2.961Zm.006-12.599c.473-.043,1.568-.134,3.032-.219v2.318c0,.276.224.5.5.5s.5-.224.5-.5v-2.371c.912-.045,1.927-.083,3-.106v2.477c0,.276.224.5.5.5s.5-.224.5-.5v-2.494c.329-.004.661-.006.997-.006,4.255,0,8.034.312,9.033.401.225.429.7,1.492.7,2.815,0,1.277-.458,2.337-.688,2.789H2.953c-.229-.449-.683-1.502-.683-2.789,0-1.303.474-2.379.698-2.815Zm17.835,19.198c-1.005.09-4.788.401-9.03.401s-8.034-.312-9.033-.401c-.225-.429-.7-1.491-.7-2.812,0-1.276.458-2.335.688-2.787h3.271v2.5c0,.276.224.5.5.5s.5-.224.5-.5v-2.5h3v2.5c0,.276.224.5.5.5s.5-.224.5-.5v-2.5h9.817c.229.448.683,1.5.683,2.787,0,1.301-.474,2.377-.697,2.812Z" fill="currentColor"/></svg>
+            <strong>Production-ready</strong>
+            <span>Your actual infrastructure, your security policies, your data. Not a demo.</span>
+          </div>
+          <div class="gs-why-item">
+            <svg class="gs-why-icon" width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><path d="m18.793 17.054c-.327 3.036-.923 4.571-.949 4.635-.052.132-.157.235-.29.285-.112.042-2.794 1.027-7.555 1.027s-7.443-.985-7.555-1.027c-.133-.05-.238-.153-.29-.285-.047-.119-1.155-2.989-1.155-8.688s1.108-8.569 1.155-8.688c.057-.145.179-.255.329-.297.062-.018 1.491-.417 3.798-.692.427-1.582 1.618-2.322 3.717-2.322s3.291.74 3.717 2.322c.635.076 1.262.168 1.87.276.272.048.454.307.405.579-.048.272-.31.455-.579.405-.699-.123-1.425-.227-2.159-.307-.22-.024-.397-.189-.438-.407-.207-1.122-.765-1.869-2.816-1.869s-2.61.747-2.816 1.869c-.04.217-.218.383-.438.407-1.864.204-3.211.505-3.741.636-.251.779-1.005 3.495-1.005 8.088 0 4.653.766 7.361 1.011 8.108.713.224 3.17.892 6.989.892s6.275-.668 6.989-.892c.165-.505.567-1.901.811-4.162.029-.274.261-.476.551-.443.274.029.473.276.443.551zm-7.906-8.937c-.211-.177-.526-.148-.705.062-.83.991-1.765 1.895-2.782 2.691-.541-.423-1.061-.878-1.55-1.358-.197-.194-.515-.19-.707.007-.193.197-.19.514.007.707.611.599 1.267 1.162 1.95 1.674.178.134.422.133.6 0 1.195-.897 2.289-1.933 3.249-3.079.177-.212.149-.527-.062-.705zm-.705 5.062c-.83.991-1.765 1.895-2.782 2.691-.541-.423-1.061-.878-1.55-1.358-.197-.194-.515-.191-.707.007-.193.197-.19.514.007.707.611.599 1.267 1.162 1.95 1.674.178.134.422.133.6 0 1.195-.897 2.289-1.933 3.249-3.079.177-.212.149-.527-.062-.705s-.526-.149-.705.062zm12.831-1.379c-.004 1.101-.42 2.158-1.172 2.978l-.973 1.06c-.198.216-.539.216-.737 0l-.966-1.055c-.748-.817-1.157-1.873-1.152-2.972l-.009-8.309c-.001-1.381 1.118-2.502 2.499-2.502s2.498 1.117 2.499 2.496l.01 8.304zm-1-.001-.011-8.301c-.001-.828-.672-1.498-1.5-1.498s-1.501.673-1.5 1.502l.011 8.31c-.003.85.312 1.665.89 2.295l.598.652.604-.658c.583-.636.906-1.454.909-2.303z" fill="currentColor"/></svg>
+            <strong>Battle-tested</strong>
+            <span>Built by the ZenML team, who spent 5 years shipping ML infra for Adeo, Rivian, and JetBrains.</span>
+          </div>
+          <div class="gs-why-item">
+            <svg class="gs-why-icon" width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.478,9.727c-.057-.158-.19-.277-.354-.316-.134-.032-3.335-.783-7.123-.783-1.817,0-3.502,.173-4.777,.357-.15-.583-.226-1.273-.226-2.056,0-4.09,2-4.929,5.003-4.929,2.803,0,4.227,.839,4.76,2.807,.072,.267,.343,.427,.613,.352,.267-.072,.424-.347,.352-.613-.861-3.177-3.68-3.545-5.725-3.545-2.795,0-6.003,.674-6.003,5.929,0,.84,.077,1.569,.234,2.214-.805,.14-1.303,.256-1.355,.268-.165,.039-.299,.159-.355,.318-.038,.107-.94,2.667-.94,6.085,0,3.448,.902,5.981,.941,6.087,.057,.158,.19,.277,.354,.316,.134,.032,3.335,.783,7.123,.783s6.988-.75,7.123-.783c.165-.039,.299-.159,.355-.318,.038-.107,.94-2.667,.94-6.085,0-3.448-.902-5.981-.941-6.087Zm-.857,11.577c-.849,.179-3.576,.696-6.62,.696s-5.774-.518-6.621-.696c-.221-.712-.798-2.835-.798-5.49,0-2.634,.578-4.772,.799-5.49,.849-.179,3.576-.696,6.62-.696s5.774,.518,6.621,.696c.221,.712,.798,2.835,.798,5.49,0,2.634-.578,4.772-.799,5.49Z" fill="currentColor"/><path d="M12,14.543c-.276,0-.5,.224-.5,.5v1.542c0,.276,.224,.5,.5,.5s.5-.224,.5-.5v-1.542c0-.276-.224-.5-.5-.5Z" fill="currentColor"/></svg>
+            <strong>Yours to keep</strong>
+            <span>Open source, Apache 2.0. Everything we set up belongs to you. Zero lock-in.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="gradient-divider"></div>
+
+    <!-- ── FAQ ── -->
     <section class="gs-faq">
       <div class="gs-faq-inner">
         <h2 data-reveal>Frequently asked questions</h2>
         <div class="gs-faq-list">
           <details class="gs-faq-item" data-reveal>
-            <summary>Is this really free? What's the catch?</summary>
+            <summary>Is this really free? What's the catch?
+              <svg class="gs-faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
             <p>There is no catch. Kitaru is open source and we don't charge for this program. We do it because every real-world deployment teaches us something, and teams that go through onboarding tend to become long-term users and contributors. If you eventually need managed hosting or enterprise support, we offer that too — but there's zero obligation.</p>
           </details>
-          <details class="gs-faq-item" data-reveal>
-            <summary>What kind of agents does Kitaru work with?</summary>
+          <details class="gs-faq-item" data-reveal data-reveal-delay="1">
+            <summary>What kind of agents does Kitaru work with?
+              <svg class="gs-faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
             <p>Any Python-based agent — LangChain, CrewAI, PydanticAI, custom code, or raw API calls. Kitaru is framework-agnostic. It wraps your existing control flow with durable execution primitives. If your agent runs in Python, it works with Kitaru.</p>
           </details>
-          <details class="gs-faq-item" data-reveal>
-            <summary>How much engineering time does our team need to invest?</summary>
+          <details class="gs-faq-item" data-reveal data-reveal-delay="1">
+            <summary>How much engineering time does our team need to invest?
+              <svg class="gs-faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
             <p>Roughly 2-4 hours per week for one engineer. We do the heavy lifting — infra setup, code migration, debugging. Your engineer joins pair-programming sessions and reviews PRs so the knowledge transfers to your team.</p>
           </details>
-          <details class="gs-faq-item" data-reveal>
-            <summary>What clouds and infrastructure do you support?</summary>
+          <details class="gs-faq-item" data-reveal data-reveal-delay="2">
+            <summary>What clouds and infrastructure do you support?
+              <svg class="gs-faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
             <p>AWS, GCP, and Azure with Kubernetes. We also support on-prem Kubernetes clusters. Kitaru runs anywhere you can run a container — we just need cluster access and a storage backend (S3, GCS, or Azure Blob).</p>
           </details>
-          <details class="gs-faq-item" data-reveal>
-            <summary>What happens after the 4 weeks?</summary>
+          <details class="gs-faq-item" data-reveal data-reveal-delay="2">
+            <summary>What happens after the 4 weeks?
+              <svg class="gs-faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
             <p>You have a working production deployment, migrated agent code, and a benchmark report. Your team keeps everything — it's your infrastructure, your code, your Kitaru instance. We offer optional ongoing support and managed hosting if you want it, but you're fully self-sufficient after onboarding.</p>
           </details>
-          <details class="gs-faq-item" data-reveal>
-            <summary>Do you need access to our data or models?</summary>
+          <details class="gs-faq-item" data-reveal data-reveal-delay="3">
+            <summary>Do you need access to our data or models?
+              <svg class="gs-faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
             <p>No. Kitaru runs on your infrastructure and your data never leaves your environment. We need cluster access to deploy and debug, but we don't need to see your training data, prompts, or model outputs. We can work under NDA if needed.</p>
           </details>
         </div>
+      </div>
+    </section>
+
+    <!-- ── Closing CTA (dark section) ── -->
+    <section class="gs-closing">
+      <div class="gs-closing-mesh" aria-hidden="true">
+        <div class="gs-closing-blob gs-closing-blob-1"></div>
+        <div class="gs-closing-blob gs-closing-blob-2"></div>
+        <div class="gs-closing-blob gs-closing-blob-3"></div>
+      </div>
+      <div class="gs-closing-inner" data-reveal>
+        <h2>Ready to make your agents durable?</h2>
+        <div class="gs-closing-actions">
+          <a href="#signup" class="btn-accent">Get started</a>
+          <a href="/docs" class="btn-secondary-dark">Read the docs</a>
+        </div>
+        <p class="gs-closing-note">Open source (Apache 2.0). Free onboarding program.</p>
       </div>
     </section>
   </main>
@@ -142,7 +199,7 @@ import Footer from '../components/Footer.astro';
 <style>
   /* ── Hero ── */
   .gs-hero {
-    padding: 160px clamp(24px, 5vw, 80px) 0;
+    padding: 160px clamp(24px, 5vw, 80px) 80px;
     text-align: center;
     display: flex;
     justify-content: center;
@@ -161,8 +218,8 @@ import Footer from '../components/Footer.astro';
     color: var(--color-primary);
   }
 
-  .gs-accent {
-    color: var(--color-accent);
+  .gs-hero-cta {
+    margin-top: 28px;
   }
 
   .gs-subtitle {
@@ -174,32 +231,206 @@ import Footer from '../components/Footer.astro';
     margin: 0 auto;
   }
 
-  /* ── Form section ── */
-  .gs-form-section {
-    padding: 16px clamp(24px, 5vw, 80px) 80px;
+  /* ── Steps ── */
+  .gs-steps {
+    padding: 80px clamp(24px, 5vw, 80px) 80px;
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    gap: 48px;
   }
 
-  .gs-form-inner {
-    max-width: 480px;
-    width: 100%;
+  .gs-steps-header {
     text-align: center;
+    max-width: 560px;
   }
 
-  .gs-form-inner h2 {
-    font-size: clamp(1.6rem, 3vw, 2.2rem);
+  .gs-steps-header h2 {
+    font-size: clamp(2rem, 4vw, 2.8rem);
     font-weight: 700;
     letter-spacing: -0.03em;
     color: var(--color-primary);
-    margin: 0 0 8px;
+    margin: 0 0 12px;
   }
 
-  .gs-form-subtitle {
+  .gs-steps-subtitle {
     font-size: 0.95rem;
     color: var(--color-secondary);
-    margin: 0 0 32px;
-    line-height: 1.5;
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  .gs-steps-grid {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    max-width: 1100px;
+    width: 100%;
+  }
+
+  .gs-step-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 28px 24px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .gs-step-card:hover {
+    border-color: oklch(0.60 0.17 45 / 0.3); /* --color-accent-darker @ 30% */
+    box-shadow: 0 0 0 3px oklch(0.60 0.17 45 / 0.06); /* --color-accent-darker @ 6% */
+  }
+
+  .gs-step-connector {
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    color: var(--color-muted);
+    font-size: 1.2rem;
+    flex-shrink: 0;
+  }
+
+  .gs-step-connector::after {
+    content: '\2192';
+    color: var(--color-border);
+    font-size: 1.1rem;
+  }
+
+  .gs-step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--color-accent-darker);
+    color: oklch(1 0 0);
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 16px;
+  }
+
+  .gs-step-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    margin: 0 0 8px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .gs-step-card p {
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: var(--color-secondary);
+    margin: 0;
+    flex: 1;
+    position: relative;
+    z-index: 2;
+  }
+
+  .gs-step-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-light);
+    border-radius: 100px;
+    padding: 3px 10px;
+    margin-top: 14px;
+    position: relative;
+    z-index: 2;
+    width: fit-content;
+  }
+
+  /* ── Form + Why (combined section) ── */
+  .gs-form-section {
+    padding: 80px clamp(24px, 5vw, 80px) 80px;
+    background: var(--color-accent-light);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .gs-form-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -10%;
+    width: 60%;
+    height: 100%;
+    background: radial-gradient(ellipse at 70% 30%, oklch(0.65 0.16 45 / 0.04) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .gs-form-why-inner {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: start;
+    max-width: 1100px;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  .gs-why-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    align-self: center;
+  }
+
+  .gs-why-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 28px 20px;
+  }
+
+  .gs-why-icon {
+    color: var(--color-accent);
+    margin-bottom: 16px;
+    opacity: 0.7;
+  }
+
+  .gs-why-item strong {
+    display: block;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    margin-bottom: 8px;
+  }
+
+  .gs-why-item span {
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: var(--color-secondary);
+  }
+
+  .gs-form-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    padding: 40px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .gs-form-card h2 {
+    font-size: clamp(1.4rem, 3vw, 1.8rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--color-primary);
+    margin: 0 0 24px;
+    position: relative;
+    z-index: 2;
   }
 
   .gs-form {
@@ -207,6 +438,8 @@ import Footer from '../components/Footer.astro';
     flex-direction: column;
     gap: 18px;
     text-align: left;
+    position: relative;
+    z-index: 2;
   }
 
   .gs-field label {
@@ -224,10 +457,9 @@ import Footer from '../components/Footer.astro';
     font-family: var(--font-ui);
     border: 1px solid var(--color-border);
     border-radius: 8px;
-    background: var(--color-surface);
+    background: var(--color-bg);
     color: var(--color-primary);
     transition: border-color 0.2s, box-shadow 0.2s;
-    outline: none;
     box-sizing: border-box;
   }
 
@@ -236,8 +468,13 @@ import Footer from '../components/Footer.astro';
   }
 
   .gs-field input:focus {
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.1);
+    border-color: var(--color-accent-darker);
+    box-shadow: 0 0 0 3px oklch(0.60 0.17 45 / 0.1); /* --color-accent-darker @ 10% */
+  }
+
+  .gs-field input:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
   }
 
   .gs-submit {
@@ -254,18 +491,21 @@ import Footer from '../components/Footer.astro';
 
   .gs-error {
     font-size: 0.85rem;
-    color: oklch(0.55 0.2 25);
+    color: var(--color-error);
     margin: 0;
     min-height: 1.2em;
   }
 
-  /* ── Success state ── */
+  /* Success state */
   .gs-success {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 12px;
     padding: 40px 0;
+    position: relative;
+    z-index: 2;
+    color: var(--color-accent-darker);
   }
 
   .gs-success h3 {
@@ -281,125 +521,9 @@ import Footer from '../components/Footer.astro';
     margin: 0;
   }
 
-  /* ── Why list ── */
-  .gs-why {
-    padding: 0 clamp(24px, 5vw, 80px) 80px;
-    display: flex;
-    justify-content: center;
-  }
-
-  .gs-why-inner {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px 40px;
-    max-width: 720px;
-    width: 100%;
-  }
-
-  .gs-why-item {
-    font-size: 0.9rem;
-    line-height: 1.55;
-    color: var(--color-secondary);
-  }
-
-  .gs-why-item strong {
-    color: var(--color-primary);
-    font-weight: 600;
-  }
-
-  /* ── Steps ── */
-  .gs-steps {
-    padding: 40px clamp(24px, 5vw, 80px) 80px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 40px;
-  }
-
-  .gs-steps-header {
-    text-align: center;
-    max-width: 560px;
-  }
-
-  .gs-steps-header h2 {
-    font-size: clamp(1.6rem, 3vw, 2.2rem);
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    color: var(--color-primary);
-    margin: 0 0 12px;
-  }
-
-  .gs-steps-subtitle {
-    font-size: 0.95rem;
-    color: var(--color-secondary);
-    line-height: 1.55;
-    margin: 0;
-  }
-
-  .gs-steps-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 24px;
-    max-width: 1000px;
-    width: 100%;
-  }
-
-  .gs-step-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
-    padding: 28px 24px;
-    transition: border-color 0.3s, box-shadow 0.3s;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .gs-step-card:hover {
-    border-color: oklch(0.65 0.16 45 / 0.3);
-    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.06);
-  }
-
-  .gs-step-number {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: var(--color-accent);
-    color: var(--color-dark-bg);
-    font-weight: 700;
-    font-size: 0.95rem;
-    margin-bottom: 16px;
-  }
-
-  .gs-step-card h3 {
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: var(--color-primary);
-    margin: 0 0 8px;
-  }
-
-  .gs-step-card p {
-    font-size: 0.85rem;
-    line-height: 1.55;
-    color: var(--color-secondary);
-    margin: 0;
-    flex: 1;
-  }
-
-  .gs-step-time {
-    display: inline-block;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--color-accent);
-    margin-top: 14px;
-    letter-spacing: 0.02em;
-  }
-
   /* ── FAQ ── */
   .gs-faq {
-    padding: 40px clamp(24px, 5vw, 80px) 120px;
+    padding: 80px clamp(24px, 5vw, 80px) 100px;
     display: flex;
     justify-content: center;
   }
@@ -415,18 +539,15 @@ import Footer from '../components/Footer.astro';
     letter-spacing: -0.03em;
     color: var(--color-primary);
     margin: 0 0 32px;
-    text-align: center;
   }
 
   .gs-faq-list {
     display: flex;
     flex-direction: column;
-    gap: 0;
   }
 
   .gs-faq-item {
     border-top: 1px solid var(--color-border);
-    padding: 0;
   }
 
   .gs-faq-item:last-child {
@@ -450,17 +571,14 @@ import Footer from '../components/Footer.astro';
     display: none;
   }
 
-  .gs-faq-item summary::after {
-    content: '+';
-    font-size: 1.3rem;
-    font-weight: 300;
-    color: var(--color-muted);
+  .gs-faq-chevron {
     flex-shrink: 0;
-    transition: transform 0.2s;
+    color: var(--color-muted);
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .gs-faq-item[open] summary::after {
-    content: '\2212';
+  .gs-faq-item[open] .gs-faq-chevron {
+    transform: rotate(180deg);
   }
 
   .gs-faq-item p {
@@ -471,34 +589,194 @@ import Footer from '../components/Footer.astro';
     padding: 0 0 20px;
   }
 
-  /* ── Responsive ── */
-  @media (max-width: 768px) {
-    .gs-hero { padding: 120px 24px 0; }
+  /* ── Closing CTA ── */
+  .gs-closing {
+    padding: 120px clamp(24px, 5vw, 80px);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    background: var(--color-primary);
+  }
 
+  .gs-closing::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 70% 80% at 50% 50%, oklch(0.16 0.02 50 / 0.6) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .gs-closing-mesh {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .gs-closing-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.15;
+    will-change: transform;
+  }
+
+  .gs-closing-blob-1 {
+    width: 400px;
+    height: 400px;
+    top: -100px;
+    left: -50px;
+    background: radial-gradient(circle, oklch(0.65 0.16 45) 0%, transparent 70%);
+    animation: gs-blob-drift-1 10s ease-in-out infinite;
+  }
+
+  .gs-closing-blob-2 {
+    width: 300px;
+    height: 300px;
+    bottom: -80px;
+    right: -40px;
+    background: radial-gradient(circle, oklch(0.68 0.08 55) 0%, transparent 70%);
+    animation: gs-blob-drift-2 13s ease-in-out infinite;
+  }
+
+  .gs-closing-blob-3 {
+    width: 250px;
+    height: 250px;
+    top: 50%;
+    left: 60%;
+    background: radial-gradient(circle, oklch(0.65 0.16 45) 0%, transparent 70%);
+    animation: gs-blob-drift-3 8s ease-in-out infinite;
+  }
+
+  @keyframes gs-blob-drift-1 {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(60px, 40px) scale(1.1); }
+  }
+
+  @keyframes gs-blob-drift-2 {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(-40px, -30px) scale(1.15); }
+  }
+
+  @keyframes gs-blob-drift-3 {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(30px, -50px) scale(0.9); }
+  }
+
+  .gs-closing-inner {
+    max-width: 800px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 2;
+  }
+
+  .gs-closing h2 {
+    font-size: clamp(2rem, 4vw, 3.2rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--color-dark-text);
+    margin: 0 0 28px;
+  }
+
+  .gs-closing-actions {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .gs-closing-note {
+    font-size: 0.75rem;
+    margin-top: 16px;
+    color: oklch(1 0 0 / 0.35);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 1024px) {
     .gs-steps-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+    }
+
+    .gs-step-connector {
+      display: none;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .gs-hero { padding: 120px 24px 60px; }
+    .gs-form-why-inner {
+      grid-template-columns: 1fr;
+      gap: 40px;
+    }
+    .gs-why-grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
   @media (max-width: 480px) {
-    .gs-hero { padding: 100px 16px 0; }
+    .gs-hero { padding: 100px 16px 48px; }
     .gs-headline { font-size: clamp(2rem, 7vw, 2.6rem); }
 
-    .gs-why-inner {
-      grid-template-columns: 1fr;
-    }
-
+    .gs-steps { padding: 60px 16px; }
     .gs-steps-grid {
       grid-template-columns: 1fr;
     }
 
+    .gs-form-section { padding: 60px 16px; }
+    .gs-form-card { padding: 28px 20px; }
+    .gs-why-grid {
+      grid-template-columns: 1fr;
+    }
 
-    .gs-form-section { padding: 16px 16px 60px; }
-    .gs-faq { padding: 40px 16px 80px; }
+    .gs-faq { padding: 60px 16px 80px; }
+
+    .gs-closing { padding: 80px 16px; }
+    .gs-closing-actions { flex-direction: column; align-items: center; }
+    .gs-closing-actions .btn-accent,
+    .gs-closing-actions .btn-secondary-dark { width: 100%; justify-content: center; }
+  }
+
+  /* Loading spinner for submit */
+  .gs-submit:disabled::after {
+    content: '';
+    width: 16px;
+    height: 16px;
+    border: 2px solid oklch(1 0 0 / 0.3);
+    border-top-color: oklch(1 0 0);
+    border-radius: 50%;
+    animation: gs-spin 0.6s linear infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes gs-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gs-closing-blob {
+      animation: none;
+    }
+    .gs-faq-chevron {
+      transition: none;
+    }
+    .gs-submit:disabled::after {
+      animation: none;
+      border-color: oklch(1 0 0 / 0.5);
+      border-top-color: oklch(1 0 0 / 0.5);
+    }
   }
 </style>
 
 <script>
+  import { setupCardGlow } from '../scripts/card-glow';
+
+  // Card glow on step cards + form card
+  setupCardGlow('.gs-step-card');
+  setupCardGlow('.gs-form-card');
+
+  // Form handling
   const form = document.getElementById('getStartedForm') as HTMLFormElement | null;
   const errorEl = document.getElementById('gsError');
   const successEl = document.getElementById('gsSuccess');
@@ -516,8 +794,8 @@ import Footer from '../components/Footer.astro';
       return;
     }
 
-    if (!email.includes('@')) {
-      if (errorEl) errorEl.textContent = 'Please enter a valid email address.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (errorEl) errorEl.textContent = 'Please enter a valid work email address.';
       return;
     }
 
