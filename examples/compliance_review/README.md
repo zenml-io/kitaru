@@ -4,7 +4,7 @@ A Claude agent audits a fictional company's documents against a set of standards
 
 A real compliance audit calls Claude many times, uses tools to read policy documents, runs for minutes, and costs real money per turn. Without durability, a crash halfway through means you restart Anthropic billing from zero, re-read every document, and re-derive every finding you already had. With Kitaru, each meaningful agent turn becomes a checkpoint: the transcript is persisted, the result is cached, and a replay from a later failure reuses everything Claude has already figured out.
 
-This example walks through that idea in five stages — four runnable and one placeholder — each adding one durable-execution capability on top of the last.
+This example walks through that idea in four stages, each adding one durable-execution capability on top of the last.
 
 ## What you'll learn
 
@@ -12,7 +12,6 @@ This example walks through that idea in five stages — four runnable and one pl
 - **Stage 2** — run four sequential domain checkpoints plus a synthesis checkpoint, and replay from a single failed step instead of re-running the whole audit.
 - **Stage 3** — give the flow a memory of its own prior findings so a weekly re-audit can tell you whether the gaps you flagged last week are still there.
 - **Stage 4** — turn the audit into a durable conversation. `kitaru.wait()` pauses the flow between Claude turns; `resume=session_id` keeps the model's full context across the gap, even if the process died in between.
-- **Stage 5** — a placeholder for the deploy story; intentionally thin today.
 
 Each stage builds on the previous one. The Claude boundary is the same from Stage 1 onwards: every Claude-running checkpoint returns a `ClaudeAgentResult` Pydantic model, and every later stage reuses that shape rather than inventing a new one.
 
@@ -36,7 +35,6 @@ Pick a stage and run it:
 | 2 | `stage_2_multi_domain.py` | Four sequential domain checkpoints + saved report artifact, with partial replay. |
 | 3 | `stage_3_memory.py` | HR + IT audit with flow-scoped memory across runs. |
 | 4 | `stage_4_conversational.py` | Wait/resume conversational loop over a single Claude session. |
-| 5 | `stage_5_deploy.py` | Placeholder. |
 
 ```bash
 uv run examples/compliance_review/stage_1_single_turn.py
