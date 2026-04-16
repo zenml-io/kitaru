@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-04-13T16:14:14.789028Z"
+exclude-newer = "2026-04-13T18:38:52.930839Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -1144,6 +1144,7 @@ pydantic-ai = [
 [package.dev-dependencies]
 dev = [
     { name = "anthropic" },
+    { name = "claude-agent-sdk" },
     { name = "griffe" },
     { name = "griffe-typingdoc" },
     { name = "openai" },
@@ -1161,7 +1162,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40.0,<1" },
-    { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'" },
+    { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.1.58,<0.2" },
     { name = "cyclopts", specifier = ">=3.0" },
     { name = "kitaru", extras = ["anthropic"], marker = "extra == 'llm'" },
     { name = "kitaru", extras = ["openai"], marker = "extra == 'llm'" },
@@ -1178,6 +1179,7 @@ provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "claude
 [package.metadata.requires-dev]
 dev = [
     { name = "anthropic", specifier = ">=0.40.0,<1" },
+    { name = "claude-agent-sdk", specifier = ">=0.1.58,<0.2" },
     { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
     { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
     { name = "openai", specifier = ">=1.0.0,<2" },

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import time
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ import pytest
 from zenml.client import Client
 from zenml.enums import ArtifactSaveType
 
+from kitaru import KitaruClient
+from kitaru.client import ExecutionStatus
 from tests.compliance_review_fakes import (
     clear_compliance_review_modules,
     configure_fake_claude_home,
@@ -43,9 +46,9 @@ def _find_artifact_by_name(
     raise AssertionError(f"No artifact named '{name}' found in step outputs.")
 
 
+@pytest.mark.usefixtures("primed_zenml")
 def test_stage2_flow_runs_domain_checkpoints_synthesis_and_saves_report(
     monkeypatch,
-    primed_zenml,
     stage2_module,
 ) -> None:
     """The real Stage 2 flow should run five checkpoints and save the report."""
@@ -126,3 +129,73 @@ def test_stage2_flow_runs_domain_checkpoints_synthesis_and_saves_report(
         name=stage2_module.REPORT_ARTIFACT_NAME,
     )
     assert saved_report_artifact.save_type == ArtifactSaveType.MANUAL
+
+
+@pytest.mark.usefixtures("primed_zenml")
+def test_stage2_replay_from_checkpoint_completes_independently(
+    monkeypatch,
+    stage2_module,
+) -> None:
+    """Replay from ``check_insurance`` should produce a distinct completed run.
+
+    This pins the Stage 2 README's replay claim at the machinery level: the
+    replay endpoint accepts ``from_="check_insurance"`` against a Stage 2
+    execution, yields a new execution id, and reaches a terminal COMPLETED
+    state. The cache-hit semantics (HR/IT/vendor reuse vs. re-execution) are
+    governed by ZenML step caching and live override inputs, which this test
+    does not exercise; see ``test_phase16_replay_example.py`` for that shape.
+    """
+    calls: list[dict[str, Any]] = []
+    domain_outputs = {
+        stage2_module.HR_COMPLIANCE_PROMPT: "HR finding: parental leave gap.",
+        stage2_module.IT_SECURITY_PROMPT: "IT finding: retention schedule gap.",
+        stage2_module.VENDOR_CONTRACTS_PROMPT: (
+            "Vendor finding: Alpha passes; Beta has gaps."
+        ),
+        stage2_module.INSURANCE_PROMPT: "Insurance finding: cyber coverage gap.",
+    }
+    final_report = "# Replay synthesis report"
+
+    async def fake_run_agent_turn(
+        prompt: str,
+        *,
+        allowed_tools: list[str],
+        cwd: Path,
+    ) -> dict[str, Any]:
+        call_index = len(calls)
+        calls.append({"prompt": prompt, "allowed_tools": allowed_tools, "cwd": cwd})
+        result = domain_outputs.get(prompt, final_report)
+        return fake_claude_response(
+            prompt=prompt,
+            cwd=cwd,
+            session_id=f"stage-2-replay-session-{call_index}",
+            result=result,
+        )
+
+    monkeypatch.setattr(stage2_module, "run_agent_turn", fake_run_agent_turn)
+
+    first_handle = stage2_module.audit_company.run()
+    first_result = first_handle.wait()
+    assert isinstance(first_result, stage2_module.ClaudeAgentResult)
+
+    client = KitaruClient()
+    replayed = client.executions.replay(
+        first_handle.exec_id,
+        from_="check_insurance",
+    )
+    assert replayed.exec_id != first_handle.exec_id
+
+    deadline = time.time() + 120
+    while True:
+        execution = client.executions.get(replayed.exec_id)
+        if execution.status in {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+        }:
+            break
+        if time.time() > deadline:
+            raise TimeoutError("Stage 2 replay did not complete within 120s.")
+        time.sleep(0.5)
+
+    assert execution.status == ExecutionStatus.COMPLETED

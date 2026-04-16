@@ -13,6 +13,7 @@ The checkpoints themselves do not call `kitaru.memory`.
 
 import asyncio
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -164,7 +165,7 @@ def synthesize_change_report(
 
 @checkpoint
 def finalize_memory_audit(report: ClaudeAgentResult) -> ClaudeAgentResult:
-    """Converge report and memory-write branches into one final output."""
+    """Terminal checkpoint that passes the change report through."""
     kitaru.log(
         stage="stage_3_memory",
         domain="finalize",
@@ -178,8 +179,11 @@ def finalize_memory_audit(report: ClaudeAgentResult) -> ClaudeAgentResult:
 def audit_with_memory() -> ClaudeAgentResult:
     """Run the memory-aware HR + IT audit.
 
-    Memory reads and writes intentionally live in the flow body, not inside
-    checkpoints.
+    Canonical memory only advances after synthesis succeeds:
+    ``synthesize_change_report`` is submitted via ``.submit()`` and each
+    memory write depends on its step future via ``after=[...]``. If synthesis
+    fails, ZenML short-circuits the dependent memory writes, so a failed
+    audit never poisons the next run's prior-finding baseline.
     """
     memory.configure(scope_type=MEMORY_SCOPE_TYPE)
 
@@ -189,29 +193,30 @@ def audit_with_memory() -> ClaudeAgentResult:
     it_result = check_it_security(previous_it)
     hr_result = check_hr_compliance(previous_hr)
 
+    report_future = synthesize_change_report.submit(it_result, hr_result)
+
     latest_it = _load_checkpoint_result(it_result)
     latest_hr = _load_checkpoint_result(hr_result)
 
-    it_memory_write = _submit_memory_set(
-        IT_FINDING_KEY,
-        _required_result_text(latest_it, domain="IT security"),
-    )
-    hr_memory_write = _submit_memory_set(
-        HR_FINDING_KEY,
-        _required_result_text(latest_hr, domain="HR"),
-    )
-    last_run_memory_write = _submit_memory_set(
-        LAST_RUN_KEY,
-        {
-            "domains": ["it_security", "hr"],
-            "artifact": CHANGE_REPORT_ARTIFACT_NAME,
-        },
-    )
+    pending_writes: list[tuple[str, Any]] = [
+        (IT_FINDING_KEY, _required_result_text(latest_it, domain="IT security")),
+        (HR_FINDING_KEY, _required_result_text(latest_hr, domain="HR")),
+        (
+            LAST_RUN_KEY,
+            {
+                "domains": ["it_security", "hr"],
+                "artifact": CHANGE_REPORT_ARTIFACT_NAME,
+            },
+        ),
+    ]
+    memory_write_handles = [
+        _submit_memory_set(key, value, after=[report_future])
+        for key, value in pending_writes
+    ]
 
-    report = synthesize_change_report(it_result, hr_result)
     return finalize_memory_audit(
-        report,
-        after=[it_memory_write, hr_memory_write, last_run_memory_write],
+        report_future.result(),
+        after=memory_write_handles,
     )
 
 
@@ -227,12 +232,19 @@ def main() -> None:
     console.print(Markdown(change_report))
 
 
-def _submit_memory_set(key: str, value: Any) -> Any:
-    """Submit a memory write and keep its dependency handle local to Stage 3.
+def _submit_memory_set(key: str, value: Any, *, after: Sequence[Any]) -> Any:
+    """Submit a memory write with an explicit DAG predecessor.
 
-    Public ``memory.set()`` intentionally returns ``None``. Stage 3 needs the
-    write step handles so the final checkpoint can depend on the memory writes
-    without changing core memory semantics.
+    Public ``memory.set()`` intentionally returns ``None``, which makes it
+    impossible to depend on the resulting write via an ``after=[...]`` edge.
+    Stage 3 needs that edge for two reasons: to gate each memory write on the
+    synthesis report (so a failed audit never advances canonical findings)
+    and to route all writes into ``finalize_memory_audit`` so the flow has a
+    single terminal step.
+
+    TODO: replace this once the core SDK ships a public
+    ``memory.set_with_handle(...)`` or equivalent that exposes the same step
+    handle shape.
     """
     active_scope = memory._resolve_memory_scope_for_operation("set")
     return memory._memory_set_step.submit(
@@ -240,6 +252,7 @@ def _submit_memory_set(key: str, value: Any) -> Any:
         active_scope.scope_type,
         key,
         value,
+        after=after,
     )
 
 

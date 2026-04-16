@@ -76,7 +76,7 @@
     {
       "id": "overview",
       "title": "SOC 2 review overview",
-      "content": "This synthetic standard is intentionally narrow. It gives the Stage 1 example a deterministic question about data retention and incident response gaps."
+      "content": "Baseline SOC 2-style expectations covering data retention scheduling, incident response procedure currency, and access control review."
     }
   ]
 }

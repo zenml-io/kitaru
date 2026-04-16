@@ -288,7 +288,17 @@ def _resolve_cwd(cwd: str | Path | None) -> str:
 
 def _encode_claude_project_dir(cwd: str | Path) -> str:
     """Encode a cwd using the documented Claude Agent SDK project-dir rule."""
-    return _NON_ALPHANUMERIC.sub("-", _resolve_cwd(cwd))
+    resolved = _resolve_cwd(cwd)
+    # The SDK's documented encoding is ASCII-focused. Non-ASCII characters
+    # pass the regex unchanged, producing a path the SDK will not find on
+    # resume, which silently starts a fresh Claude session. Raise here so
+    # the failure is diagnosable instead of invisible.
+    if not resolved.isascii():
+        raise ValueError(
+            "Claude transcript paths for non-ASCII working directories are not "
+            f"currently supported by this example: {resolved!r}"
+        )
+    return _NON_ALPHANUMERIC.sub("-", resolved)
 
 
 def _collect_stderr(stderr_lines: list[str]) -> Callable[[str], None]:

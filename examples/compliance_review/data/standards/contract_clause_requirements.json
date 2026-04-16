@@ -79,7 +79,7 @@
     {
       "id": "overview",
       "title": "Contract review overview",
-      "content": "This synthetic standard makes Vendor Contract Alpha compliant and Vendor Contract Beta non-compliant by omitting indemnification and liability-cap language from Beta."
+      "content": "Checklist for reviewing Acme Corp vendor agreements against required indemnification, liability cap, confidentiality and data protection, and termination provisions."
     }
   ]
 }

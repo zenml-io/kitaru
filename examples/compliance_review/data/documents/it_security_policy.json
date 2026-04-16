@@ -7,7 +7,7 @@
   "effective_date": "2024-01-10",
   "last_reviewed": "2024-04-20",
   "status": "active",
-  "summary": "Security policy for access control, data handling, and incident response. The planted findings are a missing data retention schedule and outdated incident response references.",
+  "summary": "Synthetic security policy covering access control, data handling and retention, incident response, and vendor access.",
   "metadata": {
     "owner": "Security and Compliance",
     "document_type": "policy",

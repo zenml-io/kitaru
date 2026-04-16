@@ -7,7 +7,7 @@
   "effective_date": "2022-09-01",
   "last_reviewed": "2022-10-10",
   "status": "active",
-  "summary": "Synthetic disaster recovery plan. The planted findings are that the plan was last tested three years ago and has no documented cloud failover.",
+  "summary": "Synthetic disaster recovery plan covering recovery objectives, test history, recovery strategy, and communications.",
   "metadata": {
     "owner": "Platform Engineering",
     "document_type": "business_continuity_plan",

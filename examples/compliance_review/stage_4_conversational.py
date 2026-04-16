@@ -28,7 +28,6 @@ from rich.markdown import Markdown
 
 import kitaru
 from kitaru import checkpoint, flow
-from kitaru.runtime import _get_current_execution_id
 
 # Make `examples.compliance_review.*` importable when this file is run as a
 # script. Using the fully qualified path keeps ZenML's materializer and any
@@ -50,7 +49,8 @@ console = Console()
 EXAMPLE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONVERSATION_LABEL = "acme_corp_compliance_review"
 FOLLOW_UP_WAIT_NAME_PREFIX = "compliance_follow_up"
-WAIT_TIMEOUT_SECONDS = 3600
+# One day: long enough that an operator stepping away does not fail the flow.
+WAIT_TIMEOUT_SECONDS = 24 * 60 * 60
 STOP_COMMANDS = {"/done", "/exit", "/quit", "done", "exit", "quit"}
 
 INITIAL_PROMPT = (
@@ -157,7 +157,7 @@ def conversational_compliance_review(
                 id="finalize_conversation",
             )
 
-        _print_remote_input_instructions(_get_current_execution_id())
+        _print_remote_input_instructions()
         follow_up = kitaru.wait(
             name=f"{FOLLOW_UP_WAIT_NAME_PREFIX}_{turn_number}",
             schema=str,
@@ -234,18 +234,24 @@ def _print_turn_result(result: ClaudeAgentResult, turn_number: int) -> None:
     console.print(Markdown(turn_text))
 
 
-def _print_remote_input_instructions(exec_id: str | None) -> None:
-    """Print CLI commands for non-interactive wait/resume operation."""
-    resolved_exec_id = exec_id or "<exec_id>"
-    print("\nTo continue remotely, run in another terminal:")
+def _print_remote_input_instructions() -> None:
+    """Print CLI commands for non-interactive wait/resume operation.
+
+    The exec id is left as a placeholder. Operators can look up the current
+    execution id with ``kitaru executions list`` and substitute it into the
+    commands below.
+    """
+    print("\nTo continue remotely, find the execution id with:")
+    print("  kitaru executions list")
+    print("Then run in another terminal:")
     print(
-        f"  kitaru executions input {resolved_exec_id} "
+        "  kitaru executions input <exec_id> "
         "--value '\"Please explain the highest-priority remediation.\"'"
     )
-    print(f"  kitaru executions resume {resolved_exec_id}")
+    print("  kitaru executions resume <exec_id>")
     print("To finish instead:")
-    print(f"  kitaru executions input {resolved_exec_id} --value '\"/done\"'")
-    print(f"  kitaru executions resume {resolved_exec_id}\n")
+    print("  kitaru executions input <exec_id> --value '\"/done\"'")
+    print("  kitaru executions resume <exec_id>\n")
 
 
 if __name__ == "__main__":

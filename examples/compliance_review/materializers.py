@@ -15,7 +15,10 @@ from zenml.io import fileio
 from zenml.materializers.materializer_registry import materializer_registry
 from zenml.materializers.pydantic_materializer import PydanticMaterializer
 
-from examples.compliance_review.claude_agent import ClaudeAgentResult
+from examples.compliance_review.claude_agent import (
+    ClaudeAgentResult,
+    resolve_claude_transcript_path,
+)
 
 TRANSCRIPT_ARTIFACT_FILENAME = "claude_transcript.jsonl"
 
@@ -60,14 +63,25 @@ class ClaudeAgentResultMaterializer(PydanticMaterializer):
         return os.path.join(self.uri, TRANSCRIPT_ARTIFACT_FILENAME)
 
     def _restore_transcript(self, result: ClaudeAgentResult) -> None:
-        """Copy the stored transcript back to the path Claude expects."""
+        """Copy the stored transcript to the path Claude expects on this host.
+
+        The saved ``result.transcript_path`` was computed on the pod that
+        produced the original Claude turn. Recompute against the current
+        ``Path.home()`` and cwd-encoding rules so the restored JSONL lands
+        where Claude will actually look for it on resume.
+        """
         if not fileio.exists(self._artifact_transcript_path):
             raise FileNotFoundError(
                 "Claude transcript was not found in the materialized artifact: "
                 f"{self._artifact_transcript_path}"
             )
 
-        destination_path = Path(result.transcript_path).expanduser()
+        current_host_path = resolve_claude_transcript_path(
+            result.session_id,
+            cwd=result.cwd,
+        )
+        result.transcript_path = current_host_path
+        destination_path = Path(current_host_path).expanduser()
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         fileio.copy(
             self._artifact_transcript_path,

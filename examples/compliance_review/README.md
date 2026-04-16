@@ -4,12 +4,12 @@ A Claude agent audits a fictional company's documents against a set of standards
 
 A real compliance audit calls Claude many times, uses tools to read policy documents, runs for minutes, and costs real money per turn. Without durability, a crash halfway through means you restart Anthropic billing from zero, re-read every document, and re-derive every finding you already had. With Kitaru, each meaningful agent turn becomes a checkpoint: the transcript is persisted, the result is cached, and a replay from a later failure reuses everything Claude has already figured out.
 
-This example walks through that idea in four runnable stages, each adding one durable-execution capability on top of the last.
+This example walks through that idea in five stages — four runnable and one placeholder — each adding one durable-execution capability on top of the last.
 
 ## What you'll learn
 
 - **Stage 1** — wrap one Claude turn in one Kitaru checkpoint so a crash doesn't burn the turn. This is the minimum viable durable agent.
-- **Stage 2** — fan out to four domain checkpoints plus a synthesis checkpoint, and replay from a single failed step instead of re-running the whole audit.
+- **Stage 2** — run four sequential domain checkpoints plus a synthesis checkpoint, and replay from a single failed step instead of re-running the whole audit.
 - **Stage 3** — give the flow a memory of its own prior findings so a weekly re-audit can tell you whether the gaps you flagged last week are still there.
 - **Stage 4** — turn the audit into a durable conversation. `kitaru.wait()` pauses the flow between Claude turns; `resume=session_id` keeps the model's full context across the gap, even if the process died in between.
 - **Stage 5** — a placeholder for the deploy story; intentionally thin today.
@@ -33,7 +33,7 @@ Pick a stage and run it:
 | Stage | Script | One-liner |
 |---|---|---|
 | 1 | `stage_1_single_turn.py` | One Claude turn as one checkpoint. |
-| 2 | `stage_2_multi_domain.py` | Four domain checkpoints + saved report artifact. |
+| 2 | `stage_2_multi_domain.py` | Four sequential domain checkpoints + saved report artifact, with partial replay. |
 | 3 | `stage_3_memory.py` | HR + IT audit with flow-scoped memory across runs. |
 | 4 | `stage_4_conversational.py` | Wait/resume conversational loop over a single Claude session. |
 | 5 | `stage_5_deploy.py` | Placeholder. |
@@ -73,9 +73,9 @@ This is the pattern every later stage composes.
 
 ## Stage 2 — multi-domain audit and partial replay
 
-Four domain checkpoints (HR, IT security, vendor contracts, insurance) fan out via `.submit()`, then a synthesis checkpoint reads all four results and writes a Markdown report as a Kitaru artifact with `kitaru.save()`.
+Four domain checkpoints (HR, IT security, vendor contracts, insurance) run sequentially, and a synthesis checkpoint then reads all four results and writes a Markdown report as a Kitaru artifact with `kitaru.save()`. The example stays sequential on purpose — the teaching point is partial replay across durable checkpoint boundaries, not parallelism.
 
-The payoff is replay. Each domain is its own checkpoint, so a failure in `check_insurance` or `synthesize_report` doesn't roll back the three domain audits that already completed. Pick up exactly where you left off:
+Each domain is its own checkpoint, so a failure in `check_insurance` or `synthesize_report` doesn't roll back the three domain audits that already completed. Pick up exactly where you left off:
 
 ```bash
 kitaru executions replay <exec-id> --from check_insurance
