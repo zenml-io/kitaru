@@ -9,7 +9,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: `${baseUrl}/docs`, lastModified: new Date() },
     ...source.getPages().map((page) => ({
-      url: `${baseUrl}${page.url}`,
+      url: `${baseUrl}/docs${page.url}`,
       lastModified: new Date(),
     })),
   ];
