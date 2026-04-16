@@ -1,0 +1,127 @@
+---
+interface Props {
+  title: string;
+  description: string;
+  competitor: string;
+  competitorLogo?: string;
+}
+const { title, description, competitor, competitorLogo } = Astro.props;
+---
+
+<header class="chero">
+  <div class="chero-inner">
+    <span class="chero-eyebrow">Compare</span>
+
+    <div class="chero-logos" aria-hidden="true">
+      <span class="chero-logo chero-logo--kitaru">
+        <svg viewBox="0 0 81 82" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M40.5 0.426758C18.1325 0.426758 0 18.5592 0 40.9268C0 63.2943 18.1325 81.4268 40.5 81.4268C62.8675 81.4268 81 63.2943 81 40.9268C81 18.5592 62.8675 0.426758 40.5 0.426758ZM40.5 11.998C56.4767 11.998 69.4285 24.9501 69.4287 40.9268C69.4287 56.9036 56.4768 69.8555 40.5 69.8555C24.5234 69.8552 11.5723 56.9034 11.5723 40.9268C11.5724 24.9503 24.5235 11.9983 40.5 11.998Z" fill="#F17829"/>
+        </svg>
+        <span class="chero-name">Kitaru</span>
+      </span>
+      <span class="chero-vs">vs</span>
+      <span class="chero-logo chero-logo--competitor">
+        {competitorLogo ? (
+          <img src={competitorLogo} alt={`${competitor} logo`} />
+        ) : (
+          <span class="chero-logo-placeholder">{competitor.charAt(0)}</span>
+        )}
+        <span class="chero-name">{competitor}</span>
+      </span>
+    </div>
+
+    <h1 class="chero-title">{title}</h1>
+    <p class="chero-desc">{description}</p>
+
+    <div class="chero-ctas">
+      <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
+      <a href="/docs" class="btn-secondary">Read the docs</a>
+    </div>
+  </div>
+</header>
+
+<style>
+  .chero {
+    padding: 120px 24px 60px;
+    text-align: center;
+    background: linear-gradient(180deg, var(--color-surface-warm) 0%, var(--color-bg) 100%);
+    border-bottom: 1px solid var(--color-border-light);
+  }
+  .chero-inner {
+    max-width: 820px;
+    margin: 0 auto;
+  }
+  .chero-eyebrow {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 24px;
+  }
+  .chero-logos {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+  .chero-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-primary);
+  }
+  .chero-logo svg,
+  .chero-logo img {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+  }
+  .chero-logo-placeholder {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--color-accent-light);
+    color: var(--color-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .chero-vs {
+    font-family: 'DM Serif Display', serif;
+    font-style: italic;
+    font-size: 20px;
+    color: var(--color-muted);
+  }
+  .chero-title {
+    font-size: clamp(32px, 4.4vw, 48px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin: 0 0 20px;
+  }
+  .chero-desc {
+    font-size: 18px;
+    line-height: 1.6;
+    color: var(--color-secondary);
+    margin: 0 auto 32px;
+    max-width: 680px;
+  }
+  .chero-ctas {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+</style>

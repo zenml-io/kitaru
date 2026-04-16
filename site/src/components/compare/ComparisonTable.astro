@@ -1,0 +1,103 @@
+---
+interface Row {
+  feature: string;
+  kitaru: boolean;
+  competitor: boolean;
+}
+interface Props {
+  rows: Row[];
+  competitorName?: string;
+}
+const { rows, competitorName = 'Alternative' } = Astro.props;
+---
+
+<div class="ctable-wrap" data-reveal>
+  <table class="ctable">
+    <thead>
+      <tr>
+        <th class="col-feature">Feature</th>
+        <th class="col-kitaru">Kitaru</th>
+        <th class="col-competitor">{competitorName}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map((row) => (
+        <tr>
+          <td class="col-feature">{row.feature}</td>
+          <td class="col-kitaru" data-value={row.kitaru ? 'yes' : 'no'}>
+            {row.kitaru ? (
+              <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
+            ) : (
+              <svg class="icon icon-no" viewBox="0 0 24 24" aria-label="No"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            )}
+          </td>
+          <td class="col-competitor" data-value={row.competitor ? 'yes' : 'no'}>
+            {row.competitor ? (
+              <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
+            ) : (
+              <svg class="icon icon-no" viewBox="0 0 24 24" aria-label="No"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            )}
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .ctable-wrap {
+    margin: 32px 0 48px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--color-surface);
+  }
+  .ctable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+  .ctable th,
+  .ctable td {
+    padding: 16px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-light);
+  }
+  .ctable tbody tr:last-child td { border-bottom: none; }
+  .ctable thead th {
+    background: var(--color-surface-warm);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-secondary);
+  }
+  .ctable tbody tr:nth-child(even) td {
+    background: oklch(0.985 0.005 75);
+  }
+  .col-feature {
+    width: 56%;
+    font-weight: 500;
+    color: var(--color-primary);
+  }
+  .col-kitaru,
+  .col-competitor {
+    text-align: center;
+    width: 22%;
+  }
+  .ctable thead .col-kitaru { color: var(--color-accent); }
+  .icon {
+    width: 22px;
+    height: 22px;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .icon-yes { color: var(--color-success); }
+  .icon-no { color: var(--color-border); }
+
+  @media (max-width: 640px) {
+    .ctable th,
+    .ctable td { padding: 12px 14px; font-size: 14px; }
+    .col-feature { width: 60%; }
+  }
+</style>

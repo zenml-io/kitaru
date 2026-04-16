@@ -1,0 +1,162 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+
+const comparisons = (await getCollection('comparisons', ({ data }) => !data.draft)).sort(
+  (a, b) => a.data.order - b.data.order,
+);
+---
+
+<Base
+  title="Compare Kitaru — Durable execution for Python agents"
+  description="See how Kitaru compares to agent SDKs and durable execution runtimes. Keep your SDK; add Kitaru for durability, memory, and cloud-native deployment."
+>
+  <Nav />
+  <main class="compare-index" id="main-content">
+    <section class="compare-hero">
+      <div class="compare-hero-inner">
+        <span class="compare-eyebrow">Compare</span>
+        <h1 class="compare-title">Kitaru vs. the alternatives</h1>
+        <p class="compare-desc">
+          Honest, side-by-side comparisons of Kitaru against the agent SDKs and
+          durable execution runtimes people ask about most. Pick the one that's
+          closest to what you're using today.
+        </p>
+      </div>
+    </section>
+
+    <section class="compare-list">
+      <div class="compare-list-inner">
+        {comparisons.length === 0 ? (
+          <p class="compare-empty">Comparisons coming soon.</p>
+        ) : (
+          <ul class="compare-grid">
+            {comparisons.map((entry) => (
+              <li>
+                <a href={`/compare/${entry.id}`} class="compare-card">
+                  <div class="compare-card-head">
+                    <span class="compare-card-vs">Kitaru <em>vs</em></span>
+                    <h2>{entry.data.competitor}</h2>
+                  </div>
+                  <p>{entry.data.cardSubtitle}</p>
+                  <span class="compare-card-cta" aria-hidden="true">
+                    Read comparison
+                    <svg viewBox="0 0 20 20" width="14" height="14"><path fill="currentColor" d="M7.05 4.55 5.64 5.96 9.67 10l-4.03 4.04 1.41 1.41L12.5 10z"/></svg>
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .compare-index { padding-top: 0; }
+  .compare-hero {
+    padding: 120px 24px 60px;
+    text-align: center;
+    background: linear-gradient(180deg, var(--color-surface-warm) 0%, var(--color-bg) 100%);
+    border-bottom: 1px solid var(--color-border-light);
+  }
+  .compare-hero-inner { max-width: 760px; margin: 0 auto; }
+  .compare-eyebrow {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 20px;
+  }
+  .compare-title {
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin: 0 0 16px;
+  }
+  .compare-desc {
+    font-size: 18px;
+    line-height: 1.6;
+    color: var(--color-secondary);
+    margin: 0 auto;
+    max-width: 620px;
+  }
+
+  .compare-list { padding: 60px 24px 100px; }
+  .compare-list-inner { max-width: 1100px; margin: 0 auto; }
+  .compare-empty {
+    text-align: center;
+    color: var(--color-muted);
+    padding: 40px 0;
+  }
+  .compare-grid {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+  }
+  .compare-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 28px;
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    background: var(--color-surface);
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: all 0.2s;
+    height: 100%;
+  }
+  .compare-card:hover {
+    border-color: var(--color-accent);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px -18px oklch(0.13 0.015 60 / 0.25);
+  }
+  .compare-card-head { display: flex; flex-direction: column; gap: 6px; }
+  .compare-card-vs {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .compare-card-vs em {
+    font-family: 'DM Serif Display', serif;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13px;
+  }
+  .compare-card h2 {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .compare-card p {
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--color-secondary);
+    margin: 0;
+    flex: 1;
+  }
+  .compare-card-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-accent);
+    margin-top: 8px;
+  }
+</style>
