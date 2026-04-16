@@ -21,6 +21,7 @@
   --color-accent-warm: oklch(0.68 0.08 55);
   --color-accent-deep: oklch(0.57 0.09 65);
   --color-accent-light: oklch(0.95 0.015 70);
+  --color-accent-darker: oklch(0.60 0.17 45);
 
   /* Status */
   --color-success: oklch(0.55 0.1 155);
@@ -29,6 +30,7 @@
   --color-warm-status-bg: oklch(0.98 0.02 85);
   --color-cost-up: oklch(0.55 0.18 25);
   --color-cost-up-bg: oklch(0.93 0.03 350);
+  --color-error: oklch(0.55 0.2 25);
 
   /* Dark sections */
   --color-dark-bg: oklch(0.13 0.015 60);
@@ -152,6 +154,49 @@ body::before {
   0%, 100% { outline: 3px solid oklch(0.65 0.16 45 / 0.3); outline-offset: 0; }
   50% { outline: 3px solid oklch(0.65 0.16 45 / 0.08); outline-offset: 6px; }
 }
+/* Pulse dot (used in pill badges across pages) */
+.pulse-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+.pulse-dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: oklch(0.65 0.16 45 / 0.4);
+  animation: pulse-ring 2s ease-in-out infinite;
+  z-index: -1;
+}
+@keyframes pulse-ring {
+  0%, 100% { transform: scale(0.6); opacity: 1; }
+  50% { transform: scale(1.8); opacity: 0; }
+}
+
+/* Accent text shimmer (gradient clip animation) */
+.accent-shimmer {
+  color: var(--color-accent);
+  background: linear-gradient(
+    90deg,
+    var(--color-accent) 0%,
+    oklch(0.78 0.14 55) 40%,
+    var(--color-accent) 80%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: accent-shimmer 4s ease-in-out infinite;
+}
+@keyframes accent-shimmer {
+  0%, 100% { background-position: 100% 50%; }
+  50% { background-position: 0% 50%; }
+}
+
 /* Shared code window dots (used in Architecture and CodeShowcase) */
 .code-dot {
   width: 10px;
@@ -251,13 +296,28 @@ body::before {
 /* Accent button (orange) */
 .btn-accent {
   font-family: var(--font-ui); font-size: 15px; font-weight: 600;
-  color: var(--color-dark-bg); background: var(--color-accent);
-  padding: 14px 32px; border-radius: 8px; border: none;
+  color: oklch(1 0 0); background: var(--color-accent-darker);
+  padding: 14px 32px; border-radius: 8px;
+  border: 1px solid oklch(0.52 0.18 45);
   cursor: pointer; transition: opacity 0.2s, transform 0.15s;
   text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
 }
 .btn-accent:hover { opacity: 0.9; transform: translateY(-2px); }
 .btn-accent:active { transform: translateY(1px); opacity: 0.95; }
+
+/* Secondary button for dark sections */
+.btn-secondary-dark {
+  font-family: var(--font-ui); font-size: 15px; font-weight: 500;
+  color: oklch(1 0 0 / 0.7); background: transparent;
+  padding: 14px 28px; border-radius: 8px;
+  border: 1px solid oklch(1 0 0 / 0.15);
+  cursor: pointer; transition: all 0.2s;
+  text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+}
+.btn-secondary-dark:hover {
+  border-color: oklch(1 0 0 / 0.3);
+  color: oklch(1 0 0 / 0.9);
+}
 
 /* Reusable pill badge */
 .pill-badge {
@@ -286,7 +346,9 @@ body::before {
 }
 
 .why-card:hover .card-glow,
-.feature-card:hover .card-glow {
+.feature-card:hover .card-glow,
+.gs-step-card:hover .card-glow,
+.gs-form-card:hover .card-glow {
   opacity: 1;
 }
 
@@ -399,6 +461,12 @@ body::before {
   }
 
   .pulse-dot::after {
+    animation: none;
+  }
+
+  .accent-shimmer {
+    -webkit-text-fill-color: var(--color-accent);
+    background: none;
     animation: none;
   }
 
