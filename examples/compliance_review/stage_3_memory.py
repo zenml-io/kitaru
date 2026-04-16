@@ -263,6 +263,9 @@ def _load_checkpoint_result(value: Any) -> ClaudeAgentResult:
         return loaded
     if isinstance(value, ClaudeAgentResult):
         return value
+    raise TypeError(
+        f"Expected checkpoint result or ClaudeAgentResult, got {type(value).__name__}."
+    )
 
 
 def _required_result_text(result: ClaudeAgentResult, *, domain: str) -> str:
