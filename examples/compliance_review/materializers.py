@@ -28,9 +28,7 @@ class ClaudeAgentResultMaterializer(PydanticMaterializer):
     def save(self, data: Any) -> None:
         """Save the result metadata and its local Claude transcript JSONL."""
         if not isinstance(data, ClaudeAgentResult):
-            raise TypeError(
-                f"Expected ClaudeAgentResult, got {type(data).__name__}."
-            )
+            raise TypeError(f"Expected ClaudeAgentResult, got {type(data).__name__}.")
         super().save(data)
         source_path = Path(data.transcript_path).expanduser()
         if not source_path.exists():
