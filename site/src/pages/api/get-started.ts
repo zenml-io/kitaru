@@ -24,7 +24,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    if (!email || !email.includes('@')) {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return new Response(JSON.stringify({ error: 'Invalid email' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
