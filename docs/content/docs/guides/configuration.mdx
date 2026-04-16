@@ -85,6 +85,28 @@ The important distinction is:
 - `my_flow.run(stack="...")` overrides both for one execution
 - none of those change the persisted active stack selected by `kitaru stack use ...`
 
+## Checkpoint cache overrides
+
+You can now set cache behavior at checkpoint granularity:
+
+```python
+from kitaru import checkpoint, flow
+
+@checkpoint(cache=False)
+def always_fresh(topic: str) -> str:
+    ...
+
+@flow(cache=True)
+def my_flow(topic: str) -> str:
+    return always_fresh(topic)
+```
+
+When both are set, checkpoint-level cache takes precedence for that checkpoint:
+
+1. `@checkpoint(cache=...)` (when set)
+2. flow-level cache (`@flow(cache=...)` or `my_flow.run(cache=...)`)
+3. lower-precedence defaults (`kitaru.configure`, env vars, project config, built-ins)
+
 ## Environment variables
 
 Kitaru's public env-var surface uses `KITARU_*` names.

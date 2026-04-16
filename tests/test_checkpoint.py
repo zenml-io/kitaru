@@ -13,6 +13,7 @@ import pytest
 from zenml.config.retry_config import StepRetryConfig
 from zenml.enums import StepRuntime, StepType
 
+from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import checkpoint
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.runtime import (
@@ -68,6 +69,7 @@ def _build_checkpoint(
     retries: int = 0,
     checkpoint_type: str | None = None,
     runtime: StepRuntime | str | None = None,
+    cache: bool | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Create a checkpoint with a fake ZenML step decorator."""
     captured: dict[str, Any] = {}
@@ -76,12 +78,14 @@ def _build_checkpoint(
         *,
         name: str | None = None,
         retry: StepRetryConfig | None,
+        enable_cache: bool | None = None,
         extra: dict[str, Any],
         step_type: StepType | None = None,
         runtime: StepRuntime | None = None,
     ) -> Any:
         captured["name"] = name
         captured["retry"] = retry
+        captured["enable_cache"] = enable_cache
         captured["extra"] = extra
         captured["step_type"] = step_type
         captured["runtime"] = runtime
@@ -94,9 +98,12 @@ def _build_checkpoint(
         return _decorate
 
     with patch("kitaru.checkpoint.step", side_effect=_fake_step):
-        wrapped = checkpoint(retries=retries, type=checkpoint_type, runtime=runtime)(
-            func
-        )
+        wrapped = checkpoint(
+            retries=retries,
+            type=checkpoint_type,
+            runtime=runtime,
+            cache=cache,
+        )(func)
 
     return wrapped, captured
 
@@ -148,6 +155,21 @@ def test_checkpoint_maps_retries_and_type_to_step_config() -> None:
 def test_checkpoint_allows_zero_retries_without_retry_config() -> None:
     _, captured = _build_checkpoint(lambda: "ok", retries=0)
     assert captured["retry"] is None
+
+
+def test_checkpoint_forwards_cache_true_to_zenml_step() -> None:
+    _, captured = _build_checkpoint(lambda: "ok", cache=True)
+    assert captured["enable_cache"] is True
+
+
+def test_checkpoint_forwards_cache_false_to_zenml_step() -> None:
+    _, captured = _build_checkpoint(lambda: "ok", cache=False)
+    assert captured["enable_cache"] is False
+
+
+def test_checkpoint_omitted_cache_forwards_none() -> None:
+    _, captured = _build_checkpoint(lambda: "ok")
+    assert captured["enable_cache"] is None
 
 
 def test_well_known_types_map_to_step_type() -> None:
@@ -238,6 +260,44 @@ def test_checkpoint_rejects_invalid_runtime_string() -> None:
 def test_checkpoint_rejects_invalid_runtime_type() -> None:
     with pytest.raises(KitaruUsageError, match="Unsupported checkpoint runtime"):
         checkpoint(runtime=123)(lambda: None)  # type: ignore[arg-type]
+
+
+def test_checkpoint_call_tracks_cache_explicitly_set_flag() -> None:
+    wrapped, captured = _build_checkpoint(lambda: "ok", cache=False)
+
+    with (
+        _zenml_contexts(compilation_active=True, flow_active=True),
+        patch("kitaru.checkpoint.track") as track_mock,
+    ):
+        wrapped()
+
+    assert captured["step"].call_args is not None
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CHECKPOINT_INVOKED,
+        {
+            "method": "call",
+            "cache_explicitly_set": True,
+        },
+    )
+
+
+def test_checkpoint_call_tracks_cache_not_set_flag() -> None:
+    wrapped, captured = _build_checkpoint(lambda: "ok")
+
+    with (
+        _zenml_contexts(compilation_active=True, flow_active=True),
+        patch("kitaru.checkpoint.track") as track_mock,
+    ):
+        wrapped()
+
+    assert captured["step"].call_args is not None
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CHECKPOINT_INVOKED,
+        {
+            "method": "call",
+            "cache_explicitly_set": False,
+        },
+    )
 
 
 def test_checkpoint_rejects_call_outside_flow_context() -> None:

@@ -24,6 +24,7 @@ from kitaru._source_aliases import (
     build_checkpoint_source_alias,
     callable_name,
 )
+from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruContextError, KitaruUsageError
 from kitaru.runtime import (
     _checkpoint_scope,
@@ -174,12 +175,14 @@ class _CheckpointDefinition:
         retries: int,
         checkpoint_type: str | None,
         runtime: StepRuntime | str | None,
+        cache: bool | None,
     ) -> None:
         """Initialize a Kitaru checkpoint wrapper."""
         self._func = func
         self._checkpoint_type = checkpoint_type
         self._default_retries = _normalize_retries(retries)
         self._runtime = _normalize_runtime(runtime)
+        self._cache = cache
 
         wrapped_entrypoint = _wrap_entrypoint(
             func,
@@ -195,6 +198,7 @@ class _CheckpointDefinition:
         self._step = step(
             name=registration_name,
             retry=_to_retry_config(self._default_retries),
+            enable_cache=self._cache,
             extra=_build_checkpoint_extra(checkpoint_type),
             step_type=_to_step_type(checkpoint_type),
             runtime=self._runtime,
@@ -228,6 +232,16 @@ class _CheckpointDefinition:
         if not DynamicPipelineRunContext.is_active() or not _is_inside_flow():
             raise KitaruContextError(_CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR)
 
+    def _track_invocation(self, *, method: str) -> None:
+        """Emit checkpoint-level telemetry for invocation surfaces."""
+        track(
+            AnalyticsEvent.CHECKPOINT_INVOKED,
+            {
+                "method": method,
+                "cache_explicitly_set": self._cache is not None,
+            },
+        )
+
     def __call__(
         self,
         *args: Any,
@@ -237,6 +251,7 @@ class _CheckpointDefinition:
     ) -> Any:
         """Call the checkpoint with context guardrails."""
         self._assert_call_allowed()
+        self._track_invocation(method="call")
         return self._step(*args, id=id, after=after, **kwargs)
 
     def submit(
@@ -248,6 +263,7 @@ class _CheckpointDefinition:
     ) -> Any:
         """Submit the checkpoint concurrently inside a running flow."""
         self._assert_submit_allowed()
+        self._track_invocation(method="submit")
         return self._step.submit(*args, id=id, after=after, **kwargs)
 
     def map(
@@ -258,6 +274,7 @@ class _CheckpointDefinition:
     ) -> Any:
         """Map checkpoint invocations inside a running flow."""
         self._assert_submit_allowed()
+        self._track_invocation(method="map")
         return self._step.map(*args, after=after, **kwargs)
 
     def product(
@@ -268,6 +285,7 @@ class _CheckpointDefinition:
     ) -> Any:
         """Map checkpoint invocations as a cartesian product in a running flow."""
         self._assert_submit_allowed()
+        self._track_invocation(method="product")
         return self._step.product(*args, after=after, **kwargs)
 
 
@@ -281,6 +299,7 @@ def checkpoint(
     retries: int = 0,
     type: str | None = None,
     runtime: str | None = None,
+    cache: bool | None = None,
 ) -> Callable[[Callable[..., Any]], _CheckpointDefinition]: ...
 
 
@@ -290,6 +309,7 @@ def checkpoint(
     retries: int = 0,
     type: str | None = None,
     runtime: str | None = None,
+    cache: bool | None = None,
 ) -> _CheckpointDefinition | Callable[[Callable[..., Any]], _CheckpointDefinition]:
     """Mark a function as a durable checkpoint.
 
@@ -317,6 +337,9 @@ def checkpoint(
             the checkpoint runs in its own container on remote orchestrators
             that support it. ``None`` (the default) lets the orchestrator
             decide.
+        cache: Optional per-checkpoint cache override. ``True`` enables cache
+            for this checkpoint, ``False`` disables it, and ``None`` defers to
+            higher-level flow/default cache behavior.
 
     Returns:
         The wrapped checkpoint object or a decorator that returns it.
@@ -329,6 +352,7 @@ def checkpoint(
             retries=retries,
             checkpoint_type=checkpoint_type,
             runtime=runtime,
+            cache=cache,
         )
 
     if func is not None:

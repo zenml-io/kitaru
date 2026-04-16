@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `@checkpoint(cache=...)` per-checkpoint cache overrides (`True`/`False`/`None`) with updated configuration docs and telemetry indicating whether checkpoint cache was explicitly configured
+
 ## [0.4.1] - 2026-04-16
 
 ### Changed
