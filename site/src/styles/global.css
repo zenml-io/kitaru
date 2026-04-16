@@ -21,7 +21,7 @@
   --color-accent-warm: oklch(0.68 0.08 55);
   --color-accent-deep: oklch(0.57 0.09 65);
   --color-accent-light: oklch(0.95 0.015 70);
-  --color-accent-darker: oklch(0.60 0.17 45);
+  --color-accent-darker: oklch(0.55 0.17 45);
 
   /* Status */
   --color-success: oklch(0.55 0.1 155);
