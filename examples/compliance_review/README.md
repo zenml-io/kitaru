@@ -25,8 +25,6 @@ kitaru init
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-The example runs from the repo's own venv — it does not have its own `pyproject.toml`. That keeps a single venv active so `zenml integration install …` lands in the same place the example runs.
-
 Pick a stage and run it:
 
 | Stage | Script | One-liner |
@@ -42,23 +40,15 @@ uv run examples/compliance_review/stage_1_single_turn.py
 
 ### Running against a remote stack
 
-The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing:
+The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing. The example only resolves the centralized Anthropic secret for known remote execution stacks (Kubernetes, Vertex, SageMaker, AzureML); local execution continues to use your shell `ANTHROPIC_API_KEY`:
 
 ```bash
 kitaru stack use <your_remote_stack>
 zenml integration install s3          # or kubernetes, vertex, gcp, azure, …
+
+kitaru secrets set anthropic --ANTHROPIC_API_KEY=sk-ant-...
+
 uv run examples/compliance_review/stage_2_multi_domain.py
-```
-
-Because there's only one venv, the integration install and the stage run see the same packages.
-
-Every stage also exposes a `run_workflow()` function, so you can drive it from Python or a test:
-
-```python
-from examples.compliance_review.stage_2_multi_domain import run_workflow
-
-result = run_workflow()
-print(result.result)
 ```
 
 ## Stage 1 — one turn, one checkpoint

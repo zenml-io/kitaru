@@ -32,6 +32,7 @@ if _REPO_ROOT not in sys.path:
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
+    CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
     ClaudeAgentResult,
     run_agent_turn,
@@ -175,7 +176,11 @@ def finalize_memory_audit(report: ClaudeAgentResult) -> ClaudeAgentResult:
     return report
 
 
-@flow
+@flow(
+    image={
+        "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+    },
+)
 def audit_with_memory() -> ClaudeAgentResult:
     """Run the memory-aware HR + IT audit.
 

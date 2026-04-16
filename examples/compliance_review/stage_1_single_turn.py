@@ -28,6 +28,7 @@ if _REPO_ROOT not in sys.path:
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
+    CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
     ClaudeAgentResult,
     run_agent_turn,
@@ -67,15 +68,25 @@ def check_it_security_policy(prompt: str = STAGE_1_PROMPT) -> ClaudeAgentResult:
     return to_claude_agent_result(response)
 
 
-@flow
+@flow(
+    image={
+        "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+    },
+)
 def it_policy_check(prompt: str = STAGE_1_PROMPT) -> ClaudeAgentResult:
     """Check Acme Corp's IT security policy for the Stage 1 SOC 2 question."""
     return check_it_security_policy(prompt)
 
 
-def run_workflow(prompt: str = STAGE_1_PROMPT) -> ClaudeAgentResult:
+def run_workflow(
+    prompt: str = STAGE_1_PROMPT,
+    *,
+    stack: str | None = None,
+) -> ClaudeAgentResult:
     """Execute the Stage 1 flow and return the Claude agent result."""
-    return it_policy_check.run(prompt).wait()
+    if stack is None:
+        return it_policy_check.run(prompt).wait()
+    return it_policy_check.run(prompt, stack=stack).wait()
 
 
 def main() -> None:

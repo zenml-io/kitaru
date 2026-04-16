@@ -53,6 +53,7 @@ def test_run_agent_turn_surfaces_result_error_before_transport_wrapper(
         )
 
     monkeypatch.setattr(claude_agent_module, "query", fake_query)
+    monkeypatch.setattr(claude_agent_module, "_ensure_anthropic_api_key", lambda: None)
 
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(claude_agent_module.run_agent_turn("test prompt"))
@@ -76,6 +77,7 @@ def test_run_agent_turn_includes_stderr_for_transport_failures(
         yield  # pragma: no cover
 
     monkeypatch.setattr(claude_agent_module, "query", fake_query)
+    monkeypatch.setattr(claude_agent_module, "_ensure_anthropic_api_key", lambda: None)
 
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(claude_agent_module.run_agent_turn("test prompt"))
@@ -84,6 +86,121 @@ def test_run_agent_turn_includes_stderr_for_transport_failures(
     assert "Claude Agent SDK transport failed:" in message
     assert "Claude CLI stderr:" in message
     assert "Authentication failed for bundled Claude CLI" in message
+
+
+def test_ensure_anthropic_api_key_skips_local_runs(
+    monkeypatch,
+    claude_agent_module,
+) -> None:
+    """Local runs should keep relying on the caller's shell environment."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(
+        claude_agent_module,
+        "classify_stack_deployment_type",
+        lambda: "local",
+    )
+    monkeypatch.setattr(
+        claude_agent_module,
+        "Client",
+        lambda: (_ for _ in ()).throw(AssertionError("Client should not be used")),
+    )
+
+    claude_agent_module._ensure_anthropic_api_key()
+
+    assert "ANTHROPIC_API_KEY" not in claude_agent_module.os.environ
+
+
+def test_ensure_anthropic_api_key_loads_remote_secret(
+    monkeypatch,
+    claude_agent_module,
+) -> None:
+    """Remote runs should fall back to the centralized Anthropic secret."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(
+        claude_agent_module,
+        "classify_stack_deployment_type",
+        lambda: "kubernetes",
+    )
+
+    class _FakeSecret:
+        secret_values = {"ANTHROPIC_API_KEY": "sk-ant-test"}
+
+    class _FakeClient:
+        def get_secret(self, **kwargs):
+            assert kwargs == {
+                "name_id_or_prefix": "anthropic",
+                "allow_partial_name_match": False,
+                "allow_partial_id_match": False,
+            }
+            return _FakeSecret()
+
+    monkeypatch.setattr(claude_agent_module, "Client", lambda: _FakeClient())
+
+    claude_agent_module._ensure_anthropic_api_key()
+
+    assert claude_agent_module.os.environ["ANTHROPIC_API_KEY"] == "sk-ant-test"
+
+
+def test_ensure_anthropic_api_key_explains_missing_remote_secret(
+    monkeypatch,
+    claude_agent_module,
+) -> None:
+    """Missing remote secret should raise a setup error with the fix command."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(
+        claude_agent_module,
+        "classify_stack_deployment_type",
+        lambda: "kubernetes",
+    )
+
+    class _FakeClient:
+        def get_secret(self, **kwargs):
+            raise RuntimeError("secret not found")
+
+    monkeypatch.setattr(claude_agent_module, "Client", lambda: _FakeClient())
+
+    with pytest.raises(RuntimeError, match="kitaru secrets set anthropic"):
+        claude_agent_module._ensure_anthropic_api_key()
+
+
+def test_ensure_anthropic_api_key_explains_missing_secret_key(
+    monkeypatch,
+    claude_agent_module,
+) -> None:
+    """Missing ANTHROPIC_API_KEY in the secret should raise a clear error."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(
+        claude_agent_module,
+        "classify_stack_deployment_type",
+        lambda: "kubernetes",
+    )
+
+    class _FakeSecret:
+        secret_values: dict[str, str] = {}
+
+    class _FakeClient:
+        def get_secret(self, **kwargs):
+            return _FakeSecret()
+
+    monkeypatch.setattr(claude_agent_module, "Client", lambda: _FakeClient())
+
+    with pytest.raises(RuntimeError, match="does not contain ANTHROPIC_API_KEY"):
+        claude_agent_module._ensure_anthropic_api_key()
+
+
+def test_importing_claude_agent_does_not_lookup_secret_or_stack(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Importing the module should not require secret-store or stack access."""
+    configure_fake_claude_home(monkeypatch, tmp_path)
+    install_fake_claude_agent_sdk(monkeypatch)
+    clear_compliance_review_modules()
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    module = importlib.import_module("examples.compliance_review.claude_agent")
+
+    assert hasattr(module, "run_agent_turn")
 
 
 def test_claude_agent_result_materializer_restores_transcript(

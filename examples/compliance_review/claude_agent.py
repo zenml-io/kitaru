@@ -30,6 +30,9 @@ from claude_agent_sdk import (
     tool,
 )
 from pydantic import BaseModel, Field
+from zenml.client import Client
+
+from kitaru.config import classify_stack_deployment_type
 
 try:  # Support both package imports and `cd examples/compliance_review`.
     from . import tools as retrieval_tools
@@ -52,6 +55,12 @@ _READ_ONLY_CLOSED_WORLD = ToolAnnotations(
     openWorldHint=False,
 )
 _NON_ALPHANUMERIC = re.compile(r"[^A-Za-z0-9]")
+CLAUDE_AGENT_SDK_REQUIREMENT = "claude-agent-sdk>=0.1.58,<0.2"
+_ANTHROPIC_SECRET_NAME = "anthropic"
+_ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
+_REMOTE_STACK_DEPLOYMENT_TYPES = frozenset(
+    {"kubernetes", "vertex", "sagemaker", "azureml"}
+)
 
 
 class ClaudeAgentResult(BaseModel):
@@ -167,6 +176,44 @@ company_tools = create_sdk_mcp_server(
 )
 
 
+def _ensure_anthropic_api_key() -> None:
+    """Load Anthropic credentials for remote runs when the shell env is absent.
+
+    Keep this at runtime instead of import time. ZenML imports example modules
+    during tests and when it reloads flow definitions inside remote runners, so
+    a module-level secret lookup would add side effects to a plain import.
+    """
+    if os.environ.get(_ANTHROPIC_API_KEY_ENV):
+        return
+
+    if classify_stack_deployment_type() not in _REMOTE_STACK_DEPLOYMENT_TYPES:
+        return
+
+    try:
+        secret = Client().get_secret(
+            name_id_or_prefix=_ANTHROPIC_SECRET_NAME,
+            allow_partial_name_match=False,
+            allow_partial_id_match=False,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "Remote compliance-review runs require a centralized Anthropic "
+            "secret. Create it with: kitaru secrets set anthropic "
+            "--ANTHROPIC_API_KEY=sk-ant-..."
+        ) from exc
+
+    try:
+        anthropic_api_key = secret.secret_values[_ANTHROPIC_API_KEY_ENV]
+    except KeyError as exc:
+        raise RuntimeError(
+            "Secret 'anthropic' exists, but it does not contain "
+            "ANTHROPIC_API_KEY. Update it with: kitaru secrets set anthropic "
+            "--ANTHROPIC_API_KEY=sk-ant-..."
+        ) from exc
+
+    os.environ[_ANTHROPIC_API_KEY_ENV] = anthropic_api_key
+
+
 async def run_agent_turn(
     prompt: str,
     *,
@@ -189,6 +236,7 @@ async def run_agent_turn(
     Returns:
         A plain dictionary suitable for `to_claude_agent_result()`.
     """
+    _ensure_anthropic_api_key()
     resolved_cwd = _resolve_cwd(cwd)
     final: ResultMessage | None = None
     stderr_lines: list[str] = []

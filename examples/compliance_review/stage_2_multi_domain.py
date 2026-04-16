@@ -34,6 +34,7 @@ if _REPO_ROOT not in sys.path:
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
+    CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
     ClaudeAgentResult,
     run_agent_turn,
@@ -178,7 +179,11 @@ def run_domain_checks() -> tuple[
     return hr, it_security, vendor_contracts, insurance
 
 
-@flow
+@flow(
+    image={
+        "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+    },
+)
 def audit_company() -> ClaudeAgentResult:
     """Run the full sequential Stage 2 compliance audit."""
     hr, it_security, vendor_contracts, insurance = run_domain_checks()
