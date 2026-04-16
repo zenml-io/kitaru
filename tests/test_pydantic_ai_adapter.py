@@ -90,11 +90,6 @@ class TestWithDefaultType:
 
 
 class TestUseGranular:
-    """The streaming fallback: granular mode must not apply when an event stream
-    handler is in play, because per-call checkpointing can't drain an async
-    stream inside a sync ZenML step.
-    """
-
     def _make_agent(self, *, granular: bool):
         from pydantic_ai import Agent
         from pydantic_ai.models.test import TestModel
@@ -151,8 +146,6 @@ class TestUseGranular:
 
 
 class TestPersistMessageHistory:
-    """Instance-level conversation memory: opt-in, one instance = one conversation."""
-
     def _make_agent(self, *, persist: bool):
         from pydantic_ai import Agent
         from pydantic_ai.models.test import TestModel
@@ -243,7 +236,6 @@ async def test_capture_off_still_routes_hitl(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.anyio
 async def test_run_sync_refuses_inside_running_event_loop() -> None:
-    """Calling `run_sync` from inside an event loop must surface a typed error."""
     from pydantic_ai import Agent
     from pydantic_ai.models.test import TestModel
 

@@ -34,10 +34,6 @@ def _make_wrapped_agent(
     return KitaruAgent(agent, granular_checkpoints=granular)
 
 
-def _step_metadata_maps(hydrated_run: Any) -> list[dict[str, Any]]:
-    return [step.run_metadata for step in hydrated_run.steps.values()]
-
-
 def _artifact_names(hydrated_run: Any) -> list[str]:
     names: list[str] = []
     for step in hydrated_run.steps.values():
@@ -60,18 +56,14 @@ def _wait_for_hydrated_run(exec_id: str) -> Any:
 
 
 def _metadata_dict_from_steps(hydrated_run: Any, key: str) -> dict[str, Any]:
-    for metadata in _step_metadata_maps(hydrated_run):
-        if key in metadata:
-            return metadata[key]
+    for step in hydrated_run.steps.values():
+        if key in step.run_metadata:
+            return step.run_metadata[key]
     raise AssertionError(f"No step metadata contained key {key!r}.")
 
 
 def _event_kinds(event_map: dict[str, list[dict[str, Any]]]) -> set[str]:
     return {event["kind"] for events in event_map.values() for event in events}
-
-
-def _as_text_output(value: Any) -> str:
-    return value.output if hasattr(value, "output") else value
 
 
 def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
@@ -85,7 +77,7 @@ def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     handle = turn_flow.run("use the add tool")
     result = handle.wait()
 
-    assert isinstance(_as_text_output(result), str)
+    assert isinstance(result, str)
 
     hydrated_run = (
         Client()

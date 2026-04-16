@@ -1,15 +1,7 @@
 """Capability smoke test for the Kitaru PydanticAI adapter.
 
 Each ``demo_*`` function exercises one feature of ``KitaruAgent`` using
-``pydantic_ai.models.test.TestModel`` so the whole file runs end-to-end
-without API keys. ``main()`` runs them in sequence and prints pass/fail so a
-maintainer can spot regressions at a glance.
-
-Auto-checkpoint caches the full ``AgentRunResult`` as the turn artifact;
-ZenML's dataclass materializer can't round-trip a generic ``AgentRunResult[X]``
-for a structured ``output_type``, so demos that rely on auto-checkpoint
-stick to ``output_type=str``. Use ``output_type=SomeModel`` only inside an
-explicit ``@checkpoint`` that returns the ``.output`` directly (demo 1).
+``TestModel`` so the whole file runs without API keys.
 
 Run:
     uv sync --extra local --extra pydantic-ai
@@ -28,9 +20,7 @@ from pydantic_ai.models.test import TestModel
 from kitaru import checkpoint, flow
 from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent, hitl_tool
 
-# Per-process suffix so each run uses fresh checkpoint names, sidestepping
-# stale cached artifacts from prior example runs (the adapter's checkpoint
-# cache key is currently agent-name scoped; see README follow-ups).
+# Fresh suffix per run so cached artifacts from prior runs don't collide.
 _RUN_TAG = uuid.uuid4().hex[:8]
 
 
@@ -118,12 +108,7 @@ def demo_auto_flow() -> str:
 
 
 def demo_granular() -> str:
-    """Granular mode: each model / tool / MCP call becomes its own checkpoint.
-
-    With a real model, each call's cached response lets replay after a mid-turn
-    crash resume at the next pending call instead of restarting the turn. Per-
-    tool overrides (retries, opt-out via ``False``) are shown for API surface.
-    """
+    """Granular mode: each model / tool / MCP call becomes its own checkpoint."""
     inner = Agent(
         TestModel(call_tools=[]), name=f"granular_agent_{_RUN_TAG}", output_type=str
     )
@@ -165,12 +150,7 @@ def demo_turn_retries() -> str:
 
 
 def demo_message_history() -> str:
-    """``persist_message_history`` threads message history across turns.
-
-    Both ``run_sync`` calls live inside a single ``@checkpoint`` so the flow
-    has one terminal step; the second call sees the first turn's messages
-    without the caller passing ``message_history=``.
-    """
+    """``persist_message_history`` threads message history across turns."""
     chat_agent = Agent(
         TestModel(call_tools=[]), name=f"chat_{_RUN_TAG}", output_type=str
     )
@@ -208,11 +188,11 @@ def demo_capture_policy() -> str:
 
 
 def demo_event_stream_handler() -> str:
-    """Construction-only: driving ``event_stream_handler`` against ``TestModel``
-    hits an upstream parts-manager ``IndexError`` that doesn't reproduce with
-    real providers, so this demo validates wiring only. The adapter wraps the
-    handler and forces the turn-checkpoint fallback when granular mode is on
-    (per-call checkpointing cannot drain an async stream inside a sync step).
+    """Wire an ``event_stream_handler`` onto a ``KitaruAgent``.
+
+    Construction-only: ``TestModel`` hits an upstream parts-manager
+    ``IndexError`` when actually streamed, which doesn't reproduce with real
+    providers.
     """
 
     async def handler(ctx: Any, stream: Any) -> None:
@@ -232,13 +212,7 @@ def publish_brief_hitl(headline: str, sources: list[str]) -> str:
 
 
 def demo_hitl_wiring() -> str:
-    """All three HITL entry points wired onto one agent.
-
-    ``@hitl_tool``, ``ApprovalRequired``, and ``CallDeferred`` all route through
-    ``kitaru.wait()`` when the model triggers them. With ``TestModel(call_tools=[])``
-    none fire here; a real model drives the waits and callers resume via
-    ``kitaru executions input <exec_id>`` or ``KitaruClient.executions.input()``.
-    """
+    """Wire ``@hitl_tool``, ``ApprovalRequired``, and ``CallDeferred`` on one agent."""
     agent = Agent(
         TestModel(call_tools=[]),
         name=f"hitl_demo_{_RUN_TAG}",
