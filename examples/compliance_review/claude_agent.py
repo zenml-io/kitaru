@@ -61,6 +61,7 @@ _ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 _REMOTE_STACK_DEPLOYMENT_TYPES = frozenset(
     {"kubernetes", "vertex", "sagemaker", "azureml"}
 )
+_anthropic_key_checked = False
 
 
 class ClaudeAgentResult(BaseModel):
@@ -177,16 +178,14 @@ company_tools = create_sdk_mcp_server(
 
 
 def _ensure_anthropic_api_key() -> None:
-    """Load Anthropic credentials for remote runs when the shell env is absent.
-
-    Keep this at runtime instead of import time. ZenML imports example modules
-    during tests and when it reloads flow definitions inside remote runners, so
-    a module-level secret lookup would add side effects to a plain import.
-    """
-    if os.environ.get(_ANTHROPIC_API_KEY_ENV):
+    """Load Anthropic credentials for remote runs when the shell env is absent."""
+    global _anthropic_key_checked
+    if _anthropic_key_checked or os.environ.get(_ANTHROPIC_API_KEY_ENV):
+        _anthropic_key_checked = True
         return
 
     if classify_stack_deployment_type() not in _REMOTE_STACK_DEPLOYMENT_TYPES:
+        _anthropic_key_checked = True
         return
 
     try:
@@ -197,9 +196,9 @@ def _ensure_anthropic_api_key() -> None:
         )
     except Exception as exc:
         raise RuntimeError(
-            "Remote compliance-review runs require a centralized Anthropic "
-            "secret. Create it with: kitaru secrets set anthropic "
-            "--ANTHROPIC_API_KEY=sk-ant-..."
+            f"Remote compliance-review runs require a centralized Anthropic "
+            f"secret, but the lookup failed: {exc}. Create the secret with: "
+            f"kitaru secrets set anthropic --ANTHROPIC_API_KEY=sk-ant-..."
         ) from exc
 
     try:
@@ -212,6 +211,7 @@ def _ensure_anthropic_api_key() -> None:
         ) from exc
 
     os.environ[_ANTHROPIC_API_KEY_ENV] = anthropic_api_key
+    _anthropic_key_checked = True
 
 
 async def run_agent_turn(

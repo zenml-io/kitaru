@@ -117,7 +117,7 @@ def test_stage1_run_workflow_uses_flow_run_and_wait(
     result = stage1_module.run_workflow("custom flow prompt")
 
     assert result == expected
-    fake_flow.run.assert_called_once_with("custom flow prompt")
+    fake_flow.run.assert_called_once_with("custom flow prompt", stack=None)
     fake_handle.wait.assert_called_once_with()
 
 

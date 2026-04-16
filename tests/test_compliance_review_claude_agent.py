@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -122,19 +123,19 @@ def test_ensure_anthropic_api_key_loads_remote_secret(
         lambda: "kubernetes",
     )
 
-    class _FakeSecret:
-        secret_values = {"ANTHROPIC_API_KEY": "sk-ant-test"}
+    def fake_get_secret(**kwargs):
+        assert kwargs == {
+            "name_id_or_prefix": "anthropic",
+            "allow_partial_name_match": False,
+            "allow_partial_id_match": False,
+        }
+        return SimpleNamespace(secret_values={"ANTHROPIC_API_KEY": "sk-ant-test"})
 
-    class _FakeClient:
-        def get_secret(self, **kwargs):
-            assert kwargs == {
-                "name_id_or_prefix": "anthropic",
-                "allow_partial_name_match": False,
-                "allow_partial_id_match": False,
-            }
-            return _FakeSecret()
-
-    monkeypatch.setattr(claude_agent_module, "Client", lambda: _FakeClient())
+    monkeypatch.setattr(
+        claude_agent_module,
+        "Client",
+        lambda: SimpleNamespace(get_secret=fake_get_secret),
+    )
 
     claude_agent_module._ensure_anthropic_api_key()
 
@@ -153,11 +154,14 @@ def test_ensure_anthropic_api_key_explains_missing_remote_secret(
         lambda: "kubernetes",
     )
 
-    class _FakeClient:
-        def get_secret(self, **kwargs):
-            raise RuntimeError("secret not found")
+    def raise_not_found(**_kwargs):
+        raise RuntimeError("secret not found")
 
-    monkeypatch.setattr(claude_agent_module, "Client", lambda: _FakeClient())
+    monkeypatch.setattr(
+        claude_agent_module,
+        "Client",
+        lambda: SimpleNamespace(get_secret=raise_not_found),
+    )
 
     with pytest.raises(RuntimeError, match="kitaru secrets set anthropic"):
         claude_agent_module._ensure_anthropic_api_key()
@@ -175,14 +179,13 @@ def test_ensure_anthropic_api_key_explains_missing_secret_key(
         lambda: "kubernetes",
     )
 
-    class _FakeSecret:
-        secret_values: dict[str, str] = {}
-
-    class _FakeClient:
-        def get_secret(self, **kwargs):
-            return _FakeSecret()
-
-    monkeypatch.setattr(claude_agent_module, "Client", lambda: _FakeClient())
+    monkeypatch.setattr(
+        claude_agent_module,
+        "Client",
+        lambda: SimpleNamespace(
+            get_secret=lambda **_kwargs: SimpleNamespace(secret_values={}),
+        ),
+    )
 
     with pytest.raises(RuntimeError, match="does not contain ANTHROPIC_API_KEY"):
         claude_agent_module._ensure_anthropic_api_key()

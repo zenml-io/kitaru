@@ -84,8 +84,6 @@ def run_workflow(
     stack: str | None = None,
 ) -> ClaudeAgentResult:
     """Execute the Stage 1 flow and return the Claude agent result."""
-    if stack is None:
-        return it_policy_check.run(prompt).wait()
     return it_policy_check.run(prompt, stack=stack).wait()
 
 
