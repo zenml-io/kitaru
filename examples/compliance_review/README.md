@@ -115,6 +115,27 @@ Some audits aren't one-shot; a human wants to steer the review turn by turn. Sta
 3. The operator replies (or says `/done`).
 4. The next checkpoint resumes the same Claude session via `resume=<session_id>`, so the model keeps its full transcript of the conversation — even though the Python process may have been down in between.
 
+The small but important detail is the transcript file. The Claude Agent SDK stores resumable session history as JSONL under the local Claude project directory:
+
+```text
+~/.claude/projects/<encoded-working-directory>/<session-id>.jsonl
+```
+
+That local file is what makes `resume=<session_id>` work. On a laptop, it usually survives because every turn runs on the same machine. On a remote stack, turn 1 might run in pod A and turn 2 might run in pod B. Pod B receives the `ClaudeAgentResult` artifact, but it does not automatically have pod A's `~/.claude/...jsonl` file.
+
+This example registers a `ClaudeAgentResultMaterializer` before any checkpoints execute. On save, it stores the normal Pydantic result plus the transcript JSONL inside the ZenML artifact. On load, it recreates the transcript at the path Claude expects before the next checkpoint calls `run_agent_turn(..., resume=context.session_id)`.
+
+So the story is:
+
+```text
+turn 1 writes ~/.claude/.../abc.jsonl
+      -> materializer bundles abc.jsonl into the checkpoint artifact
+      -> wait pauses the flow
+turn 2 starts on any machine
+      -> materializer restores ~/.claude/.../abc.jsonl
+      -> Claude resume=abc can see the previous conversation
+```
+
 Locally, Kitaru can prompt in the terminal. For a non-interactive run, drive the wait from a second terminal:
 
 ```bash
@@ -127,6 +148,12 @@ kitaru executions resume <exec-id>
 ```
 
 Each turn is its own checkpoint, so a crashed conversation resumes cleanly without reshowing Claude the prior turns — the SDK's own session replay handles that on the model side.
+
+### Transcript security and retention
+
+The materializer stores the raw Claude transcript JSONL. Treat it like conversation data, not harmless metadata. It may include prompts, model outputs, tool-call arguments, retrieved document snippets, and anything else the Claude Agent SDK records for that session.
+
+For this synthetic local example, that is fine. For real compliance work, make sure your artifact store retention, access controls, encryption, and deletion policy match the sensitivity of the documents and prompts you let the agent see. If a transcript should not be retained, do not run that conversation through a durable artifact store without first changing this materializer's storage policy.
 
 ## Data
 

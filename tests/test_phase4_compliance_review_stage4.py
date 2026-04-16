@@ -17,7 +17,9 @@ from kitaru.errors import KitaruFeatureNotAvailableError, KitaruStateError
 from kitaru.wait import _resolve_zenml_wait
 from tests.compliance_review_fakes import (
     clear_compliance_review_modules,
+    configure_fake_claude_home,
     fake_claude_response,
+    fake_claude_transcript_path,
     install_fake_claude_agent_sdk,
 )
 
@@ -25,8 +27,9 @@ _WAIT_DISCOVERY_TIMEOUT_SECONDS = 900.0
 
 
 @pytest.fixture
-def stage4_module(monkeypatch):
+def stage4_module(monkeypatch, tmp_path):
     """Import Stage 4 with a fake Claude SDK module."""
+    configure_fake_claude_home(monkeypatch, tmp_path)
     install_fake_claude_agent_sdk(monkeypatch)
     clear_compliance_review_modules(
         "examples.compliance_review.stage_4_conversational",
@@ -175,6 +178,7 @@ def test_stage4_flow_waits_resumes_and_reuses_session(
 
     calls: list[dict[str, Any]] = []
     session_id = "stage-4-test-session"
+    restored_transcript_checks: list[bool] = []
 
     async def fake_run_agent_turn(
         prompt: str,
@@ -184,6 +188,10 @@ def test_stage4_flow_waits_resumes_and_reuses_session(
         cwd: Path,
     ) -> dict[str, Any]:
         turn_number = len(calls) + 1
+        if resume is not None:
+            transcript_path = Path(fake_claude_transcript_path(resume, cwd=cwd))
+            restored_transcript_checks.append(transcript_path.exists())
+            assert transcript_path.exists()
         calls.append(
             {
                 "prompt": prompt,
@@ -235,6 +243,12 @@ def test_stage4_flow_waits_resumes_and_reuses_session(
         assert pending[0].schema is not None
         assert pending[0].schema.get("type") == "string"
         assert pending[0].metadata["session_id"] == session_id
+        first_turn_transcript = Path(
+            fake_claude_transcript_path(session_id, cwd=stage4_module.EXAMPLE_DIR)
+        )
+        assert first_turn_transcript.exists()
+        first_turn_transcript.unlink()
+        assert not first_turn_transcript.exists()
 
         client.executions.input(
             exec_id,
@@ -290,3 +304,4 @@ def test_stage4_flow_waits_resumes_and_reuses_session(
             "cwd": stage4_module.EXAMPLE_DIR,
         },
     ]
+    assert restored_transcript_checks == [True]

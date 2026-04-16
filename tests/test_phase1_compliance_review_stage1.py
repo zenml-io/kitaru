@@ -11,19 +11,21 @@ import pytest
 
 from tests.compliance_review_fakes import (
     clear_compliance_review_modules,
+    configure_fake_claude_home,
     fake_claude_response,
     install_fake_claude_agent_sdk,
 )
 
 
 @pytest.fixture
-def stage1_module(monkeypatch):
+def stage1_module(monkeypatch, tmp_path):
     """Import Stage 1 with a tiny fake Claude SDK module.
 
     The normal test suite should not need the real `claude-agent-sdk` package
     or a live Anthropic call just to verify the Kitaru boundary. These tests
     monkeypatch `run_agent_turn()` before it can call the SDK.
     """
+    configure_fake_claude_home(monkeypatch, tmp_path)
     install_fake_claude_agent_sdk(monkeypatch)
     clear_compliance_review_modules(
         "examples.compliance_review.stage_1_single_turn",

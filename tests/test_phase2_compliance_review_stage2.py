@@ -12,14 +12,16 @@ from zenml.enums import ArtifactSaveType
 
 from tests.compliance_review_fakes import (
     clear_compliance_review_modules,
+    configure_fake_claude_home,
     fake_claude_response,
     install_fake_claude_agent_sdk,
 )
 
 
 @pytest.fixture
-def stage2_module(monkeypatch):
+def stage2_module(monkeypatch, tmp_path):
     """Import Stage 2 with a fake Claude SDK module."""
+    configure_fake_claude_home(monkeypatch, tmp_path)
     install_fake_claude_agent_sdk(monkeypatch)
     clear_compliance_review_modules(
         "examples.compliance_review.stage_2_multi_domain",
