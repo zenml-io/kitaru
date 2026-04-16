@@ -25,6 +25,8 @@ End-to-end runbook for cutting a new Kitaru release. Every step has exact comman
 
 This workflow is **interactive with mandatory pauses**. Do not run multiple phases back-to-back without user confirmation. The four pauses are marked ★ in the checklist. Never skip them — releases publish to PyPI + Docker Hub + ECR and force-push `main`, so silent errors compound.
 
+There is also a **fifth pause enforced by GitHub itself**: the `pypi` environment has required reviewers (`kitaru-admins` team). Mid-workflow, the release job pauses at the environment gate until a `kitaru-admins` member approves the deployment. This is a feature, not a bug — treat it as a built-in safety net even if the user who triggered the run is the same person who approves.
+
 ## Checklist
 
 Copy and track progress in your todo / task list:
@@ -238,7 +240,37 @@ Capture the `databaseId` and watch:
 gh run watch <RUN_ID> --exit-status
 ```
 
-Run this in the background (`run_in_background: true`) with a generous timeout (600000ms / 10min). Typical runtime is 4-8 minutes for success paths.
+Run this in the background (`run_in_background: true`) with a generous timeout (600000ms / 10min). Typical runtime is 4-8 minutes for success paths (plus a few seconds for the approval gate — see below).
+
+### Approving the pypi deployment gate
+
+For **non-dry-run** releases, the `release` job pauses at `environment: pypi` until a `kitaru-admins` team member approves. `gh run watch` will show the run in `waiting` state while this is pending. The user triggering the run can approve their own deployment (`prevent_self_review: false` is set on the environment).
+
+Check for pending approvals:
+
+```bash
+gh api repos/zenml-io/kitaru/actions/runs/<RUN_ID>/pending_deployments \
+  --jq '.[] | {env: .environment.name, state: .current_user_can_approve}'
+```
+
+**Option A — approve in the web UI (recommended for one-off):** Open the Actions run page, click "Review deployments", tick the `pypi` box, click "Approve and deploy".
+
+**Option B — approve via CLI:**
+
+```bash
+# Look up the pypi environment ID dynamically (it's stable but better not to hard-code)
+ENV_ID=$(gh api repos/zenml-io/kitaru/environments/pypi --jq .id)
+gh api -X POST repos/zenml-io/kitaru/actions/runs/<RUN_ID>/pending_deployments \
+  -F "environment_ids[]=$ENV_ID" \
+  -f state=approved \
+  -f comment='Approved via kitaru-release skill'
+```
+
+Dry-runs (`-f dry-run=true`) skip the gate entirely because the workflow sets `environment: ''` when dry-run is true.
+
+Never approve a release on someone else's behalf without their confirmation. If the user triggering the release is not a `kitaru-admins` member, ask them to ping an admin to approve, or pause the skill until an admin has done so.
+
+### After approval (or immediately for dry-run)
 
 On completion, verify release artifact exists:
 
@@ -323,7 +355,8 @@ Mark any post-release follow-ups (social posts, docs sync) as user-driven. The s
 - **Site vs library changelog.** `site/` changes deploy on their own cadence via `site.yml`. They do not belong in the Python library CHANGELOG even when they land on the same `develop` branch.
 - **UI tag default.** The release workflow defaults `kitaru-ui-tag` to the latest kitaru-ui release. Only pass `-f kitaru-ui-tag=v<X>` if the user explicitly wants to pin to an older UI.
 - **Concurrency group.** `release.yml` has `concurrency: group: release, cancel-in-progress: false` — a second release trigger queues rather than cancels. If something goes wrong mid-release, do not trigger a second run; wait for the first to finish, then reset from the resulting state.
-- **Dry-run environment.** Real publishes use the `pypi` GitHub environment (requires secrets); dry-runs use no environment. If the user wants a dry-run first, pass `-f dry-run=true` and loop back through Step 9 again for the real run after they approve.
+- **Dry-run environment.** Real publishes use the `pypi` GitHub environment (requires secrets + manual approval); dry-runs use no environment. If the user wants a dry-run first, pass `-f dry-run=true` and loop back through Step 9 again for the real run after they approve.
+- **PyPI approval gate.** The `pypi` environment has required reviewers (`kitaru-admins` team, `prevent_self_review: false`). Every non-dry-run release pauses partway through awaiting approval. The triggering user can approve their own deployment if they're in `kitaru-admins`. If they're not, the release will sit waiting indefinitely until an admin approves — do not forget this step. `gh run watch` will show the run in `waiting` state while the gate is open; this is normal, not a hang.
 - **The `prompt-exports/` directory** is commonly untracked in the working tree — ignore it when staging CHANGELOG commits.
 
 ## Inputs and outputs reference
