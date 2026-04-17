@@ -37,22 +37,28 @@
 <span class="deploy-ok">✓ replayed from checkpoint process_data</span></code></pre>
       </div>
 
-      <aside class="deploy-sidecar" data-reveal="fade-right" data-reveal-delay="4">
-        <span class="deploy-sidecar-label">After pip install</span>
-        <p class="deploy-sidecar-text">
-          Dashboard, replay, durable memory, and the PydanticAI adapter. All on your infrastructure.
-        </p>
-        <div class="deploy-sidecar-links">
-          <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="deploy-sidecar-link">
-            Star on GitHub
-            <span aria-hidden="true">→</span>
-          </a>
-          <a href="/roadmap" class="deploy-sidecar-link">
-            See the roadmap
-            <span aria-hidden="true">→</span>
-          </a>
-        </div>
-      </aside>
+      <figure class="deploy-dashboard" data-reveal="fade-right" data-reveal-delay="4">
+        <img
+          src="/dashboard.png"
+          alt="Kitaru dashboard showing an execution with its checkpoints"
+          loading="lazy"
+          decoding="async"
+          width="1440"
+          height="900"
+        />
+        <figcaption class="deploy-dashboard-caption">Dashboard, replay, logs, and cost tracking ship with the server.</figcaption>
+      </figure>
+    </div>
+
+    <div class="deploy-links-row" data-reveal data-reveal-delay="5">
+      <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="deploy-link">
+        Star on GitHub
+        <span aria-hidden="true">→</span>
+      </a>
+      <a href="/roadmap" class="deploy-link">
+        See the roadmap
+        <span aria-hidden="true">→</span>
+      </a>
     </div>
 
   </div>
@@ -139,40 +145,41 @@
     font-size: 0.78rem;
   }
 
-  /* ─── Sidecar ─── */
-  .deploy-sidecar {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 14px;
-    padding: 4px 4px 4px 0;
-  }
-
-  .deploy-sidecar-label {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--color-accent);
-  }
-
-  .deploy-sidecar-text {
-    font-size: 0.95rem;
-    line-height: 1.55;
-    color: var(--color-primary);
+  /* ─── Dashboard screenshot ─── */
+  .deploy-dashboard {
     margin: 0;
-    letter-spacing: -0.005em;
-  }
-
-  .deploy-sidecar-links {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    margin-top: 6px;
+    gap: 10px;
+    align-items: flex-start;
   }
 
-  .deploy-sidecar-link {
+  .deploy-dashboard img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    box-shadow: 0 8px 28px oklch(0 0 0 / 0.06);
+    background: var(--color-surface);
+  }
+
+  .deploy-dashboard-caption {
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+
+  /* ─── Links row (below the layout) ─── */
+  .deploy-links-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px 28px;
+    margin-top: 20px;
+  }
+
+  .deploy-link {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -180,12 +187,10 @@
     font-weight: 500;
     color: var(--color-accent);
     text-decoration: none;
-    padding: 2px 0;
-    width: fit-content;
     transition: gap 0.2s;
   }
 
-  .deploy-sidecar-link:hover {
+  .deploy-link:hover {
     gap: 10px;
   }
 
@@ -193,10 +198,6 @@
     .deploy-layout {
       grid-template-columns: 1fr;
       gap: 20px;
-    }
-
-    .deploy-sidecar {
-      padding: 0;
     }
   }
 
