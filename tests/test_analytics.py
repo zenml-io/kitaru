@@ -181,6 +181,7 @@ def test_feature_adoption_event_canonical_strings() -> None:
     assert AnalyticsEvent.STACK_ACTIVATED == "Kitaru stack activated"
     assert AnalyticsEvent.MODEL_ALIAS_REGISTERED == "Kitaru model alias registered"
     assert AnalyticsEvent.LOG_STORE_CONFIGURED == "Kitaru log store configured"
+    assert AnalyticsEvent.CHECKPOINT_INVOKED == "Kitaru checkpoint invoked"
 
 
 def test_adapter_event_canonical_strings() -> None:

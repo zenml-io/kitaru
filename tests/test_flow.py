@@ -18,6 +18,7 @@ from zenml.models import PipelineRunResponse
 
 from kitaru import memory
 from kitaru.analytics import AnalyticsEvent
+from kitaru.checkpoint import checkpoint
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ImageSettings,
@@ -38,6 +39,7 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     FlowHandle,
+    _build_pipeline_options,
     _checkpoint_count_from_run,
     _duration_metadata_from_run,
     _inject_model_registry_env,
@@ -56,7 +58,7 @@ def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
 def _resolved_execution(
     *,
     stack: str | None = None,
-    cache: bool = True,
+    cache: bool | None = None,
     retries: int = 0,
 ) -> ResolvedExecutionConfig:
     return ResolvedExecutionConfig(
@@ -227,7 +229,6 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
     assert isinstance(handle, FlowHandle)
     call_kwargs = base_pipeline.with_options.call_args
     assert call_kwargs == call(
-        enable_cache=True,
         retry=None,
         settings={
             "docker": DockerSettings(
@@ -236,6 +237,86 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
             )
         },
     )
+    # Unset execution-level cache must not be forwarded as enable_cache, because
+    # ZenML's compiler treats any concrete run-level enable_cache as a per-step
+    # override that overwrites @checkpoint(cache=...) settings.
+    assert "enable_cache" not in call_kwargs.kwargs
+
+
+def test_build_pipeline_options_omits_enable_cache_when_unset() -> None:
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(cache=None),
+        transport_image=None,
+    )
+    assert "enable_cache" not in options
+
+
+@pytest.mark.parametrize("cache_value", [True, False])
+def test_build_pipeline_options_forwards_explicit_cache(
+    cache_value: bool,
+) -> None:
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(cache=cache_value),
+        transport_image=None,
+    )
+    assert options["enable_cache"] is cache_value
+
+
+def test_checkpoint_cache_survives_pipeline_with_options_when_execution_unset() -> None:
+    """Mixed ``@checkpoint(cache=...)`` values must survive ``with_options``.
+
+    A concrete ``enable_cache`` passed at run level would be applied per-step
+    during ZenML compilation and overwrite the decorator-set value; the flow
+    therefore omits ``enable_cache`` entirely when execution cache is unset.
+    """
+
+    @checkpoint(cache=False)
+    def never_cache() -> int:
+        return 1
+
+    @checkpoint(cache=True)
+    def always_cache() -> int:
+        return 2
+
+    @flow
+    def mixed_flow() -> int:
+        return never_cache() + always_cache()
+
+    assert never_cache._step.enable_cache is False
+    assert always_cache._step.enable_cache is True
+
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(cache=None),
+        transport_image=None,
+    )
+    configured = mixed_flow._pipeline.with_options(**options)
+    assert configured.configuration.enable_cache is None
+
+
+@pytest.mark.parametrize("cache_value", [True, False])
+def test_flow_run_forwards_explicit_cache_to_with_options(
+    cache_value: bool,
+) -> None:
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(cache=cache_value),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+    ):
+        flow(lambda x: x).run(123)
+
+    call_kwargs = base_pipeline.with_options.call_args
+    assert call_kwargs.kwargs["enable_cache"] is cache_value
 
 
 def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
