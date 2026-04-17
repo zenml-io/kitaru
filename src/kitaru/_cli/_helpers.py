@@ -211,6 +211,26 @@ def _print_warning(message: str, detail: str | None = None) -> None:
             print(f"  {detail}", file=sys.stderr)
 
 
+def _emit_warning(
+    message: str,
+    *,
+    output: CLIOutputFormat,
+    detail: str | None = None,
+) -> None:
+    """Emit a non-fatal warning without breaking JSON stdout payloads.
+
+    JSON mode always writes to stderr so the stdout payload remains a
+    parseable single JSON document. Text mode uses the interactive/plain
+    warning renderer.
+    """
+    if output == CLIOutputFormat.JSON:
+        print(f"Warning: {message}", file=sys.stderr)
+        if detail:
+            print(f"  {detail}", file=sys.stderr)
+        return
+    _print_warning(message, detail)
+
+
 def _resolve_output_format(raw_output: str) -> CLIOutputFormat:
     """Normalize a CLI output mode and fail with a text error if invalid."""
     try:
