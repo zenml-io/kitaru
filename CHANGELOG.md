@@ -8,12 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- `kitaru info --all` now includes active stack/project provenance, showing whether the effective context came from environment variables, repo-local `.kitaru/config.yaml`, or global config. The same structured fields are available through JSON output, exported diagnostics files, and MCP `kitaru_info(all=True)` (#182)
-- `KitaruMemoryArtifactUnavailableError` typed exception (subclass of `KitaruBackendError`) for memory entries whose backing artifact cannot be loaded from the current runtime (#183)
-- `strict=False` parameter on `kitaru.memory.get(...)`, CLI `kitaru memory get --strict`, and MCP `kitaru_memory_get(strict=...)`. Lenient mode warns and returns `None` (Python) or returns a payload with `value_available: False` and nested `value_unavailable` diagnostics (CLI/MCP); strict mode raises `KitaruMemoryArtifactUnavailableError` (#183)
+- `ImageSettings.secret_environment_from` field for attaching ZenML secret references to a flow execution; Kitaru forwards the list through `Pipeline.with_options(secrets=[...])` so secret values never enter `DockerSettings.environment`, image build metadata, logs, or the frozen execution spec (#188)
+- `kitaru info --all` now includes active stack/project provenance, showing whether the effective context came from environment variables, repo-local `.kitaru/config.yaml`, or global config. The same structured fields are available through JSON output, exported diagnostics files, and MCP `kitaru_info(all=True)` (#186)
+- `KitaruMemoryArtifactUnavailableError` typed exception (subclass of `KitaruBackendError`) for memory entries whose backing artifact cannot be loaded from the current runtime (#189)
+- `strict=False` parameter on `kitaru.memory.get(...)`, CLI `kitaru memory get --strict`, and MCP `kitaru_memory_get(strict=...)`. Lenient mode warns and returns `None` (Python) or returns a payload with `value_available: False` and nested `value_unavailable` diagnostics (CLI/MCP); strict mode raises `KitaruMemoryArtifactUnavailableError` (#189)
 
 ### Changed
-- `kitaru.memory.get(...)` no longer raises `KitaruBackendError` by default when a memory entry's artifact value is unreachable from the current stack (for example, dev→prod stack switches where old artifact URIs point at a local filesystem path). The new default is to warn and return `None` so flows can fall through to their existing missing-key handling. Callers that depended on exception-based signaling should pass `strict=True` (#183)
+- `kitaru.memory.get(...)` no longer raises `KitaruBackendError` by default when a memory entry's artifact value is unreachable from the current stack (for example, dev→prod stack switches where old artifact URIs point at a local filesystem path). The new default is to warn and return `None` so flows can fall through to their existing missing-key handling. Callers that depended on exception-based signaling should pass `strict=True` (#189)
 
 ## [0.5.0] - 2026-04-17
 
@@ -37,7 +38,6 @@ wrapped = KitaruAgent(
 ```
 
 ### Added
-- `ImageSettings.secret_environment_from` field for attaching ZenML secret references to a flow execution; Kitaru forwards the list through `Pipeline.with_options(secrets=[...])` so secret values never enter `DockerSettings.environment`, image build metadata, logs, or the frozen execution spec (#180)
 - `kitaru.get_secret()` and the public `Secret` model for exact, Kitaru-native secret reads in Python code without importing ZenML directly (#185)
 - `@checkpoint(cache=...)` per-checkpoint cache overrides (`True`/`False`/`None`) with updated configuration docs (#184)
 - `kitaru.adapters.pydantic_ai.wrap(...)` compatibility shim with deprecation warning to ease migration to `KitaruAgent(...)` (#156)
