@@ -4,25 +4,26 @@
 
 <section id="deploy" class="section-pad-compact deploy-section">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>THE PLATFORM LAYER</span>
+    <span class="section-eyebrow" data-reveal>OPEN SOURCE</span>
     <h2 class="section-title" data-reveal data-reveal-delay="1">
-      Skip the platform rebuild.
+      From laptop to enterprise. Same OSS stack.
     </h2>
     <p class="deploy-lede" data-reveal data-reveal-delay="2">
-      Every agent team ends up writing this themselves: credential brokering, scoped permissions, run tracking, multi-mode dispatch. Kitaru is that layer. Open source. Self-hosted. Yours.
+      Kitaru ships as a CLI, a dashboard, and a scalable execution server. All open source, all self-hosted. Runs on your laptop today. Scales to your enterprise cloud when you need it.
     </p>
 
-    <div class="deploy-terminal" data-reveal data-reveal-delay="3">
-      <div class="deploy-terminal-header">
-        <div class="deploy-terminal-dots">
-          <span class="code-dot"></span>
-          <span class="code-dot"></span>
-          <span class="code-dot"></span>
+    <div class="deploy-layout">
+      <div class="deploy-terminal" data-reveal data-reveal-delay="3">
+        <div class="deploy-terminal-header">
+          <div class="deploy-terminal-dots">
+            <span class="code-dot"></span>
+            <span class="code-dot"></span>
+            <span class="code-dot"></span>
+          </div>
+          <span class="deploy-terminal-title">~/your-agent</span>
         </div>
-        <span class="deploy-terminal-title">~/your-agent</span>
-      </div>
-      <pre class="deploy-terminal-pre"><code><span class="deploy-cmt"># install and log in to a local server</span>
-<span class="deploy-prompt">$</span> uv pip install <span class="deploy-str">"kitaru[local]"</span>
+        <pre class="deploy-terminal-pre"><code><span class="deploy-cmt"># install and log in to a local server</span>
+<span class="deploy-prompt">$</span> uv add kitaru
 <span class="deploy-prompt">$</span> kitaru login
 <span class="deploy-ok">✓ Connected to local server at http://localhost:9090</span>
 
@@ -34,12 +35,25 @@
 <span class="deploy-cmt"># replay from any checkpoint</span>
 <span class="deploy-prompt">$</span> kitaru executions replay 4f2a --from process_data
 <span class="deploy-ok">✓ replayed from checkpoint process_data</span></code></pre>
-    </div>
+      </div>
 
-    <a href="/roadmap" class="deploy-roadmap-nudge" data-reveal data-reveal-delay="4">
-      <span class="deploy-roadmap-headline">See the roadmap for upcoming features</span>
-      <span class="deploy-roadmap-arrow" aria-hidden="true">→</span>
-    </a>
+      <aside class="deploy-sidecar" data-reveal="fade-right" data-reveal-delay="4">
+        <span class="deploy-sidecar-label">After pip install</span>
+        <p class="deploy-sidecar-text">
+          Dashboard, replay, durable memory, and the PydanticAI adapter. All on your infrastructure.
+        </p>
+        <div class="deploy-sidecar-links">
+          <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="deploy-sidecar-link">
+            Star on GitHub
+            <span aria-hidden="true">→</span>
+          </a>
+          <a href="/roadmap" class="deploy-sidecar-link">
+            See the roadmap
+            <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </aside>
+    </div>
 
   </div>
 </section>
@@ -58,13 +72,22 @@
     color: var(--color-secondary);
   }
 
+  /* ─── Two-column layout ─── */
+  .deploy-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr);
+    gap: 28px;
+    align-items: stretch;
+  }
+
   /* ─── Terminal ─── */
   .deploy-terminal {
     background: oklch(0.16 0.015 60);
     border: 1px solid oklch(1 0 0 / 0.08);
     border-radius: 12px;
     overflow: hidden;
-    max-width: 820px;
+    display: flex;
+    flex-direction: column;
   }
 
   .deploy-terminal-header {
@@ -116,57 +139,71 @@
     font-size: 0.78rem;
   }
 
-  /* ─── Roadmap nudge ─── */
-  .deploy-roadmap-nudge {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 16px;
-    margin-top: 28px;
-    padding: 14px 20px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    text-decoration: none;
-    transition: border-color 0.2s, background 0.2s, transform 0.2s;
+  /* ─── Sidecar ─── */
+  .deploy-sidecar {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 14px;
+    padding: 4px 4px 4px 0;
   }
 
-  .deploy-roadmap-nudge:hover {
-    border-color: oklch(0.65 0.16 45 / 0.35);
-    background: oklch(0.65 0.16 45 / 0.03);
-    transform: translateY(-1px);
+  .deploy-sidecar-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
   }
 
-  .deploy-roadmap-headline {
-    font-size: 0.92rem;
-    font-weight: 500;
+  .deploy-sidecar-text {
+    font-size: 0.95rem;
+    line-height: 1.55;
     color: var(--color-primary);
+    margin: 0;
     letter-spacing: -0.005em;
   }
 
-  .deploy-roadmap-arrow {
-    color: var(--color-accent);
-    font-size: 1rem;
-    transition: transform 0.2s;
+  .deploy-sidecar-links {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
   }
 
-  .deploy-roadmap-nudge:hover .deploy-roadmap-arrow {
-    transform: translateX(3px);
+  .deploy-sidecar-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    text-decoration: none;
+    padding: 2px 0;
+    width: fit-content;
+    transition: gap 0.2s;
+  }
+
+  .deploy-sidecar-link:hover {
+    gap: 10px;
+  }
+
+  @media (max-width: 900px) {
+    .deploy-layout {
+      grid-template-columns: 1fr;
+      gap: 20px;
+    }
+
+    .deploy-sidecar {
+      padding: 0;
+    }
   }
 
   @media (max-width: 640px) {
     .deploy-terminal-pre {
       font-size: 0.74rem;
       padding: 14px 16px;
-    }
-
-    .deploy-roadmap-nudge {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 6px;
-    }
-
-    .deploy-roadmap-arrow {
-      display: none;
     }
   }
 </style>
