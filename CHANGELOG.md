@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Breaking Changes
-- `kitaru.adapters.pydantic_ai.wrap(...)` is deprecated in favor of `KitaruAgent(...)`. A compatibility shim remains for one release.
-- Legacy adapter capture config names were renamed: `"metadata_only"` -> `"metadata"` and `"off"` -> `None`.
-- Legacy `tool_capture_config_by_name={"name": {"mode": "metadata_only"}}` now maps to `capture=CapturePolicy(tool_capture_overrides={"name": "metadata"})`.
+- `kitaru.adapters.pydantic_ai.wrap(...)` is deprecated in favor of `KitaruAgent(...)`. A compatibility shim remains for one release (#156)
+- Legacy adapter capture config names were renamed: `"metadata_only"` -> `"metadata"` and `"off"` -> `None` (#156)
+- Legacy `tool_capture_config_by_name={"name": {"mode": "metadata_only"}}` now maps to `capture=CapturePolicy(tool_capture_overrides={"name": "metadata"})` (#156)
 
 Migration snippet:
 
@@ -27,20 +27,19 @@ wrapped = KitaruAgent(
 ```
 
 ### Added
-- Restored end-to-end PydanticAI adapter integration coverage for turn mode, granular mode, and auto-flow execution.
-- Granular checkpoint mode now installs a run-level tracker at flow scope and persists `pydantic_ai_events` plus `pydantic_ai_run_summaries` even when no turn checkpoint is opened.
-- `kitaru.adapters.pydantic_ai.wrap(...)` compatibility shim with deprecation warning to ease migration to `KitaruAgent(...)`.
+- `kitaru.get_secret()` and the public `Secret` model for exact, Kitaru-native secret reads in Python code without importing ZenML directly (#185)
+- `@checkpoint(cache=...)` per-checkpoint cache overrides (`True`/`False`/`None`) with updated configuration docs (#184)
+- `kitaru.adapters.pydantic_ai.wrap(...)` compatibility shim with deprecation warning to ease migration to `KitaruAgent(...)` (#156)
+- Granular checkpoint mode now installs a run-level tracker at flow scope and persists `pydantic_ai_events` plus `pydantic_ai_run_summaries` even when no turn checkpoint is opened (#156)
+- Restored end-to-end PydanticAI adapter integration coverage for turn mode, granular mode, and auto-flow execution (#156)
 
 ### Changed
-- PydanticAI adapter auto-flow now re-enters the normal run path so turn checkpoints, tracking, and message-history capture apply outside explicit flows.
-- PydanticAI granular mode now defaults its per-call checkpoint configs on, rejects invalid config combinations eagerly, keeps HITL interception active when capture is disabled, and raises clear usage errors for unsupported deferred-tool schemas.
-- PydanticAI adapter docs, README examples, and migration guidance now match the shipped runtime: `runtime="inline"` only for adapter-managed checkpoints, explicit deprecation path for `wrap(...)`, and corrected capture-policy examples.
-### Added
-- `kitaru.get_secret()` and the public `Secret` model for exact, Kitaru-native secret reads in Python code without importing ZenML directly
-- `@checkpoint(cache=...)` per-checkpoint cache overrides (`True`/`False`/`None`) with updated configuration docs
+- PydanticAI adapter auto-flow now re-enters the normal run path so turn checkpoints, tracking, and message-history capture apply outside explicit flows (#156)
+- PydanticAI granular mode now defaults its per-call checkpoint configs on, rejects invalid config combinations eagerly, keeps HITL interception active when capture is disabled, and raises clear usage errors for unsupported deferred-tool schemas (#156)
+- PydanticAI adapter docs, README examples, and migration guidance now match the shipped runtime: `runtime="inline"` only for adapter-managed checkpoints, explicit deprecation path for `wrap(...)`, and corrected capture-policy examples (#156)
 
 ### Fixed
-- Execution-level cache no longer defaults to `True`, so `@checkpoint(cache=False)` is preserved through ZenML compilation when no flow-level cache is explicitly configured
+- Execution-level cache no longer defaults to `True`, so `@checkpoint(cache=False)` is preserved through ZenML compilation when no flow-level cache is explicitly configured (#184)
 
 ## [0.4.1] - 2026-04-16
 
