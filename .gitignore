@@ -260,4 +260,4 @@ src/kitaru/_ui/bundle_manifest.json
 .codex/*
 !.codex/skills/
 AGENTS.override.md
-.agents/skills/
+.agents/skills/*

@@ -23,7 +23,7 @@ Example:
 Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
-  ``save()``, ``load()``, ``wait()``, ``llm()``,
+  ``save()``, ``load()``, ``wait()``, ``llm()``, ``get_secret()``,
   ``memory.configure/set/get/list/history/delete()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
@@ -93,6 +93,7 @@ from kitaru.errors import (
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
+from kitaru.secrets import Secret, get_secret
 from kitaru.wait import wait
 
 __all__ = [
@@ -113,6 +114,7 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "Secret",
     "StackInfo",
     "checkpoint",
     "configure",
@@ -121,6 +123,7 @@ __all__ = [
     "current_stack",
     "delete_stack",
     "flow",
+    "get_secret",
     "list_stacks",
     "llm",
     "load",

@@ -177,10 +177,12 @@ def test_feature_adoption_event_canonical_strings() -> None:
     assert AnalyticsEvent.MEMORY_COMPACTED == "Kitaru memory compacted"
     assert AnalyticsEvent.MEMORY_REINDEX_RUN == "Kitaru memory reindex run"
     assert AnalyticsEvent.SECRET_UPSERTED == "Kitaru secret upserted"
+    assert AnalyticsEvent.SECRET_READ == "Kitaru secret read"
     assert AnalyticsEvent.STACK_CREATED == "Kitaru stack created"
     assert AnalyticsEvent.STACK_ACTIVATED == "Kitaru stack activated"
     assert AnalyticsEvent.MODEL_ALIAS_REGISTERED == "Kitaru model alias registered"
     assert AnalyticsEvent.LOG_STORE_CONFIGURED == "Kitaru log store configured"
+    assert AnalyticsEvent.CHECKPOINT_INVOKED == "Kitaru checkpoint invoked"
 
 
 def test_adapter_event_canonical_strings() -> None:
