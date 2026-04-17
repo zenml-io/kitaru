@@ -15,13 +15,13 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+import yaml
 from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.constants import (
     CONFIG_FILE_NAME,
     ENV_ZENML_ACTIVE_PROJECT_ID,
     ENV_ZENML_ACTIVE_STACK_ID,
-    REPOSITORY_DIRECTORY_NAME,
 )
 from zenml.models import SecretResponse
 from zenml.utils import yaml_utils
@@ -36,6 +36,7 @@ from kitaru._client._models import (
     LogEntry,
     PendingWait,
 )
+from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
 from kitaru._version import resolve_installed_version
 from kitaru.config import (
     KITARU_PROJECT_ENV,
@@ -68,19 +69,22 @@ logger = logging.getLogger(__name__)
 
 _LOCALHOST_NAMES = {"127.0.0.1", "localhost", "::1"}
 
+ProvenanceResource = Literal["active_stack", "active_project"]
+ProvenanceSource = Literal[
+    "environment",
+    "repo-local config",
+    "global config",
+    "unset",
+    "unknown",
+]
+
 
 @dataclass(frozen=True)
 class ActiveConfigSelectionProvenance:
     """Raw and resolved provenance for an active stack/project selection."""
 
-    resource: Literal["active_stack", "active_project"]
-    effective_source: Literal[
-        "environment",
-        "repo-local config",
-        "global config",
-        "unset",
-        "unknown",
-    ]
+    resource: ProvenanceResource
+    effective_source: ProvenanceSource
     effective_source_detail: str | None
     effective_id: str | None
     resolved_id: str | None = None
@@ -371,12 +375,9 @@ def _read_raw_yaml_mapping(path: Path) -> tuple[dict[str, Any], str | None]:
 
     try:
         raw = yaml_utils.read_yaml(str(path))
-    except Exception as exc:
+    except (OSError, yaml.YAMLError) as exc:
         logger.debug("Could not read config file %s", path, exc_info=True)
-        return {}, (
-            f"Could not read config file {path}: {type(exc).__name__}. "
-            "Details were omitted to avoid leaking config contents."
-        )
+        return {}, f"Could not read config file {path} ({type(exc).__name__}): {exc}"
 
     if raw is None:
         return {}, None
@@ -397,13 +398,18 @@ def _find_repository_root_for_diagnostics() -> tuple[Path | None, str | None]:
     """Find the active repository root without constructing a ZenML client."""
     try:
         return Client.find_repository(enable_warnings=False), None
-    except Exception as exc:
+    except OSError as exc:
         return None, f"Could not inspect repository root: {type(exc).__name__}: {exc}"
+
+
+def _repo_local_config_path(repository_root: Path | str) -> Path:
+    """Return the `.kitaru/config.yaml` path for a given repository root."""
+    return Path(repository_root) / KITARU_REPOSITORY_DIRECTORY_NAME / CONFIG_FILE_NAME
 
 
 def _build_selection_provenance(
     *,
-    resource: Literal["active_stack", "active_project"],
+    resource: ProvenanceResource,
     environment_variable: str,
     environment_id: str | None,
     repository_root: Path | None,
@@ -414,13 +420,7 @@ def _build_selection_provenance(
     notes: list[str],
 ) -> ActiveConfigSelectionProvenance:
     """Apply ZenML's active context precedence to raw diagnostic candidates."""
-    effective_source: Literal[
-        "environment",
-        "repo-local config",
-        "global config",
-        "unset",
-        "unknown",
-    ]
+    effective_source: ProvenanceSource
     effective_source_detail: str | None
     effective_id: str | None
 
@@ -476,9 +476,7 @@ def _collect_active_context_provenance(
 
     repository_config_path: Path | None = None
     if repository_root is not None:
-        repository_config_path = (
-            repository_root / REPOSITORY_DIRECTORY_NAME / CONFIG_FILE_NAME
-        )
+        repository_config_path = _repo_local_config_path(repository_root)
 
     global_config_path = Path(gc.config_directory) / CONFIG_FILE_NAME
     repo_config: dict[str, Any] = {}
@@ -557,6 +555,43 @@ def _with_resolved_selection(
     )
 
 
+def _unknown_provenance_pair(
+    note: str,
+) -> tuple[ActiveConfigSelectionProvenance, ActiveConfigSelectionProvenance]:
+    """Return stub stack/project provenance records when collection itself failed.
+
+    The user passed `--all` explicitly asking for provenance. Returning `None`
+    would silently omit the section; emitting stubs with `effective_source="unknown"`
+    guarantees the failure is visible in the output.
+    """
+    return (
+        ActiveConfigSelectionProvenance(
+            resource="active_stack",
+            effective_source="unknown",
+            effective_source_detail=None,
+            effective_id=None,
+            notes=[note],
+        ),
+        ActiveConfigSelectionProvenance(
+            resource="active_project",
+            effective_source="unknown",
+            effective_source_detail=None,
+            effective_id=None,
+            notes=[note],
+        ),
+    )
+
+
+def _annotate_provenance_with_note(
+    provenance: ActiveConfigSelectionProvenance | None,
+    note: str,
+) -> ActiveConfigSelectionProvenance | None:
+    """Append a diagnostic note to a provenance record, preserving existing notes."""
+    if provenance is None:
+        return None
+    return replace(provenance, notes=[*provenance.notes, note])
+
+
 def _collect_config_provenance(
     gc: GlobalConfiguration,
     *,
@@ -579,11 +614,7 @@ def _collect_config_provenance(
     repo_config_str: str | None = None
     uses_repo = False
     if repository_root:
-        from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
-
-        repo_config = (
-            Path(repository_root) / KITARU_REPOSITORY_DIRECTORY_NAME / "config.yaml"
-        )
+        repo_config = _repo_local_config_path(repository_root)
         if repo_config.exists():
             repo_config_str = str(repo_config)
             uses_repo = True
@@ -634,22 +665,12 @@ def _collect_connection_sources() -> dict[str, str]:
         sources["project"] = "runtime override (kitaru.configure)"
     else:
         try:
-            client = Client()
-            if client.root:
-                from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
-
-                repo_config = (
-                    Path(str(client.root))
-                    / KITARU_REPOSITORY_DIRECTORY_NAME
-                    / "config.yaml"
-                )
-                if repo_config.exists():
-                    sources["project"] = "repo-local config (.kitaru/)"
-                else:
-                    sources["project"] = "global config"
+            repo_root = Client.find_repository(enable_warnings=False)
+            if repo_root and _repo_local_config_path(repo_root).exists():
+                sources["project"] = "repo-local config (.kitaru/)"
             else:
                 sources["project"] = "global config"
-        except Exception:
+        except OSError:
             sources["project"] = "global config"
 
     return sources
@@ -736,8 +757,16 @@ def build_runtime_snapshot(
                 active_stack_provenance,
                 active_project_provenance,
             ) = _collect_active_context_provenance(gc)
-        except Exception:
+        except Exception as exc:
             logger.debug("Could not collect active context provenance", exc_info=True)
+            failure_note = (
+                f"Could not collect active context provenance "
+                f"({type(exc).__name__}): {exc}"
+            )
+            (
+                active_stack_provenance,
+                active_project_provenance,
+            ) = _unknown_provenance_pair(failure_note)
 
     try:
         store_cfg = gc.store_configuration
@@ -848,7 +877,22 @@ def build_runtime_snapshot(
             logger.debug("Could not collect config provenance", exc_info=True)
 
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
-        snapshot.warning = f"Unable to query the configured store: {exc}"
+        snapshot.warning = combine_warnings(
+            snapshot.warning,
+            f"Unable to query the configured store ({type(exc).__name__}): {exc}",
+        )
+        client_failure_note = (
+            f"Client() failed ({type(exc).__name__}): {exc}. "
+            "Raw IDs above were captured before this failure."
+        )
+        snapshot.active_stack_provenance = _annotate_provenance_with_note(
+            snapshot.active_stack_provenance,
+            client_failure_note,
+        )
+        snapshot.active_project_provenance = _annotate_provenance_with_note(
+            snapshot.active_project_provenance,
+            client_failure_note,
+        )
 
     try:
         preferred_log_store = resolve_log_store()
