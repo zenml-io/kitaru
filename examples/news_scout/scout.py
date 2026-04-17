@@ -1,8 +1,13 @@
-"""News scout v2 — an agentic news monitor powered by PydanticAI + Kitaru.
+"""News scout v2 — agentic news monitor on Kitaru + PydanticAI (granular mode).
 
 A PydanticAI agent with 4 tools autonomously searches news sources, investigates
-articles, and judges what is worth surfacing. Kitaru handles durable memory
-(interests, seen fingerprints) and replay.
+articles, and judges what is worth surfacing. Uses ``KitaruAgent`` with
+``granular_checkpoints=True`` so every model and tool call becomes its own
+Kitaru checkpoint — each one replayable, cached, and visible in the dashboard.
+
+Granular mode requires the agent to run at flow scope (not inside a parent
+checkpoint), so memory is read detached — outside the flow — and interests +
+seen fingerprints are passed in as flow arguments with concrete values.
 
 Usage::
 
@@ -14,22 +19,19 @@ Usage::
 import argparse
 import os
 import sys
-from typing import Annotated
 
 from utils import load_dotenv
 
 # Load .env BEFORE any provider SDK touches the environment.
 load_dotenv()
 
-from models import ScoutContext  # noqa: E402
 from prompts import SYSTEM_PROMPT, build_user_prompt  # noqa: E402
 from pydantic_ai import Agent  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 from tools import fetch_url, investigate, search_news, search_twitter  # noqa: E402
 
-import kitaru  # noqa: E402
-from kitaru import checkpoint, flow, memory  # noqa: E402
-from kitaru.adapters import pydantic_ai as kp  # noqa: E402
+from kitaru import flow, memory  # noqa: E402
+from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config
@@ -38,7 +40,6 @@ from kitaru.adapters import pydantic_ai as kp  # noqa: E402
 NAMESPACE = "news_scout"
 MODEL = os.environ.get("KITARU_SCOUT_MODEL", "anthropic:claude-sonnet-4-6")
 MAX_REQUESTS = 50
-SEEN_FINGERPRINT_WINDOW = 500
 
 DEFAULT_INTERESTS: list[str] = [
     "artificial intelligence",
@@ -48,117 +49,52 @@ DEFAULT_INTERESTS: list[str] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Agent — wrapped once at module scope
+# Agent — granular checkpoint mode: every model/tool call is its own checkpoint
 # ---------------------------------------------------------------------------
 
-scout_agent = kp.wrap(
+scout_agent = KitaruAgent(
     Agent(
         MODEL,
+        name="news_scout",
         tools=[search_news, search_twitter, investigate, fetch_url],
         system_prompt=SYSTEM_PROMPT,
     ),
-    tool_capture_config={"mode": "full"},
+    granular_checkpoints=True,
+    model_checkpoint_config={"retries": 2},
+    tool_checkpoint_config={"retries": 1},
+    capture=CapturePolicy(tool_capture="full"),
 )
 
 # ---------------------------------------------------------------------------
-# Checkpoints
-# ---------------------------------------------------------------------------
-
-
-@checkpoint
-def resolve_context(
-    interests_raw: list[str] | None,
-    seen_raw: list[str] | None,
-    override: list[str] | None,
-) -> Annotated[ScoutContext, "scout_context"]:
-    """Normalize memory artifact refs into a concrete ScoutContext."""
-    interests = override or interests_raw or DEFAULT_INTERESTS
-    seen = list(seen_raw) if seen_raw else []
-    kitaru.log(
-        event="resolve_context",
-        interests_count=len(interests),
-        seen_count=len(seen),
-    )
-    return ScoutContext(interests=list(interests), seen_fingerprints=seen)
-
-
-@checkpoint(type="llm_call")
-def run_scout(context: ScoutContext) -> Annotated[str, "scout_report"]:
-    """Run the PydanticAI agent. This is the main replay boundary."""
-    user_prompt = build_user_prompt(context.interests, context.seen_fingerprints)
-    try:
-        result = scout_agent.run_sync(
-            user_prompt,
-            usage_limits=UsageLimits(request_limit=MAX_REQUESTS),
-        )
-        output = result.output
-    except Exception as exc:
-        output = f"Agent stopped: {exc}"
-
-    # Print report to console
-    print()
-    print("=" * 72)
-    print("News scout report")
-    print("=" * 72)
-    print(output)
-    print()
-
-    return output
-
-
-@checkpoint
-def update_seen(
-    context: ScoutContext,
-    report: str,
-) -> Annotated[list[str], "seen_fingerprints_out"]:
-    """Extend the seen-fingerprint set. Extracts fingerprints mentioned in the report.
-
-    Since the agent returns free text, we can't extract fingerprints from it.
-    Instead, we just keep the existing seen set — the agent already skipped
-    seen items via the prompt context. Future runs will re-check.
-    """
-    # For now, just preserve the existing set — the agent was told which
-    # fingerprints to skip, so dedup happened at search time.
-    kitaru.log(event="update_seen", total=len(context.seen_fingerprints))
-    return context.seen_fingerprints
-
-
-# ---------------------------------------------------------------------------
-# Flow
+# Flow — agent runs at flow scope so granular mode can open per-call checkpoints
 # ---------------------------------------------------------------------------
 
 
 @flow
-def news_scout(interests_override: list[str] | None = None) -> None:
-    """Agentic news scout with durable memory."""
-    # --- Memory reads ---
-    memory.configure(scope=NAMESPACE, scope_type="namespace")
-    interests_raw = memory.get("interests")
-    memory.configure(scope_type="flow")
-    seen_raw = memory.get("seen_fingerprints")
-
-    # --- Resolve context ---
-    context = resolve_context(
-        interests_raw=interests_raw,
-        seen_raw=seen_raw,
-        override=interests_override,
+def news_scout(interests: list[str], seen_fingerprints: list[str]) -> None:
+    """Agentic news scout. Agent runs at flow scope; each tool call is its own
+    Kitaru checkpoint (replayable, cached, visible in the dashboard)."""
+    user_prompt = build_user_prompt(interests, seen_fingerprints)
+    result = scout_agent.run_sync(
+        user_prompt,
+        usage_limits=UsageLimits(request_limit=MAX_REQUESTS),
     )
 
-    # --- Agent runs ---
-    report = run_scout(context=context)
-
-    # --- Memory write ---
-    updated = update_seen(context=context, report=report)
-    memory.set("seen_fingerprints", updated)
+    print()
+    print("=" * 72)
+    print("News scout report")
+    print("=" * 72)
+    print(result.output)
+    print()
 
 
 # ---------------------------------------------------------------------------
-# Profile seeding (outside flow)
+# Profile seeding (detached — outside the flow, namespace-scoped memory)
 # ---------------------------------------------------------------------------
 
 
 def seed_profile(interests: list[str]) -> None:
-    """Write interests into namespace memory."""
+    """Write interests into namespace memory. Runs detached (outside any flow)."""
     memory.configure(scope=NAMESPACE, scope_type="namespace")
     memory.set("interests", interests)
     print(f"Seeded {len(interests)} interests into namespace '{NAMESPACE}':")
@@ -171,9 +107,14 @@ def seed_profile(interests: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def main(argv: list[str] | None = None) -> int:
-    load_dotenv()
+def _parse_interests(raw: str | None) -> list[str] | None:
+    if raw is None:
+        return None
+    parts = [p.strip() for p in raw.split(",")]
+    return [p for p in parts if p]
 
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Kitaru agentic news scout.")
     parser.add_argument(
         "--seed-profile",
@@ -188,17 +129,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    override = (
-        [p.strip() for p in args.interests.split(",") if p.strip()]
-        if args.interests
-        else None
-    )
+    override = _parse_interests(args.interests)
 
     if args.seed_profile:
         seed_profile(override or DEFAULT_INTERESTS)
         return 0
 
-    news_scout.run(interests_override=override)
+    # Detached memory reads — both keys live in the same namespace scope so
+    # concrete values can be passed into the flow.
+    memory.configure(scope=NAMESPACE, scope_type="namespace")
+    interests_from_memory = memory.get("interests")
+    seen_fingerprints = memory.get("seen_fingerprints") or []
+    interests = override or interests_from_memory or DEFAULT_INTERESTS
+
+    news_scout.run(interests=interests, seen_fingerprints=seen_fingerprints)
     return 0
 
 
