@@ -87,7 +87,7 @@ The important distinction is:
 
 ## Checkpoint cache overrides
 
-You can now set cache behavior at checkpoint granularity:
+You can set cache behavior at checkpoint granularity:
 
 ```python
 from kitaru import checkpoint, flow
@@ -96,16 +96,20 @@ from kitaru import checkpoint, flow
 def always_fresh(topic: str) -> str:
     ...
 
-@flow(cache=True)
+@flow
 def my_flow(topic: str) -> str:
     return always_fresh(topic)
 ```
 
-When both are set, checkpoint-level cache takes precedence for that checkpoint:
+- `@checkpoint(cache=False)` disables cache for that checkpoint.
+- `@checkpoint(cache=True)` enables cache for that checkpoint.
+- Omitting `cache` defers to the execution-level setting (or the orchestrator default).
 
-1. `@checkpoint(cache=...)` (when set)
-2. flow-level cache (`@flow(cache=...)` or `my_flow.run(cache=...)`)
-3. lower-precedence defaults (`kitaru.configure`, env vars, project config, built-ins)
+For mixed cache behavior in one flow, leave execution-level cache unset and
+configure `cache` only on the checkpoints that need different behavior. If you
+set cache at execution level (`KITARU_CACHE`, `kitaru.configure(cache=...)`,
+`@flow(cache=...)`, or `my_flow.run(cache=...)`), that value is treated as an
+execution-wide override for the run and replaces any checkpoint-level setting.
 
 ## Environment variables
 
@@ -190,7 +194,7 @@ active. Secret values such as `KITARU_AUTH_TOKEN` and
 4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
 6. Persisted active stack fallback plus global user config (for example connection defaults)
-7. Built-in defaults (`cache=True`, `retries=0`)
+7. Built-in defaults (`retries=0`; cache is left unset so per-checkpoint cache settings and orchestrator defaults apply)
 
 In practice, `stack` starts unset in the built-in defaults and is then resolved
 from the persisted active stack when one is available.

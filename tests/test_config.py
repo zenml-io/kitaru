@@ -3801,6 +3801,21 @@ def test_resolve_execution_config_rejects_invalid_cache_env(
         resolve_execution_config()
 
 
+def test_resolve_execution_config_default_cache_is_unset() -> None:
+    """With no cache configured anywhere, resolved cache must be None.
+
+    A concrete default would become a run-level enable_cache override at
+    compile time and clobber per-checkpoint cache settings.
+    """
+    with patch(
+        "kitaru.config.current_stack",
+        return_value=SimpleNamespace(name="global-stack"),
+    ):
+        resolved = resolve_execution_config()
+
+    assert resolved.cache is None
+
+
 def test_resolve_execution_config_supports_string_image_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

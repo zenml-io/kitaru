@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from functools import update_wrapper, wraps
-from typing import Any, cast, overload
+from typing import Any, Literal, cast, overload
 
 from zenml.config.retry_config import StepRetryConfig
 from zenml.enums import StepRuntime, StepType
@@ -37,6 +37,8 @@ from kitaru.runtime import (
     _get_zenml_flow_name,
     _is_inside_flow,
 )
+
+CheckpointSurface = Literal["call", "submit", "map", "product"]
 
 _CHECKPOINT_OUTSIDE_FLOW_ERROR = "Checkpoints can only run inside a @flow."
 _CHECKPOINT_NESTED_ERROR = (
@@ -183,6 +185,7 @@ class _CheckpointDefinition:
         self._default_retries = _normalize_retries(retries)
         self._runtime = _normalize_runtime(runtime)
         self._cache = cache
+        self._cache_explicitly_set = cache is not None
 
         wrapped_entrypoint = _wrap_entrypoint(
             func,
@@ -232,13 +235,13 @@ class _CheckpointDefinition:
         if not DynamicPipelineRunContext.is_active() or not _is_inside_flow():
             raise KitaruContextError(_CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR)
 
-    def _track_invocation(self, *, method: str) -> None:
+    def _track_invocation(self, *, method: CheckpointSurface) -> None:
         """Emit checkpoint-level telemetry for invocation surfaces."""
         track(
             AnalyticsEvent.CHECKPOINT_INVOKED,
             {
                 "method": method,
-                "cache_explicitly_set": self._cache is not None,
+                "cache_explicitly_set": self._cache_explicitly_set,
             },
         )
 
@@ -251,8 +254,9 @@ class _CheckpointDefinition:
     ) -> Any:
         """Call the checkpoint with context guardrails."""
         self._assert_call_allowed()
+        result = self._step(*args, id=id, after=after, **kwargs)
         self._track_invocation(method="call")
-        return self._step(*args, id=id, after=after, **kwargs)
+        return result
 
     def submit(
         self,
@@ -263,8 +267,9 @@ class _CheckpointDefinition:
     ) -> Any:
         """Submit the checkpoint concurrently inside a running flow."""
         self._assert_submit_allowed()
+        result = self._step.submit(*args, id=id, after=after, **kwargs)
         self._track_invocation(method="submit")
-        return self._step.submit(*args, id=id, after=after, **kwargs)
+        return result
 
     def map(
         self,
@@ -274,8 +279,9 @@ class _CheckpointDefinition:
     ) -> Any:
         """Map checkpoint invocations inside a running flow."""
         self._assert_submit_allowed()
+        result = self._step.map(*args, after=after, **kwargs)
         self._track_invocation(method="map")
-        return self._step.map(*args, after=after, **kwargs)
+        return result
 
     def product(
         self,
@@ -285,8 +291,9 @@ class _CheckpointDefinition:
     ) -> Any:
         """Map checkpoint invocations as a cartesian product in a running flow."""
         self._assert_submit_allowed()
+        result = self._step.product(*args, after=after, **kwargs)
         self._track_invocation(method="product")
-        return self._step.product(*args, after=after, **kwargs)
+        return result
 
 
 @overload
@@ -339,7 +346,8 @@ def checkpoint(
             decide.
         cache: Optional per-checkpoint cache override. ``True`` enables cache
             for this checkpoint, ``False`` disables it, and ``None`` defers to
-            higher-level flow/default cache behavior.
+            higher-level flow/default cache behavior. Useful for forcing one
+            expensive step to re-run while the rest of the flow stays cached.
 
     Returns:
         The wrapped checkpoint object or a decorator that returns it.

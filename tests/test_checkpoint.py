@@ -32,9 +32,30 @@ class _FakeStep:
 
     def __init__(self, func: Callable[..., Any]) -> None:
         self._func = func
-        self.call_args: tuple[tuple[Any, ...], dict[str, Any]] | None = None
-        self.submit_args: tuple[tuple[Any, ...], dict[str, Any]] | None = None
-        self.submit_result: object = object()
+        self.args: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
+        self.results: dict[str, object] = {
+            "submit": object(),
+            "map": object(),
+            "product": object(),
+        }
+        self.side_effects: dict[str, BaseException] = {}
+        # Orders surface calls relative to the telemetry mock for post-step
+        # assertions.
+        self.events: list[str] = []
+
+    @property
+    def call_args(self) -> tuple[tuple[Any, ...], dict[str, Any]] | None:
+        return self.args.get("call")
+
+    @property
+    def submit_args(self) -> tuple[tuple[Any, ...], dict[str, Any]] | None:
+        return self.args.get("submit")
+
+    def _record_and_raise(self, surface: str) -> None:
+        self.events.append(surface)
+        exc = self.side_effects.get(surface)
+        if exc is not None:
+            raise exc
 
     def __call__(
         self,
@@ -43,7 +64,8 @@ class _FakeStep:
         after: Any = None,
         **kwargs: Any,
     ) -> Any:
-        self.call_args = (args, {"id": id, "after": after, **kwargs})
+        self.args["call"] = (args, {"id": id, "after": after, **kwargs})
+        self._record_and_raise("call")
         return self._func(*args, **kwargs)
 
     def submit(
@@ -53,14 +75,19 @@ class _FakeStep:
         after: Any = None,
         **kwargs: Any,
     ) -> object:
-        self.submit_args = (args, {"id": id, "after": after, **kwargs})
-        return self.submit_result
+        self.args["submit"] = (args, {"id": id, "after": after, **kwargs})
+        self._record_and_raise("submit")
+        return self.results["submit"]
 
     def map(self, *args: Any, after: Any = None, **kwargs: Any) -> object:
-        return ("map", args, after, kwargs)
+        self.args["map"] = (args, {"after": after, **kwargs})
+        self._record_and_raise("map")
+        return self.results["map"]
 
     def product(self, *args: Any, after: Any = None, **kwargs: Any) -> object:
-        return ("product", args, after, kwargs)
+        self.args["product"] = (args, {"after": after, **kwargs})
+        self._record_and_raise("product")
+        return self.results["product"]
 
 
 def _build_checkpoint(
@@ -262,42 +289,89 @@ def test_checkpoint_rejects_invalid_runtime_type() -> None:
         checkpoint(runtime=123)(lambda: None)  # type: ignore[arg-type]
 
 
-def test_checkpoint_call_tracks_cache_explicitly_set_flag() -> None:
-    wrapped, captured = _build_checkpoint(lambda: "ok", cache=False)
+def _invoke_surface(wrapped: Any, method: str) -> None:
+    """Invoke a checkpoint surface by name for parametrized tests."""
+    if method == "call":
+        wrapped()
+    elif method == "submit":
+        wrapped.submit()
+    elif method == "map":
+        wrapped.map([1, 2])
+    elif method == "product":
+        wrapped.product([1, 2])
+    else:
+        raise AssertionError(f"unknown surface: {method}")
+
+
+@pytest.mark.parametrize("method", ["call", "submit", "map", "product"])
+@pytest.mark.parametrize(
+    ("cache", "explicitly_set"),
+    [(True, True), (False, True), (None, False)],
+)
+def test_checkpoint_surface_tracks_invocation_after_step(
+    method: str, cache: bool | None, explicitly_set: bool
+) -> None:
+    """Every public checkpoint surface must emit telemetry post-step."""
+    wrapped, captured = _build_checkpoint(lambda *a, **kw: "ok", cache=cache)
+
+    contexts = (
+        _zenml_contexts(compilation_active=True, flow_active=True)
+        if method == "call"
+        else _zenml_contexts(dynamic_run_active=True, flow_active=True)
+    )
+
+    with contexts, patch("kitaru.checkpoint.track") as track_mock:
+        _invoke_surface(wrapped, method)
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CHECKPOINT_INVOKED,
+        {"method": method, "cache_explicitly_set": explicitly_set},
+    )
+    # Telemetry must fire AFTER the underlying ZenML surface, matching the
+    # post-success convention used by FLOW_SUBMITTED / LLM_CALLED. Tracking
+    # before the call would leak events on failed submissions.
+    assert captured["step"].events == [method]
+
+
+@pytest.mark.parametrize("method", ["call", "submit", "map", "product"])
+def test_checkpoint_surface_does_not_track_when_step_raises(method: str) -> None:
+    """Failures from the underlying ZenML surface must suppress telemetry."""
+    wrapped, captured = _build_checkpoint(lambda *a, **kw: "ok")
+    fake_step: _FakeStep = captured["step"]
+    fake_step.side_effects[method] = RuntimeError("boom")
+
+    contexts = (
+        _zenml_contexts(compilation_active=True, flow_active=True)
+        if method == "call"
+        else _zenml_contexts(dynamic_run_active=True, flow_active=True)
+    )
 
     with (
-        _zenml_contexts(compilation_active=True, flow_active=True),
+        contexts,
         patch("kitaru.checkpoint.track") as track_mock,
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        _invoke_surface(wrapped, method)
+
+    track_mock.assert_not_called()
+
+
+def test_checkpoint_does_not_track_when_called_outside_flow_context() -> None:
+    """Guardrail rejections must not leak analytics events."""
+    wrapped, _ = _build_checkpoint(lambda: "ok")
+
+    with (
+        _zenml_contexts(
+            compilation_active=False,
+            step_active=False,
+            dynamic_run_active=False,
+        ),
+        patch("kitaru.checkpoint.track") as track_mock,
+        pytest.raises(KitaruContextError, match=r"inside a @flow"),
     ):
         wrapped()
 
-    assert captured["step"].call_args is not None
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.CHECKPOINT_INVOKED,
-        {
-            "method": "call",
-            "cache_explicitly_set": True,
-        },
-    )
-
-
-def test_checkpoint_call_tracks_cache_not_set_flag() -> None:
-    wrapped, captured = _build_checkpoint(lambda: "ok")
-
-    with (
-        _zenml_contexts(compilation_active=True, flow_active=True),
-        patch("kitaru.checkpoint.track") as track_mock,
-    ):
-        wrapped()
-
-    assert captured["step"].call_args is not None
-    track_mock.assert_called_once_with(
-        AnalyticsEvent.CHECKPOINT_INVOKED,
-        {
-            "method": "call",
-            "cache_explicitly_set": False,
-        },
-    )
+    track_mock.assert_not_called()
 
 
 def test_checkpoint_rejects_call_outside_flow_context() -> None:
@@ -390,7 +464,7 @@ def test_submit_rejects_nested_checkpoint_calls() -> None:
 def test_submit_returns_zenml_future_object() -> None:
     wrapped, captured = _build_checkpoint(lambda: "ok")
     expected_future = object()
-    captured["step"].submit_result = expected_future
+    captured["step"].results["submit"] = expected_future
 
     with _zenml_contexts(
         step_active=False,
