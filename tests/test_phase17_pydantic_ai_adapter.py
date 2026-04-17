@@ -75,18 +75,7 @@ def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
         return durable_agent.run_sync(prompt).output
 
     handle = turn_flow.run("use the add tool")
-    result = handle.wait()
-
-    assert isinstance(result, str)
-
-    hydrated_run = (
-        Client()
-        .get_pipeline_run(
-            handle.exec_id,
-            allow_name_prefix_match=False,
-        )
-        .get_hydrated_version()
-    )
+    hydrated_run = _wait_for_hydrated_run(handle.exec_id)
 
     summary_map = _metadata_dict_from_steps(hydrated_run, "pydantic_ai_run_summaries")
     event_map = _metadata_dict_from_steps(hydrated_run, "pydantic_ai_events")
