@@ -10,8 +10,10 @@ vars it's supposed to for remote deploys.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -19,6 +21,22 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 _EXAMPLE_DIR = Path(__file__).resolve().parent.parent / "examples" / "news_scout"
+
+
+def _load_scout_from_path() -> ModuleType:
+    """Load ``examples/news_scout/scout.py`` by file path.
+
+    We avoid a bare ``import scout`` because the example directory isn't on
+    the package search path at static-analysis time, which trips the type
+    checker. Loading by path makes the import explicit to both static tools
+    and the reader.
+    """
+    spec = importlib.util.spec_from_file_location("scout", _EXAMPLE_DIR / "scout.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["scout"] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -46,9 +64,7 @@ def scout_module(monkeypatch: pytest.MonkeyPatch) -> Any:
     ]:
         monkeypatch.delitem(sys.modules, module_name, raising=False)
 
-    import scout
-
-    return scout
+    return _load_scout_from_path()
 
 
 def test_scout_module_imports_and_wires_the_agent(scout_module: Any) -> None:
