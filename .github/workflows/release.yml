@@ -58,12 +58,13 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Check tag does not already exist (dispatch only)
+      - name: Check tag status (dispatch only)
         if: github.event_name == 'workflow_dispatch'
         run: |
           if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q .; then
-            echo "::error::Tag v$VERSION already exists"
-            exit 1
+            echo "::warning::Tag v$VERSION already exists — recovery mode (downstream steps will skip pre-existing artifacts)"
+          else
+            echo "Tag v$VERSION does not exist yet — normal release flow"
           fi
 
       # --- Checkout ---
@@ -103,8 +104,12 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           DATE=$(date +%Y-%m-%d)
-          sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $DATE/" CHANGELOG.md
-          echo "Updated CHANGELOG.md for $VERSION ($DATE)"
+          if grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
+            echo "CHANGELOG.md already has a section for $VERSION — skipping"
+          else
+            sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $DATE/" CHANGELOG.md
+            echo "Updated CHANGELOG.md for $VERSION ($DATE)"
+          fi
       - name: Update lockfile
         if: github.event_name == 'workflow_dispatch'
         run: uv lock
@@ -112,7 +117,11 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           git add pyproject.toml CHANGELOG.md uv.lock
-          git commit -m "Release $VERSION"
+          if git diff --cached --quiet; then
+            echo "No release changes to commit — recovery mode"
+          else
+            git commit -m "Release $VERSION"
+          fi
 
       # --- Verify version matches (tag push only) ---
       - name: Verify tag matches pyproject.toml version
@@ -171,6 +180,8 @@ jobs:
       - name: Publish to PyPI
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        with:
+          skip-existing: true
       - name: Wait for PyPI availability
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         run: |
@@ -189,14 +200,21 @@ jobs:
       # --- Push release commit to develop (dispatch only, skip on dry-run) ---
       - name: Push release commit to develop
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
-        run: git push origin HEAD:develop
+        run: |
+          REMOTE_DEVELOP=$(git ls-remote origin refs/heads/develop | awk '{print $1}')
+          LOCAL_HEAD=$(git rev-parse HEAD)
+          if [ "$REMOTE_DEVELOP" = "$LOCAL_HEAD" ]; then
+            echo "origin/develop is already at $LOCAL_HEAD — recovery mode, skipping push"
+          else
+            git push origin HEAD:develop
+          fi
 
       # --- Create release branch and update main (skip on dry-run) ---
       - name: Create release branch
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         run: |
-          git checkout -b "release/$VERSION"
-          git push origin "release/$VERSION"
+          git checkout -B "release/$VERSION"
+          git push --force origin "release/$VERSION"
       - name: Update main to release
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         run: git push --force origin "release/$VERSION:main"
@@ -205,8 +223,12 @@ jobs:
       - name: Create and push tag
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
         run: |
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
+          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q .; then
+            echo "Tag v$VERSION already exists on origin — recovery mode, skipping"
+          else
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+          fi
 
       # --- GitHub Release (skip on dry-run) ---
       - name: Create GitHub Release
@@ -214,9 +236,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "v$VERSION" dist/* \
-            --title "v$VERSION" \
-            --generate-notes
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "GitHub Release v$VERSION already exists — recovery mode, skipping"
+          else
+            gh release create "v$VERSION" dist/* \
+              --title "v$VERSION" \
+              --generate-notes
+          fi
 
       # --- Docker image ---
       - name: Set up Docker Buildx
