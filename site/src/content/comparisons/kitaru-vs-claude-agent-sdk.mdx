@@ -61,7 +61,7 @@ The Agent SDK writes session history to disk and rewinds file edits from Write, 
 >
 The Agent SDK gives you multiple model access paths — Anthropic, Bedrock, Vertex AI, Azure AI Foundry — and several container patterns. What you still own is the runtime around it: how the agent is packaged, resumed, and supervised as a durable service.
 
-Kitaru is opinionated about that layer. The same flow code runs locally and then as a durable workflow on Kubernetes, SageMaker, Vertex AI, or AzureML. `kitaru build`, `kitaru serve`, and `kitaru deploy` turn your agent into a Docker image with durability baked in, and a configured stack lets platform teams standardize deployments for every team downstream.
+Kitaru is opinionated about that layer. The same flow code runs locally and then as a durable workflow on Kubernetes, AWS, GCP, or Azure. `kitaru build`, `kitaru serve`, and `kitaru deploy` turn your agent into a Docker image with durability baked in, and a configured stack lets platform teams standardize deployments for every team downstream.
 </FeatureWithGraphic>
 
 <FeatureWithGraphic
