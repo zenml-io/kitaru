@@ -5,8 +5,8 @@ checkpoint or execution. It is context-sensitive: inside a checkpoint
 it attaches to that checkpoint; inside a flow but outside a checkpoint
 it attaches to the execution.
 
-Example::
-
+Example:
+    ```python
     from kitaru import checkpoint
 
     @checkpoint
@@ -18,6 +18,7 @@ Example::
             model=response.model,
         )
         return response.text
+    ```
 """
 
 from __future__ import annotations

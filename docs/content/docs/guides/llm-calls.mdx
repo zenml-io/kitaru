@@ -113,12 +113,19 @@ def writer(topic: str) -> str:
         model="fast",
         name="outline_call",
     )
+    outline_text = outline.load()
     return kitaru.llm(
-        f"Write a short paragraph using this outline:\n{outline}",
+        f"Write a short paragraph using this outline:\n{outline_text}",
         model="fast",
         name="draft_call",
     )
 ```
+
+Flow-body `kitaru.llm()` calls are durable call boundaries. Use `.load()` when
+you need the text in flow-body Python, such as composing the next prompt. If you
+pass a checkpoint or LLM output into a downstream checkpoint, keep passing the
+original output handle. See [In flow bodies](/guides/artifacts#in-flow-bodies)
+for the general pattern.
 
 ## Advanced options
 

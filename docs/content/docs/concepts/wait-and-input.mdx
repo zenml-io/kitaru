@@ -24,10 +24,11 @@ def write_report(summary: str) -> str:
 @flow
 def research_agent(topic: str) -> str:
     summary = research(topic)
+    summary_text = summary.load()
 
     approved = kitaru.wait(
         name="approve_summary",
-        question=f"The agent produced this summary:\n\n{summary}\n\nApprove?",
+        question=f"The agent produced this summary:\n\n{summary_text}\n\nApprove?",
         schema=bool,
     )
 
@@ -39,6 +40,12 @@ def research_agent(topic: str) -> str:
 if __name__ == "__main__":
     research_agent.run(topic="durable execution for AI agents")
 ```
+
+The flow calls `.load()` only for the human-facing wait question. The original
+`summary` checkpoint output is still passed to `write_report(summary)` so Kitaru
+keeps the durable data flow between checkpoints intact. See [In flow
+bodies](/guides/artifacts#in-flow-bodies) for more on when to materialize
+checkpoint outputs in orchestration code.
 
 When execution reaches `kitaru.wait()`:
 

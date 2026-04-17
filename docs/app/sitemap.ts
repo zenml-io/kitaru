@@ -6,11 +6,8 @@ export const revalidate = false;
 const baseUrl = 'https://kitaru.ai';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  return [
-    { url: `${baseUrl}/docs`, lastModified: new Date() },
-    ...source.getPages().map((page) => ({
-      url: `${baseUrl}${page.url}`,
-      lastModified: new Date(),
-    })),
-  ];
+  return source.getPages().map((page) => ({
+    url: `${baseUrl}/docs${page.url}`,
+    lastModified: new Date(),
+  }));
 }

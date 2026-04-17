@@ -5,8 +5,8 @@
 
 Both are valid only inside a checkpoint.
 
-Example::
-
+Example:
+    ```python
     from kitaru import checkpoint
 
     @checkpoint
@@ -20,6 +20,7 @@ Example::
     def refine(exec_id: str) -> str:
         old_sources = kitaru.load(exec_id, "sources")
         return improve(old_sources)
+    ```
 """
 
 from __future__ import annotations

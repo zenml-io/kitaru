@@ -6,8 +6,8 @@ replayable, and observable. Decorate your orchestration function with
 ``@flow`` and your work units with ``@checkpoint`` to get automatic
 durability.
 
-Example::
-
+Example:
+    ```python
     from kitaru import flow, checkpoint
 
     @checkpoint
@@ -18,11 +18,12 @@ Example::
     def my_agent(url: str) -> str:
         data = fetch_data(url)
         return data.upper()
+    ```
 
 Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
-  ``save()``, ``load()``, ``wait()``, ``llm()``,
+  ``save()``, ``load()``, ``wait()``, ``llm()``, ``get_secret()``,
   ``memory.configure/set/get/list/history/delete()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
@@ -92,6 +93,7 @@ from kitaru.errors import (
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
+from kitaru.secrets import Secret, get_secret
 from kitaru.wait import wait
 
 __all__ = [
@@ -112,6 +114,7 @@ __all__ = [
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "Secret",
     "StackInfo",
     "checkpoint",
     "configure",
@@ -120,6 +123,7 @@ __all__ = [
     "current_stack",
     "delete_stack",
     "flow",
+    "get_secret",
     "list_stacks",
     "llm",
     "load",

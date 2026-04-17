@@ -160,7 +160,7 @@ class ResolvedExecutionConfig(BaseModel):
 
     stack: str | None = None
     image: ImageSettings | None = None
-    cache: bool
+    cache: bool | None = None
     retries: int
 
     @field_validator("stack")

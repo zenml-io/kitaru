@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.4.0"
+version = "0.5.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -61,6 +61,7 @@ local = [
 ]
 pydantic-ai = [
     "pydantic-ai-slim>=1.75.0",
+    "typing_extensions>=4.12",
 ]
 mcp = [
     "mcp>=1.19.0,<1.20.0",
@@ -132,6 +133,15 @@ select = [
     "RUF",  # ruff-specific rules
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Vendored from upstream `pydantic_ai.durable_exec.kitaru`; upstream owns the style.
+# UP006/UP007/UP035/UP045: upstream uses `Dict`/`Optional`/`typing.List` aliases.
+# UP008: upstream uses explicit `super(Cls, self)` in WrapperAgent subclass.
+"src/kitaru/adapters/pydantic_ai/**" = ["E501", "I001", "UP006", "UP007", "UP008", "UP035", "UP045", "SIM105"]
+
+[tool.ruff.format]
+exclude = ["src/kitaru/adapters/pydantic_ai/**"]
+
 [tool.ruff.lint.pydocstyle]
 # Use Google-style docstrings.
 convention = "google"
@@ -157,6 +167,27 @@ include = ["scripts/r2-upload.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
+# The wrapper entrypoints still rely on a few pyright-specific patterns upstream.
+include = [
+    "src/kitaru/adapters/pydantic_ai/_agent.py",
+    "src/kitaru/adapters/pydantic_ai/_model.py",
+    "src/kitaru/adapters/pydantic_ai/_toolset.py",
+    "src/kitaru/adapters/pydantic_ai/_run_context.py",
+]
+
+[tool.ty.overrides.rules]
+invalid-method-override = "ignore"
+invalid-assignment = "ignore"
+invalid-return-type = "ignore"
+invalid-argument-type = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
