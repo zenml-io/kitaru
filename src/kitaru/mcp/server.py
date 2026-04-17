@@ -608,11 +608,13 @@ def kitaru_info(
         include_packages = all or all_packages
         package_names = None if include_packages else (packages if packages else None)
         include_environment_type = all
+        include_provenance_details = all
 
         snapshot = inspection.build_runtime_snapshot(
             include_packages=include_packages,
             package_names=package_names,
             include_environment_type=include_environment_type,
+            include_provenance_details=include_provenance_details,
         )
         return inspection.serialize_runtime_snapshot(snapshot)
 

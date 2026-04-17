@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
@@ -41,6 +42,7 @@ from kitaru.config import (
 )
 from kitaru.errors import FailureOrigin
 from kitaru.inspection import (
+    ActiveConfigSelectionProvenance,
     RuntimeSnapshot,
     build_runtime_snapshot,
     is_registered_local_server_url,
@@ -802,6 +804,8 @@ def test_serialize_runtime_snapshot_contract() -> None:
         "uses_repo_local_config": False,
         "connection_sources": None,
         "active_project": None,
+        "active_stack_provenance": None,
+        "active_project_provenance": None,
         "python_version": None,
         "system_info": None,
         "environment_type": None,
@@ -824,6 +828,247 @@ def test_serialize_runtime_snapshot_preserves_none_fields() -> None:
     assert payload["active_user"] is None
     assert payload["warning"] is None
     assert payload["environment"] == []
+
+
+def _write_active_config(
+    directory: Path,
+    *,
+    active_stack_id: str | None = None,
+    active_project_id: str | None = None,
+) -> Path:
+    """Write a minimal raw ZenML/Kitaru active context config file."""
+    directory.mkdir(parents=True, exist_ok=True)
+    config_path = directory / "config.yaml"
+    lines: list[str] = []
+    if active_stack_id is not None:
+        lines.append(f"active_stack_id: {active_stack_id}")
+    if active_project_id is not None:
+        lines.append(f"active_project_id: {active_project_id}")
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return config_path
+
+
+def _fake_global_config(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        uses_local_store=False,
+        store_configuration=SimpleNamespace(url="https://example.com"),
+        config_directory=str(tmp_path / "global"),
+    )
+
+
+def _patch_snapshot_dependencies(
+    fake_gc: SimpleNamespace,
+    fake_client_cls: Any,
+) -> tuple[Any, ...]:
+    return (
+        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
+        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch("kitaru.inspection.describe_local_server", return_value="not started"),
+        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru.inspection.list_active_kitaru_environment_variables",
+            return_value=[],
+        ),
+        patch("kitaru.inspection._collect_connection_sources", return_value={}),
+        patch(
+            "kitaru.inspection._read_runtime_connection_config",
+            return_value=SimpleNamespace(project=None),
+        ),
+        patch("kitaru.inspection.Client", fake_client_cls),
+        patch(
+            "kitaru.inspection.resolve_log_store",
+            return_value=ResolvedLogStore(
+                backend="artifact-store",
+                endpoint=None,
+                api_key=None,
+                source="default",
+            ),
+        ),
+    )
+
+
+def test_build_runtime_snapshot_keeps_provenance_off_by_default(
+    tmp_path: Path,
+) -> None:
+    fake_gc = _fake_global_config(tmp_path)
+    fake_client_cls = MagicMock(side_effect=RuntimeError("store offline"))
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        stack.enter_context(
+            patch(
+                "kitaru.inspection._collect_active_context_provenance",
+                side_effect=AssertionError("provenance should be opt-in"),
+            )
+        )
+        snapshot = build_runtime_snapshot()
+
+    assert snapshot.active_stack_provenance is None
+    assert snapshot.active_project_provenance is None
+
+
+def test_build_runtime_snapshot_collects_active_context_source_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("ZENML_ACTIVE_STACK_ID", "env-stack-id")
+    monkeypatch.setenv("KITARU_PROJECT", "kitaru-project-id")
+    monkeypatch.setenv("ZENML_ACTIVE_PROJECT_ID", "zenml-project-id")
+    monkeypatch.setenv("KITARU_STACK", "execution-default-stack")
+
+    repo_root = tmp_path / "repo"
+    repo_config = _write_active_config(
+        repo_root / ".kitaru",
+        active_stack_id="repo-stack-id",
+        active_project_id="repo-project-id",
+    )
+    fake_gc = _fake_global_config(tmp_path)
+    global_config = _write_active_config(
+        Path(fake_gc.config_directory),
+        active_stack_id="global-stack-id",
+        active_project_id="global-project-id",
+    )
+    fake_client = SimpleNamespace(
+        active_user=SimpleNamespace(name="alice"),
+        active_stack_model=SimpleNamespace(
+            name="resolved-stack",
+            id="resolved-stack-id",
+        ),
+        active_project=SimpleNamespace(
+            name="resolved-project",
+            id="resolved-project-id",
+        ),
+        root=repo_root,
+        zen_store=SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.42.0",
+                database_type="postgres",
+                deployment_type="kubernetes",
+            )
+        ),
+    )
+    fake_client_cls = MagicMock(return_value=fake_client)
+    fake_client_cls.find_repository.return_value = repo_root
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+
+    assert stack_provenance.effective_source == "environment"
+    assert stack_provenance.effective_source_detail == "ZENML_ACTIVE_STACK_ID"
+    assert stack_provenance.effective_id == "env-stack-id"
+    assert stack_provenance.environment_id == "env-stack-id"
+    assert stack_provenance.repository_id == "repo-stack-id"
+    assert stack_provenance.global_id == "global-stack-id"
+    assert stack_provenance.repository_config_path == str(repo_config)
+    assert stack_provenance.global_config_path == str(global_config)
+    assert stack_provenance.resolved_id == "resolved-stack-id"
+    assert stack_provenance.resolved_name == "resolved-stack"
+    assert any(
+        "KITARU_STACK is an execution default" in note
+        for note in stack_provenance.notes
+    )
+
+    assert project_provenance.effective_source == "environment"
+    assert (
+        project_provenance.effective_source_detail
+        == "KITARU_PROJECT -> ZENML_ACTIVE_PROJECT_ID"
+    )
+    assert project_provenance.effective_id == "kitaru-project-id"
+    assert project_provenance.environment_id == "kitaru-project-id"
+    assert project_provenance.repository_id == "repo-project-id"
+    assert project_provenance.global_id == "global-project-id"
+    assert project_provenance.resolved_id == "resolved-project-id"
+    assert project_provenance.resolved_name == "resolved-project"
+    assert any(
+        "Both KITARU_PROJECT and ZENML_ACTIVE_PROJECT_ID" in note
+        for note in project_provenance.notes
+    )
+
+
+def test_build_runtime_snapshot_preserves_raw_provenance_when_client_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    for name in (
+        "ZENML_ACTIVE_STACK_ID",
+        "ZENML_ACTIVE_PROJECT_ID",
+        "KITARU_PROJECT",
+        "KITARU_STACK",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    repo_root = tmp_path / "repo"
+    custom_repo_config_dir = repo_root / ".custom-kitaru"
+    _write_active_config(
+        custom_repo_config_dir,
+        active_stack_id="stale-repo-stack-id",
+        active_project_id="stale-repo-project-id",
+    )
+    fake_gc = _fake_global_config(tmp_path)
+    _write_active_config(
+        Path(fake_gc.config_directory),
+        active_stack_id="global-stack-id",
+        active_project_id="global-project-id",
+    )
+    fake_client_cls = MagicMock(side_effect=RuntimeError("store offline"))
+    fake_client_cls.find_repository.return_value = repo_root
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        stack.enter_context(
+            patch(
+                "kitaru.inspection.KITARU_REPOSITORY_DIRECTORY_NAME",
+                ".custom-kitaru",
+            )
+        )
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+
+    assert stack_provenance.effective_source == "repo-local config"
+    assert stack_provenance.effective_id == "stale-repo-stack-id"
+    assert stack_provenance.repository_id == "stale-repo-stack-id"
+    assert stack_provenance.repository_config_path == str(
+        custom_repo_config_dir / "config.yaml"
+    )
+    assert stack_provenance.global_id == "global-stack-id"
+    assert stack_provenance.resolved_id is None
+    assert stack_provenance.resolved_name is None
+    assert any(
+        "Client() failed (RuntimeError): store offline" in note
+        for note in stack_provenance.notes
+    )
+
+    assert project_provenance.effective_source == "repo-local config"
+    assert project_provenance.effective_id == "stale-repo-project-id"
+    assert project_provenance.repository_id == "stale-repo-project-id"
+    assert project_provenance.global_id == "global-project-id"
+    assert project_provenance.resolved_id is None
+    assert project_provenance.resolved_name is None
+    assert any(
+        "Client() failed (RuntimeError): store offline" in note
+        for note in project_provenance.notes
+    )
+
+    assert snapshot.warning == (
+        "Unable to query the configured store (RuntimeError): store offline"
+    )
+    assert fake_client_cls.mock_calls[:2] == [
+        call.find_repository(enable_warnings=False),
+        call(),
+    ]
 
 
 def test_build_runtime_snapshot_appends_legacy_warning_when_local_store_missing(
@@ -1024,7 +1269,9 @@ def test_build_runtime_snapshot_returns_early_when_log_store_resolution_fails(
     ):
         snapshot = build_runtime_snapshot()
 
-    assert snapshot.warning == "Unable to query the configured store: store offline"
+    assert snapshot.warning == (
+        "Unable to query the configured store (RuntimeError): store offline"
+    )
     assert snapshot.log_store_warning == (
         "Unable to resolve Kitaru log-store preference: bad config"
     )
@@ -1196,3 +1443,327 @@ def test_describe_local_server_handles_non_import_error() -> None:
         result = describe_local_server()
 
     assert "query failed" in result
+
+
+def _clear_active_context_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "ZENML_ACTIVE_STACK_ID",
+        "ZENML_ACTIVE_PROJECT_ID",
+        "KITARU_PROJECT",
+        "KITARU_STACK",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_repo_local_provenance_reads_kitaru_directory_not_zen(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Regression: provenance must read `.kitaru/config.yaml`, never `.zen/`."""
+    _clear_active_context_env(monkeypatch)
+
+    repo_root = tmp_path / "repo"
+    _write_active_config(
+        repo_root / ".zen",
+        active_stack_id="zen-should-be-ignored",
+        active_project_id="zen-should-be-ignored",
+    )
+    _write_active_config(
+        repo_root / ".kitaru",
+        active_stack_id="kitaru-wins",
+        active_project_id="kitaru-wins",
+    )
+    fake_gc = _fake_global_config(tmp_path)
+    _write_active_config(
+        Path(fake_gc.config_directory),
+        active_stack_id="global-stack-id",
+    )
+    fake_client_cls = MagicMock(side_effect=RuntimeError("store offline"))
+    fake_client_cls.find_repository.return_value = repo_root
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert stack_provenance.repository_id == "kitaru-wins"
+    assert stack_provenance.repository_config_path is not None
+    assert ".kitaru" in stack_provenance.repository_config_path
+    assert ".zen" not in stack_provenance.repository_config_path
+
+
+def test_build_runtime_snapshot_surfaces_provenance_collector_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When provenance collection itself fails, emit stub records so the user
+    sees *why* — silently dropping the section defeats the point of `--all`.
+    """
+    _clear_active_context_env(monkeypatch)
+
+    fake_gc = _fake_global_config(tmp_path)
+    fake_client = SimpleNamespace(
+        active_user=SimpleNamespace(name="alice"),
+        active_stack_model=SimpleNamespace(name="resolved", id="resolved-id"),
+        active_project=SimpleNamespace(name="resolved-project", id="resolved-id"),
+        root=None,
+        zen_store=SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.42.0",
+                database_type="sqlite",
+                deployment_type="local",
+            )
+        ),
+    )
+    fake_client_cls = MagicMock(return_value=fake_client)
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        stack.enter_context(
+            patch(
+                "kitaru.inspection._collect_active_context_provenance",
+                side_effect=RuntimeError("yaml exploded"),
+            )
+        )
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+    assert stack_provenance.effective_source == "unknown"
+    assert project_provenance.effective_source == "unknown"
+    assert stack_provenance.effective_id is None
+    assert project_provenance.effective_id is None
+    assert any(
+        "Could not collect active context provenance (RuntimeError): yaml exploded"
+        in note
+        for note in stack_provenance.notes
+    )
+    assert any(
+        "Could not collect active context provenance (RuntimeError): yaml exploded"
+        in note
+        for note in project_provenance.notes
+    )
+
+
+def test_build_runtime_snapshot_preserves_raw_when_client_sanitizes_stale_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When Client() succeeds but returns a different ID than the raw config
+    value, both must coexist — raw IDs preserved, resolved reflects whatever
+    ZenML actually picked.
+    """
+    _clear_active_context_env(monkeypatch)
+
+    repo_root = tmp_path / "repo"
+    _write_active_config(
+        repo_root / ".kitaru",
+        active_stack_id="stale-repo-stack-id",
+    )
+    fake_gc = _fake_global_config(tmp_path)
+    _write_active_config(
+        Path(fake_gc.config_directory),
+        active_stack_id="stale-global-stack-id",
+    )
+    fake_client = SimpleNamespace(
+        active_user=SimpleNamespace(name="alice"),
+        active_stack_model=SimpleNamespace(
+            name="sanitized-stack",
+            id="different-resolved-id",
+        ),
+        active_project=SimpleNamespace(
+            name="some-project",
+            id="project-id",
+        ),
+        root=repo_root,
+        zen_store=SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.42.0",
+                database_type="sqlite",
+                deployment_type="local",
+            )
+        ),
+    )
+    fake_client_cls = MagicMock(return_value=fake_client)
+    fake_client_cls.find_repository.return_value = repo_root
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert stack_provenance.repository_id == "stale-repo-stack-id"
+    assert stack_provenance.global_id == "stale-global-stack-id"
+    assert stack_provenance.effective_id == "stale-repo-stack-id"
+    assert stack_provenance.resolved_id == "different-resolved-id"
+    assert stack_provenance.resolved_name == "sanitized-stack"
+    assert stack_provenance.resolved_id != stack_provenance.effective_id
+
+
+def test_build_runtime_snapshot_preserves_raw_when_yaml_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Malformed repo-local YAML must not crash the snapshot build."""
+    _clear_active_context_env(monkeypatch)
+
+    repo_root = tmp_path / "repo"
+    repo_config_dir = repo_root / ".kitaru"
+    repo_config_dir.mkdir(parents=True)
+    (repo_config_dir / "config.yaml").write_text(
+        "active_stack_id: [unclosed-list\n",
+        encoding="utf-8",
+    )
+    fake_gc = _fake_global_config(tmp_path)
+    _write_active_config(
+        Path(fake_gc.config_directory),
+        active_stack_id="global-stack-id",
+    )
+    fake_client_cls = MagicMock(side_effect=RuntimeError("store offline"))
+    fake_client_cls.find_repository.return_value = repo_root
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert stack_provenance.global_id == "global-stack-id"
+    assert any("Could not read config file" in note for note in stack_provenance.notes)
+
+
+def test_build_runtime_snapshot_yaml_error_note_omits_body(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """YAML error notes must reference the file and exception type but not
+    echo the config body — defense-in-depth even though config files hold
+    IDs and URLs, not credentials.
+    """
+    _clear_active_context_env(monkeypatch)
+
+    repo_root = tmp_path / "repo"
+    repo_config_dir = repo_root / ".kitaru"
+    repo_config_dir.mkdir(parents=True)
+    secret_marker = "SUPER_SECRET_VALUE_SHOULD_NOT_APPEAR_IN_NOTE"
+    (repo_config_dir / "config.yaml").write_text(
+        f"active_stack_id: [{secret_marker}\n",
+        encoding="utf-8",
+    )
+    fake_gc = _fake_global_config(tmp_path)
+    fake_client_cls = MagicMock(side_effect=RuntimeError("store offline"))
+    fake_client_cls.find_repository.return_value = repo_root
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    read_notes = [
+        note for note in stack_provenance.notes if "Could not read config file" in note
+    ]
+    assert read_notes, "Expected a 'Could not read config file' note"
+    for note in read_notes:
+        assert secret_marker not in note
+
+
+def test_serialize_runtime_snapshot_does_not_leak_yaml_body(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A secret-looking value in a malformed config file must never appear in
+    the serialized snapshot JSON.
+    """
+    import json
+
+    _clear_active_context_env(monkeypatch)
+
+    repo_root = tmp_path / "repo"
+    repo_config_dir = repo_root / ".kitaru"
+    repo_config_dir.mkdir(parents=True)
+    secret_marker = "CREDENTIAL_XYZ_MUST_NOT_APPEAR_IN_JSON"
+    (repo_config_dir / "config.yaml").write_text(
+        f"active_stack_id: [{secret_marker}\n",
+        encoding="utf-8",
+    )
+    fake_gc = _fake_global_config(tmp_path)
+    fake_client_cls = MagicMock(side_effect=RuntimeError("store offline"))
+    fake_client_cls.find_repository.return_value = repo_root
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    serialized = json.dumps(serialize_runtime_snapshot(snapshot))
+    assert secret_marker not in serialized
+
+
+def test_build_runtime_snapshot_reports_global_source_when_only_global_set(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Only the global config has an ID → effective_source == 'global config'."""
+    _clear_active_context_env(monkeypatch)
+
+    fake_gc = _fake_global_config(tmp_path)
+    global_config = _write_active_config(
+        Path(fake_gc.config_directory),
+        active_stack_id="global-only-id",
+        active_project_id="global-only-project-id",
+    )
+    fake_client_cls = MagicMock(side_effect=RuntimeError("store offline"))
+    fake_client_cls.find_repository.return_value = None
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+    assert stack_provenance.effective_source == "global config"
+    assert stack_provenance.effective_source_detail == str(global_config)
+    assert stack_provenance.effective_id == "global-only-id"
+    assert project_provenance.effective_source == "global config"
+    assert project_provenance.effective_id == "global-only-project-id"
+
+
+def test_build_runtime_snapshot_reports_unset_when_nothing_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """No env, no repo, no global → effective_source == 'unset'."""
+    _clear_active_context_env(monkeypatch)
+
+    fake_gc = _fake_global_config(tmp_path)
+    Path(fake_gc.config_directory).mkdir(parents=True, exist_ok=True)
+    fake_client_cls = MagicMock(side_effect=RuntimeError("store offline"))
+    fake_client_cls.find_repository.return_value = None
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    stack_provenance = snapshot.active_stack_provenance
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+    assert stack_provenance.effective_source == "unset"
+    assert stack_provenance.effective_source_detail is None
+    assert stack_provenance.effective_id is None
+    assert project_provenance.effective_source == "unset"
+    assert project_provenance.effective_id is None
