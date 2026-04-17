@@ -63,7 +63,10 @@ def test_stage3_run_workflow_forwards_strict_memory_and_secret_environment(
         strict_memory=True,
         stack="prod-k8s",
         image={
-            "requirements": [stage3_module.CLAUDE_AGENT_SDK_REQUIREMENT],
+            "requirements": [
+                stage3_module.CLAUDE_AGENT_SDK_REQUIREMENT,
+                stage3_module.KITARU_REQUIREMENT,
+            ],
             "secret_environment_from": [stage3_module.ANTHROPIC_SECRET_NAME],
         },
     )

@@ -127,7 +127,10 @@ def test_stage4_run_workflow_can_opt_into_runtime_secret_environment(
         max_turns=2,
         stack="prod-k8s",
         image={
-            "requirements": [stage4_module.CLAUDE_AGENT_SDK_REQUIREMENT],
+            "requirements": [
+                stage4_module.CLAUDE_AGENT_SDK_REQUIREMENT,
+                stage4_module.KITARU_REQUIREMENT,
+            ],
             "secret_environment_from": [stage4_module.ANTHROPIC_SECRET_NAME],
         },
     )

@@ -175,7 +175,10 @@ def test_stage1_run_workflow_can_opt_into_runtime_secret_environment(
         "custom flow prompt",
         stack="prod-k8s",
         image={
-            "requirements": [stage1_module.CLAUDE_AGENT_SDK_REQUIREMENT],
+            "requirements": [
+                stage1_module.CLAUDE_AGENT_SDK_REQUIREMENT,
+                stage1_module.KITARU_REQUIREMENT,
+            ],
             "secret_environment_from": [stage1_module.ANTHROPIC_SECRET_NAME],
         },
     )

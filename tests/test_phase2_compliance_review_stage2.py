@@ -74,7 +74,10 @@ def test_stage2_run_workflow_can_opt_into_runtime_secret_environment(
     fake_flow.run.assert_called_once_with(
         stack="prod-k8s",
         image={
-            "requirements": [stage2_module.CLAUDE_AGENT_SDK_REQUIREMENT],
+            "requirements": [
+                stage2_module.CLAUDE_AGENT_SDK_REQUIREMENT,
+                stage2_module.KITARU_REQUIREMENT,
+            ],
             "secret_environment_from": [stage2_module.ANTHROPIC_SECRET_NAME],
         },
     )

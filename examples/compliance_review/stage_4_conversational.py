@@ -41,6 +41,7 @@ from examples.compliance_review.claude_agent import (  # noqa: E402
     ANTHROPIC_SECRET_NAME,
     CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
+    KITARU_REQUIREMENT,
     ClaudeAgentResult,
     run_agent_turn,
     to_claude_agent_result,
@@ -107,7 +108,7 @@ def finalize_conversation(
 
 
 @flow(
-    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT]},
+    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT]},
 )
 def conversational_compliance_review(
     initial_prompt: str = INITIAL_PROMPT,
@@ -207,7 +208,7 @@ def run_workflow(
     run_kwargs: dict[str, Any] = {"stack": stack}
     if use_secret_environment:
         run_kwargs["image"] = {
-            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT],
             "secret_environment_from": [ANTHROPIC_SECRET_NAME],
         }
     return conversational_compliance_review.run(

@@ -38,6 +38,7 @@ from examples.compliance_review.claude_agent import (  # noqa: E402
     ANTHROPIC_SECRET_NAME,
     CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
+    KITARU_REQUIREMENT,
     ClaudeAgentResult,
     run_agent_turn,
     to_claude_agent_result,
@@ -182,7 +183,7 @@ def run_domain_checks() -> tuple[
 
 
 @flow(
-    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT]},
+    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT]},
 )
 def audit_company() -> ClaudeAgentResult:
     """Run the full sequential Stage 2 compliance audit."""
@@ -235,7 +236,7 @@ def run_workflow(
     run_kwargs: dict[str, Any] = {"stack": stack}
     if use_secret_environment:
         run_kwargs["image"] = {
-            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT],
             "secret_environment_from": [ANTHROPIC_SECRET_NAME],
         }
     return audit_company.run(**run_kwargs).wait()

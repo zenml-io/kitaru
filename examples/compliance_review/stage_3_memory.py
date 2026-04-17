@@ -35,6 +35,7 @@ from examples.compliance_review.claude_agent import (  # noqa: E402
     ANTHROPIC_SECRET_NAME,
     CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
+    KITARU_REQUIREMENT,
     ClaudeAgentResult,
     run_agent_turn,
     to_claude_agent_result,
@@ -178,7 +179,7 @@ def finalize_memory_audit(report: ClaudeAgentResult) -> ClaudeAgentResult:
 
 
 @flow(
-    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT]},
+    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT]},
 )
 def audit_with_memory(strict_memory: bool = False) -> ClaudeAgentResult:
     """Run the memory-aware HR + IT audit.
@@ -234,7 +235,7 @@ def run_workflow(
     run_kwargs: dict[str, Any] = {"stack": stack}
     if use_secret_environment:
         run_kwargs["image"] = {
-            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT],
             "secret_environment_from": [ANTHROPIC_SECRET_NAME],
         }
     return audit_with_memory.run(strict_memory=strict_memory, **run_kwargs).wait()
