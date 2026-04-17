@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-17
+
 ### Breaking Changes
 - `kitaru.adapters.pydantic_ai.wrap(...)` is deprecated in favor of `KitaruAgent(...)`. A compatibility shim remains for one release (#156)
 - Legacy adapter capture config names were renamed: `"metadata_only"` -> `"metadata"` and `"off"` -> `None` (#156)

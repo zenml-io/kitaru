@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-04-13T14:45:32.515279664Z"
+exclude-newer = "2026-04-14T09:50:38.522255Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -1091,7 +1091,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.4.1"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
@@ -1119,7 +1119,6 @@ openai = [
 ]
 pydantic-ai = [
     { name = "pydantic-ai-slim" },
-    { name = "typing-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -1150,7 +1149,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.75.0" },
     { name = "rich", specifier = ">=12.0.0" },
-    { name = "typing-extensions", marker = "extra == 'pydantic-ai'", specifier = ">=4.12" },
     { name = "zenml", extras = ["local"], specifier = ">=0.94.2" },
     { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.94.2" },
 ]
