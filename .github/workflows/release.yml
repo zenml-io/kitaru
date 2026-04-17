@@ -58,20 +58,36 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Check tag does not already exist (dispatch only)
+      # --- Determine checkout ref (dispatch only) ---
+      # Normally checks out `develop`. If v$VERSION already exists on origin,
+      # this is a partial-recovery dispatch and we must check out that tag so
+      # the rest of the workflow runs against the canonical release commit —
+      # otherwise the SHA consistency check would fail, and the error message
+      # telling operators to "check out $TAG_SHA and retry" wouldn't be
+      # actionable from workflow_dispatch. Uses the full repo URL because
+      # `origin` isn't configured until after actions/checkout runs.
+      - name: Determine checkout ref (dispatch only)
         if: github.event_name == 'workflow_dispatch'
+        id: ref
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q .; then
-            echo "::error::Tag v$VERSION already exists"
-            exit 1
+          if gh api "repos/${{ github.repository }}/git/ref/tags/v$VERSION" --silent 2>/dev/null; then
+            echo "Tag v$VERSION exists — recovery mode, checking out tag"
+            echo "ref=refs/tags/v$VERSION" >> "$GITHUB_OUTPUT"
+            echo "TAG_EXISTS_AT_START=true" >> "$GITHUB_ENV"
+          else
+            echo "No existing tag — normal release flow, checking out develop"
+            echo "ref=develop" >> "$GITHUB_OUTPUT"
+            echo "TAG_EXISTS_AT_START=false" >> "$GITHUB_ENV"
           fi
 
       # --- Checkout ---
-      - name: Checkout develop (dispatch)
+      - name: Checkout (dispatch)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
-          ref: develop
+          ref: ${{ steps.ref.outputs.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout tagged commit (tag push)
@@ -92,27 +108,77 @@ jobs:
         with:
           python-version: '3.12'
 
-      # --- Bump version (dispatch only) ---
+      # --- Bump version (dispatch only, skip in recovery mode) ---
+      # In recovery mode (tag already exists) we checked out the tag itself,
+      # so these mutating steps must be skipped. Otherwise `uv lock` can
+      # re-resolve transitive deps to newer versions and create a commit on
+      # top of the tag, making HEAD diverge from the tag SHA — which the
+      # consistency check will then (correctly) reject.
       - name: Bump version in pyproject.toml
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
+          'true'
         run: |
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
           echo "Updated pyproject.toml to version $VERSION"
           grep '^version' pyproject.toml
       - name: Update CHANGELOG.md
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
+          'true'
         run: |
           DATE=$(date +%Y-%m-%d)
-          sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $DATE/" CHANGELOG.md
-          echo "Updated CHANGELOG.md for $VERSION ($DATE)"
+          if grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
+            echo "CHANGELOG.md already has a section for $VERSION — skipping"
+          else
+            sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $DATE/" CHANGELOG.md
+            echo "Updated CHANGELOG.md for $VERSION ($DATE)"
+          fi
       - name: Update lockfile
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
+          'true'
         run: uv lock
       - name: Commit release changes
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
+          'true'
         run: |
           git add pyproject.toml CHANGELOG.md uv.lock
-          git commit -m "Release $VERSION"
+          if git diff --cached --quiet; then
+            echo "No release changes to commit"
+          else
+            git commit -m "Release $VERSION"
+          fi
+
+      # --- Capture authoritative RELEASE_SHA for this release ---
+      # The v$VERSION tag, if it exists, is the immutable source of truth for
+      # which commit owns this version. A recovery dispatch must run on the
+      # exact same commit; otherwise PyPI, Docker, Helm, and the tag would
+      # diverge (split-brain release).
+      - name: Verify release SHA consistency
+        run: |
+          RELEASE_SHA=$(git rev-parse HEAD)
+          # Dispatch trigger pre-populates $TAG_EXISTS_AT_START. Tag-push trigger
+          # skipped the dispatch-only probe, but by definition the tag exists.
+          if [ -z "${TAG_EXISTS_AT_START:-}" ]; then
+            TAG_EXISTS_AT_START=true
+          fi
+          if [ "$TAG_EXISTS_AT_START" = "true" ]; then
+            git fetch origin "refs/tags/v$VERSION:refs/tags/v$VERSION" --force
+            TAG_SHA=$(git rev-list -n 1 "v$VERSION")
+            if [ "$TAG_SHA" != "$RELEASE_SHA" ]; then
+              echo "::error::Tag v$VERSION pins SHA $TAG_SHA but workflow HEAD is $RELEASE_SHA."
+              echo "::error::The workflow must run on the same commit the tag points to."
+              echo "::error::Dispatch a different version, or check out $TAG_SHA and retry."
+              exit 1
+            fi
+            echo "Tag v$VERSION matches HEAD ($RELEASE_SHA) — recovery-safe"
+          else
+            echo "No existing tag for v$VERSION — normal release flow"
+          fi
+          if ! grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md is missing a '## [$VERSION] - YYYY-MM-DD' section."
+            echo "::error::The release commit is incomplete — add the changelog entry before retrying."
+            exit 1
+          fi
+          echo "RELEASE_SHA=$RELEASE_SHA" >> "$GITHUB_ENV"
 
       # --- Verify version matches (tag push only) ---
       - name: Verify tag matches pyproject.toml version
@@ -167,10 +233,29 @@ jobs:
       - name: List build artifacts
         run: ls -lh dist/
 
+      # --- Tag (dispatch only, skip on dry-run) ---
+      # Push the tag BEFORE PyPI so that any later failure leaves a durable
+      # anchor: a subsequent recovery dispatch will find the tag, check out
+      # its SHA, and pass the consistency check. Without this, a mid-workflow
+      # failure after PyPI upload but before tag push would leave PyPI with
+      # artifacts from one commit and no immutable ref to anchor the next run
+      # to the same commit (split-brain release risk).
+      - name: Create and push tag
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
+        run: |
+          if [ "$TAG_EXISTS_AT_START" = "true" ]; then
+            echo "Tag v$VERSION already exists at RELEASE_SHA $RELEASE_SHA — skipping"
+          else
+            git tag "v$VERSION" "$RELEASE_SHA"
+            git push origin "v$VERSION"
+          fi
+
       # --- Publish (skip on dry-run) ---
       - name: Publish to PyPI
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        with:
+          skip-existing: true
       - name: Wait for PyPI availability
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         run: |
@@ -189,34 +274,119 @@ jobs:
       # --- Push release commit to develop (dispatch only, skip on dry-run) ---
       - name: Push release commit to develop
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
-        run: git push origin HEAD:develop
+        run: |
+          REMOTE_DEVELOP=$(git ls-remote origin refs/heads/develop | awk '{print $1}')
+          if [ "$REMOTE_DEVELOP" = "$RELEASE_SHA" ]; then
+            echo "origin/develop is at RELEASE_SHA $RELEASE_SHA — skipping push"
+          else
+            # Distinguish "not ancestor" (exit 1) from fatal git errors (exit 128).
+            set +e
+            git merge-base --is-ancestor "$RELEASE_SHA" "$REMOTE_DEVELOP"
+            ancestor_status=$?
+            set -e
+            case "$ancestor_status" in
+              0)
+                echo "origin/develop ($REMOTE_DEVELOP) already contains RELEASE_SHA $RELEASE_SHA — skipping push"
+                ;;
+              1)
+                git push origin "$RELEASE_SHA:refs/heads/develop"
+                ;;
+              *)
+                echo "::error::Ancestry check failed (exit $ancestor_status) for origin/develop ($REMOTE_DEVELOP) vs RELEASE_SHA $RELEASE_SHA"
+                exit 1
+                ;;
+            esac
+          fi
 
       # --- Create release branch and update main (skip on dry-run) ---
+      # Both guards are identity-based: we only touch refs if they're missing
+      # or already at RELEASE_SHA. Divergent state triggers a hard error rather
+      # than silently overwriting an archival branch or rewinding main.
       - name: Create release branch
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         run: |
-          git checkout -b "release/$VERSION"
-          git push origin "release/$VERSION"
+          REMOTE_SHA=$(git ls-remote --heads origin "refs/heads/release/$VERSION" | awk '{print $1}')
+          if [ -z "$REMOTE_SHA" ]; then
+            git push origin "$RELEASE_SHA:refs/heads/release/$VERSION"
+            echo "Created release/$VERSION at $RELEASE_SHA"
+          elif [ "$REMOTE_SHA" = "$RELEASE_SHA" ]; then
+            echo "release/$VERSION is already at RELEASE_SHA $RELEASE_SHA — skipping"
+          else
+            echo "::error::release/$VERSION exists at $REMOTE_SHA but expected $RELEASE_SHA."
+            echo "::error::Archival release branches are immutable; manual intervention required."
+            exit 1
+          fi
       - name: Update main to release
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        run: git push --force origin "release/$VERSION:main"
-
-      # --- Tag (dispatch only, skip on dry-run) ---
-      - name: Create and push tag
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
         run: |
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
+          REMOTE_MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          if [ "$REMOTE_MAIN" = "$RELEASE_SHA" ]; then
+            echo "origin/main is already at RELEASE_SHA $RELEASE_SHA — skipping"
+          else
+            set +e
+            git merge-base --is-ancestor "$REMOTE_MAIN" "$RELEASE_SHA"
+            ancestor_status=$?
+            set -e
+            case "$ancestor_status" in
+              0)
+                git push --force origin "$RELEASE_SHA:refs/heads/main"
+                echo "Fast-forwarded main to $RELEASE_SHA"
+                ;;
+              1)
+                echo "::error::origin/main ($REMOTE_MAIN) is not an ancestor of RELEASE_SHA $RELEASE_SHA."
+                echo "::error::Force-pushing would rewind main to an older release. Manual intervention required."
+                exit 1
+                ;;
+              *)
+                echo "::error::Ancestry check failed (exit $ancestor_status) for origin/main ($REMOTE_MAIN) vs RELEASE_SHA $RELEASE_SHA"
+                exit 1
+                ;;
+            esac
+          fi
 
       # --- GitHub Release (skip on dry-run) ---
+      # If the release already exists, verify it's attached to v$VERSION, then
+      # check each expected dist/* asset. Present assets are SHA256-compared
+      # against the local build; matching assets are skipped, mismatched assets
+      # fail loudly (never silently overwrite), and missing assets get uploaded.
       - name: Create GitHub Release
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "v$VERSION" dist/* \
-            --title "v$VERSION" \
-            --generate-notes
+          release_json=$(gh release view "v$VERSION" --json tagName,assets 2>/dev/null) || release_json=""
+          if [ -z "$release_json" ]; then
+            gh release create "v$VERSION" dist/* \
+              --title "v$VERSION" \
+              --generate-notes
+            exit 0
+          fi
+          existing_tag=$(echo "$release_json" | jq -r '.tagName')
+          if [ "$existing_tag" != "v$VERSION" ]; then
+            echo "::error::Release v$VERSION is attached to tag $existing_tag, expected v$VERSION"
+            exit 1
+          fi
+          echo "Release v$VERSION exists — reconciling dist/* assets by SHA256"
+          mkdir -p existing-assets
+          existing_assets=$(echo "$release_json" | jq -r '.assets[].name')
+          for f in dist/*; do
+            name=$(basename "$f")
+            if echo "$existing_assets" | grep -Fxq "$name"; then
+              gh release download "v$VERSION" --pattern "$name" --dir existing-assets --clobber
+              local_hash=$(sha256sum "$f" | awk '{print $1}')
+              remote_hash=$(sha256sum "existing-assets/$name" | awk '{print $1}')
+              if [ "$local_hash" = "$remote_hash" ]; then
+                echo "  asset matches local build: $name"
+              else
+                echo "::error::Release asset $name hash mismatch (remote=$remote_hash local=$local_hash)."
+                echo "::error::The existing asset was built from a different commit. Manual intervention required."
+                exit 1
+              fi
+            else
+              echo "  uploading missing asset: $name"
+              gh release upload "v$VERSION" "$f"
+            fi
+          done
 
       # --- Docker image ---
       - name: Set up Docker Buildx
