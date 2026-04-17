@@ -28,7 +28,7 @@ def test_get_secret_fetches_exact_secret_and_normalizes_values() -> None:
 
     with (
         patch("kitaru.secrets._ZenMLClient", return_value=client),
-        patch("kitaru.secrets._analytics.track") as track_mock,
+        patch("kitaru.secrets.track") as track_mock,
     ):
         secret = get_secret(" openai-creds ")
 

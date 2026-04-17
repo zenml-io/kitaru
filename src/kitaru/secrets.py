@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 from zenml.client import Client as _ZenMLClient
 from zenml.exceptions import ZenKeyError as _ZenMLKeyError
 
-import kitaru.analytics as _analytics
-from kitaru.analytics import AnalyticsEvent as _AnalyticsEvent
+from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import KitaruBackendError, KitaruRuntimeError, KitaruUsageError
 
 
@@ -70,7 +69,6 @@ def _get_secret_response_exact(
     name_or_id: str,
     *,
     client: Any | None = None,
-    client_factory: Callable[[], Any] | None = None,
 ) -> Any:
     """Fetch one backend secret response by exact name or exact ID.
 
@@ -78,9 +76,6 @@ def _get_secret_response_exact(
         name_or_id: Secret name or ID to fetch.
         client: Optional already-created backend client. CLI code passes this
             to preserve its existing client lifecycle and tests.
-        client_factory: Factory used when ``client`` is not provided. Defaults
-            to the current backend client object, so tests can patch the module
-            symbol normally.
 
     Returns:
         The raw backend secret response.
@@ -93,9 +88,7 @@ def _get_secret_response_exact(
     normalized_name_or_id = _normalize_name_or_id(name_or_id)
 
     try:
-        resolved_client = (
-            client if client is not None else (client_factory or _ZenMLClient)()
-        )
+        resolved_client = client if client is not None else _ZenMLClient()
         return resolved_client.get_secret(
             name_id_or_prefix=normalized_name_or_id,
             allow_partial_name_match=False,
@@ -119,9 +112,7 @@ def _secret_from_response(secret_response: Any) -> Secret:
         raise KitaruBackendError("Backend returned a secret without a readable name.")
 
     raw_id = getattr(secret_response, "id", None)
-    if raw_id is None:
-        raise KitaruBackendError(f"Backend returned secret `{name}` without an ID.")
-    secret_id = str(raw_id)
+    secret_id = str(raw_id) if raw_id is not None else ""
     if not secret_id:
         raise KitaruBackendError(f"Backend returned secret `{name}` without an ID.")
 
@@ -135,12 +126,12 @@ def _secret_from_response(secret_response: Any) -> Secret:
 def _read_secret_values(secret_name: str) -> dict[str, str]:
     """Read non-empty secret key/value pairs for internal credential injection."""
     secret_response = _get_secret_response_exact(secret_name)
-    secret = _secret_from_response(secret_response)
-    if not secret.values:
+    values = _normalize_secret_values(secret_response, display_name=secret_name)
+    if not values:
         raise KitaruRuntimeError(
             f"Secret `{secret_name}` does not contain readable key/value pairs."
         )
-    return dict(secret.values)
+    return values
 
 
 def get_secret(name_or_id: str) -> Secret:
@@ -161,7 +152,7 @@ def get_secret(name_or_id: str) -> Secret:
     """
     secret_response = _get_secret_response_exact(name_or_id)
     secret = _secret_from_response(secret_response)
-    _analytics.track(_AnalyticsEvent.SECRET_READ, {"key_count": len(secret.values)})
+    track(AnalyticsEvent.SECRET_READ, {"key_count": len(secret.values)})
     return secret
 
 
