@@ -28,6 +28,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Track a model call inside a flow:** `examples/llm/flow_with_llm.py`
 - **Wrap an existing PydanticAI agent:** `examples/pydantic_ai_agent/pydantic_ai_adapter.py`
 - **Build a full coding agent with tool calling and HITL:** `examples/coding_agent/agent.py`
+- **Run a granular-checkpoint PydanticAI agent end to end:** `examples/news_scout/scout.py`
 - **Explore Kitaru through MCP tools:** `examples/mcp/mcp_query_tools.py`
 
 ## Install the extras you need
@@ -53,6 +54,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 - [llm/README.md](llm/README.md) — tracked `kitaru.llm()` calls inside flows
 - [pydantic_ai_agent/README.md](pydantic_ai_agent/README.md) — wrap a PydanticAI agent with Kitaru observability
 - [coding_agent/README.md](coding_agent/README.md) — full coding agent with provider SDK tool calling, HITL, and custom materializers
+- [news_scout/README.md](news_scout/README.md) — agentic news monitor with granular per-tool checkpoints, memory-seeded interests, and image-based remote deploy
 - [mcp/README.md](mcp/README.md) — inspect flows with the Kitaru MCP server
 
 ## Core workflow basics
