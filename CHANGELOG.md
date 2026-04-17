@@ -37,6 +37,7 @@ wrapped = KitaruAgent(
 ```
 
 ### Added
+- `ImageSettings.secret_environment_from` field for attaching ZenML secret references to a flow execution; Kitaru forwards the list through `Pipeline.with_options(secrets=[...])` so secret values never enter `DockerSettings.environment`, image build metadata, logs, or the frozen execution spec (#180)
 - `kitaru.get_secret()` and the public `Secret` model for exact, Kitaru-native secret reads in Python code without importing ZenML directly (#185)
 - `@checkpoint(cache=...)` per-checkpoint cache overrides (`True`/`False`/`None`) with updated configuration docs (#184)
 - `kitaru.adapters.pydantic_ai.wrap(...)` compatibility shim with deprecation warning to ease migration to `KitaruAgent(...)` (#156)
