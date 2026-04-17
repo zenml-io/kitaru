@@ -1,0 +1,201 @@
+---
+// Positioning.astro — Explicit positioning against adjacent categories
+---
+
+<section id="positioning" class="section-pad positioning-section">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>WHERE KITARU FITS</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">
+      The lifecycle layer. Nothing else.
+    </h2>
+    <p class="positioning-desc" data-reveal data-reveal-delay="2">
+      We're not trying to replace the tools your team already uses. Agent frameworks, sandboxes, orchestrators, observability &mdash; they all play a role. Kitaru is the layer between them that almost no one else provides.
+    </p>
+
+    <div class="positioning-grid">
+
+      <div class="positioning-card" data-reveal="scale-up" data-reveal-delay="3">
+        <div class="card-glow"></div>
+        <div class="positioning-label">Not a framework</div>
+        <h3>We don't replace LangGraph, PydanticAI, or the Agent SDKs.</h3>
+        <p>Use whatever framework your team picks. Kitaru wraps it.</p>
+        <div class="positioning-tools">
+          <span class="positioning-tool">LangGraph</span>
+          <span class="positioning-tool">PydanticAI</span>
+          <span class="positioning-tool">CrewAI</span>
+        </div>
+      </div>
+
+      <div class="positioning-card" data-reveal="scale-up" data-reveal-delay="4">
+        <div class="card-glow"></div>
+        <div class="positioning-label">Not a sandbox</div>
+        <h3>We don't replace Daytona, E2B, or Modal.</h3>
+        <p>Configure your sandbox in your agent code. Kitaru observes what happens inside.</p>
+        <div class="positioning-tools">
+          <span class="positioning-tool">Daytona</span>
+          <span class="positioning-tool">E2B</span>
+          <span class="positioning-tool">Modal</span>
+        </div>
+      </div>
+
+      <div class="positioning-card" data-reveal="scale-up" data-reveal-delay="5">
+        <div class="card-glow"></div>
+        <div class="positioning-label">Not an orchestrator</div>
+        <h3>We don't replace Temporal or Prefect.</h3>
+        <p>Your Runner handles the loop. We can be the Runner, but don't have to be.</p>
+        <div class="positioning-tools">
+          <span class="positioning-tool">Temporal</span>
+          <span class="positioning-tool">Prefect</span>
+          <span class="positioning-tool">Dagster</span>
+        </div>
+      </div>
+
+      <div class="positioning-card" data-reveal="scale-up" data-reveal-delay="6">
+        <div class="card-glow"></div>
+        <div class="positioning-label">Not observability</div>
+        <h3>We don't replace LangSmith, Langfuse, or Braintrust.</h3>
+        <p>They score traces. Kitaru is the infrastructure those traces live in &mdash; versioned, lineaged, governed.</p>
+        <div class="positioning-tools">
+          <span class="positioning-tool">Langfuse</span>
+          <span class="positioning-tool">Braintrust</span>
+          <span class="positioning-tool">LangSmith</span>
+        </div>
+      </div>
+
+    </div>
+
+    <p class="positioning-conclusion" data-reveal data-reveal-delay="7">
+      Kitaru is <strong>what happens between your agent SDK and your production cloud</strong> &mdash; the deploy, the checkpoints, the artifacts, the lineage, the governance. The glue that lets everything else do what it does best.
+    </p>
+  </div>
+</section>
+
+<style>
+  .positioning-section {
+    background: var(--color-bg);
+  }
+
+  .positioning-desc {
+    max-width: 720px;
+    font-size: clamp(1rem, 1.8vw, 1.15rem);
+    line-height: 1.6;
+    color: var(--color-secondary);
+    margin-top: 16px;
+    margin-bottom: 48px;
+  }
+
+  .positioning-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+
+  .positioning-card {
+    position: relative;
+    overflow: hidden;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    padding: 28px;
+    transition: border-color 0.3s;
+  }
+
+  .positioning-card:hover {
+    border-color: oklch(0.65 0.16 45 / 0.25);
+  }
+
+  .positioning-card:hover .card-glow {
+    opacity: 1;
+  }
+
+  .positioning-label {
+    position: relative;
+    z-index: 2;
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    padding: 4px 10px;
+    background: oklch(0.65 0.16 45 / 0.08);
+    border: 1px solid oklch(0.65 0.16 45 / 0.2);
+    border-radius: 100px;
+    margin-bottom: 14px;
+  }
+
+  .positioning-card h3 {
+    position: relative;
+    z-index: 2;
+    font-size: 1.1rem;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: var(--color-primary);
+    margin-bottom: 10px;
+  }
+
+  .positioning-card p {
+    position: relative;
+    z-index: 2;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--color-secondary);
+    font-weight: 300;
+    margin-bottom: 18px;
+  }
+
+  .positioning-tools {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .positioning-tool {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    padding: 3px 10px;
+    border-radius: 5px;
+    background: var(--color-surface-warm);
+    border: 1px solid var(--color-border);
+    color: var(--color-muted);
+  }
+
+  .positioning-conclusion {
+    margin-top: 48px;
+    padding: 28px 32px;
+    border-left: 3px solid var(--color-accent);
+    background: oklch(0.65 0.16 45 / 0.04);
+    border-radius: 0 10px 10px 0;
+    font-size: clamp(0.98rem, 1.5vw, 1.1rem);
+    line-height: 1.65;
+    color: var(--color-primary);
+  }
+
+  .positioning-conclusion strong {
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+
+  @media (max-width: 768px) {
+    .positioning-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .positioning-card {
+      padding: 24px;
+    }
+
+    .positioning-conclusion {
+      padding: 22px 24px;
+    }
+  }
+</style>
+
+<script>
+  import { setupCardGlow } from '../scripts/card-glow';
+  setupCardGlow('#positioning .positioning-card');
+</script>

@@ -1,0 +1,200 @@
+---
+// Deploy.astro — Terminal-led "run it" section, with a forward-looking roadmap nudge
+---
+
+<section id="deploy" class="section-pad-compact deploy-section">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>OPEN SOURCE</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">
+      From laptop to enterprise. Same OSS stack.
+    </h2>
+    <p class="deploy-lede" data-reveal data-reveal-delay="2">
+      A CLI, a dashboard, and a scalable execution server. All open source. Runs on your laptop and scales to your cloud.
+    </p>
+
+    <div class="deploy-install" data-reveal data-reveal-delay="3">
+      <span class="deploy-install-prompt" aria-hidden="true">$</span>
+      <code class="deploy-install-cmd">uv add kitaru &amp;&amp; kitaru login</code>
+      <button class="deploy-install-copy" type="button" aria-label="Copy install command" data-copy="uv add kitaru && kitaru login">
+        <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>
+    </div>
+
+    <figure class="deploy-dashboard" data-reveal="scale-up" data-reveal-delay="4">
+      <img
+        src="/dashboard.png"
+        alt="Kitaru dashboard showing an execution with its checkpoints, logs, and cost"
+        loading="lazy"
+        decoding="async"
+        width="1378"
+        height="945"
+      />
+      <figcaption class="deploy-dashboard-caption">Dashboard, replay, and logs ship with the server.</figcaption>
+    </figure>
+
+    <div class="deploy-links-row" data-reveal data-reveal-delay="5">
+      <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener" class="deploy-link">
+        Star on GitHub
+        <span aria-hidden="true">→</span>
+      </a>
+      <a href="/roadmap" class="deploy-link">
+        See the roadmap
+        <span aria-hidden="true">→</span>
+      </a>
+    </div>
+
+  </div>
+</section>
+
+<style>
+  .deploy-section {
+    background: var(--color-bg);
+  }
+
+  .deploy-lede {
+    max-width: 680px;
+    margin-top: 10px;
+    margin-bottom: 24px;
+    font-size: clamp(0.9rem, 1.3vw, 1rem);
+    line-height: 1.55;
+    color: var(--color-secondary);
+  }
+
+  /* ─── Install strip ─── */
+  .deploy-install {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 8px 10px 18px;
+    background: var(--color-primary);
+    border-radius: 8px;
+    margin-bottom: 28px;
+    font-family: var(--font-mono);
+  }
+
+  .deploy-install-prompt {
+    color: oklch(0.72 0.14 55);
+    font-size: 0.95rem;
+    user-select: none;
+  }
+
+  .deploy-install-cmd {
+    color: oklch(1 0 0);
+    font-size: 0.95rem;
+    letter-spacing: -0.005em;
+    user-select: all;
+  }
+
+  .deploy-install-copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    background: transparent;
+    color: oklch(1 0 0 / 0.4);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .deploy-install-copy:hover {
+    color: oklch(1 0 0 / 0.85);
+    background: oklch(1 0 0 / 0.08);
+  }
+
+  .deploy-install-copy .check-icon {
+    display: none;
+    color: var(--color-success);
+  }
+
+  .deploy-install-copy.copied .copy-icon {
+    display: none;
+  }
+
+  .deploy-install-copy.copied .check-icon {
+    display: block;
+    animation: check-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  /* ─── Dashboard screenshot (hero) ─── */
+  .deploy-dashboard {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .deploy-dashboard img {
+    width: 100%;
+    max-width: 640px;
+    height: auto;
+    display: block;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    box-shadow: 0 10px 30px oklch(0 0 0 / 0.08);
+    background: var(--color-surface);
+  }
+
+  .deploy-dashboard-caption {
+    align-self: center;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+
+  /* ─── Links row (below the layout) ─── */
+  .deploy-links-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px 28px;
+    margin-top: 20px;
+  }
+
+  .deploy-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    text-decoration: none;
+    transition: gap 0.2s;
+  }
+
+  .deploy-link:hover {
+    gap: 10px;
+  }
+
+  @media (max-width: 640px) {
+    .deploy-install {
+      padding: 8px 6px 8px 14px;
+      gap: 8px;
+    }
+
+    .deploy-install-cmd {
+      font-size: 0.82rem;
+    }
+  }
+</style>
+
+<script>
+  import { copyToClipboard } from '../scripts/clipboard';
+
+  document.querySelectorAll<HTMLButtonElement>('.deploy-install-copy').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const text = btn.dataset.copy ?? '';
+      copyToClipboard(text).then(() => {
+        btn.classList.add('copied');
+        setTimeout(() => btn.classList.remove('copied'), 1500);
+      }).catch(() => {
+        btn.setAttribute('aria-label', 'Copy failed');
+        setTimeout(() => btn.setAttribute('aria-label', 'Copy install command'), 2000);
+      });
+    });
+  });
+</script>
