@@ -1,30 +1,27 @@
 ---
-// Deploy.astro — What ships today + what's on the roadmap (compact, honest)
+// Deploy.astro — Terminal-led "run it" section, with a forward-looking roadmap nudge
 ---
 
 <section id="deploy" class="section-pad-compact deploy-section">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>SHIPPING IN 0.5.0</span>
+    <span class="section-eyebrow" data-reveal>RUN IT ANYWHERE</span>
     <h2 class="section-title" data-reveal data-reveal-delay="1">
-      Locally first. Your cloud next.
+      Install, log in, run.
     </h2>
     <p class="deploy-lede" data-reveal data-reveal-delay="2">
-      Kitaru runs today on your laptop or a self-hosted server, with the dashboard, replay, and memory surfaces all available out of the box. Multi-stack cloud deploy is on the roadmap.
+      Kitaru works on your laptop, your server, or anywhere you can run Python. The dashboard, replay CLI, durable memory, and the PydanticAI adapter all come out of the box.
     </p>
 
-    <div class="deploy-grid" data-reveal data-reveal-delay="3">
-
-      <!-- Left: CLI terminal -->
-      <div class="deploy-terminal">
-        <div class="deploy-terminal-header">
-          <div class="deploy-terminal-dots">
-            <span class="code-dot"></span>
-            <span class="code-dot"></span>
-            <span class="code-dot"></span>
-          </div>
-          <span class="deploy-terminal-title">~/your-agent</span>
+    <div class="deploy-terminal" data-reveal data-reveal-delay="3">
+      <div class="deploy-terminal-header">
+        <div class="deploy-terminal-dots">
+          <span class="code-dot"></span>
+          <span class="code-dot"></span>
+          <span class="code-dot"></span>
         </div>
-        <pre class="deploy-terminal-pre"><code><span class="deploy-cmt"># install and log in to a local server</span>
+        <span class="deploy-terminal-title">~/your-agent</span>
+      </div>
+      <pre class="deploy-terminal-pre"><code><span class="deploy-cmt"># install and log in to a local server</span>
 <span class="deploy-prompt">$</span> uv pip install <span class="deploy-str">"kitaru[local]"</span>
 <span class="deploy-prompt">$</span> kitaru login
 <span class="deploy-ok">✓ Connected to local server at http://localhost:9090</span>
@@ -32,68 +29,18 @@
 <span class="deploy-cmt"># initialize and run your first flow</span>
 <span class="deploy-prompt">$</span> kitaru init
 <span class="deploy-prompt">$</span> python agent.py
-<span class="deploy-ok">✓ execution 4f2a complete — 6 checkpoints persisted</span>
+<span class="deploy-ok">✓ execution 4f2a complete (6 checkpoints persisted)</span>
 
 <span class="deploy-cmt"># replay from any checkpoint</span>
 <span class="deploy-prompt">$</span> kitaru executions replay 4f2a --from process_data
 <span class="deploy-ok">✓ replayed from checkpoint process_data</span></code></pre>
-      </div>
-
-      <!-- Right: available today checklist -->
-      <div class="deploy-today">
-        <div class="deploy-today-head">
-          <span class="deploy-today-label">Available today</span>
-        </div>
-        <ul class="deploy-checklist">
-          <li>
-            <span class="deploy-check" aria-hidden="true">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </span>
-            <span><strong>Local server + dashboard</strong> with zero config</span>
-          </li>
-          <li>
-            <span class="deploy-check" aria-hidden="true">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </span>
-            <span><strong>Checkpointed execution</strong> + CLI replay</span>
-          </li>
-          <li>
-            <span class="deploy-check" aria-hidden="true">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </span>
-            <span><strong>Human-in-the-loop waits</strong> via <code>kitaru.wait()</code></span>
-          </li>
-          <li>
-            <span class="deploy-check" aria-hidden="true">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </span>
-            <span><strong>Durable memory</strong> across Python, CLI, MCP</span>
-          </li>
-          <li>
-            <span class="deploy-check" aria-hidden="true">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </span>
-            <span><strong>PydanticAI adapter</strong> &mdash; wrap any agent with <code>KitaruAgent</code></span>
-          </li>
-          <li>
-            <span class="deploy-check" aria-hidden="true">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </span>
-            <span><strong>Self-host the server</strong> &mdash; <code>kitaru login &lt;url&gt;</code></span>
-          </li>
-        </ul>
-
-        <div class="deploy-roadmap">
-          <span class="deploy-roadmap-label">On the roadmap</span>
-          <ul class="deploy-roadmap-list">
-            <li>Multi-stack cloud deploy (AWS, GCP, Azure)</li>
-            <li>OpenAI Agents SDK &amp; Anthropic Agent SDK adapters</li>
-          </ul>
-          <a href="/roadmap" class="deploy-roadmap-link">See the full roadmap <span aria-hidden="true">→</span></a>
-        </div>
-      </div>
-
     </div>
+
+    <a href="/roadmap" class="deploy-roadmap-nudge" data-reveal data-reveal-delay="4">
+      <span class="deploy-roadmap-label">Coming next</span>
+      <span class="deploy-roadmap-headline">Multi-stack cloud deploy. OpenAI &amp; Anthropic adapters.</span>
+      <span class="deploy-roadmap-arrow" aria-hidden="true">→</span>
+    </a>
 
   </div>
 </section>
@@ -104,19 +51,12 @@
   }
 
   .deploy-lede {
-    max-width: 720px;
+    max-width: 680px;
     margin-top: 14px;
-    margin-bottom: 36px;
+    margin-bottom: 32px;
     font-size: clamp(0.95rem, 1.5vw, 1.08rem);
     line-height: 1.6;
     color: var(--color-secondary);
-  }
-
-  .deploy-grid {
-    display: grid;
-    grid-template-columns: 1.2fr 1fr;
-    gap: 24px;
-    align-items: stretch;
   }
 
   /* ─── Terminal ─── */
@@ -125,8 +65,7 @@
     border: 1px solid oklch(1 0 0 / 0.08);
     border-radius: 12px;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    max-width: 820px;
   }
 
   .deploy-terminal-header {
@@ -149,14 +88,13 @@
   }
 
   .deploy-terminal-pre {
-    padding: 18px 20px;
+    padding: 18px 22px;
     margin: 0;
     overflow-x: auto;
     font-family: var(--font-mono);
-    font-size: 0.78rem;
-    line-height: 1.7;
+    font-size: 0.82rem;
+    line-height: 1.75;
     color: var(--color-dark-text);
-    flex: 1;
   }
 
   .deploy-prompt {
@@ -176,152 +114,69 @@
 
   .deploy-ok {
     color: oklch(0.7 0.12 155);
-    font-size: 0.75rem;
+    font-size: 0.78rem;
   }
 
-  /* ─── Today + Roadmap ─── */
-  .deploy-today {
-    display: flex;
-    flex-direction: column;
-    padding: 20px 22px;
+  /* ─── Roadmap nudge ─── */
+  .deploy-roadmap-nudge {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-top: 28px;
+    padding: 14px 20px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: 12px;
-    gap: 16px;
+    border-radius: 10px;
+    text-decoration: none;
+    transition: border-color 0.2s, background 0.2s, transform 0.2s;
   }
 
-  .deploy-today-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .deploy-today-label {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--color-accent);
-  }
-
-  .deploy-checklist {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .deploy-checklist li {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    font-size: 0.88rem;
-    line-height: 1.5;
-    color: var(--color-secondary);
-  }
-
-  .deploy-checklist strong {
-    color: var(--color-primary);
-    font-weight: 600;
-  }
-
-  .deploy-checklist code {
-    font-family: var(--font-mono);
-    font-size: 0.82em;
-    color: var(--color-accent);
-    background: oklch(0.65 0.16 45 / 0.08);
-    padding: 1px 5px;
-    border-radius: 4px;
-  }
-
-  .deploy-check {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: oklch(0.55 0.1 155 / 0.12);
-    color: var(--color-success);
-    margin-top: 2px;
-  }
-
-  /* Roadmap footer */
-  .deploy-roadmap {
-    margin-top: 4px;
-    padding-top: 16px;
-    border-top: 1px dashed var(--color-border);
+  .deploy-roadmap-nudge:hover {
+    border-color: oklch(0.65 0.16 45 / 0.35);
+    background: oklch(0.65 0.16 45 / 0.03);
+    transform: translateY(-1px);
   }
 
   .deploy-roadmap-label {
-    display: block;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--color-muted);
-    margin-bottom: 10px;
-  }
-
-  .deploy-roadmap-list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .deploy-roadmap-list li {
-    font-size: 0.85rem;
-    line-height: 1.45;
-    color: var(--color-muted);
-    padding-left: 18px;
-    position: relative;
-  }
-
-  .deploy-roadmap-list li::before {
-    content: '◯';
-    position: absolute;
-    left: 0;
-    color: var(--color-muted);
-    font-size: 0.75em;
-    top: 3px;
-  }
-
-  .deploy-roadmap-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.82rem;
-    font-weight: 500;
     color: var(--color-accent);
-    text-decoration: none;
-    transition: gap 0.2s;
   }
 
-  .deploy-roadmap-link:hover {
-    gap: 8px;
+  .deploy-roadmap-headline {
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--color-primary);
+    letter-spacing: -0.005em;
   }
 
-  @media (max-width: 900px) {
-    .deploy-grid {
-      grid-template-columns: 1fr;
-    }
+  .deploy-roadmap-arrow {
+    color: var(--color-accent);
+    font-size: 1rem;
+    transition: transform 0.2s;
   }
 
-  @media (max-width: 480px) {
+  .deploy-roadmap-nudge:hover .deploy-roadmap-arrow {
+    transform: translateX(3px);
+  }
+
+  @media (max-width: 640px) {
     .deploy-terminal-pre {
-      font-size: 0.72rem;
+      font-size: 0.74rem;
       padding: 14px 16px;
     }
-    .deploy-today {
-      padding: 18px 18px;
+
+    .deploy-roadmap-nudge {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .deploy-roadmap-arrow {
+      display: none;
     }
   }
 </style>

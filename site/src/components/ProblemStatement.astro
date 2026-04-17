@@ -9,8 +9,7 @@
       The agent loop is solved. The platform around it isn't.
     </h2>
     <p class="problem-lede" data-reveal data-reveal-delay="2">
-      Agent SDKs handle <em>inside the loop</em>: tool calls, LLM calls, sandboxes. That's the easy part now.<br>
-      Everything <em>outside the loop</em> — how the agent is deployed, what credentials it gets, which skills it loads, how runs are tracked — teams are rebuilding from scratch, company by company.
+      Agent SDKs handle <em>inside the loop</em>: tool calls, LLM calls, sandboxes. Kitaru handles everything <em>outside</em> it.
     </p>
 
     <div class="problem-grid">
@@ -18,44 +17,40 @@
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="3">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Permissions and credential brokering" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Scoped permissions" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
           <span class="why-card-tag">Permissions</span>
-          <h3>Agents run untrusted code. Env vars leak.</h3>
-          <p>Every team ships a proxy with scoped permissions before they ship the agent. Credential brokering, allowlists, per-session scoping — hand-rolled, every time.</p>
+          <h3>Scoped permissions, out of the box.</h3>
+          <p>Kitaru ships a credential broker in front of every agent: per-session scoping, allowlists, and short-lived tokens by default. You wire up the agent, not the proxy.</p>
         </div>
       </div>
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="4">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="Orchestration and dispatch" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="One agent, three runtimes" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
           <span class="why-card-tag">Orchestration</span>
-          <h3>Same agent, three modes. No standard.</h3>
-          <p>Interactive chat, background webhook, scheduled batch — one agent runs in all three. Without dispatch scaffolding, every context is a fresh rebuild, every failure mode is a surprise.</p>
+          <h3>One agent, three runtimes.</h3>
+          <p>Interactive chat, background webhook, scheduled batch. Define the agent once, dispatch it anywhere. Kitaru's runtime absorbs the differences so a single entry point covers all three contexts.</p>
         </div>
       </div>
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="5">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Skills, tracking, and lineage" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Runs you can actually compare" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
           <span class="why-card-tag">Tracking</span>
-          <h3>Skills load per task. Runs need to be compared.</h3>
-          <p>Progressive disclosure. Versioned artifacts. Cross-run diffs. Lineage between executions. None of this is out of the box &mdash; and without it, you're flying blind past the demo.</p>
+          <h3>Runs you can actually compare.</h3>
+          <p>Every execution is versioned, every skill load is logged, every artifact is lineage-tracked. Progressive disclosure when you want depth, cross-run diffs when you need to debug. Built in, not bolted on.</p>
         </div>
       </div>
 
     </div>
-
-    <p class="problem-conclusion" data-reveal data-reveal-delay="6">
-      Browserbase, Ramp, and Stripe all rebuilt this platform layer for themselves. <strong>Kitaru is that layer &mdash; open source.</strong>
-    </p>
   </div>
 </section>
 
@@ -105,23 +100,6 @@
     margin-bottom: 12px;
   }
 
-  .problem-conclusion {
-    margin-top: 40px;
-    padding: 22px 28px;
-    border-left: 3px solid var(--color-accent);
-    background: oklch(0.65 0.16 45 / 0.04);
-    border-radius: 0 10px 10px 0;
-    font-size: clamp(1rem, 1.8vw, 1.15rem);
-    line-height: 1.55;
-    font-weight: 400;
-    color: var(--color-primary);
-    letter-spacing: -0.005em;
-  }
-
-  .problem-conclusion strong {
-    font-weight: 600;
-    color: var(--color-accent);
-  }
 
   @media (max-width: 768px) {
     .problem-grid {
