@@ -183,6 +183,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 - **Environment-variable docs:** document `KITARU_*` env vars as the public surface. Mention `ZENML_*` only as a compatibility note when necessary to explain migration or interop.
 - **Model-registry docs:** `kitaru model register` still writes aliases to local config, but submitted/replayed runs automatically receive a transported registry snapshot via `KITARU_MODEL_REGISTRY`. `kitaru model list` should be described as listing aliases available in the current environment, not just aliases stored locally.
 - **Frontmatter required:** every `.mdx` page needs `title` and `description`.
+- **Example READMEs are user-facing, not contributor-facing:** `examples/**/README.md` files exist to teach new users what Kitaru does and walk them through the specific example. Keep them focused on concepts, the primitives used, and how to run the example. Do **not** add maintainer-oriented sections such as "Testing" (internal test commands), CI-only credential setup, or notes about how stubbed/mocked test runs work — those are implementation details for the Kitaru team and belong in `tests/`, contributor docs, or PR descriptions. If a section would not help a first-time user understand Kitaru, it does not belong in an example README.
 
 ## Security & Configuration Notes
 
