@@ -44,6 +44,7 @@ class ImageSettings(BaseModel):
     dockerfile: str | None = None
     build_context_root: str | None = None
     environment: dict[str, str] | None = None
+    secret_environment_from: list[str] | None = None
     apt_packages: list[str] | None = None
     replicate_local_python_environment: bool | None = None
     image_tag: str | None = None
@@ -101,6 +102,24 @@ class ImageSettings(BaseModel):
                 raise KitaruUsageError("Image environment keys cannot be empty.")
             normalized_environment[normalized_key] = str(environment_value)
         return normalized_environment
+
+    @field_validator("secret_environment_from")
+    @classmethod
+    def _validate_secret_environment_from(
+        cls,
+        value: list[str] | None,
+    ) -> list[str] | None:
+        if value is None:
+            return None
+        normalized_refs: list[str] = []
+        for secret_ref in value:
+            normalized_ref = secret_ref.strip()
+            if not normalized_ref:
+                raise KitaruUsageError(
+                    "Image secret_environment_from cannot contain empty strings."
+                )
+            normalized_refs.append(normalized_ref)
+        return normalized_refs
 
     def is_empty(self) -> bool:
         """Return whether this object carries any configured values."""
@@ -333,6 +352,11 @@ def _merge_image_settings(
             else base.build_context_root
         ),
         environment=merged_environment,
+        secret_environment_from=(
+            override.secret_environment_from
+            if override.secret_environment_from is not None
+            else base.secret_environment_from
+        ),
         apt_packages=(
             override.apt_packages
             if override.apt_packages is not None

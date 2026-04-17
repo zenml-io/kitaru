@@ -137,10 +137,13 @@ This project uses [just](https://github.com/casey/just) as a command stack. Run 
 
 **Typical loop:** write code → `just fix` (auto-fix what it can) → `just check` (verify everything passes) → `just test` (make sure nothing is broken) → commit.
 
+**Worktree setup gotcha:** In a fresh `git worktree`, the `test_phase*_example::*_runs_end_to_end` tests (~14 of them) fail with `RuntimeError: Unable to resolve dynamic pipeline source. Make sure your pipeline is defined at the top level of your module.` This is because ZenML's dynamic pipeline resolver uses `get_source_root()` to locate the project root before re-importing the pipeline module by dotted path, and that root comes from the `.kitaru/` marker. Worktrees don't inherit `.kitaru/` from the main checkout, so the resolver can't find `examples.basic_flow....` on `sys.path`. **Fix:** run `uv run kitaru init` once in the new worktree after `uv sync`. The unit test suite passes without this — only the end-to-end example tests need it.
+
 ```bash
 # Setup
 uv sync                              # Install dependencies
 uv sync --extra local                # Include local ZenML runtime components
+kitaru init                          # Required in a fresh git worktree — see note below
 
 # Common Python workflows
 just check                            # Run all checks (format, lint, typecheck, typos, yaml, actions, links)
@@ -249,6 +252,7 @@ Future work will add richer OpenTelemetry-native tracing and exporter integratio
 - **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize"
 - **Comments explain *why*, not *what*.** No change-tracking comments ("Updated from X", "Refactored this"). No narrating obvious code (`x = x + 1  # increment x`). Add comments only for intent, trade-offs, constraints, edge cases, or non-obvious decisions. Prefer expressive names and small functions over inline commentary.
 - **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
+- **No postponed annotations in flow/checkpoint modules.** Do not add `from __future__ import annotations` to files that define Kitaru `@flow`/`@checkpoint` functions or ZenML `@pipeline`/`@step` functions. ZenML inspects step output annotations at runtime and currently rejects string annotations such as `"dict[str, Any]"`; use real runtime annotations instead. Python 3.11+ already supports `list[str]` / `str | None` without the future import.
 - **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Use standalone util files only for truly generic functions used across unrelated modules.
 - **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
 

@@ -53,7 +53,8 @@ kitaru.configure(
     retries=1,
     image=kitaru.ImageSettings(
         base_image="python:3.12-slim",
-        environment={"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
+        environment={"LOG_LEVEL": "INFO"},
+        secret_environment_from=["openai-creds"],
     ),
 )
 ```
@@ -156,7 +157,9 @@ Execution settings:
 - `KITARU_STACK`
 - `KITARU_CACHE`
 - `KITARU_RETRIES`
-- `KITARU_IMAGE` (JSON object or plain image string)
+- `KITARU_IMAGE` (JSON object or plain image string; the JSON form accepts every
+  `ImageSettings` field, including `secret_environment_from` for secret
+  references resolved at runtime)
 
 ### LLM
 
@@ -216,10 +219,19 @@ retries = 2
 
 [tool.kitaru.image]
 base_image = "python:3.12-slim"
+secret_environment_from = ["openai-creds"]
 
 [tool.kitaru.image.environment]
-OPENAI_API_KEY = "{{ OPENAI_KEY }}"
+LOG_LEVEL = "INFO"
 ```
+
+<Callout type="warn">
+  `environment` is for non-secret values only. Put credentials in
+  `secret_environment_from` instead — those references are resolved at runtime
+  via the ZenML pipeline secret mechanism and never appear in image metadata,
+  log output, or the frozen execution spec. See
+  [Containerization → Secret-backed environment variables](/guides/containerization#secret-backed-environment-variables).
+</Callout>
 
 ## Automatic package injection
 
@@ -331,6 +343,9 @@ export KITARU_RETRIES=2
 # LLM
 export OPENAI_API_KEY=sk-...
 export KITARU_DEFAULT_MODEL=openai/gpt-5-nano
+
+# Remote secret references — resolved at runtime, never written into image env
+export KITARU_IMAGE='{"secret_environment_from": ["openai-creds"]}'
 
 # Observability
 export KITARU_LOG_STORE_BACKEND=datadog
