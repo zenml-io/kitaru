@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -40,10 +39,10 @@ from ._helpers import (
     _emit_json_item,
     _emit_snapshot,
     _emit_snapshot_sections,
+    _emit_warning,
     _exit_with_error,
     _facade_module,
     _print_success,
-    _print_warning,
     _resolve_output_format,
 )
 
@@ -131,21 +130,6 @@ def _ensure_no_auth_environment_overrides(
         "environment variables directly.",
         output=output,
     )
-
-
-def _emit_warning(
-    message: str,
-    *,
-    output: CLIOutputFormat,
-    detail: str | None = None,
-) -> None:
-    """Emit a non-fatal warning without breaking JSON stdout payloads."""
-    if output == CLIOutputFormat.JSON:
-        print(f"Warning: {message}", file=sys.stderr)
-        if detail:
-            print(f"  {detail}", file=sys.stderr)
-        return
-    _print_warning(message, detail)
 
 
 def _warn_for_auth_environment_overrides(*, output: CLIOutputFormat) -> None:
