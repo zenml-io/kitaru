@@ -168,23 +168,3 @@ Each document is a JSON object with stable metadata, section ids, section text, 
 - `get_company_info()` — the Acme Corp profile.
 
 These are plain Python functions, registered as Claude Agent SDK custom tools in `claude_agent.py`. No Kitaru primitives, no model calls.
-
-## Testing
-
-The stage tests stub Claude so they don't hit Anthropic, run the real decorated flows, and verify the durable state Kitaru captured (artifacts, memory, wait points, session resume). They follow the same pattern across stages:
-
-```bash
-uv run pytest tests/test_compliance_review_tools.py          # retrieval unit tests
-uv run pytest tests/test_phase1_compliance_review_stage1.py  # Stage 1 integration
-uv run pytest tests/test_phase2_compliance_review_stage2.py  # Stage 2 integration
-uv run pytest tests/test_phase3_compliance_review_stage3.py  # Stage 3 integration
-uv run pytest tests/test_phase4_compliance_review_stage4.py  # Stage 4 integration
-```
-
-None of these tests require `ANTHROPIC_API_KEY`.
-
-## Credentials
-
-The Claude-backed stages (1–4) need Anthropic credentials in the environment expected by the Claude Agent SDK — typically `ANTHROPIC_API_KEY`. For local runs, export it in your shell. For remote runs, create the `anthropic` Kitaru secret shown above; the shared Claude boundary loads it at runtime with `kitaru.get_secret()` and sets `ANTHROPIC_API_KEY` for the SDK.
-
-The retrieval unit tests and the `tools.py` surface run without any credentials at all.
