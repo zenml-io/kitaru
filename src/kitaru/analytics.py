@@ -58,6 +58,7 @@ class AnalyticsEvent(StrEnum):
     MEMORY_COMPACTED = "Kitaru memory compacted"
     MEMORY_REINDEX_RUN = "Kitaru memory reindex run"
     SECRET_UPSERTED = "Kitaru secret upserted"
+    SECRET_READ = "Kitaru secret read"
     STACK_CREATED = "Kitaru stack created"
     STACK_ACTIVATED = "Kitaru stack activated"
     MODEL_ALIAS_REGISTERED = "Kitaru model alias registered"

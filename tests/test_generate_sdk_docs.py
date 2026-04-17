@@ -290,6 +290,17 @@ class TestExtractApi:
             "use_stack",
         }.issubset(config_funcs)
 
+    def test_filtered_extraction_includes_secret_api(self) -> None:
+        raw = extract_api("kitaru")
+        filtered = _filter_module(raw, is_root=True)
+        secrets_module = filtered.get("modules", {}).get("secrets", {})
+
+        assert "Secret" in secrets_module.get("classes", {})
+        assert "Client" not in secrets_module.get("classes", {})
+        assert "ZenKeyError" not in secrets_module.get("classes", {})
+        assert "get_secret" in secrets_module.get("functions", {})
+        assert "_get_secret_response_exact" not in secrets_module.get("functions", {})
+
     def test_filtered_extraction_excludes_private_reference_modules(self) -> None:
         raw = extract_api("kitaru")
         filtered = _filter_module(raw, is_root=True)

@@ -6,12 +6,14 @@ import re
 from typing import Annotated, Any
 
 from cyclopts import Parameter
-from zenml.exceptions import EntityExistsError, ZenKeyError
+from zenml.exceptions import EntityExistsError
 from zenml.models import SecretResponse
 
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
+from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 from kitaru.inspection import serialize_secret_detail, serialize_secret_summary
+from kitaru.secrets import _get_secret_response_exact
 
 from . import secrets_app
 from ._helpers import (
@@ -109,14 +111,8 @@ def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
 def _resolve_secret_exact(client: Any, name_or_id: str) -> SecretResponse:
     """Fetch one secret by exact name or exact ID."""
     try:
-        return client.get_secret(
-            name_id_or_prefix=name_or_id,
-            allow_partial_name_match=False,
-            allow_partial_id_match=False,
-        )
-    except KeyError as exc:
-        raise ValueError(f"Secret `{name_or_id}` was not found.") from exc
-    except ZenKeyError as exc:
+        return _get_secret_response_exact(name_or_id, client=client)
+    except (KitaruRuntimeError, KitaruUsageError) as exc:
         raise ValueError(str(exc)) from exc
 
 

@@ -263,6 +263,20 @@ fi
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run
 
 # ---------------------------------------------------------------------------
+# Secret API
+# ---------------------------------------------------------------------------
+section_header "Secret API"
+
+SMOKE_SECRET_NAME="kitaru-smoke-creds"
+run_test "kitaru secrets set smoke secret" \
+    $UV_RUN kitaru secrets set "$SMOKE_SECRET_NAME" --SMOKE_TOKEN=smoke-value
+run_test "SDK get_secret()" \
+    env SMOKE_SECRET_NAME="$SMOKE_SECRET_NAME" \
+    $UV_RUN python -c 'import os; from kitaru import get_secret; s = get_secret(os.environ["SMOKE_SECRET_NAME"]); assert s.get("SMOKE_TOKEN") == "smoke-value"'
+run_test "kitaru secrets delete smoke secret" \
+    $UV_RUN kitaru secrets delete "$SMOKE_SECRET_NAME"
+
+# ---------------------------------------------------------------------------
 # Core SDK flows
 # ---------------------------------------------------------------------------
 section_header "Core SDK flows"
