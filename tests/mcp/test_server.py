@@ -2271,6 +2271,7 @@ class TestKitaruInfo:
             include_packages=False,
             package_names=None,
             include_environment_type=False,
+            include_provenance_details=False,
         )
         mock_serialize.assert_called_once_with(snapshot)
         assert payload == {"sdk_version": "0.2.0"}
@@ -2284,6 +2285,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": True,
+                    "include_provenance_details": True,
                 },
                 id="all_includes_packages_and_env",
             ),
@@ -2293,6 +2295,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": False,
+                    "include_provenance_details": False,
                 },
                 id="all_packages_without_env",
             ),
@@ -2302,6 +2305,7 @@ class TestKitaruInfo:
                     "include_packages": False,
                     "package_names": ["zenml", "kitaru"],
                     "include_environment_type": False,
+                    "include_provenance_details": False,
                 },
                 id="specific_packages",
             ),
@@ -2311,6 +2315,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": True,
+                    "include_provenance_details": True,
                 },
                 id="all_overrides_specific_packages",
             ),

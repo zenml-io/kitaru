@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `kitaru info --all` now includes active stack/project provenance, showing whether the effective context came from environment variables, repo-local `.kitaru/config.yaml`, or global config. The same structured fields are available through JSON output, exported diagnostics files, and MCP `kitaru_info(all=True)` (#182)
+
 ## [0.5.0] - 2026-04-17
 
 ### Breaking Changes

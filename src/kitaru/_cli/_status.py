@@ -24,6 +24,7 @@ from kitaru.config import (
     active_stack_log_store,
 )
 from kitaru.inspection import (
+    ActiveConfigSelectionProvenance,
     RuntimeSnapshot,
     describe_local_server,
     is_registered_local_server_url,
@@ -367,7 +368,84 @@ def _package_rows(snapshot: RuntimeSnapshot) -> list[tuple[str, str]]:
     return [(name, version) for name, version in snapshot.packages.items()]
 
 
-def _build_info_sections(snapshot: RuntimeSnapshot) -> list[SnapshotSection]:
+def _configured_source(selection: ActiveConfigSelectionProvenance) -> str:
+    """Render the configured source for active stack/project provenance."""
+    if selection.effective_source == "unset":
+        return "unset"
+    if selection.effective_source_detail:
+        return f"{selection.effective_source} ({selection.effective_source_detail})"
+    return selection.effective_source
+
+
+def _id_with_optional_path(value: str | None, path: str | None) -> str:
+    """Render an optional raw config ID with the path it came from."""
+    rendered = value or "not set"
+    if path:
+        return f"{rendered} ({path})"
+    return rendered
+
+
+def _resolved_selection(selection: ActiveConfigSelectionProvenance) -> str:
+    """Render the post-Client resolved resource, if available."""
+    if selection.resolved_name and selection.resolved_id:
+        return f"{selection.resolved_name} ({selection.resolved_id})"
+    if selection.resolved_name:
+        return selection.resolved_name
+    if selection.resolved_id:
+        return selection.resolved_id
+    return "unavailable"
+
+
+def _active_context_provenance_rows(
+    snapshot: RuntimeSnapshot,
+) -> list[tuple[str, str]]:
+    """Build rows for the verbose active stack/project provenance section."""
+    rows: list[tuple[str, str]] = []
+    selections = (
+        ("Active stack", snapshot.active_stack_provenance),
+        ("Active project", snapshot.active_project_provenance),
+    )
+    for label, selection in selections:
+        if selection is None:
+            continue
+        rows.extend(
+            [
+                (f"{label} source", _configured_source(selection)),
+                (f"{label} configured ID", selection.effective_id or "not set"),
+                (f"{label} resolved", _resolved_selection(selection)),
+                (
+                    f"{label} env",
+                    _id_with_optional_path(
+                        selection.environment_id,
+                        selection.environment_variable,
+                    ),
+                ),
+                (
+                    f"{label} repo-local",
+                    _id_with_optional_path(
+                        selection.repository_id,
+                        selection.repository_config_path,
+                    ),
+                ),
+                (
+                    f"{label} global",
+                    _id_with_optional_path(
+                        selection.global_id,
+                        selection.global_config_path,
+                    ),
+                ),
+            ]
+        )
+        for note in selection.notes:
+            rows.append((f"{label} note", note))
+    return rows
+
+
+def _build_info_sections(
+    snapshot: RuntimeSnapshot,
+    *,
+    include_provenance_details: bool = False,
+) -> list[SnapshotSection]:
     """Build multi-section layout for the info command."""
     sections = [SnapshotSection(title=None, rows=_info_rows(snapshot))]
 
@@ -378,6 +456,15 @@ def _build_info_sections(snapshot: RuntimeSnapshot) -> list[SnapshotSection]:
     conn_sources = _connection_source_rows(snapshot)
     if conn_sources:
         sections.append(SnapshotSection(title="Connection source", rows=conn_sources))
+
+    active_context_provenance = _active_context_provenance_rows(snapshot)
+    if include_provenance_details and active_context_provenance:
+        sections.append(
+            SnapshotSection(
+                title="Active context provenance",
+                rows=active_context_provenance,
+            )
+        )
 
     if snapshot.environment:
         sections.append(
@@ -865,7 +952,10 @@ def info(
         bool,
         Parameter(
             alias=["-a"],
-            help="Full diagnostic: include all packages and environment type.",
+            help=(
+                "Full diagnostic: include all packages, environment type, and "
+                "active stack/project provenance."
+            ),
         ),
     ] = False,
     all_packages: Annotated[
@@ -888,18 +978,26 @@ def info(
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Show detailed environment information for the current setup."""
+    """Show detailed environment information for the current setup.
+
+    Use `--all` to include active stack/project provenance. The provenance
+    shows whether the effective context came from environment variables,
+    repo-local `.kitaru/config.yaml`, or global config, and is also included
+    in JSON output and exported diagnostics files.
+    """
     output_format = _resolve_output_format(output)
     command = "info"
 
     include_packages = all or all_packages
     package_names = None if include_packages else (list(packages) if packages else None)
     include_environment_type = all
+    include_provenance_details = all
 
     snapshot = _facade_module()._build_runtime_snapshot(
         include_packages=include_packages,
         package_names=package_names,
         include_environment_type=include_environment_type,
+        include_provenance_details=include_provenance_details,
     )
 
     from kitaru.analytics import AnalyticsEvent, track
@@ -944,7 +1042,10 @@ def info(
         )
         return
 
-    sections = _build_info_sections(snapshot)
+    sections = _build_info_sections(
+        snapshot,
+        include_provenance_details=include_provenance_details,
+    )
     _emit_snapshot_sections(
         "Kitaru info",
         sections,
