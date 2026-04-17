@@ -12,6 +12,7 @@ sees that whole turn as one durable checkpoint.
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -28,6 +29,7 @@ if _REPO_ROOT not in sys.path:
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
+    ANTHROPIC_SECRET_NAME,
     CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
     ClaudeAgentResult,
@@ -69,9 +71,7 @@ def check_it_security_policy(prompt: str = STAGE_1_PROMPT) -> ClaudeAgentResult:
 
 
 @flow(
-    image={
-        "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
-    },
+    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT]},
 )
 def it_policy_check(prompt: str = STAGE_1_PROMPT) -> ClaudeAgentResult:
     """Check Acme Corp's IT security policy for the Stage 1 SOC 2 question."""
@@ -82,9 +82,16 @@ def run_workflow(
     prompt: str = STAGE_1_PROMPT,
     *,
     stack: str | None = None,
+    use_secret_environment: bool = False,
 ) -> ClaudeAgentResult:
     """Execute the Stage 1 flow and return the Claude agent result."""
-    return it_policy_check.run(prompt, stack=stack).wait()
+    run_kwargs: dict[str, Any] = {"stack": stack}
+    if use_secret_environment:
+        run_kwargs["image"] = {
+            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+            "secret_environment_from": [ANTHROPIC_SECRET_NAME],
+        }
+    return it_policy_check.run(prompt, **run_kwargs).wait()
 
 
 def main() -> None:

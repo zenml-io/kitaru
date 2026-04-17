@@ -8,6 +8,7 @@ import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -91,6 +92,46 @@ def _wait_for_pending_wait(
         f"Timed out after {_WAIT_DISCOVERY_TIMEOUT_SECONDS:.0f}s waiting for "
         f"Stage 4 turn {turn_number} to reach a pending wait."
     )
+
+
+def test_stage4_run_workflow_can_opt_into_runtime_secret_environment(
+    monkeypatch,
+    stage4_module,
+) -> None:
+    """run_workflow() should forward stack and secret-env image overrides."""
+    expected = stage4_module.ClaudeAgentResult(
+        session_id="stage-4-test-session",
+        cwd=str(stage4_module.EXAMPLE_DIR),
+        transcript_path="/tmp/stage-4-test-session.jsonl",
+        result="Stubbed flow result",
+        num_turns=1,
+    )
+    fake_handle = Mock()
+    fake_handle.wait = Mock(return_value=expected)
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=fake_handle)
+    monkeypatch.setattr(stage4_module, "conversational_compliance_review", fake_flow)
+
+    result = stage4_module.run_workflow(
+        initial_prompt="Start the audit.",
+        conversation_label="my-conversation",
+        max_turns=2,
+        stack="prod-k8s",
+        use_secret_environment=True,
+    )
+
+    assert result == expected
+    fake_flow.run.assert_called_once_with(
+        initial_prompt="Start the audit.",
+        conversation_label="my-conversation",
+        max_turns=2,
+        stack="prod-k8s",
+        image={
+            "requirements": [stage4_module.CLAUDE_AGENT_SDK_REQUIREMENT],
+            "secret_environment_from": [stage4_module.ANTHROPIC_SECRET_NAME],
+        },
+    )
+    fake_handle.wait.assert_called_once_with()
 
 
 def test_stage4_checkpoint_resumes_existing_claude_session(

@@ -56,8 +56,8 @@ _READ_ONLY_CLOSED_WORLD = ToolAnnotations(
 )
 _NON_ALPHANUMERIC = re.compile(r"[^A-Za-z0-9]")
 CLAUDE_AGENT_SDK_REQUIREMENT = "claude-agent-sdk>=0.1.58,<0.2"
-_ANTHROPIC_SECRET_NAME = "anthropic"
-_ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
+ANTHROPIC_SECRET_NAME = "anthropic"
+ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 _REMOTE_STACK_DEPLOYMENT_TYPES = frozenset(
     {"kubernetes", "vertex", "sagemaker", "azureml"}
 )
@@ -180,7 +180,7 @@ company_tools = create_sdk_mcp_server(
 def _ensure_anthropic_api_key() -> None:
     """Load Anthropic credentials for remote runs when the shell env is absent."""
     global _anthropic_key_checked
-    if _anthropic_key_checked or os.environ.get(_ANTHROPIC_API_KEY_ENV):
+    if _anthropic_key_checked or os.environ.get(ANTHROPIC_API_KEY_ENV):
         _anthropic_key_checked = True
         return
 
@@ -189,23 +189,24 @@ def _ensure_anthropic_api_key() -> None:
         return
 
     try:
-        secret = get_secret(_ANTHROPIC_SECRET_NAME)
+        secret = get_secret(ANTHROPIC_SECRET_NAME)
     except Exception as exc:
         raise RuntimeError(
             f"Remote compliance-review runs require a centralized Anthropic "
             f"secret, but the lookup failed: {exc}. Create the secret with: "
-            f"kitaru secrets set anthropic --ANTHROPIC_API_KEY=sk-ant-..."
+            f"kitaru secrets set {ANTHROPIC_SECRET_NAME} "
+            f"--{ANTHROPIC_API_KEY_ENV}=sk-ant-..."
         ) from exc
 
-    anthropic_api_key = secret.get(_ANTHROPIC_API_KEY_ENV)
+    anthropic_api_key = secret.get(ANTHROPIC_API_KEY_ENV)
     if not anthropic_api_key:
         raise RuntimeError(
-            "Secret 'anthropic' exists, but it does not contain "
-            "ANTHROPIC_API_KEY. Update it with: kitaru secrets set anthropic "
-            "--ANTHROPIC_API_KEY=sk-ant-..."
+            f"Secret '{ANTHROPIC_SECRET_NAME}' exists, but it does not contain "
+            f"{ANTHROPIC_API_KEY_ENV}. Update it with: kitaru secrets set "
+            f"{ANTHROPIC_SECRET_NAME} --{ANTHROPIC_API_KEY_ENV}=sk-ant-..."
         )
 
-    os.environ[_ANTHROPIC_API_KEY_ENV] = anthropic_api_key
+    os.environ[ANTHROPIC_API_KEY_ENV] = anthropic_api_key
     _anthropic_key_checked = True
 
 

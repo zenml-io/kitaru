@@ -32,6 +32,7 @@ if _REPO_ROOT not in sys.path:
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
+    ANTHROPIC_SECRET_NAME,
     CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
     ClaudeAgentResult,
@@ -177,11 +178,9 @@ def finalize_memory_audit(report: ClaudeAgentResult) -> ClaudeAgentResult:
 
 
 @flow(
-    image={
-        "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
-    },
+    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT]},
 )
-def audit_with_memory() -> ClaudeAgentResult:
+def audit_with_memory(strict_memory: bool = False) -> ClaudeAgentResult:
     """Run the memory-aware HR + IT audit.
 
     Canonical memory only advances after synthesis succeeds:
@@ -192,8 +191,8 @@ def audit_with_memory() -> ClaudeAgentResult:
     """
     memory.configure(scope_type=MEMORY_SCOPE_TYPE)
 
-    previous_it = memory.get(IT_FINDING_KEY)
-    previous_hr = memory.get(HR_FINDING_KEY)
+    previous_it = memory.get(IT_FINDING_KEY, strict=strict_memory)
+    previous_hr = memory.get(HR_FINDING_KEY, strict=strict_memory)
 
     it_result = check_it_security(previous_it)
     hr_result = check_hr_compliance(previous_hr)
@@ -225,9 +224,20 @@ def audit_with_memory() -> ClaudeAgentResult:
     )
 
 
-def run_workflow() -> ClaudeAgentResult:
+def run_workflow(
+    *,
+    stack: str | None = None,
+    use_secret_environment: bool = False,
+    strict_memory: bool = False,
+) -> ClaudeAgentResult:
     """Execute the Stage 3 memory-aware audit."""
-    return audit_with_memory.run().wait()
+    run_kwargs: dict[str, Any] = {"stack": stack}
+    if use_secret_environment:
+        run_kwargs["image"] = {
+            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+            "secret_environment_from": [ANTHROPIC_SECRET_NAME],
+        }
+    return audit_with_memory.run(strict_memory=strict_memory, **run_kwargs).wait()
 
 
 def main() -> None:

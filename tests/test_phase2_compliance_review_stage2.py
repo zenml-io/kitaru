@@ -6,6 +6,7 @@ import importlib
 import time
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from zenml.client import Client
@@ -44,6 +45,40 @@ def _find_artifact_by_name(
                 if artifact.name == name:
                     return artifact
     raise AssertionError(f"No artifact named '{name}' found in step outputs.")
+
+
+def test_stage2_run_workflow_can_opt_into_runtime_secret_environment(
+    monkeypatch,
+    stage2_module,
+) -> None:
+    """run_workflow() should forward stack and secret-env image overrides."""
+    expected = stage2_module.ClaudeAgentResult(
+        session_id="stage-2-test-session",
+        cwd=str(stage2_module.EXAMPLE_DIR),
+        transcript_path="/tmp/stage-2-test-session.jsonl",
+        result="Stubbed flow result",
+        num_turns=1,
+    )
+    fake_handle = Mock()
+    fake_handle.wait = Mock(return_value=expected)
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=fake_handle)
+    monkeypatch.setattr(stage2_module, "audit_company", fake_flow)
+
+    result = stage2_module.run_workflow(
+        stack="prod-k8s",
+        use_secret_environment=True,
+    )
+
+    assert result == expected
+    fake_flow.run.assert_called_once_with(
+        stack="prod-k8s",
+        image={
+            "requirements": [stage2_module.CLAUDE_AGENT_SDK_REQUIREMENT],
+            "secret_environment_from": [stage2_module.ANTHROPIC_SECRET_NAME],
+        },
+    )
+    fake_handle.wait.assert_called_once_with()
 
 
 @pytest.mark.usefixtures("primed_zenml")

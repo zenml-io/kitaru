@@ -146,6 +146,42 @@ def test_stage1_run_workflow_passes_stack_override(
     fake_handle.wait.assert_called_once_with()
 
 
+def test_stage1_run_workflow_can_opt_into_runtime_secret_environment(
+    monkeypatch,
+    stage1_module,
+) -> None:
+    """run_workflow() should forward the shared secret env image override."""
+    expected = stage1_module.ClaudeAgentResult(
+        session_id="stage-1-test-session",
+        cwd=str(stage1_module.EXAMPLE_DIR),
+        transcript_path="/tmp/stage-1-test-session.jsonl",
+        result="Stubbed flow result",
+        num_turns=1,
+    )
+    fake_handle = Mock()
+    fake_handle.wait = Mock(return_value=expected)
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=fake_handle)
+    monkeypatch.setattr(stage1_module, "it_policy_check", fake_flow)
+
+    result = stage1_module.run_workflow(
+        "custom flow prompt",
+        stack="prod-k8s",
+        use_secret_environment=True,
+    )
+
+    assert result == expected
+    fake_flow.run.assert_called_once_with(
+        "custom flow prompt",
+        stack="prod-k8s",
+        image={
+            "requirements": [stage1_module.CLAUDE_AGENT_SDK_REQUIREMENT],
+            "secret_environment_from": [stage1_module.ANTHROPIC_SECRET_NAME],
+        },
+    )
+    fake_handle.wait.assert_called_once_with()
+
+
 def test_stage1_flow_runs_one_checkpoint_with_stubbed_claude(
     monkeypatch,
     primed_zenml,

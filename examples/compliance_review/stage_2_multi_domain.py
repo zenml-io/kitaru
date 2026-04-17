@@ -18,6 +18,7 @@ created.
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -34,6 +35,7 @@ if _REPO_ROOT not in sys.path:
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
+    ANTHROPIC_SECRET_NAME,
     CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
     ClaudeAgentResult,
@@ -180,9 +182,7 @@ def run_domain_checks() -> tuple[
 
 
 @flow(
-    image={
-        "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
-    },
+    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT]},
 )
 def audit_company() -> ClaudeAgentResult:
     """Run the full sequential Stage 2 compliance audit."""
@@ -226,9 +226,19 @@ def synthesize_report(
     return to_claude_agent_result(response)
 
 
-def run_workflow() -> ClaudeAgentResult:
+def run_workflow(
+    *,
+    stack: str | None = None,
+    use_secret_environment: bool = False,
+) -> ClaudeAgentResult:
     """Execute the full Stage 2 audit and return the final report result."""
-    return audit_company.run().wait()
+    run_kwargs: dict[str, Any] = {"stack": stack}
+    if use_secret_environment:
+        run_kwargs["image"] = {
+            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+            "secret_environment_from": [ANTHROPIC_SECRET_NAME],
+        }
+    return audit_company.run(**run_kwargs).wait()
 
 
 def main() -> None:

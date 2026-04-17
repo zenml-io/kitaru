@@ -38,6 +38,7 @@ if _REPO_ROOT not in sys.path:
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
+    ANTHROPIC_SECRET_NAME,
     CLAUDE_AGENT_SDK_REQUIREMENT,
     DEFAULT_ALLOWED_TOOLS,
     ClaudeAgentResult,
@@ -106,9 +107,7 @@ def finalize_conversation(
 
 
 @flow(
-    image={
-        "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
-    },
+    image={"requirements": [CLAUDE_AGENT_SDK_REQUIREMENT]},
 )
 def conversational_compliance_review(
     initial_prompt: str = INITIAL_PROMPT,
@@ -200,12 +199,22 @@ def run_workflow(
     initial_prompt: str = INITIAL_PROMPT,
     conversation_label: str = DEFAULT_CONVERSATION_LABEL,
     max_turns: int | None = None,
+    *,
+    stack: str | None = None,
+    use_secret_environment: bool = False,
 ) -> ClaudeAgentResult:
     """Execute the Stage 4 conversational review flow."""
+    run_kwargs: dict[str, Any] = {"stack": stack}
+    if use_secret_environment:
+        run_kwargs["image"] = {
+            "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT],
+            "secret_environment_from": [ANTHROPIC_SECRET_NAME],
+        }
     return conversational_compliance_review.run(
-        initial_prompt,
-        conversation_label,
-        max_turns,
+        initial_prompt=initial_prompt,
+        conversation_label=conversation_label,
+        max_turns=max_turns,
+        **run_kwargs,
     ).wait()
 
 

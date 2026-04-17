@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -31,6 +32,127 @@ def stage3_module(monkeypatch, tmp_path):
 def _load_memory_value(client: KitaruClient, artifact_id: str) -> Any:
     """Load the stored value for a memory metadata entry."""
     return client.artifacts.get(artifact_id).load()
+
+
+def test_stage3_run_workflow_forwards_strict_memory_and_secret_environment(
+    monkeypatch,
+    stage3_module,
+) -> None:
+    """run_workflow() should forward strict-memory and secret-env options."""
+    expected = stage3_module.ClaudeAgentResult(
+        session_id="stage-3-test-session",
+        cwd=str(stage3_module.EXAMPLE_DIR),
+        transcript_path="/tmp/stage-3-test-session.jsonl",
+        result="Stubbed flow result",
+        num_turns=1,
+    )
+    fake_handle = Mock()
+    fake_handle.wait = Mock(return_value=expected)
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=fake_handle)
+    monkeypatch.setattr(stage3_module, "audit_with_memory", fake_flow)
+
+    result = stage3_module.run_workflow(
+        stack="prod-k8s",
+        use_secret_environment=True,
+        strict_memory=True,
+    )
+
+    assert result == expected
+    fake_flow.run.assert_called_once_with(
+        strict_memory=True,
+        stack="prod-k8s",
+        image={
+            "requirements": [stage3_module.CLAUDE_AGENT_SDK_REQUIREMENT],
+            "secret_environment_from": [stage3_module.ANTHROPIC_SECRET_NAME],
+        },
+    )
+    fake_handle.wait.assert_called_once_with()
+
+
+def test_stage3_flow_forwards_strict_memory_to_memory_reads(
+    monkeypatch,
+    stage3_module,
+) -> None:
+    """The flow body should thread strict=True into both prior-memory reads."""
+    configure_calls: list[str] = []
+    get_calls: list[tuple[str, bool]] = []
+    memory_write_calls: list[tuple[str, Any]] = []
+
+    it_result = stage3_module.ClaudeAgentResult(
+        session_id="it-session",
+        cwd=str(stage3_module.EXAMPLE_DIR),
+        transcript_path="/tmp/it-session.jsonl",
+        result="IT strict result",
+        num_turns=1,
+    )
+    hr_result = stage3_module.ClaudeAgentResult(
+        session_id="hr-session",
+        cwd=str(stage3_module.EXAMPLE_DIR),
+        transcript_path="/tmp/hr-session.jsonl",
+        result="HR strict result",
+        num_turns=1,
+    )
+    synthesized = stage3_module.ClaudeAgentResult(
+        session_id="report-session",
+        cwd=str(stage3_module.EXAMPLE_DIR),
+        transcript_path="/tmp/report-session.jsonl",
+        result="Change report",
+        num_turns=1,
+    )
+
+    monkeypatch.setattr(
+        stage3_module.memory,
+        "configure",
+        lambda *, scope_type: configure_calls.append(scope_type),
+    )
+    monkeypatch.setattr(
+        stage3_module.memory,
+        "get",
+        lambda key, *, strict=False: get_calls.append((key, strict)) or None,
+    )
+    monkeypatch.setattr(stage3_module, "check_it_security", lambda _previous=None: "it")
+    monkeypatch.setattr(
+        stage3_module, "check_hr_compliance", lambda _previous=None: "hr"
+    )
+
+    fake_synthesize = Mock()
+    fake_future = Mock()
+    fake_future.result.return_value = synthesized
+    fake_synthesize.submit = Mock(return_value=fake_future)
+    monkeypatch.setattr(stage3_module, "synthesize_change_report", fake_synthesize)
+    monkeypatch.setattr(
+        stage3_module,
+        "_load_checkpoint_result",
+        lambda value: {"it": it_result, "hr": hr_result}[value],
+    )
+    monkeypatch.setattr(
+        stage3_module,
+        "_submit_memory_set",
+        lambda key, value, **_kwargs: (
+            memory_write_calls.append((key, value)) or f"write:{key}"
+        ),
+    )
+    monkeypatch.setattr(
+        stage3_module,
+        "finalize_memory_audit",
+        lambda report, **_kwargs: report,
+    )
+
+    result = stage3_module.audit_with_memory.__wrapped__(strict_memory=True)
+
+    assert result == synthesized
+    assert configure_calls == [stage3_module.MEMORY_SCOPE_TYPE]
+    assert get_calls == [
+        (stage3_module.IT_FINDING_KEY, True),
+        (stage3_module.HR_FINDING_KEY, True),
+    ]
+    fake_synthesize.submit.assert_called_once_with("it", "hr")
+    assert [key for key, _ in memory_write_calls] == [
+        stage3_module.IT_FINDING_KEY,
+        stage3_module.HR_FINDING_KEY,
+        stage3_module.LAST_RUN_KEY,
+    ]
 
 
 def test_stage3_flow_preserves_memory_across_repeated_runs(

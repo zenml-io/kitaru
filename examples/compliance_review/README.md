@@ -42,16 +42,21 @@ uv run examples/compliance_review/stage_1_single_turn.py
 
 The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing.
 
-A remote runner does not automatically inherit your laptop's shell `ANTHROPIC_API_KEY`. For known remote execution stacks (Kubernetes, Vertex, SageMaker, AzureML), this example loads a Kitaru-managed `anthropic` secret with `kitaru.get_secret("anthropic")`, then injects `ANTHROPIC_API_KEY` into the process environment before calling the Claude Agent SDK. Local execution keeps using your shell environment and does not read the centralized secret.
+A remote runner does not automatically inherit your laptop's shell `ANTHROPIC_API_KEY`. The safest path is to expose that credential at step runtime from a centralized `anthropic` secret:
 
 ```bash
 kitaru stack use <your_remote_stack>
 zenml integration install s3          # or kubernetes, vertex, gcp, azure, …
 
 kitaru secrets set anthropic --ANTHROPIC_API_KEY=sk-ant-...
+export KITARU_IMAGE='{"secret_environment_from":["anthropic"]}'
 
 uv run examples/compliance_review/stage_2_multi_domain.py
 ```
+
+This example also keeps a `kitaru.get_secret("anthropic")` fallback for known remote stacks when `ANTHROPIC_API_KEY` is still missing at runtime, so the existing local quickstart and guarded tests keep working.
+
+If you are calling a stage from Python instead of using `KITARU_IMAGE`, pass `use_secret_environment=True` to its `run_workflow(...)` helper to send the same `secret_environment_from=["anthropic"]` override for that run.
 
 ## Stage 1 — one turn, one checkpoint
 
@@ -78,6 +83,8 @@ Everything before that checkpoint returns its cached `ClaudeAgentResult`; everyt
 The audit should get smarter each time it runs. The second run shouldn't just re-check the same gaps in isolation; it should know what the first run found and ask "is that still true?"
 
 Stage 3 uses **flow-scoped memory**: the `audit_with_memory` flow has its own memory keyed by flow id, not a shared namespace. The flow body reads prior findings before dispatching checkpoints, passes them in as arguments, and writes the fresh findings back after the checkpoints complete. A final change-report checkpoint compares current to prior.
+
+By default those reads are lenient: if an older memory entry exists but its backing artifact store is unreachable from the current runtime, Kitaru warns and Stage 3 treats it like \"no prior finding\" so the audit can continue. If you are driving the flow programmatically, `strict_memory=True` switches that to fail-fast behavior.
 
 Inspect and seed memory from the CLI:
 
