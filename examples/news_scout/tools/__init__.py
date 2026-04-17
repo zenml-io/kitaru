@@ -3,4 +3,4 @@
 from .sources import search_news, search_twitter
 from .web import fetch_url, investigate
 
-__all__ = ["search_news", "search_twitter", "investigate", "fetch_url"]
+__all__ = ["fetch_url", "investigate", "search_news", "search_twitter"]
