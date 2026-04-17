@@ -602,6 +602,7 @@ def test_serialize_execution_contract() -> None:
             "dockerfile": "Dockerfile",
             "build_context_root": None,
             "environment": None,
+            "secret_environment_from": None,
             "apt_packages": None,
             "replicate_local_python_environment": None,
             "image_tag": None,

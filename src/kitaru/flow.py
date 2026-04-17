@@ -184,6 +184,10 @@ def _build_pipeline_options(
     cache at some execution layer. Passing a concrete bool here makes ZenML's
     compiler overwrite every step's ``enable_cache``, which would clobber any
     ``@checkpoint(cache=...)`` overrides.
+
+    ``secrets`` is forwarded only when non-empty so ZenML does not overwrite
+    its own defaults with an empty list. Secret references intentionally
+    bypass Docker settings so values never enter image/build metadata.
     """
     options: dict[str, Any] = {
         "retry": _to_retry_config(_normalize_retries(resolved_execution.retries)),
@@ -191,6 +195,8 @@ def _build_pipeline_options(
     }
     if resolved_execution.cache is not None:
         options["enable_cache"] = resolved_execution.cache
+    if transport_image is not None and transport_image.secret_environment_from:
+        options["secrets"] = list(transport_image.secret_environment_from)
     return options
 
 
