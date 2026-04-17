@@ -215,7 +215,7 @@ body::before {
 }
 
 .section-pad-compact {
-  padding: 48px clamp(24px, 5vw, 80px) 56px;
+  padding: 36px clamp(24px, 5vw, 80px) 44px;
 }
 
 .section-inner {
