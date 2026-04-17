@@ -168,7 +168,7 @@ kitaru executions retry <exec_id>
 
 ```
 scout.py        — flow + agent + CLI
-models.py       — Article, JudgedItem
+models.py       — Article + Source enum
 tools/          — the four tools
 prompts.py      — system prompt + user prompt
 utils/          — dotenv loader, HTTP helpers
