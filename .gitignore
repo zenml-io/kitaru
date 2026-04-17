@@ -236,9 +236,10 @@ site/.wrangler/
 # Git worktrees (isolated workspaces created via git worktree add)
 .worktrees/
 
-# Design docs
+# Design docs + Repoprompt
 design/
 dogfood-output/
+prompt-exports/
 
 # Local Kitaru UI build artifacts (used by docker/Dockerfile.server-dev)
 docker/kitaru-ui-dist/
