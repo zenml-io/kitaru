@@ -17,6 +17,7 @@ from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
+    KitaruMemoryArtifactUnavailableError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -317,7 +318,22 @@ def test_memory_get_dispatches_to_synthetic_step() -> None:
         result = memory.get("prefs", version=2)
 
     assert result == {"theme": "dark"}
-    memory_get_step.assert_called_once_with(flow_id, "flow", "prefs", 2)
+    memory_get_step.assert_called_once_with(flow_id, "flow", "prefs", 2, False)
+
+
+def test_memory_get_forwards_strict_flag_to_synthetic_step() -> None:
+    flow_id = _runtime_flow_id("demo_flow")
+
+    with (
+        _flow_scope(name="demo_flow", flow_id=flow_id),
+        patch(
+            "kitaru.memory._memory_get_step",
+            return_value={"theme": "dark"},
+        ) as memory_get_step,
+    ):
+        memory.get("prefs", version=2, strict=True)
+
+    memory_get_step.assert_called_once_with(flow_id, "flow", "prefs", 2, True)
 
 
 def test_memory_get_outside_flow_dispatches_to_direct_impl() -> None:
@@ -337,8 +353,28 @@ def test_memory_get_outside_flow_dispatches_to_direct_impl() -> None:
         _MemoryScope(scope="repo_seed", scope_type="namespace"),
         "prefs",
         2,
+        strict=False,
     )
     memory_get_step.assert_not_called()
+
+
+def test_memory_get_outside_flow_forwards_strict_flag() -> None:
+    memory.configure(scope="repo_seed")
+
+    with (
+        patch(
+            "kitaru.memory._get_impl",
+            return_value={"theme": "dark"},
+        ) as get_impl,
+    ):
+        memory.get("prefs", version=2, strict=True)
+
+    get_impl.assert_called_once_with(
+        _MemoryScope(scope="repo_seed", scope_type="namespace"),
+        "prefs",
+        2,
+        strict=True,
+    )
 
 
 def test_memory_list_dispatches_to_synthetic_step() -> None:
@@ -495,7 +531,9 @@ def test_memory_configure_sets_namespace_scope_for_subsequent_calls() -> None:
         "prefs",
         {"theme": "dark"},
     )
-    memory_get_step.assert_called_once_with("my_repo", "namespace", "prefs", None)
+    memory_get_step.assert_called_once_with(
+        "my_repo", "namespace", "prefs", None, False
+    )
     memory_list_step.assert_called_once_with("my_repo", "namespace")
     memory_history_step.assert_called_once_with("my_repo", "namespace", "prefs")
     memory_delete_step.assert_called_once_with("my_repo", "namespace", "prefs")
@@ -1308,6 +1346,59 @@ def test_get_impl_returns_none_for_tombstone_history_version() -> None:
 
     assert result is None
     tombstone.load.assert_not_called()
+
+
+def test_get_impl_warns_and_returns_none_when_artifact_value_unreachable() -> None:
+    unreachable = _memory_artifact(
+        scope="demo_flow",
+        key="prefs",
+        version=2,
+        value=None,
+    )
+    unreachable.load.side_effect = FileNotFoundError(
+        "/local/kitaru/mem/prefs does not exist."
+    )
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(unreachable)
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        pytest.warns(
+            RuntimeWarning,
+            match=r"artifact value could not be loaded from this environment",
+        ),
+    ):
+        result = _get_impl(_flow_memory_scope(), "prefs")
+
+    assert result is None
+    unreachable.load.assert_called_once_with()
+
+
+def test_get_impl_strict_raises_typed_error_when_artifact_value_unreachable() -> None:
+    unreachable = _memory_artifact(
+        scope="demo_flow",
+        key="prefs",
+        version=2,
+        value=None,
+    )
+    cause = FileNotFoundError("/local/kitaru/mem/prefs does not exist.")
+    unreachable.load.side_effect = cause
+    client_mock = MagicMock()
+    client_mock.list_artifact_versions.return_value = _page(unreachable)
+
+    with (
+        patch("kitaru.memory.Client", return_value=client_mock),
+        pytest.raises(
+            KitaruMemoryArtifactUnavailableError,
+            match=r"prefs.*demo_flow.*could not be loaded",
+        ) as exc_info,
+    ):
+        _get_impl(_flow_memory_scope(), "prefs", strict=True)
+
+    # Strict mode must preserve the original cause for debugging.
+    assert exc_info.value.__cause__ is cause
+    # Subclass relationship keeps broader handlers working.
+    assert isinstance(exc_info.value, KitaruBackendError)
 
 
 def test_list_impl_dedupes_versions_and_excludes_deleted_latest_keys() -> None:

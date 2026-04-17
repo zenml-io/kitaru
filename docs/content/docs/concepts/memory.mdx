@@ -10,7 +10,7 @@ Use it when your agent needs to remember things like:
 
 - user preferences
 - repository conventions
-- previously discovered facts
+- facts discovered across sessions
 - long-lived workflow state that should not be passed through every function call
 
 Unlike checkpoint outputs, memory is looked up by **key within a typed scope** (`scope_type` + `scope`), not by an execution ID.
@@ -90,6 +90,33 @@ Because deletes are **soft deletes** (tombstones) rather than hard purges:
 This is useful for audit trails and future rollback/forking patterns. You always
 have a complete record of what happened to a key, even after deletion.
 
+### Missing entries vs unreachable values
+
+A memory entry has two parts: the index metadata and the stored value artifact.
+Sometimes the metadata is reachable, but the value artifact is not reachable
+from the environment doing the read. Kitaru treats that differently from a
+missing key.
+
+| Situation | Python `memory.get()` | CLI/MCP read |
+|---|---|---|
+| No entry exists, or the selected version is a tombstone | `None` | `None` / not found |
+| Entry exists and value loads | Loaded value | `value_available: true` + `value` |
+| Entry exists but value cannot load | `RuntimeWarning` + `None` | `value_available: false` + diagnostics |
+| Same unreachable value with strict mode | `KitaruMemoryArtifactUnavailableError` | Typed error / non-zero CLI exit |
+
+This unreachable-value case can happen when a memory was written against storage
+that the current environment cannot access. Use `strict=True` when code or an
+assistant needs to distinguish "no active entry" from "the entry exists, but the
+backing artifact cannot be loaded here."
+
+<Callout type="info">
+  Memory values are stored as artifacts. If you need memory values to be
+  available from every environment regardless of where they were written, that
+  requires a server-attached or storage-backed memory implementation. The
+  current memory system surfaces unreachable values clearly, but it does not
+  make every historical value universally loadable.
+</Callout>
+
 ## Memory maintenance: purge, compact, and audit
 
 Soft deletes (tombstones) preserve full history, but over time a scope can
@@ -140,7 +167,7 @@ Compact does **not** delete the source entries. If you want to reclaim old
 history after compaction, the recommended workflow is: compact, inspect the
 summary if needed, then run `purge` separately.
 
-Compaction audit records now include the `source_mode` that was used, so the
+Compaction audit records include the `source_mode` that was used, so the
 maintenance log shows whether a summary came from current state or historical
 versions.
 
@@ -228,7 +255,7 @@ Execution-scoped memory has two slightly different jobs:
 - the **producer execution** tells you whether a particular version was written
   during a live flow run or added later from a script, CLI, or MCP
 
-That distinction matters for the UI. Kitaru now adds extra discovery tags to
+That distinction matters for the UI. Kitaru adds extra discovery tags to
 new execution-scoped writes so the flow UI can answer the practical question:
 
 > show me all execution-scoped memories that belong to this flow

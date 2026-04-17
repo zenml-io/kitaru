@@ -705,6 +705,7 @@ def test_memory_get_delegates_to_shared_interface(
         scope="repo/demo",
         scope_type="namespace",
         version=3,
+        strict=False,
     )
     assert result == payload
 
@@ -732,8 +733,86 @@ def test_memory_get_returns_none_when_missing(
         scope="repo/demo",
         scope_type="namespace",
         version=None,
+        strict=False,
     )
     assert result is None
+
+
+def test_memory_get_passes_through_unavailable_payload_in_lenient_mode(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Lenient MCP reads return the value-unavailable payload so agents can branch."""
+    from kitaru.errors import KitaruMemoryArtifactUnavailableError
+
+    unavailable_payload = {
+        "key": "preferences/theme",
+        "scope": "repo/demo",
+        "scope_type": "namespace",
+        "version": 3,
+        "artifact_id": "artifact-123",
+        "value_available": False,
+        "value_unavailable": {
+            "error_type": KitaruMemoryArtifactUnavailableError.__name__,
+            "cause_type": FileNotFoundError.__name__,
+            "message": "Memory value could not be loaded from this environment.",
+        },
+    }
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch.object(
+            memory_interface,
+            "get_memory_payload",
+            return_value=unavailable_payload,
+        ) as mock_get,
+    ):
+        result = kitaru_memory_get(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
+
+    assert result == unavailable_payload
+    mock_get.assert_called_once_with(
+        mock_kitaru_client,
+        key="preferences/theme",
+        scope="repo/demo",
+        scope_type="namespace",
+        version=None,
+        strict=False,
+    )
+
+
+def test_memory_get_strict_propagates_typed_error(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Strict mode must forward and raise the typed error for agent-side handling."""
+    from kitaru.errors import KitaruMemoryArtifactUnavailableError
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch.object(
+            memory_interface,
+            "get_memory_payload",
+            side_effect=KitaruMemoryArtifactUnavailableError("unreachable"),
+        ) as mock_get,
+        pytest.raises(KitaruMemoryArtifactUnavailableError, match="unreachable"),
+    ):
+        kitaru_memory_get(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+            strict=True,
+        )
+
+    mock_get.assert_called_once_with(
+        mock_kitaru_client,
+        key="preferences/theme",
+        scope="repo/demo",
+        scope_type="namespace",
+        version=None,
+        strict=True,
+    )
 
 
 def test_memory_set_delegates_to_shared_interface(
@@ -2271,6 +2350,7 @@ class TestKitaruInfo:
             include_packages=False,
             package_names=None,
             include_environment_type=False,
+            include_provenance_details=False,
         )
         mock_serialize.assert_called_once_with(snapshot)
         assert payload == {"sdk_version": "0.2.0"}
@@ -2284,6 +2364,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": True,
+                    "include_provenance_details": True,
                 },
                 id="all_includes_packages_and_env",
             ),
@@ -2293,6 +2374,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": False,
+                    "include_provenance_details": False,
                 },
                 id="all_packages_without_env",
             ),
@@ -2302,6 +2384,7 @@ class TestKitaruInfo:
                     "include_packages": False,
                     "package_names": ["zenml", "kitaru"],
                     "include_environment_type": False,
+                    "include_provenance_details": False,
                 },
                 id="specific_packages",
             ),
@@ -2311,6 +2394,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": True,
+                    "include_provenance_details": True,
                 },
                 id="all_overrides_specific_packages",
             ),
