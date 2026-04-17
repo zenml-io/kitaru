@@ -30,8 +30,8 @@ from claude_agent_sdk import (
     tool,
 )
 from pydantic import BaseModel, Field
-from zenml.client import Client
 
+from kitaru import get_secret
 from kitaru.config import classify_stack_deployment_type
 
 try:  # Support both package imports and `cd examples/compliance_review`.
@@ -189,11 +189,7 @@ def _ensure_anthropic_api_key() -> None:
         return
 
     try:
-        secret = Client().get_secret(
-            name_id_or_prefix=_ANTHROPIC_SECRET_NAME,
-            allow_partial_name_match=False,
-            allow_partial_id_match=False,
-        )
+        secret = get_secret(_ANTHROPIC_SECRET_NAME)
     except Exception as exc:
         raise RuntimeError(
             f"Remote compliance-review runs require a centralized Anthropic "
@@ -201,14 +197,13 @@ def _ensure_anthropic_api_key() -> None:
             f"kitaru secrets set anthropic --ANTHROPIC_API_KEY=sk-ant-..."
         ) from exc
 
-    try:
-        anthropic_api_key = secret.secret_values[_ANTHROPIC_API_KEY_ENV]
-    except KeyError as exc:
+    anthropic_api_key = secret.get(_ANTHROPIC_API_KEY_ENV)
+    if not anthropic_api_key:
         raise RuntimeError(
             "Secret 'anthropic' exists, but it does not contain "
             "ANTHROPIC_API_KEY. Update it with: kitaru secrets set anthropic "
             "--ANTHROPIC_API_KEY=sk-ant-..."
-        ) from exc
+        )
 
     os.environ[_ANTHROPIC_API_KEY_ENV] = anthropic_api_key
     _anthropic_key_checked = True

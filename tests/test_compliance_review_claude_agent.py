@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Protocol
 
 import pytest
 
@@ -15,6 +15,10 @@ from tests.compliance_review_fakes import (
     fake_claude_response,
     install_fake_claude_agent_sdk,
 )
+
+
+class _FakeSecret(Protocol):
+    def get(self, key: str, default: str | None = None) -> str | None: ...
 
 
 @pytest.fixture
@@ -102,8 +106,10 @@ def test_ensure_anthropic_api_key_skips_local_runs(
     )
     monkeypatch.setattr(
         claude_agent_module,
-        "Client",
-        lambda: (_ for _ in ()).throw(AssertionError("Client should not be used")),
+        "get_secret",
+        lambda _name: (_ for _ in ()).throw(
+            AssertionError("get_secret should not be used")
+        ),
     )
 
     claude_agent_module._ensure_anthropic_api_key()
@@ -123,19 +129,15 @@ def test_ensure_anthropic_api_key_loads_remote_secret(
         lambda: "kubernetes",
     )
 
-    def fake_get_secret(**kwargs):
-        assert kwargs == {
-            "name_id_or_prefix": "anthropic",
-            "allow_partial_name_match": False,
-            "allow_partial_id_match": False,
-        }
-        return SimpleNamespace(secret_values={"ANTHROPIC_API_KEY": "sk-ant-test"})
+    class FakeSecret:
+        def get(self, key: str, default: str | None = None) -> str | None:
+            return {"ANTHROPIC_API_KEY": "sk-ant-test"}.get(key, default)
 
-    monkeypatch.setattr(
-        claude_agent_module,
-        "Client",
-        lambda: SimpleNamespace(get_secret=fake_get_secret),
-    )
+    def fake_get_secret(name_or_id: str) -> _FakeSecret:
+        assert name_or_id == "anthropic"
+        return FakeSecret()
+
+    monkeypatch.setattr(claude_agent_module, "get_secret", fake_get_secret)
 
     claude_agent_module._ensure_anthropic_api_key()
 
@@ -154,14 +156,10 @@ def test_ensure_anthropic_api_key_explains_missing_remote_secret(
         lambda: "kubernetes",
     )
 
-    def raise_not_found(**_kwargs):
+    def raise_not_found(_name: str):
         raise RuntimeError("secret not found")
 
-    monkeypatch.setattr(
-        claude_agent_module,
-        "Client",
-        lambda: SimpleNamespace(get_secret=raise_not_found),
-    )
+    monkeypatch.setattr(claude_agent_module, "get_secret", raise_not_found)
 
     with pytest.raises(RuntimeError, match="kitaru secrets set anthropic"):
         claude_agent_module._ensure_anthropic_api_key()
@@ -179,12 +177,14 @@ def test_ensure_anthropic_api_key_explains_missing_secret_key(
         lambda: "kubernetes",
     )
 
+    class FakeSecret:
+        def get(self, _key: str, default: str | None = None) -> str | None:
+            return default
+
     monkeypatch.setattr(
         claude_agent_module,
-        "Client",
-        lambda: SimpleNamespace(
-            get_secret=lambda **_kwargs: SimpleNamespace(secret_values={}),
-        ),
+        "get_secret",
+        lambda _name: FakeSecret(),
     )
 
     with pytest.raises(RuntimeError, match="does not contain ANTHROPIC_API_KEY"):

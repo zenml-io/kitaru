@@ -43,7 +43,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | LLM examples (tracked `kitaru.llm()` calls) | `uv sync --extra local --extra llm` |
 | PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
 | Coding agent example | `uv sync --extra local` + model alias / provider credentials |
-| Compliance review example | `uv sync --extra local --extra claude-agent-sdk` + `ANTHROPIC_API_KEY` |
+| Compliance review example | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or remote `anthropic` secret |
 | MCP query tools example | `uv sync --extra local --extra mcp` |
 
 ## How the examples are organized
@@ -89,7 +89,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | [Tracked LLM calls](llm/flow_with_llm.py) | `uv run examples/llm/flow_with_llm.py` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | [tests/test_phase12_llm_example.py](../tests/test_phase12_llm_example.py) |
 | [PydanticAI adapter](pydantic_ai_agent/pydantic_ai_adapter.py) | `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py` | `uv sync --extra local --extra pydantic-ai` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](https://kitaru.ai/docs/getting-started/pydantic-ai-adapter) | [tests/test_phase17_pydantic_ai_example.py](../tests/test_phase17_pydantic_ai_example.py) |
 | [Coding agent](coding_agent/agent.py) | `cd examples/coding_agent && uv run python agent.py "Your task"` | `uv sync --extra local` + model alias / provider credentials | Full agent loop with provider SDK tool calling, `kitaru.wait()` HITL, custom materializers, and artifact persistence | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | — |
-| [Compliance review](compliance_review/README.md) | `uv run examples/compliance_review/stage_1_single_turn.py` | `uv sync --extra local --extra claude-agent-sdk` + `ANTHROPIC_API_KEY` | Four-stage Claude Agent SDK audit: checkpointed turns, sequential domain checkpoints with partial replay, flow-scoped memory across runs, and durable wait/resume conversation | [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) | [tests/test_phase4_compliance_review_stage4.py](../tests/test_phase4_compliance_review_stage4.py) |
+| [Compliance review](compliance_review/README.md) | `uv run examples/compliance_review/stage_1_single_turn.py` | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or remote `anthropic` secret | Four-stage Claude Agent SDK audit: checkpointed turns, sequential domain checkpoints with partial replay, flow-scoped memory across runs, and durable wait/resume conversation | [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) | [tests/test_phase4_compliance_review_stage4.py](../tests/test_phase4_compliance_review_stage4.py) |
 | [MCP query tools](mcp/mcp_query_tools.py) | `uv run examples/mcp/mcp_query_tools.py` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/mcp/test_phase19_mcp_example.py](../tests/mcp/test_phase19_mcp_example.py) |
 
 ## Recommended learning path

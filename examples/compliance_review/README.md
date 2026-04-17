@@ -40,7 +40,9 @@ uv run examples/compliance_review/stage_1_single_turn.py
 
 ### Running against a remote stack
 
-The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing. The example only resolves the centralized Anthropic secret for known remote execution stacks (Kubernetes, Vertex, SageMaker, AzureML); local execution continues to use your shell `ANTHROPIC_API_KEY`:
+The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing.
+
+A remote runner does not automatically inherit your laptop's shell `ANTHROPIC_API_KEY`. For known remote execution stacks (Kubernetes, Vertex, SageMaker, AzureML), this example loads a Kitaru-managed `anthropic` secret with `kitaru.get_secret("anthropic")`, then injects `ANTHROPIC_API_KEY` into the process environment before calling the Claude Agent SDK. Local execution keeps using your shell environment and does not read the centralized secret.
 
 ```bash
 kitaru stack use <your_remote_stack>
@@ -183,4 +185,6 @@ None of these tests require `ANTHROPIC_API_KEY`.
 
 ## Credentials
 
-The Claude-backed stages (1–4) need Anthropic credentials in the environment expected by the Claude Agent SDK — typically `ANTHROPIC_API_KEY`. The retrieval unit tests and the `tools.py` surface run without any credentials at all.
+The Claude-backed stages (1–4) need Anthropic credentials in the environment expected by the Claude Agent SDK — typically `ANTHROPIC_API_KEY`. For local runs, export it in your shell. For remote runs, create the `anthropic` Kitaru secret shown above; the shared Claude boundary loads it at runtime with `kitaru.get_secret()` and sets `ANTHROPIC_API_KEY` for the SDK.
+
+The retrieval unit tests and the `tools.py` surface run without any credentials at all.
