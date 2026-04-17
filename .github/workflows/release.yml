@@ -108,15 +108,22 @@ jobs:
         with:
           python-version: '3.12'
 
-      # --- Bump version (dispatch only) ---
+      # --- Bump version (dispatch only, skip in recovery mode) ---
+      # In recovery mode (tag already exists) we checked out the tag itself,
+      # so these mutating steps must be skipped. Otherwise `uv lock` can
+      # re-resolve transitive deps to newer versions and create a commit on
+      # top of the tag, making HEAD diverge from the tag SHA — which the
+      # consistency check will then (correctly) reject.
       - name: Bump version in pyproject.toml
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
+          'true'
         run: |
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
           echo "Updated pyproject.toml to version $VERSION"
           grep '^version' pyproject.toml
       - name: Update CHANGELOG.md
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
+          'true'
         run: |
           DATE=$(date +%Y-%m-%d)
           if grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
@@ -126,14 +133,16 @@ jobs:
             echo "Updated CHANGELOG.md for $VERSION ($DATE)"
           fi
       - name: Update lockfile
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
+          'true'
         run: uv lock
       - name: Commit release changes
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
+          'true'
         run: |
           git add pyproject.toml CHANGELOG.md uv.lock
           if git diff --cached --quiet; then
-            echo "No release changes to commit — recovery mode"
+            echo "No release changes to commit"
           else
             git commit -m "Release $VERSION"
           fi
