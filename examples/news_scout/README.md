@@ -1,134 +1,183 @@
 # News Scout
 
-An agentic news monitor built on Kitaru's durable execution layer and PydanticAI.
-A single agent with 4 tools autonomously searches news sources, investigates
-articles, and decides what's worth surfacing. Every tool call is its own
-durable Kitaru checkpoint.
+An agent that reads the internet so you don't have to. Give it your
+interests, let it loose, and it comes back with a scored briefing of what
+actually matters today.
+
+Built on Kitaru + PydanticAI. Every tool call becomes its own durable
+checkpoint — you can see what the agent did, replay any step, and retry
+what failed.
+
+## What it looks like running
+
+```
+$ python scout.py --interests "quantum computing,fusion"
+
+Kitaru: Starting flow `news_scout`.
+Kitaru: Checkpoint `news_scout_model_request` started.
+Kitaru: Checkpoint `search_news_tool` started.
+Kitaru: Checkpoint `search_news_tool_2` started.     ← runs in parallel
+Kitaru: Checkpoint `search_news_tool` finished in 2.5s.
+...
+Kitaru: Checkpoint `investigate_tool_3` finished in 2.8s.
+...
+Kitaru: Flow completed in 3m3s.
+
+========================================================================
+News scout report
+========================================================================
+
+## 🚀 SEND NOW — Top Picks
+
+### 1. 🧲 ITER Fusion Project Crosses Milestone with World's Most Powerful Magnet
+Score: 9/10 · Reuters · May 2025
+
+The global ITER project hit a real engineering milestone — credible
+source, not vapor. After years of delays and overruns, this one counts.
+
+### 2. ⚛️ Microsoft's Majorana 1 Chip: Topological Qubit Breakthrough
+Score: 8/10 · NYT / Nature · Feb 2025
+
+Microsoft claims a new state of matter enabling inherently noise-resistant
+qubits. A Nature paper backs the results, though some academic debate
+remains. The most technically consequential quantum news of the year.
+
+...
+```
 
 ## Quick start
 
 ```bash
 cd examples/news_scout
 kitaru init
+uv sync --extra local --extra pydantic-ai --extra llm
 ```
 
-Create a `.env` file with your API keys:
+Drop your keys in `.env`:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-XAI_API_KEY=xai-...            # optional — enables the search_twitter tool
+XAI_API_KEY=xai-...        # optional, unlocks the search_twitter tool
 ```
 
-Install dependencies and run:
+Then:
 
 ```bash
-uv sync --extra local --extra pydantic-ai --extra llm
-python scout.py --seed-profile   # one-time: seed interests into memory
-python scout.py                   # run one agentic sweep
+python scout.py --seed-profile   # write default interests to memory (once)
+python scout.py                   # sweep
+python scout.py --interests "robotics,biotech"
 ```
 
-## How it works
+Default model is `anthropic:claude-sonnet-4-6`. Override with
+`KITARU_SCOUT_MODEL=openai:gpt-4o` or any PydanticAI model string.
 
-The agent has 4 tools:
+## The agent's toolbox
 
-| Tool | What it does |
+| Tool | Does |
 |---|---|
-| `search_news(query)` | Searches Hacker News + Google News |
-| `search_twitter(query)` | Asks Grok what X/Twitter is saying |
-| `investigate(url)` | Fetches and summarizes an article |
-| `fetch_url(url)` | Raw HTTP GET for anything else |
+| `search_news` | Hacker News + Google News |
+| `search_twitter` | Grok with live X access |
+| `investigate` | Fetches and reads a URL |
+| `fetch_url` | Raw HTTP — escape hatch |
 
-The agent is wrapped with `KitaruAgent(..., granular_checkpoints=True)` which
-means **each tool call, each model request, and each MCP call becomes its own
-Kitaru checkpoint** — individually cached, individually replayable, and shown
-as separate steps in the Kitaru dashboard.
+The agent decides what to search, when to dig deeper, and when it has
+enough. A hard cap of 50 model requests keeps runaway agents from
+emptying your wallet.
+
+## Why every tool call is its own checkpoint
+
+We wrap the agent with `KitaruAgent(granular_checkpoints=True)`. That
+turns each model request, each tool call, and each MCP invocation into
+its own Kitaru checkpoint — individually cached, individually
+replayable, individually visible in the dashboard.
 
 ```
 @flow news_scout
-  └── scout_agent.run_sync(prompt)        # runs at flow scope
-        ├── @checkpoint: model_request_1
-        ├── @checkpoint: tool_call search_news
-        ├── @checkpoint: model_request_2
-        ├── @checkpoint: tool_call investigate
-        ├── @checkpoint: model_request_3
+  └── scout_agent.run_sync(prompt)
+        ├── model_request_1      ← checkpoint
+        ├── search_news_tool     ← checkpoint
+        ├── model_request_2      ← checkpoint
+        ├── investigate_tool     ← checkpoint
         └── ...
 ```
 
-## Why the agent is at flow scope (not inside a checkpoint)
+If `investigate_tool_5` fails because a site was down, you can replay
+from exactly that point. Everything before it is cached. Nothing is
+re-paid.
 
-Granular mode cannot coexist with an enclosing `@checkpoint` — the adapter
-runs inline inside a parent checkpoint instead. So the agent call lives
-directly in the flow body, which means its inputs must be concrete Python
-values, not ZenML artifact refs.
+## Running on Kubernetes (or any remote stack)
 
-That's why this example reads memory **detached** (outside the flow) in
-`main()` and passes `interests` + `seen_fingerprints` into the flow as
-arguments. The agent sees real lists, not DAG placeholders.
+The flow declares its own image:
 
-## Memory layout
+```python
+SCOUT_IMAGE = ImageSettings(
+    requirements=["pydantic-ai>=1.80", "openai>=1.0"],
+    environment=_collect_env(),   # picks up API keys from local env
+)
 
-Both keys live in the `news_scout` namespace scope:
+@flow(image=SCOUT_IMAGE)
+def news_scout(...): ...
+```
 
-- `interests` — topics the user cares about (read on every run)
-- `seen_fingerprints` — articles already surfaced (passed to the agent as
-  prompt context so it can skip them)
+`_collect_env()` reads the keys that matter (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `XAI_API_KEY`, `KITARU_SCOUT_MODEL`) from your local
+environment at module-load time and bakes them into the container image
+when Kitaru builds it for the remote stack. Nothing secret leaves this
+file that wasn't already in your shell.
+
+To ship it:
 
 ```bash
-kitaru memory scopes
+kitaru stack use my-k8s-stack
+python scout.py
+```
+
+> **Heads up:** baking keys into images is fine for a personal scout,
+> not for shared infrastructure. For production, use `kitaru secrets`
+> and model aliases with `--secret`.
+
+## Memory
+
+Two keys in the `news_scout` namespace:
+
+- `interests` — what you care about
+- `seen_fingerprints` — articles the scout has surfaced before
+
+Poke at them directly:
+
+```bash
 kitaru memory get --scope-type=namespace --scope=news_scout interests
-kitaru memory get --scope-type=namespace --scope=news_scout seen_fingerprints
+kitaru memory list --scope-type=namespace --scope=news_scout
 ```
 
-The seen-set is currently read-only from the flow's perspective (the agent
-returns free text, so we don't parse new fingerprints out). To update it,
-use the CLI or write a follow-up flow that parses the agent's output.
+Memory is read outside the flow (in `main()`) and passed in as
+arguments. This is because granular-mode agents run at flow scope, and
+flow-scope needs concrete values rather than DAG refs.
 
-## Switching models
-
-Default model is `anthropic:claude-sonnet-4-6`. Override via env var:
-
-```bash
-KITARU_SCOUT_MODEL=openai:gpt-4o python scout.py
-KITARU_SCOUT_MODEL=gemini:gemini-2.5-flash python scout.py
-KITARU_SCOUT_MODEL=ollama:llama3.3 python scout.py
-```
-
-PydanticAI's model strings — anything it supports works here.
-
-## Replay and retry
-
-Because each tool call is a checkpoint, you can:
+## Replay a failed run
 
 ```bash
 kitaru executions list
-kitaru executions replay <exec_id> --from <checkpoint_name>
+kitaru executions replay <exec_id> --from search_news_tool_3
 kitaru executions retry <exec_id>
 ```
 
-The tool-level `retries` config on the agent (2 for model, 1 for tools) also
-auto-retries transient failures inline.
-
-## CLI flags
+## Layout
 
 ```
---seed-profile          Write default interests into namespace memory and exit
---interests TOPICS      Comma-separated interests to override for this run
-```
-
-## File layout
-
-```
-scout.py        — @flow + agent construction + CLI
-models.py       — Article, JudgedItem (used by tools)
-tools/          — search_news, search_twitter, investigate, fetch_url
-prompts.py      — system prompt + user prompt builder
+scout.py        — flow + agent + CLI
+models.py       — Article, JudgedItem
+tools/          — the four tools
+prompts.py      — system prompt + user prompt
 utils/          — dotenv loader, HTTP helpers
 ```
 
-## Next steps (not implemented)
+## What it doesn't do yet
 
-- Parse fingerprints from the agent's output to update seen-set automatically
-- Add Discord/email delivery (`send_alert` as a fifth tool)
-- Schedule via Kubernetes cron (run every N minutes)
-- Add `kitaru.wait()` for human approval before surfacing certain items
-- Add a preference-learning loop (thumbs up/down feeds back into the prompt)
+- Parse fingerprints out of the agent's report to auto-update the
+  seen-set (the agent returns prose, not JSON)
+- Send alerts anywhere — just prints to your terminal
+- Schedule itself — pair with a K8s CronJob or `just schedule`
+- Learn from thumbs up / down — no feedback loop yet
+
+Pull requests welcome.

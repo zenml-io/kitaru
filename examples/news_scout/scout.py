@@ -30,7 +30,7 @@ from pydantic_ai import Agent  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 from tools import fetch_url, investigate, search_news, search_twitter  # noqa: E402
 
-from kitaru import flow, memory  # noqa: E402
+from kitaru import ImageSettings, flow, memory  # noqa: E402
 from kitaru.adapters.pydantic_ai import CapturePolicy, KitaruAgent  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,25 @@ DEFAULT_INTERESTS: list[str] = [
     "open source",
     "developer tools",
 ]
+
+# Env vars to pick up from the local environment and bake into the container
+# image when running on remote stacks (Kubernetes, Vertex, etc.). Only vars
+# present locally at module load are forwarded — nothing secret leaves this
+# file that isn't already in your shell / `.env`.
+_ENV_VARS_TO_PROPAGATE = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "XAI_API_KEY",
+    "KITARU_SCOUT_MODEL",
+)
+
+
+def _collect_env() -> dict[str, str]:
+    """Pick up env vars set locally (after load_dotenv) for the remote image."""
+    return {
+        key: os.environ[key] for key in _ENV_VARS_TO_PROPAGATE if os.environ.get(key)
+    }
+
 
 # ---------------------------------------------------------------------------
 # Agent — granular checkpoint mode: every model/tool call is its own checkpoint
@@ -69,8 +88,16 @@ scout_agent = KitaruAgent(
 # Flow — agent runs at flow scope so granular mode can open per-call checkpoints
 # ---------------------------------------------------------------------------
 
+SCOUT_IMAGE = ImageSettings(
+    requirements=[
+        "pydantic-ai>=1.80",
+        "openai>=1.0",
+    ],
+    environment=_collect_env(),
+)
 
-@flow
+
+@flow(image=SCOUT_IMAGE)
 def news_scout(interests: list[str], seen_fingerprints: list[str]) -> None:
     """Agentic news scout. Agent runs at flow scope; each tool call is its own
     Kitaru checkpoint (replayable, cached, visible in the dashboard)."""
