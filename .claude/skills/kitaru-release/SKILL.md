@@ -207,6 +207,8 @@ The script uses `set -uo pipefail` **without `-e`** deliberately — it continue
 
 Prefer running in the background with `run_in_background: true` and tail the log afterwards — the full output is verbose and not useful in conversation context.
 
+**If running from a git worktree:** the smoke test's local server will serve ZenML's stock dashboard rather than the Kitaru UI, because `src/kitaru/_ui/dist/` is gitignored and not populated in fresh worktrees. The smoke test outcome is unaffected (CLI/SDK/MCP/LLM checks are dashboard-independent). Surface this to the user so they don't mistake the ZenML fallback for a Kitaru regression. If they want the Kitaru UI locally in the worktree, `bash scripts/download-ui.sh` pulls it.
+
 ## Step 8: ★ Pause — verify smoke test
 
 Parse the final summary. **Any non-zero `Failed:` count = STOP.**
@@ -357,6 +359,8 @@ Mark any post-release follow-ups (social posts, docs sync) as user-driven. The s
 - **Concurrency group.** `release.yml` has `concurrency: group: release, cancel-in-progress: false` — a second release trigger queues rather than cancels. If something goes wrong mid-release, do not trigger a second run; wait for the first to finish, then reset from the resulting state.
 - **Dry-run environment.** Real publishes use the `pypi` GitHub environment (requires secrets + manual approval); dry-runs use no environment. If the user wants a dry-run first, pass `-f dry-run=true` and loop back through Step 9 again for the real run after they approve.
 - **PyPI approval gate.** The `pypi` environment has required reviewers (`kitaru-admins` team, `prevent_self_review: false`). Every non-dry-run release pauses partway through awaiting approval. The triggering user can approve their own deployment if they're in `kitaru-admins`. If they're not, the release will sit waiting indefinitely until an admin approves — do not forget this step. `gh run watch` will show the run in `waiting` state while the gate is open; this is normal, not a hang.
+- **Branch protection on `develop` can block the workflow's push.** The Actions `GITHUB_TOKEN` cannot bypass admin-protected rules by default, so the "Push release commit to develop" step will fail unless `github-actions[bot]` (or a dedicated deploy key/PAT) is added to the "Allow bypass" list in the develop branch protection rule. If this isn't configured, the release publishes to PyPI (irreversible) before failing at the git push step, leaving a partial state. The workflow's recovery guards let re-dispatch complete cleanly on the same version (see next gotcha), but configuring the bypass avoids the incident entirely.
+- **Recovery dispatch skips file mutations.** When `v$VERSION` already exists on origin, the workflow detects this pre-checkout, checks out the tag itself, and skips the "Bump version" / "Update CHANGELOG" / "Update lockfile" / "Commit release changes" steps. This is intentional: `uv lock` is not stable across time (it regenerates `exclude-newer` timestamps and may re-resolve transitive deps if newer versions have been released between the original tag push and the recovery dispatch), so running it would create a commit on top of the tagged SHA and fail the consistency check. Do not re-enable those steps for recovery — the tag is the authoritative identity anchor.
 - **The `prompt-exports/` directory** is commonly untracked in the working tree — ignore it when staging CHANGELOG commits.
 
 ## Inputs and outputs reference
