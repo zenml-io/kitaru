@@ -15,10 +15,10 @@ exact same controls.
 
 | Surface | Scope input | Version reads | Admin ops (purge/compact/log) | Notes |
 |---|---|---|---|---|
-| `kitaru.memory` | Implicit via `memory.configure(...)` or active flow | `get(version=...)` | No | Best inside Python flows and scripts |
-| `KitaruClient.memories` | Explicit `scope=` + `scope_type=` on scoped calls | Yes | Yes | Best for admin/inspection code |
-| CLI | Explicit `--scope` + `--scope-type` on scoped commands | No | Yes | Best for shell inspection and maintenance |
-| MCP | Explicit `scope` + `scope_type` on scoped tools | Yes on `get` | Yes | Best for assistant/tool use |
+| `kitaru.memory` | Implicit via `memory.configure(...)` or active flow | `get(version=...)` | No | Loads values; unreachable values emit `RuntimeWarning` + `None` by default; use `strict=True` to raise |
+| `KitaruClient.memories` | Explicit `scope=` + `scope_type=` on scoped calls | Yes | Yes | Metadata-only for `get`; use artifact APIs, CLI, or MCP when you need the value |
+| CLI | Explicit `--scope` + `--scope-type` on scoped commands | No | Yes | `memory get` loads values; `--strict` turns unreachable values into an error |
+| MCP | Explicit `scope` + `scope_type` on scoped tools | Yes on `get` | Yes | `kitaru_memory_get(strict=...)` loads values and exposes structured unavailable diagnostics in lenient mode |
 
 <Callout type="info">
   The module-level `kitaru.memory` API does not take per-call `scope=`
@@ -91,6 +91,35 @@ This is useful for:
 - patching stored state by hand
 - writing migration or setup utilities
 
+### Handle unreachable memory values
+
+`memory.get(...)` returns `None` when no active value exists: the key may be
+missing, or the selected version may be a tombstone. In lenient mode, it also
+returns `None` with a `RuntimeWarning` when the entry exists but the backing
+artifact cannot be loaded from the current environment.
+
+Use `strict=True` when your code needs to distinguish an absent value from an
+unreachable value artifact:
+
+```python
+from kitaru import memory
+from kitaru.errors import KitaruMemoryArtifactUnavailableError
+
+memory.configure(scope="repo_docs", scope_type="namespace")
+
+try:
+    style = memory.get("style/release_notes", strict=True)
+except KitaruMemoryArtifactUnavailableError as exc:
+    print(f"The memory entry exists, but its value is not reachable here: {exc}")
+else:
+    if style is None:
+        print("No active memory value is stored for this key.")
+```
+
+`strict=True` is a read-time behavior only. Writing with `memory.set(...)` still
+creates a latest version; it does not rewrite or repair older unreachable
+versions.
+
 ## Inspect memory with `KitaruClient`
 
 Use `KitaruClient.memories` when you want explicit-scope programmatic control.
@@ -123,6 +152,14 @@ scopes = client.memories.scopes()
 
 The client API is the best fit for admin utilities because every call makes the
 typed scope explicit.
+
+`client.memories.get(...)` returns a `MemoryEntry` metadata object. It does not
+load the stored value. That makes it useful for inspection even when the backing
+value artifact is not reachable from the current environment.
+
+The CLI and MCP `get` surfaces use this metadata first, then attempt to load the
+artifact value separately. In lenient mode they can return metadata with
+`value_available: false` when that second step fails.
 
 That explicit scope matters most for execution-scoped memory. For example, a
 script can write into one execution bucket after the run has finished:
@@ -170,12 +207,45 @@ Two details matter here:
 - `kitaru memory set` parses the value as JSON when possible
 - the CLI `get` command reads the latest value only; it does not expose a version flag
 
+### CLI read strictness
+
+By default, `kitaru memory get` is lenient when an entry exists but its value
+artifact cannot be loaded from the current environment. Text output shows the
+entry metadata and unavailable diagnostics, while the warning is written to
+stderr. JSON output keeps stdout parseable and includes structured diagnostics
+in the item.
+
+```bash
+# Lenient read: shows metadata even if the value artifact is unreachable
+kitaru memory get style/release_notes --scope repo_docs --scope-type namespace
+
+# Strict read: fail if the entry exists but the value cannot be loaded here
+kitaru memory get style/release_notes --scope repo_docs --scope-type namespace --strict
+```
+
+A lenient JSON item keeps metadata fields such as `key`, `scope`, `scope_type`,
+`version`, and `artifact_id`, and includes this unavailable-value shape:
+
+```json
+{
+  "value_available": false,
+  "value_unavailable": {
+    "error_type": "KitaruMemoryArtifactUnavailableError",
+    "cause_type": "FileNotFoundError",
+    "message": "..."
+  }
+}
+```
+
+With `--strict`, the same unreachable value is treated as an error and the CLI
+exits non-zero with `KitaruMemoryArtifactUnavailableError`.
+
 ## Read and update memory from MCP
 
 Assistants can use the MCP server's structured memory tools:
 
 - `kitaru_memory_list(scope, scope_type, prefix=None)`
-- `kitaru_memory_get(key, scope, scope_type, version=None)`
+- `kitaru_memory_get(key, scope, scope_type, version=None, strict=False)`
 - `kitaru_memory_set(key, value, scope, scope_type)`
 - `kitaru_memory_delete(key, scope, scope_type)`
 - `kitaru_memory_history(key, scope, scope_type)`
@@ -188,6 +258,18 @@ A typical sequence looks like this:
 
 Use MCP when an assistant needs to inspect or update durable state without
 shelling out to the CLI.
+
+For `kitaru_memory_get`, `None` means no active entry was found for that key and
+scope. A payload with `value_available: false` means the entry exists, but the
+value artifact cannot be loaded from the MCP server's environment. Set
+`strict=True` when the assistant should treat that case as an error instead of
+receiving metadata-only diagnostics.
+
+A safe assistant flow is:
+
+1. If the tool returns `None`, treat the memory as absent.
+2. If `value_available` is `false`, explain that the memory entry exists but the value is unreachable from this environment.
+3. If `value_available` is `true`, use the returned `value`.
 
 ## Delete a key and inspect history
 
@@ -442,6 +524,9 @@ These follow the same semantics as the Python client and CLI surfaces.
   See [Why memory is forbidden in checkpoints](/concepts/memory#where-memory-calls-are-allowed)
   for the full explanation.
 - Outside a flow, configure the scope first with `memory.configure(...)`
+- Unreachable memory values are read-time environment issues. In lenient mode,
+  `memory.get(...)` warns and returns `None`; use `strict=True` when code needs
+  to distinguish this from an absent value.
 - Replay may observe newer values and replays of writes create new versions
 
 ## Runnable example

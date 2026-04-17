@@ -185,6 +185,12 @@ Inspect results from a completed execution:
 Get the latest completed execution and show me its response artifacts.
 ```
 
+Read durable memory safely:
+
+```text
+Read `style/release_notes` from Kitaru memory in scope `repo_docs`. If the value is unavailable, explain the diagnostics instead of overwriting it.
+```
+
 Manage a local stack:
 
 ```text
@@ -238,7 +244,7 @@ The memory tools give assistants direct structured access to Kitaru's durable
 key-value memory store.
 
 - `scope` and `scope_type` are required on every scoped memory tool
-- `version` is available only on `kitaru_memory_get`
+- `version` and `strict` are available only on `kitaru_memory_get`
 
 Typical memory query/update flow:
 
@@ -247,8 +253,47 @@ Typical memory query/update flow:
 3. `kitaru_memory_set(key="style/release_notes", value={"tone": "concise"}, scope="repo_docs", scope_type="namespace")`
 4. `kitaru_memory_history(key="style/release_notes", scope="repo_docs", scope_type="namespace")`
 
+Use `strict=True` when the assistant should fail the tool call if the memory
+entry exists but its value artifact cannot be loaded from the MCP server's
+environment:
+
+`kitaru_memory_get(key="style/release_notes", scope="repo_docs", scope_type="namespace", strict=True)`
+
 Use these tools when an assistant needs durable shared state without parsing CLI
 output or inventing its own scratchpad format.
+
+### Missing entries vs unavailable values
+
+`kitaru_memory_get` can return three useful shapes:
+
+- `None` means no active entry exists for that key and scope.
+- A payload with `value_available: true` includes the loaded `value`.
+- A payload with `value_available: false` means metadata exists, but the value
+  artifact cannot be loaded from the MCP server's environment.
+
+For an unavailable value, the payload includes diagnostics alongside the memory
+metadata:
+
+```json
+{
+  "key": "style/release_notes",
+  "scope": "repo_docs",
+  "scope_type": "namespace",
+  "version": 3,
+  "artifact_id": "...",
+  "value_available": false,
+  "value_unavailable": {
+    "error_type": "KitaruMemoryArtifactUnavailableError",
+    "cause_type": "FileNotFoundError",
+    "message": "..."
+  }
+}
+```
+
+This is different from a missing key: the assistant still has enough metadata to
+tell the user which memory entry exists and why the value cannot be read here.
+Set `strict=True` to raise the typed error instead of returning the unavailable
+payload.
 
 ### Memory maintenance tools
 
