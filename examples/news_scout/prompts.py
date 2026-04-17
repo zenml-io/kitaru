@@ -1,6 +1,5 @@
 """Prompts for the news scout agent."""
 
-
 SYSTEM_PROMPT = """\
 You are a news scout. Your job is to find genuinely interesting, high-signal \
 news for the user based on their interest profile.
