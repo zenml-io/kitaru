@@ -10,7 +10,7 @@
     </h2>
     <p class="problem-lede" data-reveal data-reveal-delay="2">
       Agent SDKs solve <em>the inner loop</em>: tool calls, LLM calls, sandboxes. That's the easy part now.<br>
-      Everything in the outer loop (how the agent is deployed, what credentials it gets, which skills it loads, how runs are tracked) gets rebuilt from scratch, company by company.
+      Everything in the outer loop (how the agent is deployed, what state it remembers, how it's dispatched, how runs are tracked) gets rebuilt from scratch, company by company.
     </p>
 
     <div class="problem-grid">
@@ -18,12 +18,12 @@
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="3">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Scoped permissions" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Durable agent memory" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <span class="why-card-tag">Permissions</span>
-          <h3>Scoped permissions, out of the box.</h3>
-          <p>Kitaru ships a credential broker in front of every agent: per-session scoping, allowlists, and short-lived tokens by default. You wire up the agent, not the proxy.</p>
+          <span class="why-card-tag">Memory</span>
+          <h3>State your agents can come back to.</h3>
+          <p>Versioned, scoped memory that persists across executions. Write it from Python, read it from the CLI or MCP. Agents remember conventions, context, and prior work across runs.</p>
         </div>
       </div>
 
