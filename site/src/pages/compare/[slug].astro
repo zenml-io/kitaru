@@ -88,11 +88,13 @@ const { Content } = await render(entry);
   }
   .compare-body-inner :global(code) {
     font-family: var(--font-mono);
-    font-size: 0.9em;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: var(--color-accent-light);
+    font-size: 0.92em;
     color: var(--color-primary);
+  }
+  /* Re-apply subtle background only to code inside <pre> blocks (fenced code),
+     not to inline `code` spans in prose. */
+  .compare-body-inner :global(pre code) {
+    background: transparent;
   }
   .compare-body-inner :global(a) {
     color: var(--color-accent);
@@ -129,5 +131,11 @@ const { Content } = await render(entry);
     gap: 12px;
     justify-content: center;
     flex-wrap: wrap;
+  }
+
+  .compare-body-inner :global(.compare-inline-cta) {
+    display: flex;
+    justify-content: flex-start;
+    margin: 24px 0 8px;
   }
 </style>

@@ -11,6 +11,7 @@ order: 10
 import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
 import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
+import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
 import PullQuote from '../../components/compare/PullQuote.astro';
 
 Kitaru and the Claude Agent SDK solve different problems. The Agent SDK builds agents that read files, run commands, and solve coding tasks in a session you kick off yourself. Kitaru is the lifecycle layer above your SDK: durable execution, artifact lineage, durable memory, and deployment on your own infrastructure.
@@ -42,33 +43,47 @@ Keep your SDK, model, and sandbox; for local, one-off use, you don't need Kitaru
   quote="Most production teams end up using both — an SDK to build the agent, and a runtime to operate it."
 />
 
-## Durable execution and replay
+<FeatureWithGraphic
+  title="Durable execution and replay"
+  image="/compare/kitaru-vs-claude-agent-sdk/durable-execution-card.avif"
+  imageAlt="Kitaru durable execution and replay"
+>
+Every `@flow` creates an execution record, and checkpoints persist intermediate results before the next step runs. A crash, timeout, or pod eviction doesn't send the agent back to step 1 — fix the bug, replay, and earlier steps return cached output instead of re-running. Reliability goes up, token spend comes down.
 
-Durable execution persists step outputs so a workflow can resume or replay from checkpoint boundaries after interruption. It is the primitive everything else in Kitaru builds on.
+The Agent SDK writes session history to disk and rewinds file edits from Write, Edit, and NotebookEdit — useful for coding, but not the step-level workflow state you can replay after process failure. Prompt caching and Haiku help with cost inside the Claude stack; Kitaru eliminates avoidable re-execution entirely.
+</FeatureWithGraphic>
 
-Every `@flow` creates an execution record, and checkpoints persist intermediate results before the next step runs. A crash, timeout, or pod eviction does not send the agent back to step 1. When a step fails, Kitaru lets you fix the bug and replay from there; earlier steps return cached output instead of re-running. So reliability goes up, and token spend goes down.
+<FeatureWithGraphic
+  title="Infrastructure ownership and deployment flexibility"
+  image="/compare/kitaru-vs-claude-agent-sdk/infra-ownership-and-deployment-flexibility.avif"
+  imageAlt="Deploy Kitaru on your own cloud"
+  reverse={true}
+>
+The Agent SDK gives you multiple model access paths — Anthropic, Bedrock, Vertex AI, Azure AI Foundry — and several container patterns. What you still own is the runtime around it: how the agent is packaged, resumed, and supervised as a durable service.
 
-In Claude Agent SDK sessions, write conversation history to disk, and file checkpointing rewinds edits from Write, Edit, and NotebookEdit — useful for coding, but not the same as the step-level workflow state you can replay after process failure. Prompt caching and cheaper tiers like Haiku help with cost inside the Claude stack, but Kitaru eliminates avoidable re-execution entirely and keeps the door open to other model backends if economics become the bottleneck.
+Kitaru is opinionated about that layer. The same flow code runs locally and then as a durable workflow on Kubernetes, SageMaker, Vertex AI, or AzureML. `kitaru build`, `kitaru serve`, and `kitaru deploy` turn your agent into a Docker image with durability baked in, and a configured stack lets platform teams standardize deployments for every team downstream.
+</FeatureWithGraphic>
 
-## Infrastructure ownership and deployment flexibility
+<FeatureWithGraphic
+  title="Long-running state and memory"
+  image="/compare/kitaru-vs-claude-agent-sdk/long-running-state-and-memory.avif"
+  imageAlt="Kitaru versioned memory across Python, CLI, and MCP"
+>
+Agent SDK sessions resume with prior conversation context. For many local and coding-centric use cases, that's enough. But sessions persist the conversation — not a versioned memory system for production agent state.
 
-Claude Agent SDK has several hosting patterns — ephemeral, long-running, and hybrid containers — and it supports Anthropic, Bedrock, Vertex AI, and Azure AI Foundry as model access paths. That gives you and your team multiple ways to host or buy Claude. What you still own, though, is the surrounding runtime: how the agent is packaged, resumed, supervised, and operated as a durable service.
+Kitaru gives you that: scoped, versioned state accessible across Python, CLI, and MCP. It's useful when an agent needs long-lived operational memory, when teams want an audit trail of what the agent knew and when, or when a reviewer asks "what state existed at this point in the run?" — and you need an answer that doesn't depend on `grep`.
+</FeatureWithGraphic>
 
-Kitaru is opinionated about that runtime layer. The same flow code can start locally and then run as a durable workflow on infrastructure like Kubernetes, SageMaker, Vertex AI, or AzureML. `kitaru build`, `kitaru serve`, and `kitaru deploy` turn your agent into a Docker image with durability baked in, and a configured stack — artifact store, deployer, container registry, secrets — lets platform teams standardize deployments for every team downstream.
+<FeatureWithGraphic
+  title="Artifact lineage and run tracking"
+  image="/compare/kitaru-vs-claude-agent-sdk/artifact-lineage-and-run-tracking.avif"
+  imageAlt="Kitaru artifact lineage and run tracking"
+  reverse={true}
+>
+Production agents produce a lot of work: inputs, intermediate outputs, tool call results, model responses. If you can't inspect what a run produced and compare it to the run before it, you're flying blind when something regresses.
 
-## Long-running state and memory
-
-Claude Agent SDK supports resumable sessions, which means the agent can return with prior conversation context. For many local and coding-centric use cases, that may be enough. But sessions persist the conversation, not a versioned memory system for production agent state.
-
-With Kitaru, we solve the latter issue: we offer a scoped, versioned state that can be accessed across Python, CLI, and MCP surfaces. It's useful when an agent needs long-lived operational memory, when teams want an audit trail of what the agent knew and when, or when a reviewer asks "what state existed at this point in the run?" and you need an answer that does not depend on `grep`.
-
-## Artifact lineage and run tracking
-
-Production agents produce a lot of work: inputs, intermediate outputs, tool call results, model responses, final artifacts. If you can't inspect what a given run produced and compare it to the run before it, you are flying blind when something regresses.
-
-Kitaru captures artifacts from every `@checkpoint` automatically and links them to the execution record. Each run has an `exec_id`, a tree of checkpoints, the artifacts each one produced, the LLM calls made under it, and the cost attached. You can browse runs in the dashboard, diff artifacts across runs, and trace a bad output back to the specific step and inputs that generated it.
-
-Claude Agent SDK gives you OpenTelemetry traces and per-session logs — real observability for interactive workflows. What it does not give you is a persisted artifact graph across runs. Once the session ends, the intermediate outputs are not indexed as first-class objects you can browse or compare. For platform teams that need to answer "what did this agent produce, and how does that compare to last Tuesday's run?" the difference matters.
+Kitaru captures artifacts from every `@checkpoint` automatically and links them to the execution record. Each run has an `exec_id`, a checkpoint tree, the artifacts each one produced, the LLM calls beneath it, and attached cost. Browse runs in the dashboard, diff artifacts across runs, and trace a bad output back to the specific step and inputs that made it. The Agent SDK gives you OpenTelemetry traces and per-session logs — real observability for interactive work, but not a persisted artifact graph across runs.
+</FeatureWithGraphic>
 
 ## What makes Kitaru unique
 
@@ -109,8 +124,7 @@ def review_flow(topic: str) -> str:
         return "Rejected"
     return text
 
-handle = review_flow.run("Durable agents")
-print(handle.exec_id)`}
+review_flow.run("Durable agents")`}
   competitorCode={`import asyncio
 from claude_agent_sdk import query, ClaudeAgentOptions, SystemMessage, ResultMessage
 
@@ -143,3 +157,7 @@ If you are running agents locally or in short interactive sessions, stick with w
 - Read [our documentation](/docs) and see how `@flow` and `@checkpoint` work
 - `pip install kitaru` and run your first durable flow in an afternoon
 - [Talk to the team](/get-started) if you want help mapping an Agent SDK prototype to a production deployment
+
+<div class="compare-inline-cta">
+  <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
+</div>
