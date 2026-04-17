@@ -137,10 +137,13 @@ This project uses [just](https://github.com/casey/just) as a command stack. Run 
 
 **Typical loop:** write code → `just fix` (auto-fix what it can) → `just check` (verify everything passes) → `just test` (make sure nothing is broken) → commit.
 
+**Worktree setup gotcha:** In a fresh `git worktree`, the `test_phase*_example::*_runs_end_to_end` tests (~14 of them) fail with `RuntimeError: Unable to resolve dynamic pipeline source. Make sure your pipeline is defined at the top level of your module.` This is because ZenML's dynamic pipeline resolver uses `get_source_root()` to locate the project root before re-importing the pipeline module by dotted path, and that root comes from the `.kitaru/` marker. Worktrees don't inherit `.kitaru/` from the main checkout, so the resolver can't find `examples.basic_flow....` on `sys.path`. **Fix:** run `uv run kitaru init` once in the new worktree after `uv sync`. The unit test suite passes without this — only the end-to-end example tests need it.
+
 ```bash
 # Setup
 uv sync                              # Install dependencies
 uv sync --extra local                # Include local ZenML runtime components
+kitaru init                          # Required in a fresh git worktree — see note below
 
 # Common Python workflows
 just check                            # Run all checks (format, lint, typecheck, typos, yaml, actions, links)
