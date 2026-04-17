@@ -84,6 +84,7 @@ These require Node 22+ and pnpm.
 - Follow US English spelling in code and docs (`initialize`, `serialize`, `color`).
 - Use type hints on all public functions and return values.
 - Prefer modern annotations (`list[str]`, `str | None`) over legacy `typing` aliases.
+- **Do not use `from __future__ import annotations` in files that define Kitaru `@flow`/`@checkpoint` functions or ZenML `@pipeline`/`@step` functions.** ZenML inspects step output annotations at runtime and currently rejects postponed/string annotations such as `"dict[str, Any]"`. Use real runtime annotations instead; Python 3.11+ supports `list[str]` / `str | None` without the future import.
 - Follow Google Python style for docstrings.
 - Keep comments focused on *why* (intent/trade-offs), not line-by-line narration.
 - Treat leading underscore names as private to module/class boundaries.
