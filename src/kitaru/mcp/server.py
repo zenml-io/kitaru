@@ -282,8 +282,15 @@ def kitaru_memory_get(
     scope: str,
     scope_type: str,
     version: int | None = None,
+    strict: bool = False,
 ) -> dict[str, Any] | None:
-    """Get one memory value from one explicit scope."""
+    """Get one memory value from one explicit scope.
+
+    Lenient mode (``strict=False``, the default) returns a payload with
+    ``value_available: False`` and nested ``value_unavailable`` diagnostics
+    when the backing artifact cannot be loaded from the current runtime.
+    Strict mode raises ``KitaruMemoryArtifactUnavailableError`` instead.
+    """
     return run_with_mcp_error_boundary(
         lambda: memory_interface.get_memory_payload(
             client_api.KitaruClient(),
@@ -291,6 +298,7 @@ def kitaru_memory_get(
             scope=scope,
             scope_type=scope_type,
             version=version,
+            strict=strict,
         )
     )
 
@@ -608,11 +616,13 @@ def kitaru_info(
         include_packages = all or all_packages
         package_names = None if include_packages else (packages if packages else None)
         include_environment_type = all
+        include_provenance_details = all
 
         snapshot = inspection.build_runtime_snapshot(
             include_packages=include_packages,
             package_names=package_names,
             include_environment_type=include_environment_type,
+            include_provenance_details=include_provenance_details,
         )
         return inspection.serialize_runtime_snapshot(snapshot)
 
