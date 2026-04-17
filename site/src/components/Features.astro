@@ -20,7 +20,7 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">01 — Wait & Resume</div>
+          <div class="feature-number">01 · Wait & Resume</div>
           <h3>Pause. Get input. Continue later.</h3>
           <p>Suspends at decision points, releases compute, and resumes when input arrives from a human, another agent, or a webhook, even hours or days later.</p>
         </div>
@@ -48,7 +48,7 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">02 — Replay from Failure</div>
+          <div class="feature-number">02 · Replay from Failure</div>
           <h3>Crash at step 6? Resume from step 6.</h3>
           <p>Every step is checkpointed. Fix the issue and replay from the point of failure instead of re-burning tokens.</p>
         </div>
@@ -64,7 +64,6 @@
               <div class="rstep" data-idx="6">7</div>
             </div>
             <div class="replay-status" id="replayStatus">Running agent...</div>
-            <div class="cost-saved" id="costSaved">$12.40 in tokens saved</div>
           </div>
         </div>
       </div>
@@ -75,8 +74,8 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">03 — Framework Portability</div>
-          <h3>Keep your framework. Add the lifecycle.</h3>
+          <div class="feature-number">03 · Framework Portability</div>
+          <h3>Keep your framework. Add durable execution.</h3>
           <p>OpenAI Agents SDK, Anthropic Agent SDK, PydanticAI, LangGraph, or raw Python. Wrap it with Kitaru and get checkpointed execution without rewriting your agent.</p>
         </div>
         <div class="feature-visual">
@@ -97,7 +96,7 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">04 — Parallel Recovery</div>
+          <div class="feature-number">04 · Parallel Recovery</div>
           <h3>Fan out work without losing recovery.</h3>
           <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each keeps its own checkpoint history, so you can replay only the failed branch.</p>
         </div>
@@ -415,19 +414,6 @@
   .replay-status.error { color: var(--color-cost-up); }
   .replay-status.success { color: var(--color-success); }
 
-  .cost-saved {
-    position: absolute;
-    top: 15%;
-    right: 10%;
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--color-success);
-    opacity: 0;
-    transition: opacity 0.4s;
-  }
-
-  .cost-saved.visible { opacity: 1; }
-
   /* ═══ ANIMATION: Framework Orbit (light) ═══ */
   .anim-framework {
     width: 100%;
@@ -703,11 +689,9 @@
     if (!container) return;
     const steps = container.querySelectorAll('.rstep');
     const status = document.getElementById('replayStatus');
-    const cost = document.getElementById('costSaved');
 
     steps.forEach(s => { s.className = 'rstep'; });
     if (status) { status.textContent = 'Running agent...'; status.className = 'replay-status'; }
-    cost?.classList.remove('visible');
 
     let i = 0;
     function nextRStep() {
@@ -720,7 +704,6 @@
             steps[i].className = 'rstep';
             scheduleTimer(ci, () => {
               steps[i].classList.add('replay');
-              cost?.classList.add('visible');
               scheduleTimer(ci, () => {
                 steps[i].classList.remove('replay');
                 steps[i].classList.add('ok');
@@ -821,7 +804,6 @@
         container.querySelectorAll('.rstep').forEach(s => { s.className = 'rstep'; });
         const status = document.getElementById('replayStatus');
         if (status) { status.textContent = 'Running agent...'; status.className = 'replay-status'; }
-        document.getElementById('costSaved')?.classList.remove('visible');
       }
     } else if (cardIdx === 2) {
       const container = document.getElementById('animFramework');
