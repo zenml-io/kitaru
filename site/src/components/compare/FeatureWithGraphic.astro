@@ -31,12 +31,24 @@ const { title, image, imageAlt = '', reverse = false } = Astro.props;
 </section>
 
 <style>
-  .feature-graphic { margin: 56px 0; }
+  .feature-graphic {
+    margin: 56px auto;
+    /* Break out of the narrow 820px prose column so graphics have room to breathe. */
+    width: min(1120px, calc(100vw - 48px));
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+  }
   .feature-graphic-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 48px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: 56px;
     align-items: center;
+  }
+  /* Reverse layout: flip both the column widths and the visual order so the
+     graphic still lands in the wider column on the opposite side. */
+  .feature-graphic--reverse .feature-graphic-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   }
   .feature-graphic--reverse .feature-graphic-copy { order: 2; }
   .feature-graphic--reverse .feature-graphic-media { order: 1; }
@@ -63,7 +75,6 @@ const { title, image, imageAlt = '', reverse = false } = Astro.props;
   }
   .feature-graphic-media img {
     width: 100%;
-    max-width: 520px;
     height: auto;
     display: block;
   }
