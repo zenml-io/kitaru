@@ -15,6 +15,7 @@ from zenml.exceptions import EntityExistsError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
+    ActiveConfigSelectionProvenance,
     RuntimeSnapshot,
     _build_runtime_snapshot,
     _describe_local_server,
@@ -7202,6 +7203,186 @@ def test_info_shows_system_info(
     output = capsys.readouterr().out
     assert "System" in output
     assert "Python version: 3.12.4" in output
+
+
+def _snapshot_with_active_context_provenance() -> RuntimeSnapshot:
+    return RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        config_directory="/tmp/config",
+        active_stack="prod",
+        active_project="default",
+        active_stack_provenance=ActiveConfigSelectionProvenance(
+            resource="active_stack",
+            effective_source="repo-local config",
+            effective_source_detail="/work/repo/.kitaru/config.yaml",
+            effective_id="repo-stack-id",
+            resolved_id="resolved-stack-id",
+            resolved_name="prod",
+            environment_variable="ZENML_ACTIVE_STACK_ID",
+            environment_id=None,
+            repository_root="/work/repo",
+            repository_config_path="/work/repo/.kitaru/config.yaml",
+            repository_id="repo-stack-id",
+            global_config_path="/tmp/config/config.yaml",
+            global_id="global-stack-id",
+            notes=[
+                "KITARU_STACK is an execution default and does not set "
+                "ZenML's active stack."
+            ],
+        ),
+        active_project_provenance=ActiveConfigSelectionProvenance(
+            resource="active_project",
+            effective_source="environment",
+            effective_source_detail="KITARU_PROJECT -> ZENML_ACTIVE_PROJECT_ID",
+            effective_id="env-project-id",
+            resolved_id="resolved-project-id",
+            resolved_name="default",
+            environment_variable="KITARU_PROJECT -> ZENML_ACTIVE_PROJECT_ID",
+            environment_id="env-project-id",
+            repository_root="/work/repo",
+            repository_config_path="/work/repo/.kitaru/config.yaml",
+            repository_id="repo-project-id",
+            global_config_path="/tmp/config/config.yaml",
+            global_id="global-project-id",
+        ),
+    )
+
+
+def test_info_default_does_not_render_active_context_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default `kitaru info` should not show the verbose provenance section."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot", return_value=snapshot
+        ) as mock_build,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    mock_build.assert_called_once_with(
+        include_packages=False,
+        package_names=None,
+        include_environment_type=False,
+        include_provenance_details=False,
+    )
+    output = capsys.readouterr().out
+    assert "Active context provenance" not in output
+    assert "repo-stack-id" not in output
+    assert "global-project-id" not in output
+
+
+def test_status_does_not_render_active_context_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru status` should stay compact even if a snapshot has provenance."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru status" in output
+    assert "Active context provenance" not in output
+    assert "repo-stack-id" not in output
+
+
+def test_info_all_renders_active_context_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info --all` should show active stack/project provenance."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot", return_value=snapshot
+        ) as mock_build,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--all"])
+
+    assert exc_info.value.code == 0
+    mock_build.assert_called_once_with(
+        include_packages=True,
+        package_names=None,
+        include_environment_type=True,
+        include_provenance_details=True,
+    )
+    output = capsys.readouterr().out
+    assert "Active context provenance" in output
+    assert "Active stack source: repo-local config" in output
+    assert "Active stack configured ID: repo-stack-id" in output
+    assert "Active stack resolved: prod (resolved-stack-id)" in output
+    assert "Active project source: environment" in output
+    assert "Active project configured ID: env-project-id" in output
+    assert "KITARU_STACK is an execution default" in output
+
+
+def test_info_all_json_includes_active_context_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info --all -o json` should serialize structured provenance."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot", return_value=snapshot
+        ) as mock_build,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--all", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    mock_build.assert_called_once_with(
+        include_packages=True,
+        package_names=None,
+        include_environment_type=True,
+        include_provenance_details=True,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "info"
+    item = payload["item"]
+    assert item["active_stack_provenance"]["effective_id"] == "repo-stack-id"
+    assert item["active_stack_provenance"]["resolved_name"] == "prod"
+    assert item["active_project_provenance"]["environment_id"] == "env-project-id"
+
+
+def test_info_all_file_export_includes_active_context_provenance(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info --all --file` should export structured provenance."""
+    snapshot = _snapshot_with_active_context_provenance()
+    export_path = tmp_path / "debug.json"
+
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot", return_value=snapshot
+        ) as mock_build,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--all", "--file", str(export_path)])
+
+    assert exc_info.value.code == 0
+    mock_build.assert_called_once_with(
+        include_packages=True,
+        package_names=None,
+        include_environment_type=True,
+        include_provenance_details=True,
+    )
+    assert str(export_path) in capsys.readouterr().out
+    payload = json.loads(export_path.read_text())
+    assert payload["active_stack_provenance"]["effective_id"] == "repo-stack-id"
+    assert payload["active_project_provenance"]["resolved_id"] == "resolved-project-id"
 
 
 def test_info_all_includes_packages(

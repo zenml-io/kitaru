@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `kitaru info --all` now includes active stack/project provenance, showing whether the effective context came from environment variables, repo-local `.kitaru/config.yaml`, or global config. The same structured fields are available through JSON output, exported diagnostics files, and MCP `kitaru_info(all=True)` (#182)
 - `KitaruMemoryArtifactUnavailableError` typed exception (subclass of `KitaruBackendError`) for memory entries whose backing artifact cannot be loaded from the current runtime (#183)
 - `strict=False` parameter on `kitaru.memory.get(...)`, CLI `kitaru memory get --strict`, and MCP `kitaru_memory_get(strict=...)`. Lenient mode warns and returns `None` (Python) or returns a payload with `value_available: False` and nested `value_unavailable` diagnostics (CLI/MCP); strict mode raises `KitaruMemoryArtifactUnavailableError` (#183)
 

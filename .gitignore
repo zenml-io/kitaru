@@ -233,6 +233,9 @@ site/.wrangler/
 .kitaru/
 .zen/
 
+# Git worktrees (isolated workspaces created via git worktree add)
+.worktrees/
+
 # Design docs
 design/
 dogfood-output/
