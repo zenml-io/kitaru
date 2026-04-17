@@ -211,11 +211,11 @@ body::before {
    Shared layout
    ═══════════════════════════════════════════════════ */
 .section-pad {
-  padding: 80px clamp(24px, 5vw, 80px) 100px;
+  padding: 64px clamp(24px, 5vw, 80px) 72px;
 }
 
 .section-pad-compact {
-  padding: 60px clamp(24px, 5vw, 80px) 100px;
+  padding: 48px clamp(24px, 5vw, 80px) 56px;
 }
 
 .section-inner {
