@@ -34,8 +34,8 @@
 Your agent crashed at step 7. Kitaru replays from step 7 — not from scratch.
 
 Add two decorators to your existing Python code and get crash recovery, human
-approval gates, durable memory, cost tracking, and a full dashboard. No rewrite.
-No graph DSL. No framework lock-in.
+approval gates, durable memory, and a full dashboard. No rewrite. No graph DSL.
+No framework lock-in.
 
 ## Why Kitaru?
 
@@ -101,11 +101,11 @@ a SQL database. Deploy your agents to Kubernetes, Vertex AI, SageMaker, or
 AzureML using Kitaru's **stack** abstraction. Your registry, your deployer, your
 infrastructure.
 
-### Built-in dashboard
+### Built-in UI
 
 Every execution is observable from day one. See your agent runs, inspect
-checkpoint outputs, track LLM costs, and approve human-in-the-loop wait steps —
-all from a visual dashboard that ships with the Kitaru server.
+checkpoint outputs, and approve human-in-the-loop wait steps, all from a visual
+dashboard that ships with the Kitaru server.
 
 To start the server locally, run `kitaru login` after installing `kitaru[local]`.
 To connect to an existing remote server, run `kitaru login <server>`.
@@ -205,7 +205,7 @@ kitaru executions replay <EXECUTION_ID> --from process_data
 | [PydanticAI adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter) | Wrap a PydanticAI agent with `KitaruAgent` |
 | [Memory guide](https://kitaru.ai/docs/guides/memory) | Durable memory concepts, scopes, history, and compaction |
 | [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
-| [Stack Selection Guide](https://kitaru.ai/docs/getting-started/stack-selection) | Deploy to Kubernetes, AWS, GCP, or Azure |
+| [Stacks](https://kitaru.ai/docs/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 
 ## Origins
 
