@@ -23,6 +23,7 @@ from ._helpers import (
     _emit_pagination_note,
     _emit_snapshot_sections,
     _emit_table,
+    _emit_warning,
     _exit_with_error,
     _facade_module,
     _format_table_timestamp,
@@ -166,7 +167,44 @@ def _memory_history_rows(entries: list[dict[str, Any]]) -> list[list[str]]:
 
 
 def _memory_value_section(payload: dict[str, Any]) -> SnapshotSection:
-    """Build the value section for `kitaru memory get` text output."""
+    """Build the value section for `kitaru memory get` text output.
+
+    Handles three cases:
+        - ``value_available is False``: metadata is present but the backing
+          artifact could not be loaded from the current environment; render
+          structured diagnostics from ``value_unavailable``.
+        - legacy payloads missing ``value`` / ``value_format``: surface a
+          generic "unavailable" placeholder so downstream formatters don't
+          crash. Retained for compatibility with older transport payloads.
+        - a value is present: render format + stringified value.
+    """
+    if payload.get("value_available") is False:
+        diagnostics = payload.get("value_unavailable") or {}
+        rows: list[tuple[str, str]] = [
+            ("Status", "unavailable"),
+            (
+                "Error",
+                str(diagnostics.get("error_type", "unknown")),
+            ),
+            (
+                "Cause",
+                str(diagnostics.get("cause_type", "unknown")),
+            ),
+            (
+                "Reason",
+                str(
+                    diagnostics.get(
+                        "message",
+                        (
+                            "Memory value exists but its artifact could not "
+                            "be loaded from this environment."
+                        ),
+                    )
+                ),
+            ),
+        ]
+        return SnapshotSection(title="Value", rows=rows)
+
     value_format = payload.get("value_format")
     if value_format is None or "value" not in payload:
         return SnapshotSection(
@@ -380,6 +418,17 @@ def get_(
             help="Memory scope type to read from. [required]", show_default=False
         ),
     ] = None,
+    strict: Annotated[
+        bool,
+        Parameter(
+            help=(
+                "Fail with a typed error when the memory value exists but "
+                "its artifact cannot be loaded from this environment. "
+                "Default behavior returns metadata with a "
+                "`value_available: false` marker instead."
+            ),
+        ),
+    ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
     """Read the latest value for one memory key in one explicit scope."""
@@ -398,6 +447,7 @@ def get_(
             key=key,
             scope=scope,
             scope_type=scope_type,
+            strict=strict,
         ),
         command=command,
         output=output_format,
@@ -412,6 +462,22 @@ def get_(
                 f"`{_memory_scope_label(scope, scope_type)}`."
             ),
             output=output_format,
+        )
+
+    if payload.get("value_available") is False:
+        diagnostics = payload.get("value_unavailable") or {}
+        _emit_warning(
+            "Memory value is unavailable; showing metadata only.",
+            output=output_format,
+            detail=str(
+                diagnostics.get(
+                    "message",
+                    (
+                        "Memory entry exists but its artifact could not be "
+                        "loaded from this environment."
+                    ),
+                )
+            ),
         )
 
     if output_format == CLIOutputFormat.JSON:

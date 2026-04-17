@@ -37,7 +37,7 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruMemoryArtifactUnavailableError, KitaruUsageError
 
 
 class _BrokenGlobalConfig:
@@ -2645,6 +2645,7 @@ def test_memory_get_renders_value_sections(capsys: pytest.CaptureFixture[str]) -
         key="repo_conventions",
         scope="my_repo",
         scope_type="flow",
+        strict=False,
     )
     output = capsys.readouterr().out
     assert "Kitaru memory" in output
@@ -2717,6 +2718,149 @@ def test_memory_get_errors_when_missing(capsys: pytest.CaptureFixture[str]) -> N
         "No memory entry found for key `prefs` in scope `my_repo (namespace)`."
         in capsys.readouterr().err
     )
+
+
+def _memory_unavailable_payload(
+    *,
+    key: str = "prefs",
+    scope: str = "my_repo",
+    scope_type: str = "namespace",
+    version: int = 3,
+) -> dict[str, Any]:
+    """Build a lenient-mode payload representing an unreachable value."""
+    payload = _memory_payload(
+        key=key,
+        scope=scope,
+        scope_type=scope_type,
+        version=version,
+    )
+    payload["value_available"] = False
+    payload["value_unavailable"] = {
+        "error_type": KitaruMemoryArtifactUnavailableError.__name__,
+        "cause_type": FileNotFoundError.__name__,
+        "message": (
+            f"Memory key '{key}' in scope '{scope}' ({scope_type}) points "
+            f"to artifact 'artifact-{key}-{version}', but the artifact "
+            "value could not be loaded from this environment: "
+            "FileNotFoundError: /local/path does not exist."
+        ),
+    }
+    return payload
+
+
+def test_memory_get_renders_unavailable_value_with_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Lenient text mode warns and still renders metadata for unreachable values."""
+    payload = _memory_unavailable_payload()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.get_memory_payload", return_value=payload),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "memory",
+                "get",
+                "prefs",
+                "--scope",
+                "my_repo",
+                "--scope-type",
+                "namespace",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    # Warning surfaces to stderr on non-TTY (default in tests).
+    assert "Memory value is unavailable" in captured.err
+    assert "could not be loaded from this environment" in captured.err
+    # Metadata and structured unavailable diagnostics show up on stdout.
+    assert "Metadata" in captured.out
+    assert "unavailable" in captured.out
+    assert "KitaruMemoryArtifactUnavailableError" in captured.out
+    assert "FileNotFoundError" in captured.out
+
+
+def test_memory_get_json_output_preserves_unavailable_shape(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON stdout must stay parseable; warning goes to stderr."""
+    payload = _memory_unavailable_payload()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.get_memory_payload", return_value=payload),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "memory",
+                "get",
+                "prefs",
+                "--scope",
+                "my_repo",
+                "--scope-type",
+                "namespace",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    envelope = json.loads(captured.out)
+    assert envelope["command"] == "memory.get"
+    item = envelope["item"]
+    assert item["value_available"] is False
+    assert item["value_unavailable"]["cause_type"] == "FileNotFoundError"
+    # Warning must not pollute stdout JSON.
+    assert "Warning" not in captured.out
+    assert "Warning" in captured.err
+
+
+def test_memory_get_strict_propagates_typed_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--strict` must forward and surface the typed error as a non-zero exit."""
+    fake_client = Mock()
+    strict_error = KitaruMemoryArtifactUnavailableError(
+        "Memory key 'prefs' in scope 'my_repo' (namespace) points to artifact "
+        "'artifact-prefs-3', but the artifact value could not be loaded from "
+        "this environment: FileNotFoundError: /local/path does not exist."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.cli.get_memory_payload",
+            side_effect=strict_error,
+        ) as mock_get_memory,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "memory",
+                "get",
+                "prefs",
+                "--scope",
+                "my_repo",
+                "--scope-type",
+                "namespace",
+                "--strict",
+            ]
+        )
+
+    assert exc_info.value.code != 0
+    mock_get_memory.assert_called_once_with(
+        fake_client,
+        key="prefs",
+        scope="my_repo",
+        scope_type="namespace",
+        strict=True,
+    )
+    assert "could not be loaded from this environment" in capsys.readouterr().err
 
 
 def test_memory_set_parses_json_value_and_reports_success(
