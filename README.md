@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">You build your agents. We make them durable.</h3>
+<h3 align="center">You build the agent. Kitaru runs everything around it.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") helps you run long-running Python agents reliably: checkpoint state, replay from failure, wait for input, and keep durable memory. It is an open-source runtime for agents &mdash; any framework, any cloud &mdash; built on <a href="https://zenml.io">ZenML</a> foundations.
+  Kitaru (来る, "to arrive") is the open-source platform layer for AI agents in production. Wrap an existing agent or write raw Python — Kitaru gives you checkpointed execution, human-in-the-loop waits, durable memory, and deployment on any cloud. Any framework. Any model.
 </p>
 
 <p align="center">
@@ -31,13 +31,34 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-Your long-running agent crashed at step 7. Kitaru replays from step 7 — not
-from scratch.
-Add two decorators to your existing Python agent and get crash recovery, human
+Your agent crashed at step 7. Kitaru replays from step 7 — not from scratch.
+
+Add two decorators to your existing Python code and get crash recovery, human
 approval gates, durable memory, cost tracking, and a full dashboard. No rewrite.
-No graph DSL. No framework lock-in. No distributed systems overhead.
+No graph DSL. No framework lock-in.
 
 ## Why Kitaru?
+
+### Works with your agent SDK
+
+Wrap an existing PydanticAI agent with `KitaruAgent` — no rewrite. For agents
+built on the OpenAI Agents SDK, Anthropic Agent SDK, or raw Python, use `@flow`
+and `@checkpoint` around your calls. Your model, your tools, your framework —
+Kitaru wraps them, not the other way around.
+
+```python
+from kitaru import flow
+from kitaru.adapters.pydantic_ai import KitaruAgent
+from pydantic_ai import Agent
+
+researcher = KitaruAgent(
+    Agent("openai:gpt-5.4", system_prompt="You summarize research topics.")
+)
+
+@flow
+def research_flow(topic: str) -> str:
+    return researcher.run_sync(topic).output
+```
 
 ### Python-first, no graph DSL
 
@@ -72,21 +93,21 @@ resume waiting runs, and inspect what happened. Durable memory adds scoped,
 versioned state for long-running agents across Python, CLI, client, and MCP
 surfaces.
 
-### Deployment flexibility
+### Deploy on your cloud
 
 No workers, no message queues, no distributed systems PhD required. Kitaru runs
 locally with zero config, and scales to production with a single server backed by
-a SQL database. Deploy your agents anywhere — Kubernetes, Vertex AI, SageMaker,
-or AzureML — using Kitaru's **stack** abstraction.
+a SQL database. Deploy your agents to Kubernetes, Vertex AI, SageMaker, or
+AzureML using Kitaru's **stack** abstraction. Your registry, your deployer, your
+infrastructure.
 
 ### Built-in dashboard
 
 Every execution is observable from day one. See your agent runs, inspect
 checkpoint outputs, track LLM costs, and approve human-in-the-loop wait steps —
-all from a visual dashboard that ships with the Kitaru server. The dashboard
-ships free, with the server, from day one.
+all from a visual dashboard that ships with the Kitaru server.
 
-To start that server locally, run `kitaru login` after installing `kitaru[local]`.
+To start the server locally, run `kitaru login` after installing `kitaru[local]`.
 To connect to an existing remote server, run `kitaru login <server>`.
 
 ## Quick Start
@@ -101,6 +122,12 @@ Or with [uv](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
 uv pip install kitaru
+```
+
+To wrap a PydanticAI agent, install the adapter extra:
+
+```bash
+uv pip install "kitaru[pydantic-ai]"
 ```
 
 ### Optional: start a local Kitaru server
@@ -175,9 +202,17 @@ kitaru executions replay <EXECUTION_ID> --from process_data
 |---|---|
 | [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
 | [Documentation](https://kitaru.ai/docs) | Complete reference and guides |
+| [PydanticAI adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter) | Wrap a PydanticAI agent with `KitaruAgent` |
 | [Memory guide](https://kitaru.ai/docs/guides/memory) | Durable memory concepts, scopes, history, and compaction |
 | [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
 | [Stack Selection Guide](https://kitaru.ai/docs/getting-started/stack-selection) | Deploy to Kubernetes, Vertex AI, SageMaker, or AzureML |
+
+## Origins
+
+Kitaru is built by the team behind [ZenML](https://zenml.io), drawing on five
+years of production orchestration experience (JetBrains, Adeo, Brevo). The
+lifecycle primitives — stacks, artifacts, lineage — are purpose-rebuilt here for
+autonomous agents.
 
 ## Contributing
 

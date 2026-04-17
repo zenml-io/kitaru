@@ -4,50 +4,57 @@
 
 <section class="section-pad problem-section">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>WHAT BREAKS FIRST</span>
+    <span class="section-eyebrow" data-reveal>INSIDE VS OUTSIDE</span>
     <h2 class="section-title problem-headline" data-reveal data-reveal-delay="1">
-      Long-running agents fail in boring, expensive ways.
+      The agent loop is solved. The platform around it isn't.
     </h2>
+    <p class="problem-lede" data-reveal data-reveal-delay="2">
+      Agent SDKs handle <em>inside the loop</em>: tool calls, LLM calls, sandboxes. That's the easy part now.<br>
+      Everything <em>outside the loop</em> — how the agent is deployed, what credentials it gets, which skills it loads, how runs are tracked — teams are rebuilding from scratch, company by company.
+    </p>
 
     <div class="problem-grid">
-
-      <div class="why-card" data-reveal="scale-up" data-reveal-delay="2">
-        <div class="card-glow"></div>
-        <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Agents die when your laptop sleeps" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
-        </div>
-        <div class="why-card-content">
-          <h3>Hours of work disappear on routine failures</h3>
-          <p>A laptop sleep, pod eviction, or API timeout can wipe a run that took hours to build. You burn tokens and start over.</p>
-        </div>
-      </div>
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="3">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="Agents can't coordinate" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Permissions and credential brokering" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>They need to wait on humans and other systems</h3>
-          <p>Real agents pause for approvals, webhooks, and other agents. Fire-and-forget loops do not handle that well.</p>
+          <span class="why-card-tag">Permissions</span>
+          <h3>Agents run untrusted code. Env vars leak.</h3>
+          <p>Every team ships a proxy with scoped permissions before they ship the agent. Credential brokering, allowlists, per-session scoping — hand-rolled, every time.</p>
         </div>
       </div>
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="4">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Results vanish when agents crash" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="Orchestration and dispatch" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>State either vanishes or gets stitched together by hand</h3>
-          <p>Without checkpoints, artifacts, and memory, you lose context when things go wrong and debugging becomes guesswork.</p>
+          <span class="why-card-tag">Orchestration</span>
+          <h3>Same agent, three modes. No standard.</h3>
+          <p>Interactive chat, background webhook, scheduled batch — one agent runs in all three. Without dispatch scaffolding, every context is a fresh rebuild, every failure mode is a surprise.</p>
+        </div>
+      </div>
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="5">
+        <div class="card-glow"></div>
+        <div class="why-card-image">
+          <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Skills, tracking, and lineage" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+        </div>
+        <div class="why-card-content">
+          <span class="why-card-tag">Tracking</span>
+          <h3>Skills load per task. Runs need to be compared.</h3>
+          <p>Progressive disclosure. Versioned artifacts. Cross-run diffs. Lineage between executions. None of this is out of the box &mdash; and without it, you're flying blind past the demo.</p>
         </div>
       </div>
 
     </div>
 
-    <p class="problem-conclusion" data-reveal data-reveal-delay="5">
-      That is why Kitaru focuses on runtime primitives: checkpoints, replay, wait/resume, and durable state on real infrastructure.
+    <p class="problem-conclusion" data-reveal data-reveal-delay="6">
+      Browserbase, Ramp, and Stripe all rebuilt this platform layer for themselves. <strong>Kitaru is that layer &mdash; open source.</strong>
     </p>
   </div>
 </section>
@@ -58,7 +65,22 @@
   }
 
   .problem-headline {
-    max-width: 700px;
+    max-width: 740px;
+  }
+
+  .problem-lede {
+    max-width: 740px;
+    margin-top: 20px;
+    font-size: clamp(0.98rem, 1.5vw, 1.1rem);
+    line-height: 1.7;
+    color: var(--color-secondary);
+    font-weight: 300;
+  }
+
+  .problem-lede em {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--color-primary);
   }
 
   .problem-grid {
@@ -68,12 +90,37 @@
     margin-top: 48px;
   }
 
+  .why-card-tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    padding: 3px 9px;
+    background: oklch(0.65 0.16 45 / 0.08);
+    border: 1px solid oklch(0.65 0.16 45 / 0.2);
+    border-radius: 100px;
+    margin-bottom: 12px;
+  }
+
   .problem-conclusion {
     margin-top: 40px;
+    padding: 22px 28px;
+    border-left: 3px solid var(--color-accent);
+    background: oklch(0.65 0.16 45 / 0.04);
+    border-radius: 0 10px 10px 0;
     font-size: clamp(1rem, 1.8vw, 1.15rem);
-    font-weight: 500;
+    line-height: 1.55;
+    font-weight: 400;
     color: var(--color-primary);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.005em;
+  }
+
+  .problem-conclusion strong {
+    font-weight: 600;
+    color: var(--color-accent);
   }
 
   @media (max-width: 768px) {

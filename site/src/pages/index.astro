@@ -1,44 +1,45 @@
 ---
 import Base from '../layouts/Base.astro';
+import WebinarBanner from '../components/WebinarBanner.astro';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
 import ProblemStatement from '../components/ProblemStatement.astro';
 import VideoDemo from '../components/VideoDemo.astro';
+import OneImport from '../components/OneImport.astro';
 import CodeShowcase from '../components/CodeShowcase.astro';
 import Features from '../components/Features.astro';
-import Memory from '../components/Memory.astro';
-import WhyKitaru from '../components/WhyKitaru.astro';
 import Architecture from '../components/Architecture.astro';
+import Deploy from '../components/Deploy.astro';
 import SocialProof from '../components/SocialProof.astro';
 import Cta from '../components/Cta.astro';
 import Footer from '../components/Footer.astro';
 ---
 
 <Base>
+  <WebinarBanner />
   <Nav />
   <main id="main-content">
-    <!-- 1. Hero (light) -->
+    <!-- 1. Hero (light) — autonomous agents in production -->
     <Hero />
-    <!-- 2. Video demo (dark) — no divider, bg change is the break -->
+    <!-- 2. Video demo (dark) -->
     <VideoDemo />
-    <!-- 3. Problem statement (light) — "why now" narrative -->
+    <!-- 3. Problem statement (light) — why autonomous agents fail in production -->
     <ProblemStatement />
-    <!-- 4. Code showcase (dark) — full code example -->
+    <!-- 4. One-import integration (dark) — OpenAI + Anthropic + PydanticAI + Custom -->
+    <OneImport />
+    <!-- 5. Code showcase (dark) — full code example with 8 primitives -->
     <CodeShowcase />
-    <!-- 5. Features (light) — full-width sticky stacking cards -->
+    <!-- 6. Features (light) — sticky stacking primitive cards -->
     <Features />
-    <div class="gradient-divider"></div>
-    <!-- 6. Memory (light) — durable agent memory -->
-    <Memory />
-    <div class="gradient-divider"></div>
-    <!-- 7. Why Kitaru (light) -->
-    <WhyKitaru />
-    <!-- 7. Architecture (dark) — no divider, bg change is the break -->
+    <!-- 7. Architecture (dark) — the lifecycle layer, positioning -->
     <Architecture />
-    <!-- 8. Social proof (light) — no divider after dark section -->
+    <!-- 8. Deploy (light) — kitaru deploy + stacks -->
+    <Deploy />
+    <div class="gradient-divider"></div>
+    <!-- 9. Social proof (light) — ZenML lineage + capabilities -->
     <SocialProof />
     <div class="gradient-divider"></div>
-    <!-- 9. CTA -->
+    <!-- 10. CTA -->
     <Cta />
   </main>
   <Footer />

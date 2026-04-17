@@ -1,0 +1,379 @@
+---
+// Deploy.astro — Visual flow: one agent, one command, multiple stacks
+---
+
+<section id="deploy" class="section-pad deploy-section">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>PLATFORM TEAMS OWN THE STACK</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">
+      Same agent. Swap infrastructure with one flag.
+    </h2>
+
+    <div class="deploy-flow" data-reveal data-reveal-delay="2">
+
+      <!-- Source: the agent -->
+      <div class="deploy-node deploy-node--agent">
+        <div class="deploy-node-head">
+          <span class="deploy-node-kind">Your agent</span>
+        </div>
+        <div class="deploy-node-body">
+          <span class="deploy-filename">compliance_reviewer.py</span>
+        </div>
+      </div>
+
+      <!-- Arrow into deploy -->
+      <div class="deploy-arrow" aria-hidden="true">
+        <svg width="36" height="14" viewBox="0 0 36 14" fill="none">
+          <path d="M0 7 H30 M24 1 L30 7 L24 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <!-- Deploy terminal -->
+      <div class="deploy-node deploy-node--command">
+        <div class="deploy-command-shell">
+          <span class="deploy-command-prompt">$</span>
+          <code class="deploy-command-cmd">kitaru&nbsp;deploy&nbsp;--stack&nbsp;<span id="deployStackName" class="deploy-command-flag">prod</span></code>
+        </div>
+      </div>
+
+      <!-- Branch arrows + stacks -->
+      <div class="deploy-branch" aria-hidden="true">
+        <svg class="deploy-branch-svg" viewBox="0 0 100 120" preserveAspectRatio="none">
+          <path d="M0 60 L60 60 L60 10 L100 10" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+          <path d="M0 60 L60 60 L60 110 L100 110" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+          <path d="M96 6 L100 10 L96 14" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M96 106 L100 110 L96 114" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <!-- Target stacks -->
+      <div class="deploy-targets">
+        <button class="deploy-stack-card" data-stack="staging" aria-pressed="false">
+          <div class="deploy-stack-head">
+            <span class="deploy-stack-badge deploy-stack-badge--staging">Staging</span>
+            <code class="deploy-stack-name">staging-gcp</code>
+          </div>
+          <div class="deploy-stack-pills">
+            <span class="deploy-stack-pill">GCS</span>
+            <span class="deploy-stack-pill">Cloud Run</span>
+            <span class="deploy-stack-pill">Artifact Registry</span>
+            <span class="deploy-stack-pill">Secret Manager</span>
+          </div>
+        </button>
+
+        <button class="deploy-stack-card is-active" data-stack="prod" aria-pressed="true">
+          <div class="deploy-stack-head">
+            <span class="deploy-stack-badge deploy-stack-badge--prod">Production</span>
+            <code class="deploy-stack-name">prod-aws-us-east</code>
+          </div>
+          <div class="deploy-stack-pills">
+            <span class="deploy-stack-pill">S3</span>
+            <span class="deploy-stack-pill">Fargate</span>
+            <span class="deploy-stack-pill">ECR</span>
+            <span class="deploy-stack-pill">Secrets Manager</span>
+          </div>
+        </button>
+      </div>
+
+    </div>
+
+    <p class="deploy-note" data-reveal data-reveal-delay="3">
+      <strong>Your registry. Your deployer. Your cloud.</strong>
+      Standard Docker image, handed to the infrastructure you control. Click a stack above to see the command change.
+    </p>
+
+  </div>
+</section>
+
+<style>
+  .deploy-section {
+    background: var(--color-bg);
+    position: relative;
+  }
+
+  /* ─── Flow layout ─── */
+  .deploy-flow {
+    margin-top: 48px;
+    display: grid;
+    grid-template-columns: auto auto auto auto 1fr;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .deploy-node {
+    position: relative;
+  }
+
+  /* Agent card */
+  .deploy-node--agent {
+    padding: 18px 22px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    min-width: 180px;
+  }
+
+  .deploy-node-head {
+    margin-bottom: 6px;
+  }
+
+  .deploy-node-kind {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .deploy-filename {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-primary);
+    letter-spacing: -0.005em;
+  }
+
+  /* Arrow between nodes */
+  .deploy-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-accent);
+    opacity: 0.85;
+  }
+
+  /* Deploy command shell */
+  .deploy-node--command {
+    display: flex;
+    align-items: center;
+  }
+
+  .deploy-command-shell {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    background: var(--color-primary);
+    border-radius: 10px;
+    border: 1px solid oklch(0 0 0 / 0.2);
+    box-shadow: 0 10px 30px oklch(0 0 0 / 0.12);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+  }
+
+  .deploy-command-prompt {
+    color: oklch(0.72 0.14 55);
+    font-size: 0.95rem;
+    font-weight: 500;
+    user-select: none;
+  }
+
+  .deploy-command-cmd {
+    color: oklch(1 0 0);
+    font-size: 0.98rem;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+
+  .deploy-command-flag {
+    color: oklch(0.85 0.14 55);
+    font-weight: 600;
+    transition: color 0.25s, opacity 0.15s;
+  }
+
+  /* Branch lines */
+  .deploy-branch {
+    color: var(--color-border);
+    height: 140px;
+    width: 60px;
+    display: flex;
+    align-items: center;
+  }
+
+  .deploy-branch-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* Target stacks */
+  .deploy-targets {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .deploy-stack-card {
+    text-align: left;
+    cursor: pointer;
+    padding: 14px 18px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s, transform 0.15s;
+    font-family: var(--font-ui);
+  }
+
+  .deploy-stack-card:hover {
+    border-color: var(--color-muted);
+    transform: translateY(-1px);
+  }
+
+  .deploy-stack-card.is-active {
+    border-color: oklch(0.65 0.16 45 / 0.4);
+    background: oklch(0.65 0.16 45 / 0.03);
+    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.06);
+  }
+
+  .deploy-stack-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+
+  .deploy-stack-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .deploy-stack-badge--staging {
+    color: oklch(0.55 0.1 155);
+    background: oklch(0.55 0.1 155 / 0.1);
+    border: 1px solid oklch(0.55 0.1 155 / 0.3);
+  }
+
+  .deploy-stack-badge--prod {
+    color: var(--color-accent);
+    background: oklch(0.65 0.16 45 / 0.1);
+    border: 1px solid oklch(0.65 0.16 45 / 0.3);
+  }
+
+  .deploy-stack-name {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--color-primary);
+    letter-spacing: -0.005em;
+  }
+
+  .deploy-stack-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .deploy-stack-pill {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    padding: 3px 9px;
+    border-radius: 5px;
+    background: var(--color-surface-warm);
+    border: 1px solid var(--color-border);
+    color: var(--color-secondary);
+  }
+
+  /* Note under the flow */
+  .deploy-note {
+    margin-top: 40px;
+    padding: 18px 22px;
+    border-left: 3px solid var(--color-accent);
+    background: oklch(0.65 0.16 45 / 0.04);
+    border-radius: 0 8px 8px 0;
+    font-size: 0.92rem;
+    line-height: 1.55;
+    color: var(--color-secondary);
+  }
+
+  .deploy-note strong {
+    color: var(--color-primary);
+    font-weight: 600;
+    margin-right: 6px;
+  }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 1100px) {
+    .deploy-flow {
+      grid-template-columns: 1fr;
+      gap: 14px;
+      justify-items: center;
+    }
+
+    .deploy-arrow {
+      transform: rotate(90deg);
+    }
+
+    .deploy-branch {
+      display: none;
+    }
+
+    .deploy-targets {
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .deploy-node--agent,
+    .deploy-node--command {
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .deploy-command-shell {
+      width: 100%;
+      white-space: normal;
+      justify-content: flex-start;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .deploy-command-cmd {
+      font-size: 0.85rem;
+    }
+
+    .deploy-stack-pills {
+      gap: 5px;
+    }
+
+    .deploy-stack-pill {
+      font-size: 0.64rem;
+    }
+  }
+</style>
+
+<script>
+  const section = document.getElementById('deploy');
+  if (section) {
+    const cards = section.querySelectorAll<HTMLButtonElement>('.deploy-stack-card');
+    const stackFlag = section.querySelector<HTMLElement>('#deployStackName');
+
+    cards.forEach(card => {
+      card.addEventListener('click', () => {
+        const target = card.dataset.stack;
+        if (!target) return;
+
+        cards.forEach(c => {
+          const active = c === card;
+          c.classList.toggle('is-active', active);
+          c.setAttribute('aria-pressed', String(active));
+        });
+
+        if (stackFlag) {
+          stackFlag.style.opacity = '0';
+          setTimeout(() => {
+            stackFlag.textContent = target;
+            stackFlag.style.opacity = '1';
+          }, 120);
+        }
+      });
+    });
+  }
+</script>
