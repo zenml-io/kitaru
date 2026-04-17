@@ -205,7 +205,7 @@ kitaru executions replay <EXECUTION_ID> --from process_data
 | [PydanticAI adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter) | Wrap a PydanticAI agent with `KitaruAgent` |
 | [Memory guide](https://kitaru.ai/docs/guides/memory) | Durable memory concepts, scopes, history, and compaction |
 | [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
-| [Stack Selection Guide](https://kitaru.ai/docs/getting-started/stack-selection) | Deploy to Kubernetes, Vertex AI, SageMaker, or AzureML |
+| [Stack Selection Guide](https://kitaru.ai/docs/getting-started/stack-selection) | Deploy to Kubernetes, AWS, GCP, or Azure |
 
 ## Origins
 
