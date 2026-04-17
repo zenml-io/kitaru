@@ -211,8 +211,8 @@ kitaru executions replay <EXECUTION_ID> --from process_data
 
 Kitaru is built by the team behind [ZenML](https://zenml.io), drawing on five
 years of production orchestration experience (JetBrains, Adeo, Brevo). The
-lifecycle primitives — stacks, artifacts, lineage — are purpose-rebuilt here for
-autonomous agents.
+orchestration primitives (stacks, artifacts, lineage) are purpose-rebuilt here
+for autonomous agents.
 
 ## Contributing
 
