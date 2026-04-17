@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `kitaru.get_secret()` and the public `Secret` model for exact, Kitaru-native secret reads in Python code without importing ZenML directly
 - `@checkpoint(cache=...)` per-checkpoint cache overrides (`True`/`False`/`None`) with updated configuration docs
 
 ### Fixed
