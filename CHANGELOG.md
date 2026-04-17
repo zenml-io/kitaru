@@ -32,10 +32,25 @@ wrapped = KitaruAgent(
 - `kitaru.adapters.pydantic_ai.wrap(...)` compatibility shim with deprecation warning to ease migration to `KitaruAgent(...)`.
 
 ### Changed
-- CLI list commands now default to paginated windows (`--page 1 --size 20`) for executions, memory, stacks, models, and secrets. `kitaru executions list` also shows compact `Started` and `Ended` columns, while JSON output keeps the existing `{command, items, count}` envelope shape. Paging past the end of a non-empty list now reports `no items on page N` across all five commands rather than a misleading "none found". `kitaru executions list --limit N` still works but no longer accepts any explicit `--page`/`--size`, so the two modes don't silently mix (#122)
 - PydanticAI adapter auto-flow now re-enters the normal run path so turn checkpoints, tracking, and message-history capture apply outside explicit flows.
 - PydanticAI granular mode now defaults its per-call checkpoint configs on, rejects invalid config combinations eagerly, keeps HITL interception active when capture is disabled, and raises clear usage errors for unsupported deferred-tool schemas.
 - PydanticAI adapter docs, README examples, and migration guidance now match the shipped runtime: `runtime="inline"` only for adapter-managed checkpoints, explicit deprecation path for `wrap(...)`, and corrected capture-policy examples.
+### Added
+- `kitaru.get_secret()` and the public `Secret` model for exact, Kitaru-native secret reads in Python code without importing ZenML directly
+- `@checkpoint(cache=...)` per-checkpoint cache overrides (`True`/`False`/`None`) with updated configuration docs
+
+### Fixed
+- Execution-level cache no longer defaults to `True`, so `@checkpoint(cache=False)` is preserved through ZenML compilation when no flow-level cache is explicitly configured
+
+## [0.4.1] - 2026-04-16
+
+### Changed
+- CLI list commands now default to paginated windows (`--page 1 --size 20`) for executions, memory, stacks, models, and secrets. `kitaru executions list` also shows compact `Started` and `Ended` columns, while JSON output keeps the existing `{command, items, count}` envelope shape. Paging past the end of a non-empty list now reports `no items on page N` across all five commands rather than a misleading "none found". `kitaru executions list --limit N` still works but no longer accepts any explicit `--page`/`--size`, so the two modes don't silently mix (#139)
+- Clarified flow-body artifact loading semantics in the concepts and guides docs, including a dedicated section in the artifacts guide and tighter guidance in the `wait`/`input` and LLM-call pages (#143)
+- Expanded the MCP setup docs with a venv/PATH caveat (the common failure mode where Claude Code inherits its launcher's PATH rather than a later-activated venv) and added `claude mcp add` with all three scope flags as an alternative to hand-editing `.mcp.json`
+
+### Fixed
+- Fixed SDK and CLI reference rendering in the generated docs, including docstring cleanups across `checkpoint`, `flow`, `logging`, `artifacts`, and `client` so the griffe/fumapy pipeline emits correctly formatted reference pages (#141)
 
 ## [0.4.0] - 2026-04-12
 
