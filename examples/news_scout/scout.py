@@ -42,9 +42,10 @@ MODEL = os.environ.get("KITARU_SCOUT_MODEL", "anthropic:claude-sonnet-4-6")
 MAX_REQUESTS = 50
 
 DEFAULT_INTERESTS: list[str] = [
-    "artificial intelligence",
-    "startups",
-    "open source",
+    "AI agents",
+    "harness engineering",
+    "durable execution",
+    "agent frameworks",
     "developer tools",
 ]
 
