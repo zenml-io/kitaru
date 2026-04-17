@@ -30,4 +30,4 @@ jobs:
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           # Dashboard screenshot — heavy lossy compression visibly blurs it.
           # Keep this as-is until we host higher-quality sources externally.
-          ignorePaths: "site/public/dashboard.png"
+          ignorePaths: site/public/dashboard.png
