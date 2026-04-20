@@ -1,0 +1,387 @@
+---
+// OneImport.astro — One-import swap with OpenAI Agents SDK and Anthropic Agent SDK
+---
+
+<section id="one-import" class="section-pad-compact one-import-section">
+  <div class="section-inner">
+    <span class="section-eyebrow" data-reveal>WORKS WITH YOUR AGENT SDK</span>
+    <h2 class="section-title" data-reveal data-reveal-delay="1">
+      One import. Any agent SDK.
+    </h2>
+    <p class="one-import-desc" data-reveal data-reveal-delay="2">
+      Keep your agent, your sandbox, your manifest exactly as they are. Swap one import and get checkpointed execution, artifact tracking, and observability, without changing a line of your agent code.
+    </p>
+
+    <!-- Tabs -->
+    <div class="one-import-tabs" role="tablist" data-reveal data-reveal-delay="3">
+      <button class="one-import-tab is-active" role="tab" aria-selected="true" data-tab="openai">OpenAI Agents SDK</button>
+      <button class="one-import-tab" role="tab" aria-selected="false" data-tab="anthropic">Anthropic Agent SDK</button>
+      <button class="one-import-tab" role="tab" aria-selected="false" data-tab="pydanticai">PydanticAI</button>
+      <button class="one-import-tab" role="tab" aria-selected="false" data-tab="custom">Raw Python</button>
+    </div>
+
+    <!-- OpenAI panel -->
+      <div class="one-import-panel is-active" id="panel-openai" role="tabpanel">
+        <div class="one-import-codes">
+          <div class="one-import-code">
+            <div class="one-import-code-header">
+              <span class="one-import-code-label">Before</span>
+              <span class="one-import-code-filename">agent.py</span>
+            </div>
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> agents <span class="kw">import</span> Runner
+<span class="kw">from</span> agents.sandbox <span class="kw">import</span> SandboxAgent, Manifest
+
+agent <span class="op">=</span> <span class="fn">SandboxAgent</span>(
+    name<span class="op">=</span><span class="str">"Compliance Reviewer"</span>,
+    model<span class="op">=</span><span class="str">"gpt-5.4"</span>,
+    default_manifest<span class="op">=</span>manifest,
+)
+
+result <span class="op">=</span> <span class="kw">await</span> Runner.<span class="fn">run</span>(agent, task)</code></pre>
+          </div>
+          <div class="one-import-arrow" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/>
+              <polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </div>
+          <div class="one-import-code is-after">
+            <div class="one-import-code-header">
+              <span class="one-import-code-label is-after">With Kitaru</span>
+              <span class="one-import-code-filename">agent.py</span>
+            </div>
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru.integrations.openai <span class="kw">import</span> KitaruRunner
+<span class="kw">from</span> agents.sandbox <span class="kw">import</span> SandboxAgent, Manifest
+
+agent <span class="op">=</span> <span class="fn">SandboxAgent</span>(
+    name<span class="op">=</span><span class="str">"Compliance Reviewer"</span>,
+    model<span class="op">=</span><span class="str">"gpt-5.4"</span>,
+    default_manifest<span class="op">=</span>manifest,
+)
+
+result <span class="op">=</span> <span class="kw">await</span> KitaruRunner.<span class="fn">run</span>(agent, task)</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Anthropic panel -->
+      <div class="one-import-panel" id="panel-anthropic" role="tabpanel" hidden>
+        <div class="one-import-codes">
+          <div class="one-import-code">
+            <div class="one-import-code-header">
+              <span class="one-import-code-label">Before</span>
+              <span class="one-import-code-filename">agent.py</span>
+            </div>
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> claude_agent_sdk <span class="kw">import</span> query, ClaudeAgentOptions
+
+options <span class="op">=</span> <span class="fn">ClaudeAgentOptions</span>(
+    system_prompt<span class="op">=</span><span class="str">"You are a compliance reviewer."</span>,
+    allowed_tools<span class="op">=</span>[<span class="str">"search_docs"</span>, <span class="str">"fetch_policy"</span>],
+)
+
+<span class="kw">async for</span> msg <span class="kw">in</span> <span class="fn">query</span>(prompt<span class="op">=</span>task, options<span class="op">=</span>options):
+    process(msg)</code></pre>
+          </div>
+          <div class="one-import-arrow" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/>
+              <polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </div>
+          <div class="one-import-code is-after">
+            <div class="one-import-code-header">
+              <span class="one-import-code-label is-after">With Kitaru</span>
+              <span class="one-import-code-filename">agent.py</span>
+            </div>
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru.integrations.claude <span class="kw">import</span> kitaru_query
+<span class="kw">from</span> claude_agent_sdk <span class="kw">import</span> ClaudeAgentOptions
+
+options <span class="op">=</span> <span class="fn">ClaudeAgentOptions</span>(
+    system_prompt<span class="op">=</span><span class="str">"You are a compliance reviewer."</span>,
+    allowed_tools<span class="op">=</span>[<span class="str">"search_docs"</span>, <span class="str">"fetch_policy"</span>],
+)
+
+<span class="kw">async for</span> msg <span class="kw">in</span> <span class="fn">kitaru_query</span>(prompt<span class="op">=</span>task, options<span class="op">=</span>options):
+    process(msg)</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- PydanticAI panel -->
+      <div class="one-import-panel" id="panel-pydanticai" role="tabpanel" hidden>
+        <div class="one-import-codes">
+          <div class="one-import-code">
+            <div class="one-import-code-header">
+              <span class="one-import-code-label">Before</span>
+              <span class="one-import-code-filename">agent.py</span>
+            </div>
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> pydantic_ai <span class="kw">import</span> Agent
+
+agent <span class="op">=</span> <span class="fn">Agent</span>(
+    <span class="str">"openai:gpt-5.4"</span>,
+    system_prompt<span class="op">=</span><span class="str">"You are a compliance reviewer."</span>,
+    tools<span class="op">=</span>[search_docs, fetch_policy],
+)
+
+result <span class="op">=</span> <span class="kw">await</span> agent.<span class="fn">run</span>(task)</code></pre>
+          </div>
+          <div class="one-import-arrow" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/>
+              <polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </div>
+          <div class="one-import-code is-after">
+            <div class="one-import-code-header">
+              <span class="one-import-code-label is-after">With Kitaru</span>
+              <span class="one-import-code-filename">agent.py</span>
+            </div>
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru.integrations.pydanticai <span class="kw">import</span> kitaru_agent
+<span class="kw">from</span> pydantic_ai <span class="kw">import</span> Agent
+
+agent <span class="op">=</span> <span class="fn">kitaru_agent</span>(<span class="fn">Agent</span>(
+    <span class="str">"openai:gpt-5.4"</span>,
+    system_prompt<span class="op">=</span><span class="str">"You are a compliance reviewer."</span>,
+    tools<span class="op">=</span>[search_docs, fetch_policy],
+))
+
+result <span class="op">=</span> <span class="kw">await</span> agent.<span class="fn">run</span>(task)</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom panel (no framework) -->
+      <div class="one-import-panel" id="panel-custom" role="tabpanel" hidden>
+        <div class="one-import-codes">
+          <div class="one-import-code">
+            <div class="one-import-code-header">
+              <span class="one-import-code-label">Before</span>
+              <span class="one-import-code-filename">agent.py</span>
+            </div>
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> anthropic <span class="kw">import</span> Anthropic
+
+client <span class="op">=</span> <span class="fn">Anthropic</span>()
+
+<span class="kw">def</span> <span class="fn">my_agent</span>(task: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    plan <span class="op">=</span> <span class="fn">analyze</span>(client, task)
+    <span class="cmt"># crash here? everything above is lost.</span>
+    result <span class="op">=</span> <span class="fn">execute</span>(client, plan)
+    <span class="kw">return</span> result</code></pre>
+          </div>
+          <div class="one-import-arrow" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/>
+              <polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </div>
+          <div class="one-import-code is-after">
+            <div class="one-import-code-header">
+              <span class="one-import-code-label is-after">With Kitaru</span>
+              <span class="one-import-code-filename">agent.py</span>
+            </div>
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint
+<span class="kw">from</span> anthropic <span class="kw">import</span> Anthropic
+
+client <span class="op">=</span> <span class="fn">Anthropic</span>()
+
+<span class="dec">@flow</span>
+<span class="kw">def</span> <span class="fn">my_agent</span>(task: <span class="var">str</span>) <span class="op">-></span> <span class="var">str</span>:
+    plan <span class="op">=</span> <span class="fn">checkpoint</span>(analyze)(client, task)
+    result <span class="op">=</span> <span class="fn">checkpoint</span>(execute)(client, plan)
+    <span class="kw">return</span> result</code></pre>
+          </div>
+        </div>
+      </div>
+
+  </div>
+</section>
+
+<style>
+  .one-import-section {
+    position: relative;
+    background: var(--color-bg);
+  }
+
+  .one-import-desc {
+    max-width: 680px;
+    margin: 12px 0 24px;
+    color: var(--color-secondary);
+    font-size: clamp(0.95rem, 1.5vw, 1.05rem);
+    line-height: 1.6;
+  }
+
+  /* ─── Tabs ─── */
+  .one-import-tabs {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    background: var(--color-surface-warm);
+    border: 1px solid var(--color-border);
+    border-radius: 9px;
+    margin-bottom: 20px;
+  }
+
+  .one-import-tab {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: var(--color-muted);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s;
+    white-space: nowrap;
+  }
+
+  .one-import-tab:hover {
+    color: var(--color-primary);
+  }
+
+  .one-import-tab.is-active {
+    background: var(--color-surface);
+    color: var(--color-accent);
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 0 0 1px oklch(0.65 0.16 45 / 0.25);
+  }
+
+  /* ─── Code panels ─── */
+  .one-import-panel {
+    display: block;
+  }
+
+  .one-import-panel[hidden] {
+    display: none;
+  }
+
+  .one-import-codes {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    align-items: stretch;
+  }
+
+  .one-import-code {
+    background: oklch(0.16 0.015 60);
+    border: 1px solid oklch(1 0 0 / 0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .one-import-code.is-after {
+    border-color: oklch(0.65 0.16 45 / 0.3);
+    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.05);
+  }
+
+  .one-import-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid oklch(1 0 0 / 0.06);
+  }
+
+  .one-import-code-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: oklch(1 0 0 / 0.4);
+  }
+
+  .one-import-code-label.is-after {
+    color: var(--color-accent);
+  }
+
+  .one-import-code-filename {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: oklch(1 0 0 / 0.35);
+  }
+
+  .one-import-code-pre {
+    padding: 20px;
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.7;
+    color: var(--color-dark-text);
+    flex: 1;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .one-import-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-accent);
+    opacity: 0.7;
+  }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 900px) {
+    .one-import-codes {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .one-import-arrow {
+      transform: rotate(90deg);
+      padding: 4px 0;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .one-import-tabs {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    .one-import-tab {
+      flex-shrink: 0;
+    }
+
+    .one-import-code-pre {
+      font-size: 0.72rem;
+      padding: 16px;
+    }
+  }
+</style>
+
+<script>
+  const section = document.getElementById('one-import');
+  if (section) {
+    const tabs = section.querySelectorAll<HTMLButtonElement>('.one-import-tab');
+    const panels = section.querySelectorAll<HTMLElement>('.one-import-panel');
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.tab;
+        if (!target) return;
+
+        tabs.forEach(t => {
+          const isActive = t === tab;
+          t.classList.toggle('is-active', isActive);
+          t.setAttribute('aria-selected', String(isActive));
+        });
+
+        panels.forEach(panel => {
+          const isActive = panel.id === `panel-${target}`;
+          panel.classList.toggle('is-active', isActive);
+          if (isActive) {
+            panel.removeAttribute('hidden');
+          } else {
+            panel.setAttribute('hidden', '');
+          }
+        });
+      });
+    });
+  }
+</script>

@@ -205,7 +205,7 @@ from kitaru.config import (
 from kitaru.config import current_stack as get_current_stack
 from kitaru.config import list_stacks as get_available_stacks
 from kitaru.config import use_stack as set_active_stack
-from kitaru.inspection import RuntimeSnapshot
+from kitaru.inspection import ActiveConfigSelectionProvenance, RuntimeSnapshot
 from kitaru.inspection import build_runtime_snapshot as _build_runtime_snapshot
 from kitaru.inspection import combine_warnings as _combine_warnings
 from kitaru.inspection import (
@@ -313,6 +313,7 @@ __all__ = [
     "_STACK_CREATE_FILE_STRING_KEYS",
     "_STACK_CREATE_FILE_SUPPORTED_KEYS",
     "_UNKNOWN_VERSION",
+    "ActiveConfigSelectionProvenance",
     "CleanScope",
     "CleanupPlan",
     "CleanupResult",

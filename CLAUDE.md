@@ -105,6 +105,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 - Only `kitaru.llm()` auto-resolves alias-linked secrets today. If you need to document non-LLM secret access, present it as the current low-level pattern rather than implying a public Kitaru helper already exists.
 - If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py` and/or the relevant `src/kitaru/_cli/_*.py` module (use `src/kitaru/cli.py` only for facade/bootstrap issues), not the generated `docs/content/docs/cli/*` output.
 - Current shipped stack-create types on the CLI/MCP surface are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. Advanced CLI/MCP stack creation also supports `--extra` / structured `extra` plus the remote-only `--async` / `async_mode` convenience flag. The public Python SDK `kitaru.create_stack(...)` still provisions local stacks only, so docs should keep that distinction explicit.
+- `examples/**/README.md` files are **public-facing, educational content** for users learning Kitaru — not internal documentation. Their audience is a developer encountering the example for the first time and trying to understand what Kitaru does, what the example demonstrates, and how to run it themselves. Keep them focused on concepts, primitives in use, and the flow of the example. Do **not** add sections like "Testing" (how maintainers run the example's test suite), internal CI setup notes, contributor-only credential instructions for stubbed/mocked test runs, or any content that only makes sense to someone working on Kitaru itself. Those details belong in `tests/` docstrings, internal contributor docs, or PR descriptions. A good rule of thumb: if the section wouldn't help a brand-new user understand Kitaru, it doesn't belong in an example README.
 
 ## Branching strategy
 
@@ -137,10 +138,13 @@ This project uses [just](https://github.com/casey/just) as a command stack. Run 
 
 **Typical loop:** write code → `just fix` (auto-fix what it can) → `just check` (verify everything passes) → `just test` (make sure nothing is broken) → commit.
 
+**Worktree setup gotcha:** In a fresh `git worktree`, the `test_phase*_example::*_runs_end_to_end` tests (~14 of them) fail with `RuntimeError: Unable to resolve dynamic pipeline source. Make sure your pipeline is defined at the top level of your module.` This is because ZenML's dynamic pipeline resolver uses `get_source_root()` to locate the project root before re-importing the pipeline module by dotted path, and that root comes from the `.kitaru/` marker. Worktrees don't inherit `.kitaru/` from the main checkout, so the resolver can't find `examples.basic_flow....` on `sys.path`. **Fix:** run `uv run kitaru init` once in the new worktree after `uv sync`. The unit test suite passes without this — only the end-to-end example tests need it.
+
 ```bash
 # Setup
 uv sync                              # Install dependencies
 uv sync --extra local                # Include local ZenML runtime components
+kitaru init                          # Required in a fresh git worktree — see note below
 
 # Common Python workflows
 just check                            # Run all checks (format, lint, typecheck, typos, yaml, actions, links)
@@ -229,9 +233,9 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ### Framework adapters
 
-The first framework adapter is implemented: `kitaru.adapters.pydantic_ai.wrap(agent)`.
+The first framework adapter is implemented: `kitaru.adapters.pydantic_ai.KitaruAgent(agent, ...)`.
 
-It keeps the enclosing checkpoint as the replay boundary, while tracking PydanticAI model requests and tool calls as child events/metadata under that checkpoint. At flow scope, `run()` / `run_sync()` automatically use a synthetic `llm_call` checkpoint so tracking still works without an explicit outer checkpoint. The adapter also supports per-tool capture modes (`full`, `metadata_only`, `off`) and HITL marker tools via `kitaru.adapters.pydantic_ai.hitl_tool(...)`.
+It keeps the enclosing checkpoint as the replay boundary while tracking PydanticAI model requests and tool calls as child events/artifacts under that checkpoint. At flow scope, `run()` / `run_sync()` automatically open a synthetic checkpoint per turn so tracking still works without an explicit outer checkpoint; outside any flow they auto-open a local flow (remote stacks require an explicit `@kitaru.flow`). Capture is controlled via a `CapturePolicy` (`tool_capture="full"|"metadata"|None` plus per-tool overrides). HITL is auto-bridged: PydanticAI's native `requires_approval=True`, `ApprovalRequired`, and `CallDeferred` all route through `kitaru.wait(...)` with no decorator. For explicit HITL markers, use `kitaru.adapters.pydantic_ai.hitl_tool(...)`. Per-turn checkpoint behavior (runtime, retries, type) is configurable via `KitaruAgent(..., turn_checkpoint_config={"runtime": "inline"})`; adapter-managed checkpoints do not yet support `runtime="isolated"`.
 
 ### Observability (current MVP + planned)
 
@@ -249,6 +253,7 @@ Future work will add richer OpenTelemetry-native tracing and exporter integratio
 - **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize"
 - **Comments explain *why*, not *what*.** No change-tracking comments ("Updated from X", "Refactored this"). No narrating obvious code (`x = x + 1  # increment x`). Add comments only for intent, trade-offs, constraints, edge cases, or non-obvious decisions. Prefer expressive names and small functions over inline commentary.
 - **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
+- **No postponed annotations in flow/checkpoint modules.** Do not add `from __future__ import annotations` to files that define Kitaru `@flow`/`@checkpoint` functions or ZenML `@pipeline`/`@step` functions. ZenML inspects step output annotations at runtime and currently rejects string annotations such as `"dict[str, Any]"`; use real runtime annotations instead. Python 3.11+ already supports `list[str]` / `str | None` without the future import.
 - **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Use standalone util files only for truly generic functions used across unrelated modules.
 - **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
 

@@ -37,6 +37,12 @@ class TestPublicExports:
     def test_load_exists(self) -> None:
         assert hasattr(kitaru, "load")
 
+    def test_secret_exists(self) -> None:
+        assert hasattr(kitaru, "Secret")
+
+    def test_get_secret_exists(self) -> None:
+        assert hasattr(kitaru, "get_secret")
+
     def test_log_exists(self) -> None:
         assert hasattr(kitaru, "log")
 
@@ -78,11 +84,13 @@ class TestPublicExports:
             "KitaruExecutionError",
             "KitaruFeatureNotAvailableError",
             "KitaruLogRetrievalError",
+            "KitaruMemoryArtifactUnavailableError",
             "KitaruRuntimeError",
             "KitaruStateError",
             "KitaruUsageError",
             "KitaruUserCodeError",
             "KitaruWaitValidationError",
+            "Secret",
             "StackInfo",
             "checkpoint",
             "configure",
@@ -91,6 +99,7 @@ class TestPublicExports:
             "current_stack",
             "delete_stack",
             "flow",
+            "get_secret",
             "list_stacks",
             "llm",
             "memory",

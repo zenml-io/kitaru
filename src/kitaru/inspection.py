@@ -8,16 +8,23 @@ import os
 import platform
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
+import yaml
 from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
+from zenml.constants import (
+    CONFIG_FILE_NAME,
+    ENV_ZENML_ACTIVE_PROJECT_ID,
+    ENV_ZENML_ACTIVE_STACK_ID,
+)
 from zenml.models import SecretResponse
+from zenml.utils import yaml_utils
 from zenml.utils.server_utils import connected_to_local_server, get_local_server
 
 from kitaru._client._models import (
@@ -29,9 +36,11 @@ from kitaru._client._models import (
     LogEntry,
     PendingWait,
 )
+from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
 from kitaru._version import resolve_installed_version
 from kitaru.config import (
     KITARU_PROJECT_ENV,
+    KITARU_STACK_ENV,
     ActiveEnvironmentVariable,
     ActiveStackLogStore,
     ModelAliasEntry,
@@ -59,6 +68,35 @@ from kitaru.memory import (
 logger = logging.getLogger(__name__)
 
 _LOCALHOST_NAMES = {"127.0.0.1", "localhost", "::1"}
+
+ProvenanceResource = Literal["active_stack", "active_project"]
+ProvenanceSource = Literal[
+    "environment",
+    "repo-local config",
+    "global config",
+    "unset",
+    "unknown",
+]
+
+
+@dataclass(frozen=True)
+class ActiveConfigSelectionProvenance:
+    """Raw and resolved provenance for an active stack/project selection."""
+
+    resource: ProvenanceResource
+    effective_source: ProvenanceSource
+    effective_source_detail: str | None
+    effective_id: str | None
+    resolved_id: str | None = None
+    resolved_name: str | None = None
+    environment_variable: str | None = None
+    environment_id: str | None = None
+    repository_root: str | None = None
+    repository_config_path: str | None = None
+    repository_id: str | None = None
+    global_config_path: str | None = None
+    global_id: str | None = None
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -93,8 +131,10 @@ class RuntimeSnapshot:
     # Connection source breakdown
     connection_sources: dict[str, str] | None = None
 
-    # Active project
+    # Active project/context provenance
     active_project: str | None = None
+    active_stack_provenance: ActiveConfigSelectionProvenance | None = None
+    active_project_provenance: ActiveConfigSelectionProvenance | None = None
 
     # System info
     python_version: str | None = None
@@ -328,6 +368,230 @@ class ConfigProvenance:
     uses_repo_local: bool = False
 
 
+def _read_raw_yaml_mapping(path: Path) -> tuple[dict[str, Any], str | None]:
+    """Read a YAML mapping for diagnostics without raising user-facing errors."""
+    if not path.exists():
+        return {}, None
+
+    try:
+        raw = yaml_utils.read_yaml(str(path))
+    except (OSError, yaml.YAMLError) as exc:
+        logger.debug("Could not read config file %s", path, exc_info=True)
+        return {}, f"Could not read config file {path} ({type(exc).__name__}): {exc}"
+
+    if raw is None:
+        return {}, None
+    if not isinstance(raw, dict):
+        return {}, f"Config file exists but is not a mapping: {path}"
+    return raw, None
+
+
+def _stringify_config_id(value: Any) -> str | None:
+    """Return a non-empty string for an active config ID without validating it."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _find_repository_root_for_diagnostics() -> tuple[Path | None, str | None]:
+    """Find the active repository root without constructing a ZenML client."""
+    try:
+        return Client.find_repository(enable_warnings=False), None
+    except OSError as exc:
+        return None, f"Could not inspect repository root: {type(exc).__name__}: {exc}"
+
+
+def _repo_local_config_path(repository_root: Path | str) -> Path:
+    """Return the `.kitaru/config.yaml` path for a given repository root."""
+    return Path(repository_root) / KITARU_REPOSITORY_DIRECTORY_NAME / CONFIG_FILE_NAME
+
+
+def _build_selection_provenance(
+    *,
+    resource: ProvenanceResource,
+    environment_variable: str,
+    environment_id: str | None,
+    repository_root: Path | None,
+    repository_config_path: Path | None,
+    repository_id: str | None,
+    global_config_path: Path,
+    global_id: str | None,
+    notes: list[str],
+) -> ActiveConfigSelectionProvenance:
+    """Apply ZenML's active context precedence to raw diagnostic candidates."""
+    effective_source: ProvenanceSource
+    effective_source_detail: str | None
+    effective_id: str | None
+
+    if environment_id is not None:
+        effective_source = "environment"
+        effective_source_detail = environment_variable
+        effective_id = environment_id
+    elif repository_id is not None:
+        effective_source = "repo-local config"
+        effective_source_detail = (
+            str(repository_config_path) if repository_config_path else None
+        )
+        effective_id = repository_id
+    elif global_id is not None:
+        effective_source = "global config"
+        effective_source_detail = str(global_config_path)
+        effective_id = global_id
+    else:
+        effective_source = "unset"
+        effective_source_detail = None
+        effective_id = None
+
+    return ActiveConfigSelectionProvenance(
+        resource=resource,
+        effective_source=effective_source,
+        effective_source_detail=effective_source_detail,
+        effective_id=effective_id,
+        environment_variable=environment_variable,
+        environment_id=environment_id,
+        repository_root=str(repository_root) if repository_root else None,
+        repository_config_path=(
+            str(repository_config_path) if repository_config_path else None
+        ),
+        repository_id=repository_id,
+        global_config_path=str(global_config_path),
+        global_id=global_id,
+        notes=list(notes),
+    )
+
+
+def _collect_active_context_provenance(
+    gc: GlobalConfiguration,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[ActiveConfigSelectionProvenance, ActiveConfigSelectionProvenance]:
+    """Collect raw active stack/project IDs before Client can sanitize them."""
+    env = os.environ if environ is None else environ
+    notes: list[str] = []
+
+    repository_root, repo_note = _find_repository_root_for_diagnostics()
+    if repo_note:
+        notes.append(repo_note)
+
+    repository_config_path: Path | None = None
+    if repository_root is not None:
+        repository_config_path = _repo_local_config_path(repository_root)
+
+    global_config_path = Path(gc.config_directory) / CONFIG_FILE_NAME
+    repo_config: dict[str, Any] = {}
+    global_config: dict[str, Any] = {}
+
+    if repository_config_path is not None:
+        repo_config, repo_yaml_note = _read_raw_yaml_mapping(repository_config_path)
+        if repo_yaml_note:
+            notes.append(repo_yaml_note)
+
+    global_config, global_yaml_note = _read_raw_yaml_mapping(global_config_path)
+    if global_yaml_note:
+        notes.append(global_yaml_note)
+
+    stack_notes = list(notes)
+    if env.get(KITARU_STACK_ENV):
+        stack_notes.append(
+            f"{KITARU_STACK_ENV} is an execution default and does not set "
+            "ZenML's active stack."
+        )
+
+    kitaru_project_id = _stringify_config_id(env.get(KITARU_PROJECT_ENV))
+    zenml_project_id = _stringify_config_id(env.get(ENV_ZENML_ACTIVE_PROJECT_ID))
+    project_environment_id = kitaru_project_id or zenml_project_id
+    project_environment_variable = ENV_ZENML_ACTIVE_PROJECT_ID
+    project_notes = list(notes)
+    if kitaru_project_id is not None:
+        project_environment_variable = (
+            f"{KITARU_PROJECT_ENV} -> {ENV_ZENML_ACTIVE_PROJECT_ID}"
+        )
+        if zenml_project_id is not None and zenml_project_id != kitaru_project_id:
+            project_notes.append(
+                f"Both {KITARU_PROJECT_ENV} and {ENV_ZENML_ACTIVE_PROJECT_ID} "
+                f"are set with different values; {KITARU_PROJECT_ENV} takes "
+                "precedence via Kitaru's init-hook translation."
+            )
+
+    active_stack_provenance = _build_selection_provenance(
+        resource="active_stack",
+        environment_variable=ENV_ZENML_ACTIVE_STACK_ID,
+        environment_id=_stringify_config_id(env.get(ENV_ZENML_ACTIVE_STACK_ID)),
+        repository_root=repository_root,
+        repository_config_path=repository_config_path,
+        repository_id=_stringify_config_id(repo_config.get("active_stack_id")),
+        global_config_path=global_config_path,
+        global_id=_stringify_config_id(global_config.get("active_stack_id")),
+        notes=stack_notes,
+    )
+    active_project_provenance = _build_selection_provenance(
+        resource="active_project",
+        environment_variable=project_environment_variable,
+        environment_id=project_environment_id,
+        repository_root=repository_root,
+        repository_config_path=repository_config_path,
+        repository_id=_stringify_config_id(repo_config.get("active_project_id")),
+        global_config_path=global_config_path,
+        global_id=_stringify_config_id(global_config.get("active_project_id")),
+        notes=project_notes,
+    )
+    return active_stack_provenance, active_project_provenance
+
+
+def _with_resolved_selection(
+    provenance: ActiveConfigSelectionProvenance | None,
+    *,
+    resolved_id: str | None,
+    resolved_name: str | None,
+) -> ActiveConfigSelectionProvenance | None:
+    """Attach resolved Client details to a previously captured provenance row."""
+    if provenance is None:
+        return None
+    return replace(
+        provenance,
+        resolved_id=resolved_id,
+        resolved_name=resolved_name,
+    )
+
+
+def _unknown_provenance_pair(
+    note: str,
+) -> tuple[ActiveConfigSelectionProvenance, ActiveConfigSelectionProvenance]:
+    """Return stub stack/project provenance records when collection itself failed.
+
+    The user passed `--all` explicitly asking for provenance. Returning `None`
+    would silently omit the section; emitting stubs with `effective_source="unknown"`
+    guarantees the failure is visible in the output.
+    """
+    return (
+        ActiveConfigSelectionProvenance(
+            resource="active_stack",
+            effective_source="unknown",
+            effective_source_detail=None,
+            effective_id=None,
+            notes=[note],
+        ),
+        ActiveConfigSelectionProvenance(
+            resource="active_project",
+            effective_source="unknown",
+            effective_source_detail=None,
+            effective_id=None,
+            notes=[note],
+        ),
+    )
+
+
+def _annotate_provenance_with_note(
+    provenance: ActiveConfigSelectionProvenance | None,
+    note: str,
+) -> ActiveConfigSelectionProvenance | None:
+    """Append a diagnostic note to a provenance record, preserving existing notes."""
+    if provenance is None:
+        return None
+    return replace(provenance, notes=[*provenance.notes, note])
+
+
 def _collect_config_provenance(
     gc: GlobalConfiguration,
     *,
@@ -350,11 +614,7 @@ def _collect_config_provenance(
     repo_config_str: str | None = None
     uses_repo = False
     if repository_root:
-        from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
-
-        repo_config = (
-            Path(repository_root) / KITARU_REPOSITORY_DIRECTORY_NAME / "config.yaml"
-        )
+        repo_config = _repo_local_config_path(repository_root)
         if repo_config.exists():
             repo_config_str = str(repo_config)
             uses_repo = True
@@ -405,22 +665,12 @@ def _collect_connection_sources() -> dict[str, str]:
         sources["project"] = "runtime override (kitaru.configure)"
     else:
         try:
-            client = Client()
-            if client.root:
-                from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
-
-                repo_config = (
-                    Path(str(client.root))
-                    / KITARU_REPOSITORY_DIRECTORY_NAME
-                    / "config.yaml"
-                )
-                if repo_config.exists():
-                    sources["project"] = "repo-local config (.kitaru/)"
-                else:
-                    sources["project"] = "global config"
+            repo_root = Client.find_repository(enable_warnings=False)
+            if repo_root and _repo_local_config_path(repo_root).exists():
+                sources["project"] = "repo-local config (.kitaru/)"
             else:
                 sources["project"] = "global config"
-        except Exception:
+        except OSError:
             sources["project"] = "global config"
 
     return sources
@@ -466,6 +716,7 @@ def build_runtime_snapshot(
     include_packages: bool = False,
     package_names: Sequence[str] | None = None,
     include_environment_type: bool = False,
+    include_provenance_details: bool = False,
 ) -> RuntimeSnapshot:
     """Resolve the current Kitaru runtime state from ZenML-backed config."""
     # Collect non-network diagnostics early so they're available even in
@@ -478,6 +729,8 @@ def build_runtime_snapshot(
         include_all=include_packages,
         package_names=package_names,
     )
+    active_stack_provenance: ActiveConfigSelectionProvenance | None = None
+    active_project_provenance: ActiveConfigSelectionProvenance | None = None
 
     try:
         gc = GlobalConfiguration()
@@ -498,12 +751,31 @@ def build_runtime_snapshot(
         )
         return snapshot
 
+    if include_provenance_details:
+        try:
+            (
+                active_stack_provenance,
+                active_project_provenance,
+            ) = _collect_active_context_provenance(gc)
+        except Exception as exc:
+            logger.debug("Could not collect active context provenance", exc_info=True)
+            failure_note = (
+                f"Could not collect active context provenance "
+                f"({type(exc).__name__}): {exc}"
+            )
+            (
+                active_stack_provenance,
+                active_project_provenance,
+            ) = _unknown_provenance_pair(failure_note)
+
     try:
         store_cfg = gc.store_configuration
         uses_local_store = gc.uses_local_store
     except Exception as exc:
         logger.debug("Could not read store configuration", exc_info=True)
         snapshot = _build_snapshot_without_local_store(gc, exc)
+        snapshot.active_stack_provenance = active_stack_provenance
+        snapshot.active_project_provenance = active_project_provenance
         snapshot.zenml_version = zenml_version
         snapshot.python_version = python_ver
         snapshot.system_info = sys_info
@@ -534,6 +806,8 @@ def build_runtime_snapshot(
         system_info=sys_info,
         environment_type=env_type,
         packages=packages,
+        active_stack_provenance=active_stack_provenance,
+        active_project_provenance=active_project_provenance,
     )
 
     if uses_stale_local_server_url(server_url, snapshot.local_server_status):
@@ -565,7 +839,13 @@ def build_runtime_snapshot(
         client = Client()
         store_info = client.zen_store.get_store_info()
         snapshot.active_user = client.active_user.name
-        snapshot.active_stack = client.active_stack_model.name
+        active_stack_model = client.active_stack_model
+        snapshot.active_stack = active_stack_model.name
+        snapshot.active_stack_provenance = _with_resolved_selection(
+            snapshot.active_stack_provenance,
+            resolved_id=_stringify_config_id(getattr(active_stack_model, "id", None)),
+            resolved_name=active_stack_model.name,
+        )
         snapshot.repository_root = str(client.root) if client.root else None
         snapshot.server_version = str(store_info.version)
         snapshot.server_database = str(store_info.database_type)
@@ -573,7 +853,13 @@ def build_runtime_snapshot(
 
         # Active project
         try:
-            snapshot.active_project = client.active_project.name
+            active_project = client.active_project
+            snapshot.active_project = active_project.name
+            snapshot.active_project_provenance = _with_resolved_selection(
+                snapshot.active_project_provenance,
+                resolved_id=_stringify_config_id(getattr(active_project, "id", None)),
+                resolved_name=active_project.name,
+            )
         except Exception:
             logger.debug("Could not read active project", exc_info=True)
 
@@ -591,7 +877,22 @@ def build_runtime_snapshot(
             logger.debug("Could not collect config provenance", exc_info=True)
 
     except Exception as exc:  # pragma: no cover - exercised via CLI behavior
-        snapshot.warning = f"Unable to query the configured store: {exc}"
+        snapshot.warning = combine_warnings(
+            snapshot.warning,
+            f"Unable to query the configured store ({type(exc).__name__}): {exc}",
+        )
+        client_failure_note = (
+            f"Client() failed ({type(exc).__name__}): {exc}. "
+            "Raw IDs above were captured before this failure."
+        )
+        snapshot.active_stack_provenance = _annotate_provenance_with_note(
+            snapshot.active_stack_provenance,
+            client_failure_note,
+        )
+        snapshot.active_project_provenance = _annotate_provenance_with_note(
+            snapshot.active_project_provenance,
+            client_failure_note,
+        )
 
     try:
         preferred_log_store = resolve_log_store()

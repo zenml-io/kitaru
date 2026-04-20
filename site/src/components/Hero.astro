@@ -14,19 +14,19 @@
     <div class="hero-badges" data-reveal>
       <span class="pill-badge">
         <span class="pulse-dot"></span>
-        Open runtime for long-running agents
+        From the makers of ZenML
       </span>
       <span class="pill-badge">
-        Open source &mdash; Apache 2.0
+        Open source · Apache 2.0
       </span>
     </div>
 
     <h1 class="hero-headline" data-reveal data-reveal-delay="1">
-      Keep long-running agents moving across interruptions&nbsp;&mdash;&nbsp;on <span class="hero-accent">any&nbsp;model, any&nbsp;cloud</span>.
+      Everything around the <span class="hero-accent">agent&nbsp;loop</span>.
     </h1>
 
     <p class="hero-subtitle" data-reveal data-reveal-delay="2">
-      The open-source runtime for Python agents. Durable execution, durable memory, replay, wait on humans&nbsp;&mdash;&nbsp;deploy on your infrastructure.
+      Deploy, track, and govern autonomous agents on your cloud. Any framework. Any model.
     </p>
 
     <div class="hero-install" data-reveal data-reveal-delay="3">
@@ -150,30 +150,6 @@
     margin-bottom: 32px;
   }
 
-  .pulse-dot {
-    position: relative;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--color-accent);
-    flex-shrink: 0;
-  }
-
-  .pulse-dot::after {
-    content: '';
-    position: absolute;
-    inset: -3px;
-    border-radius: 50%;
-    background: oklch(0.65 0.16 45 / 0.4);
-    animation: pulse-ring 2s ease-in-out infinite;
-    z-index: -1;
-  }
-
-  @keyframes pulse-ring {
-    0%, 100% { transform: scale(0.6); opacity: 1; }
-    50% { transform: scale(1.8); opacity: 0; }
-  }
-
   .hero-headline {
     font-size: clamp(3rem, 6vw, 5rem);
     font-weight: 700;
@@ -196,11 +172,6 @@
     background-clip: text;
     -webkit-text-fill-color: transparent;
     animation: accent-shimmer 4s ease-in-out infinite;
-  }
-
-  @keyframes accent-shimmer {
-    0%, 100% { background-position: 100% 50%; }
-    50% { background-position: 0% 50%; }
   }
 
   .hero-subtitle {
@@ -356,15 +327,14 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .mesh-blob,
-    .hero-accent,
-    .pulse-dot::after {
+    .mesh-blob {
       animation: none;
     }
 
     .hero-accent {
       -webkit-text-fill-color: var(--color-accent);
       background: none;
+      animation: none;
     }
   }
 </style>

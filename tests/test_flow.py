@@ -18,6 +18,7 @@ from zenml.models import PipelineRunResponse
 
 from kitaru import memory
 from kitaru.analytics import AnalyticsEvent
+from kitaru.checkpoint import checkpoint
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ImageSettings,
@@ -38,6 +39,7 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     FlowHandle,
+    _build_pipeline_options,
     _checkpoint_count_from_run,
     _duration_metadata_from_run,
     _inject_model_registry_env,
@@ -56,12 +58,13 @@ def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
 def _resolved_execution(
     *,
     stack: str | None = None,
-    cache: bool = True,
+    cache: bool | None = None,
     retries: int = 0,
+    image: ImageSettings | None = None,
 ) -> ResolvedExecutionConfig:
     return ResolvedExecutionConfig(
         stack=stack,
-        image=None,
+        image=image,
         cache=cache,
         retries=retries,
     )
@@ -227,7 +230,6 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
     assert isinstance(handle, FlowHandle)
     call_kwargs = base_pipeline.with_options.call_args
     assert call_kwargs == call(
-        enable_cache=True,
         retry=None,
         settings={
             "docker": DockerSettings(
@@ -236,6 +238,189 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
             )
         },
     )
+    # Unset execution-level cache must not be forwarded as enable_cache, because
+    # ZenML's compiler treats any concrete run-level enable_cache as a per-step
+    # override that overwrites @checkpoint(cache=...) settings.
+    assert "enable_cache" not in call_kwargs.kwargs
+
+
+def test_build_pipeline_options_omits_enable_cache_when_unset() -> None:
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(cache=None),
+        transport_image=None,
+    )
+    assert "enable_cache" not in options
+
+
+@pytest.mark.parametrize("cache_value", [True, False])
+def test_build_pipeline_options_forwards_explicit_cache(
+    cache_value: bool,
+) -> None:
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(cache=cache_value),
+        transport_image=None,
+    )
+    assert options["enable_cache"] is cache_value
+
+
+def test_build_pipeline_options_forwards_secret_environment_from() -> None:
+    """Non-empty secret refs must be forwarded via with_options(secrets=...)."""
+    transport_image = ImageSettings(secret_environment_from=["openai-creds"])
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(),
+        transport_image=transport_image,
+    )
+    assert options["secrets"] == ["openai-creds"]
+    # The forwarded list must be a fresh copy so downstream mutation cannot
+    # corrupt the model-owned list (see list(...) wrap in _build_pipeline_options).
+    options["secrets"].append("mutation")
+    assert transport_image.secret_environment_from == ["openai-creds"]
+
+
+@pytest.mark.parametrize(
+    "transport_image",
+    [
+        None,
+        ImageSettings(),
+        ImageSettings(secret_environment_from=None),
+        ImageSettings(secret_environment_from=[]),
+    ],
+)
+def test_build_pipeline_options_omits_secrets_when_unset_or_empty(
+    transport_image: ImageSettings | None,
+) -> None:
+    """``secrets`` must stay absent so ZenML defaults are not overwritten."""
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(),
+        transport_image=transport_image,
+    )
+    assert "secrets" not in options
+
+
+def test_build_pipeline_options_keeps_secret_refs_out_of_docker_environment() -> None:
+    """Secret refs must never enter DockerSettings.environment."""
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(),
+        transport_image=ImageSettings(
+            environment={"PLAIN": "value"},
+            secret_environment_from=["openai-creds"],
+        ),
+    )
+    docker_settings = options["settings"]["docker"]
+    assert docker_settings.environment == {"PLAIN": "value"}
+    assert options["secrets"] == ["openai-creds"]
+
+
+def test_flow_run_forwards_secrets_and_preserves_model_registry_env() -> None:
+    """``.run()`` threads secret refs while keeping model registry in Docker env."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    resolved = _resolved_execution(
+        image=ImageSettings(secret_environment_from=["openai-creds"]),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.resolve_execution_config", return_value=resolved),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+    ):
+        flow(lambda x: x).run(123)
+
+    call_kwargs = base_pipeline.with_options.call_args.kwargs
+    assert call_kwargs["secrets"] == ["openai-creds"]
+
+    docker_settings = call_kwargs["settings"]["docker"]
+    assert docker_settings.environment == {
+        KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload(),
+    }
+    assert "enable_cache" not in call_kwargs
+
+
+def test_flow_run_omits_secrets_when_none_configured() -> None:
+    """Without secret refs configured, ``secrets`` must not be passed at all."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+    ):
+        flow(lambda x: x).run(123)
+
+    call_kwargs = base_pipeline.with_options.call_args.kwargs
+    assert "secrets" not in call_kwargs
+
+
+def test_checkpoint_cache_survives_pipeline_with_options_when_execution_unset() -> None:
+    """Mixed ``@checkpoint(cache=...)`` values must survive ``with_options``.
+
+    A concrete ``enable_cache`` passed at run level would be applied per-step
+    during ZenML compilation and overwrite the decorator-set value; the flow
+    therefore omits ``enable_cache`` entirely when execution cache is unset.
+    """
+
+    @checkpoint(cache=False)
+    def never_cache() -> int:
+        return 1
+
+    @checkpoint(cache=True)
+    def always_cache() -> int:
+        return 2
+
+    @flow
+    def mixed_flow() -> int:
+        return never_cache() + always_cache()
+
+    assert never_cache._step.enable_cache is False
+    assert always_cache._step.enable_cache is True
+
+    options = _build_pipeline_options(
+        resolved_execution=_resolved_execution(cache=None),
+        transport_image=None,
+    )
+    configured = mixed_flow._pipeline.with_options(**options)
+    assert configured.configuration.enable_cache is None
+
+
+@pytest.mark.parametrize("cache_value", [True, False])
+def test_flow_run_forwards_explicit_cache_to_with_options(
+    cache_value: bool,
+) -> None:
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(cache=cache_value),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+    ):
+        flow(lambda x: x).run(123)
+
+    call_kwargs = base_pipeline.with_options.call_args
+    assert call_kwargs.kwargs["enable_cache"] is cache_value
 
 
 def test_flow_registers_pipeline_source_alias_for_dynamic_reload() -> None:
@@ -473,6 +658,54 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
             requirements=["kitaru"],
             environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
         )
+    }
+
+
+def test_replay_forwards_secret_environment_from_to_with_options() -> None:
+    """Replay submission must also thread secret refs through with_options."""
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+    )
+
+    resolved = _resolved_execution(
+        stack="prod",
+        image=ImageSettings(secret_environment_from=["openai-creds"]),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch("kitaru.flow.resolve_execution_config", return_value=resolved),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.active_stack_model.id = "old-stack-id"
+        client_instance.get_pipeline_run.return_value = source_run
+
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write", topic="t")
+
+    call_kwargs = base_pipeline.with_options.call_args.kwargs
+    assert call_kwargs["secrets"] == ["openai-creds"]
+    docker_settings = call_kwargs["settings"]["docker"]
+    assert docker_settings.environment == {
+        KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload(),
     }
 
 

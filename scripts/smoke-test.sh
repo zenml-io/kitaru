@@ -158,8 +158,8 @@ section_header "Install from source"
 if [[ "$SKIP_INSTALL" == true ]]; then
     skip_test "uv sync" "skipped via --skip-install"
 else
-    run_test "uv sync --python $PY --extra local --extra llm --extra mcp" \
-        uv sync --python "$PY" --extra local --extra llm --extra mcp
+    run_test "uv sync --python $PY --extra local --extra llm --extra mcp --extra pydantic-ai" \
+        uv sync --python "$PY" --extra local --extra llm --extra mcp --extra pydantic-ai
 fi
 
 # ---------------------------------------------------------------------------
@@ -258,9 +258,31 @@ else
     run_test "kitaru init" $UV_RUN kitaru init
 fi
 
+# ---------------------------------------------------------------------------
+# Adapter example
+# ---------------------------------------------------------------------------
+section_header "PydanticAI adapter"
+
+run_test "examples/pydantic_ai_agent/pydantic_ai_adapter.py" \
+    $UV_RUN python examples/pydantic_ai_agent/pydantic_ai_adapter.py
+
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run
+
+# ---------------------------------------------------------------------------
+# Secret API
+# ---------------------------------------------------------------------------
+section_header "Secret API"
+
+SMOKE_SECRET_NAME="kitaru-smoke-creds"
+run_test "kitaru secrets set smoke secret" \
+    $UV_RUN kitaru secrets set "$SMOKE_SECRET_NAME" --SMOKE_TOKEN=smoke-value
+run_test "SDK get_secret()" \
+    env SMOKE_SECRET_NAME="$SMOKE_SECRET_NAME" \
+    $UV_RUN python -c 'import os; from kitaru import get_secret; s = get_secret(os.environ["SMOKE_SECRET_NAME"]); assert s.get("SMOKE_TOKEN") == "smoke-value"'
+run_test "kitaru secrets delete smoke secret" \
+    $UV_RUN kitaru secrets delete "$SMOKE_SECRET_NAME"
 
 # ---------------------------------------------------------------------------
 # Core SDK flows

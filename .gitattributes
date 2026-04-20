@@ -1,0 +1,8 @@
+# Lock files are generated and should never be text-merged.
+# On merge conflict, git keeps the local version and flags the file
+# for manual resolution — regenerate with the appropriate tool:
+#   uv.lock           -> `uv lock`
+#   pnpm-lock.yaml    -> `pnpm install` (in the relevant subdir)
+uv.lock              merge=binary
+docs/pnpm-lock.yaml  merge=binary
+site/pnpm-lock.yaml  merge=binary
