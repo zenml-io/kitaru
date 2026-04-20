@@ -4,51 +4,54 @@
 
 <section class="section-pad problem-section">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>WHAT BREAKS FIRST</span>
+    <span class="section-eyebrow" data-reveal>INSIDE VS OUTSIDE</span>
     <h2 class="section-title problem-headline" data-reveal data-reveal-delay="1">
-      Long-running agents fail in boring, expensive ways.
+      The agent loop is solved. The platform around it isn't.
     </h2>
+    <p class="problem-lede" data-reveal data-reveal-delay="2">
+      Agent SDKs solve <em>the inner loop</em>: tool calls, LLM calls, sandboxes. That's the easy part now.<br>
+      Everything in the outer loop (how the agent is deployed, what state it remembers, how it's dispatched, how runs are tracked) gets rebuilt from scratch, company by company.
+    </p>
 
     <div class="problem-grid">
-
-      <div class="why-card" data-reveal="scale-up" data-reveal-delay="2">
-        <div class="card-glow"></div>
-        <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Agents die when your laptop sleeps" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
-        </div>
-        <div class="why-card-content">
-          <h3>Hours of work disappear on routine failures</h3>
-          <p>A laptop sleep, pod eviction, or API timeout can wipe a run that took hours to build. You burn tokens and start over.</p>
-        </div>
-      </div>
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="3">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="Agents can't coordinate" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif" srcset="https://assets.kitaru.ai/content/site/2cc2883d/k-prob-1-sm.avif 664w, https://assets.kitaru.ai/content/site/34447ad2/k-prob-1-800.avif 800w" alt="Durable agent memory" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>They need to wait on humans and other systems</h3>
-          <p>Real agents pause for approvals, webhooks, and other agents. Fire-and-forget loops do not handle that well.</p>
+          <span class="why-card-tag">Memory</span>
+          <h3>State your agents can come back to.</h3>
+          <p>Versioned, scoped memory that persists across executions. Write it from Python, read it from the CLI or MCP. Agents remember conventions, context, and prior work across runs.</p>
         </div>
       </div>
 
       <div class="why-card" data-reveal="scale-up" data-reveal-delay="4">
         <div class="card-glow"></div>
         <div class="why-card-image">
-          <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Results vanish when agents crash" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+          <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="One agent, three runtimes" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <h3>State either vanishes or gets stitched together by hand</h3>
-          <p>Without checkpoints, artifacts, and memory, you lose context when things go wrong and debugging becomes guesswork.</p>
+          <span class="why-card-tag">Orchestration</span>
+          <h3>Dispatch from anywhere.</h3>
+          <p>CLI, Python script, or HTTP. Define the agent once and call it from any entry point. Kitaru's runtime absorbs the differences so the same flow runs the same way.</p>
+        </div>
+      </div>
+
+      <div class="why-card" data-reveal="scale-up" data-reveal-delay="5">
+        <div class="card-glow"></div>
+        <div class="why-card-image">
+          <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Runs you can actually compare" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
+        </div>
+        <div class="why-card-content">
+          <span class="why-card-tag">Tracking</span>
+          <h3>Inspect every run.</h3>
+          <p>Every execution is versioned, every checkpoint persisted, every artifact tracked. Open the dashboard and see exactly what happened. Built in, not bolted on.</p>
         </div>
       </div>
 
     </div>
-
-    <p class="problem-conclusion" data-reveal data-reveal-delay="5">
-      That is why Kitaru focuses on runtime primitives: checkpoints, replay, wait/resume, and durable state on real infrastructure.
-    </p>
   </div>
 </section>
 
@@ -58,7 +61,22 @@
   }
 
   .problem-headline {
-    max-width: 700px;
+    max-width: 740px;
+  }
+
+  .problem-lede {
+    max-width: 740px;
+    margin-top: 20px;
+    font-size: clamp(0.98rem, 1.5vw, 1.1rem);
+    line-height: 1.7;
+    color: var(--color-secondary);
+    font-weight: 300;
+  }
+
+  .problem-lede em {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--color-primary);
   }
 
   .problem-grid {
@@ -68,13 +86,21 @@
     margin-top: 48px;
   }
 
-  .problem-conclusion {
-    margin-top: 40px;
-    font-size: clamp(1rem, 1.8vw, 1.15rem);
-    font-weight: 500;
-    color: var(--color-primary);
-    letter-spacing: -0.01em;
+  .why-card-tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    padding: 3px 9px;
+    background: oklch(0.65 0.16 45 / 0.08);
+    border: 1px solid oklch(0.65 0.16 45 / 0.2);
+    border-radius: 100px;
+    margin-bottom: 12px;
   }
+
 
   @media (max-width: 768px) {
     .problem-grid {

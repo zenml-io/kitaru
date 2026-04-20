@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-04-14T12:31:26.983737Z"
+exclude-newer = "2026-04-14T16:10:32.436765875Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -393,6 +393,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/40/65/e7c6c77d7aaa4c0d7974f2e403e17f0ed2cb0fc135f77d686b916bf1eead/charset_normalizer-3.4.5-cp314-cp314-win_amd64.whl", hash = "sha256:4481e6da1830c8a1cc0b746b47f603b653dadb690bcd851d039ffaefe70533aa", size = 143511, upload-time = "2026-03-06T06:02:26.195Z" },
     { url = "https://files.pythonhosted.org/packages/ba/91/52b0841c71f152f563b8e072896c14e3d83b195c188b338d3cc2e582d1d4/charset_normalizer-3.4.5-cp314-cp314-win_arm64.whl", hash = "sha256:97ab7787092eb9b50fb47fa04f24c75b768a606af1bcba1957f07f128a7219e4", size = 133775, upload-time = "2026-03-06T06:02:27.473Z" },
     { url = "https://files.pythonhosted.org/packages/c5/60/3a621758945513adfd4db86827a5bafcc615f913dbd0b4c2ed64a65731be/charset_normalizer-3.4.5-py3-none-any.whl", hash = "sha256:9db5e3fcdcee89a78c04dffb3fe33c79f77bd741a624946db2591c81b2fc85b0", size = 55455, upload-time = "2026-03-06T06:03:17.827Z" },
+]
+
+[[package]]
+name = "claude-agent-sdk"
+version = "0.1.59"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "mcp" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a5/55/438f5ba33f90cc9cbf3b40f74fbedf6792332e8fe34838f4189e418a4090/claude_agent_sdk-0.1.59.tar.gz", hash = "sha256:061af12a783a3456abfd0def3602a01249b2eee1be783fb3e242392c0ebbd2e2", size = 122887, upload-time = "2026-04-13T22:07:09.576Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/6d/1fdfbcce76d7b81e89b29ad11864a48779a880f828c2541df620686693dd/claude_agent_sdk-0.1.59-py3-none-macosx_11_0_arm64.whl", hash = "sha256:b8734b5d630b75ad63b29a802fff40ba087adf463c1004dae65f7a5a912ab13a", size = 59629367, upload-time = "2026-04-13T22:07:14.602Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/c6/aa9c5b310851b74db82e0da73a836335af4ef6767982d93ac04df52ef0cb/claude_agent_sdk-0.1.59-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:b333c0685db3f6e035acd2c6efa6ae4c4d8b077fef99de829ddb2a37ca1d9183", size = 61444059, upload-time = "2026-04-13T22:07:20.677Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/47/4ba5eb8846fcb9ba544d777ff752ff20c10a508931199f9def3e724dcc8b/claude_agent_sdk-0.1.59-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:8ebe1f7e6dc18c5fae6483977ff16fcabe91cbb955f9c423c05a11f013db3957", size = 72938796, upload-time = "2026-04-13T22:07:27.147Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/df/366d8ffb3399426769a08b68bdb4bf4ccb0c8e742418a27c3d369cfab07a/claude_agent_sdk-0.1.59-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:cac6c42f3c554981597a3d023bc87fe5b4bc14da987d9ef30cc2596005c3bc12", size = 73057901, upload-time = "2026-04-13T22:07:35.372Z" },
+    { url = "https://files.pythonhosted.org/packages/27/5a/f7506588831eb664c45241745d2cd21bd095b0f432ef2fa1062b824c538a/claude_agent_sdk-0.1.59-py3-none-win_amd64.whl", hash = "sha256:92d8da9ea5f0b4a7492d074d612d54b5e6ce6800312992aa48b2bcaa6bf7bf5e", size = 75161150, upload-time = "2026-04-13T22:07:43.695Z" },
 ]
 
 [[package]]
@@ -1091,7 +1108,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
@@ -1103,6 +1120,9 @@ dependencies = [
 [package.optional-dependencies]
 anthropic = [
     { name = "anthropic" },
+]
+claude-agent-sdk = [
+    { name = "claude-agent-sdk" },
 ]
 llm = [
     { name = "anthropic" },
@@ -1125,6 +1145,7 @@ pydantic-ai = [
 [package.dev-dependencies]
 dev = [
     { name = "anthropic" },
+    { name = "claude-agent-sdk" },
     { name = "griffe" },
     { name = "griffe-typingdoc" },
     { name = "openai" },
@@ -1142,6 +1163,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40.0,<1" },
+    { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.1.58,<0.2" },
     { name = "cyclopts", specifier = ">=3.0" },
     { name = "kitaru", extras = ["anthropic"], marker = "extra == 'llm'" },
     { name = "kitaru", extras = ["openai"], marker = "extra == 'llm'" },
@@ -1154,11 +1176,12 @@ requires-dist = [
     { name = "zenml", extras = ["local"], specifier = ">=0.94.2" },
     { name = "zenml", extras = ["server"], marker = "extra == 'local'", specifier = ">=0.94.2" },
 ]
-provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "mcp"]
+provides-extras = ["openai", "anthropic", "llm", "local", "pydantic-ai", "claude-agent-sdk", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "anthropic", specifier = ">=0.40.0,<1" },
+    { name = "claude-agent-sdk", specifier = ">=0.1.58,<0.2" },
     { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
     { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
     { name = "openai", specifier = ">=1.0.0,<2" },

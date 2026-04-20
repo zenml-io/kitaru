@@ -1,0 +1,82 @@
+{
+  "id": "soc2_controls",
+  "kind": "standard",
+  "title": "SOC 2 Type II Control Requirements",
+  "domain": "it_security",
+  "version": "2025.1",
+  "effective_date": "2025-01-01",
+  "description": "Synthetic SOC 2-style requirements for reviewing Acme Corp's IT security policy.",
+  "metadata": {
+    "owner": "Security and Compliance",
+    "applies_to_documents": [
+      "it_security_policy",
+      "disaster_recovery_plan"
+    ],
+    "trust_services_categories": [
+      "Security",
+      "Availability",
+      "Confidentiality"
+    ]
+  },
+  "requirements": [
+    {
+      "id": "SOC2-RET-001",
+      "title": "Data retention schedule",
+      "severity": "high",
+      "keywords": [
+        "data retention",
+        "retention schedule",
+        "disposal",
+        "deletion"
+      ],
+      "requirement": "The organization must maintain a documented data retention schedule that defines retention periods, legal hold handling, secure deletion procedures, and accountable owners by data category.",
+      "expected_evidence": [
+        "Retention periods by data type",
+        "Legal hold process",
+        "Secure deletion or disposal process",
+        "Named control owner"
+      ]
+    },
+    {
+      "id": "SOC2-IR-002",
+      "title": "Current incident response procedures",
+      "severity": "high",
+      "keywords": [
+        "incident response",
+        "playbook",
+        "outdated",
+        "security incident"
+      ],
+      "requirement": "Incident response procedures must reference current communication channels, current severity levels, current roles, and a playbook reviewed within the last 12 months.",
+      "expected_evidence": [
+        "Incident playbook reviewed within 12 months",
+        "Current on-call and escalation path",
+        "Severity classification",
+        "Post-incident review process"
+      ]
+    },
+    {
+      "id": "SOC2-AC-001",
+      "title": "Access control review",
+      "severity": "medium",
+      "keywords": [
+        "access review",
+        "least privilege",
+        "MFA"
+      ],
+      "requirement": "Access to production systems must require MFA, least-privilege roles, and periodic access review.",
+      "expected_evidence": [
+        "MFA requirement",
+        "Quarterly access review",
+        "Least-privilege language"
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "overview",
+      "title": "SOC 2 review overview",
+      "content": "Baseline SOC 2-style expectations covering data retention scheduling, incident response procedure currency, and access control review."
+    }
+  ]
+}
