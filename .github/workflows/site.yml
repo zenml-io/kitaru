@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - site/**
       - docs/**
@@ -14,9 +15,7 @@ on:
       - wrangler.toml
   pull_request_target:
     types: [closed]
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {}
 concurrency:
   group: site-${{ github.event_name == 'pull_request' && github.event.pull_request.number
     || github.ref }}
@@ -25,6 +24,9 @@ jobs:
   build-deploy:
     if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       HAS_CF_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
@@ -34,6 +36,8 @@ jobs:
 
       # --- Generate docs content (Python-only generators) ---
       - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
+        with:
+          enable-cache: false
       - run: uv sync --frozen
       - run: uv run python scripts/generate_cli_docs.py
       - run: uv run python scripts/generate_changelog_docs.py
@@ -42,13 +46,10 @@ jobs:
       - uses: pnpm/action-setup@08c4be7e2e672a47d11bd04269e27e5f3e8529cb  # v6.0.0
         with:
           version: 10.33.0
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
           node-version-file: docs/.node-version
-          cache: pnpm
-          cache-dependency-path: |
-            docs/pnpm-lock.yaml
-            site/pnpm-lock.yaml
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         working-directory: docs
 
@@ -82,7 +83,7 @@ jobs:
       - name: Deploy production
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
           == 'workflow_dispatch'
-        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3.14.1
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -95,7 +96,7 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
           == github.repository && env.HAS_CF_SECRETS == 'true'
         id: preview
-        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3.14.1
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -105,7 +106,7 @@ jobs:
       # --- Sticky PR comment with preview URL ---
       - name: Comment preview URL
         if: steps.preview.outcome == 'success'
-        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0  # v3
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0  # v3.0.4
         with:
           header: site-preview
           message: |
@@ -116,14 +117,19 @@ jobs:
             | **Branch** | `${{ github.head_ref }}` |
             | **Commit** | `${{ github.sha }}` |
 
-  # --- Clean up preview Worker when PR closes ---
+  # --- Clean up preview Worker when same-repo PR closes ---
   cleanup-preview:
-    if: github.event_name == 'pull_request_target'
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name
+      == github.repository
     runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      HAS_CF_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
       - name: Delete preview Worker
+        if: env.HAS_CF_SECRETS == 'true'
         continue-on-error: true
-        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3.14.1
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

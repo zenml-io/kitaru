@@ -7,6 +7,8 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+permissions:
+  contents: read
 env:
   ZENML_ANALYTICS_OPT_IN: false
   ZENML_LOGGING_VERBOSITY: INFO
@@ -31,7 +33,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
-      - uses: crate-ci/typos@5745f2a8dd91cd7b684680e2e10a2b388ba6e5cf  # v1
+      - uses: crate-ci/typos@cf5f1c29a8ac336af8568821ec41919923b05a83  # v1.45.1
   typecheck:
     runs-on: ubuntu-latest
     steps:

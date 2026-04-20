@@ -20,44 +20,55 @@ on:
         default: false
   push:
     tags: [v*]
-permissions:
-  contents: write
-  id-token: write
+permissions: {}
 concurrency:
   group: release
   cancel-in-progress: false
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' && '' || 'pypi' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' && 'dry-run' || 'pypi' }}
+    permissions:
+      contents: write
+      id-token: write
     steps:
       # --- Determine version and trigger mode ---
-      - name: Set version from dispatch
-        if: github.event_name == 'workflow_dispatch'
-        run: echo "VERSION=${{ github.event.inputs.version }}" >> "$GITHUB_ENV"
-      - name: Set version from tag
-        if: github.event_name == 'push'
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-
-      # --- Validate version ---
-      - name: Validate semver format
+      - name: Determine and validate version
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "::error::Invalid version format: $VERSION (expected semver like 1.2.3 or 1.2.3-rc.1)"
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION_CANDIDATE="$DISPATCH_VERSION"
+          else
+            VERSION_CANDIDATE="${GITHUB_REF_NAME#v}"
+          fi
+          if ! printf '%s' "$VERSION_CANDIDATE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid version format: $VERSION_CANDIDATE (expected semver like 1.2.3 or 1.2.3-rc.1)"
             exit 1
           fi
+          printf 'VERSION=%s\n' "$VERSION_CANDIDATE" >> "$GITHUB_ENV"
       - name: Set Kitaru UI tag
-        run: |
-          INPUT_TAG="${{ github.event.inputs.kitaru-ui-tag }}"
-          if [ -n "$INPUT_TAG" ]; then
-            echo "KITARU_UI_TAG=$INPUT_TAG" >> "$GITHUB_ENV"
-          else
-            LATEST_TAG=$(gh release view --repo zenml-io/kitaru-ui --json tagName -q '.tagName')
-            echo "Using latest Kitaru UI release: $LATEST_TAG"
-            echo "KITARU_UI_TAG=$LATEST_TAG" >> "$GITHUB_ENV"
-          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.kitaru-ui-tag }}
+        run: |
+          set -euo pipefail
+          validate_tag() {
+            local tag="$1"
+            if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+              echo "::error::Invalid Kitaru UI tag: $tag"
+              exit 1
+            fi
+          }
+          if [ -n "$INPUT_TAG" ]; then
+            KITARU_UI_TAG_VALUE="$INPUT_TAG"
+          else
+            KITARU_UI_TAG_VALUE=$(gh release view --repo zenml-io/kitaru-ui --json tagName -q '.tagName')
+            echo "Using latest Kitaru UI release: $KITARU_UI_TAG_VALUE"
+          fi
+          validate_tag "$KITARU_UI_TAG_VALUE"
+          printf 'KITARU_UI_TAG=%s\n' "$KITARU_UI_TAG_VALUE" >> "$GITHUB_ENV"
       # --- Determine checkout ref (dispatch only) ---
       # Normally checks out `develop`. If v$VERSION already exists on origin,
       # this is a partial-recovery dispatch and we must check out that tag so
@@ -74,12 +85,12 @@ jobs:
         run: |
           if gh api "repos/${{ github.repository }}/git/ref/tags/v$VERSION" --silent 2>/dev/null; then
             echo "Tag v$VERSION exists — recovery mode, checking out tag"
-            echo "ref=refs/tags/v$VERSION" >> "$GITHUB_OUTPUT"
-            echo "TAG_EXISTS_AT_START=true" >> "$GITHUB_ENV"
+            printf 'ref=refs/tags/v%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+            printf 'TAG_EXISTS_AT_START=true\n' >> "$GITHUB_ENV"
           else
             echo "No existing tag — normal release flow, checking out develop"
-            echo "ref=develop" >> "$GITHUB_OUTPUT"
-            echo "TAG_EXISTS_AT_START=false" >> "$GITHUB_ENV"
+            printf 'ref=develop\n' >> "$GITHUB_OUTPUT"
+            printf 'TAG_EXISTS_AT_START=false\n' >> "$GITHUB_ENV"
           fi
 
       # --- Checkout ---
@@ -90,11 +101,13 @@ jobs:
           ref: ${{ steps.ref.outputs.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
       - name: Checkout tagged commit (tag push)
         if: github.event_name == 'push'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # --- Configure git ---
       - name: Configure git identity
@@ -107,6 +120,7 @@ jobs:
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
         with:
           python-version: '3.12'
+          enable-cache: false
 
       # --- Bump version (dispatch only, skip in recovery mode) ---
       # In recovery mode (tag already exists) we checked out the tag itself,
@@ -178,7 +192,7 @@ jobs:
             echo "::error::The release commit is incomplete — add the changelog entry before retrying."
             exit 1
           fi
-          echo "RELEASE_SHA=$RELEASE_SHA" >> "$GITHUB_ENV"
+          printf 'RELEASE_SHA=%s\n' "$RELEASE_SHA" >> "$GITHUB_ENV"
 
       # --- Verify version matches (tag push only) ---
       - name: Verify tag matches pyproject.toml version
@@ -194,7 +208,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra mcp
       - name: Check typos
-        uses: crate-ci/typos@5745f2a8dd91cd7b684680e2e10a2b388ba6e5cf  # v1
+        uses: crate-ci/typos@cf5f1c29a8ac336af8568821ec41919923b05a83  # v1.45.1
       - name: Lint
         run: |
           uv run ruff check .
@@ -242,12 +256,16 @@ jobs:
       # to the same commit (split-brain release risk).
       - name: Create and push tag
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          AUTHENTICATED_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if [ "$TAG_EXISTS_AT_START" = "true" ]; then
             echo "Tag v$VERSION already exists at RELEASE_SHA $RELEASE_SHA — skipping"
           else
             git tag "v$VERSION" "$RELEASE_SHA"
-            git push origin "v$VERSION"
+            git push "$AUTHENTICATED_REMOTE" "v$VERSION"
           fi
 
       # --- Publish (skip on dry-run) ---
@@ -274,7 +292,11 @@ jobs:
       # --- Push release commit to develop (dispatch only, skip on dry-run) ---
       - name: Push release commit to develop
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          AUTHENTICATED_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           REMOTE_DEVELOP=$(git ls-remote origin refs/heads/develop | awk '{print $1}')
           if [ "$REMOTE_DEVELOP" = "$RELEASE_SHA" ]; then
             echo "origin/develop is at RELEASE_SHA $RELEASE_SHA — skipping push"
@@ -289,7 +311,7 @@ jobs:
                 echo "origin/develop ($REMOTE_DEVELOP) already contains RELEASE_SHA $RELEASE_SHA — skipping push"
                 ;;
               1)
-                git push origin "$RELEASE_SHA:refs/heads/develop"
+                git push "$AUTHENTICATED_REMOTE" "$RELEASE_SHA:refs/heads/develop"
                 ;;
               *)
                 echo "::error::Ancestry check failed (exit $ancestor_status) for origin/develop ($REMOTE_DEVELOP) vs RELEASE_SHA $RELEASE_SHA"
@@ -304,10 +326,14 @@ jobs:
       # than silently overwriting an archival branch or rewinding main.
       - name: Create release branch
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          AUTHENTICATED_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           REMOTE_SHA=$(git ls-remote --heads origin "refs/heads/release/$VERSION" | awk '{print $1}')
           if [ -z "$REMOTE_SHA" ]; then
-            git push origin "$RELEASE_SHA:refs/heads/release/$VERSION"
+            git push "$AUTHENTICATED_REMOTE" "$RELEASE_SHA:refs/heads/release/$VERSION"
             echo "Created release/$VERSION at $RELEASE_SHA"
           elif [ "$REMOTE_SHA" = "$RELEASE_SHA" ]; then
             echo "release/$VERSION is already at RELEASE_SHA $RELEASE_SHA — skipping"
@@ -318,7 +344,11 @@ jobs:
           fi
       - name: Update main to release
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          AUTHENTICATED_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           REMOTE_MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')
           if [ "$REMOTE_MAIN" = "$RELEASE_SHA" ]; then
             echo "origin/main is already at RELEASE_SHA $RELEASE_SHA — skipping"
@@ -329,7 +359,7 @@ jobs:
             set -e
             case "$ancestor_status" in
               0)
-                git push --force origin "$RELEASE_SHA:refs/heads/main"
+                git push --force-with-lease=refs/heads/main:"$REMOTE_MAIN" "$AUTHENTICATED_REMOTE" "$RELEASE_SHA:refs/heads/main"
                 echo "Fast-forwarded main to $RELEASE_SHA"
                 ;;
               1)
@@ -442,7 +472,7 @@ jobs:
       - name: Login to Amazon ECR Public (Helm)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78  # v2
+        uses: aws-actions/amazon-ecr-login@f2e9fc6c2b355c1890b65e6f6f0e2ac3e6e22f78  # v2.1.2
         with:
           mask-password: 'true'
           registry-type: public

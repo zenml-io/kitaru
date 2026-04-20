@@ -54,6 +54,11 @@ yaml-check:
 actions-lint:
     actionlint
 
+# Audit GitHub Actions workflows with zizmor. For richer online checks, run:
+#   GH_TOKEN=$(gh auth token) just zizmor
+zizmor:
+    uvx zizmor --config=.github/zizmor.yml .github/workflows/ .github/dependabot.yml
+
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
     lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
