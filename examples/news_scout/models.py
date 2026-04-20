@@ -25,7 +25,7 @@ class Article(BaseModel):
     title: str
     url: str
     summary: str = ""
-    source: str
+    source: Source
 
     @computed_field
     @property

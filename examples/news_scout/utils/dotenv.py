@@ -7,9 +7,11 @@ from pathlib import Path
 def load_dotenv() -> None:
     """Load KEY=VALUE pairs from .env alongside the caller's file."""
     dotenv_path = Path(__file__).resolve().parent.parent / ".env"
-    if not dotenv_path.exists():
+    try:
+        text = dotenv_path.read_text()
+    except FileNotFoundError:
         return
-    for raw_line in dotenv_path.read_text().splitlines():
+    for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
