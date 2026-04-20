@@ -4,8 +4,9 @@ interface Props {
   description: string;
   competitor: string;
   competitorLogo?: string;
+  competitorTagline?: string;
 }
-const { title, description, competitor, competitorLogo } = Astro.props;
+const { title, description, competitor, competitorLogo, competitorTagline } = Astro.props;
 ---
 
 <header class="chero">
@@ -29,6 +30,8 @@ const { title, description, competitor, competitorLogo } = Astro.props;
         <span class="chero-name">{competitor}</span>
       </span>
     </div>
+
+    {competitorTagline && <p class="chero-tagline">{competitorTagline}</p>}
 
     <h1 class="chero-title">{title}</h1>
     <p class="chero-desc">{description}</p>
@@ -103,6 +106,14 @@ const { title, description, competitor, competitorLogo } = Astro.props;
     font-style: italic;
     font-size: 20px;
     color: var(--color-muted);
+  }
+  .chero-tagline {
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--color-muted);
+    max-width: 560px;
+    margin: 0 auto 24px;
+    font-style: italic;
   }
   .chero-title {
     font-size: clamp(32px, 4.4vw, 48px);

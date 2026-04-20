@@ -6,9 +6,9 @@ interface Row {
 }
 interface Props {
   rows: Row[];
-  competitorName?: string;
+  competitorLabel?: string;
 }
-const { rows, competitorName = 'Alternative' } = Astro.props;
+const { rows, competitorLabel = 'Alternative' } = Astro.props;
 ---
 
 <div class="ctable-wrap" data-reveal>
@@ -17,7 +17,7 @@ const { rows, competitorName = 'Alternative' } = Astro.props;
       <tr>
         <th class="col-feature">Feature</th>
         <th class="col-kitaru">Kitaru</th>
-        <th class="col-competitor">{competitorName}</th>
+        <th class="col-competitor">{competitorLabel}</th>
       </tr>
     </thead>
     <tbody>

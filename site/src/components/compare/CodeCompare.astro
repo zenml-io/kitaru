@@ -1,5 +1,6 @@
 ---
 import { Code } from 'astro:components';
+import type { ThemeRegistrationRaw } from 'shiki';
 import kitaruLight from '../../styles/kitaru-light.json';
 
 interface Props {
@@ -26,7 +27,7 @@ const {
         <span class="codecompare-label">{kitaruLabel}</span>
       </header>
       <div class="codecompare-code">
-        <Code code={kitaruCode} lang={lang} theme={kitaruLight as any} />
+        <Code code={kitaruCode} lang={lang} theme={kitaruLight as ThemeRegistrationRaw} />
       </div>
     </article>
     <article class="codecompare-pane">
@@ -35,7 +36,7 @@ const {
         <span class="codecompare-label">{competitorLabel}</span>
       </header>
       <div class="codecompare-code">
-        <Code code={competitorCode} lang={lang} theme={kitaruLight as any} />
+        <Code code={competitorCode} lang={lang} theme={kitaruLight as ThemeRegistrationRaw} />
       </div>
     </article>
   </div>

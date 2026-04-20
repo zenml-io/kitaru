@@ -25,6 +25,7 @@ const { Content } = await render(entry);
       description={entry.data.description}
       competitor={entry.data.competitor}
       competitorLogo={entry.data.competitorLogo}
+      competitorTagline={entry.data.competitorTagline}
     />
 
     <article class="compare-body">
@@ -35,7 +36,7 @@ const { Content } = await render(entry);
 
     <section class="compare-footer-cta">
       <div class="compare-footer-inner">
-        <h2>Put the runtime underneath your Agent SDK</h2>
+        <h2>{entry.data.ctaHeading}</h2>
         <p>No cost, no commitment. Install Kitaru and run your first durable flow in an afternoon.</p>
         <div class="compare-footer-ctas">
           <a href="/get-started" class="btn-primary">Get started</a>
@@ -91,8 +92,8 @@ const { Content } = await render(entry);
     font-size: 0.92em;
     color: var(--color-primary);
   }
-  /* Re-apply subtle background only to code inside <pre> blocks (fenced code),
-     not to inline `code` spans in prose. */
+  /* Clear any inherited background on code inside fenced blocks so Shiki's
+     theme shows through without a doubled layer. */
   .compare-body-inner :global(pre code) {
     background: transparent;
   }

@@ -6,8 +6,9 @@ interface Side {
 interface Props {
   kitaru: Side;
   competitor: Side;
+  competitorLabel?: string;
 }
-const { kitaru, competitor } = Astro.props;
+const { kitaru, competitor, competitorLabel = 'Alternative' } = Astro.props;
 ---
 
 <section class="when" data-reveal>
@@ -29,7 +30,7 @@ const { kitaru, competitor } = Astro.props;
 
     <article class="when-card when-card--competitor">
       <div class="when-card-head">
-        <span class="when-tag when-tag--competitor">Alternative</span>
+        <span class="when-tag when-tag--competitor">{competitorLabel}</span>
         <h3>{competitor.title}</h3>
       </div>
       <ul>
