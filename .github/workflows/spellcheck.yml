@@ -11,6 +11,8 @@ concurrency:
   # New commit on branch cancels running workflows of the same branch
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+permissions:
+  contents: read
 jobs:
   spellcheck:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
@@ -21,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Spelling checker
-        uses: crate-ci/typos@2361394247a38536a5f2376a05181ca001dd9e26  # v1.17.0
+        uses: crate-ci/typos@cf5f1c29a8ac336af8568821ec41919923b05a83  # v1.45.1
         with:
           files: .
           config: ./.typos.toml
