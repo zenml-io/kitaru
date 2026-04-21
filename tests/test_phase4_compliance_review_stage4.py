@@ -212,18 +212,15 @@ def test_stage4_checkpoint_resumes_existing_claude_session(
 
 
 @pytest.mark.parametrize(
-    ("repository_marker", "has_too_deep_marker"),
-    [
-        ("without-kitaru", False),
-        ("too-deep-kitaru", True),
-    ],
+    "repository_marker",
+    ["without-kitaru", "too-deep-kitaru"],
 )
 def test_stage4_flow_loads_claude_result_from_checkout_with_unstable_repository_root(
+    request,
     monkeypatch,
     tmp_path,
     primed_zenml,
     repository_marker: str,
-    has_too_deep_marker: bool,
 ) -> None:
     """Stage 4 should load Claude results when source root discovery is unstable."""
     del primed_zenml
@@ -242,12 +239,10 @@ def test_stage4_flow_loads_claude_result_from_checkout_with_unstable_repository_
         copied_example_dir,
         ignore=shutil.ignore_patterns("__pycache__"),
     )
-    too_deep_kitaru_dir = copied_example_dir / ".kitaru"
-    if has_too_deep_marker:
+    if repository_marker == "too-deep-kitaru":
+        too_deep_kitaru_dir = copied_example_dir / ".kitaru"
         too_deep_kitaru_dir.mkdir()
         (too_deep_kitaru_dir / "config.yaml").write_text("{}\n")
-    else:
-        assert not too_deep_kitaru_dir.exists()
     assert not (copied_checkout / ".kitaru").exists()
 
     configure_fake_claude_home(monkeypatch, tmp_path)
@@ -255,6 +250,14 @@ def test_stage4_flow_loads_claude_result_from_checkout_with_unstable_repository_
     clear_compliance_review_modules()
     sys.modules.pop("examples", None)
     monkeypatch.syspath_prepend(str(copied_checkout))
+
+    # Unbind the tmp-path-imported package on teardown so subsequent tests
+    # re-import compliance_review from the real repo path.
+    def _restore_compliance_modules() -> None:
+        clear_compliance_review_modules()
+        sys.modules.pop("examples", None)
+
+    request.addfinalizer(_restore_compliance_modules)
 
     stage4_module = importlib.import_module(
         "examples.compliance_review.stage_4_conversational"

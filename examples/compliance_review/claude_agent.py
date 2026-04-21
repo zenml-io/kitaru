@@ -35,8 +35,8 @@ from pydantic import BaseModel, Field
 from kitaru import get_secret
 from kitaru.config import classify_stack_deployment_type
 
-# Support both package imports and `cd examples/compliance_review` while keeping
-# the retrieval tools on one canonical module identity.
+# Keep `retrieval_tools` on a single module identity so
+# `isinstance`/`@tool` registration is stable regardless of cwd.
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
