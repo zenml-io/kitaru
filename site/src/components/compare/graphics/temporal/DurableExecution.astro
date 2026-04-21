@@ -1,9 +1,4 @@
 ---
-/**
- * Durable execution without a service tier.
- * Left: Temporal's cluster of services you run.
- * Right: Kitaru's flow → cloud storage you already own.
- */
 ---
 
 <figure class="fig">
@@ -12,7 +7,6 @@
     <div class="panel-sub">Temporal Service + Workers</div>
     <div class="cluster">
       <svg class="mesh" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true">
-        {/* Services down to collector bus, then bus into DB */}
         <path d="M16.67 40 L16.67 58 L83.33 58 L83.33 40" />
         <path d="M50 40 L50 58" />
         <path d="M50 58 L50 72" />
@@ -60,7 +54,6 @@
     gap: 16px;
     margin: 0;
     padding: 0;
-    font-family: var(--font-sans, system-ui);
   }
   .panel {
     border: 1px solid var(--color-border);
@@ -144,11 +137,6 @@
     position: relative;
     z-index: 1;
   }
-  .node--small {
-    font-weight: 500;
-    color: var(--color-secondary);
-    font-size: 10px;
-  }
   .stack {
     display: flex;
     flex-direction: column;
@@ -166,7 +154,7 @@
     background: var(--color-surface);
   }
   .card .mono {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
   }
   .card .accent { color: var(--color-accent); font-weight: 600; }
@@ -200,7 +188,7 @@
     flex-shrink: 0;
   }
   .bucket .mono {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     color: var(--color-primary);
     font-weight: 600;

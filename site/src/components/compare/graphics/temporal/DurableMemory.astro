@@ -1,8 +1,4 @@
 ---
-/**
- * Versioned durable memory.
- * Central kitaru.memory store with versioned entries, shared across 3 runs.
- */
 ---
 
 <figure class="fig">
@@ -67,12 +63,11 @@
     gap: 14px;
     margin: 0;
     padding: 0;
-    font-family: var(--font-sans, system-ui);
   }
 
   .tag {
     display: inline-block;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 700;
     padding: 3px 10px;
@@ -113,7 +108,7 @@
   }
   .entries li:last-child { border-bottom: none; }
   .ver {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 700;
     color: var(--color-surface);
@@ -127,12 +122,12 @@
     color: var(--color-muted);
   }
   .key {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     color: var(--color-primary);
     font-weight: 600;
   }
   .val {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     color: var(--color-secondary);
     padding: 2px 8px;
     background: var(--color-surface-warm);
@@ -179,7 +174,7 @@
   }
   .run .exec {
     display: block;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 700;
     color: var(--color-primary);

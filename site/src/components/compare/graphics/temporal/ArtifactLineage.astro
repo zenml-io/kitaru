@@ -1,9 +1,4 @@
 ---
-/**
- * Artifact lineage across runs.
- * Execution tree with checkpoints, attached artifacts, and cost.
- * Two runs diffed side-by-side.
- */
 ---
 
 <figure class="fig">
@@ -96,7 +91,6 @@
     align-items: start;
     margin: 0;
     padding: 0;
-    font-family: var(--font-sans, system-ui);
   }
 
   .tree {
@@ -116,7 +110,7 @@
     border-bottom: 1px solid var(--color-border-light);
   }
   .exec {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 700;
     color: var(--color-accent);
@@ -140,13 +134,13 @@
     margin-bottom: 6px;
   }
   .cp {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 11.5px;
     color: var(--color-primary);
     font-weight: 600;
   }
   .cost {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--color-muted);
     padding: 2px 6px;
@@ -161,19 +155,13 @@
   }
   .artifact {
     display: inline-block;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 10.5px;
     padding: 3px 8px;
     background: var(--color-accent-light);
     color: var(--color-accent-deep);
     border-radius: 4px;
   }
-  .artifact--regress {
-    background: var(--color-cost-up-bg);
-    color: var(--color-cost-up);
-    font-weight: 600;
-  }
-
   .conn {
     display: block;
     width: 6px;
@@ -193,7 +181,7 @@
     padding-top: 60px;
   }
   .diff-label {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 9.5px;
     font-weight: 700;
     letter-spacing: 0.02em;

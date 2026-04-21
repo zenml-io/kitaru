@@ -1,9 +1,4 @@
 ---
-/**
- * LLM calls as first-class checkpoints.
- * A run record card showing captured fields (prompt, response, tokens, cost)
- * contrasted with Temporal's opaque Activity.
- */
 ---
 
 <figure class="fig">
@@ -63,7 +58,6 @@
     gap: 14px;
     margin: 0;
     padding: 0;
-    font-family: var(--font-sans, system-ui);
   }
   .tag {
     display: inline-block;
@@ -99,7 +93,7 @@
     gap: 12px;
   }
   .opaque code {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     color: var(--color-secondary);
   }
@@ -123,12 +117,12 @@
     margin-bottom: 12px;
   }
   .exec {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--color-muted);
   }
   .mono-call {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12.5px;
     color: var(--color-primary);
     padding: 10px 12px;
@@ -159,7 +153,7 @@
     border-radius: 4px;
   }
   .fields .mono {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
   }
 
   .row {
@@ -180,7 +174,7 @@
   }
   .chip-k { color: var(--color-muted); font-weight: 600; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.05em; }
   .chip-v {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     color: var(--color-primary);
     font-weight: 600;
   }
