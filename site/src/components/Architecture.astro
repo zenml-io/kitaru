@@ -6,12 +6,12 @@
   <div class="section-inner">
     <!-- Eyebrow + title above the grid -->
     <div class="arch-header" data-reveal>
-      <span class="section-eyebrow">THE PLATFORM LAYER</span>
+      <span class="section-eyebrow">EXECUTION ARCHITECTURE</span>
       <h2 id="arch-heading" class="section-title arch-title">
-        Your framework. Your model. Your sandbox.<br><em class="arch-italic">Shipped, governed, observable.</em>
+        Control flow isn&rsquo;t code execution.<br><em class="arch-italic">Kitaru separates the two.</em>
       </h2>
       <p class="arch-desc">
-        Agent SDKs give you the loop. Sandboxes give you compute. Kitaru adds the layer in between (checkpoints, artifacts, replay, and memory) so your agent can run in production without rewriting it.
+        The Kitaru runtime owns the durable run &mdash; checkpoint order, state, retry, replay, resume, and wait. Execution targets do the work: inline in the runner, in an isolated job, inside a sandbox, or through an external tool. Checkpoints are the contract between them.
       </p>
     </div>
 
@@ -49,26 +49,39 @@
           </div>
 
           <div class="arch-layer arch-layer-engine">
-            <div class="arch-layer-label">Kitaru Engine</div>
+            <div class="arch-layer-label">Kitaru Runtime</div>
             <div class="arch-layer-pills">
-              <span class="arch-pill">Checkpointer</span>
-              <span class="arch-pill">Artifact Store</span>
-              <span class="arch-pill">Deployer</span>
+              <span class="arch-pill">Checkpoint order</span>
               <span class="arch-pill">Replay</span>
-              <span class="arch-pill">Governance</span>
+              <span class="arch-pill">Resume</span>
+              <span class="arch-pill">Wait</span>
+              <span class="arch-pill">Artifacts &amp; state</span>
+              <span class="arch-pill">Versions</span>
             </div>
-            <div class="arch-layer-note">Deploy, track, govern</div>
+            <div class="arch-layer-note">Durable control flow</div>
+          </div>
+
+          <div class="arch-layer arch-layer-targets">
+            <div class="arch-layer-label">Execution Targets</div>
+            <div class="arch-layer-pills">
+              <span class="arch-pill">Inline</span>
+              <span class="arch-pill">Isolated job</span>
+              <span class="arch-pill">Sandbox</span>
+              <span class="arch-pill">External / MCP tool</span>
+              <span class="arch-pill">Custom backend</span>
+            </div>
+            <div class="arch-layer-note">Where code runs</div>
           </div>
 
           <div class="arch-layer arch-layer-infra">
-            <div class="arch-layer-label">Infrastructure</div>
+            <div class="arch-layer-label">Your Infrastructure</div>
             <div class="arch-layer-pills">
               <span class="arch-pill">Kubernetes</span>
               <span class="arch-pill">AWS / GCP / Azure</span>
               <span class="arch-pill">S3 / GCS</span>
               <span class="arch-pill">SQL Database</span>
             </div>
-            <div class="arch-layer-note">Your cloud</div>
+            <div class="arch-layer-note">Self-hosted</div>
           </div>
         </div>
       </div>
@@ -172,6 +185,11 @@
     border-color: oklch(0.68 0.08 55 / 0.3);
   }
 
+  .arch-layer-targets {
+    background: oklch(0.62 0.09 260 / 0.14);
+    border-color: oklch(0.62 0.09 260 / 0.3);
+  }
+
   .arch-layer-infra {
     background: oklch(1 0 0 / 0.04);
     border-color: oklch(1 0 0 / 0.1);
@@ -187,6 +205,7 @@
   .arch-layer-agent .arch-layer-label { color: oklch(0.73 0.12 80 / 0.95); }
   .arch-layer-sdk .arch-layer-label { color: oklch(0.65 0.16 45 / 0.95); }
   .arch-layer-engine .arch-layer-label { color: oklch(0.68 0.08 55 / 0.95); }
+  .arch-layer-targets .arch-layer-label { color: oklch(0.72 0.09 260 / 0.95); }
   .arch-layer-infra .arch-layer-label { color: oklch(1 0 0 / 0.6); }
 
   .arch-layer-pills {
@@ -218,6 +237,12 @@
     color: oklch(0.68 0.08 55 / 0.95);
     background: oklch(0.68 0.08 55 / 0.14);
     border: 1px solid oklch(0.68 0.08 55 / 0.3);
+  }
+
+  .arch-layer-targets .arch-pill {
+    color: oklch(0.72 0.09 260 / 0.95);
+    background: oklch(0.62 0.09 260 / 0.14);
+    border: 1px solid oklch(0.62 0.09 260 / 0.3);
   }
 
   .arch-layer-infra .arch-pill {

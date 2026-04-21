@@ -7,6 +7,19 @@ A **checkpoint** is a unit of work inside a flow whose output is automatically
 persisted. When a flow re-executes, checkpoints that already succeeded can
 return their recorded results instead of running again.
 
+## Checkpoints are replay boundaries
+
+Every checkpoint is a boundary the runner remembers. On the first run,
+checkpoint outputs are computed and stored. On replay, completed checkpoints
+return their persisted outputs &mdash; execution only re-enters the first
+incomplete one.
+
+<CheckpointReplayDiagram />
+
+You can also **override** a cached checkpoint&rsquo;s output during replay &mdash;
+useful when you want to correct a single step&rsquo;s result and let the rest of
+the flow continue. See [Replay and overrides](/guides/replay-and-overrides).
+
 ## Defining a checkpoint
 
 Decorate work functions with `@checkpoint`:

@@ -7,6 +7,19 @@ When you call `.run()` on a flow, three things work together to make it
 durable. During local development they all live on your machine. In production
 they separate across your infrastructure.
 
+For the deeper breakdown of **control flow vs code execution** — inline vs
+isolated checkpoints, orchestrator vs sandbox, and how failed checkpoints
+become durable context — see
+[Execution Architecture](/concepts/execution-architecture).
+
+## The three components at a glance
+
+<ComponentsDiagram />
+
+All three collapse into a single Python process in local dev. In production
+they separate: the server is a Kubernetes pod, the agent runtime is a pod/job
+on your configured stack, and clients run wherever you are.
+
 ## Agent runtime
 
 Where your flow code actually executes. The runtime runs your checkpoints,
@@ -87,6 +100,9 @@ credentials brokered by the server to access storage directly.
 
 ## Next steps
 
+- [Execution Architecture](/concepts/execution-architecture) — the three
+  planes, inline vs isolated checkpoints, and how Kitaru separates durable
+  control flow from code execution
 - [Stacks](/stacks) — how compute, storage, and container
   registry are bundled into a named runtime
 - [Deploy Your Agent](/getting-started/deploy) — move from local to production

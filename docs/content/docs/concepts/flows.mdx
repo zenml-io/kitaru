@@ -6,6 +6,16 @@ description: Define durable execution boundaries for your AI agent workflows
 A **flow** is the outer durable boundary in Kitaru. It marks the top-level
 function whose execution becomes persistent, replayable, and observable.
 
+## The shape of a flow
+
+Everything inside the `@flow` boundary is durable. Checkpoints become persisted
+work units; the rest is ordinary Python that orchestrates them.
+
+<FlowShapeDiagram />
+
+The flow body is the orchestration layer. The checkpoints inside are the
+replay boundaries.
+
 ## Defining a flow
 
 Decorate your orchestration function with `@flow`:
@@ -106,6 +116,29 @@ When a higher layer supplies `stack`, Kitaru binds that stack only for the
 submission of that execution and then restores the previous active stack.
 That override does **not** permanently switch your default stack.
 
+## Run, then deploy
+
+`.run()` starts an ad-hoc execution from the current process &mdash; great for
+iteration, local development, and calls from your own code.
+
+For production use, flows are typically **deployed**: captured as an immutable,
+versioned snapshot that consumers invoke through a stable URL, with tag-based
+routing for rollout and rollback.
+
+```python
+# Ad-hoc run from the current process
+handle = my_agent.run(url="https://example.com")
+
+# Deploy an immutable snapshot (new version each call)
+my_agent.deploy()
+
+# Consumers invoke the deployed flow via the stable URL
+handle = my_agent.invoke({"url": "https://example.com"})
+```
+
+See [Deployments](/concepts/deployments) for versioning, tag routing, rollback,
+and invocation patterns.
+
 ## Rules to know
 
 - **Flow functions should compose checkpoints.** The flow body is the
@@ -121,6 +154,7 @@ That override does **not** permanently switch your default stack.
 
 - Learn how to break work into durable units with
   [Checkpoints](/concepts/checkpoints)
+- Ship a versioned, invokable flow with [Deployments](/concepts/deployments)
 - Attach structured data to your executions with
   [Logging and Metadata](/concepts/logging)
 - Understand how results and errors surface in the

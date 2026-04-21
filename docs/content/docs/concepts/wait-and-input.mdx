@@ -7,6 +7,14 @@ description: Pause flows for human or agent input, then resume from where they l
 or an external system — provides input. While waiting, the compute is fully
 released. The execution can resume seconds, hours, or months later.
 
+## The wait/resume timeline
+
+<WaitResumeDiagram />
+
+The server holds the run&rsquo;s durable state while compute is idle. When input
+lands, the runner picks up at the exact point the wait left off &mdash; same
+checkpoint state, same artifacts, same memory.
+
 ## Full example
 
 ```python
