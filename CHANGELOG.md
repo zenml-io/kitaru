@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - CLI commands for building, deploying, invoking, listing, tagging, logging, and deleting snapshot-backed flow deployments.
+- MCP deployment tools for deploying, invoking, listing, inspecting, deleting, tagging, and untagging snapshot-backed flow deployments.
+- Deployment model docs covering auto-versioning, reserved/default tag routing, serverless invocation, shared workspace authentication, and producer/consumer examples.
 - Python SDK secret write helpers: `kitaru.create_secret(...)` and `kitaru.delete_secret(...)`.
 - MCP secret creation tool `kitaru_secrets_create` for metadata-only secret creation from MCP clients.
 

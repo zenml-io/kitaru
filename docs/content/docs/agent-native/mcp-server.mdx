@@ -1,10 +1,11 @@
 ---
 title: MCP Server
-description: Query and manage Kitaru executions, artifacts, memory, and secret creation through Model Context Protocol tools
+description: Query and manage Kitaru executions, deployments, artifacts, memory, and secret creation through Model Context Protocol tools
 ---
 
-Kitaru ships an MCP server so assistants can query and manage executions with
-structured tool calls instead of parsing CLI text output.
+Kitaru ships an MCP server so assistants can query and manage executions,
+deployments, memory, artifacts, and project context with structured tool calls
+instead of parsing CLI text output.
 
 ## Install MCP support
 
@@ -125,6 +126,16 @@ Execution tools:
 - `kitaru_executions_retry`
 - `kitaru_executions_replay`
 
+Deployment tools:
+
+- `deploy_flow`
+- `invoke_flow`
+- `list_flow_deployments`
+- `get_flow_deployment`
+- `delete_flow_deployment`
+- `tag_flow_deployment`
+- `untag_flow_deployment`
+
 Artifact tools:
 
 - `kitaru_artifacts_list`
@@ -205,6 +216,12 @@ Manage a local stack:
 Create a local Kitaru stack named local-dev if it does not already exist, then show me the current Kitaru status.
 ```
 
+Deploy and invoke a shared flow route:
+
+```text
+Deploy `flows/research.py:research_agent` with topic="durable execution" as a canary deployment, then invoke the canary route and show me the started execution ID.
+```
+
 ## Starting executions with `kitaru_executions_run`
 
 The `kitaru_executions_run` tool requires a `target` string in the format:
@@ -235,6 +252,86 @@ Pass flow inputs as `args` (a JSON object) and optionally specify a `stack`:
 
 When `stack` is provided, the tool passes it to `.run(stack=...)` so the
 execution targets that stack.
+
+## Deployment tools
+
+The deployment tools let assistants publish and invoke versioned flow routes
+without shelling out to `kitaru deploy` or `kitaru invoke`.
+
+| Tool | Use it for |
+|---|---|
+| `deploy_flow` | Create a new deployment version from `<module_or_file>:<flow_name>` |
+| `invoke_flow` | Start a new execution from a deployed flow by `default`, tag, or version |
+| `list_flow_deployments` | List all deployment versions, optionally filtered to one flow |
+| `get_flow_deployment` | Inspect one deployment by version or tag |
+| `delete_flow_deployment` | Delete one version when no exclusive tag protects it |
+| `tag_flow_deployment` | Attach or move a public tag to a version |
+| `untag_flow_deployment` | Remove a non-reserved public tag from a version |
+
+`deploy_flow` accepts deployment-time flow inputs plus optional deployment
+controls:
+
+```json
+{
+  "target": "flows/research.py:research_agent",
+  "inputs": {"topic": "durable execution"},
+  "tag": "canary",
+  "exclusive": true,
+  "stack": "production",
+  "cache": false,
+  "retries": 1
+}
+```
+
+The first deployment of a flow gets the reserved `default` tag automatically.
+`default` is always exclusive and cannot be removed. Non-default tags are shared
+by default; pass `exclusive=true` when the tag should move to exactly one
+version, such as `canary`, `stable`, or `prod`.
+
+`invoke_flow` is the MCP equivalent of the primary CLI command
+`kitaru invoke`. If neither `version` nor `tag` is provided, it invokes the
+reserved `default` route:
+
+```json
+{
+  "flow": "research_agent",
+  "inputs": {"topic": "serverless routing"}
+}
+```
+
+Pin a version or named route when needed:
+
+```json
+{
+  "flow": "research_agent",
+  "tag": "stable",
+  "inputs": {"topic": "consumer request"}
+}
+```
+
+```json
+{
+  "flow": "research_agent",
+  "version": 2,
+  "inputs": {"topic": "reproducible request"}
+}
+```
+
+Use the list/get/tag tools for the producer side of a shared flow:
+
+```json
+{"flow": "research_agent"}
+```
+
+```json
+{"flow": "research_agent", "tag": "stable", "version": 2, "exclusive": true}
+```
+
+Then consumers can invoke by flow name and tag; they do not need the producer's
+source file path.
+
+For the full deployment model, including auto-versioning, tag exclusivity,
+serverless routing, and auth context, see [Deployments](/concepts/deployments).
 
 ## Example query flow
 
@@ -336,10 +433,16 @@ for detailed MCP tool-call sequences.
 The MCP server reuses the same config/auth context as `kitaru` CLI and SDK.
 If you want MCP tools to target a local server, start one first with bare
 `kitaru login` or via `kitaru_start_local_server(...)`. If you want MCP tools
-to target a deployed Kitaru server, connect first with `kitaru login <server>`
-before starting `kitaru-mcp`, or set `KITARU_*` connection variables in the MCP
-server environment. If you can run `kitaru status`, MCP tools use that same
-connection.
+to target a deployed Kitaru server or managed workspace, connect first with
+`kitaru login <server-or-workspace> --api-key <workspace-api-key>` before
+starting `kitaru-mcp`, or set `KITARU_SERVER_URL`, `KITARU_AUTH_TOKEN`, and
+`KITARU_PROJECT` in the MCP server environment. If you can run `kitaru status`,
+MCP tools use that same connection.
+
+Deployment MCP calls do not use per-deployment tokens. `deploy_flow`,
+`invoke_flow`, and the deployment management tools authorize through the active
+workspace/project context, just like `kitaru deploy`, `kitaru invoke`, and
+`KitaruClient().deployments.invoke(...)`.
 
 ## Replay behavior
 

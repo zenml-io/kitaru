@@ -3,6 +3,7 @@
   "defaultOpen": false,
   "pages": [
     "configuration",
+    "deployments",
     "containerization",
     "execution-management",
     "execution-logs",

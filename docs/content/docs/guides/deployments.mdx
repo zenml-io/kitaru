@@ -1,0 +1,320 @@
+---
+title: Deploy and invoke flows
+description: A practical producer-consumer guide to deploying Kitaru flows, moving tags, and invoking stable or canary routes
+---
+
+This guide walks through the deployment workflow you will probably use in a real
+team: one person publishes a flow, tests a canary version, promotes it, and then
+other people or agents invoke it by name.
+
+The short mental model is:
+
+1. **Producer deploys** from source: `kitaru deploy flows/research.py:research_agent`.
+2. **Kitaru versions** the deployment automatically: `v1`, then `v2`, then `v3`.
+3. **Producer moves tags** like `default`, `canary`, or `stable` to control routes.
+4. **Consumer invokes one route** by flow name plus a selector: usually a tag,
+   sometimes an exact version. Kitaru resolves that route to the saved snapshot.
+
+## The story: a research flow you want to share
+
+Imagine you have this flow in `flows/research.py`:
+
+```python
+from kitaru import checkpoint, flow
+
+@checkpoint
+def collect_notes(topic: str) -> str:
+    ...
+
+@checkpoint
+def write_summary(notes: str) -> str:
+    ...
+
+@flow
+def research_agent(topic: str) -> str:
+    notes = collect_notes(topic)
+    return write_summary(notes)
+```
+
+When you are still developing locally, you can run it directly from source:
+
+```python
+research_agent.run(topic="durable execution").wait()
+```
+
+A deployment is for the next step: saving a reusable, versioned entrypoint so
+other processes can invoke the flow without importing `flows/research.py`.
+
+## Step 1: deploy the first version
+
+Deploy from the source target:
+
+```bash
+kitaru deploy flows/research.py:research_agent \
+  --input '{"topic": "durable execution"}'
+```
+
+The `--input` value is a deployment-time default. It is useful because Kitaru may
+need concrete input values to prepare the saved flow entrypoint. Consumers can
+override it later when they invoke the deployment.
+
+Because this is the first deployment for `research_agent`, Kitaru creates:
+
+| Flow | Version | Tags |
+|---|---:|---|
+| `research_agent` | `1` | `default*` |
+
+The `*` means the tag is **exclusive**. Exclusive tags point to exactly one
+version at a time.
+
+You can inspect the versions:
+
+```bash
+kitaru flow deployments list research_agent
+kitaru flow deployments show research_agent
+```
+
+`show` defaults to the `default` tag when you do not pass `--version` or `--tag`.
+
+## Step 2: invoke the default route
+
+Now invoke the deployed flow by name:
+
+```bash
+kitaru invoke research_agent \
+  --input '{"topic": "serverless routing"}'
+```
+
+Because you did not specify `--version` or `--tag`, Kitaru uses the reserved
+`default` tag. It resolves `research_agent` + `default` to the saved deployment
+snapshot for that version, starts a new execution from it, and returns an
+execution ID.
+
+The same invocation from Python looks like this:
+
+```python
+from kitaru import KitaruClient
+
+handle = KitaruClient().deployments.invoke(
+    flow="research_agent",
+    inputs={"topic": "serverless routing"},
+)
+print(handle.exec_id)
+```
+
+If you have the flow object imported in the current process, `.invoke()` is the
+remote invocation verb:
+
+```python
+from flows.research import research_agent
+
+handle = research_agent.invoke(topic="serverless routing")
+```
+
+## Step 3: deploy a canary version
+
+Now imagine you improve the flow and want to test the new behavior without
+moving the default route yet. Deploy it with an exclusive `canary` tag:
+
+```bash
+kitaru deploy flows/research.py:research_agent \
+  --tag canary \
+  --exclusive \
+  --input '{"topic": "durable execution"}'
+```
+
+Kitaru creates version `2` and attaches `canary*`:
+
+| Flow | Version | Tags |
+|---|---:|---|
+| `research_agent` | `1` | `default*` |
+| `research_agent` | `2` | `canary*` |
+
+Now you can test only the canary route:
+
+```bash
+kitaru invoke research_agent \
+  --tag canary \
+  --input '{"topic": "tag routing"}'
+```
+
+This is the safe pattern: deploy a candidate, invoke it explicitly, inspect the
+execution, and only then move the stable route.
+
+## Step 4: promote a version
+
+There are two common promotion styles.
+
+### Option A: move `default`
+
+If your consumers use the implicit default route, move `default` to version `2`:
+
+```bash
+kitaru flow tag research_agent default --version 2 --exclusive
+```
+
+After that, plain `kitaru invoke research_agent ...` routes to version `2`.
+The old version no longer has `default`.
+
+### Option B: publish a separate `stable` route
+
+If you prefer an explicit production route, move `stable` to version `2`:
+
+```bash
+kitaru flow tag research_agent stable --version 2 --exclusive
+```
+
+Consumers then invoke:
+
+```bash
+kitaru invoke research_agent \
+  --tag stable \
+  --input '{"topic": "consumer request"}'
+```
+
+This is nice when you want `default` for interactive testing, while `stable` is
+what other systems use.
+
+## Producer vs consumer responsibilities
+
+A useful way to keep the model straight:
+
+| Role | Needs source target? | Typical commands |
+|---|---|---|
+| Producer | Yes, for deploys | `kitaru deploy`, `kitaru flow tag`, `kitaru flow deployments list` |
+| Consumer | No | `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, MCP `invoke_flow` |
+
+The producer knows `flows/research.py:research_agent`. The consumer only needs
+`research_agent` plus a selector such as `default`, `stable`, `canary`, or `v2`.
+
+## When selectors matter
+
+Most of the time, consumers should use a tag:
+
+```bash
+kitaru invoke research_agent --tag stable --input '{"topic": "..."}'
+```
+
+Use an exact version when you need reproducibility:
+
+```bash
+kitaru invoke research_agent --version 2 --input '{"topic": "..."}'
+```
+
+A version is a hard pin. It will not move when someone promotes `stable` or
+`default` later. Tags are movable route names; versions are the saved deployment
+snapshots those routes resolve to.
+
+### Exclusive tags
+
+Use exclusive tags for routes that should point to one version:
+
+- `default`
+- `stable`
+- `prod`
+- `canary` when there is only one current canary
+
+`default` is always exclusive and reserved. You cannot remove it directly. To
+move it, attach `default` to another version with `--exclusive`.
+
+A deployment that still holds any exclusive tag cannot be deleted. Move the tag
+first, then delete the old version:
+
+```bash
+kitaru flow tag research_agent default --version 2 --exclusive
+kitaru flow deployments delete research_agent --version 1
+```
+
+### Shared tags
+
+Non-exclusive tags can point to more than one version. That can be useful for
+marking a group of deployments:
+
+```bash
+kitaru flow tag research_agent benchmark --version 1
+kitaru flow tag research_agent benchmark --version 2
+```
+
+But shared tags are not good invocation routes once they point to multiple
+versions. If `benchmark` points to both `v1` and `v2`, then this selector is
+ambiguous:
+
+```bash
+kitaru invoke research_agent --tag benchmark --input '{"topic": "..."}'
+```
+
+When a tag should be invocable by consumers, make it exclusive.
+
+## Invoke from MCP
+
+MCP clients use the same deployment model with structured tool calls.
+
+Deploy a canary:
+
+```json
+{
+  "target": "flows/research.py:research_agent",
+  "inputs": {"topic": "durable execution"},
+  "tag": "canary",
+  "exclusive": true
+}
+```
+
+Invoke the stable route:
+
+```json
+{
+  "flow": "research_agent",
+  "tag": "stable",
+  "inputs": {"topic": "consumer request"}
+}
+```
+
+Use `list_flow_deployments` and `get_flow_deployment` before invoking when the
+assistant needs to discover available versions or confirm where a tag points.
+
+## Auth: one workspace context, no deployment tokens
+
+Deployments do not have their own tokens. The CLI, SDK, and MCP server all use
+the active Kitaru connection context.
+
+For a local server:
+
+```bash
+kitaru login
+kitaru status
+```
+
+For a remote workspace:
+
+```bash
+kitaru login my-workspace --api-key kat_abc123 --project production
+kitaru status
+```
+
+For headless environments:
+
+```bash
+export KITARU_SERVER_URL=https://kitaru.example.com
+export KITARU_AUTH_TOKEN=kat_abc123
+export KITARU_PROJECT=production
+```
+
+Once that context is configured, deployment invocation uses it automatically.
+A consumer invokes one route by flow name plus tag/version; Kitaru resolves that
+route to the saved snapshot. There is no long-lived per-version service and no
+extra per-deployment token to pass to `kitaru invoke`, `.invoke()`, or
+`invoke_flow`.
+
+## A practical checklist
+
+Before sharing a route with other people or agents:
+
+1. `kitaru deploy ... --tag canary --exclusive` for the candidate.
+2. `kitaru invoke FLOW --tag canary ...` and inspect the execution.
+3. Move `stable` or `default` with `kitaru flow tag FLOW TAG --version N --exclusive`.
+4. Tell consumers the flow name and tag, not the source file path.
+5. Use exact `--version N` only for reproducible one-off runs.
+
+If you remember just one thing: deploys create Kitaru-managed saved versions;
+tags are the movable signposts consumers follow.
