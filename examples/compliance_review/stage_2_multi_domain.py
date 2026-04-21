@@ -15,7 +15,6 @@ created.
 - final synthesis report saved as a Kitaru artifact
 """
 
-import argparse
 import asyncio
 import sys
 from pathlib import Path
@@ -234,9 +233,16 @@ def run_workflow(
     *,
     stack: str | None = None,
     use_secret_environment: bool = False,
-    cache: bool = True,
+    cache: bool = False,
 ) -> ClaudeAgentResult:
-    """Execute the full Stage 2 audit and return the final report result."""
+    """Execute the full Stage 2 audit and return the final report result.
+
+    Caching defaults to off so each run exercises Claude fresh. ZenML's
+    implicit cache-hit on identical inputs would otherwise make the
+    second run a no-op that hides the agent behavior the example is
+    meant to demonstrate. Replay (`.replay()`) is independent of this
+    flag and continues to reuse durable checkpoint outputs.
+    """
     run_kwargs: dict[str, Any] = {"stack": stack, "cache": cache}
     if use_secret_environment:
         run_kwargs["image"] = {
@@ -248,39 +254,22 @@ def run_workflow(
 
 def main() -> None:
     """Run the Stage 2 audit as a script and print the final report."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--no-cache",
-        action="store_true",
-        help=(
-            "Force every domain checkpoint to re-run. Use this to escape a "
-            "cached-but-empty Claude result from a prior failed run."
-        ),
-    )
-    args = parser.parse_args()
-
-    result = run_workflow(cache=not args.no_cache)
+    result = run_workflow()
     report = result.result or "Claude returned no report text."
     console.print(Markdown(report))
 
 
 def _required_result_text(result: ClaudeAgentResult, *, domain: str) -> str:
-    """Return result text or fail clearly before building the synthesis prompt.
-
-    Cached `ClaudeAgentResult` entries from prior failed runs can carry
-    `result=None` with `is_error=False`. Surface the session + stop metadata so
-    the traceback makes it obvious the failure is a stale-cache issue, not a
-    fresh Claude call.
-    """
+    """Return result text or raise with diagnostic context for the synthesis step."""
     if result.result is None or not result.result.strip():
         raise ValueError(
             f"{domain} checkpoint returned no result text "
             f"(session_id={result.session_id!r}, "
             f"stop_reason={result.stop_reason!r}, "
             f"num_turns={result.num_turns}). "
-            f"If this keeps happening on re-runs, the cached artifact is "
-            f"serving an empty Claude response — re-run with --no-cache to "
-            f"force a fresh call."
+            f"If you opted into `cache=True` and this keeps recurring, a "
+            f"prior run may have cached an empty Claude response — re-run "
+            f"with the default `cache=False` to force a fresh call."
         )
     return result.result
 

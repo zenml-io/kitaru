@@ -62,6 +62,7 @@ def test_stage3_run_workflow_forwards_strict_memory_and_secret_environment(
     fake_flow.run.assert_called_once_with(
         strict_memory=True,
         stack="prod-k8s",
+        cache=False,
         image={
             "requirements": [
                 stage3_module.CLAUDE_AGENT_SDK_REQUIREMENT,

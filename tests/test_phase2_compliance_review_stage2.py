@@ -66,36 +66,31 @@ def _patch_audit_company(
     return fake_flow
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "expected_cache"),
+    [({}, False), ({"cache": True}, True)],
+    ids=["defaults-to-cache-disabled", "can-opt-into-cache"],
+)
 def test_stage2_run_workflow_forwards_cache_to_audit_company(
     monkeypatch,
     stage2_module,
+    kwargs: dict[str, Any],
+    expected_cache: bool,
 ) -> None:
-    """`cache=False` should skip ZenML's checkpoint cache for every domain."""
+    """Cache defaults to off for honest demos; callers can still opt in."""
     fake_flow = _patch_audit_company(monkeypatch, stage2_module)
 
-    stage2_module.run_workflow(cache=False)
+    stage2_module.run_workflow(**kwargs)
 
-    fake_flow.run.assert_called_once_with(stack=None, cache=False)
+    fake_flow.run.assert_called_once_with(stack=None, cache=expected_cache)
 
 
-def test_stage2_run_workflow_defaults_to_cache_enabled(
-    monkeypatch,
+def test_stage2_required_result_text_surfaces_diagnostics(
     stage2_module,
 ) -> None:
-    """Default `run_workflow()` should pass `cache=True`."""
-    fake_flow = _patch_audit_company(monkeypatch, stage2_module)
-
-    stage2_module.run_workflow()
-
-    fake_flow.run.assert_called_once_with(stack=None, cache=True)
-
-
-def test_stage2_required_result_text_surfaces_cache_diagnostics(
-    stage2_module,
-) -> None:
-    """The empty-result error should name the cached session so re-runs are obvious."""
+    """The empty-result error should expose session + stop metadata."""
     empty = stage2_module.ClaudeAgentResult(
-        session_id="746c3a14-stale-cache",
+        session_id="746c3a14-session",
         cwd="/tmp",
         transcript_path="/tmp/t.jsonl",
         result=None,
@@ -108,10 +103,9 @@ def test_stage2_required_result_text_surfaces_cache_diagnostics(
 
     message = str(exc_info.value)
     assert "insurance checkpoint returned no result text" in message
-    assert "session_id='746c3a14-stale-cache'" in message
+    assert "session_id='746c3a14-session'" in message
     assert "stop_reason='end_turn'" in message
     assert "num_turns=14" in message
-    assert "--no-cache" in message
 
 
 def test_stage2_run_workflow_can_opt_into_runtime_secret_environment(
@@ -136,7 +130,7 @@ def test_stage2_run_workflow_can_opt_into_runtime_secret_environment(
     assert result == expected
     fake_flow.run.assert_called_once_with(
         stack="prod-k8s",
-        cache=True,
+        cache=False,
         image={
             "requirements": [
                 stage2_module.CLAUDE_AGENT_SDK_REQUIREMENT,

@@ -129,6 +129,7 @@ def test_stage4_run_workflow_can_opt_into_runtime_secret_environment(
         conversation_label="my-conversation",
         max_turns=2,
         stack="prod-k8s",
+        cache=False,
         image={
             "requirements": [
                 stage4_module.CLAUDE_AGENT_SDK_REQUIREMENT,

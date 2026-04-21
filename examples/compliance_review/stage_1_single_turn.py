@@ -86,9 +86,17 @@ def run_workflow(
     *,
     stack: str | None = None,
     use_secret_environment: bool = False,
+    cache: bool = False,
 ) -> ClaudeAgentResult:
-    """Execute the Stage 1 flow and return the Claude agent result."""
-    run_kwargs: dict[str, Any] = {"stack": stack}
+    """Execute the Stage 1 flow and return the Claude agent result.
+
+    Caching defaults to off so each run exercises Claude fresh. ZenML's
+    implicit cache-hit on identical inputs would otherwise make the
+    second run a no-op that hides the agent behavior the example is
+    meant to demonstrate. Replay (`.replay()`) is independent of this
+    flag and continues to reuse durable checkpoint outputs.
+    """
+    run_kwargs: dict[str, Any] = {"stack": stack, "cache": cache}
     if use_secret_environment:
         run_kwargs["image"] = {
             "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT],
