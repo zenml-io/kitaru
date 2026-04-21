@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any
 
 from cyclopts import Parameter
@@ -56,11 +57,29 @@ def _parse_json_object(
     raw_value: str | None,
     *,
     option_name: str,
+    allow_file: bool = False,
 ) -> dict[str, Any]:
-    """Parse a CLI JSON option that must decode to an object."""
+    """Parse a CLI JSON option that must decode to an object.
+
+    With `allow_file=True`, a leading ``@`` resolves the remainder as a
+    filesystem path whose contents are parsed as JSON instead.
+    """
     if raw_value is None:
         return {}
-    parsed = _parse_json_value(raw_value, option_name=option_name)
+
+    source_label = option_name
+    payload = raw_value
+    if allow_file and raw_value.startswith("@"):
+        path = Path(raw_value[1:]).expanduser()
+        source_label = f"{option_name} file '{path}'"
+        try:
+            payload = path.read_text()
+        except OSError as exc:
+            raise ValueError(
+                f"Unable to read `{option_name}` file '{path}': {exc}"
+            ) from exc
+
+    parsed = _parse_json_value(payload, option_name=source_label)
     if not isinstance(parsed, dict):
         raise ValueError(
             f"`{option_name}` must be a JSON object "

@@ -369,6 +369,7 @@ def test_executions_run_fetches_execution(
     """Run tool should run a flow and include execution details when available."""
     invocation_result = execution_interface.FlowInvocationResult(
         handle=SimpleNamespace(exec_id=sample_execution.exec_id),
+        exec_id=sample_execution.exec_id,
     )
 
     with (
@@ -415,6 +416,7 @@ def test_executions_run_returns_warning_when_details_unavailable(
             "kitaru._interface_executions.invoke_flow_target",
             return_value=execution_interface.FlowInvocationResult(
                 handle=SimpleNamespace(exec_id="kr-new"),
+                exec_id="kr-new",
             ),
         ),
         patch(

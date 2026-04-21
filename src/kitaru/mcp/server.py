@@ -180,7 +180,7 @@ def kitaru_executions_run(
             module_name_prefix="_kitaru_mcp_run_target_",
         )
         details = execution_interface.resolve_started_execution_details(
-            exec_id=result.handle.exec_id,
+            exec_id=result.exec_id,
             client=client,
         )
         return execution_interface.build_started_execution_payload(

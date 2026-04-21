@@ -25,6 +25,7 @@ class FlowInvocationResult:
     """Structured result from starting a flow target."""
 
     handle: _flow_loading._FlowHandleLike
+    exec_id: str
 
 
 def list_executions_filtered(
@@ -191,8 +192,7 @@ def invoke_flow_target(
     else:
         handle = flow_target.run(**flow_inputs)
 
-    flow_handle_exec_id(handle)
-    return FlowInvocationResult(handle=handle)
+    return FlowInvocationResult(handle=handle, exec_id=flow_handle_exec_id(handle))
 
 
 def resolve_started_execution_details(

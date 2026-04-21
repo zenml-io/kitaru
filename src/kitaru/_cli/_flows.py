@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Annotated, Any
 
 from cyclopts import Parameter
@@ -32,6 +30,7 @@ from ._executions import (
     _emit_json_log_event,
     _emit_log_entries,
     _follow_execution_logs,
+    _parse_json_object,
 )
 from ._helpers import (
     DEFAULT_LIST_PAGE,
@@ -53,47 +52,6 @@ from ._helpers import (
     _resolve_output_format,
     _validate_pagination,
 )
-
-
-def _parse_json_value(raw_value: str, *, option_name: str) -> Any:
-    """Parse a JSON CLI option value."""
-    try:
-        return json.loads(raw_value)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Invalid JSON for `{option_name}`: {exc.msg} "
-            f"(line {exc.lineno}, column {exc.colno})."
-        ) from exc
-
-
-def _parse_json_object_or_file(
-    raw_value: str | None,
-    *,
-    option_name: str,
-) -> dict[str, Any]:
-    """Parse a JSON object option that may be provided inline or as `@path`."""
-    if raw_value is None:
-        return {}
-
-    source_label = option_name
-    payload = raw_value
-    if raw_value.startswith("@"):
-        path = Path(raw_value[1:]).expanduser()
-        source_label = f"{option_name} file '{path}'"
-        try:
-            payload = path.read_text()
-        except OSError as exc:
-            raise ValueError(
-                f"Unable to read `{option_name}` file '{path}': {exc}"
-            ) from exc
-
-    parsed = _parse_json_value(payload, option_name=source_label)
-    if not isinstance(parsed, dict):
-        raise ValueError(
-            f"`{option_name}` must be a JSON object "
-            '(for example: \'{"topic": "AI"}\').'
-        )
-    return parsed
 
 
 def _format_deployment_tags(tags: Mapping[str, bool]) -> str:
@@ -146,14 +104,6 @@ def _group_deployments_by_flow(deployments: Sequence[Any]) -> dict[str, list[Any
     for deployment in deployments:
         grouped.setdefault(str(deployment.flow), []).append(deployment)
     return dict(sorted(grouped.items()))
-
-
-def _flow_summary_items(deployments: Sequence[Any]) -> list[dict[str, Any]]:
-    """Build serialized summaries for all deployment-backed flows."""
-    return [
-        serialize_flow_deployment_summary(flow, items)
-        for flow, items in _group_deployments_by_flow(deployments).items()
-    ]
 
 
 def _flow_list_table(items: Sequence[dict[str, Any]]) -> list[list[str]]:
@@ -231,14 +181,6 @@ def _started_deployment_payload(
     return payload
 
 
-def _track_deployment_event(
-    event: AnalyticsEvent,
-    metadata: dict[str, Any],
-) -> None:
-    """Track deployment CLI events without letting analytics affect commands."""
-    track(event, metadata)
-
-
 def _resolve_latest_deployment_execution_id(
     *,
     client: Any,
@@ -246,7 +188,10 @@ def _resolve_latest_deployment_execution_id(
     deployment: Any,
 ) -> str:
     """Best-effort lookup of the latest execution associated with a deployment."""
-    executions = client.executions.list(flow=flow, limit=None)
+    # Cap the scan to the most recent executions: executions.list already
+    # returns desc:created, so the first match is by definition the latest.
+    # Without a limit, this paginates the entire history of the flow.
+    executions = client.executions.list(flow=flow, limit=50)
     for execution in executions:
         metadata = getattr(execution, "metadata", {}) or {}
         if not isinstance(metadata, Mapping):
@@ -298,7 +243,7 @@ def build(
     output_format = _resolve_output_format(output)
 
     def _build_deployment() -> Any:
-        inputs = _parse_json_object_or_file(input_, option_name="--input")
+        inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
         _validate_deployment_input_keys(inputs)
         flow_target = _load_deployable_flow_target(
             target,
@@ -313,7 +258,7 @@ def build(
                 inputs=inputs,
             )
         )
-        _track_deployment_event(
+        track(
             AnalyticsEvent.DEPLOYMENT_BUILT,
             {"command": command, "has_input": bool(inputs)},
         )
@@ -362,7 +307,7 @@ def deploy(
     output_format = _resolve_output_format(output)
 
     def _deploy_flow() -> Any:
-        inputs = _parse_json_object_or_file(input_, option_name="--input")
+        inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
         _validate_deployment_input_keys(inputs)
         normalized_tag = validate_deployment_selector(
             tag=tag,
@@ -388,7 +333,7 @@ def deploy(
                 inputs=inputs,
             )
         )
-        _track_deployment_event(
+        track(
             AnalyticsEvent.DEPLOYMENT_DEPLOYED,
             {
                 "command": command,
@@ -433,7 +378,7 @@ def invoke(
     output_format = _resolve_output_format(output)
 
     def _invoke_deployment() -> tuple[Any, dict[str, Any], int | None, str | None]:
-        inputs = _parse_json_object_or_file(input_, option_name="--input")
+        inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
         resolved_version, resolved_tag = validate_deployment_selector(
             version=version,
             tag=tag,
@@ -453,7 +398,7 @@ def invoke(
             handle=handle,
             client=client,
         )
-        _track_deployment_event(
+        track(
             AnalyticsEvent.DEPLOYMENT_INVOKED,
             {
                 "command": command,
@@ -498,7 +443,10 @@ def list_(output: OutputFormatOption = "text") -> None:
         output=output_format,
         exit_with_error=_exit_with_error,
     )
-    items = _flow_summary_items(deployments)
+    items = [
+        serialize_flow_deployment_summary(flow, grouped)
+        for flow, grouped in _group_deployments_by_flow(deployments).items()
+    ]
 
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(command, items, output=output_format)
@@ -791,7 +739,7 @@ def delete(
 
     def _delete_deployment() -> dict[str, Any]:
         _facade_module().KitaruClient().deployments.delete(flow=flow, version=version)
-        _track_deployment_event(
+        track(
             AnalyticsEvent.DEPLOYMENT_DELETED,
             {"command": command, "selector": "version"},
         )
@@ -837,7 +785,7 @@ def tag(
                 exclusive=exclusive,
             )
         )
-        _track_deployment_event(
+        track(
             AnalyticsEvent.DEPLOYMENT_TAGGED,
             {"command": command, "selector": "version", "exclusive": exclusive},
         )
@@ -879,7 +827,7 @@ def untag(
                 tag=tag,
             )
         )
-        _track_deployment_event(
+        track(
             AnalyticsEvent.DEPLOYMENT_UNTAGGED,
             {"command": command, "selector": "version"},
         )
