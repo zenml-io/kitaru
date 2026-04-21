@@ -6,10 +6,18 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from zenml.exceptions import EntityExistsError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.errors import KitaruBackendError, KitaruRuntimeError, KitaruUsageError
-from kitaru.secrets import Secret, _read_secret_values, get_secret
+from kitaru.secrets import (
+    Secret,
+    SecretSummary,
+    _read_secret_values,
+    create_secret,
+    delete_secret,
+    get_secret,
+)
 
 
 def test_get_secret_fetches_exact_secret_and_normalizes_values() -> None:
@@ -18,6 +26,7 @@ def test_get_secret_fetches_exact_secret_and_normalizes_values() -> None:
     client.get_secret.return_value = SimpleNamespace(
         name="openai-creds",
         id=123,
+        private=True,
         secret_values={
             "OPENAI_API_KEY": "sk-123",
             "COUNT": 3,
@@ -41,11 +50,200 @@ def test_get_secret_fetches_exact_secret_and_normalizes_values() -> None:
         name="openai-creds",
         id="123",
         values={"OPENAI_API_KEY": "sk-123", "COUNT": "3"},
+        private=True,
     )
     assert secret.get("OPENAI_API_KEY") == "sk-123"
     assert secret.get("MISSING") is None
     assert secret.get("MISSING", "fallback") == "fallback"
     track_mock.assert_called_once_with(AnalyticsEvent.SECRET_READ, {"key_count": 2})
+
+
+def test_create_secret_creates_public_secret_by_default() -> None:
+    """SDK secret creation should default to public metadata-only writes."""
+    client = Mock()
+    client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id=123,
+        private=False,
+        values={"OPENAI_API_KEY": object(), "COUNT": object()},
+        has_missing_values=False,
+    )
+
+    with (
+        patch("kitaru.secrets._ZenMLClient", return_value=client),
+        patch("kitaru.secrets.track") as track_mock,
+    ):
+        summary = create_secret(
+            " openai-creds ",
+            {"OPENAI_API_KEY": "sk-123", "COUNT": 3},
+        )
+
+    client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123", "COUNT": "3"},
+        private=False,
+    )
+    assert summary == SecretSummary(
+        name="openai-creds",
+        id="123",
+        private=False,
+        keys=["COUNT", "OPENAI_API_KEY"],
+        has_missing_values=False,
+    )
+    assert summary.visibility == "public"
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.SECRET_UPSERTED,
+        {"operation": "created", "key_count": 2},
+    )
+
+
+def test_create_secret_forwards_private_flag() -> None:
+    """Callers can opt into private secret creation."""
+    client = Mock()
+    client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        values={"OPENAI_API_KEY": object()},
+        has_missing_values=False,
+    )
+
+    with patch("kitaru.secrets._ZenMLClient", return_value=client):
+        summary = create_secret(
+            "openai-creds",
+            {"OPENAI_API_KEY": "sk-123"},
+            private=True,
+        )
+
+    client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123"},
+        private=True,
+    )
+    assert summary.visibility == "private"
+
+
+@pytest.mark.parametrize(
+    ("name", "values", "message"),
+    [
+        ("   ", {"OPENAI_API_KEY": "sk-123"}, "Secret name or ID cannot be empty"),
+        ("openai-creds", {}, "Provide at least one secret value"),
+        (
+            "openai-creds",
+            {"1_BAD": "sk-123"},
+            "Invalid secret key `1_BAD`",
+        ),
+        (
+            "openai-creds",
+            {"OPENAI_API_KEY": ""},
+            "Secret value for key `OPENAI_API_KEY` cannot be empty",
+        ),
+        (
+            "openai-creds",
+            {"OPENAI_API_KEY": None},
+            "Secret value for key `OPENAI_API_KEY` cannot be None",
+        ),
+        (
+            "openai-creds",
+            {"TOKEN": "first", " TOKEN ": "second"},
+            "Duplicate secret key `TOKEN`",
+        ),
+    ],
+)
+def test_create_secret_rejects_invalid_inputs(
+    name: str,
+    values: dict[str, object],
+    message: str,
+) -> None:
+    """Invalid write inputs should fail before contacting the backend."""
+    with pytest.raises(KitaruUsageError, match=message):
+        create_secret(name, values)
+
+
+def test_create_secret_maps_existing_secret_to_runtime_error() -> None:
+    """Existing backend secrets should become a Kitaru runtime error."""
+    client = Mock()
+    client.create_secret.side_effect = EntityExistsError("already exists")
+
+    with (
+        patch("kitaru.secrets._ZenMLClient", return_value=client),
+        pytest.raises(KitaruRuntimeError, match="Secret `openai-creds` already exists"),
+    ):
+        create_secret("openai-creds", {"OPENAI_API_KEY": "sk-123"})
+
+
+def test_create_secret_maps_backend_failure_to_backend_error() -> None:
+    """Unexpected create failures should not leak raw client errors."""
+    client = Mock()
+    client.create_secret.side_effect = RuntimeError("offline")
+
+    with (
+        patch("kitaru.secrets._ZenMLClient", return_value=client),
+        pytest.raises(
+            KitaruBackendError, match="Failed to create secret `openai-creds`"
+        ),
+    ):
+        create_secret("openai-creds", {"OPENAI_API_KEY": "sk-123"})
+
+
+def test_delete_secret_resolves_exact_secret_and_deletes_by_id() -> None:
+    """SDK deletion should exact-resolve first and delete the resolved ID."""
+    client = Mock()
+    client.get_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id=123,
+        private=False,
+        values={"OPENAI_API_KEY": object()},
+        has_missing_values=False,
+    )
+
+    with patch("kitaru.secrets._ZenMLClient", return_value=client):
+        summary = delete_secret(" openai-creds ")
+
+    client.get_secret.assert_called_once_with(
+        name_id_or_prefix="openai-creds",
+        allow_partial_name_match=False,
+        allow_partial_id_match=False,
+    )
+    client.delete_secret.assert_called_once_with(name_id_or_prefix="123")
+    assert summary == SecretSummary(
+        name="openai-creds",
+        id="123",
+        private=False,
+        keys=["OPENAI_API_KEY"],
+    )
+
+
+def test_delete_secret_maps_client_initialization_failure_to_backend_error() -> None:
+    """Client construction failures should become Kitaru backend errors."""
+    with (
+        patch("kitaru.secrets._ZenMLClient", side_effect=RuntimeError("offline")),
+        pytest.raises(
+            KitaruBackendError, match="Failed to delete secret `openai-creds`"
+        ),
+    ):
+        delete_secret("openai-creds")
+
+
+def test_delete_secret_maps_backend_failure_to_backend_error() -> None:
+    """Delete failures should become Kitaru backend errors."""
+    client = Mock()
+    client.get_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+        private=False,
+        values={"OPENAI_API_KEY": object()},
+        has_missing_values=False,
+    )
+    client.delete_secret.side_effect = RuntimeError("offline")
+
+    with (
+        patch("kitaru.secrets._ZenMLClient", return_value=client),
+        pytest.raises(
+            KitaruBackendError, match="Failed to delete secret `openai-creds`"
+        ),
+    ):
+        delete_secret("openai-creds")
 
 
 def test_get_secret_rejects_empty_name() -> None:

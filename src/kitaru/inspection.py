@@ -1304,15 +1304,22 @@ def secret_visibility(secret: SecretResponse) -> str:
     return "private" if secret.private else "public"
 
 
-def serialize_secret_summary(secret: SecretResponse) -> dict[str, Any]:
-    """Serialize secret summary information."""
-    keys = sorted(secret.values.keys())
+def serialize_secret_summary(secret: Any) -> dict[str, Any]:
+    """Serialize secret summary information without raw secret values."""
+    summary_keys = getattr(secret, "keys", None)
+    if isinstance(summary_keys, list | tuple):
+        keys = sorted(str(key) for key in summary_keys)
+        visibility = "private" if getattr(secret, "private", False) else "public"
+    else:
+        keys = sorted(str(key) for key in secret.values)
+        visibility = secret_visibility(secret)
+
     return {
         "id": str(secret.id),
         "name": secret.name,
-        "visibility": secret_visibility(secret),
+        "visibility": visibility,
         "keys": keys,
-        "has_missing_values": secret.has_missing_values,
+        "has_missing_values": bool(getattr(secret, "has_missing_values", False)),
     }
 
 

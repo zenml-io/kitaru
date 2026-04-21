@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Annotated, Any
 
 from cyclopts import Parameter
@@ -13,7 +12,7 @@ from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 from kitaru.inspection import serialize_secret_detail, serialize_secret_summary
-from kitaru.secrets import _get_secret_response_exact
+from kitaru.secrets import _SECRET_KEY_PATTERN, _get_secret_response_exact
 
 from . import secrets_app
 from ._helpers import (
@@ -33,8 +32,6 @@ from ._helpers import (
     _resolve_output_format,
     _validate_pagination,
 )
-
-_SECRET_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _secret_visibility(secret: SecretResponse) -> str:
@@ -180,9 +177,13 @@ def set_(
             allow_leading_hyphen=True,
         ),
     ],
+    private: Annotated[
+        bool,
+        Parameter(help="Create a private secret instead of the default public secret."),
+    ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Set a secret with env-var-style key names, creating it if needed."""
+    """Set a public secret by default, or create it privately with --private."""
     command = "secrets.set"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
@@ -195,7 +196,7 @@ def set_(
             secret = client.create_secret(
                 name=name,
                 values=parsed_assignments,
-                private=True,
+                private=private,
             )
             action = "Created"
         except EntityExistsError:
