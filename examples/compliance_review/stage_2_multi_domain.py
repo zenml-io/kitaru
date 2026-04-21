@@ -15,6 +15,7 @@ created.
 - final synthesis report saved as a Kitaru artifact
 """
 
+import argparse
 import asyncio
 import sys
 from pathlib import Path
@@ -233,6 +234,7 @@ def run_workflow(
     *,
     stack: str | None = None,
     use_secret_environment: bool = False,
+    cache: bool = True,
 ) -> ClaudeAgentResult:
     """Execute the full Stage 2 audit and return the final report result."""
     run_kwargs: dict[str, Any] = {"stack": stack}
@@ -241,20 +243,47 @@ def run_workflow(
             "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT],
             "secret_environment_from": [ANTHROPIC_SECRET_NAME],
         }
+    if not cache:
+        run_kwargs["cache"] = False
     return audit_company.run(**run_kwargs).wait()
 
 
 def main() -> None:
     """Run the Stage 2 audit as a script and print the final report."""
-    result = run_workflow()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help=(
+            "Force every domain checkpoint to re-run. Use this to escape a "
+            "cached-but-empty Claude result from a prior failed run."
+        ),
+    )
+    args = parser.parse_args()
+
+    result = run_workflow(cache=not args.no_cache)
     report = result.result or "Claude returned no report text."
     console.print(Markdown(report))
 
 
 def _required_result_text(result: ClaudeAgentResult, *, domain: str) -> str:
-    """Return result text or fail clearly before building the synthesis prompt."""
+    """Return result text or fail clearly before building the synthesis prompt.
+
+    Cached `ClaudeAgentResult` entries from prior failed runs can carry
+    `result=None` with `is_error=False`. Surface the session + stop metadata so
+    the traceback makes it obvious the failure is a stale-cache issue, not a
+    fresh Claude call.
+    """
     if result.result is None or not result.result.strip():
-        raise ValueError(f"{domain} checkpoint returned no result text.")
+        raise ValueError(
+            f"{domain} checkpoint returned no result text "
+            f"(session_id={result.session_id!r}, "
+            f"stop_reason={result.stop_reason!r}, "
+            f"num_turns={result.num_turns}). "
+            f"If this keeps happening on re-runs, the cached artifact is "
+            f"serving an empty Claude response — re-run with --no-cache to "
+            f"force a fresh call."
+        )
     return result.result
 
 

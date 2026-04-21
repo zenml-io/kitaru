@@ -47,6 +47,78 @@ def _find_artifact_by_name(
     raise AssertionError(f"No artifact named '{name}' found in step outputs.")
 
 
+def test_stage2_run_workflow_forwards_cache_false_to_audit_company(
+    monkeypatch,
+    stage2_module,
+) -> None:
+    """`cache=False` should skip ZenML's checkpoint cache for every domain."""
+    fake_handle = Mock()
+    fake_handle.wait = Mock(
+        return_value=stage2_module.ClaudeAgentResult(
+            session_id="s",
+            cwd=str(stage2_module.EXAMPLE_DIR),
+            transcript_path="/tmp/s.jsonl",
+            result="ok",
+            num_turns=1,
+        )
+    )
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=fake_handle)
+    monkeypatch.setattr(stage2_module, "audit_company", fake_flow)
+
+    stage2_module.run_workflow(cache=False)
+
+    fake_flow.run.assert_called_once_with(stack=None, cache=False)
+
+
+def test_stage2_run_workflow_defaults_omit_cache_kwarg(
+    monkeypatch,
+    stage2_module,
+) -> None:
+    """Default `run_workflow()` keeps the existing call shape (no `cache` kwarg)."""
+    fake_handle = Mock()
+    fake_handle.wait = Mock(
+        return_value=stage2_module.ClaudeAgentResult(
+            session_id="s",
+            cwd=str(stage2_module.EXAMPLE_DIR),
+            transcript_path="/tmp/s.jsonl",
+            result="ok",
+            num_turns=1,
+        )
+    )
+    fake_flow = Mock()
+    fake_flow.run = Mock(return_value=fake_handle)
+    monkeypatch.setattr(stage2_module, "audit_company", fake_flow)
+
+    stage2_module.run_workflow()
+
+    fake_flow.run.assert_called_once_with(stack=None)
+
+
+def test_stage2_required_result_text_surfaces_cache_diagnostics(
+    stage2_module,
+) -> None:
+    """The empty-result error should name the cached session so re-runs are obvious."""
+    empty = stage2_module.ClaudeAgentResult(
+        session_id="746c3a14-stale-cache",
+        cwd="/tmp",
+        transcript_path="/tmp/t.jsonl",
+        result=None,
+        stop_reason="end_turn",
+        num_turns=14,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        stage2_module._required_result_text(empty, domain="insurance")
+
+    message = str(exc_info.value)
+    assert "insurance checkpoint returned no result text" in message
+    assert "session_id='746c3a14-stale-cache'" in message
+    assert "stop_reason='end_turn'" in message
+    assert "num_turns=14" in message
+    assert "--no-cache" in message
+
+
 def test_stage2_run_workflow_can_opt_into_runtime_secret_environment(
     monkeypatch,
     stage2_module,
