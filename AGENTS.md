@@ -125,7 +125,7 @@ Kitaru collects anonymous usage analytics for opted-in users. When adding new fe
 
 ## Commit & Pull Request Guidelines
 
-Use short, imperative subjects (for example: `Add ...`, `Update ...`, `Create ...`). Keep commit titles concise (about 50 chars), and explain the why in the body when needed.
+Use short, imperative subjects (for example: `Add ...`, `Update ...`, `Create ...`). Keep commit titles concise (about 50 chars), and explain any important or useful implementation details (esp those relating to 'why' choices were made) in the commit body message.
 
 For pull requests, use a clear human-readable title and include:
 - what changed
