@@ -264,6 +264,9 @@ async def run_agent_turn(
     if final.is_error:
         raise RuntimeError(_format_result_error(final, stderr_lines))
 
+    if not (final.result and final.result.strip()):
+        raise RuntimeError(_format_empty_result_error(final, stderr_lines))
+
     transcript_path = resolve_claude_transcript_path(
         final.session_id,
         cwd=resolved_cwd,
@@ -376,6 +379,24 @@ def _format_transport_error(exc: Exception, stderr_lines: list[str]) -> str:
     """Format a transport/process failure with any collected stderr context."""
     return _append_stderr(
         f"Claude Agent SDK transport failed: {exc}",
+        stderr_lines,
+    )
+
+
+def _format_empty_result_error(
+    final: ResultMessage,
+    stderr_lines: list[str],
+) -> str:
+    """Format a completed-but-empty-text turn so callers see why Claude stopped."""
+    parts: list[str] = []
+    if final.stop_reason is not None:
+        parts.append(f"stop_reason={final.stop_reason!r}")
+    if final.subtype is not None:
+        parts.append(f"subtype={final.subtype!r}")
+    parts.append(f"num_turns={final.num_turns}")
+    context = ", ".join(parts)
+    return _append_stderr(
+        f"Claude Agent SDK turn finished without producing result text ({context})",
         stderr_lines,
     )
 
