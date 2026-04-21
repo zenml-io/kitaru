@@ -9,7 +9,10 @@ from cyclopts import Parameter
 
 from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
 from kitaru._flow_loading import _load_deployable_flow_target
-from kitaru._interface_deployments import validate_deployment_selector
+from kitaru._interface_deployments import (
+    build_deployment_deploy_kwargs,
+    validate_deployment_selector,
+)
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru._interface_executions import (
     build_started_execution_payload,
@@ -132,17 +135,6 @@ def _selector_kind(*, version: int | None, tag: str | None) -> str:
     return "tag"
 
 
-def _validate_deployment_input_keys(inputs: Mapping[str, Any]) -> None:
-    """Reject flow input keys that collide with deployment-control kwargs."""
-    reserved_keys = {"cache", "image", "retries", "stack", "tags"}
-    collisions = reserved_keys & set(inputs)
-    if collisions:
-        raise ValueError(
-            "`--input` contains reserved deployment option key(s): "
-            + ", ".join(sorted(collisions))
-        )
-
-
 def _build_deploy_kwargs(
     *,
     stack: str | None,
@@ -152,15 +144,14 @@ def _build_deploy_kwargs(
     inputs: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build keyword arguments for `flow.deploy(...)` without noisy Nones."""
-    _validate_deployment_input_keys(inputs)
-    deploy_kwargs: dict[str, Any] = {**dict(inputs), "tags": dict(tags)}
-    if stack is not None:
-        deploy_kwargs["stack"] = stack
-    if cache is not None:
-        deploy_kwargs["cache"] = cache
-    if retries is not None:
-        deploy_kwargs["retries"] = retries
-    return deploy_kwargs
+    return build_deployment_deploy_kwargs(
+        stack=stack,
+        cache=cache,
+        retries=retries,
+        tags=tags,
+        inputs=inputs,
+        input_label="`--input`",
+    )
 
 
 def _started_deployment_payload(
@@ -244,20 +235,18 @@ def build(
 
     def _build_deployment() -> Any:
         inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
-        _validate_deployment_input_keys(inputs)
+        deploy_kwargs = _build_deploy_kwargs(
+            stack=stack,
+            cache=cache,
+            retries=retries,
+            tags={},
+            inputs=inputs,
+        )
         flow_target = _load_deployable_flow_target(
             target,
             module_name_prefix="kitaru_cli_deploy_",
         )
-        deployment = flow_target.deploy(
-            **_build_deploy_kwargs(
-                stack=stack,
-                cache=cache,
-                retries=retries,
-                tags={},
-                inputs=inputs,
-            )
-        )
+        deployment = flow_target.deploy(**deploy_kwargs)
         track(
             AnalyticsEvent.DEPLOYMENT_BUILT,
             {"command": command, "has_input": bool(inputs)},
@@ -308,7 +297,6 @@ def deploy(
 
     def _deploy_flow() -> Any:
         inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
-        _validate_deployment_input_keys(inputs)
         normalized_tag = validate_deployment_selector(
             tag=tag,
             require_one=True,
@@ -320,19 +308,18 @@ def deploy(
             if normalized_tag == DEFAULT_DEPLOYMENT_TAG
             else exclusive
         }
+        deploy_kwargs = _build_deploy_kwargs(
+            stack=stack,
+            cache=cache,
+            retries=retries,
+            tags=resolved_tags,
+            inputs=inputs,
+        )
         flow_target = _load_deployable_flow_target(
             target,
             module_name_prefix="kitaru_cli_deploy_",
         )
-        deployment = flow_target.deploy(
-            **_build_deploy_kwargs(
-                stack=stack,
-                cache=cache,
-                retries=retries,
-                tags=resolved_tags,
-                inputs=inputs,
-            )
-        )
+        deployment = flow_target.deploy(**deploy_kwargs)
         track(
             AnalyticsEvent.DEPLOYMENT_DEPLOYED,
             {

@@ -19,7 +19,16 @@ import kitaru._interface_stacks as stack_interface
 import kitaru.client as client_api
 import kitaru.inspection as inspection
 import kitaru.secrets as secrets_api
+from kitaru._client._deployments import (
+    DEFAULT_DEPLOYMENT_TAG,
+    resolve_deployment_exclusive,
+)
 from kitaru._config import _stacks as stack_ops
+from kitaru._flow_loading import _load_deployable_flow_target
+from kitaru._interface_deployments import (
+    build_deployment_deploy_kwargs,
+    validate_deployment_selector,
+)
 from kitaru._interface_errors import run_with_mcp_error_boundary
 from kitaru._local_server import (
     start_or_connect_local_server,
@@ -189,6 +198,182 @@ def kitaru_executions_run(
         )
 
     return run_with_mcp_error_boundary(_start_execution)
+
+
+def _validate_mcp_inputs_object(
+    inputs: dict[str, Any] | None,
+    *,
+    label: str = "`inputs`",
+) -> dict[str, Any]:
+    """Return a concrete inputs mapping for MCP tools."""
+    if inputs is None:
+        return {}
+    if not isinstance(inputs, dict):
+        raise ValueError(f"{label} must be an object when provided.")
+    return inputs
+
+
+@tracked_mcp_tool
+def deploy_flow(
+    target: str,
+    inputs: dict[str, Any] | None = None,
+    tag: str = DEFAULT_DEPLOYMENT_TAG,
+    exclusive: bool = False,
+    stack: str | None = None,
+    cache: bool | None = None,
+    retries: int | None = None,
+) -> dict[str, Any]:
+    """Deploy a new flow version from a `<module_or_file>:<flow_name>` target."""
+
+    def _deploy() -> dict[str, Any]:
+        flow_inputs = _validate_mcp_inputs_object(inputs)
+        _, normalized_tag = validate_deployment_selector(
+            tag=tag,
+            require_one=True,
+        )
+        if normalized_tag is None:
+            raise ValueError("Deployment tag selector could not be resolved.")
+
+        resolved_tags = {
+            normalized_tag: resolve_deployment_exclusive(normalized_tag, exclusive)
+        }
+        deploy_kwargs = build_deployment_deploy_kwargs(
+            stack=stack,
+            cache=cache,
+            retries=retries,
+            tags=resolved_tags,
+            inputs=flow_inputs,
+        )
+        flow_target = _load_deployable_flow_target(
+            target,
+            module_name_prefix="_kitaru_mcp_deploy_target_",
+        )
+        deployment = flow_target.deploy(**deploy_kwargs)
+        return inspection.serialize_deployment(deployment)
+
+    return run_with_mcp_error_boundary(_deploy)
+
+
+@tracked_mcp_tool
+def invoke_flow(
+    flow: str,
+    version: int | None = None,
+    tag: str | None = None,
+    inputs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Invoke a deployed flow snapshot by version or tag."""
+
+    def _invoke() -> dict[str, Any]:
+        flow_inputs = _validate_mcp_inputs_object(inputs)
+        resolved_version, resolved_tag = validate_deployment_selector(
+            version=version,
+            tag=tag,
+            default_tag=DEFAULT_DEPLOYMENT_TAG,
+        )
+        client = client_api.KitaruClient()
+        handle = client.deployments.invoke(
+            flow=flow,
+            version=resolved_version,
+            tag=resolved_tag,
+            inputs=flow_inputs,
+        )
+        exec_id = execution_interface.flow_handle_exec_id(handle)
+        details = execution_interface.resolve_started_execution_details(
+            exec_id=exec_id,
+            client=client,
+        )
+        payload = execution_interface.build_started_execution_payload(
+            target=flow,
+            details=details,
+        )
+        payload.pop("target", None)
+        payload["flow"] = flow
+        payload["selector"] = {"version": resolved_version, "tag": resolved_tag}
+        return payload
+
+    return run_with_mcp_error_boundary(_invoke)
+
+
+@tracked_mcp_tool
+def list_flow_deployments(flow: str | None = None) -> list[dict[str, Any]]:
+    """List flow deployments, optionally filtered to one flow."""
+    return run_with_mcp_error_boundary(
+        lambda: [
+            inspection.serialize_deployment(deployment)
+            for deployment in client_api.KitaruClient().deployments.list(flow=flow)
+        ]
+    )
+
+
+@tracked_mcp_tool
+def get_flow_deployment(
+    flow: str,
+    version: int | None = None,
+    tag: str | None = None,
+) -> dict[str, Any]:
+    """Get one flow deployment by version or tag."""
+
+    def _get() -> dict[str, Any]:
+        resolved_version, resolved_tag = validate_deployment_selector(
+            version=version,
+            tag=tag,
+            default_tag=DEFAULT_DEPLOYMENT_TAG,
+        )
+        deployment = client_api.KitaruClient().deployments.get(
+            flow=flow,
+            version=resolved_version,
+            tag=resolved_tag,
+        )
+        return inspection.serialize_deployment(deployment)
+
+    return run_with_mcp_error_boundary(_get)
+
+
+@tracked_mcp_tool
+def delete_flow_deployment(flow: str, version: int) -> dict[str, Any]:
+    """Delete one deployment version when no exclusive tag protects it."""
+
+    def _delete() -> dict[str, Any]:
+        client_api.KitaruClient().deployments.delete(flow=flow, version=version)
+        return {"flow": flow, "version": version, "deleted": True}
+
+    return run_with_mcp_error_boundary(_delete)
+
+
+@tracked_mcp_tool
+def tag_flow_deployment(
+    flow: str,
+    version: int,
+    tag: str,
+    exclusive: bool = False,
+) -> dict[str, Any]:
+    """Attach a public tag to one deployment version."""
+
+    def _tag() -> dict[str, Any]:
+        deployment = client_api.KitaruClient().deployments.tag(
+            flow=flow,
+            version=version,
+            tag=tag,
+            exclusive=exclusive,
+        )
+        return inspection.serialize_deployment(deployment)
+
+    return run_with_mcp_error_boundary(_tag)
+
+
+@tracked_mcp_tool
+def untag_flow_deployment(flow: str, version: int, tag: str) -> dict[str, Any]:
+    """Remove a public tag from one deployment version."""
+
+    def _untag() -> dict[str, Any]:
+        deployment = client_api.KitaruClient().deployments.untag(
+            flow=flow,
+            version=version,
+            tag=tag,
+        )
+        return inspection.serialize_deployment(deployment)
+
+    return run_with_mcp_error_boundary(_untag)
 
 
 @tracked_mcp_tool

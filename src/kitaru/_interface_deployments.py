@@ -23,6 +23,10 @@ if TYPE_CHECKING:
     from kitaru.client import KitaruClient
     from kitaru.flow import FlowHandle
 
+DEPLOYMENT_CONTROL_INPUT_KEYS = frozenset(
+    {"cache", "image", "retries", "stack", "tags"}
+)
+
 _KNOWN_DEPLOYMENTS: set[tuple[str, int]] = set()
 
 
@@ -97,6 +101,41 @@ def validate_remove_deployment_tag(tag: str) -> str:
             "The reserved `default` deployment tag cannot be removed."
         )
     return normalized_tag
+
+
+def validate_deployment_input_keys(
+    inputs: Mapping[str, Any],
+    *,
+    input_label: str = "`inputs`",
+) -> None:
+    """Reject flow input keys that collide with deployment-control kwargs."""
+    collisions = DEPLOYMENT_CONTROL_INPUT_KEYS & set(inputs)
+    if collisions:
+        raise ValueError(
+            f"{input_label} contains reserved deployment option key(s): "
+            + ", ".join(sorted(collisions))
+        )
+
+
+def build_deployment_deploy_kwargs(
+    *,
+    stack: str | None,
+    cache: bool | None,
+    retries: int | None,
+    tags: Mapping[str, bool],
+    inputs: Mapping[str, Any],
+    input_label: str = "`inputs`",
+) -> dict[str, Any]:
+    """Build keyword arguments for ``flow.deploy(...)`` without noisy Nones."""
+    validate_deployment_input_keys(inputs, input_label=input_label)
+    deploy_kwargs: dict[str, Any] = {**dict(inputs), "tags": dict(tags)}
+    if stack is not None:
+        deploy_kwargs["stack"] = stack
+    if cache is not None:
+        deploy_kwargs["cache"] = cache
+    if retries is not None:
+        deploy_kwargs["retries"] = retries
+    return deploy_kwargs
 
 
 def warn_if_deployment_drifted(
@@ -206,10 +245,13 @@ class Deployment:
 
 
 __all__ = [
+    "DEPLOYMENT_CONTROL_INPUT_KEYS",
     "Deployment",
+    "build_deployment_deploy_kwargs",
     "deployment_tags_for_create",
     "is_deployment_known",
     "mark_deployment_known",
+    "validate_deployment_input_keys",
     "validate_deployment_selector",
     "validate_remove_deployment_tag",
     "warn_if_deployment_drifted",
