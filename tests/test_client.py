@@ -355,7 +355,7 @@ def test_deployments_get_validates_version_or_tag_selector() -> None:
 
     with pytest.raises(KitaruUsageError, match="Exactly one"):
         client.deployments.get(flow="research_flow")
-    with pytest.raises(KitaruUsageError, match="Exactly one"):
+    with pytest.raises(KitaruUsageError, match="mutually exclusive"):
         client.deployments.get(flow="research_flow", version=1, tag="stable")
     with pytest.raises(LookupError, match="No deployment"):
         client.deployments.get(flow="research_flow", version=99)
@@ -406,7 +406,7 @@ def test_deployments_delete_blocks_exclusive_tags_before_backend_delete() -> Non
 
         client = KitaruClient()
         with pytest.raises(KitaruStateError, match="default"):
-            client.deployments._delete(flow="research_flow", version=1)
+            client.deployments.delete(flow="research_flow", version=1)
 
     client_mock.delete_snapshot.assert_not_called()
 
@@ -438,7 +438,7 @@ def test_deployments_create_retries_duplicate_name_by_reallocating_version() -> 
         ]
 
         client = KitaruClient()
-        deployment = client.deployments._create(
+        deployment = client.deployments.create(
             flow="research_flow",
             source_snapshot=source_snapshot,
             tags={"default": True},
@@ -453,6 +453,36 @@ def test_deployments_create_retries_duplicate_name_by_reallocating_version() -> 
     assert client_mock.update_snapshot.call_args_list[1].kwargs["name"] == (
         "kitaru::research_flow::v3"
     )
+
+
+def test_deployments_create_auto_adds_default_tag_on_first_deploy() -> None:
+    source_snapshot = _DummySnapshot(name="temporary-source")
+    created_v1 = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("default", exclusive=True)],
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[])
+        client_mock.update_snapshot.return_value = created_v1
+
+        client = KitaruClient()
+        deployment = client.deployments.create(
+            flow="research_flow",
+            source_snapshot=source_snapshot,
+        )
+
+    assert deployment.version == 1
+    assert deployment.tags == {"default": True}
+    add_tags = client_mock.update_snapshot.call_args.kwargs["add_tags"]
+    assert deployment_public_tag("default", exclusive=True) in add_tags
 
 
 def test_deployments_create_moves_exclusive_tags_from_previous_versions() -> None:
@@ -495,7 +525,7 @@ def test_deployments_create_moves_exclusive_tags_from_previous_versions() -> Non
         client_mock.update_snapshot.side_effect = update_snapshot
 
         client = KitaruClient()
-        deployment = client.deployments._create(
+        deployment = client.deployments.create(
             flow="research_flow",
             source_snapshot=source_snapshot,
             tags={"stable": True},
@@ -543,7 +573,7 @@ def test_deployments_tag_default_is_exclusive_and_untag_rejects_default() -> Non
         client_mock.update_snapshot.side_effect = update_snapshot
 
         client = KitaruClient()
-        tagged = client.deployments._tag(
+        tagged = client.deployments.tag(
             flow="research_flow",
             version=2,
             tag="default",
@@ -551,7 +581,7 @@ def test_deployments_tag_default_is_exclusive_and_untag_rejects_default() -> Non
         )
 
         with pytest.raises(KitaruUsageError, match="cannot be removed"):
-            client.deployments._untag(flow="research_flow", version=2, tag="default")
+            client.deployments.untag(flow="research_flow", version=2, tag="default")
 
     assert tagged.version == 2
     assert tagged.tags["default"] is True

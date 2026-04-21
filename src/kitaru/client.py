@@ -37,7 +37,6 @@ from kitaru._client._deployments import (
     deployment_native_tags,
     deployment_public_tag,
     deployment_snapshot_marker_tag,
-    is_default_deployment_tag,
     map_deployment_snapshot,
     next_deployment_version,
     resolve_deployment_exclusive,
@@ -95,9 +94,11 @@ from kitaru._client._models import (
 )
 from kitaru._interface_deployments import (
     Deployment,
+    deployment_tags_for_create,
     is_deployment_known,
     mark_deployment_known,
     validate_deployment_selector,
+    validate_remove_deployment_tag,
     warn_if_deployment_drifted,
 )
 from kitaru._source_aliases import (
@@ -1246,13 +1247,13 @@ class _DeploymentsAPI:
         tag: str | None = None,
     ) -> DeploymentRecord:
         """Resolve a raw deployment record by exact version or tag selector."""
-        if (version is None) == (tag is None):
-            raise KitaruUsageError("Exactly one of `version` or `tag` is required.")
+        version, tag = validate_deployment_selector(
+            version=version, tag=tag, require_one=True
+        )
 
         deployments = self._list_records(flow=flow)
 
         if version is not None:
-            validate_deployment_version(version)
             for deployment in deployments:
                 if deployment.version == version:
                     return deployment
@@ -1261,21 +1262,16 @@ class _DeploymentsAPI:
             )
 
         assert tag is not None
-        normalized_tag = validate_deployment_tag(tag)
-        matches = [
-            deployment
-            for deployment in deployments
-            if normalized_tag in deployment.tags
-        ]
+        matches = [deployment for deployment in deployments if tag in deployment.tags]
         if not matches:
             raise LookupError(
-                f"No deployment found for flow {flow!r} with tag {normalized_tag!r}."
+                f"No deployment found for flow {flow!r} with tag {tag!r}."
             )
         if len(matches) == 1:
             return matches[0]
 
         raise KitaruStateError(
-            f"Deployment tag {normalized_tag!r} is ambiguous for flow {flow!r}; "
+            f"Deployment tag {tag!r} is ambiguous for flow {flow!r}; "
             f"matched versions: {', '.join(str(match.version) for match in matches)}."
         )
 
@@ -1302,9 +1298,9 @@ class _DeploymentsAPI:
         """Invoke a deployment by version or tag and return a flow handle."""
         from kitaru.flow import FlowHandle
 
-        version, tag = validate_deployment_selector(version=version, tag=tag)
-        if version is None and tag is None:
-            raise KitaruUsageError("Exactly one of `version` or `tag` is required.")
+        version, tag = validate_deployment_selector(
+            version=version, tag=tag, require_one=True
+        )
 
         known_before = (
             is_deployment_known(flow, version) if version is not None else True
@@ -1370,32 +1366,16 @@ class _DeploymentsAPI:
         # effort rather than atomic with the snapshot rename. If a concurrent
         # writer races here, the normal ambiguous-tag guard in `get(...)` still
         # prevents silently selecting the wrong deployment.
-        for tag in exclusive_tags:
-            for deployment in previous_deployments:
-                existing_exclusive = deployment.tags.get(tag)
-                if existing_exclusive is None:
-                    continue
-                self._update_snapshot_tags(
-                    deployment,
-                    remove_tags=[
-                        deployment_public_tag(
-                            tag,
-                            exclusive=existing_exclusive,
-                        )
-                    ],
-                )
+        for deployment in previous_deployments:
+            remove_tags = [
+                deployment_public_tag(tag, exclusive=deployment.tags[tag])
+                for tag in exclusive_tags
+                if tag in deployment.tags
+            ]
+            if remove_tags:
+                self._update_snapshot_tags(deployment, remove_tags=remove_tags)
 
     def create(
-        self,
-        *,
-        flow: str,
-        source_snapshot: Any,
-        tags: Mapping[str, bool] | None = None,
-    ) -> Deployment:
-        """Create a versioned deployment from an existing source snapshot."""
-        return self._create(flow=flow, source_snapshot=source_snapshot, tags=tags)
-
-    def _create(
         self,
         *,
         flow: str,
@@ -1411,13 +1391,17 @@ class _DeploymentsAPI:
         for _ in range(attempts):
             snapshots = self._list_snapshots()
             version = next_deployment_version(snapshots, flow=flow)
+            resolved_tags = deployment_tags_for_create(
+                is_first_deploy=version == 1,
+                tags=tags,
+            )
             snapshot_name = build_deployment_snapshot_name(flow, version)
 
             try:
                 created = self._name_source_snapshot(
                     source_snapshot=source_snapshot,
                     name=snapshot_name,
-                    tags=tags,
+                    tags=resolved_tags,
                 )
             except EntityExistsError as exc:
                 last_error = exc
@@ -1447,11 +1431,7 @@ class _DeploymentsAPI:
 
     def delete(self, *, flow: str, version: int) -> None:
         """Delete one deployment version if no exclusive tag protects it."""
-        self._delete(flow=flow, version=version)
-
-    def _delete(self, *, flow: str, version: int) -> None:
-        """Delete one deployment version if it is not protected by exclusive tags."""
-        deployment = self._get_record(flow=flow, version=version)
+        deployment = self._resolve_record(flow=flow, version=version)
         exclusive_tags = sorted(
             tag for tag, exclusive in deployment.tags.items() if exclusive
         )
@@ -1464,22 +1444,6 @@ class _DeploymentsAPI:
         self._delete_snapshot(deployment)
 
     def tag(
-        self,
-        *,
-        flow: str,
-        version: int,
-        tag: str,
-        exclusive: bool = False,
-    ) -> Deployment:
-        """Attach a public deployment tag to one deployment version."""
-        return self._tag(
-            flow=flow,
-            version=version,
-            tag=tag,
-            exclusive=exclusive,
-        )
-
-    def _tag(
         self,
         *,
         flow: str,
@@ -1533,27 +1497,11 @@ class _DeploymentsAPI:
         )
         return self.get(flow=flow, version=version)
 
-    def _get_record(self, *, flow: str, version: int) -> DeploymentRecord:
-        """Get a raw deployment record by exact version."""
-        validate_deployment_version(version)
-        for deployment in self._list_records(flow=flow):
-            if deployment.version == version:
-                return deployment
-        raise LookupError(f"No deployment found for flow {flow!r} version {version}.")
-
     def untag(self, *, flow: str, version: int, tag: str) -> Deployment:
         """Remove a public deployment tag from one deployment version."""
-        return self._untag(flow=flow, version=version, tag=tag)
+        normalized_tag = validate_remove_deployment_tag(tag)
 
-    def _untag(self, *, flow: str, version: int, tag: str) -> Deployment:
-        """Remove a public deployment tag from one deployment version."""
-        normalized_tag = validate_deployment_tag(tag)
-        if is_default_deployment_tag(normalized_tag):
-            raise KitaruUsageError(
-                "The reserved `default` deployment tag cannot be removed."
-            )
-
-        deployment = self._get_record(flow=flow, version=version)
+        deployment = self._resolve_record(flow=flow, version=version)
         existing_exclusive = deployment.tags.get(normalized_tag)
         if existing_exclusive is None:
             mark_deployment_known(deployment)

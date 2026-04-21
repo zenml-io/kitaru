@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from kitaru._client._deployments import (
+    DEFAULT_DEPLOYMENT_TAG,
     is_default_deployment_tag,
     resolve_deployment_exclusive,
     validate_deployment_flow,
@@ -40,22 +42,38 @@ def is_deployment_known(flow: str, version: int) -> bool:
 
 
 def validate_deployment_selector(
-    *, version: int | None = None, tag: str | None = None
+    *,
+    version: int | None = None,
+    tag: str | None = None,
+    default_tag: str | None = None,
+    require_one: bool = False,
 ) -> tuple[int | None, str | None]:
-    """Validate mutually exclusive deployment selectors."""
+    """Validate mutually exclusive deployment selectors.
+
+    When both selectors are None, ``default_tag`` (if given) is used as the
+    resolved tag. ``require_one`` raises if neither selector resolves.
+    """
     if version is not None and tag is not None:
         raise KitaruUsageError("`version` and `tag` are mutually exclusive.")
     normalized_version = (
         validate_deployment_version(version) if version is not None else None
     )
     normalized_tag = validate_deployment_tag(tag) if tag is not None else None
+    if (
+        normalized_version is None
+        and normalized_tag is None
+        and default_tag is not None
+    ):
+        normalized_tag = validate_deployment_tag(default_tag)
+    if require_one and normalized_version is None and normalized_tag is None:
+        raise KitaruUsageError("Exactly one of `version` or `tag` is required.")
     return normalized_version, normalized_tag
 
 
 def deployment_tags_for_create(
     *,
-    existing_count: int,
-    tags: dict[str, bool] | None = None,
+    is_first_deploy: bool,
+    tags: Mapping[str, bool] | None = None,
 ) -> dict[str, bool]:
     """Return normalized deployment tags, adding first-deploy default if needed."""
     normalized: dict[str, bool] = {}
@@ -66,8 +84,8 @@ def deployment_tags_for_create(
             exclusive,
         )
 
-    if existing_count == 0:
-        normalized["default"] = True
+    if is_first_deploy:
+        normalized[DEFAULT_DEPLOYMENT_TAG] = True
     return normalized
 
 

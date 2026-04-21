@@ -72,6 +72,7 @@ class TestPublicExports:
 
     def test_all_exports_match(self) -> None:
         expected = {
+            "Deployment",
             "FailureOrigin",
             "FlowHandle",
             "ImageSettings",
@@ -236,7 +237,8 @@ class TestPlaceholderBehavior:
     def test_flow_returns_wrapper_with_run(self) -> None:
         wrapped = kitaru.flow(lambda: None)
         assert hasattr(wrapped, "run")
-        assert not hasattr(wrapped, "deploy")
+        assert hasattr(wrapped, "deploy")
+        assert hasattr(wrapped, "invoke")
         assert not hasattr(wrapped, "start")
 
     def test_checkpoint_returns_callable_with_submit(self) -> None:

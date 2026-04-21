@@ -19,7 +19,7 @@ _DEPLOYMENT_PUBLIC_TAG_PREFIX = f"{_DEPLOYMENT_NAMESPACE_PREFIX}tag:"
 _DEPLOYMENT_PUBLIC_TAG_EXCLUSIVE_SUFFIX = ":exclusive"
 _DEPLOYMENT_PUBLIC_TAG_SHARED_SUFFIX = ":shared"
 
-_DEFAULT_DEPLOYMENT_TAG = "default"
+DEFAULT_DEPLOYMENT_TAG = "default"
 
 
 @dataclass(frozen=True)
@@ -59,12 +59,12 @@ def validate_deployment_version(version: int) -> int:
 
 def resolve_deployment_exclusive(tag: str, exclusive: bool) -> bool:
     """Return the effective exclusivity, forcing ``default`` to always be exclusive."""
-    return True if tag == _DEFAULT_DEPLOYMENT_TAG else bool(exclusive)
+    return True if tag == DEFAULT_DEPLOYMENT_TAG else bool(exclusive)
 
 
 def is_default_deployment_tag(tag: str) -> bool:
     """Return whether ``tag`` is the reserved default deployment tag."""
-    return tag == _DEFAULT_DEPLOYMENT_TAG
+    return tag == DEFAULT_DEPLOYMENT_TAG
 
 
 def build_deployment_snapshot_name(flow: str, version: int) -> str:
@@ -311,6 +311,7 @@ def map_deployment_snapshot(snapshot: Any) -> Deployment | None:
 
 
 __all__ = [
+    "DEFAULT_DEPLOYMENT_TAG",
     "DeploymentSnapshotName",
     "build_deployment_snapshot_name",
     "deployment_native_tags",

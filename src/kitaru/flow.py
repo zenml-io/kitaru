@@ -28,11 +28,8 @@ from zenml.models import PipelineRunResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
-from kitaru._interface_deployments import (
-    Deployment,
-    deployment_tags_for_create,
-    validate_deployment_selector,
-)
+from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
+from kitaru._interface_deployments import Deployment, validate_deployment_selector
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
     build_pipeline_source_alias,
@@ -811,6 +808,15 @@ class _FlowDefinition:
             ),
         )
 
+    def _deployments_api_and_flow_name(self) -> tuple[Any, str]:
+        """Return the client deployments API and this flow's registration name."""
+        from kitaru.client import KitaruClient
+
+        return (
+            KitaruClient().deployments,
+            build_pipeline_registration_name(callable_name(self._func)),
+        )
+
     def deploy(
         self,
         *args: Any,
@@ -828,8 +834,6 @@ class _FlowDefinition:
         snapshot. Later invocations can override those values by passing flow
         inputs to ``invoke(...)``.
         """
-        from kitaru.client import KitaruClient
-
         resolved_execution = resolve_execution_config(
             decorator_overrides=self._decorator_config,
             invocation_overrides=_build_execution_overrides(
@@ -846,13 +850,7 @@ class _FlowDefinition:
                 transport_image=transport_image,
             )
         )
-        client = KitaruClient()
-        flow_name = build_pipeline_registration_name(callable_name(self._func))
-        existing_count = len(client.deployments.list(flow=flow_name))
-        deployment_tags = deployment_tags_for_create(
-            existing_count=existing_count,
-            tags=tags,
-        )
+        deployments_api, flow_name = self._deployments_api_and_flow_name()
         source_name = f"kitaru-source::{flow_name}::{uuid4().hex}"
 
         with _temporary_active_stack(resolved_execution.stack):
@@ -886,18 +884,16 @@ class _FlowDefinition:
                     f"{flow_name!r}: {exc}"
                 ) from exc
 
-        return client.deployments.create(
+        return deployments_api.create(
             flow=flow_name,
             source_snapshot=source_snapshot,
-            tags=deployment_tags,
+            tags=tags,
         )
 
     def deployments(self) -> list[Deployment]:
         """List deployment versions for this flow."""
-        from kitaru.client import KitaruClient
-
-        flow_name = build_pipeline_registration_name(callable_name(self._func))
-        return KitaruClient().deployments.list(flow=flow_name)
+        deployments_api, flow_name = self._deployments_api_and_flow_name()
+        return deployments_api.list(flow=flow_name)
 
     def deployment(
         self,
@@ -906,18 +902,11 @@ class _FlowDefinition:
         tag: str | None = None,
     ) -> Deployment:
         """Get one deployment version by version or tag."""
-        version, tag = validate_deployment_selector(version=version, tag=tag)
-        if version is None and tag is None:
-            tag = "default"
-
-        from kitaru.client import KitaruClient
-
-        flow_name = build_pipeline_registration_name(callable_name(self._func))
-        return KitaruClient().deployments.get(
-            flow=flow_name,
-            version=version,
-            tag=tag,
+        version, tag = validate_deployment_selector(
+            version=version, tag=tag, default_tag=DEFAULT_DEPLOYMENT_TAG
         )
+        deployments_api, flow_name = self._deployments_api_and_flow_name()
+        return deployments_api.get(flow=flow_name, version=version, tag=tag)
 
     def invoke(
         self,
@@ -927,15 +916,11 @@ class _FlowDefinition:
         **flow_inputs: Any,
     ) -> FlowHandle:
         """Invoke a deployed flow snapshot and return an execution handle."""
-        version, tag = validate_deployment_selector(version=version, tag=tag)
-        if version is None and tag is None:
-            tag = "default"
-
-        from kitaru.client import KitaruClient
-
-        client = KitaruClient()
-        flow_name = build_pipeline_registration_name(callable_name(self._func))
-        return client.deployments.invoke(
+        version, tag = validate_deployment_selector(
+            version=version, tag=tag, default_tag=DEFAULT_DEPLOYMENT_TAG
+        )
+        deployments_api, flow_name = self._deployments_api_and_flow_name()
+        return deployments_api.invoke(
             flow=flow_name,
             version=version,
             tag=tag,

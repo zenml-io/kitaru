@@ -245,7 +245,7 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
     assert "enable_cache" not in call_kwargs.kwargs
 
 
-def test_flow_deploy_creates_snapshot_and_auto_defaults_first_version() -> None:
+def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
     source_snapshot = SimpleNamespace(id=uuid4(), name="temporary-source")
     public_deployment = object()
     configured_pipeline = MagicMock()
@@ -256,7 +256,6 @@ def test_flow_deploy_creates_snapshot_and_auto_defaults_first_version() -> None:
     base_pipeline.with_options.return_value = configured_pipeline
     zenml_decorator = MagicMock(return_value=base_pipeline)
     deployments_api = SimpleNamespace(
-        list=MagicMock(return_value=[]),
         create=MagicMock(return_value=public_deployment),
     )
     client = SimpleNamespace(deployments=deployments_api)
@@ -288,7 +287,7 @@ def test_flow_deploy_creates_snapshot_and_auto_defaults_first_version() -> None:
     deployments_api.create.assert_called_once_with(
         flow="_lambda_",
         source_snapshot=source_snapshot,
-        tags={"canary": False, "default": True},
+        tags={"canary": False},
     )
 
 
