@@ -28,6 +28,9 @@ load_dotenv()
 from prompts import SYSTEM_PROMPT, build_user_prompt  # noqa: E402
 from pydantic_ai import Agent  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
+from rich.console import Console  # noqa: E402
+from rich.markdown import Markdown  # noqa: E402
+from rich.rule import Rule  # noqa: E402
 from tools import fetch_url, investigate, search_news, search_twitter  # noqa: E402
 
 from kitaru import ImageSettings, checkpoint, flow, memory  # noqa: E402
@@ -113,12 +116,14 @@ def publish_report(report_text: str) -> Annotated[str, "final_report"]:
     first-class ``final_report`` artifact on the flow, so readers can pull up
     one run and see its summary without scrolling through every tool call.
     """
-    print()
-    print("=" * 72)
-    print("News scout report")
-    print("=" * 72)
-    print(report_text)
-    print()
+    # Construct Console lazily so TTY detection happens at call time (so
+    # piped/captured output gets plain text, interactive terminals get styled).
+    console = Console()
+    console.print()
+    console.print(Rule("News scout report"))
+    console.print(Markdown(report_text))
+    console.print(Rule())
+    console.print()
     return report_text
 
 
