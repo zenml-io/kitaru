@@ -4,8 +4,10 @@ We don't run the agent itself here — PydanticAI's granular-mode dispatch
 path is already exercised in ``test_phase17_pydantic_ai_adapter.py``.
 These tests focus on the example-specific wiring: that the module imports
 cleanly under the expected env vars, that ``seed_profile`` writes to the
-configured namespace scope, and that ``SCOUT_IMAGE`` collects the env
-vars it's supposed to for remote deploys.
+configured namespace scope, and that ``SCOUT_IMAGE`` carries the right
+non-secret env + pinned requirements (provider API keys travel via
+``secret_environment_from`` on remote stacks only, not via
+``ImageSettings.environment``).
 """
 
 from __future__ import annotations
@@ -80,9 +82,9 @@ def test_scout_module_imports_and_wires_the_agent(scout_module: Any) -> None:
     assert scout_module.SCOUT_IMAGE is not None
 
 
+@pytest.mark.usefixtures("primed_zenml")
 def test_seed_profile_writes_namespace_memory(
     scout_module: Any,
-    primed_zenml: Any,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """``seed_profile`` writes interests to namespace memory and reports them."""
@@ -101,14 +103,36 @@ def test_seed_profile_writes_namespace_memory(
     assert stored == interests
 
 
-def test_image_settings_collect_env_and_requirements(scout_module: Any) -> None:
-    """SCOUT_IMAGE picks up configured env vars for remote container builds."""
+def test_image_settings_carries_non_secret_env_and_pinned_requirements(
+    scout_module: Any,
+) -> None:
+    """SCOUT_IMAGE propagates non-secret config + pinned requirements.
+
+    Provider API keys intentionally do NOT travel via
+    ``ImageSettings.environment`` (that would land them in Docker build
+    metadata, image layers, and logs). Post-refactor they travel through
+    ``secret_environment_from`` at run time on remote stacks only.
+    """
     env = scout_module.SCOUT_IMAGE.environment or {}
 
-    assert env.get("ANTHROPIC_API_KEY") == "test-key"
-    assert env.get("XAI_API_KEY") == "test-xai-key"
+    # Non-secret model overrides are propagated into remote images.
     assert env.get("KITARU_SCOUT_MODEL") == "anthropic:claude-sonnet-4-6"
 
+    # Provider keys MUST NOT be present — refactor moved them to secrets.
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "XAI_API_KEY" not in env
+
+    # The decorator image itself carries no secret reference — the
+    # conditional runtime override attaches it when the active stack is
+    # remote.
+    assert scout_module.SCOUT_IMAGE.secret_environment_from is None
+    assert scout_module.SECRET_NAME == "news-scout-keys"
+
+    # On a local default stack the conditional override stays None so
+    # local runs don't demand that the secret exists.
+    assert scout_module._image_override_for_active_stack() is None
+
     requirements = scout_module.SCOUT_IMAGE.requirements or []
-    assert any("pydantic-ai" in req for req in requirements)
-    assert any("openai" in req for req in requirements)
+    assert any("pydantic-ai-slim" in req for req in requirements)
+    # Pinned below 1.80 for ZenML otel-sdk compatibility — don't regress.
+    assert any("<1.80" in req for req in requirements)
