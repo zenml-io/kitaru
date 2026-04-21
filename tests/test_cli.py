@@ -3531,7 +3531,7 @@ class TestMemoryMaintenance:
 def test_secrets_set_creates_secret(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru secrets set` should create private secrets by default."""
+    """`kitaru secrets set` should create public secrets by default."""
     fake_client = Mock()
     fake_client.create_secret.return_value = SimpleNamespace(
         name="openai-creds",
@@ -3555,11 +3555,77 @@ def test_secrets_set_creates_secret(
     fake_client.create_secret.assert_called_once_with(
         name="openai-creds",
         values={"OPENAI_API_KEY": "sk-123"},
-        private=True,
+        private=False,
     )
     output = capsys.readouterr().out
     assert "Created secret: openai-creds" in output
     assert "Secret ID: secret-id" in output
+
+
+def test_secrets_set_creates_private_secret_when_requested(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets set --private` should opt into private creation."""
+    fake_client = Mock()
+    fake_client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "--private",
+                "--OPENAI_API_KEY=sk-123",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123"},
+        private=True,
+    )
+    assert "Created secret: openai-creds" in capsys.readouterr().out
+
+
+def test_secrets_set_accepts_private_after_assignments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--private` should remain a CLI flag after leading-hyphen assignments."""
+    fake_client = Mock()
+    fake_client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "--OPENAI_API_KEY=sk-123",
+                "--private",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123"},
+        private=True,
+    )
+    assert "Created secret: openai-creds" in capsys.readouterr().out
 
 
 def test_secrets_set_updates_existing_secret(
@@ -3588,6 +3654,11 @@ def test_secrets_set_updates_existing_secret(
         )
 
     assert exc_info.value.code == 0
+    fake_client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123"},
+        private=False,
+    )
     fake_client.get_secret.assert_called_once_with(
         name_id_or_prefix="openai-creds",
         allow_partial_name_match=False,
@@ -3627,7 +3698,7 @@ def test_secrets_set_json_output_accepts_output_after_assignments(
     fake_client.create_secret.return_value = SimpleNamespace(
         name="openai-creds",
         id="secret-id",
-        private=True,
+        private=False,
         values={"OPENAI_API_KEY": object()},
         has_missing_values=False,
         secret_values={"OPENAI_API_KEY": "sk-123"},
@@ -3653,6 +3724,7 @@ def test_secrets_set_json_output_accepts_output_after_assignments(
     assert payload["command"] == "secrets.set"
     assert payload["item"]["name"] == "openai-creds"
     assert payload["item"]["result"] == "created"
+    assert payload["item"]["visibility"] == "public"
 
 
 def test_secrets_show_hides_values_by_default(
@@ -6273,7 +6345,7 @@ def test_secrets_set_json_output_accepts_output_before_assignments(
     fake_client.create_secret.return_value = SimpleNamespace(
         name="openai-creds",
         id="secret-id",
-        private=True,
+        private=False,
         values={"OPENAI_API_KEY": object()},
         has_missing_values=False,
         secret_values={"OPENAI_API_KEY": "sk-123"},
@@ -6299,6 +6371,7 @@ def test_secrets_set_json_output_accepts_output_before_assignments(
     assert payload["command"] == "secrets.set"
     assert payload["item"]["name"] == "openai-creds"
     assert payload["item"]["result"] == "created"
+    assert payload["item"]["visibility"] == "public"
 
 
 def test_status_json_output(capsys: pytest.CaptureFixture[str]) -> None:

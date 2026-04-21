@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Python SDK secret write helpers: `kitaru.create_secret(...)` and `kitaru.delete_secret(...)`.
+- MCP secret creation tool `kitaru_secrets_create` for metadata-only secret creation from MCP clients.
+
+### Changed
+- `kitaru secrets set` now creates public secrets by default. Pass `--private` to create a private secret. Updating an existing secret still only updates values and leaves existing visibility unchanged.
+
 ## [0.5.1] - 2026-04-17
 
 ### Added
