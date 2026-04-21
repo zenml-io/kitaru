@@ -225,7 +225,8 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
 
     pipeline_mock.assert_called_once_with(dynamic=True, name="_lambda_")
     assert hasattr(wrapped, "run")
-    assert not hasattr(wrapped, "deploy")
+    assert hasattr(wrapped, "deploy")
+    assert hasattr(wrapped, "invoke")
     assert not hasattr(wrapped, "start")
     assert isinstance(handle, FlowHandle)
     call_kwargs = base_pipeline.with_options.call_args
@@ -242,6 +243,94 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
     # ZenML's compiler treats any concrete run-level enable_cache as a per-step
     # override that overwrites @checkpoint(cache=...) settings.
     assert "enable_cache" not in call_kwargs.kwargs
+
+
+def test_flow_deploy_creates_snapshot_and_auto_defaults_first_version() -> None:
+    source_snapshot = SimpleNamespace(id=uuid4(), name="temporary-source")
+    public_deployment = object()
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {"x": 1}
+    configured_pipeline._create_snapshot.return_value = source_snapshot
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(
+        list=MagicMock(return_value=[]),
+        create=MagicMock(return_value=public_deployment),
+    )
+    client = SimpleNamespace(deployments=deployments_api)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: x)
+        deployment = wrapped.deploy(1, tags={"canary": False})
+
+    assert deployment is public_deployment
+    configured_pipeline.prepare.assert_called_once_with(1)
+    create_kwargs = configured_pipeline._create_snapshot.call_args.kwargs
+    assert create_kwargs["replace"] is False
+    assert create_kwargs["extra"]["kitaru_deployment"]["stack"] == "prod"
+    schema = create_kwargs["extra"]["kitaru_deployment"]["schema"]
+    assert schema["type"] == "object"
+    assert "x" not in schema.get("required", [])
+    deployments_api.create.assert_called_once_with(
+        flow="_lambda_",
+        source_snapshot=source_snapshot,
+        tags={"canary": False, "default": True},
+    )
+
+
+def test_flow_deployment_and_deployments_delegate_to_client() -> None:
+    listed = [object()]
+    selected = object()
+    deployments_api = SimpleNamespace(
+        list=MagicMock(return_value=listed),
+        get=MagicMock(return_value=selected),
+    )
+    client = SimpleNamespace(deployments=deployments_api)
+
+    with patch("kitaru.client.KitaruClient", return_value=client):
+        wrapped = flow(lambda: None)
+        assert wrapped.deployments() == listed
+        assert wrapped.deployment() is selected
+
+    deployments_api.list.assert_called_once_with(flow="_lambda_")
+    deployments_api.get.assert_called_once_with(
+        flow="_lambda_",
+        version=None,
+        tag="default",
+    )
+
+
+def test_flow_invoke_validates_selectors_and_delegates_to_client() -> None:
+    handle = object()
+    deployments_api = SimpleNamespace(invoke=MagicMock(return_value=handle))
+    client = SimpleNamespace(deployments=deployments_api)
+
+    with patch("kitaru.client.KitaruClient", return_value=client):
+        wrapped = flow(lambda answer=0: answer)
+        with pytest.raises(KitaruUsageError, match="mutually exclusive"):
+            wrapped.invoke(version=1, tag="default")
+        assert wrapped.invoke(version=7, answer=42) is handle
+
+    deployments_api.invoke.assert_called_once_with(
+        flow="_lambda_",
+        version=7,
+        tag=None,
+        inputs={"answer": 42},
+    )
 
 
 def test_build_pipeline_options_omits_enable_cache_when_unset() -> None:

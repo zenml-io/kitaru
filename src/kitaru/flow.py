@@ -6,6 +6,7 @@ function whose execution becomes durable, replayable, and observable.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import sys
 import threading
@@ -15,7 +16,9 @@ from contextlib import contextmanager
 from datetime import datetime
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
+from uuid import uuid4
 
+from pydantic import ConfigDict, create_model
 from zenml.client import Client
 from zenml.config.constants import DOCKER_SETTINGS_KEY
 from zenml.config.docker_settings import DockerSettings
@@ -25,6 +28,11 @@ from zenml.models import PipelineRunResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
+from kitaru._interface_deployments import (
+    Deployment,
+    deployment_tags_for_create,
+    validate_deployment_selector,
+)
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
     build_pipeline_source_alias,
@@ -280,6 +288,66 @@ def _build_execution_overrides(
     if retries is not None:
         values["retries"] = retries
     return KitaruConfig.model_validate(values)
+
+
+def _flow_input_schema(
+    func: Callable[..., Any],
+    *,
+    default_values: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Derive a best-effort JSON schema for SDK deployment inputs."""
+    try:
+        signature = inspect.signature(func)
+        fields: dict[str, tuple[Any, Any]] = {}
+        for name, parameter in signature.parameters.items():
+            if parameter.kind in {
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            }:
+                return None
+            annotation = (
+                Any
+                if parameter.annotation is inspect.Parameter.empty
+                else parameter.annotation
+            )
+            if default_values is not None and name in default_values:
+                default = default_values[name]
+            else:
+                default = (
+                    ...
+                    if parameter.default is inspect.Parameter.empty
+                    else parameter.default
+                )
+            fields[name] = (annotation, default)
+
+        input_model = create_model(
+            f"{build_pipeline_registration_name(callable_name(func))}DeploymentInput",
+            __config__=ConfigDict(arbitrary_types_allowed=True),
+            **cast(Any, fields),
+        )
+        return input_model.model_json_schema()
+    except Exception:
+        logger.debug(
+            "Failed to derive deployment input schema for flow %s.",
+            callable_name(func),
+            exc_info=True,
+        )
+        return None
+
+
+def _deployment_extra_metadata(
+    *,
+    func: Callable[..., Any],
+    stack: str | None,
+    default_values: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build best-effort metadata stored on Kitaru deployment snapshots."""
+    metadata: dict[str, Any] = {
+        "schema": _flow_input_schema(func, default_values=default_values)
+    }
+    if stack:
+        metadata["stack"] = stack
+    return {key: value for key, value in metadata.items() if value is not None}
 
 
 def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
@@ -741,6 +809,137 @@ class _FlowDefinition:
                 cache=cache,
                 retries=retries,
             ),
+        )
+
+    def deploy(
+        self,
+        *args: Any,
+        stack: str | None = None,
+        image: ImageSetting | None = None,
+        cache: bool | None = None,
+        retries: int | None = None,
+        tags: dict[str, bool] | None = None,
+        **kwargs: Any,
+    ) -> Deployment:
+        """Create a versioned deployment snapshot for this flow.
+
+        Positional and keyword flow inputs are accepted as deployment-time
+        defaults when ZenML needs concrete parameters to compile a dynamic
+        snapshot. Later invocations can override those values by passing flow
+        inputs to ``invoke(...)``.
+        """
+        from kitaru.client import KitaruClient
+
+        resolved_execution = resolve_execution_config(
+            decorator_overrides=self._decorator_config,
+            invocation_overrides=_build_execution_overrides(
+                stack=stack,
+                image=image,
+                cache=cache,
+                retries=retries,
+            ),
+        )
+        transport_image, _ = _prepare_model_registry_transport(resolved_execution.image)
+        configured_pipeline = self._pipeline.with_options(
+            **_build_pipeline_options(
+                resolved_execution=resolved_execution,
+                transport_image=transport_image,
+            )
+        )
+        client = KitaruClient()
+        flow_name = build_pipeline_registration_name(callable_name(self._func))
+        existing_count = len(client.deployments.list(flow=flow_name))
+        deployment_tags = deployment_tags_for_create(
+            existing_count=existing_count,
+            tags=tags,
+        )
+        source_name = f"kitaru-source::{flow_name}::{uuid4().hex}"
+
+        with _temporary_active_stack(resolved_execution.stack):
+            try:
+                configured_pipeline.prepare(*args, **kwargs)
+            except (RuntimeError, ValueError) as exc:
+                raise KitaruUsageError(
+                    "Unable to deploy this flow without valid deployment-time "
+                    "input defaults. ZenML currently needs concrete inputs to "
+                    "compile some dynamic flow snapshots; pass representative "
+                    "inputs to flow.deploy(...), then override them when "
+                    "invoking the deployment."
+                ) from exc
+
+            metadata = _deployment_extra_metadata(
+                func=self._func,
+                stack=resolved_execution.stack,
+                default_values=getattr(configured_pipeline, "_parameters", None),
+            )
+            try:
+                source_snapshot = configured_pipeline._create_snapshot(
+                    skip_schedule_registration=True,
+                    name=source_name,
+                    replace=False,
+                    extra={"kitaru_deployment": metadata},
+                    **configured_pipeline._run_args,
+                )
+            except Exception as exc:
+                raise KitaruBackendError(
+                    f"Failed to create deployment source snapshot for flow "
+                    f"{flow_name!r}: {exc}"
+                ) from exc
+
+        return client.deployments.create(
+            flow=flow_name,
+            source_snapshot=source_snapshot,
+            tags=deployment_tags,
+        )
+
+    def deployments(self) -> list[Deployment]:
+        """List deployment versions for this flow."""
+        from kitaru.client import KitaruClient
+
+        flow_name = build_pipeline_registration_name(callable_name(self._func))
+        return KitaruClient().deployments.list(flow=flow_name)
+
+    def deployment(
+        self,
+        *,
+        version: int | None = None,
+        tag: str | None = None,
+    ) -> Deployment:
+        """Get one deployment version by version or tag."""
+        version, tag = validate_deployment_selector(version=version, tag=tag)
+        if version is None and tag is None:
+            tag = "default"
+
+        from kitaru.client import KitaruClient
+
+        flow_name = build_pipeline_registration_name(callable_name(self._func))
+        return KitaruClient().deployments.get(
+            flow=flow_name,
+            version=version,
+            tag=tag,
+        )
+
+    def invoke(
+        self,
+        *,
+        version: int | None = None,
+        tag: str | None = None,
+        **flow_inputs: Any,
+    ) -> FlowHandle:
+        """Invoke a deployed flow snapshot and return an execution handle."""
+        version, tag = validate_deployment_selector(version=version, tag=tag)
+        if version is None and tag is None:
+            tag = "default"
+
+        from kitaru.client import KitaruClient
+
+        client = KitaruClient()
+        flow_name = build_pipeline_registration_name(callable_name(self._func))
+        return client.deployments.invoke(
+            flow=flow_name,
+            version=version,
+            tag=tag,
+            inputs=flow_inputs,
         )
 
     def replay(

@@ -24,6 +24,7 @@ from typing import Any, Protocol, cast, runtime_checkable
 
 from pydantic import ValidationError
 from zenml.client import Client
+from zenml.config.pipeline_run_configuration import PipelineRunConfiguration
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
 from zenml.models import PipelineRunResponse
@@ -83,12 +84,21 @@ from kitaru._client._models import (
     ArtifactRef,
     CheckpointAttempt,
     CheckpointCall,
-    Deployment,
     Execution,
     ExecutionStatus,
     FailureInfo,
     LogEntry,
     PendingWait,
+)
+from kitaru._client._models import (
+    Deployment as DeploymentRecord,
+)
+from kitaru._interface_deployments import (
+    Deployment,
+    is_deployment_known,
+    mark_deployment_known,
+    validate_deployment_selector,
+    warn_if_deployment_drifted,
 )
 from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
@@ -1162,7 +1172,7 @@ class _DeploymentsAPI:
 
     def _update_snapshot_tags(
         self,
-        deployment: Deployment,
+        deployment: DeploymentRecord,
         *,
         add_tags: builtins.list[str] | None = None,
         remove_tags: builtins.list[str] | None = None,
@@ -1180,7 +1190,7 @@ class _DeploymentsAPI:
                 f"Failed to update deployment '{deployment.deployment_id}': {exc}"
             ) from exc
 
-    def _delete_snapshot(self, deployment: Deployment) -> None:
+    def _delete_snapshot(self, deployment: DeploymentRecord) -> None:
         """Delete a snapshot through the backend."""
         try:
             self._client_ref._client().delete_snapshot(
@@ -1209,10 +1219,10 @@ class _DeploymentsAPI:
             add_tags=deployment_native_tags(tags),
         )
 
-    def list(self, *, flow: str) -> builtins.list[Deployment]:
-        """List Kitaru deployment versions for one flow."""
+    def _list_records(self, *, flow: str) -> builtins.list[DeploymentRecord]:
+        """List raw Kitaru deployment records for one flow."""
         normalized_flow = validate_deployment_flow(flow)
-        deployments: builtins.list[Deployment] = []
+        deployments: builtins.list[DeploymentRecord] = []
         for snapshot in self._list_snapshots():
             deployment = map_deployment_snapshot(snapshot)
             if deployment is None or deployment.flow != normalized_flow:
@@ -1220,18 +1230,26 @@ class _DeploymentsAPI:
             deployments.append(deployment)
         return sorted(deployments, key=lambda deployment: deployment.version)
 
-    def get(
+    def _wrap(self, deployment: DeploymentRecord) -> Deployment:
+        """Return an SDK-facing deployment facade."""
+        return Deployment(deployment, self._client_ref)
+
+    def list(self, *, flow: str) -> builtins.list[Deployment]:
+        """List Kitaru deployment versions for one flow."""
+        return [self._wrap(deployment) for deployment in self._list_records(flow=flow)]
+
+    def _resolve_record(
         self,
         *,
         flow: str,
         version: int | None = None,
         tag: str | None = None,
-    ) -> Deployment:
-        """Get a deployment by exact version or tag selector."""
+    ) -> DeploymentRecord:
+        """Resolve a raw deployment record by exact version or tag selector."""
         if (version is None) == (tag is None):
             raise KitaruUsageError("Exactly one of `version` or `tag` is required.")
 
-        deployments = self.list(flow=flow)
+        deployments = self._list_records(flow=flow)
 
         if version is not None:
             validate_deployment_version(version)
@@ -1260,6 +1278,122 @@ class _DeploymentsAPI:
             f"Deployment tag {normalized_tag!r} is ambiguous for flow {flow!r}; "
             f"matched versions: {', '.join(str(match.version) for match in matches)}."
         )
+
+    def get(
+        self,
+        *,
+        flow: str,
+        version: int | None = None,
+        tag: str | None = None,
+    ) -> Deployment:
+        """Get a deployment by exact version or tag selector."""
+        deployment = self._resolve_record(flow=flow, version=version, tag=tag)
+        mark_deployment_known(deployment)
+        return self._wrap(deployment)
+
+    def invoke(
+        self,
+        *,
+        flow: str,
+        version: int | None = None,
+        tag: str | None = None,
+        inputs: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Invoke a deployment by version or tag and return a flow handle."""
+        from kitaru.flow import FlowHandle
+
+        version, tag = validate_deployment_selector(version=version, tag=tag)
+        if version is None and tag is None:
+            raise KitaruUsageError("Exactly one of `version` or `tag` is required.")
+
+        known_before = (
+            is_deployment_known(flow, version) if version is not None else True
+        )
+        deployment = self._resolve_record(flow=flow, version=version, tag=tag)
+        mark_deployment_known(deployment)
+        warn_if_deployment_drifted(
+            deployment,
+            known_before_resolution=known_before,
+        )
+
+        zenml_client = self._client_ref._client()
+        trigger_pipeline = getattr(zenml_client, "trigger_pipeline", None)
+        if not callable(trigger_pipeline):
+            raise KitaruBackendError(
+                "This ZenML backend does not expose snapshot invocation via "
+                "Client.trigger_pipeline(...). Upgrade ZenML or invoke the "
+                "snapshot through a backend-supported route."
+            )
+
+        run_inputs = dict(inputs or {})
+        run_configuration = (
+            PipelineRunConfiguration(parameters=run_inputs) if run_inputs else None
+        )
+        try:
+            run = trigger_pipeline(
+                snapshot_name_or_id=deployment.deployment_id,
+                run_configuration=run_configuration,
+                project=self._client_ref._project,
+                synchronous=False,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                "Failed to invoke deployment "
+                f"{deployment.flow!r} v{deployment.version}: {exc}"
+            ) from exc
+
+        if run is None:
+            raise KitaruBackendError(
+                "Deployment invocation did not produce a pipeline run."
+            )
+        return FlowHandle(run)
+
+    def _enforce_create_exclusive_tags(
+        self,
+        *,
+        target: DeploymentRecord,
+        previous_snapshots: builtins.list[Any],
+    ) -> None:
+        """Remove create-time exclusive tags from older deployment versions."""
+        exclusive_tags = [tag for tag, exclusive in target.tags.items() if exclusive]
+        if not exclusive_tags:
+            return
+
+        previous_deployments = [
+            deployment
+            for snapshot in previous_snapshots
+            if (deployment := map_deployment_snapshot(snapshot)) is not None
+            and deployment.flow == target.flow
+            and deployment.version != target.version
+        ]
+        # This mirrors tag exclusivity after the create call, so it is best
+        # effort rather than atomic with the snapshot rename. If a concurrent
+        # writer races here, the normal ambiguous-tag guard in `get(...)` still
+        # prevents silently selecting the wrong deployment.
+        for tag in exclusive_tags:
+            for deployment in previous_deployments:
+                existing_exclusive = deployment.tags.get(tag)
+                if existing_exclusive is None:
+                    continue
+                self._update_snapshot_tags(
+                    deployment,
+                    remove_tags=[
+                        deployment_public_tag(
+                            tag,
+                            exclusive=existing_exclusive,
+                        )
+                    ],
+                )
+
+    def create(
+        self,
+        *,
+        flow: str,
+        source_snapshot: Any,
+        tags: Mapping[str, bool] | None = None,
+    ) -> Deployment:
+        """Create a versioned deployment from an existing source snapshot."""
+        return self._create(flow=flow, source_snapshot=source_snapshot, tags=tags)
 
     def _create(
         self,
@@ -1299,16 +1433,25 @@ class _DeploymentsAPI:
                     "Backend created a snapshot that does not have a valid "
                     f"Kitaru deployment name: {getattr(created, 'name', None)!r}."
                 )
-            return deployment
+            self._enforce_create_exclusive_tags(
+                target=deployment,
+                previous_snapshots=snapshots,
+            )
+            mark_deployment_known(deployment)
+            return self._wrap(deployment)
 
         raise KitaruBackendError(
             "Failed to allocate a deployment version after duplicate-name "
             f"conflicts for flow {flow!r}: {last_error}"
         )
 
+    def delete(self, *, flow: str, version: int) -> None:
+        """Delete one deployment version if no exclusive tag protects it."""
+        self._delete(flow=flow, version=version)
+
     def _delete(self, *, flow: str, version: int) -> None:
         """Delete one deployment version if it is not protected by exclusive tags."""
-        deployment = self.get(flow=flow, version=version)
+        deployment = self._get_record(flow=flow, version=version)
         exclusive_tags = sorted(
             tag for tag, exclusive in deployment.tags.items() if exclusive
         )
@@ -1319,6 +1462,22 @@ class _DeploymentsAPI:
                 f"{', '.join(exclusive_tags)}."
             )
         self._delete_snapshot(deployment)
+
+    def tag(
+        self,
+        *,
+        flow: str,
+        version: int,
+        tag: str,
+        exclusive: bool = False,
+    ) -> Deployment:
+        """Attach a public deployment tag to one deployment version."""
+        return self._tag(
+            flow=flow,
+            version=version,
+            tag=tag,
+            exclusive=exclusive,
+        )
 
     def _tag(
         self,
@@ -1333,7 +1492,7 @@ class _DeploymentsAPI:
         normalized_tag = validate_deployment_tag(tag)
         effective_exclusive = resolve_deployment_exclusive(normalized_tag, exclusive)
 
-        deployments = self.list(flow=flow)
+        deployments = self._list_records(flow=flow)
         target = next(
             (deployment for deployment in deployments if deployment.version == version),
             None,
@@ -1374,6 +1533,18 @@ class _DeploymentsAPI:
         )
         return self.get(flow=flow, version=version)
 
+    def _get_record(self, *, flow: str, version: int) -> DeploymentRecord:
+        """Get a raw deployment record by exact version."""
+        validate_deployment_version(version)
+        for deployment in self._list_records(flow=flow):
+            if deployment.version == version:
+                return deployment
+        raise LookupError(f"No deployment found for flow {flow!r} version {version}.")
+
+    def untag(self, *, flow: str, version: int, tag: str) -> Deployment:
+        """Remove a public deployment tag from one deployment version."""
+        return self._untag(flow=flow, version=version, tag=tag)
+
     def _untag(self, *, flow: str, version: int, tag: str) -> Deployment:
         """Remove a public deployment tag from one deployment version."""
         normalized_tag = validate_deployment_tag(tag)
@@ -1382,10 +1553,11 @@ class _DeploymentsAPI:
                 "The reserved `default` deployment tag cannot be removed."
             )
 
-        deployment = self.get(flow=flow, version=version)
+        deployment = self._get_record(flow=flow, version=version)
         existing_exclusive = deployment.tags.get(normalized_tag)
         if existing_exclusive is None:
-            return deployment
+            mark_deployment_known(deployment)
+            return self._wrap(deployment)
 
         self._update_snapshot_tags(
             deployment,
