@@ -1,0 +1,221 @@
+---
+/**
+ * Versioned durable memory.
+ * Central kitaru.memory store with versioned entries, shared across 3 runs.
+ */
+---
+
+<figure class="fig">
+  <div class="memory">
+    <div class="memory-head">
+      <span class="tag tag--accent">kitaru.memory</span>
+      <span class="hint">versioned · persists across runs</span>
+    </div>
+    <ul class="entries">
+      <li>
+        <span class="ver">v3</span>
+        <span class="key">preferences.tone</span>
+        <span class="val">"formal, brief"</span>
+        <span class="ts">today · 14:02</span>
+      </li>
+      <li>
+        <span class="ver">v2</span>
+        <span class="key">preferences.tone</span>
+        <span class="val">"casual"</span>
+        <span class="ts">yesterday · 09:18</span>
+      </li>
+      <li>
+        <span class="ver ver--old">v1</span>
+        <span class="key">preferences.tone</span>
+        <span class="val">"neutral"</span>
+        <span class="ts">Mon · 11:47</span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="runs">
+    <svg class="connectors" viewBox="0 0 480 70" aria-hidden="true" preserveAspectRatio="none">
+      <path d="M80 0 L80 30 Q80 50 100 50 L380 50 Q400 50 400 30 L400 0" />
+      <path d="M240 0 L240 50" />
+    </svg>
+    <div class="run">
+      <span class="exec">exec #1</span>
+      <span class="when">Mon</span>
+    </div>
+    <div class="run run--active">
+      <span class="exec">exec #2</span>
+      <span class="when">yesterday</span>
+    </div>
+    <div class="run">
+      <span class="exec">exec #3</span>
+      <span class="when">today</span>
+    </div>
+  </div>
+
+  <div class="contrast">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2 L12 22 M2 12 L22 12" />
+    </svg>
+    <span><strong>Temporal:</strong> workflow variables are scoped to one execution, reconstituted from event history.</span>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans, system-ui);
+  }
+
+  .tag {
+    display: inline-block;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 4px;
+  }
+  .tag--accent {
+    background: var(--color-accent);
+    color: var(--color-surface);
+  }
+
+  .memory {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+    padding: 16px 16px 6px;
+  }
+  .memory-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .hint {
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+
+  .entries { list-style: none; padding: 0; margin: 0; }
+  .entries li {
+    display: grid;
+    grid-template-columns: 38px 1fr auto auto;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--color-border-light);
+    font-size: 12px;
+  }
+  .entries li:last-child { border-bottom: none; }
+  .ver {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-surface);
+    background: var(--color-accent);
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-align: center;
+  }
+  .ver--old {
+    background: var(--color-border-light);
+    color: var(--color-muted);
+  }
+  .key {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+  .val {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    color: var(--color-secondary);
+    padding: 2px 8px;
+    background: var(--color-surface-warm);
+    border-radius: 3px;
+    font-size: 11px;
+  }
+  .ts {
+    font-size: 10.5px;
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+
+  .runs {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    padding-top: 14px;
+  }
+  .connectors {
+    position: absolute;
+    top: -6px;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 34px;
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+  .run {
+    position: relative;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-surface);
+    text-align: center;
+    z-index: 1;
+  }
+  .run--active {
+    border-color: var(--color-accent);
+    background: var(--color-accent-light);
+  }
+  .run .exec {
+    display: block;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .run .when {
+    display: block;
+    font-size: 10.5px;
+    color: var(--color-muted);
+    margin-top: 2px;
+  }
+
+  .contrast {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 4px;
+    padding: 10px 12px;
+    background: var(--color-surface-warm);
+    border-left: 2px solid var(--color-muted);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+  .contrast svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    fill: none;
+    stroke: var(--color-muted);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    opacity: 0.6;
+  }
+  .contrast strong {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+</style>
