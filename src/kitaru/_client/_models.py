@@ -25,6 +25,22 @@ class ExecutionStatus(StrEnum):
 
 
 @dataclass(frozen=True)
+class Deployment:
+    """Public view of a versioned Kitaru deployment snapshot."""
+
+    deployment_id: str
+    flow: str
+    version: int
+    tags: dict[str, bool]
+    commit_sha: str | None
+    commit_dirty: bool | None
+    image_digest: str | None
+    created_at: datetime | None
+    schema: dict[str, Any] | None
+    stack: str | None
+
+
+@dataclass(frozen=True)
 class PendingWait:
     """Public view of an active wait condition."""
 
@@ -176,6 +192,7 @@ __all__ = [
     "ArtifactRef",
     "CheckpointAttempt",
     "CheckpointCall",
+    "Deployment",
     "Execution",
     "ExecutionStatus",
     "FailureInfo",

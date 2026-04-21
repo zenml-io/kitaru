@@ -14,6 +14,12 @@ from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.models import PipelineRunResponse, StepRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 
+from kitaru._client._deployments import (
+    build_deployment_snapshot_name,
+    deployment_public_tag,
+    map_deployment_snapshot,
+    parse_deployment_snapshot_name,
+)
 from kitaru.analytics import AnalyticsEvent
 from kitaru.client import ExecutionStatus, KitaruClient
 from kitaru.config import (
@@ -141,6 +147,27 @@ class _DummyRun:
         return SimpleNamespace(active_wait_condition=self._active_wait_condition)
 
 
+class _DummySnapshot:
+    def __init__(
+        self,
+        *,
+        name: str,
+        snapshot_id: UUID | None = None,
+        tags: list[str] | None = None,
+        created: datetime | None = None,
+        metadata: dict[str, Any] | None = None,
+        stack: str | None = "prod",
+    ) -> None:
+        self.id = snapshot_id or uuid4()
+        self.name = name
+        self.body = SimpleNamespace(created=created)
+        self.resources = SimpleNamespace(
+            tags=[SimpleNamespace(name=tag) for tag in tags or []],
+            stack=SimpleNamespace(name=stack) if stack is not None else None,
+        )
+        self.kitaru_deployment = metadata or {}
+
+
 def _resolved_connection(project: str | None = None) -> ResolvedConnectionConfig:
     return ResolvedConnectionConfig(
         server_url=None,
@@ -209,6 +236,264 @@ def test_client_initializes_namespaces() -> None:
     assert hasattr(client, "executions")
     assert hasattr(client, "artifacts")
     assert hasattr(client, "memories")
+    assert hasattr(client, "deployments")
+
+
+def test_deployment_snapshot_names_build_and_parse() -> None:
+    name = build_deployment_snapshot_name("research_flow", 3)
+
+    assert name == "kitaru::research_flow::v3"
+    assert parse_deployment_snapshot_name(name) is not None
+    assert parse_deployment_snapshot_name(name).flow == "research_flow"  # type: ignore[union-attr]
+    assert parse_deployment_snapshot_name(name).version == 3  # type: ignore[union-attr]
+    assert parse_deployment_snapshot_name("research_flow-v3") is None
+    assert parse_deployment_snapshot_name("kitaru::research_flow::v0") is None
+
+    with pytest.raises(KitaruUsageError, match="cannot contain"):
+        build_deployment_snapshot_name("bad::flow", 1)
+
+
+def test_map_deployment_snapshot_extracts_public_model_fields() -> None:
+    created = datetime(2026, 4, 21, 9, 30, tzinfo=UTC)
+    snapshot = _DummySnapshot(
+        name="kitaru::research_flow::v2",
+        created=created,
+        tags=[
+            "kitaru:deployment",
+            deployment_public_tag("default", exclusive=True),
+            deployment_public_tag("canary", exclusive=False),
+        ],
+        metadata={
+            "commit_sha": "abc123",
+            "commit_dirty": False,
+            "image_digest": "sha256:feed",
+            "schema": {"type": "object"},
+        },
+        stack="serverless-prod",
+    )
+
+    deployment = map_deployment_snapshot(snapshot)
+
+    assert deployment is not None
+    assert deployment.deployment_id == str(snapshot.id)
+    assert deployment.flow == "research_flow"
+    assert deployment.version == 2
+    assert deployment.tags == {"default": True, "canary": False}
+    assert deployment.commit_sha == "abc123"
+    assert deployment.commit_dirty is False
+    assert deployment.image_digest == "sha256:feed"
+    assert deployment.created_at == created
+    assert deployment.schema == {"type": "object"}
+    assert deployment.stack == "serverless-prod"
+
+
+def test_deployments_list_requires_flow_filters_and_sorts_versions() -> None:
+    snapshots = [
+        _DummySnapshot(name="kitaru::research_flow::v3"),
+        _DummySnapshot(name="unrelated"),
+        _DummySnapshot(name="kitaru::other_flow::v1"),
+        _DummySnapshot(name="kitaru::research_flow::v1"),
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=snapshots)
+
+        client = KitaruClient()
+        deployments = client.deployments.list(flow="research_flow")
+
+    assert [deployment.version for deployment in deployments] == [1, 3]
+
+    with pytest.raises(KitaruUsageError, match="flow"):
+        client.deployments.list(flow="")
+
+
+def test_deployments_get_validates_version_or_tag_selector() -> None:
+    snapshots = [
+        _DummySnapshot(
+            name="kitaru::research_flow::v1",
+            tags=[deployment_public_tag("stable", exclusive=True)],
+        ),
+        _DummySnapshot(
+            name="kitaru::research_flow::v2",
+            tags=[deployment_public_tag("canary", exclusive=False)],
+        ),
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=snapshots)
+
+        client = KitaruClient()
+        by_version = client.deployments.get(flow="research_flow", version=2)
+        by_tag = client.deployments.get(flow="research_flow", tag="stable")
+
+    assert by_version.version == 2
+    assert by_tag.version == 1
+
+    with pytest.raises(KitaruUsageError, match="Exactly one"):
+        client.deployments.get(flow="research_flow")
+    with pytest.raises(KitaruUsageError, match="Exactly one"):
+        client.deployments.get(flow="research_flow", version=1, tag="stable")
+    with pytest.raises(LookupError, match="No deployment"):
+        client.deployments.get(flow="research_flow", version=99)
+
+
+def test_deployments_get_rejects_ambiguous_shared_tag() -> None:
+    snapshots = [
+        _DummySnapshot(
+            name="kitaru::research_flow::v1",
+            tags=[deployment_public_tag("shared", exclusive=False)],
+        ),
+        _DummySnapshot(
+            name="kitaru::research_flow::v2",
+            tags=[deployment_public_tag("shared", exclusive=False)],
+        ),
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=snapshots)
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="ambiguous"):
+            client.deployments.get(flow="research_flow", tag="shared")
+
+
+def test_deployments_delete_blocks_exclusive_tags_before_backend_delete() -> None:
+    snapshot = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("default", exclusive=True)],
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="default"):
+            client.deployments._delete(flow="research_flow", version=1)
+
+    client_mock.delete_snapshot.assert_not_called()
+
+
+def test_deployments_create_retries_duplicate_name_by_reallocating_version() -> None:
+    source_snapshot = _DummySnapshot(name="temporary-source")
+    existing_v1 = _DummySnapshot(name="kitaru::research_flow::v1")
+    concurrent_v2 = _DummySnapshot(name="kitaru::research_flow::v2")
+    created_v3 = _DummySnapshot(
+        name="kitaru::research_flow::v3",
+        tags=[deployment_public_tag("default", exclusive=True)],
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.side_effect = [
+            SimpleNamespace(items=[existing_v1]),
+            SimpleNamespace(items=[existing_v1, concurrent_v2]),
+        ]
+        client_mock.update_snapshot.side_effect = [
+            RuntimeError("snapshot already exists"),
+            created_v3,
+        ]
+
+        client = KitaruClient()
+        deployment = client.deployments._create(
+            flow="research_flow",
+            source_snapshot=source_snapshot,
+            tags={"default": True},
+        )
+
+    assert deployment.version == 3
+    assert deployment.tags == {"default": True}
+    assert client_mock.update_snapshot.call_args_list[0].kwargs["name"] == (
+        "kitaru::research_flow::v2"
+    )
+    assert client_mock.update_snapshot.call_args_list[0].kwargs["replace"] is False
+    assert client_mock.update_snapshot.call_args_list[1].kwargs["name"] == (
+        "kitaru::research_flow::v3"
+    )
+
+
+def test_deployments_tag_default_is_exclusive_and_untag_rejects_default() -> None:
+    v1 = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("default", exclusive=True)],
+    )
+    v2 = _DummySnapshot(name="kitaru::research_flow::v2")
+    snapshots = [v1, v2]
+
+    def update_snapshot(
+        *,
+        name_id_or_prefix: str,
+        add_tags: list[str] | None = None,
+        remove_tags: list[str] | None = None,
+        **_: Any,
+    ) -> _DummySnapshot:
+        snapshot = next(
+            item for item in snapshots if str(item.id) == str(name_id_or_prefix)
+        )
+        tag_names = {tag.name for tag in snapshot.resources.tags}
+        tag_names.update(add_tags or [])
+        tag_names.difference_update(remove_tags or [])
+        snapshot.resources.tags = [SimpleNamespace(name=tag) for tag in tag_names]
+        return snapshot
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=snapshots)
+        client_mock.update_snapshot.side_effect = update_snapshot
+
+        client = KitaruClient()
+        tagged = client.deployments._tag(
+            flow="research_flow",
+            version=2,
+            tag="default",
+            exclusive=False,
+        )
+
+        with pytest.raises(KitaruUsageError, match="cannot be removed"):
+            client.deployments._untag(flow="research_flow", version=2, tag="default")
+
+    assert tagged.version == 2
+    assert tagged.tags["default"] is True
+    assert "default" not in map_deployment_snapshot(v1).tags  # type: ignore[union-attr]
 
 
 def test_client_rejects_connection_overrides() -> None:

@@ -30,6 +30,14 @@ from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.utils.run_utils import stop_run
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
+from kitaru._client._deployments import (
+    build_deployment_snapshot_name,
+    deployment_native_tags,
+    deployment_public_tag,
+    deployment_snapshot_marker_tag,
+    map_deployment_snapshot,
+    next_deployment_version,
+)
 from kitaru._client._logs import (
     _coerce_log_level,
     _coerce_log_lineno,
@@ -69,6 +77,7 @@ from kitaru._client._models import (
     ArtifactRef,
     CheckpointAttempt,
     CheckpointCall,
+    Deployment,
     Execution,
     ExecutionStatus,
     FailureInfo,
@@ -1111,6 +1120,338 @@ class _MemoriesAPI:
         )
 
 
+class _DeploymentsAPI:
+    """Namespace for versioned deployment snapshot operations."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self._client_ref = client
+
+    def _list_snapshots(self) -> builtins.list[Any]:
+        """List all snapshots visible to the active project."""
+        client = self._client_ref._client()
+        list_snapshots = getattr(client, "list_snapshots", None)
+        if not callable(list_snapshots):
+            raise KitaruBackendError(
+                "This ZenML client does not support snapshot listing."
+            )
+
+        snapshots: builtins.list[Any] = []
+        page = 1
+        page_size = 100
+        try:
+            while True:
+                snapshot_page = list_snapshots(
+                    sort_by="asc:created",
+                    page=page,
+                    size=page_size,
+                    project=self._client_ref._project,
+                    named_only=True,
+                    hydrate=True,
+                )
+                items = list(snapshot_page.items)
+                snapshots.extend(items)
+                if len(items) < page_size:
+                    break
+                page += 1
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to list deployment snapshots: {exc}"
+            ) from exc
+
+        return snapshots
+
+    def _update_snapshot_tags(
+        self,
+        deployment: Deployment,
+        *,
+        add_tags: builtins.list[str] | None = None,
+        remove_tags: builtins.list[str] | None = None,
+    ) -> Any:
+        """Apply native tag updates to a snapshot."""
+        client = self._client_ref._client()
+        update_snapshot = getattr(client, "update_snapshot", None)
+        if not callable(update_snapshot):
+            raise KitaruBackendError(
+                "This ZenML client does not support snapshot tag updates."
+            )
+
+        try:
+            return update_snapshot(
+                name_id_or_prefix=deployment.deployment_id,
+                project=self._client_ref._project,
+                add_tags=add_tags or None,
+                remove_tags=remove_tags or None,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to update deployment '{deployment.deployment_id}': {exc}"
+            ) from exc
+
+    def _delete_snapshot(self, deployment: Deployment) -> None:
+        """Delete a snapshot through the backend."""
+        client = self._client_ref._client()
+        delete_snapshot = getattr(client, "delete_snapshot", None)
+        if not callable(delete_snapshot):
+            raise KitaruBackendError(
+                "This ZenML client does not support snapshot deletion."
+            )
+
+        try:
+            delete_snapshot(
+                name_id_or_prefix=deployment.deployment_id,
+                project=self._client_ref._project,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to delete deployment '{deployment.deployment_id}': {exc}"
+            ) from exc
+
+    def _name_source_snapshot(
+        self,
+        *,
+        source_snapshot: Any,
+        name: str,
+        tags: Mapping[str, bool] | None,
+    ) -> Any:
+        """Create or name a ZenML snapshot with the requested deployment name."""
+        client = self._client_ref._client()
+        update_snapshot = getattr(client, "update_snapshot", None)
+        if callable(update_snapshot):
+            source_snapshot_id = getattr(source_snapshot, "id", source_snapshot)
+            return update_snapshot(
+                name_id_or_prefix=source_snapshot_id,
+                project=self._client_ref._project,
+                name=name,
+                replace=False,
+                add_tags=deployment_native_tags(tags),
+            )
+
+        create_snapshot = getattr(client, "create_snapshot", None)
+        if callable(create_snapshot):
+            try:
+                if isinstance(source_snapshot, Mapping):
+                    return create_snapshot(
+                        **dict(source_snapshot),
+                        name=name,
+                        replace=False,
+                        project=self._client_ref._project,
+                        tags=deployment_native_tags(tags),
+                    )
+                return create_snapshot(
+                    snapshot=source_snapshot,
+                    name=name,
+                    replace=False,
+                    project=self._client_ref._project,
+                    tags=deployment_native_tags(tags),
+                )
+            except TypeError:
+                # Fall through to the clear backend error below.
+                pass
+
+        raise KitaruBackendError(
+            "This ZenML client does not support snapshot creation or naming."
+        )
+
+    @staticmethod
+    def _is_duplicate_name_error(exc: Exception) -> bool:
+        """Return whether a backend error looks like a duplicate snapshot name."""
+        message = str(exc).lower()
+        return any(
+            hint in message
+            for hint in (
+                "already exists",
+                "duplicate",
+                "conflict",
+                "409",
+                "replace=false",
+                "replace false",
+            )
+        )
+
+    def list(self, *, flow: str) -> builtins.list[Deployment]:
+        """List Kitaru deployment versions for one flow."""
+        build_deployment_snapshot_name(flow, 1)
+        normalized_flow = flow.strip()
+        deployments: builtins.list[Deployment] = []
+        for snapshot in self._list_snapshots():
+            deployment = map_deployment_snapshot(snapshot)
+            if deployment is None or deployment.flow != normalized_flow:
+                continue
+            deployments.append(deployment)
+        return sorted(deployments, key=lambda deployment: deployment.version)
+
+    def get(
+        self,
+        *,
+        flow: str,
+        version: int | None = None,
+        tag: str | None = None,
+    ) -> Deployment:
+        """Get a deployment by exact version or tag selector."""
+        build_deployment_snapshot_name(flow, 1)
+        if (version is None) == (tag is None):
+            raise KitaruUsageError("Exactly one of `version` or `tag` is required.")
+
+        deployments = self.list(flow=flow)
+
+        if version is not None:
+            if isinstance(version, bool) or version < 1:
+                raise KitaruUsageError("Deployment version must be >= 1.")
+            for deployment in deployments:
+                if deployment.version == version:
+                    return deployment
+            raise LookupError(
+                f"No deployment found for flow {flow!r} version {version}."
+            )
+
+        assert tag is not None
+        normalized_tag = tag.strip()
+        if not normalized_tag:
+            raise KitaruUsageError("Deployment tags must be non-empty strings.")
+        matches = [
+            deployment
+            for deployment in deployments
+            if normalized_tag in deployment.tags
+        ]
+        if not matches:
+            raise LookupError(
+                f"No deployment found for flow {flow!r} with tag {normalized_tag!r}."
+            )
+        if len(matches) == 1:
+            return matches[0]
+
+        raise KitaruStateError(
+            f"Deployment tag {normalized_tag!r} is ambiguous for flow {flow!r}; "
+            f"matched versions: {', '.join(str(match.version) for match in matches)}."
+        )
+
+    def _create(
+        self,
+        *,
+        flow: str,
+        source_snapshot: Any,
+        tags: Mapping[str, bool] | None = None,
+        max_attempts: int = 3,
+    ) -> Deployment:
+        """Create a versioned deployment snapshot from a source snapshot."""
+        build_deployment_snapshot_name(flow, 1)
+        attempts = max(1, max_attempts)
+
+        last_error: Exception | None = None
+        for _ in range(attempts):
+            snapshots = self._list_snapshots()
+            version = next_deployment_version(snapshots, flow=flow)
+            snapshot_name = build_deployment_snapshot_name(flow, version)
+
+            try:
+                created = self._name_source_snapshot(
+                    source_snapshot=source_snapshot,
+                    name=snapshot_name,
+                    tags=tags,
+                )
+            except Exception as exc:
+                if self._is_duplicate_name_error(exc):
+                    last_error = exc
+                    continue
+                raise KitaruBackendError(
+                    f"Failed to create deployment snapshot {snapshot_name!r}: {exc}"
+                ) from exc
+
+            deployment = map_deployment_snapshot(created)
+            if deployment is None:
+                raise KitaruBackendError(
+                    "Backend created a snapshot that does not have a valid "
+                    f"Kitaru deployment name: {getattr(created, 'name', None)!r}."
+                )
+            return deployment
+
+        raise KitaruBackendError(
+            "Failed to allocate a deployment version after duplicate-name "
+            f"conflicts for flow {flow!r}: {last_error}"
+        )
+
+    def _delete(self, *, flow: str, version: int) -> None:
+        """Delete one deployment version if it is not protected by exclusive tags."""
+        deployment = self.get(flow=flow, version=version)
+        exclusive_tags = sorted(
+            tag for tag, exclusive in deployment.tags.items() if exclusive
+        )
+        if exclusive_tags:
+            raise KitaruStateError(
+                "Cannot delete deployment "
+                f"{flow!r} v{version} while it holds exclusive tag(s): "
+                f"{', '.join(exclusive_tags)}."
+            )
+        self._delete_snapshot(deployment)
+
+    def _tag(
+        self,
+        *,
+        flow: str,
+        version: int,
+        tag: str,
+        exclusive: bool = False,
+    ) -> Deployment:
+        """Attach a public deployment tag to one deployment version."""
+        target = self.get(flow=flow, version=version)
+        normalized_tag = tag.strip()
+        if not normalized_tag:
+            raise KitaruUsageError("Deployment tags must be non-empty strings.")
+
+        exclusive = True if normalized_tag == "default" else exclusive
+        if exclusive:
+            for deployment in self.list(flow=flow):
+                if deployment.version == target.version:
+                    continue
+                existing_exclusive = deployment.tags.get(normalized_tag)
+                if existing_exclusive is None:
+                    continue
+                self._update_snapshot_tags(
+                    deployment,
+                    remove_tags=[
+                        deployment_public_tag(
+                            normalized_tag,
+                            exclusive=existing_exclusive,
+                        )
+                    ],
+                )
+
+        self._update_snapshot_tags(
+            target,
+            add_tags=[
+                deployment_snapshot_marker_tag(),
+                deployment_public_tag(normalized_tag, exclusive=exclusive),
+            ],
+            remove_tags=[
+                deployment_public_tag(normalized_tag, exclusive=not exclusive),
+            ],
+        )
+        return self.get(flow=flow, version=version)
+
+    def _untag(self, *, flow: str, version: int, tag: str) -> Deployment:
+        """Remove a public deployment tag from one deployment version."""
+        normalized_tag = tag.strip()
+        if normalized_tag == "default":
+            raise KitaruUsageError(
+                "The reserved `default` deployment tag cannot be removed."
+            )
+        if not normalized_tag:
+            raise KitaruUsageError("Deployment tags must be non-empty strings.")
+
+        deployment = self.get(flow=flow, version=version)
+        existing_exclusive = deployment.tags.get(normalized_tag)
+        if existing_exclusive is None:
+            return deployment
+
+        self._update_snapshot_tags(
+            deployment,
+            remove_tags=[
+                deployment_public_tag(normalized_tag, exclusive=existing_exclusive)
+            ],
+        )
+        return self.get(flow=flow, version=version)
+
+
 class KitaruClient:
     """Client for managing Kitaru executions, artifacts, and memories."""
 
@@ -1155,6 +1496,7 @@ class KitaruClient:
         self.executions = _ExecutionsAPI(self)
         self.artifacts = _ArtifactsAPI(self)
         self.memories = _MemoriesAPI(self)
+        self.deployments = _DeploymentsAPI(self)
 
     def _client(self) -> Client:
         """Return a ZenML client instance."""
@@ -1202,6 +1544,7 @@ __all__ = [
     "ArtifactRef",
     "CheckpointAttempt",
     "CheckpointCall",
+    "Deployment",
     "Execution",
     "ExecutionStatus",
     "FailureInfo",
