@@ -64,12 +64,16 @@ kitaru init
 uv sync --extra local --extra pydantic-ai --extra llm
 ```
 
-Drop your keys in `.env`:
+For a local run, drop your provider API keys in `.env` — the example loads
+them with `python-dotenv` before PydanticAI touches the environment:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 XAI_API_KEY=xai-...        # optional, unlocks the search_twitter tool
 ```
+
+(See [Running on Kubernetes](#running-on-kubernetes-or-any-remote-stack)
+below for the secret-based setup when you move to a remote stack.)
 
 Then:
 
@@ -137,33 +141,25 @@ exactly that point. Everything before it is cached. Nothing is re-paid.
 
 ## Running on Kubernetes (or any remote stack)
 
-The flow declares its own image:
-
-```python
-SCOUT_IMAGE = ImageSettings(
-    requirements=["pydantic-ai>=1.80", "openai>=1.0"],
-    environment=_collect_env(),   # picks up API keys from local env
-)
-
-@flow(image=SCOUT_IMAGE)
-def news_scout(...): ...
-```
-
-`_collect_env()` reads the keys that matter (`ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `XAI_API_KEY`, `KITARU_SCOUT_MODEL`, `KITARU_GROK_MODEL`)
-from your local environment at module-load time and bakes them into the
-container image when Kitaru builds it for the remote stack.
-
-To ship it:
+On a remote stack the pod has no access to your shell environment, and baking
+keys into the image layer would leak them through registry metadata and
+logs. The scout switches credential sources from your shell to a Kitaru
+secret whenever the active stack is remote:
 
 ```bash
+kitaru secrets set news-scout-keys \
+  --ANTHROPIC_API_KEY=sk-ant-... \
+  --XAI_API_KEY=xai-...        # optional, unlocks the search_twitter tool
+
 kitaru stack use my-k8s-stack
 python scout.py
 ```
 
-> **Heads up:** baking keys into images is fine for a personal scout, not for
-> shared infrastructure. For production, use `kitaru secrets` and model
-> aliases with `--secret`.
+Under the hood, `scout.py` attaches `ImageSettings.secret_environment_from=["news-scout-keys"]`
+to the run when the active stack is remote. Kitaru resolves the secret at
+step dispatch time and exposes each key (`ANTHROPIC_API_KEY`, `XAI_API_KEY`)
+in the pod's environment — values never enter image layers, logs, or the
+frozen execution spec.
 
 ## Memory
 
