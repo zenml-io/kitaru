@@ -29,14 +29,17 @@ from kitaru.config import (
 from kitaru.errors import KitaruRuntimeError
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
-    delete_flow_deployment,
-    deploy_flow,
     get_execution_logs,
-    get_flow_deployment,
-    invoke_flow,
     kitaru_artifacts_get,
     kitaru_artifacts_list,
     kitaru_clean_preview,
+    kitaru_deployments_delete,
+    kitaru_deployments_deploy,
+    kitaru_deployments_get,
+    kitaru_deployments_invoke,
+    kitaru_deployments_list,
+    kitaru_deployments_tag,
+    kitaru_deployments_untag,
     kitaru_executions_cancel,
     kitaru_executions_get,
     kitaru_executions_input,
@@ -60,11 +63,8 @@ from kitaru.mcp.server import (
     kitaru_start_local_server,
     kitaru_status,
     kitaru_stop_local_server,
-    list_flow_deployments,
     manage_stack,
-    tag_flow_deployment,
     tracked_mcp_tool,
-    untag_flow_deployment,
 )
 from kitaru.secrets import SecretSummary
 
@@ -449,15 +449,15 @@ def test_executions_run_returns_warning_when_details_unavailable(
     assert "details are not available yet" in payload["warning"]
 
 
-def test_deploy_flow_loads_target_and_serializes(sample_deployment) -> None:
-    """deploy_flow should load the target, deploy it, and serialize the record."""
+def test_deployments_deploy_loads_target_and_serializes(sample_deployment) -> None:
+    """kitaru_deployments_deploy should load, deploy, and serialize the record."""
     flow_target = SimpleNamespace(deploy=MagicMock(return_value=sample_deployment))
 
     with patch(
         "kitaru.mcp.server._load_deployable_flow_target",
         return_value=flow_target,
     ) as mock_loader:
-        payload = deploy_flow(
+        payload = kitaru_deployments_deploy(
             "agent.py:content_pipeline",
             inputs={"topic": "ai safety"},
             stack="prod",
@@ -480,7 +480,9 @@ def test_deploy_flow_loads_target_and_serializes(sample_deployment) -> None:
     assert payload["tags"] == sample_deployment.tags
 
 
-def test_deploy_flow_forwards_non_default_tag_exclusivity(sample_deployment) -> None:
+def test_deployments_deploy_forwards_non_default_tag_exclusivity(
+    sample_deployment,
+) -> None:
     """Non-default deployment tags should honor the explicit exclusive flag."""
     flow_target = SimpleNamespace(deploy=MagicMock(return_value=sample_deployment))
 
@@ -488,7 +490,7 @@ def test_deploy_flow_forwards_non_default_tag_exclusivity(sample_deployment) -> 
         "kitaru.mcp.server._load_deployable_flow_target",
         return_value=flow_target,
     ):
-        deploy_flow(
+        kitaru_deployments_deploy(
             "agent.py:content_pipeline",
             inputs={"topic": "ai safety"},
             tag="canary",
@@ -501,28 +503,31 @@ def test_deploy_flow_forwards_non_default_tag_exclusivity(sample_deployment) -> 
     )
 
 
-def test_deploy_flow_rejects_reserved_input_keys() -> None:
+def test_deployments_deploy_rejects_reserved_input_keys() -> None:
     """Flow inputs must not shadow deployment-control options."""
     with (
         patch("kitaru.mcp.server._load_deployable_flow_target") as mock_loader,
         pytest.raises(ValueError, match="`inputs` contains reserved"),
     ):
-        deploy_flow("agent.py:content_pipeline", inputs={"stack": "not-a-stack"})
+        kitaru_deployments_deploy(
+            "agent.py:content_pipeline",
+            inputs={"stack": "not-a-stack"},
+        )
 
     mock_loader.assert_not_called()
 
 
-def test_deploy_flow_rejects_non_object_inputs() -> None:
+def test_deployments_deploy_rejects_non_object_inputs() -> None:
     """MCP inputs should be structured JSON objects, not scalars/lists."""
     with pytest.raises(ValueError, match="`inputs` must be an object"):
-        deploy_flow("agent.py:content_pipeline", inputs=["topic"])
+        kitaru_deployments_deploy("agent.py:content_pipeline", inputs=["topic"])
 
 
-def test_invoke_flow_defaults_to_default_tag(
+def test_deployments_invoke_defaults_to_default_tag(
     mock_kitaru_client: MagicMock,
     sample_execution,
 ) -> None:
-    """invoke_flow should default to the reserved default deployment tag."""
+    """kitaru_deployments_invoke should default to the reserved default tag."""
     mock_kitaru_client.deployments.invoke.return_value = SimpleNamespace(
         exec_id=sample_execution.exec_id
     )
@@ -538,7 +543,7 @@ def test_invoke_flow_defaults_to_default_tag(
             ),
         ) as mock_resolve,
     ):
-        payload = invoke_flow(
+        payload = kitaru_deployments_invoke(
             "content_pipeline",
             inputs={"topic": "ai safety"},
         )
@@ -558,7 +563,7 @@ def test_invoke_flow_defaults_to_default_tag(
     assert payload["execution"]["exec_id"] == sample_execution.exec_id
 
 
-def test_invoke_flow_rejects_version_and_tag_together(
+def test_deployments_invoke_rejects_version_and_tag_together(
     mock_kitaru_client: MagicMock,
 ) -> None:
     """MCP selector validation should match the shared deployment rules."""
@@ -566,20 +571,20 @@ def test_invoke_flow_rejects_version_and_tag_together(
         patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
         pytest.raises(ValueError, match="mutually exclusive"),
     ):
-        invoke_flow("content_pipeline", version=2, tag="canary")
+        kitaru_deployments_invoke("content_pipeline", version=2, tag="canary")
 
     mock_kitaru_client.deployments.invoke.assert_not_called()
 
 
-def test_list_flow_deployments_forwards_filter_and_serializes(
+def test_deployments_list_forwards_filter_and_serializes(
     mock_kitaru_client: MagicMock,
     sample_deployment,
 ) -> None:
-    """list_flow_deployments should delegate to the public deployments API."""
+    """kitaru_deployments_list should delegate to the public deployments API."""
     mock_kitaru_client.deployments.list.return_value = [sample_deployment]
 
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
-        payload = list_flow_deployments(flow="content_pipeline")
+        payload = kitaru_deployments_list(flow="content_pipeline")
 
     mock_kitaru_client.deployments.list.assert_called_once_with(flow="content_pipeline")
     assert payload == [
@@ -598,15 +603,15 @@ def test_list_flow_deployments_forwards_filter_and_serializes(
     ]
 
 
-def test_get_flow_deployment_defaults_to_default_tag(
+def test_deployments_get_defaults_to_default_tag(
     mock_kitaru_client: MagicMock,
     sample_deployment,
 ) -> None:
-    """get_flow_deployment should use the same default selector as CLI/SDK."""
+    """kitaru_deployments_get should use the same default selector as CLI/SDK."""
     mock_kitaru_client.deployments.get.return_value = sample_deployment
 
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
-        payload = get_flow_deployment("content_pipeline")
+        payload = kitaru_deployments_get("content_pipeline")
 
     mock_kitaru_client.deployments.get.assert_called_once_with(
         flow="content_pipeline",
@@ -616,12 +621,12 @@ def test_get_flow_deployment_defaults_to_default_tag(
     assert payload["version"] == 2
 
 
-def test_delete_flow_deployment_delegates_by_version(
+def test_deployments_delete_delegates_by_version(
     mock_kitaru_client: MagicMock,
 ) -> None:
-    """delete_flow_deployment should leave safety checks to the SDK API."""
+    """kitaru_deployments_delete should leave safety checks to the SDK API."""
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
-        payload = delete_flow_deployment("content_pipeline", version=2)
+        payload = kitaru_deployments_delete("content_pipeline", version=2)
 
     mock_kitaru_client.deployments.delete.assert_called_once_with(
         flow="content_pipeline",
@@ -630,15 +635,15 @@ def test_delete_flow_deployment_delegates_by_version(
     assert payload == {"flow": "content_pipeline", "version": 2, "deleted": True}
 
 
-def test_tag_flow_deployment_delegates_and_serializes(
+def test_deployments_tag_delegates_and_serializes(
     mock_kitaru_client: MagicMock,
     sample_deployment,
 ) -> None:
-    """tag_flow_deployment should forward version/tag/exclusive to SDK API."""
+    """kitaru_deployments_tag should forward version/tag/exclusive to SDK API."""
     mock_kitaru_client.deployments.tag.return_value = sample_deployment
 
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
-        payload = tag_flow_deployment(
+        payload = kitaru_deployments_tag(
             "content_pipeline",
             version=2,
             tag="stable",
@@ -654,15 +659,15 @@ def test_tag_flow_deployment_delegates_and_serializes(
     assert payload["deployment_id"] == sample_deployment.deployment_id
 
 
-def test_untag_flow_deployment_delegates_and_serializes(
+def test_deployments_untag_delegates_and_serializes(
     mock_kitaru_client: MagicMock,
     sample_deployment,
 ) -> None:
-    """untag_flow_deployment should forward tag removal to SDK API."""
+    """kitaru_deployments_untag should forward tag removal to SDK API."""
     mock_kitaru_client.deployments.untag.return_value = sample_deployment
 
     with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
-        payload = untag_flow_deployment(
+        payload = kitaru_deployments_untag(
             "content_pipeline",
             version=2,
             tag="canary",

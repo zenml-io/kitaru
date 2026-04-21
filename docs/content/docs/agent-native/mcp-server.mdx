@@ -128,13 +128,13 @@ Execution tools:
 
 Deployment tools:
 
-- `deploy_flow`
-- `invoke_flow`
-- `list_flow_deployments`
-- `get_flow_deployment`
-- `delete_flow_deployment`
-- `tag_flow_deployment`
-- `untag_flow_deployment`
+- `kitaru_deployments_deploy`
+- `kitaru_deployments_invoke`
+- `kitaru_deployments_list`
+- `kitaru_deployments_get`
+- `kitaru_deployments_delete`
+- `kitaru_deployments_tag`
+- `kitaru_deployments_untag`
 
 Artifact tools:
 
@@ -260,16 +260,16 @@ without shelling out to `kitaru deploy` or `kitaru invoke`.
 
 | Tool | Use it for |
 |---|---|
-| `deploy_flow` | Create a new deployment version from `<module_or_file>:<flow_name>` |
-| `invoke_flow` | Start a new execution from a deployed flow by `default`, tag, or version |
-| `list_flow_deployments` | List all deployment versions, optionally filtered to one flow |
-| `get_flow_deployment` | Inspect one deployment by version or tag |
-| `delete_flow_deployment` | Delete one version when no exclusive tag protects it |
-| `tag_flow_deployment` | Attach or move a public tag to a version |
-| `untag_flow_deployment` | Remove a non-reserved public tag from a version |
+| `kitaru_deployments_deploy` | Create a new deployment version from `<module_or_file>:<flow_name>` |
+| `kitaru_deployments_invoke` | Start a new execution from a deployed flow by `default`, tag, or version |
+| `kitaru_deployments_list` | List all deployment versions, optionally filtered to one flow |
+| `kitaru_deployments_get` | Inspect one deployment by version or tag |
+| `kitaru_deployments_delete` | Delete one version when no exclusive tag protects it |
+| `kitaru_deployments_tag` | Attach or move a public tag to a version |
+| `kitaru_deployments_untag` | Remove a non-reserved public tag from a version |
 
-`deploy_flow` accepts deployment-time flow inputs plus optional deployment
-controls:
+`kitaru_deployments_deploy` accepts deployment-time flow inputs plus optional
+deployment controls:
 
 ```json
 {
@@ -288,7 +288,7 @@ The first deployment of a flow gets the reserved `default` tag automatically.
 by default; pass `exclusive=true` when the tag should move to exactly one
 version, such as `canary`, `stable`, or `prod`.
 
-`invoke_flow` is the MCP equivalent of the primary CLI command
+`kitaru_deployments_invoke` is the MCP equivalent of the primary CLI command
 `kitaru invoke`. If neither `version` nor `tag` is provided, it invokes the
 reserved `default` route:
 
@@ -439,8 +439,8 @@ starting `kitaru-mcp`, or set `KITARU_SERVER_URL`, `KITARU_AUTH_TOKEN`, and
 `KITARU_PROJECT` in the MCP server environment. If you can run `kitaru status`,
 MCP tools use that same connection.
 
-Deployment MCP calls do not use per-deployment tokens. `deploy_flow`,
-`invoke_flow`, and the deployment management tools authorize through the active
+Deployment MCP calls do not use per-deployment tokens. `kitaru_deployments_deploy`,
+`kitaru_deployments_invoke`, and the deployment management tools authorize through the active
 workspace/project context, just like `kitaru deploy`, `kitaru invoke`, and
 `KitaruClient().deployments.invoke(...)`.
 

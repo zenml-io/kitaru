@@ -200,21 +200,8 @@ def kitaru_executions_run(
     return run_with_mcp_error_boundary(_start_execution)
 
 
-def _validate_mcp_inputs_object(
-    inputs: dict[str, Any] | None,
-    *,
-    label: str = "`inputs`",
-) -> dict[str, Any]:
-    """Return a concrete inputs mapping for MCP tools."""
-    if inputs is None:
-        return {}
-    if not isinstance(inputs, dict):
-        raise ValueError(f"{label} must be an object when provided.")
-    return inputs
-
-
 @tracked_mcp_tool
-def deploy_flow(
+def kitaru_deployments_deploy(
     target: str,
     inputs: dict[str, Any] | None = None,
     tag: str = DEFAULT_DEPLOYMENT_TAG,
@@ -226,14 +213,12 @@ def deploy_flow(
     """Deploy a new flow version from a `<module_or_file>:<flow_name>` target."""
 
     def _deploy() -> dict[str, Any]:
-        flow_inputs = _validate_mcp_inputs_object(inputs)
+        flow_inputs = execution_interface.ensure_inputs_object(inputs)
         _, normalized_tag = validate_deployment_selector(
             tag=tag,
             require_one=True,
         )
-        if normalized_tag is None:
-            raise ValueError("Deployment tag selector could not be resolved.")
-
+        assert normalized_tag is not None  # guaranteed by require_one=True
         resolved_tags = {
             normalized_tag: resolve_deployment_exclusive(normalized_tag, exclusive)
         }
@@ -255,7 +240,7 @@ def deploy_flow(
 
 
 @tracked_mcp_tool
-def invoke_flow(
+def kitaru_deployments_invoke(
     flow: str,
     version: int | None = None,
     tag: str | None = None,
@@ -264,7 +249,7 @@ def invoke_flow(
     """Invoke a deployed flow snapshot by version or tag."""
 
     def _invoke() -> dict[str, Any]:
-        flow_inputs = _validate_mcp_inputs_object(inputs)
+        flow_inputs = execution_interface.ensure_inputs_object(inputs)
         resolved_version, resolved_tag = validate_deployment_selector(
             version=version,
             tag=tag,
@@ -282,31 +267,31 @@ def invoke_flow(
             exec_id=exec_id,
             client=client,
         )
-        payload = execution_interface.build_started_execution_payload(
-            target=flow,
+        return execution_interface.build_started_deployment_payload(
+            flow=flow,
+            version=resolved_version,
+            tag=resolved_tag,
             details=details,
         )
-        payload.pop("target", None)
-        payload["flow"] = flow
-        payload["selector"] = {"version": resolved_version, "tag": resolved_tag}
-        return payload
 
     return run_with_mcp_error_boundary(_invoke)
 
 
 @tracked_mcp_tool
-def list_flow_deployments(flow: str | None = None) -> list[dict[str, Any]]:
+def kitaru_deployments_list(flow: str | None = None) -> list[dict[str, Any]]:
     """List flow deployments, optionally filtered to one flow."""
-    return run_with_mcp_error_boundary(
-        lambda: [
+
+    def _list_deployments() -> list[dict[str, Any]]:
+        return [
             inspection.serialize_deployment(deployment)
             for deployment in client_api.KitaruClient().deployments.list(flow=flow)
         ]
-    )
+
+    return run_with_mcp_error_boundary(_list_deployments)
 
 
 @tracked_mcp_tool
-def get_flow_deployment(
+def kitaru_deployments_get(
     flow: str,
     version: int | None = None,
     tag: str | None = None,
@@ -330,7 +315,7 @@ def get_flow_deployment(
 
 
 @tracked_mcp_tool
-def delete_flow_deployment(flow: str, version: int) -> dict[str, Any]:
+def kitaru_deployments_delete(flow: str, version: int) -> dict[str, Any]:
     """Delete one deployment version when no exclusive tag protects it."""
 
     def _delete() -> dict[str, Any]:
@@ -341,7 +326,7 @@ def delete_flow_deployment(flow: str, version: int) -> dict[str, Any]:
 
 
 @tracked_mcp_tool
-def tag_flow_deployment(
+def kitaru_deployments_tag(
     flow: str,
     version: int,
     tag: str,
@@ -362,7 +347,7 @@ def tag_flow_deployment(
 
 
 @tracked_mcp_tool
-def untag_flow_deployment(flow: str, version: int, tag: str) -> dict[str, Any]:
+def kitaru_deployments_untag(flow: str, version: int, tag: str) -> dict[str, Any]:
     """Remove a public tag from one deployment version."""
 
     def _untag() -> dict[str, Any]:
@@ -425,10 +410,10 @@ def kitaru_executions_replay(
     """Replay an execution and return structured replay details."""
 
     def _replay_execution() -> dict[str, Any]:
-        if flow_inputs is not None and not isinstance(flow_inputs, dict):
-            raise ValueError("`flow_inputs` must be an object when provided.")
-
-        replay_inputs = flow_inputs or {}
+        replay_inputs = execution_interface.ensure_inputs_object(
+            flow_inputs,
+            input_label="`flow_inputs`",
+        )
         execution = client_api.KitaruClient().executions.replay(
             exec_id,
             from_=from_,

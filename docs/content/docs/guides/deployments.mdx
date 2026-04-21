@@ -182,7 +182,7 @@ A useful way to keep the model straight:
 | Role | Needs source target? | Typical commands |
 |---|---|---|
 | Producer | Yes, for deploys | `kitaru deploy`, `kitaru flow tag`, `kitaru flow deployments list` |
-| Consumer | No | `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, MCP `invoke_flow` |
+| Consumer | No | `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, MCP `kitaru_deployments_invoke` |
 
 The producer knows `flows/research.py:research_agent`. The consumer only needs
 `research_agent` plus a selector such as `default`, `stable`, `canary`, or `v2`.
@@ -270,8 +270,8 @@ Invoke the stable route:
 }
 ```
 
-Use `list_flow_deployments` and `get_flow_deployment` before invoking when the
-assistant needs to discover available versions or confirm where a tag points.
+Use `kitaru_deployments_list` and `kitaru_deployments_get` before invoking when
+the assistant needs to discover available versions or confirm where a tag points.
 
 ## Auth: one workspace context, no deployment tokens
 
@@ -304,7 +304,7 @@ Once that context is configured, deployment invocation uses it automatically.
 A consumer invokes one route by flow name plus tag/version; Kitaru resolves that
 route to the saved snapshot. There is no long-lived per-version service and no
 extra per-deployment token to pass to `kitaru invoke`, `.invoke()`, or
-`invoke_flow`.
+`kitaru_deployments_invoke`.
 
 ## A practical checklist
 

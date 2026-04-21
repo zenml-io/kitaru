@@ -12,13 +12,13 @@ You can create deployments from three surfaces:
 
 - CLI: `kitaru deploy path/to/file.py:flow_name`
 - Python SDK: `flow_name.deploy(...)`
-- MCP: `deploy_flow(target="path/to/file.py:flow_name", ...)`
+- MCP: `kitaru_deployments_deploy(target="path/to/file.py:flow_name", ...)`
 
 You can then invoke the deployed flow without the original target path:
 
 - CLI: `kitaru invoke flow_name`
 - Python SDK: `flow_name.invoke(...)` or `deployment.invoke(...)`
-- MCP: `invoke_flow(flow="flow_name", ...)`
+- MCP: `kitaru_deployments_invoke(flow="flow_name", ...)`
 
 If you want a step-by-step producer/consumer walkthrough, see the
 [Deploy and invoke flows guide](/guides/deployments).
@@ -202,7 +202,7 @@ export KITARU_PROJECT=production
 ```
 
 After that, `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, and MCP
-`invoke_flow(...)` use that active workspace API key / auth context. The
+`kitaru_deployments_invoke(...)` use that active workspace API key / auth context. The
 invocation request does not carry a separate deployment-specific token.
 
 Runtime secrets for the flow itself should live in Kitaru secrets or stack
@@ -279,6 +279,6 @@ An MCP-capable assistant can do the same with structured tool input:
 }
 ```
 
-Use `list_flow_deployments(flow="research_agent")` or
-`get_flow_deployment(flow="research_agent", tag="stable")` when the assistant
+Use `kitaru_deployments_list(flow="research_agent")` or
+`kitaru_deployments_get(flow="research_agent", tag="stable")` when the assistant
 needs to inspect the available routes before invoking.

@@ -170,6 +170,24 @@ def flow_handle_exec_id(handle: Any) -> str:
     return str(exec_id)
 
 
+def ensure_inputs_object(
+    inputs: Any,
+    *,
+    input_label: str = "`inputs`",
+) -> dict[str, Any]:
+    """Normalize a flow inputs kwarg: ``None`` -> ``{}``; reject non-dicts.
+
+    This is a transport-boundary check. MCP tools declare ``dict[str, Any] | None``
+    for their inputs kwarg, but the wire-level JSON can be any value, so the
+    isinstance check is real defense-in-depth and must stay live at runtime.
+    """
+    if inputs is None:
+        return {}
+    if not isinstance(inputs, dict):
+        raise ValueError(f"{input_label} must be an object when provided.")
+    return inputs
+
+
 def invoke_flow_target(
     *,
     target: str,
@@ -178,14 +196,12 @@ def invoke_flow_target(
     module_name_prefix: str,
 ) -> FlowInvocationResult:
     """Load and invoke a flow target for CLI or MCP run surfaces."""
-    if args is not None and not isinstance(args, dict):
-        raise ValueError("`args` must be an object when provided.")
+    flow_inputs = ensure_inputs_object(args, input_label="`args`")
 
     flow_target = _flow_loading._load_flow_target(
         target,
         module_name_prefix=module_name_prefix,
     )
-    flow_inputs = args or {}
 
     if stack:
         handle = flow_target.run(stack=stack, **flow_inputs)
@@ -225,6 +241,27 @@ def build_started_execution_payload(
     return {
         "exec_id": details.exec_id,
         "target": target,
+        "execution": (
+            inspection.serialize_execution(details.execution)
+            if details.execution is not None
+            else None
+        ),
+        "warning": details.warning,
+    }
+
+
+def build_started_deployment_payload(
+    *,
+    flow: str,
+    version: int | None,
+    tag: str | None,
+    details: StartedExecutionDetails,
+) -> dict[str, Any]:
+    """Build the shared structured payload for deployment invocation responses."""
+    return {
+        "exec_id": details.exec_id,
+        "flow": flow,
+        "selector": {"version": version, "tag": tag},
         "execution": (
             inspection.serialize_execution(details.execution)
             if details.execution is not None

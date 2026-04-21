@@ -7,7 +7,10 @@ from typing import Annotated, Any
 
 from cyclopts import Parameter
 
-from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
+from kitaru._client._deployments import (
+    DEFAULT_DEPLOYMENT_TAG,
+    resolve_deployment_exclusive,
+)
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
     build_deployment_deploy_kwargs,
@@ -15,7 +18,7 @@ from kitaru._interface_deployments import (
 )
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru._interface_executions import (
-    build_started_execution_payload,
+    build_started_deployment_payload,
     flow_handle_exec_id,
     resolve_started_execution_details,
 )
@@ -154,24 +157,6 @@ def _build_deploy_kwargs(
     )
 
 
-def _started_deployment_payload(
-    *,
-    flow: str,
-    version: int | None,
-    tag: str | None,
-    handle: Any,
-    client: Any,
-) -> dict[str, Any]:
-    """Build JSON output for a deployment invocation."""
-    exec_id = flow_handle_exec_id(handle)
-    details = resolve_started_execution_details(exec_id=exec_id, client=client)
-    payload = build_started_execution_payload(target=flow, details=details)
-    payload.pop("target", None)
-    payload["flow"] = flow
-    payload["selector"] = {"version": version, "tag": tag}
-    return payload
-
-
 def _resolve_latest_deployment_execution_id(
     *,
     client: Any,
@@ -297,16 +282,13 @@ def deploy(
 
     def _deploy_flow() -> Any:
         inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
-        normalized_tag = validate_deployment_selector(
+        _, normalized_tag = validate_deployment_selector(
             tag=tag,
             require_one=True,
-        )[1]
-        if normalized_tag is None:
-            raise ValueError("Deployment tag selector could not be resolved.")
+        )
+        assert normalized_tag is not None  # guaranteed by require_one=True
         resolved_tags = {
-            normalized_tag: True
-            if normalized_tag == DEFAULT_DEPLOYMENT_TAG
-            else exclusive
+            normalized_tag: resolve_deployment_exclusive(normalized_tag, exclusive)
         }
         deploy_kwargs = _build_deploy_kwargs(
             stack=stack,
@@ -378,12 +360,13 @@ def invoke(
             tag=resolved_tag,
             inputs=inputs,
         )
-        payload = _started_deployment_payload(
+        exec_id = flow_handle_exec_id(handle)
+        details = resolve_started_execution_details(exec_id=exec_id, client=client)
+        payload = build_started_deployment_payload(
             flow=flow,
             version=resolved_version,
             tag=resolved_tag,
-            handle=handle,
-            client=client,
+            details=details,
         )
         track(
             AnalyticsEvent.DEPLOYMENT_INVOKED,
