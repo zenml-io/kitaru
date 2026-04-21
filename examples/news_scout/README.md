@@ -8,6 +8,21 @@ you can see what the agent did, replay any step, and retry what failed. The
 agent's final report lands in the dashboard as a first-class `final_report`
 artifact you can read without scrolling through every tool call.
 
+## What happens when you run it
+
+The agent reads your interest list from Kitaru's memory and starts a loop:
+it searches news and social sources for each interest, picks the headlines
+that look promising, pulls up the full articles to actually read them, and
+scores each on novelty, consequence, and relevance. It stops once it's
+covered every interest area (or hits the 50-request cap). Output is a
+scored briefing — top picks worth surfacing now, a digest of secondary
+items, and the rest discarded.
+
+Every search, article fetch, and scoring decision becomes its own Kitaru
+checkpoint, so the dashboard shows the full trail of what the agent did
+and why. If a step fails (site down, rate limit, model hiccup), you can
+replay from exactly that step without re-paying for everything before it.
+
 ## What running it looks like
 
 ```
@@ -59,8 +74,17 @@ XAI_API_KEY=xai-...        # optional, unlocks the search_twitter tool
 Then:
 
 ```bash
-python scout.py --seed-profile   # seed default interests to memory (once)
-python scout.py                   # sweep
+# One-time setup: writes the default interest list into Kitaru's
+# persistent memory store so every future run knows what you care about.
+python scout.py --seed-profile
+
+# Normal usage: reads your interests from memory and runs one full pass —
+# search, investigate, score, and emit the final briefing to the terminal.
+python scout.py
+
+# One-off override: runs a pass for these specific topics instead of
+# whatever is stored in memory. Useful for trying the agent on a new
+# topic without overwriting your saved interests.
 python scout.py --interests "robotics,biotech"
 ```
 
