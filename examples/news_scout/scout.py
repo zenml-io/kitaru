@@ -71,9 +71,7 @@ _NON_SECRET_ENV_VARS = (
 
 def _collect_non_secret_env() -> dict[str, str]:
     """Forward local non-secret config (model overrides) into remote images."""
-    return {
-        key: os.environ[key] for key in _NON_SECRET_ENV_VARS if os.environ.get(key)
-    }
+    return {key: os.environ[key] for key in _NON_SECRET_ENV_VARS if os.environ.get(key)}
 
 
 # ---------------------------------------------------------------------------
