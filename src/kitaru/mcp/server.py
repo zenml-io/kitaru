@@ -18,6 +18,7 @@ import kitaru._interface_memory as memory_interface
 import kitaru._interface_stacks as stack_interface
 import kitaru.client as client_api
 import kitaru.inspection as inspection
+import kitaru.secrets as secrets_api
 from kitaru._config import _stacks as stack_ops
 from kitaru._interface_errors import run_with_mcp_error_boundary
 from kitaru._local_server import (
@@ -257,6 +258,20 @@ def kitaru_executions_replay(
         }
 
     return run_with_mcp_error_boundary(_replay_execution)
+
+
+@tracked_mcp_tool
+def kitaru_secrets_create(
+    name: str,
+    values: dict[str, Any],
+    private: bool = False,
+) -> dict[str, Any]:
+    """Create a Kitaru secret and return metadata without raw values."""
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_secret_summary(
+            secrets_api.create_secret(name, values, private=private)
+        )
+    )
 
 
 @tracked_mcp_tool
