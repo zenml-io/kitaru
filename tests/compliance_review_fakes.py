@@ -80,11 +80,13 @@ def install_fake_claude_agent_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def clear_compliance_review_modules(*module_names: str) -> None:
     """Clear compliance review modules so they re-import with the fake SDK."""
-    for module_name in (
-        "examples.compliance_review.claude_agent",
-        "examples.compliance_review.materializers",
-        *module_names,
-    ):
+    compliance_modules = [
+        name
+        for name in sys.modules
+        if name == "examples.compliance_review"
+        or name.startswith("examples.compliance_review.")
+    ]
+    for module_name in (*compliance_modules, *module_names):
         sys.modules.pop(module_name, None)
 
 

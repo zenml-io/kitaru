@@ -68,6 +68,42 @@ def test_run_agent_turn_surfaces_result_error_before_transport_wrapper(
     assert "Claude Agent SDK turn failed:" in message
 
 
+@pytest.mark.parametrize("empty_result", [None, "", "   \n  "])
+def test_run_agent_turn_raises_when_claude_returns_no_result_text(
+    monkeypatch,
+    claude_agent_module,
+    empty_result: str | None,
+) -> None:
+    """A completed turn with no text should fail loudly with diagnostic context."""
+
+    async def fake_query(*, prompt, options):
+        del prompt
+        assert options.stderr is not None
+        options.stderr("company_docs tool returned empty content")
+        yield claude_agent_module.ResultMessage(
+            subtype="end_turn",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=3,
+            session_id="empty-result-session",
+            result=empty_result,
+            stop_reason="tool_use",
+        )
+
+    monkeypatch.setattr(claude_agent_module, "query", fake_query)
+    monkeypatch.setattr(claude_agent_module, "_ensure_anthropic_api_key", lambda: None)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(claude_agent_module.run_agent_turn("test prompt"))
+
+    message = str(exc_info.value)
+    assert "finished without producing result text" in message
+    assert "stop_reason='tool_use'" in message
+    assert "num_turns=3" in message
+    assert "company_docs tool returned empty content" in message
+
+
 def test_run_agent_turn_includes_stderr_for_transport_failures(
     monkeypatch,
     claude_agent_module,

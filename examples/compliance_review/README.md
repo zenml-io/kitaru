@@ -38,6 +38,10 @@ Pick a stage and run it:
 uv run examples/compliance_review/stage_1_single_turn.py
 ```
 
+### Re-running the examples costs real money
+
+Each stage's `run_workflow()` defaults to `cache=False`. That means every invocation — including back-to-back reruns with identical prompts — makes fresh Claude API calls. We default to fresh runs because the pedagogy is "watch the agent work": an implicit cache-hit would silently skip Claude on the second run and hide the behavior you came here to see. Replay (`.replay()` on a prior execution) is independent of this default and still reuses durable checkpoint outputs. If you want to experiment with re-run cache-hits explicitly, call `run_workflow(cache=True)` from Python.
+
 ### Running against a remote stack
 
 The local default stack works out of the box. If you want to run against a remote stack (S3 artifact store, Kubernetes orchestrator, Vertex, etc.), install that stack's ZenML integration into the same venv after syncing.

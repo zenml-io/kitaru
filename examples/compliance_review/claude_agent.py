@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -34,11 +35,13 @@ from pydantic import BaseModel, Field
 from kitaru import get_secret
 from kitaru.config import classify_stack_deployment_type
 
-try:  # Support both package imports and `cd examples/compliance_review`.
-    from . import tools as retrieval_tools
-except ImportError:  # pragma: no cover - exercised by direct script execution.
-    import tools as retrieval_tools  # type: ignore[no-redef]
+# Keep `retrieval_tools` on a single module identity so
+# `isinstance`/`@tool` registration is stable regardless of cwd.
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
+from examples.compliance_review import tools as retrieval_tools  # noqa: E402
 
 COMPANY_TOOLS_SERVER_NAME = "company_docs"
 DEFAULT_ALLOWED_TOOLS = [
@@ -261,6 +264,9 @@ async def run_agent_turn(
     if final.is_error:
         raise RuntimeError(_format_result_error(final, stderr_lines))
 
+    if not (final.result and final.result.strip()):
+        raise RuntimeError(_format_empty_result_error(final, stderr_lines))
+
     transcript_path = resolve_claude_transcript_path(
         final.session_id,
         cwd=resolved_cwd,
@@ -373,6 +379,24 @@ def _format_transport_error(exc: Exception, stderr_lines: list[str]) -> str:
     """Format a transport/process failure with any collected stderr context."""
     return _append_stderr(
         f"Claude Agent SDK transport failed: {exc}",
+        stderr_lines,
+    )
+
+
+def _format_empty_result_error(
+    final: ResultMessage,
+    stderr_lines: list[str],
+) -> str:
+    """Format a completed-but-empty-text turn so callers see why Claude stopped."""
+    parts: list[str] = []
+    if final.stop_reason is not None:
+        parts.append(f"stop_reason={final.stop_reason!r}")
+    if final.subtype is not None:
+        parts.append(f"subtype={final.subtype!r}")
+    parts.append(f"num_turns={final.num_turns}")
+    context = ", ".join(parts)
+    return _append_stderr(
+        f"Claude Agent SDK turn finished without producing result text ({context})",
         stderr_lines,
     )
 

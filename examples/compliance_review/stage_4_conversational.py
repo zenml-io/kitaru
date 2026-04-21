@@ -25,6 +25,7 @@ from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
+from zenml.utils.source_utils import set_custom_source_root
 
 import kitaru
 from kitaru import checkpoint, flow
@@ -35,6 +36,7 @@ from kitaru import checkpoint, flow
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+set_custom_source_root(_REPO_ROOT)
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
@@ -203,9 +205,17 @@ def run_workflow(
     *,
     stack: str | None = None,
     use_secret_environment: bool = False,
+    cache: bool = False,
 ) -> ClaudeAgentResult:
-    """Execute the Stage 4 conversational review flow."""
-    run_kwargs: dict[str, Any] = {"stack": stack}
+    """Execute the Stage 4 conversational review flow.
+
+    Caching defaults to off so each run exercises Claude fresh. ZenML's
+    implicit cache-hit on identical inputs would otherwise make the
+    second run a no-op that hides the agent behavior the example is
+    meant to demonstrate. Replay (`.replay()`) is independent of this
+    flag and continues to reuse durable checkpoint outputs.
+    """
+    run_kwargs: dict[str, Any] = {"stack": stack, "cache": cache}
     if use_secret_environment:
         run_kwargs["image"] = {
             "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT],
