@@ -47,52 +47,47 @@ def _find_artifact_by_name(
     raise AssertionError(f"No artifact named '{name}' found in step outputs.")
 
 
-def test_stage2_run_workflow_forwards_cache_false_to_audit_company(
+def _patch_audit_company(
+    monkeypatch: pytest.MonkeyPatch,
+    stage2_module: Any,
+    *,
+    result: Any | None = None,
+) -> Mock:
+    """Replace stage 2's `audit_company` flow with a Mock and return it."""
+    stub = result or stage2_module.ClaudeAgentResult(
+        session_id="s",
+        cwd=str(stage2_module.EXAMPLE_DIR),
+        transcript_path="/tmp/s.jsonl",
+        result="ok",
+        num_turns=1,
+    )
+    fake_flow = Mock(run=Mock(return_value=Mock(wait=Mock(return_value=stub))))
+    monkeypatch.setattr(stage2_module, "audit_company", fake_flow)
+    return fake_flow
+
+
+def test_stage2_run_workflow_forwards_cache_to_audit_company(
     monkeypatch,
     stage2_module,
 ) -> None:
     """`cache=False` should skip ZenML's checkpoint cache for every domain."""
-    fake_handle = Mock()
-    fake_handle.wait = Mock(
-        return_value=stage2_module.ClaudeAgentResult(
-            session_id="s",
-            cwd=str(stage2_module.EXAMPLE_DIR),
-            transcript_path="/tmp/s.jsonl",
-            result="ok",
-            num_turns=1,
-        )
-    )
-    fake_flow = Mock()
-    fake_flow.run = Mock(return_value=fake_handle)
-    monkeypatch.setattr(stage2_module, "audit_company", fake_flow)
+    fake_flow = _patch_audit_company(monkeypatch, stage2_module)
 
     stage2_module.run_workflow(cache=False)
 
     fake_flow.run.assert_called_once_with(stack=None, cache=False)
 
 
-def test_stage2_run_workflow_defaults_omit_cache_kwarg(
+def test_stage2_run_workflow_defaults_to_cache_enabled(
     monkeypatch,
     stage2_module,
 ) -> None:
-    """Default `run_workflow()` keeps the existing call shape (no `cache` kwarg)."""
-    fake_handle = Mock()
-    fake_handle.wait = Mock(
-        return_value=stage2_module.ClaudeAgentResult(
-            session_id="s",
-            cwd=str(stage2_module.EXAMPLE_DIR),
-            transcript_path="/tmp/s.jsonl",
-            result="ok",
-            num_turns=1,
-        )
-    )
-    fake_flow = Mock()
-    fake_flow.run = Mock(return_value=fake_handle)
-    monkeypatch.setattr(stage2_module, "audit_company", fake_flow)
+    """Default `run_workflow()` should pass `cache=True`."""
+    fake_flow = _patch_audit_company(monkeypatch, stage2_module)
 
     stage2_module.run_workflow()
 
-    fake_flow.run.assert_called_once_with(stack=None)
+    fake_flow.run.assert_called_once_with(stack=None, cache=True)
 
 
 def test_stage2_required_result_text_surfaces_cache_diagnostics(
@@ -131,11 +126,7 @@ def test_stage2_run_workflow_can_opt_into_runtime_secret_environment(
         result="Stubbed flow result",
         num_turns=1,
     )
-    fake_handle = Mock()
-    fake_handle.wait = Mock(return_value=expected)
-    fake_flow = Mock()
-    fake_flow.run = Mock(return_value=fake_handle)
-    monkeypatch.setattr(stage2_module, "audit_company", fake_flow)
+    fake_flow = _patch_audit_company(monkeypatch, stage2_module, result=expected)
 
     result = stage2_module.run_workflow(
         stack="prod-k8s",
@@ -145,6 +136,7 @@ def test_stage2_run_workflow_can_opt_into_runtime_secret_environment(
     assert result == expected
     fake_flow.run.assert_called_once_with(
         stack="prod-k8s",
+        cache=True,
         image={
             "requirements": [
                 stage2_module.CLAUDE_AGENT_SDK_REQUIREMENT,
@@ -153,7 +145,7 @@ def test_stage2_run_workflow_can_opt_into_runtime_secret_environment(
             "secret_environment_from": [stage2_module.ANTHROPIC_SECRET_NAME],
         },
     )
-    fake_handle.wait.assert_called_once_with()
+    fake_flow.run.return_value.wait.assert_called_once_with()
 
 
 @pytest.mark.usefixtures("primed_zenml")

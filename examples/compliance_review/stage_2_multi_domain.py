@@ -237,14 +237,12 @@ def run_workflow(
     cache: bool = True,
 ) -> ClaudeAgentResult:
     """Execute the full Stage 2 audit and return the final report result."""
-    run_kwargs: dict[str, Any] = {"stack": stack}
+    run_kwargs: dict[str, Any] = {"stack": stack, "cache": cache}
     if use_secret_environment:
         run_kwargs["image"] = {
             "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT],
             "secret_environment_from": [ANTHROPIC_SECRET_NAME],
         }
-    if not cache:
-        run_kwargs["cache"] = False
     return audit_company.run(**run_kwargs).wait()
 
 
