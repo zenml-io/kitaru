@@ -22,6 +22,7 @@ from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
+from zenml.utils.source_utils import set_custom_source_root
 
 import kitaru
 from kitaru import checkpoint, flow
@@ -32,6 +33,7 @@ from kitaru import checkpoint, flow
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+set_custom_source_root(_REPO_ROOT)
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402

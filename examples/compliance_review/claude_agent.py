@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -34,11 +35,13 @@ from pydantic import BaseModel, Field
 from kitaru import get_secret
 from kitaru.config import classify_stack_deployment_type
 
-try:  # Support both package imports and `cd examples/compliance_review`.
-    from . import tools as retrieval_tools
-except ImportError:  # pragma: no cover - exercised by direct script execution.
-    import tools as retrieval_tools  # type: ignore[no-redef]
+# Support both package imports and `cd examples/compliance_review` while keeping
+# the retrieval tools on one canonical module identity.
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
+from examples.compliance_review import tools as retrieval_tools  # noqa: E402
 
 COMPANY_TOOLS_SERVER_NAME = "company_docs"
 DEFAULT_ALLOWED_TOOLS = [
