@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 from zenml.enums import ArtifactSaveType
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
+from zenml.exceptions import EntityExistsError
 from zenml.models import PipelineRunResponse, StepRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 
@@ -423,7 +424,7 @@ def test_deployments_create_retries_duplicate_name_by_reallocating_version() -> 
             SimpleNamespace(items=[existing_v1, concurrent_v2]),
         ]
         client_mock.update_snapshot.side_effect = [
-            RuntimeError("snapshot already exists"),
+            EntityExistsError("snapshot already exists"),
             created_v3,
         ]
 

@@ -14,9 +14,12 @@ from kitaru.errors import KitaruUsageError
 
 _SNAPSHOT_NAME_PATTERN = re.compile(r"^kitaru::(?P<flow>.+)::v(?P<version>[1-9]\d*)$")
 _DEPLOYMENT_TAG_MARKER = "kitaru:deployment"
-_DEPLOYMENT_PUBLIC_TAG_PREFIX = "kitaru:deployment:tag:"
+_DEPLOYMENT_NAMESPACE_PREFIX = f"{_DEPLOYMENT_TAG_MARKER}:"
+_DEPLOYMENT_PUBLIC_TAG_PREFIX = f"{_DEPLOYMENT_NAMESPACE_PREFIX}tag:"
 _DEPLOYMENT_PUBLIC_TAG_EXCLUSIVE_SUFFIX = ":exclusive"
 _DEPLOYMENT_PUBLIC_TAG_SHARED_SUFFIX = ":shared"
+
+_DEFAULT_DEPLOYMENT_TAG = "default"
 
 
 @dataclass(frozen=True)
@@ -27,7 +30,7 @@ class DeploymentSnapshotName:
     version: int
 
 
-def _validate_deployment_flow(flow: str) -> str:
+def validate_deployment_flow(flow: str) -> str:
     """Validate and normalize a deployment flow selector."""
     normalized = flow.strip()
     if not normalized:
@@ -37,21 +40,37 @@ def _validate_deployment_flow(flow: str) -> str:
     return normalized
 
 
-def _validate_deployment_tag(tag: str) -> str:
+def validate_deployment_tag(tag: str) -> str:
     """Validate and normalize a deployment tag."""
     normalized = tag.strip()
     if not normalized:
         raise KitaruUsageError("Deployment tags must be non-empty strings.")
-    if normalized.startswith("kitaru:deployment:"):
+    if normalized.startswith(_DEPLOYMENT_NAMESPACE_PREFIX):
         raise KitaruUsageError("Deployment tags cannot use the `kitaru:` namespace.")
     return normalized
 
 
-def build_deployment_snapshot_name(flow: str, version: int) -> str:
-    """Build the Kitaru-owned ZenML snapshot name for a deployment version."""
-    normalized_flow = _validate_deployment_flow(flow)
+def validate_deployment_version(version: int) -> int:
+    """Validate a deployment version selector."""
     if isinstance(version, bool) or version < 1:
         raise KitaruUsageError("Deployment version must be >= 1.")
+    return version
+
+
+def resolve_deployment_exclusive(tag: str, exclusive: bool) -> bool:
+    """Return the effective exclusivity, forcing ``default`` to always be exclusive."""
+    return True if tag == _DEFAULT_DEPLOYMENT_TAG else bool(exclusive)
+
+
+def is_default_deployment_tag(tag: str) -> bool:
+    """Return whether ``tag`` is the reserved default deployment tag."""
+    return tag == _DEFAULT_DEPLOYMENT_TAG
+
+
+def build_deployment_snapshot_name(flow: str, version: int) -> str:
+    """Build the Kitaru-owned ZenML snapshot name for a deployment version."""
+    normalized_flow = validate_deployment_flow(flow)
+    validate_deployment_version(version)
     return f"kitaru::{normalized_flow}::v{version}"
 
 
@@ -74,7 +93,7 @@ def next_deployment_version(
     flow: str,
 ) -> int:
     """Return the next deployment version for ``flow`` from existing snapshots."""
-    normalized_flow = _validate_deployment_flow(flow)
+    normalized_flow = validate_deployment_flow(flow)
     versions = [
         parsed.version
         for snapshot in snapshots
@@ -94,7 +113,7 @@ def deployment_snapshot_marker_tag() -> str:
 
 def deployment_public_tag(tag: str, *, exclusive: bool) -> str:
     """Build the native ZenML tag that stores public deployment tag state."""
-    normalized_tag = _validate_deployment_tag(tag)
+    normalized_tag = validate_deployment_tag(tag)
     encoded = quote(normalized_tag, safe="")
     suffix = (
         _DEPLOYMENT_PUBLIC_TAG_EXCLUSIVE_SUFFIX
@@ -129,11 +148,11 @@ def deployment_native_tags(tags: Mapping[str, bool] | None) -> list[str]:
     """Build native ZenML tags for a deployment snapshot."""
     native_tags = [_DEPLOYMENT_TAG_MARKER]
     for tag, exclusive in (tags or {}).items():
-        normalized_tag = _validate_deployment_tag(tag)
+        normalized_tag = validate_deployment_tag(tag)
         native_tags.append(
             deployment_public_tag(
                 normalized_tag,
-                exclusive=True if normalized_tag == "default" else bool(exclusive),
+                exclusive=resolve_deployment_exclusive(normalized_tag, exclusive),
             )
         )
     return native_tags
@@ -298,7 +317,12 @@ __all__ = [
     "deployment_public_tag",
     "deployment_snapshot_marker_tag",
     "deployment_tags_from_snapshot",
+    "is_default_deployment_tag",
     "map_deployment_snapshot",
     "next_deployment_version",
     "parse_deployment_snapshot_name",
+    "resolve_deployment_exclusive",
+    "validate_deployment_flow",
+    "validate_deployment_tag",
+    "validate_deployment_version",
 ]
