@@ -59,6 +59,7 @@ Use `uv` for Python dependency management and `just` as the command stack.
 **Typical loop:** write code → `just fix` → `just check` → `just test` → commit.
 
 - `just test tests/test_file.py::test_name`: run one test
+- **Agent tip:** the full suite takes ~4 minutes. When running it through a pager or any stream that may truncate output, pipe through grep so the failure names survive the truncation: `just test 2>&1 | grep -E "FAILED|ERROR|passed|failed" | tail -20`. This keeps the PASS/FAIL summary and every `FAILED` line without forcing a rerun just to recover the list.
 - `just lint`: lint only
 - `just typecheck`: type check only
 - `just typos`: typo check only

@@ -154,6 +154,13 @@ just test tests/test_foo.py::test_bar # Run a single test
 just test -x                          # Stop on first failure
 just fix                              # Auto-fix formatting, lint, and yaml
 
+# Agent tip: the full suite takes ~4 minutes. When running it through a
+# pager/truncated stream that may drop the failure list, pipe through
+# grep so the failure names survive:
+#   just test 2>&1 | grep -E "FAILED|ERROR|passed|failed" | tail -20
+# That keeps the PASS/FAIL summary and every FAILED line without
+# forcing a rerun just to recover the list.
+
 # Individual checks
 just lint                             # Lint only
 just typecheck                        # Type check only
