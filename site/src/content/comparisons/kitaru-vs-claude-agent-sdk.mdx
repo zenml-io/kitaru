@@ -106,49 +106,53 @@ Kitaru captures artifacts from every `@checkpoint` automatically and links them 
 ## Code comparison
 
 <CodeCompare
-  kitaruLabel="Kitaru"
-  competitorLabel="Claude Agent SDK"
-  kitaruCode={`from kitaru import checkpoint, flow, wait
+  kitaruLabel="Kitaru + Agent SDK"
+  competitorLabel="Claude Agent SDK alone"
+  kitaruCode={`import asyncio
+from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
+from kitaru import checkpoint, flow, wait
 
 @checkpoint
 def draft(topic: str) -> str:
-    # Runs once, result cached for replay
-    return generate_draft(topic)
+    # One Agent SDK turn == one durable checkpoint.
+    # On replay, the cached result is returned — no re-billing.
+    async def run() -> str:
+        async for msg in query(
+            prompt=f"Draft a short blog post on: {topic}",
+            options=ClaudeAgentOptions(allowed_tools=["Read"]),
+        ):
+            if isinstance(msg, ResultMessage):
+                return msg.result or ""
+        return ""
+    return asyncio.run(run())
 
 @flow
 def review_flow(topic: str) -> str:
     text = draft(topic)
+    # Compute is released while we wait. Survives crashes.
     approved = wait(
-        name="approve_draft",
-        question="Approve draft?",
+        name="approve",
+        question=f"Approve?\\n{text}",
         schema=bool,
     )
-    if not approved:
-        return "Rejected"
-    return text
+    return text if approved else "Rejected"
 
 review_flow.run("Durable agents")`}
   competitorCode={`import asyncio
-from claude_agent_sdk import query, ClaudeAgentOptions, SystemMessage, ResultMessage
+from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
 
 async def review_flow(topic: str) -> str:
-    session_id = None
-    draft_text = None
-
-    async for message in query(
+    draft_text = ""
+    async for msg in query(
         prompt=f"Draft a short blog post on: {topic}",
         options=ClaudeAgentOptions(allowed_tools=["Read"]),
     ):
-        if isinstance(message, SystemMessage) and message.subtype == "init":
-            session_id = message.data["session_id"]
-        if isinstance(message, ResultMessage):
-            draft_text = message.result
+        if isinstance(msg, ResultMessage):
+            draft_text = msg.result or ""
 
-    # Approval is in-process. If this container dies, the draft is gone.
+    # Blocking input(). If the container dies, the draft is lost.
     approved = input(f"Approve?\\n{draft_text}\\n[y/n]: ") == "y"
-    if not approved:
-        return "Rejected"
-    return draft_text
+    return draft_text if approved else "Rejected"
 
 asyncio.run(review_flow("Durable agents"))`}
 />

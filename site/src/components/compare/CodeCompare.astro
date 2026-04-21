@@ -43,7 +43,15 @@ const {
 </section>
 
 <style>
-  .codecompare { margin: 32px 0 48px; }
+  /* Break out of the 820px article column so the two panes have room.
+     Pattern mirrors FeatureWithGraphic.astro for cross-component consistency. */
+  .codecompare {
+    margin: 32px auto 48px;
+    width: min(1120px, calc(100vw - 48px));
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+  }
   .codecompare-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
