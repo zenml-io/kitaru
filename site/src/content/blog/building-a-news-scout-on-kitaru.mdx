@@ -90,18 +90,33 @@ python scout.py --seed-profile           # uses my defaults
 python scout.py --interests "robotics,biotech"
 ```
 
-## Baking keys into the image
+## Secrets that don't travel through the image
 
-The flow declares its own image, and `_collect_env()` reads the keys I have locally and bakes them into the container when Kitaru builds it for a remote stack:
+When I first wrote this I was propagating `ANTHROPIC_API_KEY` directly into `ImageSettings.environment`. That ships the value into Docker build metadata, image layers, and build logs — fine as a laptop-grade toy, corrosive in a quiet way the moment anyone else runs it, because a leaked image doesn't feel like a leaked secret until someone pulls its history.
+
+The 0.5.1 release added `ImageSettings.secret_environment_from`, which is the same idea minus the leak surface. The flow references a secret by **name**; ZenML resolves it at step dispatch time and injects the values into the pod's environment — not into image layers, not into logs, not into the frozen execution spec.
 
 ```python
 SCOUT_IMAGE = ImageSettings(
-    requirements=["pydantic-ai>=1.80", "openai>=1.0"],
-    environment=_collect_env(),
+    requirements=["pydantic-ai-slim[anthropic,openai]>=1.75,<1.80"],
+    environment=_collect_non_secret_env(),    # model overrides only, no keys
 )
+
+# On remote stacks, main() injects this at .run() time:
+run_kwargs["image"] = {
+    "requirements": [...],
+    "environment": _collect_non_secret_env(),
+    "secret_environment_from": ["news-scout-keys"],
+}
 ```
 
-Baking keys into images is fine for a personal scout running on my own infra. It is *not* fine for shared infrastructure. Keys in images leak the moment the image leaks. For anything beyond a one-developer toy, use `kitaru secrets` and model aliases. I went laptop-grade on purpose here because I'm the only consumer and I'd rather optimize for "works after a `kitaru stack use`" than build a credential pipeline for myself.
+One-time setup for the remote path:
+
+```bash
+kitaru secrets set news-scout-keys --ANTHROPIC_API_KEY=sk-ant-... --XAI_API_KEY=xai-...
+```
+
+Local runs on the default stack still read `.env` via `load_dotenv()`, so experimenting locally needs no secret setup.
 
 ## What I'd do differently
 

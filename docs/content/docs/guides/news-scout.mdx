@@ -10,7 +10,7 @@ It's a good reference if you want to see:
 - `KitaruAgent(granular_checkpoints=True)` wired end-to-end
 - A final `@checkpoint` that promotes the agent's free-text output to a **named artifact** (`final_report`) readable straight from the dashboard
 - Namespace memory read **detached** (outside the flow) so granular-mode agents see concrete values, not artifact refs
-- `ImageSettings` with `_collect_env()` baking API keys into the container for remote stacks
+- `ImageSettings.secret_environment_from` for provider API keys, injected automatically when the active stack is remote
 
 ## What you get
 
@@ -131,12 +131,12 @@ In the dashboard, the flow now has a `final_report` artifact you can open withou
 
 ## Running on a remote stack
 
-The flow declares its own image so it can build and deploy to Kubernetes (or any other remote stack) without any other glue:
+The flow declares its own image; `main()` attaches a runtime secret reference automatically when the active stack is remote (Kubernetes, Vertex, SageMaker, or AzureML):
 
 ```python
 SCOUT_IMAGE = ImageSettings(
-    requirements=["pydantic-ai>=1.80", "openai>=1.0"],
-    environment=_collect_env(),    # reads ANTHROPIC_API_KEY, XAI_API_KEY, etc.
+    requirements=["pydantic-ai-slim[anthropic,openai]>=1.75,<1.80"],
+    environment=_collect_non_secret_env(),    # KITARU_SCOUT_MODEL, KITARU_GROK_MODEL
 )
 
 @flow(image=SCOUT_IMAGE)
@@ -144,17 +144,25 @@ def news_scout(interests: list[str]) -> str:
     ...
 ```
 
-`_collect_env()` picks up whichever keys are set in your local environment at module-load time (after `load_dotenv()`) and bakes them into the image. Nothing secret leaves the file that isn't already in your shell.
+At `.run()` time, `_image_override_for_active_stack()` checks `classify_stack_deployment_type()` and, if the stack is remote, attaches `ImageSettings.secret_environment_from=["news-scout-keys"]` to the run. Kitaru forwards that list to ZenML via `Pipeline.with_options(secrets=[...])`, so each key in the secret is resolved at step dispatch time and exposed as an environment variable inside the pod. Values never enter image layers, logs, or the frozen execution spec — only the secret name is persisted.
 
-Ship it:
+Create the secret once (shared across stacks):
 
 ```bash
+kitaru secrets set news-scout-keys \
+  --ANTHROPIC_API_KEY=sk-ant-... \
+  --XAI_API_KEY=xai-...      # optional, unlocks search_twitter
+
 kitaru stack use my-k8s-stack
 python scout.py
 ```
 
-<Callout type="warn">
-  Baking credentials into container images is fine for a personal scout, not for shared infrastructure. For production, register secrets with `kitaru secrets set` and link them via a model alias with `--secret` so they're only materialized inside the runtime.
+<Callout type="info">
+  Local default stacks skip the secret path — the in-process runner reads credentials straight from your shell (via `load_dotenv()`), so experimenting locally needs no secret setup.
+</Callout>
+
+<Callout type="info">
+  The `pydantic-ai-slim[anthropic,openai]>=1.75,<1.80` pin is load-bearing for ZenML 0.94.x compatibility. Every `pydantic-ai` release from 1.80 onward bumps its `opentelemetry-sdk` floor to `>=1.39`, but ZenML hard-pins otel to `1.38.0`, so the full package is unresolvable inside the flow-execution image.
 </Callout>
 
 ## Swapping models
