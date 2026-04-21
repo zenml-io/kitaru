@@ -157,6 +157,18 @@ def format_mcp_execution_logs(entries: Sequence[LogEntry]) -> str:
     return "\n".join(_format_mcp_log_entry(entry) for entry in entries)
 
 
+def flow_handle_exec_id(handle: Any) -> str:
+    """Return a flow handle execution ID from property- or method-style handles."""
+    exec_id = getattr(handle, "exec_id", None)
+    if callable(exec_id):
+        exec_id = exec_id()
+    if exec_id is None:
+        raise ValueError(
+            "Flow execution did not return a valid handle with an `exec_id`."
+        )
+    return str(exec_id)
+
+
 def invoke_flow_target(
     *,
     target: str,
@@ -179,11 +191,7 @@ def invoke_flow_target(
     else:
         handle = flow_target.run(**flow_inputs)
 
-    if not isinstance(handle, _flow_loading._FlowHandleLike):
-        raise ValueError(
-            "Flow execution did not return a valid handle with an `exec_id`."
-        )
-
+    flow_handle_exec_id(handle)
     return FlowInvocationResult(handle=handle)
 
 

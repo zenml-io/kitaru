@@ -68,6 +68,12 @@ class AnalyticsEvent(StrEnum):
     INFO_VIEWED = "Kitaru info viewed"
     INFO_EXPORTED = "Kitaru info exported"
     STATUS_VIEWED = "Kitaru status viewed"
+    DEPLOYMENT_BUILT = "Kitaru deployment built"
+    DEPLOYMENT_DEPLOYED = "Kitaru deployment deployed"
+    DEPLOYMENT_INVOKED = "Kitaru deployment invoked"
+    DEPLOYMENT_TAGGED = "Kitaru deployment tagged"
+    DEPLOYMENT_UNTAGGED = "Kitaru deployment untagged"
+    DEPLOYMENT_DELETED = "Kitaru deployment deleted"
 
     # Adapter
     PYDANTIC_AI_WRAPPED = "Kitaru PydanticAI wrapped"

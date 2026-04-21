@@ -232,6 +232,13 @@ run_test "kitaru model list"             $UV_RUN kitaru model list
 run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
 run_test "kitaru analytics opt-in --help"  $UV_RUN kitaru analytics opt-in --help
 run_test "kitaru analytics opt-out --help" $UV_RUN kitaru analytics opt-out --help
+run_test "kitaru build --help"            $UV_RUN kitaru build --help
+run_test "kitaru deploy --help"           $UV_RUN kitaru deploy --help
+run_test "kitaru invoke --help"           $UV_RUN kitaru invoke --help
+run_test "kitaru flow --help"             $UV_RUN kitaru flow --help
+run_test "kitaru flow deployments --help" $UV_RUN kitaru flow deployments --help
+run_test "kitaru flow list"               $UV_RUN kitaru flow list
+run_test "kitaru flow list -o json"       $UV_RUN kitaru flow list -o json
 ANALYTICS_OUT=$($UV_RUN kitaru analytics status -o json 2>&1) || true
 ANALYTICS_DISABLED=$(echo "$ANALYTICS_OUT" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['item']['analytics_opt_in'])" 2>/dev/null) || true

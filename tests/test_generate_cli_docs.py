@@ -123,10 +123,14 @@ class TestBuildCommandTree:
         tree = build_command_tree(app)
         assert [sub.name for sub in tree.subcommands] == [
             "analytics",
+            "build",
             "clean",
+            "deploy",
             "executions",
+            "flow",
             "info",
             "init",
+            "invoke",
             "log-store",
             "login",
             "logout",
@@ -151,6 +155,26 @@ class TestBuildCommandTree:
             "replay",
             "resume",
             "retry",
+        ]
+
+    def test_flow_tree_includes_deployment_commands(self) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        flow = _find_command(tree, "flow")
+        assert [sub.name for sub in flow.subcommands] == [
+            "deployments",
+            "list",
+            "show",
+            "tag",
+            "untag",
+        ]
+        deployments = _find_command(tree, "flow", "deployments")
+        assert [sub.name for sub in deployments.subcommands] == [
+            "delete",
+            "list",
+            "logs",
+            "show",
         ]
 
     def test_stack_tree_includes_create_and_delete(self) -> None:
@@ -430,10 +454,14 @@ class TestWriteDocsTree:
         assert meta["title"] == "CLI Reference"
         assert meta["pages"] == [
             "analytics",
+            "build",
             "clean",
+            "deploy",
             "executions",
+            "flow",
             "info",
             "init",
+            "invoke",
             "log-store",
             "login",
             "logout",
@@ -515,10 +543,11 @@ class TestWriteDocsTree:
         status_page = (output_dir / "status.mdx").read_text()
         assert "`--output`, `-o`" in status_page
 
-        # executions, log-store, memory, model, secrets, and stack all
+        # executions, flow, log-store, memory, model, secrets, and stack all
         # have nested subcommands.
         for command in (
             "executions",
+            "flow",
             "log-store",
             "memory",
             "model",
@@ -540,6 +569,13 @@ class TestWriteDocsTree:
         ):
             assert (output_dir / "executions" / f"{command}.mdx").exists()
             assert f"executions/{command}.mdx" in files
+
+        for command in ("list", "show", "tag", "untag"):
+            assert (output_dir / "flow" / f"{command}.mdx").exists()
+            assert f"flow/{command}.mdx" in files
+        for command in ("delete", "list", "logs", "show"):
+            assert (output_dir / "flow" / "deployments" / f"{command}.mdx").exists()
+            assert f"flow/deployments/{command}.mdx" in files
 
         for command in ("set", "show", "reset"):
             assert (output_dir / "log-store" / f"{command}.mdx").exists()

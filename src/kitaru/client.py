@@ -1220,23 +1220,31 @@ class _DeploymentsAPI:
             add_tags=deployment_native_tags(tags),
         )
 
-    def _list_records(self, *, flow: str) -> builtins.list[DeploymentRecord]:
-        """List raw Kitaru deployment records for one flow."""
-        normalized_flow = validate_deployment_flow(flow)
+    def _list_records(
+        self,
+        *,
+        flow: str | None = None,
+    ) -> builtins.list[DeploymentRecord]:
+        """List raw Kitaru deployment records, optionally filtered to one flow."""
+        normalized_flow = validate_deployment_flow(flow) if flow is not None else None
         deployments: builtins.list[DeploymentRecord] = []
         for snapshot in self._list_snapshots():
             deployment = map_deployment_snapshot(snapshot)
-            if deployment is None or deployment.flow != normalized_flow:
+            if deployment is None:
+                continue
+            if normalized_flow is not None and deployment.flow != normalized_flow:
                 continue
             deployments.append(deployment)
-        return sorted(deployments, key=lambda deployment: deployment.version)
+        return sorted(
+            deployments, key=lambda deployment: (deployment.flow, deployment.version)
+        )
 
     def _wrap(self, deployment: DeploymentRecord) -> Deployment:
         """Return an SDK-facing deployment facade."""
         return Deployment(deployment, self._client_ref)
 
-    def list(self, *, flow: str) -> builtins.list[Deployment]:
-        """List Kitaru deployment versions for one flow."""
+    def list(self, *, flow: str | None = None) -> builtins.list[Deployment]:
+        """List Kitaru deployment versions, optionally filtered to one flow."""
         return [self._wrap(deployment) for deployment in self._list_records(flow=flow)]
 
     def _resolve_record(

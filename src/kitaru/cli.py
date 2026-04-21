@@ -25,6 +25,8 @@ from kitaru._cli import (
     app,
     clean_app,
     executions_app,
+    flow_app,
+    flow_deployments_app,
     log_store_app,
     main,
     memory_app,
@@ -63,6 +65,35 @@ from kitaru._cli._executions import (
     replay_,
     resume_,
     retry_,
+)
+from kitaru._cli._flows import (
+    build,
+    deploy,
+    invoke,
+)
+from kitaru._cli._flows import (
+    delete as deployment_delete,
+)
+from kitaru._cli._flows import (
+    list_ as flow_list,
+)
+from kitaru._cli._flows import (
+    list__ as flow_deployments_list,
+)
+from kitaru._cli._flows import (
+    logs as flow_deployments_logs,
+)
+from kitaru._cli._flows import (
+    show as flow_show,
+)
+from kitaru._cli._flows import (
+    show__ as flow_deployments_show,
+)
+from kitaru._cli._flows import (
+    tag as flow_tag,
+)
+from kitaru._cli._flows import (
+    untag as flow_untag,
 )
 from kitaru._cli._helpers import (
     DEFAULT_LIST_PAGE,
@@ -268,6 +299,7 @@ _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
         "analytics",
         "clean",
         "executions",
+        "flow",
         "secrets",
         "log-store",
         "stack",
@@ -429,6 +461,7 @@ __all__ = [
     "_value_style",
     "all_",
     "app",
+    "build",
     "build_cleanup_plan",
     "cancel_",
     "clean_app",
@@ -440,8 +473,19 @@ __all__ = [
     "delete",
     "delete_",
     "delete_memory_payload",
+    "deploy",
+    "deployment_delete",
     "execute_cleanup_plan",
     "executions_app",
+    "flow_app",
+    "flow_deployments_app",
+    "flow_deployments_list",
+    "flow_deployments_logs",
+    "flow_deployments_show",
+    "flow_list",
+    "flow_show",
+    "flow_tag",
+    "flow_untag",
     "get_",
     "get_available_stacks",
     "get_credentials_store",
@@ -452,6 +496,7 @@ __all__ = [
     "info",
     "init",
     "input_",
+    "invoke",
     "list_",
     "list__",
     "list___",

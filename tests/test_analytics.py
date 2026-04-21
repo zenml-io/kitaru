@@ -166,6 +166,16 @@ def test_core_funnel_event_canonical_strings() -> None:
     assert AnalyticsEvent.EXECUTION_CANCELLED == "Kitaru execution cancelled"
 
 
+def test_deployment_event_canonical_strings() -> None:
+    """Deployment events should carry the expected canonical strings."""
+    assert AnalyticsEvent.DEPLOYMENT_BUILT == "Kitaru deployment built"
+    assert AnalyticsEvent.DEPLOYMENT_DEPLOYED == "Kitaru deployment deployed"
+    assert AnalyticsEvent.DEPLOYMENT_INVOKED == "Kitaru deployment invoked"
+    assert AnalyticsEvent.DEPLOYMENT_TAGGED == "Kitaru deployment tagged"
+    assert AnalyticsEvent.DEPLOYMENT_UNTAGGED == "Kitaru deployment untagged"
+    assert AnalyticsEvent.DEPLOYMENT_DELETED == "Kitaru deployment deleted"
+
+
 def test_feature_adoption_event_canonical_strings() -> None:
     """Feature-adoption events should carry the expected canonical strings."""
     assert AnalyticsEvent.LLM_CALLED == "Kitaru LLM called"
@@ -231,6 +241,27 @@ def test_cli_entrypoint_tracks_memory_subcommand_granularity() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.CLI_INVOKED,
         {"command": "memory compact"},
+    )
+
+
+def test_cli_entrypoint_tracks_flow_subcommand_granularity() -> None:
+    """Flow commands should track command + subcommand without flow names."""
+    with (
+        patch("kitaru.analytics.set_source"),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        patch("kitaru.cli.GlobalConfiguration") as gc_mock,
+        patch("kitaru.cli._apply_runtime_version"),
+        patch("kitaru.cli.app"),
+        patch("sys.argv", ["kitaru", "flow", "deployments", "list", "demo"]),
+    ):
+        gc_mock.return_value = MagicMock()
+        from kitaru.cli import cli
+
+        cli()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CLI_INVOKED,
+        {"command": "flow deployments"},
     )
 
 
