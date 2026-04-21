@@ -35,7 +35,7 @@ jobs:
           persist-credentials: false
 
       # --- Generate docs content (Python-only generators) ---
-      - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
         with:
           enable-cache: false
       - run: uv sync --frozen
@@ -43,10 +43,10 @@ jobs:
       - run: uv run python scripts/generate_changelog_docs.py
 
       # --- Build docs (Node) ---
-      - uses: pnpm/action-setup@08c4be7e2e672a47d11bd04269e27e5f3e8529cb  # v6.0.0
+      - uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53  # v6.0.1
         with:
           version: 10.33.0
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
         with:
           node-version-file: docs/.node-version
           package-manager-cache: false
@@ -83,7 +83,7 @@ jobs:
       - name: Deploy production
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
           == 'workflow_dispatch'
-        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3.14.1
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd  # v3.15.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -96,7 +96,7 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
           == github.repository && env.HAS_CF_SECRETS == 'true'
         id: preview
-        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3.14.1
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd  # v3.15.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -129,7 +129,7 @@ jobs:
       - name: Delete preview Worker
         if: env.HAS_CF_SECRETS == 'true'
         continue-on-error: true
-        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65  # v3.14.1
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd  # v3.15.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
