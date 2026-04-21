@@ -34,11 +34,6 @@ from ._helpers import (
 )
 
 
-def _secret_visibility(secret: SecretResponse) -> str:
-    """Return a human-readable visibility label for a secret."""
-    return "private" if secret.private else "public"
-
-
 def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
     """Parse `--KEY=value` style assignment tokens into a dictionary."""
     if not raw_assignments:
@@ -135,7 +130,7 @@ def _secret_show_rows(
     rows: list[tuple[str, str]] = [
         ("Name", secret.name),
         ("Secret ID", str(secret.id)),
-        ("Visibility", _secret_visibility(secret)),
+        ("Visibility", "private" if secret.private else "public"),
         ("Keys", ", ".join(keys) if keys else "none"),
         ("Missing values", "yes" if secret.has_missing_values else "no"),
     ]
@@ -159,7 +154,10 @@ def _secret_list_rows(secrets: list[SecretResponse]) -> list[tuple[str, str]]:
         return [("Secrets", "none found")]
 
     return [
-        (secret.name, f"{secret.id} ({_secret_visibility(secret)})")
+        (
+            secret.name,
+            f"{secret.id} ({'private' if secret.private else 'public'})",
+        )
         for secret in secrets
     ]
 

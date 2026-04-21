@@ -57,11 +57,6 @@ class SecretSummary(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    @property
-    def visibility(self) -> str:
-        """Return the user-facing visibility label for this secret."""
-        return "private" if self.private else "public"
-
 
 def _normalize_name_or_id(name_or_id: str) -> str:
     """Normalize and validate a secret name or ID input."""
@@ -71,7 +66,7 @@ def _normalize_name_or_id(name_or_id: str) -> str:
     return normalized
 
 
-def _normalize_secret_write_values(values: Mapping[str, Any]) -> dict[str, str]:
+def _normalize_secret_write_values(values: Any) -> dict[str, str]:
     """Validate and normalize values for secret creation."""
     if not isinstance(values, Mapping):
         raise KitaruUsageError("Secret values must be provided as a mapping.")
@@ -174,8 +169,8 @@ def _get_secret_response_exact(
         ) from exc
 
 
-def _secret_from_response(secret_response: Any) -> Secret:
-    """Convert a backend secret response into Kitaru's public Secret model."""
+def _extract_backend_name_and_id(secret_response: Any) -> tuple[str, str]:
+    """Extract and validate the name and ID from a backend secret response."""
     raw_name = getattr(secret_response, "name", None)
     name = str(raw_name).strip() if raw_name is not None else ""
     if not name:
@@ -185,6 +180,13 @@ def _secret_from_response(secret_response: Any) -> Secret:
     secret_id = str(raw_id) if raw_id is not None else ""
     if not secret_id:
         raise KitaruBackendError(f"Backend returned secret `{name}` without an ID.")
+
+    return name, secret_id
+
+
+def _secret_from_response(secret_response: Any) -> Secret:
+    """Convert a backend secret response into Kitaru's public Secret model."""
+    name, secret_id = _extract_backend_name_and_id(secret_response)
 
     raw_private = getattr(secret_response, "private", None)
     private = bool(raw_private) if raw_private is not None else None
@@ -199,15 +201,7 @@ def _secret_from_response(secret_response: Any) -> Secret:
 
 def _secret_summary_from_response(secret_response: Any) -> SecretSummary:
     """Convert a backend secret response into safe metadata."""
-    raw_name = getattr(secret_response, "name", None)
-    name = str(raw_name).strip() if raw_name is not None else ""
-    if not name:
-        raise KitaruBackendError("Backend returned a secret without a readable name.")
-
-    raw_id = getattr(secret_response, "id", None)
-    secret_id = str(raw_id) if raw_id is not None else ""
-    if not secret_id:
-        raise KitaruBackendError(f"Backend returned secret `{name}` without an ID.")
+    name, secret_id = _extract_backend_name_and_id(secret_response)
 
     return SecretSummary(
         name=name,

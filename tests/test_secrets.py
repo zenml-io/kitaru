@@ -90,7 +90,6 @@ def test_create_secret_creates_public_secret_by_default() -> None:
         keys=["COUNT", "OPENAI_API_KEY"],
         has_missing_values=False,
     )
-    assert summary.visibility == "public"
     track_mock.assert_called_once_with(
         AnalyticsEvent.SECRET_UPSERTED,
         {"operation": "created", "key_count": 2},
@@ -120,7 +119,7 @@ def test_create_secret_forwards_private_flag() -> None:
         values={"OPENAI_API_KEY": "sk-123"},
         private=True,
     )
-    assert summary.visibility == "private"
+    assert summary.private is True
 
 
 @pytest.mark.parametrize(

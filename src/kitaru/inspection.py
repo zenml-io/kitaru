@@ -1299,25 +1299,24 @@ def serialize_model_alias(entry: ModelAliasEntry) -> dict[str, Any]:
     }
 
 
-def secret_visibility(secret: SecretResponse) -> str:
-    """Return a human-readable visibility label for a secret."""
-    return "private" if secret.private else "public"
-
-
 def serialize_secret_summary(secret: Any) -> dict[str, Any]:
-    """Serialize secret summary information without raw secret values."""
-    summary_keys = getattr(secret, "keys", None)
-    if isinstance(summary_keys, list | tuple):
-        keys = sorted(str(key) for key in summary_keys)
-        visibility = "private" if getattr(secret, "private", False) else "public"
+    """Serialize secret summary information without raw secret values.
+
+    Accepts either a ZenML ``SecretResponse`` (which exposes ``.values``
+    as a mapping) or a Kitaru ``SecretSummary`` (which exposes ``.keys``
+    as a list).
+    """
+    from kitaru.secrets import SecretSummary
+
+    if isinstance(secret, SecretSummary):
+        keys = sorted(secret.keys)
     else:
         keys = sorted(str(key) for key in secret.values)
-        visibility = secret_visibility(secret)
 
     return {
         "id": str(secret.id),
         "name": secret.name,
-        "visibility": visibility,
+        "visibility": "private" if secret.private else "public",
         "keys": keys,
         "has_missing_values": bool(getattr(secret, "has_missing_values", False)),
     }
