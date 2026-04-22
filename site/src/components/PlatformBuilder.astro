@@ -1,74 +1,83 @@
 ---
-// PlatformBuilder.astro — "Primitive, not platform" positioning for platform teams
+// PlatformBuilder.astro — "Primitive, not platform" three-layer stack
 ---
 
 <section id="platform-builder" class="pb-section section-pad">
   <div class="section-inner">
     <div class="pb-header" data-reveal>
-      <span class="section-eyebrow">BUILD YOUR AGENT PLATFORM</span>
+      <span class="section-eyebrow">FOR PLATFORM BUILDERS</span>
       <h2 class="section-title">
         Primitive, not platform.
       </h2>
       <p class="pb-desc">
-        Kitaru doesn&rsquo;t decide how your agent thinks, which model you use, or which harness your teams adopt. It gives platform teams the runtime primitives underneath those choices &mdash; durable checkpoints, replay, resume, wait states, and execution across your own infrastructure.
+        Agent tooling really lives in three layers. Kitaru owns one of them &mdash; the runtime &mdash; and leaves the other two to the tools your teams already picked.
       </p>
     </div>
 
-    <div class="pb-grid">
+    <div class="pb-stack">
 
-      <div class="pb-card pb-card-harness" data-reveal="scale-up" data-reveal-delay="2">
-        <div class="card-glow"></div>
-        <div class="pb-card-label">Agent harness</div>
-        <h3>How your agent thinks.</h3>
-        <p>Prompts, tools, model loop, framework choice. Picked per-team.</p>
-        <div class="pb-tags">
-          <span class="pb-tag">OpenAI Agents SDK</span>
-          <span class="pb-tag">Claude Agent SDK</span>
-          <span class="pb-tag">PydanticAI</span>
+      <div class="pb-layer pb-layer-harness" data-reveal="fade-up" data-reveal-delay="1">
+        <div class="pb-layer-head">
+          <span class="pb-layer-label">Harness layer</span>
+          <span class="pb-layer-role">how the agent thinks</span>
+        </div>
+        <div class="pb-layer-tags">
+          <span class="pb-tag">Pydantic AI</span>
+          <span class="pb-tag">Deep Agents</span>
           <span class="pb-tag">LangGraph</span>
+          <span class="pb-tag">Claude Agent SDK</span>
+          <span class="pb-tag">OpenAI Agents SDK</span>
           <span class="pb-tag">Raw Python</span>
-          <span class="pb-tag">Internal</span>
+          <span class="pb-tag pb-tag-ghost">your pick</span>
         </div>
       </div>
 
-      <div class="pb-card pb-card-kitaru" data-reveal="scale-up" data-reveal-delay="3">
-        <div class="card-glow"></div>
-        <div class="pb-card-label">Kitaru runtime</div>
-        <h3>How your agent survives.</h3>
-        <p>Checkpoints, replay, resume, durable execution, versioned deployments, artifact and state tracking.</p>
-        <div class="pb-tags">
-          <span class="pb-tag pb-tag-accent">@flow</span>
-          <span class="pb-tag pb-tag-accent">@checkpoint</span>
-          <span class="pb-tag pb-tag-accent">wait()</span>
+      <div class="pb-connector" aria-hidden="true"></div>
+
+      <div class="pb-layer pb-layer-kitaru" data-reveal="fade-up" data-reveal-delay="2">
+        <div class="pb-layer-head">
+          <span class="pb-layer-label">Runtime layer</span>
+          <span class="pb-layer-role"><strong>Kitaru</strong> &mdash; how the agent survives</span>
+        </div>
+        <div class="pb-layer-tags">
+          <span class="pb-tag pb-tag-accent">checkpoints</span>
           <span class="pb-tag pb-tag-accent">replay</span>
-          <span class="pb-tag pb-tag-accent">memory</span>
-          <span class="pb-tag pb-tag-accent">isolated runtime</span>
+          <span class="pb-tag pb-tag-accent">resume</span>
+          <span class="pb-tag pb-tag-accent">wait()</span>
+          <span class="pb-tag pb-tag-accent">versions + tag routing</span>
+          <span class="pb-tag pb-tag-accent">invocation</span>
+          <span class="pb-tag pb-tag-accent">artifacts + state</span>
+          <span class="pb-tag pb-tag-accent">execution placement</span>
         </div>
       </div>
 
-      <div class="pb-card pb-card-platform" data-reveal="scale-up" data-reveal-delay="4">
-        <div class="card-glow"></div>
-        <div class="pb-card-label">Your platform</div>
-        <h3>How your org governs.</h3>
-        <p>Auth, entitlements, interceptors, observability, UI, policy, customer-facing workflows.</p>
-        <div class="pb-tags">
-          <span class="pb-tag">Gateway</span>
-          <span class="pb-tag">RBAC</span>
-          <span class="pb-tag">Guardrails</span>
-          <span class="pb-tag">Tracing</span>
-          <span class="pb-tag">Product UI</span>
+      <div class="pb-connector" aria-hidden="true"></div>
+
+      <div class="pb-layer pb-layer-platform" data-reveal="fade-up" data-reveal-delay="3">
+        <div class="pb-layer-head">
+          <span class="pb-layer-label">Platform layer</span>
+          <span class="pb-layer-role">how the org governs</span>
+        </div>
+        <div class="pb-layer-tags">
+          <span class="pb-tag">auth</span>
+          <span class="pb-tag">entitlements</span>
+          <span class="pb-tag">interceptors</span>
+          <span class="pb-tag">guardrails</span>
+          <span class="pb-tag">observability</span>
+          <span class="pb-tag">product UI</span>
+          <span class="pb-tag pb-tag-ghost">yours, unchanged</span>
         </div>
       </div>
 
     </div>
 
-    <div class="pb-callout" data-reveal data-reveal-delay="5">
-      <p>
+    <div class="pb-callout" data-reveal data-reveal-delay="4">
+      <p class="pb-callout-line">
         If you&rsquo;re <em>buying</em> an agent platform, Kitaru may feel low-level.<br>
         If you&rsquo;re <strong>building</strong> one, that&rsquo;s the point.
       </p>
       <p class="pb-callout-sub">
-        Platform teams get the durable execution layer they&rsquo;d otherwise build themselves &mdash; run lifecycle, checkpoint boundaries, replay, invocation routing, and self-hosted execution &mdash; without mandating which harness application teams use on top.
+        Kitaru is not a harness and not a packaged platform. It&rsquo;s the durable runtime between them &mdash; framework-agnostic, self-host-first, and ready to drop underneath whatever your teams already chose.
       </p>
     </div>
   </div>
@@ -80,7 +89,7 @@
   }
 
   .pb-header {
-    margin-bottom: 40px;
+    margin-bottom: 48px;
     max-width: 760px;
   }
 
@@ -92,86 +101,89 @@
     font-weight: 300;
   }
 
-  .pb-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
+  /* ─── Three-layer stack ─── */
+
+  .pb-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .pb-card {
+  .pb-layer {
     position: relative;
-    overflow: hidden;
-    background: var(--color-surface);
+    padding: 22px 28px;
     border: 1px solid var(--color-border);
     border-radius: 14px;
-    padding: 28px;
-    transition: border-color 0.3s;
+    background: var(--color-surface);
+    transition: border-color 0.25s, transform 0.25s;
   }
 
-  .pb-card:hover {
-    border-color: oklch(0.65 0.16 45 / 0.25);
+  .pb-layer-harness,
+  .pb-layer-platform {
+    background: var(--color-surface);
+    opacity: 0.92;
   }
 
-  .pb-card:hover .card-glow {
-    opacity: 1;
-  }
-
-  .pb-card-kitaru {
-    border-color: oklch(0.65 0.16 45 / 0.35);
+  .pb-layer-kitaru {
+    border-color: oklch(0.65 0.16 45 / 0.45);
     background: linear-gradient(
       180deg,
-      oklch(0.65 0.16 45 / 0.04) 0%,
-      var(--color-surface) 100%
+      oklch(0.65 0.16 45 / 0.08) 0%,
+      oklch(0.65 0.16 45 / 0.04) 100%
     );
+    box-shadow:
+      0 0 0 1px oklch(0.65 0.16 45 / 0.15),
+      0 12px 28px -18px oklch(0.65 0.16 45 / 0.35);
+    padding: 30px 32px;
   }
 
-  .pb-card-label {
-    position: relative;
-    z-index: 2;
-    display: inline-block;
+  .pb-layer-kitaru::before {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: -1px;
+    bottom: -1px;
+    width: 4px;
+    background: var(--color-accent);
+    border-radius: 14px 0 0 14px;
+  }
+
+  .pb-layer-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  .pb-layer-label {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--color-muted);
-    padding: 4px 10px;
-    background: var(--color-surface-warm);
-    border: 1px solid var(--color-border);
-    border-radius: 100px;
-    margin-bottom: 14px;
   }
 
-  .pb-card-kitaru .pb-card-label {
+  .pb-layer-kitaru .pb-layer-label {
     color: var(--color-accent);
-    background: oklch(0.65 0.16 45 / 0.08);
-    border-color: oklch(0.65 0.16 45 / 0.25);
   }
 
-  .pb-card h3 {
-    position: relative;
-    z-index: 2;
-    font-size: 1.15rem;
-    font-weight: 600;
-    line-height: 1.35;
-    letter-spacing: -0.01em;
-    color: var(--color-primary);
-    margin-bottom: 10px;
-  }
-
-  .pb-card p {
-    position: relative;
-    z-index: 2;
-    font-size: 0.92rem;
-    line-height: 1.6;
+  .pb-layer-role {
+    font-family: var(--font-ui);
+    font-size: 13px;
     color: var(--color-secondary);
-    font-weight: 300;
-    margin-bottom: 18px;
+    font-weight: 400;
   }
 
-  .pb-tags {
-    position: relative;
-    z-index: 2;
+  .pb-layer-role strong {
+    color: var(--color-accent);
+    font-weight: 600;
+    margin-right: 4px;
+  }
+
+  .pb-layer-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
@@ -179,9 +191,9 @@
 
   .pb-tag {
     font-family: var(--font-mono);
-    font-size: 0.68rem;
-    padding: 3px 10px;
-    border-radius: 5px;
+    font-size: 0.72rem;
+    padding: 4px 10px;
+    border-radius: 6px;
     background: var(--color-surface-warm);
     border: 1px solid var(--color-border);
     color: var(--color-muted);
@@ -189,9 +201,32 @@
 
   .pb-tag-accent {
     color: var(--color-accent);
-    background: oklch(0.65 0.16 45 / 0.08);
-    border-color: oklch(0.65 0.16 45 / 0.25);
+    background: oklch(0.65 0.16 45 / 0.1);
+    border-color: oklch(0.65 0.16 45 / 0.3);
   }
+
+  .pb-tag-ghost {
+    background: transparent;
+    border-style: dashed;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+
+  /* Connector dots between layers */
+  .pb-connector {
+    align-self: center;
+    width: 2px;
+    height: 18px;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      var(--color-border) 40%,
+      var(--color-border) 60%,
+      transparent 100%
+    );
+  }
+
+  /* ─── Callout ─── */
 
   .pb-callout {
     margin-top: 48px;
@@ -201,7 +236,7 @@
     border-radius: 0 10px 10px 0;
   }
 
-  .pb-callout p {
+  .pb-callout-line {
     font-size: clamp(1.05rem, 1.8vw, 1.25rem);
     line-height: 1.5;
     color: var(--color-primary);
@@ -209,39 +244,34 @@
     font-weight: 400;
   }
 
-  .pb-callout p em {
+  .pb-callout-line em {
     font-style: italic;
     color: var(--color-muted);
     font-weight: 300;
   }
 
-  .pb-callout p strong {
+  .pb-callout-line strong {
     color: var(--color-accent);
     font-weight: 600;
   }
 
   .pb-callout-sub {
-    margin-top: 16px !important;
-    font-size: 0.95rem !important;
-    color: var(--color-secondary) !important;
-    font-weight: 300 !important;
-    line-height: 1.65 !important;
-  }
-
-  @media (max-width: 900px) {
-    .pb-grid {
-      grid-template-columns: 1fr;
-    }
+    margin: 16px 0 0;
+    font-size: 0.95rem;
+    color: var(--color-secondary);
+    font-weight: 300;
+    line-height: 1.65;
   }
 
   @media (max-width: 600px) {
+    .pb-layer {
+      padding: 18px 20px;
+    }
+    .pb-layer-kitaru {
+      padding: 22px 22px;
+    }
     .pb-callout {
       padding: 24px 22px;
     }
   }
 </style>
-
-<script>
-  import { setupCardGlow } from '../scripts/card-glow';
-  setupCardGlow('#platform-builder .pb-card');
-</script>

@@ -1,0 +1,180 @@
+---
+competitor: "Pydantic AI"
+competitorTagline: "Type-safe, Pythonic agent framework from the Pydantic team."
+title: "Kitaru vs Pydantic AI: harness and runtime, composed"
+description: "Pydantic AI is how the agent thinks. Kitaru is how it runs reliably over time and infrastructure. Use both — there's a first-class adapter."
+cardSubtitle: "Build the agent with Pydantic AI. Run it reliably with Kitaru."
+ctaHeading: "Put a runtime under your Pydantic AI agents"
+order: 30
+---
+
+import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
+import ComparisonTable from '../../components/compare/ComparisonTable.astro';
+import CodeCompare from '../../components/compare/CodeCompare.astro';
+import PullQuote from '../../components/compare/PullQuote.astro';
+
+Pydantic AI and Kitaru solve different problems at different layers. Pydantic AI is an **agent harness**: it&rsquo;s the best-in-class Pythonic library for writing type-safe agent logic &mdash; tool calling, structured outputs, dependency injection, streaming. Kitaru is a **durable runtime**: checkpoints, replay, resume, wait states, versioned deployments, artifact lineage, and self-hosted execution.
+
+They don&rsquo;t compete. They compose. Kitaru ships a [first-class Pydantic AI adapter](/docs/concepts/flows) that tracks model requests and tool calls as child events under the enclosing checkpoint.
+
+<WhenToUseEach
+  competitorLabel="Pydantic AI"
+  kitaru={{
+    title: "Use Kitaru if you are",
+    items: [
+      "Running Pydantic AI agents as long-lived services that must survive crashes and pod evictions",
+      "Processing enough volume that replaying a failed step is cheaper than re-running the whole agent",
+      "Deploying into your own cloud (Kubernetes, Vertex AI, SageMaker, AzureML) for security or compliance",
+      "Letting different teams pick different harnesses while standardizing durable execution underneath",
+      "Versioning and rolling deployments of agent flows with tag-based routing",
+    ],
+  }}
+  competitor={{
+    title: "Use Pydantic AI if you are",
+    items: [
+      "Writing agent logic in Python and want type-safe inputs, outputs, and tools",
+      "Building short-lived or interactive agents where durable runtime is overkill",
+      "Prototyping an agent before deciding whether it needs a production runtime around it",
+      "Happy with your existing orchestration and only need better agent ergonomics",
+    ],
+  }}
+/>
+
+<PullQuote
+  quote="Pydantic AI gives you a great way to write an agent. Kitaru gives you a great way to run one."
+/>
+
+## Different questions
+
+Pydantic AI is asking:
+
+> How do I write a typed, ergonomic agent loop with first-class tools and structured outputs?
+
+Kitaru is asking:
+
+> Once this agent exists, how does it survive crashes, resume after a human approves, replay from failure, version its deployments, and plug into my infra?
+
+In practice that means Pydantic AI lives *inside* a Kitaru checkpoint. Kitaru wraps the outer boundaries &mdash; where durability, replay, and execution placement matter.
+
+## Compose, don&rsquo;t replace
+
+Kitaru doesn&rsquo;t ask you to give up the Pydantic AI agent you already wrote. Wrap it in a checkpoint and you&rsquo;re done:
+
+```python
+from kitaru import flow, checkpoint, wait
+from kitaru.adapters.pydantic_ai import KitaruAgent
+from pydantic_ai import Agent
+
+agent = KitaruAgent(
+    Agent("openai:gpt-5.4", system_prompt="You're a compliance reviewer."),
+)
+
+@flow
+def review(case: dict) -> str:
+    first_pass = agent.run_sync(case).output
+    approved = wait(name="approve", question=first_pass, schema=bool)
+    return first_pass if approved else "rejected"
+```
+
+The adapter tracks every model request and tool call as a child event under the enclosing checkpoint, so replay, artifact lineage, and logs work at the grain of the agent&rsquo;s internal steps &mdash; not just the outer call.
+
+## What Kitaru adds on top
+
+Pydantic AI doesn&rsquo;t try to do any of this. Kitaru does:
+
+- **Durable execution.** A crash, pod eviction, or timeout doesn&rsquo;t send the run back to zero. Fix the bug, replay, and the completed checkpoints return cached output instead of re-burning tokens.
+- **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and resumes minutes, hours, or days later when input lands from a human, another agent, a webhook, or a CLI call.
+- **Versioned deployments.** `flow.deploy()` captures an immutable snapshot. Consumers invoke by flow name; tag routing and rollback are a `kitaru flow tag` away.
+- **Artifact lineage.** Every checkpoint writes a typed, versioned artifact. Diff artifacts across runs, trace a bad output back to the specific step, and build audit trails without grepping logs.
+- **Execution placement.** `@checkpoint(runtime="isolated")` runs a specific step in its own pod or job on Kubernetes / Vertex / SageMaker / AzureML. Heavy or risky steps stay isolated; orchestration stays inline.
+- **Self-hosted infrastructure.** The Kitaru server is a single Helm-deployed service. Artifacts and state live in your own S3 / GCS / Azure Blob bucket. No mandatory SaaS control plane.
+
+## What makes Kitaru different
+
+<ComparisonTable
+  competitorLabel="Pydantic AI"
+  rows={[
+    { feature: "Typed agent inputs, outputs, tools", kitaru: false, competitor: true },
+    { feature: "Structured model outputs", kitaru: false, competitor: true },
+    { feature: "Dependency injection for tools", kitaru: false, competitor: true },
+    { feature: "Durable execution + replay from checkpoint", kitaru: true, competitor: false },
+    { feature: "Pause/resume with compute released", kitaru: true, competitor: false },
+    { feature: "Versioned, invocable deployments with tag routing", kitaru: true, competitor: false },
+    { feature: "Artifact lineage across runs", kitaru: true, competitor: false },
+    { feature: "Per-checkpoint isolated runtime on your stack", kitaru: true, competitor: false },
+    { feature: "First-class Kubernetes, Vertex, SageMaker, AzureML deployment", kitaru: true, competitor: false },
+    { feature: "Durable memory scopes (Python, CLI, MCP)", kitaru: true, competitor: false },
+    { feature: "MCP server for AI-assistant introspection", kitaru: true, competitor: false },
+    { feature: "First-class adapter for the other", kitaru: true, competitor: false },
+  ]}
+/>
+
+## Code comparison
+
+<CodeCompare
+  kitaruLabel="Pydantic AI + Kitaru"
+  competitorLabel="Pydantic AI alone"
+  kitaruCode={`from kitaru import flow, checkpoint, wait
+from kitaru.adapters.pydantic_ai import KitaruAgent
+from pydantic_ai import Agent
+
+reviewer = KitaruAgent(
+    Agent("openai:gpt-5.4", system_prompt="You're a compliance reviewer."),
+)
+
+@checkpoint
+def review_case(case: dict) -> str:
+    # One PydanticAI run == one durable checkpoint.
+    # Model calls + tool calls tracked as child events.
+    return reviewer.run_sync(case).output
+
+@flow
+def review_flow(case: dict) -> str:
+    draft = review_case(case)
+    # Compute released while we wait; survives crashes.
+    ok = wait(name="approve", question=draft, schema=bool)
+    return draft if ok else "rejected"
+
+# Durable ad-hoc run
+review_flow.run(case={"id": "C-001"})
+
+# Or deploy as versioned snapshot, invoke by name
+review_flow.deploy()
+review_flow.invoke(case={"id": "C-001"})`}
+  competitorCode={`from pydantic_ai import Agent
+
+reviewer = Agent(
+    "openai:gpt-5.4",
+    system_prompt="You're a compliance reviewer.",
+)
+
+def review_flow(case: dict) -> str:
+    draft = reviewer.run_sync(case).output
+    # Blocking input(). If the container dies,
+    # the draft is lost.
+    ok = input(f"Approve?\\n{draft}\\n[y/n]: ") == "y"
+    return draft if ok else "rejected"
+
+review_flow(case={"id": "C-001"})`}
+/>
+
+## When to reach for Kitaru
+
+- The agent is becoming a **production workload**, not a notebook script.
+- A run can **take minutes to hours**, and you can&rsquo;t afford to re-run it on every crash.
+- A step sometimes needs a **human or another agent** to say yes, and you don&rsquo;t want a process sitting around paying for CPU while it waits.
+- You need to **version, roll out, and roll back** deployments without redeploying infrastructure.
+- You want **artifact-level audit trails**, not just log lines.
+- You need **self-hosted execution** on your own Kubernetes / cloud job backend.
+
+If none of that applies, Pydantic AI on its own is the right answer.
+
+## Ready to try Kitaru?
+
+- Read the [Pydantic AI adapter docs](/docs/concepts/flows) for the composition pattern.
+- See the [harness, runtime, platform](/docs/concepts/harness-runtime-platform) page for the layer split.
+- `pip install kitaru` and wrap an existing Pydantic AI agent in `@flow` in an afternoon.
+
+<div class="compare-inline-cta">
+  <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
+</div>

@@ -1133,3 +1133,115 @@ export function GatewayStackDiagram() {
     </DiagramFrame>
   );
 }
+
+// ============================================================
+// Diagram 9: Harness / Runtime / Platform — the three-layer split
+// ============================================================
+
+export function HarnessRuntimePlatformDiagram() {
+  return (
+    <DiagramFrame>
+      <div style={{ ...col, gap: 12 }}>
+        <Subgraph
+          label="Harness layer"
+          tone="muted"
+          annotation="how the agent thinks"
+        >
+          <div style={{ ...row }}>
+            <Node title="Pydantic AI" tone="muted" minWidth={130} isMono />
+            <Node title="Deep Agents" tone="muted" minWidth={130} isMono />
+            <Node title="LangGraph" tone="muted" minWidth={120} isMono />
+            <Node title="Claude Agent SDK" tone="muted" minWidth={170} isMono />
+            <Node title="OpenAI Agents SDK" tone="muted" minWidth={170} isMono />
+            <Node title="Raw Python" tone="muted" minWidth={130} isMono />
+          </div>
+        </Subgraph>
+
+        <Subgraph
+          label="Runtime layer"
+          tone="accent"
+          annotation="how the agent survives · Kitaru lives here"
+        >
+          <div style={{ ...row }}>
+            <Node title="Checkpoints" tone="accent" minWidth={130} isMono />
+            <Node title="Replay" tone="accent" minWidth={100} isMono />
+            <Node title="Resume" tone="accent" minWidth={110} isMono />
+            <Node title="Wait" tone="accent" minWidth={90} isMono />
+            <Node title="Versions + tag routing" tone="accent" minWidth={200} isMono />
+            <Node title="Invocation" tone="accent" minWidth={130} isMono />
+            <Node title="Artifacts + state" tone="accent" minWidth={160} isMono />
+            <Node title="Execution placement" tone="accent" minWidth={180} isMono />
+          </div>
+        </Subgraph>
+
+        <Subgraph
+          label="Platform layer"
+          tone="muted"
+          annotation="how the org governs · stays yours"
+        >
+          <div style={{ ...row }}>
+            <Node title="Auth + entitlements" tone="muted" minWidth={180} />
+            <Node title="Interceptors + guardrails" tone="muted" minWidth={210} />
+            <Node title="Observability" tone="muted" minWidth={140} />
+            <Node title="Product UI" tone="muted" minWidth={120} />
+            <Node title="Policy" tone="muted" minWidth={90} />
+          </div>
+        </Subgraph>
+      </div>
+      <Legend
+        items={[
+          { tone: 'muted', label: 'Composable (your choice)' },
+          { tone: 'accent', label: 'Where Kitaru lives' },
+        ]}
+      />
+      <Caption>
+        Harnesses define behavior. Kitaru defines durable execution. Platforms
+        define governance.
+      </Caption>
+    </DiagramFrame>
+  );
+}
+
+// ============================================================
+// Diagram 10: Buyer matrix — harness-first vs runtime-first
+// ============================================================
+
+export function BuyerMatrixDiagram() {
+  return (
+    <DiagramFrame>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 18,
+        }}
+      >
+        <Node
+          title="Individual or small team building one agent"
+          subtitle="optimize for velocity"
+          bullets={[
+            'pick a harness (PydanticAI, Deep Agents, Claude SDK…)',
+            'adopt its runtime if it has one',
+            'Kitaru is probably overkill',
+          ]}
+          tone="muted"
+        />
+        <Node
+          title="Platform team supporting many agent teams"
+          subtitle="optimize for durability + portability"
+          bullets={[
+            'teams pick their own harness',
+            'durable execution must be harness-independent',
+            'infra must be self-hosted',
+            'Kitaru is the right size primitive',
+          ]}
+          tone="accent"
+        />
+      </div>
+      <Caption>
+        Harness-first tools optimize for how a single agent is built. Kitaru
+        optimizes for how many agents are run.
+      </Caption>
+    </DiagramFrame>
+  );
+}

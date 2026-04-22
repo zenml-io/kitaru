@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">You build the agent. Kitaru runs everything around it.</h3>
+<h3 align="center">The runtime layer underneath your agent stack.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") is the open-source platform layer for AI agents in production. Wrap an existing agent or write raw Python — Kitaru gives you checkpointed execution, human-in-the-loop waits, durable memory, and deployment on any cloud. Any framework. Any model.
+  Kitaru (来る, "to arrive") is a self-hosted, framework-agnostic runtime for autonomous agents — underneath the harness your team already picked. You keep your agent SDK, your prompts, your tools, your model. Kitaru adds durable execution: checkpoints, replay, resume, <code>wait()</code>, versioned deployments, and isolated runtimes, running on your own infrastructure.
 </p>
 
 <p align="center">
@@ -31,11 +31,24 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-Your agent crashed at step 7. Kitaru replays from step 7 — not from scratch.
+## Where Kitaru fits
 
-Add two decorators to your existing Python code and get crash recovery, human
-approval gates, durable memory, and a full dashboard. No rewrite. No graph DSL.
-No framework lock-in.
+Agent stacks break cleanly into three layers. Kitaru is exactly one of them.
+
+| Layer | What it does | Examples |
+|---|---|---|
+| **Harness** | How the agent *thinks* — prompts, tools, model loop, framework choice | PydanticAI, Deep Agents, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
+| **Runtime (Kitaru)** | How the agent *survives and executes over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `kitaru.wait()`, `kitaru.memory` |
+| **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
+
+Kitaru lives in the middle row. Harnesses define behavior, your stack defines
+policy, and Kitaru gives you the durable execution layer in between. 
+
+If you're *buying* an agent platform, Kitaru may feel low-level. If you're                                                                    *building* one, that's the point.  
+
+Platform teams get the durable execution layer they'd otherwise build themselves — 
+run lifecycle, checkpoint boundaries, replay, invocation routing, and self-hosted execution — 
+without mandating which harness application teams use on top.                                                                                                                                     
 
 ## Why Kitaru?
 
@@ -95,11 +108,11 @@ surfaces.
 
 ### Deploy on your cloud
 
-No workers, no message queues, no distributed systems PhD required. Kitaru runs
-locally with zero config, and scales to production with a single server backed by
-a SQL database. Deploy your agents to Kubernetes, Vertex AI, SageMaker, or
-AzureML using Kitaru's **stack** abstraction. Your registry, your deployer, your
-infrastructure.
+Kitaru runs locally with zero config and scales to production as a single
+self-hosted server backed by SQL. Flows execute on whichever **stack** you
+configure — local, Kubernetes, GCP, AWS, or Azure — with
+artifacts in your own S3/GCS/Azure Blob bucket. There is no mandatory SaaS
+control plane in the path of your agent's data.
 
 ### Built-in UI
 
