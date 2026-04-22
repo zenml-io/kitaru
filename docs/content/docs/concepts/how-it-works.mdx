@@ -72,8 +72,8 @@ In production, the three components separate across your infrastructure:
   database and serves the UI UI. Your whole team connects to it.
 
 - The **agent runtime** runs on the compute backend defined by your
-  [stack](/stacks) — Kubernetes pods, Vertex AI jobs,
-  SageMaker jobs, or any other supported environment. When you call `.run()`,
+  [stack](/stacks) — Kubernetes pods, AWS / GCP / Azure managed jobs,
+  or any other supported environment. When you call `.run()`,
   the client fetches short-lived credentials from the server and dispatches
   the execution directly to the compute backend. The runtime runs your
   checkpoints and writes outputs to cloud storage. If the execution crashes,

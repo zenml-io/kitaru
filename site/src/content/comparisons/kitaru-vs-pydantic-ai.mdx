@@ -5,7 +5,7 @@ title: "Kitaru vs Pydantic AI: harness and runtime, composed"
 description: "Pydantic AI is how the agent thinks. Kitaru is how it runs reliably over time and infrastructure. Use both — there's a first-class adapter."
 cardSubtitle: "Build the agent with Pydantic AI. Run it reliably with Kitaru."
 ctaHeading: "Put a runtime under your Pydantic AI agents"
-order: 30
+order: 50
 ---
 
 import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
@@ -24,7 +24,7 @@ They don&rsquo;t compete. They compose. Kitaru ships a [first-class Pydantic AI 
     items: [
       "Running Pydantic AI agents as long-lived services that must survive crashes and pod evictions",
       "Processing enough volume that replaying a failed step is cheaper than re-running the whole agent",
-      "Deploying into your own cloud (Kubernetes, Vertex AI, SageMaker, AzureML) for security or compliance",
+      "Deploying into your own cloud (Kubernetes, AWS, GCP, Azure) for security or compliance",
       "Letting different teams pick different harnesses while standardizing durable execution underneath",
       "Versioning and rolling deployments of agent flows with tag-based routing",
     ],
@@ -86,7 +86,7 @@ Pydantic AI doesn&rsquo;t try to do any of this. Kitaru does:
 - **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and resumes minutes, hours, or days later when input lands from a human, another agent, a webhook, or a CLI call.
 - **Versioned deployments.** `flow.deploy()` captures an immutable snapshot. Consumers invoke by flow name; tag routing and rollback are a `kitaru flow tag` away.
 - **Artifact lineage.** Every checkpoint writes a typed, versioned artifact. Diff artifacts across runs, trace a bad output back to the specific step, and build audit trails without grepping logs.
-- **Execution placement.** `@checkpoint(runtime="isolated")` runs a specific step in its own pod or job on Kubernetes / Vertex / SageMaker / AzureML. Heavy or risky steps stay isolated; orchestration stays inline.
+- **Execution placement.** `@checkpoint(runtime="isolated")` runs a specific step in its own pod or job on Kubernetes, AWS, GCP, Azure. Heavy or risky steps stay isolated; orchestration stays inline.
 - **Self-hosted infrastructure.** The Kitaru server is a single Helm-deployed service. Artifacts and state live in your own S3 / GCS / Azure Blob bucket. No mandatory SaaS control plane.
 
 ## What makes Kitaru different
@@ -102,7 +102,7 @@ Pydantic AI doesn&rsquo;t try to do any of this. Kitaru does:
     { feature: "Versioned, invocable deployments with tag routing", kitaru: true, competitor: false },
     { feature: "Artifact lineage across runs", kitaru: true, competitor: false },
     { feature: "Per-checkpoint isolated runtime on your stack", kitaru: true, competitor: false },
-    { feature: "First-class Kubernetes, Vertex, SageMaker, AzureML deployment", kitaru: true, competitor: false },
+    { feature: "First-class Kubernetes, AWS, GCP, Azure deployment", kitaru: true, competitor: false },
     { feature: "Durable memory scopes (Python, CLI, MCP)", kitaru: true, competitor: false },
     { feature: "MCP server for AI-assistant introspection", kitaru: true, competitor: false },
     { feature: "First-class adapter for the other", kitaru: true, competitor: false },

@@ -114,7 +114,7 @@ Like flow options, `retries` must be non-negative.
 
 By default, checkpoints run **inline** — in the same process or thread as the
 flow. Set `runtime="isolated"` to run a checkpoint in its own container on
-remote orchestrators that support it (Kubernetes, Vertex, SageMaker, AzureML):
+remote orchestrators that support it (Kubernetes, AWS, GCP, Azure):
 
 ```python
 @checkpoint(runtime="isolated")
