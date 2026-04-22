@@ -122,8 +122,8 @@ That override does **not** permanently switch your default stack.
 iteration, local development, and calls from your own code.
 
 For production use, flows are typically **deployed**: captured as an immutable,
-versioned snapshot that consumers invoke through a stable URL, with tag-based
-routing for rollout and rollback.
+versioned snapshot that consumers invoke by flow name, with tag-based routing
+for rollout and rollback.
 
 ```python
 # Ad-hoc run from the current process
@@ -132,8 +132,8 @@ handle = my_agent.run(url="https://example.com")
 # Deploy an immutable snapshot (new version each call)
 my_agent.deploy()
 
-# Consumers invoke the deployed flow via the stable URL
-handle = my_agent.invoke({"url": "https://example.com"})
+# Consumers invoke by flow name — no source needed
+handle = my_agent.invoke(url="https://example.com")
 ```
 
 See [Deployments](/concepts/deployments) for versioning, tag routing, rollback,

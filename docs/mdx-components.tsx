@@ -8,12 +8,10 @@ import type { MDXComponents } from 'mdx/types';
 import {
   CheckpointReplayDiagram,
   ComponentsDiagram,
-  DeploymentsDiagram,
   ExecutionArchitectureDiagram,
   FailedCheckpointDiagram,
   FlowShapeDiagram,
   GatewayStackDiagram,
-  InvocationModesDiagram,
   ThreePlanesDiagram,
   WaitResumeDiagram,
 } from '@/components/diagrams';
@@ -33,12 +31,10 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     CheckpointReplayDiagram,
     WaitResumeDiagram,
     ComponentsDiagram,
-    DeploymentsDiagram,
     GatewayStackDiagram,
     ExecutionArchitectureDiagram,
     ThreePlanesDiagram,
     FailedCheckpointDiagram,
-    InvocationModesDiagram,
     ...components,
   };
 }
