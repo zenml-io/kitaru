@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from zenml.exceptions import EntityExistsError
+from zenml.zen_stores.rest_zen_store import RestZenStore
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
@@ -473,9 +474,8 @@ def test_auth_token_text_prints_token_only(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Text mode should print only the access token plus a newline."""
-    fake_store = SimpleNamespace(
-        get_or_generate_api_token=Mock(return_value="server-access-token")
-    )
+    fake_store = Mock(spec=RestZenStore)
+    fake_store.get_or_generate_api_token.return_value = "server-access-token"
     fake_client = SimpleNamespace(zen_store=fake_store)
 
     with (
@@ -497,9 +497,8 @@ def test_auth_token_text_prints_token_only(
 
 def test_auth_token_json_includes_token(capsys: pytest.CaptureFixture[str]) -> None:
     """JSON mode should wrap the access token in the standard command envelope."""
-    fake_store = SimpleNamespace(
-        get_or_generate_api_token=Mock(return_value="server-access-token")
-    )
+    fake_store = Mock(spec=RestZenStore)
+    fake_store.get_or_generate_api_token.return_value = "server-access-token"
     fake_client = SimpleNamespace(zen_store=fake_store)
 
     with (
@@ -526,9 +525,8 @@ def test_auth_token_uses_public_env_active_connection(
     monkeypatch.setenv("KITARU_SERVER_URL", "https://env-kitaru.example.com")
     monkeypatch.setenv("KITARU_AUTH_TOKEN", "org-level-token")
     monkeypatch.setenv("KITARU_PROJECT", "demo-project")
-    fake_store = SimpleNamespace(
-        get_or_generate_api_token=Mock(return_value="server-access-token")
-    )
+    fake_store = Mock(spec=RestZenStore)
+    fake_store.get_or_generate_api_token.return_value = "server-access-token"
     fake_client = SimpleNamespace(zen_store=fake_store)
 
     with (
@@ -796,10 +794,7 @@ def test_flow_deployments_curl_json_resolves_default_and_formats_command(
     }
     assert item["token_env_var"] == "KITARU_SERVER_ACCESS_TOKEN"
     assert item["token_command"] == "kitaru auth token"
-    assert item["token_assignment"] == (
-        'KITARU_SERVER_ACCESS_TOKEN="$(kitaru auth token)"'
-    )
-    assert item["token_assignment"] in item["curl_command"]
+    assert 'KITARU_SERVER_ACCESS_TOKEN="$(kitaru auth token)"' in item["curl_command"]
     assert "Authorization: Bearer ${KITARU_SERVER_ACCESS_TOKEN}" in item["curl_command"]
     assert "Review data retention" in item["curl_command"]
     assert "KITARU_AUTH_TOKEN" not in item["curl_command"]

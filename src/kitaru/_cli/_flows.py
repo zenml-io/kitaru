@@ -166,7 +166,6 @@ def _build_deploy_kwargs(
 
 
 def _active_kitaru_server_url() -> str:
-    """Return the active Kitaru server URL for generated HTTP examples."""
     try:
         resolved_connection = resolve_connection_config()
     except Exception as exc:
@@ -202,7 +201,6 @@ def _shell_double_quote(value: str) -> str:
 
 
 def _server_access_token_assignment() -> str:
-    """Return the shell assignment used by generated curl snippets."""
     return f'{SERVER_ACCESS_TOKEN_ENV}="$({SERVER_ACCESS_TOKEN_COMMAND})"'
 
 
@@ -273,7 +271,6 @@ def _deployment_curl_payload(
         "invoke_url": invoke_url,
         "token_env_var": SERVER_ACCESS_TOKEN_ENV,
         "token_command": SERVER_ACCESS_TOKEN_COMMAND,
-        "token_assignment": _server_access_token_assignment(),
         "request_body": body,
         "curl_command": curl_command,
     }

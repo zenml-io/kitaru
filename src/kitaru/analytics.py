@@ -150,6 +150,10 @@ def track(event_name: AnalyticsEvent, metadata: dict[str, Any] | None = None) ->
         enriched_metadata["kitaru_version"] = _safe_kitaru_version()
         enriched_metadata["zenml_version"] = _safe_zenml_version()
 
+        # ZenML's analytics import chain emits a few INFO/DEBUG log lines on
+        # first import and during track(); those leak into CLI output where
+        # Kitaru owns the UX. Silence the root logger for the duration of the
+        # ZenML call and restore the prior level afterwards.
         previous_disable_level = logging.root.manager.disable
         try:
             logging.disable(logging.CRITICAL)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from zenml.zen_stores.rest_zen_store import RestZenStore
 
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.analytics import AnalyticsEvent, track
@@ -20,17 +20,6 @@ from ._helpers import (
 )
 
 
-def _bearer_token_from_header(header: str | None) -> str | None:
-    """Extract a bearer token from an Authorization header value."""
-    if not header:
-        return None
-    prefix = "Bearer "
-    if not header.startswith(prefix):
-        return None
-    token = header.removeprefix(prefix).strip()
-    return token or None
-
-
 def _active_server_access_token() -> str:
     """Return a short-lived bearer token for the active Kitaru server."""
     resolve_connection_config(validate_for_use=True)
@@ -43,40 +32,20 @@ def _active_server_access_token() -> str:
             "or set KITARU_SERVER_URL, KITARU_AUTH_TOKEN, and KITARU_PROJECT."
         ) from exc
 
-    token_getter = getattr(store, "get_or_generate_api_token", None)
-    if callable(token_getter):
-        try:
-            token = token_getter()
-        except Exception as exc:
-            raise KitaruBackendError(
-                "Could not create a server access token for the active Kitaru "
-                f"server: {exc}"
-            ) from exc
-        if isinstance(token, str) and token.strip():
-            return token.strip()
+    if not isinstance(store, RestZenStore):
+        raise KitaruUsageError(
+            "Minting a server bearer token requires a remote Kitaru server. "
+            "Run `kitaru login <server>` or set KITARU_SERVER_URL, "
+            "KITARU_AUTH_TOKEN, and KITARU_PROJECT."
+        )
 
-    authenticate = getattr(store, "authenticate", None)
-    session = getattr(store, "session", None)
-    if callable(authenticate):
-        try:
-            authenticate()
-        except Exception as exc:
-            raise KitaruBackendError(
-                f"Could not authenticate to the active Kitaru server: {exc}"
-            ) from exc
-        session = getattr(store, "session", None)
-
-    headers: Any = getattr(session, "headers", None)
-    header = headers.get("Authorization") if hasattr(headers, "get") else None
-    token = _bearer_token_from_header(header if isinstance(header, str) else None)
-    if token:
-        return token
-
-    raise KitaruBackendError(
-        "The active Kitaru server connection did not provide a bearer token. "
-        "Run `kitaru login` again or check KITARU_SERVER_URL, KITARU_AUTH_TOKEN, "
-        "and KITARU_PROJECT."
-    )
+    try:
+        return store.get_or_generate_api_token()
+    except Exception as exc:
+        raise KitaruBackendError(
+            f"Could not create a server access token for the active Kitaru "
+            f"server: {exc}"
+        ) from exc
 
 
 @auth_app.command
