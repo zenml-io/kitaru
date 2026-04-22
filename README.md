@@ -62,12 +62,19 @@ application teams use on top.
 - **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and
   resumes minutes, hours, or days later when input lands from a human, another
   agent, a webhook, or a CLI call.
-- **Versioned deployments.** `flow.deploy()` captures an immutable snapshot.
-  Consumers invoke by flow name; tag routing and rollback are a
-  `kitaru flow tag` away.
-- **Artifact lineage.** Every checkpoint writes a typed, versioned artifact.
-  Diff artifacts across runs, trace a bad output back to the specific step, and
-  build audit trails without grepping logs.
+- **Versioned deployments.** `flow.deploy()` freezes a flow's code into an
+  immutable, versioned snapshot. Consumers invoke it by name — from Python,
+  CLI, MCP, or HTTP — without knowing or caring which version is current.
+  Ship a new version by tagging (`kitaru flow tag research_agent --stage=prod`),
+  roll back by re-tagging the previous version, and A/B two versions by routing
+  a percentage of traffic. Nothing that *calls* the agent needs to be
+  redeployed.
+- **Artifact lineage.** Every checkpoint output is written to your own object
+  store (S3 / GCS / Azure Blob) as a typed, versioned artifact — not a log
+  line. Open any run in the UI, step through its intermediate outputs, diff
+  artifacts across runs to see what changed between a good run and a bad one,
+  and trace a bad final output back to the exact step that produced it. Full
+  audit trail without grepping production logs.
 - **Isolated execution.** `@checkpoint(runtime="isolated")` runs a specific
   step in its own pod or job on Kubernetes, AWS, GCP, or Azure. Heavy or risky
   steps stay isolated; orchestration stays inline.
@@ -99,6 +106,35 @@ def writing_agent(topic: str) -> str:
 
 result = writing_agent.run("quantum computing").wait()
 ```
+
+### Deployment lifecycle
+
+A flow ships in three moves: freeze a versioned snapshot, invoke it by name,
+and tag to control which version consumers hit.
+
+```python
+from kitaru import flow
+from kitaru.client import KitaruClient
+
+@flow
+def research_agent(topic: str) -> str:
+    ...
+
+# 1. Freeze the current code + dependencies as a versioned snapshot.
+research_agent.deploy()
+
+# 2. Consumers invoke by name — from Python, CLI, MCP, or HTTP.
+KitaruClient().invoke("research_agent", topic="quantum computing")
+```
+
+```bash
+# 3. Tag a version into a stage; re-tag to roll back.
+kitaru flow tag research_agent latest --stage=prod
+kitaru flow tag research_agent v2     --stage=prod   # rollback
+```
+
+Apps that *call* the agent never redeploy when a new version of the flow
+ships. You deploy the flow; consumers resolve the name.
 
 ### Deploy on your cloud
 
