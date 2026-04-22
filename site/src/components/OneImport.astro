@@ -28,12 +28,13 @@
               <span class="one-import-code-label">Before</span>
               <span class="one-import-code-filename">agent.py</span>
             </div>
-            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> agents <span class="kw">import</span> Agent, Runner
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> agents <span class="kw">import</span> Runner
+<span class="kw">from</span> agents.sandbox <span class="kw">import</span> SandboxAgent, Manifest
 
-agent <span class="op">=</span> <span class="fn">Agent</span>(
+agent <span class="op">=</span> <span class="fn">SandboxAgent</span>(
     name<span class="op">=</span><span class="str">"Compliance Reviewer"</span>,
-    instructions<span class="op">=</span><span class="str">"You are a compliance reviewer."</span>,
     model<span class="op">=</span><span class="str">"gpt-5.4"</span>,
+    default_manifest<span class="op">=</span>manifest,
 )
 
 result <span class="op">=</span> <span class="kw">await</span> Runner.<span class="fn">run</span>(agent, task)</code></pre>
@@ -50,12 +51,12 @@ result <span class="op">=</span> <span class="kw">await</span> Runner.<span clas
               <span class="one-import-code-filename">agent.py</span>
             </div>
             <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru.adapters.openai_agents <span class="kw">import</span> KitaruRunner
-<span class="kw">from</span> agents <span class="kw">import</span> Agent
+<span class="kw">from</span> agents.sandbox <span class="kw">import</span> SandboxAgent, Manifest
 
-agent <span class="op">=</span> <span class="fn">Agent</span>(
+agent <span class="op">=</span> <span class="fn">SandboxAgent</span>(
     name<span class="op">=</span><span class="str">"Compliance Reviewer"</span>,
-    instructions<span class="op">=</span><span class="str">"You are a compliance reviewer."</span>,
     model<span class="op">=</span><span class="str">"gpt-5.4"</span>,
+    default_manifest<span class="op">=</span>manifest,
 )
 
 result <span class="op">=</span> <span class="kw">await</span> KitaruRunner.<span class="fn">run</span>(agent, task)</code></pre>
