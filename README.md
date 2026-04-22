@@ -62,19 +62,12 @@ application teams use on top.
 - **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and
   resumes minutes, hours, or days later when input lands from a human, another
   agent, a webhook, or a CLI call.
-- **Versioned deployments.** `flow.deploy()` freezes a flow's code into an
-  immutable, versioned snapshot. Consumers invoke it by name — from Python,
-  CLI, MCP, or HTTP — without knowing or caring which version is current.
-  Ship a new version by tagging (`kitaru flow tag research_agent --stage=prod`),
-  roll back by re-tagging the previous version, and A/B two versions by routing
-  a percentage of traffic. Nothing that *calls* the agent needs to be
-  redeployed.
-- **Artifact lineage.** Every checkpoint output is written to your own object
-  store (S3 / GCS / Azure Blob) as a typed, versioned artifact — not a log
-  line. Open any run in the UI, step through its intermediate outputs, diff
-  artifacts across runs to see what changed between a good run and a bad one,
-  and trace a bad final output back to the exact step that produced it. Full
-  audit trail without grepping production logs.
+- **Versioned deployments.** `flow.deploy()` freezes a flow as an immutable
+  snapshot consumers invoke by name. Tag to roll out, re-tag to roll back.
+  Nothing that *calls* the agent redeploys when a new version ships.
+- **Artifact lineage.** Every checkpoint output is written to your object store
+  as a typed, versioned artifact. Step through any run, diff artifacts across
+  runs, and trace a bad output back to the step that produced it.
 - **Isolated execution.** `@checkpoint(runtime="isolated")` runs a specific
   step in its own pod or job on Kubernetes, AWS, GCP, or Azure. Heavy or risky
   steps stay isolated; orchestration stays inline.
@@ -107,42 +100,11 @@ def writing_agent(topic: str) -> str:
 result = writing_agent.run("quantum computing").wait()
 ```
 
-### Deployment lifecycle
-
-A flow ships in three moves: freeze a versioned snapshot, invoke it by name,
-and tag to control which version consumers hit.
-
-```python
-from kitaru import flow
-from kitaru.client import KitaruClient
-
-@flow
-def research_agent(topic: str) -> str:
-    ...
-
-# 1. Freeze the current code + dependencies as a versioned snapshot.
-research_agent.deploy()
-
-# 2. Consumers invoke by name — from Python, CLI, MCP, or HTTP.
-KitaruClient().invoke("research_agent", topic="quantum computing")
-```
-
-```bash
-# 3. Tag a version into a stage; re-tag to roll back.
-kitaru flow tag research_agent latest --stage=prod
-kitaru flow tag research_agent v2     --stage=prod   # rollback
-```
-
-Apps that *call* the agent never redeploy when a new version of the flow
-ships. You deploy the flow; consumers resolve the name.
-
 ### Deploy on your cloud
 
-Kitaru runs locally with zero config and scales to production as a single
-self-hosted server backed by SQL. Flows execute on whichever **stack** you
-configure — local, Kubernetes, GCP, AWS, or Azure — with
-artifacts in your own S3/GCS/Azure Blob bucket. There is no mandatory SaaS
-control plane in the path of your agent's data.
+A single self-hosted server, your own infra. Flows run on whichever **stack**
+you pick — local, Kubernetes, GCP, AWS, or Azure — with artifacts in your own
+S3/GCS/Azure Blob bucket. No mandatory SaaS control plane.
 
 ### Built-in UI
 
@@ -258,6 +220,26 @@ kitaru executions list
 kitaru executions get <EXECUTION_ID>
 kitaru executions logs <EXECUTION_ID>
 kitaru executions replay <EXECUTION_ID> --from process_data
+```
+
+### Deploy it
+
+When the flow is ready, deploy it as a versioned snapshot and invoke it by
+name — no redeploy of whatever *calls* the agent.
+
+```python
+# Freeze the current code + dependencies as a versioned snapshot.
+my_agent.deploy()
+
+# Consumers invoke by name — from Python, CLI, MCP, or HTTP.
+from kitaru.client import KitaruClient
+KitaruClient().invoke("my_agent", url="https://example.com")
+```
+
+```bash
+# Tag a version into a stage; re-tag to roll back.
+kitaru flow tag my_agent latest --stage=prod
+kitaru flow tag my_agent v2     --stage=prod   # rollback
 ```
 
 ## 📚 Learn more

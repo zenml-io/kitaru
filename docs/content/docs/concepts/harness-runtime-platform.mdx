@@ -4,7 +4,7 @@ description: Where Kitaru fits — and doesn't — in an agent stack.
 ---
 
 Agent tooling spans three layers. Confusion between them is where most
-&ldquo;is Kitaru a competitor to X?&rdquo; questions come from.
+"is Kitaru a competitor to X?" questions come from.
 
 <HarnessRuntimePlatformDiagram />
 
@@ -24,7 +24,7 @@ Agent tooling spans three layers. Confusion between them is where most
   already runs.
 </Callout>
 
-## Where Kitaru is — and isn&rsquo;t
+## Where Kitaru is — and isn't
 
 | Tool | Primary layer | What it optimizes for |
 |---|---|---|
@@ -43,8 +43,8 @@ Agent tooling spans three layers. Confusion between them is where most
 Several tools in the runtime row are real alternatives to Kitaru. Worth
 naming the overlap before drawing the distinction.
 
-- **LangGraph** has its own checkpointer, resume, and time-travel &mdash; powerful
-  inside its graph/state-machine model. Kitaru&rsquo;s difference is that
+- **LangGraph** has its own checkpointer, resume, and time-travel — powerful
+  inside its graph/state-machine model. Kitaru's difference is that
   `@checkpoint` wraps ordinary Python boundaries independent of any harness.
 - **LangSmith Deployment** delivers durable execution + sandboxes + auth proxy as
   a packaged platform. Kitaru ships just the runtime primitives so platform
@@ -77,12 +77,12 @@ Neither is universally better. They optimize for different buyers.
 Platform teams rightly push back on tools that try to own *everything*. What
 Kitaru actually takes responsibility for:
 
-| Concern | Kitaru owns? | Kitaru&rsquo;s stance |
+| Concern | Kitaru owns? | Kitaru's stance |
 |---|---|---|
 | Checkpoint / replay / resume | Yes | Core product |
 | Flow versioning and invocation routing | Yes | Core product |
 | Execution placement per checkpoint | Yes, as config | `@checkpoint(runtime="isolated")` today; richer policy evolving |
-| Sandbox implementation | No | Provide adapters; don&rsquo;t mandate a vendor |
+| Sandbox implementation | No | Provide adapters; don't mandate a vendor |
 | Secrets storage | Partly | Alias-linked secret resolution for `kitaru.llm()`; integrate with your secret manager |
 | Auth to invoke flows | Yes | Workspace keys / service accounts; no per-deployment tokens |
 | Enterprise entitlements / RBAC | No | Integrate with your platform |
@@ -93,7 +93,7 @@ Kitaru actually takes responsibility for:
 
 The line to remember:
 
-> Durability without execution policy is not enough for production agents &mdash;
+> Durability without execution policy is not enough for production agents —
 > but Kitaru should make policy **attachable** to execution boundaries, not
 > mandate the policy itself.
 
@@ -137,20 +137,20 @@ def research_agent(question: str) -> str:
   Use what you have.
 - If you are building one agent for yourself and never leave your laptop, a
   harness alone is enough.
-- If you want a hosted, all-in-one agent platform and don&rsquo;t need to
+- If you want a hosted, all-in-one agent platform and don't need to
   self-host anything, a packaged platform is the better buy.
 
 ## When Kitaru fits
 
 - Application teams across your org pick different harnesses (Pydantic AI,
-  LangGraph, Claude Agent SDK, internal).
+  Langchain's Deep Agents, Claude Agent SDK, internal).
 - Infra must be self-hosted (regulated industry, on-prem requirements,
   sovereignty).
 - The platform team wants runtime primitives, not a packaged platform that
   replaces the one they already operate.
 - Deployment must plug into existing Kubernetes, secret manager, observability,
-  and data policy &mdash; not live in someone else&rsquo;s control plane.
-- Durable execution needs to be independent of any single framework&rsquo;s
+  and data policy — not live in someone else's control plane.
+- Durable execution needs to be independent of any single framework's
   worldview.
 
 ## Shorthand

@@ -3,11 +3,11 @@ title: Flows
 description: Define durable execution boundaries for your AI agent workflows
 ---
 
-A **flow** is the outer durable boundary in Kitaru &mdash; the unit of work
+A **flow** is the outer durable boundary in Kitaru — the unit of work
 your platform invokes and the runner executes. Everything inside the flow is
 tracked at checkpoint boundaries: persisted outputs, retry, replay, resume,
 and wait. Your harness (Pydantic AI, LangGraph, Claude Agent SDK, raw Python)
-lives inside the checkpoints. Your platform sits in front of the flow&rsquo;s
+lives inside the checkpoints. Your platform sits in front of the flow's
 invocation API. See
 [Harness, Runtime, Platform](/concepts/harness-runtime-platform) for the
 bigger picture.
@@ -124,7 +124,7 @@ That override does **not** permanently switch your default stack.
 
 ## Run, then deploy
 
-`.run()` starts an ad-hoc execution from the current process. It&rsquo;s the
+`.run()` starts an ad-hoc execution from the current process. It's the
 right loop for iteration and for calls made from your own code.
 
 For production, a flow is **deployed**: `.deploy()` captures an immutable

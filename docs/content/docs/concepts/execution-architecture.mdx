@@ -27,7 +27,7 @@ Kitaru breaks cleanly into three layers, each with a single responsibility.
 | **Orchestration plane** | The runner for a single execution | Owns durable control flow for one run |
 | **Execution plane** | Inline process, isolated container, sandbox, external tool, or custom backend | Performs work |
 
-This split is the thing to remember. The control plane is long-lived and shared. The orchestration plane is per-run and durable. The execution plane is where your code (and your agent&rsquo;s code) actually executes.
+This split is the thing to remember. The control plane is long-lived and shared. The orchestration plane is per-run and durable. The execution plane is where your code (and your agent's code) actually executes.
 
 ## What runs where?
 
@@ -41,7 +41,7 @@ The most common confusion is which component runs user code. This table makes it
 | Isolated runtime | Runs a checkpoint in a separate container, job, pod, or remote compute backend | Yes |
 | Sandbox | Runs constrained code/tool execution with stronger isolation or restricted egress | Yes |
 | External tool / MCP server | Performs work through a remote API or capability | Outside Kitaru |
-| Metadata DB | Stores runs, versions, checkpoint statuses, replay lineage | No |
+| Metadata store | Stores runs, versions, checkpoint statuses, replay lineage | No |
 | Artifact / state store | Stores checkpoint outputs, files, logs, replay lineage | No |
 
 ## The run, step by step
@@ -76,9 +76,9 @@ This is the idea that tends to click last and matter most.
 > The runner is the durable brain of a run.<br/>
 > The sandbox (or isolated runtime) is the hands that perform work.
 
-If a sandbox dies mid-execution — a container evicted, a network partition, a pod OOM — **the runner still holds durable checkpoint state** and can retry that single checkpoint, resume from the last known boundary, or replay the run with a modified input or code version. The sandbox&rsquo;s failure is localized to the checkpoint that was executing, not the whole agent.
+If a sandbox dies mid-execution — a container evicted, a network partition, a pod OOM — **the runner still holds durable checkpoint state** and can retry that single checkpoint, resume from the last known boundary, or replay the run with a modified input or code version. The sandbox's failure is localized to the checkpoint that was executing, not the whole agent.
 
-This is why platform teams should not confuse &ldquo;I have a sandbox provider&rdquo; with &ldquo;I have durable execution&rdquo;. A sandbox is a bounded execution environment. Durable execution is a property of the surrounding runner &mdash; and of the checkpoints it persists.
+This is why platform teams should not confuse "I have a sandbox provider" with "I have durable execution". A sandbox is a bounded execution environment. Durable execution is a property of the surrounding runner — and of the checkpoints it persists.
 
 ## Inline vs isolated checkpoints
 
@@ -103,7 +103,7 @@ def coding_agent(task: str) -> str:
     return run_untrusted_code(p)
 ```
 
-**Inline** is the right default. It&rsquo;s fast, low-overhead, and makes sense for most orchestration logic. **Isolated** is the right call when a checkpoint:
+**Inline** is the right default. It's fast, low-overhead, and makes sense for most orchestration logic. **Isolated** is the right call when a checkpoint:
 
 - runs untrusted or model-generated code
 - needs a specific container image / dependencies that differ from the runner
@@ -120,7 +120,7 @@ Consider a document-synthesis agent:
 
 <FailedCheckpointDiagram />
 
-Because the retrieval checkpoint&rsquo;s failure is persisted as a typed artifact, a downstream consumer has several real options:
+Because the retrieval checkpoint's failure is persisted as a typed artifact, a downstream consumer has several real options:
 
 - Retry the same checkpoint with the same input
 - Replay with a modified input (e.g. a corrected document id)
@@ -128,11 +128,11 @@ Because the retrieval checkpoint&rsquo;s failure is persisted as a typed artifac
 - Feed the error artifact back into the agent loop so it can self-correct
 - Wait for a human to provide a correction via `kitaru.wait()`, then resume
 
-This is what &ldquo;agent-native error handling&rdquo; means in practice: failures become data, and durable state survives them.
+This is what "agent-native error handling" means in practice: failures become data, and durable state survives them.
 
 ## How deep do you integrate?
 
-You don&rsquo;t have to restructure your agent to get value. Pick the depth that fits.
+You don't have to restructure your agent to get value. Pick the depth that fits.
 
 ### Level 0 — Black-box harness
 
@@ -148,7 +148,7 @@ flow
 - Minimal code changes
 - Framework-agnostic
 
-The tradeoff: replay boundary is coarse (one per agent run) and you see less of the agent&rsquo;s internal state.
+The tradeoff: replay boundary is coarse (one per agent run) and you see less of the agent's internal state.
 
 ### Level 1 — Coarse workflow checkpoints
 
@@ -171,7 +171,7 @@ The tradeoff: you (not the framework) decide where the boundaries go.
 
 ### Level 2 — Framework-aware adapter
 
-Use a Kitaru adapter that tracks the framework&rsquo;s internals (model calls, tool calls, intermediate state) as child events under the enclosing checkpoint.
+Use a Kitaru adapter that tracks the framework's internals (model calls, tool calls, intermediate state) as child events under the enclosing checkpoint.
 
 ```text
 flow
@@ -192,7 +192,7 @@ The tradeoff: adapters are per-framework and need maintenance. The [Pydantic AI 
 
 Kitaru does not require your agent to be written as a graph. `@checkpoint` wraps ordinary Python function boundaries, independent of the harness.
 
-That means a platform team supporting multiple harnesses &mdash; PydanticAI here, LangGraph there, Claude Agent SDK for one team, a raw-Python loop for another &mdash; can still standardize **durability, replay, and execution metadata** on a single runtime primitive. The harness choice stays a per-team decision.
+That means a platform team supporting multiple harnesses — PydanticAI here, LangGraph there, Claude Agent SDK for one team, a raw-Python loop for another — can still standardize **durability, replay, and execution metadata** on a single runtime primitive. The harness choice stays a per-team decision.
 
 ## Fits behind your platform
 
@@ -207,10 +207,10 @@ You keep your auth, entitlements, interceptors, observability, and UI. Kitaru ha
 All three planes run on your infrastructure:
 
 - The **server** is a Helm-deployed service (see [Deploy with Helm](/deploy/helm)).
-- The **runner** runs on whichever [stack](/stacks) you configure &mdash; Kubernetes, AWS, GCP, Azure, or local.
+- The **runner** runs on whichever [stack](/stacks) you configure — Kubernetes, AWS, GCP, Azure, or local.
 - **Artifacts and state** live in your own S3 / GCS / Azure Blob bucket.
 
-The Kitaru server brokers short-lived credentials when a client needs to read artifacts. There is no mandatory SaaS control plane in the path of your agent&rsquo;s data.
+The Kitaru server brokers short-lived credentials when a client needs to read artifacts. There is no mandatory SaaS control plane in the path of your agent's data.
 
 ## Related
 
