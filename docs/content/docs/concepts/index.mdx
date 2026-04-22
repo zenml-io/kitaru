@@ -3,17 +3,18 @@ title: Core Concepts
 description: The mental model behind Kitaru's durable execution primitives
 ---
 
-Kitaru sits in the **runtime layer** of your agent stack: underneath the
-harness your team picked (Pydantic AI, Deep Agents, LangGraph, Claude Agent
-SDK, raw Python) and underneath the platform your org already runs (auth,
-observability, policy, UI). Its job is to make the run durable —
-checkpoints, replay, resume, wait states, versioned deployments —
-without forcing a graph DSL or a rewrite of your control flow.
+Kitaru sits in the **runtime layer** of your agent stack. Underneath it are the
+**harness** your team picked (Pydantic AI / Pydantic AI Harness, LangGraph, Claude
+Agent SDK, raw Python) and the **model(s)** that harness drives. On top sits the
+**platform** your org already runs (auth, observability, policy, UI). Kitaru's
+job is to make the run durable — checkpoints, replay, resume, wait states,
+versioned deployments — without forcing a graph DSL or a rewrite of your
+control flow.
 
 Start with [Harness, Runtime, Platform](/concepts/harness-runtime-platform)
-if you want the big-picture split, or
-[Execution Architecture](/concepts/execution-architecture) for the
-three-planes model (control / orchestration / execution).
+if you want the big-picture split, or [How It Works](/concepts/how-it-works)
+for the three-planes model (control / orchestration / execution) and
+what-runs-where in local dev vs production.
 
 ## Core ideas
 
@@ -58,13 +59,8 @@ Kitaru's current release includes:
     href="/concepts/harness-runtime-platform"
   />
   <Card
-    title="Execution Architecture"
-    description="Three planes, runner vs execution target, inline vs isolated checkpoints"
-    href="/concepts/execution-architecture"
-  />
-  <Card
     title="How It Works"
-    description="Kitaru server, runner, client — what lives where in local and production"
+    description="Server, runner, execution targets; three planes; local dev vs production"
     href="/concepts/how-it-works"
   />
   <Card
@@ -86,10 +82,5 @@ Kitaru's current release includes:
     title="Logging and Metadata"
     description="Attach structured data to executions and checkpoints"
     href="/concepts/logging"
-  />
-  <Card
-    title="Execution Model"
-    description="Understand how flows run, return results, and surface errors"
-    href="/concepts/execution-model"
   />
 </Cards>

@@ -3,13 +3,16 @@ title: Harness, Runtime, Platform
 description: Where Kitaru fits — and doesn't — in an agent stack.
 ---
 
-Agent tooling spans three layers. Confusion between them is where most
+Agent tooling spans four layers. Confusion between them is where most
 "is Kitaru a competitor to X?" questions come from.
 
 <HarnessRuntimePlatformDiagram />
 
-- **Harness layer** — how the agent thinks. Prompts, tools, model loop, context,
-  structured outputs, memory semantics. Picked per-agent or per-team.
+- **Model layer** — the LLM itself. A compute unit over a context window, picked
+  per-call or per-agent: OpenAI, Anthropic, Google, open-weights, fine-tuned in-house.
+- **Harness layer** — the loop around the model. Prompts, tools, model loop,
+  context management, structured outputs, in-turn memory. Picked per-agent or
+  per-team.
 - **Runtime layer** — how the agent survives and executes over time.
   Checkpoints, replay, resume, wait states, versioned deployments, invocation
   routing, artifact + state handling, execution placement.
@@ -166,8 +169,7 @@ Or the even shorter version:
 ## Related
 
 <Cards>
-  <Card title="Execution Architecture" href="/concepts/execution-architecture" description="Three planes, inline vs isolated, runner vs sandbox." />
-  <Card title="How It Works" href="/concepts/how-it-works" description="Server, runner, client — what lives where." />
+  <Card title="How It Works" href="/concepts/how-it-works" description="Server, runner, execution targets; three planes; local dev vs production." />
   <Card title="Flows" href="/concepts/flows" description="The outer durable boundary." />
   <Card title="Checkpoints" href="/concepts/checkpoints" description="The contract between the runtime and your code." />
 </Cards>

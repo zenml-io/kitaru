@@ -5,7 +5,7 @@ description: Durable work units with persistence and concurrency support
 
 A **checkpoint** is a unit of work inside a flow whose output is automatically
 persisted. It's also the **contract between the runner and the
-[execution target](/concepts/execution-architecture)**: the runner owns
+[execution target](/concepts/how-it-works)**: the runner owns
 durable control flow (order, retry, replay, resume, wait), the execution
 target (inline, isolated container, sandbox, external tool) does the work,
 and the checkpoint is what they agree on.
@@ -13,7 +13,7 @@ and the checkpoint is what they agree on.
 That separation is why a checkpoint failure is never just a crash —
 it's persisted context the runner, agent loop, or a human can retry,
 replay, or feed back into the flow. See
-[Execution Architecture](/concepts/execution-architecture) for the full model.
+[How It Works](/concepts/how-it-works) for the full model.
 
 ## Checkpoints are replay boundaries
 
@@ -113,7 +113,7 @@ def call_model(prompt: str) -> str:
 | Option | Default | What it controls |
 |---|---|---|
 | `retries` | `0` | Automatic retries on checkpoint failure |
-| `cache` | `None` | Reuse the persisted output from a previous run when inputs and code match. `None` falls back to the flow-level or active default; set `True` or `False` to pin it for this checkpoint. |
+| `cache` | `True` | Reuse the persisted output from a previous run when inputs and code match. Set `False` to disable on this checkpoint (overrides the flow-level default). |
 | `type` | `None` | A label for UI visualization (e.g. `"llm_call"`, `"tool_call"`) |
 | `runtime` | `None` | Execution runtime: `"inline"` or `"isolated"` (see below) |
 
@@ -230,8 +230,8 @@ def outer():
 
 - Add structured metadata to your checkpoints with
   [Logging and Metadata](/concepts/logging)
-- Understand how checkpoint results and errors surface in the
-  [Execution Model](/concepts/execution-model)
+- Understand how results and errors surface in
+  [Flows](/concepts/flows#how-errors-surface)
 - See the full API in the
   [Checkpoint Reference](/reference/python/checkpoint)
 

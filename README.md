@@ -33,11 +33,12 @@
 
 ## 🧩 Where Kitaru fits
 
-Agent stacks break cleanly into three layers. Kitaru is exactly one of them.
+Agent stacks break cleanly into four layers. Kitaru is exactly one of them.
 
 | Layer | What it does | Examples |
 |---|---|---|
-| **Harness** | How the agent *thinks* — prompts, tools, model loop, framework choice | Pydantic AI / Pydantic AI Harness, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
+| **Model** | The LLM itself — a compute unit over a context window | OpenAI, Anthropic, Google, open-weights, fine-tuned in-house |
+| **Harness** | The *loop around the model* — prompts, tools, model loop, framework choice | Pydantic AI / Pydantic AI Harness, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
 | **Runtime (Kitaru)** | How the agent *survives and executes over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()`, `kitaru.memory` |
 | **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
 

@@ -87,6 +87,7 @@ function Node({
   isMono,
   minWidth = 180,
   fullWidth,
+  conceptual,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
@@ -95,6 +96,7 @@ function Node({
   isMono?: boolean;
   minWidth?: number;
   fullWidth?: boolean;
+  conceptual?: boolean;
 }) {
   return (
     <div
@@ -106,12 +108,13 @@ function Node({
         padding: '10px 14px',
         minWidth: fullWidth ? undefined : minWidth,
         width: fullWidth ? '100%' : undefined,
-        border: `1px solid ${toneBorder(tone)}`,
-        background: toneFill(tone),
+        border: `1px ${conceptual ? 'dashed' : 'solid'} ${toneBorder(tone)}`,
+        background: conceptual ? 'transparent' : toneFill(tone),
         color: toneText(tone),
         borderRadius: 10,
         fontSize: 13,
         lineHeight: 1.35,
+        opacity: conceptual ? 0.75 : 1,
       }}
     >
       <span
@@ -334,7 +337,7 @@ function Caption({ children }: { children: ReactNode }) {
 function Legend({
   items,
 }: {
-  items: { tone: Tone; label: string }[];
+  items: { tone: Tone; label: string; conceptual?: boolean }[];
 }) {
   return (
     <div
@@ -359,8 +362,9 @@ function Legend({
               width: 12,
               height: 12,
               borderRadius: 3,
-              background: toneFill(i.tone),
-              border: `1px solid ${toneBorder(i.tone)}`,
+              background: i.conceptual ? 'transparent' : toneFill(i.tone),
+              border: `1px ${i.conceptual ? 'dashed' : 'solid'} ${toneBorder(i.tone)}`,
+              opacity: i.conceptual ? 0.75 : 1,
             }}
           />
           {i.label}
@@ -491,12 +495,14 @@ export function ExecutionArchitectureDiagram() {
               subtitle="restricted egress / capabilities"
               tone="success"
               isMono
+              conceptual
             />
             <Node
               title="External / MCP tool"
               subtitle="remote capability or API"
               tone="success"
               isMono
+              conceptual
             />
           </div>
         </Subgraph>
@@ -524,7 +530,7 @@ export function ExecutionArchitectureDiagram() {
               tone="info"
             />
             <Node
-              title="Metadata DB"
+              title="Metadata store"
               subtitle="runs · versions · statuses"
               tone="info"
             />
@@ -556,6 +562,7 @@ export function ExecutionArchitectureDiagram() {
           { tone: 'warn', label: 'Orchestration plane' },
           { tone: 'success', label: 'Execution plane' },
           { tone: 'info', label: 'Persistence' },
+          { tone: 'success', label: 'Conceptual — via adapters or your platform', conceptual: true },
         ]}
       />
       <Caption>
@@ -611,12 +618,18 @@ export function ThreePlanesDiagram() {
           <div style={{ ...row }}>
             <Node title="Inline" tone="success" minWidth={100} isMono />
             <Node title="Isolated job" tone="success" minWidth={130} isMono />
-            <Node title="Sandbox" tone="success" minWidth={110} isMono />
-            <Node title="External / MCP tool" tone="success" minWidth={180} isMono />
-            <Node title="Custom backend" tone="success" minWidth={160} isMono />
+            <Node title="Sandbox" tone="success" minWidth={110} isMono conceptual />
+            <Node title="External / MCP tool" tone="success" minWidth={180} isMono conceptual />
+            <Node title="Custom backend" tone="success" minWidth={160} isMono conceptual />
           </div>
         </Subgraph>
       </div>
+      <Legend
+        items={[
+          { tone: 'success', label: 'Shipped execution target' },
+          { tone: 'success', label: 'Conceptual — same contract, via adapters or your platform', conceptual: true },
+        ]}
+      />
       <Caption>
         The three planes run independently. The control plane survives if a
         runner dies. A runner survives if an execution target dies.
@@ -1135,7 +1148,7 @@ export function GatewayStackDiagram() {
 }
 
 // ============================================================
-// Diagram 9: Harness / Runtime / Platform — the three-layer split
+// Diagram 9: Model / Harness / Runtime / Platform — the four-layer split
 // ============================================================
 
 export function HarnessRuntimePlatformDiagram() {
@@ -1143,13 +1156,26 @@ export function HarnessRuntimePlatformDiagram() {
     <DiagramFrame>
       <div style={{ ...col, gap: 12 }}>
         <Subgraph
-          label="Harness layer"
+          label="Model layer"
           tone="muted"
-          annotation="how the agent thinks"
+          annotation="the LLM itself · your pick"
         >
           <div style={{ ...row }}>
-            <Node title="Pydantic AI" tone="muted" minWidth={130} isMono />
-            <Node title="Deep Agents" tone="muted" minWidth={130} isMono />
+            <Node title="OpenAI" tone="muted" minWidth={110} isMono />
+            <Node title="Anthropic" tone="muted" minWidth={120} isMono />
+            <Node title="Google" tone="muted" minWidth={100} isMono />
+            <Node title="Open-weights" tone="muted" minWidth={140} isMono />
+            <Node title="Fine-tuned in-house" tone="muted" minWidth={180} isMono />
+          </div>
+        </Subgraph>
+
+        <Subgraph
+          label="Harness layer"
+          tone="muted"
+          annotation="the loop around the model"
+        >
+          <div style={{ ...row }}>
+            <Node title="Pydantic AI / Harness" tone="muted" minWidth={180} isMono />
             <Node title="LangGraph" tone="muted" minWidth={120} isMono />
             <Node title="Claude Agent SDK" tone="muted" minWidth={170} isMono />
             <Node title="OpenAI Agents SDK" tone="muted" minWidth={170} isMono />
@@ -1220,7 +1246,7 @@ export function BuyerMatrixDiagram() {
           title="Individual or small team building one agent"
           subtitle="optimize for velocity"
           bullets={[
-            'pick a harness (PydanticAI, Deep Agents, Claude SDK…)',
+            'pick a harness (Pydantic AI / Harness, LangGraph, Claude SDK…)',
             'adopt its runtime if it has one',
             'Kitaru is probably overkill',
           ]}

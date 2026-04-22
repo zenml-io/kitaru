@@ -1,6 +1,6 @@
 ---
 title: "The runtime layer underneath your agent stack"
-description: "What people call the agent stack is really three layers: harness, runtime, platform. Conflating them costs durability. The runtime layer, and one split inside it, gets the least attention."
+description: "What people call the agent stack is really four layers: model, harness, runtime, platform. Conflating them costs durability. The runtime layer, and one split inside it, gets the least attention."
 date: 2026-04-22
 author: "Hamza Tahir"
 draft: false
@@ -9,15 +9,17 @@ image: "https://assets.kitaru.ai/content/blog/49da6231/arch_blog.avif"
 ogImage: "https://assets.kitaru.ai/content/blog/49da6231/arch_blog.avif"
 ---
 
-The agent stack has three layers: the harness (how the agent thinks), the runtime (how it survives and executes over time), and the platform (how the org governs it). They usually get collapsed into one.
+The agent stack has four layers: the model (the LLM itself), the harness (the loop around the model), the runtime (how it survives and executes over time), and the platform (how the org governs it). They usually get collapsed into one.
 
 For a single agent in a single harness, collapsing them is fine. The place where you write the prompt, the place where a run survives a crash, and the place where someone in your org decides whether you're allowed to run this all end up in one file on your laptop. That stops working the moment two teams in your org pick different harnesses. The durability you thought you had was harness-coupled. The replay lived inside the graph. The "wait for a human" was a blocking `input()`. None of it transfers to the agent someone else built in a different harness.
 
-This post pulls the three layers apart. The runtime layer is where most of the durability work lives, and inside it there's a second split — runner vs execution target — that matters more than most current tooling acknowledges.
+This post pulls the layers apart. The runtime layer is where most of the durability work lives, and inside it there's a second split — runner vs execution target — that matters more than most current tooling acknowledges.
 
-## Three layers
+## Four layers
 
-**Harness.** How the agent thinks. Prompts, tool loops, model calls, structured output, context management, in-turn memory. Pydantic AI / Pydantic AI Harness, LangGraph, the Claude Agent SDK, the OpenAI Agents SDK, hand-rolled loops. Harness design is a very active area. This is where reasoning quality lives.
+**Model.** The LLM itself — a compute unit over a context window. OpenAI, Anthropic, Google, open-weights, fine-tuned in-house. Picked for capability and cost; everything upstream wraps this.
+
+**Harness.** The loop around the model. Prompts, tool loops, model calls, structured output, context management, in-turn memory. Pydantic AI / Pydantic AI Harness, LangGraph, the Claude Agent SDK, the OpenAI Agents SDK, hand-rolled loops. Harness design is a very active area — it's how much you get out of whatever model you picked.
 
 **Runtime.** How the agent survives and executes over time. Checkpoints, replay, resume, wait states, versioned deployments, invocation routing, artifact and state persistence, execution placement. The part that doesn't change when the harness changes. The part nobody ships by default.
 
@@ -29,7 +31,8 @@ The split is cleaner on paper than in most products. LangGraph is a harness and 
 
 To place any tool in this space, ask which of these questions it actually answers:
 
-- *How does this agent reason in a single turn?* → harness
+- *Which LLM is actually generating tokens, and at what cost/context window?* → model
+- *How is the model driven in a single turn — prompts, tools, output schema?* → harness
 - *What does its output look like when a downstream system has to consume it?* → harness
 - *What happens when the pod running this agent dies at step 4 of 7?* → runtime
 - *How do I roll a new version of this agent out to 5% of traffic?* → runtime
@@ -42,7 +45,7 @@ Most of the confusion between tools here is a tool answering one of these questi
 
 ## What you lose when you compress
 
-When the three layers compress into a single piece of software, you typically lose durability, and you lose it in a way that isn't obvious until production.
+When the layers compress into a single piece of software, you typically lose durability, and you lose it in a way that isn't obvious until production.
 
 A harness-native durable runtime stores checkpoints indexed by graph node, or workflow step, or some abstraction internal to the harness. That's great for agents written in that harness. An agent written in a different harness on the same org's infrastructure gets none of it. Its crashes are full crashes. Its waits are blocking. Its deploys are bespoke.
 
@@ -107,5 +110,5 @@ If you're a platform engineer with more than one agent harness showing up in you
 
 More on the layer model and the runner/execution-target split, if you want to go deeper:
 
-- [Harness, Runtime, Platform](/docs/concepts/harness-runtime-platform) — the three layers in full.
+- [Harness, Runtime, Platform](/docs/concepts/harness-runtime-platform) — the four layers in full.
 - [Execution Architecture](/docs/concepts/execution-architecture) — the runner, the execution target, and the checkpoint contract.

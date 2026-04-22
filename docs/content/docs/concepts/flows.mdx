@@ -86,6 +86,21 @@ access to the running execution:
   a `KitaruStateError`. Use `handle.wait()` when you want to block.
 </Callout>
 
+### How errors surface
+
+If the flow execution fails, `handle.wait()` raises a typed
+`KitaruExecutionError` (or a more specific subclass) with the execution ID,
+final status, and the failure origin attached:
+
+```python
+import kitaru
+
+try:
+    result = my_agent.run(url="bad-input").wait()
+except kitaru.KitaruExecutionError as exc:
+    print(exc.exec_id, exc.status, exc.failure_origin)
+```
+
 ## Runtime options
 
 You can configure execution behavior at the decorator level (defaults) or
@@ -105,7 +120,7 @@ handle = my_agent.run(url="https://example.com", retries=3, cache=True)
 | Option | Default | What it controls |
 |---|---|---|
 | `retries` | `0` | Number of automatic retries on failure |
-| `cache` | `None` | Whether checkpointed outputs can be reused from previous runs. `None` leaves the choice to each checkpoint's own `cache` setting; set `True` or `False` at the flow level to force it uniformly. |
+| `cache` | `True` | Whether checkpointed outputs can be reused from previous runs. Set `False` to disable. |
 | `stack` | `None` | Target execution environment for this run (overrides the active stack default) |
 | `image` | `None` | Container image for remote execution (string, mapping, or settings object). Supports `base_image`, `requirements`, `environment`, `apt_packages`, `replicate_local_python_environment`, and `dockerfile`. |
 
@@ -173,5 +188,3 @@ handle = KitaruClient().deployments.invoke(
   [Checkpoints](/concepts/checkpoints)
 - Attach structured data to your executions with
   [Logging and Metadata](/concepts/logging)
-- Understand how results and errors surface in the
-  [Execution Model](/concepts/execution-model)

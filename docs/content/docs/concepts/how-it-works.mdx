@@ -1,54 +1,196 @@
 ---
 title: How It Works
-description: What runs where when you execute a Kitaru flow
+description: What runs where when you execute a Kitaru flow — server, runner, execution targets, and the contract between them.
 ---
 
 When you call `.run()` on a flow, three things work together to make it
-durable: the **Kitaru server** (shared metadata, auth, deployment registry),
-the **runner** (per-run durable control flow), and a **client** (how you
-observe and interact — SDK, CLI, UI, MCP). This page is the practical
-"what lives where" view. [Execution Architecture](/concepts/execution-architecture)
-is the deeper model with the three planes, inline vs isolated checkpoints, and
-orchestrator vs sandbox.
-
-During local development all three collapse into a single Python process. In
-production they separate across your infrastructure.
-
-## The three components at a glance
+durable: the **Kitaru server** (shared metadata, auth, deployment registry), the
+**runner** (per-run durable control flow), and one or more **execution targets**
+(where each checkpoint's code actually executes). During local development all
+three collapse into a single Python process. In production they separate across
+your infrastructure.
 
 <ComponentsDiagram />
 
-All three collapse into a single Python process in local dev. In production
-they separate: the server is a Kubernetes pod, the runner is a pod/job on
-your configured stack, and clients run wherever you are.
+Kitaru separates **durable control flow** from **code execution**:
 
-## Runner
+- The **Kitaru server** stores shared metadata, deployment snapshots, checkpoint state, execution logs, and control-plane data.
+- For each run, a **runner** (the durable brain of an execution) executes the selected flow snapshot, manages checkpoint order, persists state, and handles retry, replay, resume, and wait.
+- Individual checkpoints can run **inline** in the runner or in an **isolated** runtime (a separate container, Kubernetes job, or cloud job on the configured stack). The runner/target split is also where sandboxes, external tools, and custom compute backends conceptually plug in — the two shipped execution targets today are `inline` and `isolated`.
 
-Where your flow code actually executes. The runner manages checkpoint order,
-runs your checkpoints, calls `kitaru.llm()`, persists outputs, and handles
-retry, replay, resume, and wait. Locally this is your Python process. In
-production it is typically a pod or job on your configured stack.
+<Callout type="info">
+  **Key idea.** The runner owns the durable run: checkpoint order, state, retry, replay, resume, and wait. Execution targets do the work. **Checkpoints are the contract between the two.**
+</Callout>
 
-## Server
+<ExecutionArchitectureDiagram />
 
-The central coordination layer. The runner reports execution state,
-checkpoint results, and logs to the server. The server stores everything
-and makes it queryable.
+## Control / orchestration / execution
 
-Locally, the server runs embedded in your Python process (no setup needed).
-For production, you [deploy it on Kubernetes](/deploy/helm) so
-your team can share executions and agents can run independently of your machine.
+Kitaru splits runtime responsibilities into three planes. (This is separate
+from the [harness / runtime / platform](/concepts/harness-runtime-platform)
+split, which is about where Kitaru sits in the broader agent stack — not about
+how a single run executes.)
 
-## Client
+<ThreePlanesDiagram />
 
-How you observe and interact with executions. The client connects to the
-server to inspect runs, view logs, provide human input, replay, and cancel
-executions. This can be:
+| Plane | What lives here | Responsibility |
+|---|---|---|
+| **Control plane** | Kitaru server, UI, metadata DB, deployment registry, CLI/SDK/MCP APIs, auth and credential brokering | Knows what exists and who can call what |
+| **Orchestration plane** | The runner for a single execution | Owns durable control flow for one run |
+| **Execution plane** | Inline process or isolated container (shipped today); sandboxes, external tools, and custom backends are conceptual extensions of the same contract | Performs work |
 
-- **`KitaruClient`** — the Python SDK for programmatic access
-- **CLI** — `kitaru executions list`, `kitaru executions logs`, etc.
-- **UI** — the web interface for browsing executions visually
-- **MCP server** — for AI assistants to query and manage executions
+The control plane is long-lived and shared. The orchestration plane is per-run
+and durable. The execution plane is where your code (and your agent's code)
+actually executes.
+
+## What runs where?
+
+The most common confusion is which component runs user code. This table makes it explicit.
+
+| Component | What it does | Runs user code? |
+|---|---|---|
+| Kitaru server (control plane) | Stores deployment registry, execution metadata, checkpoint state, log metadata, auth and session state | **No** |
+| Runner (orchestration plane) | Runs the selected flow snapshot, controls checkpoint order, persists durable state, handles retry / replay / resume / wait | **Yes**, for inline checkpoints |
+| Inline execution | Runs a checkpoint inside the runner process/pod | Yes |
+| Isolated runtime | Runs a checkpoint in a separate container, job, pod, or remote compute backend | Yes |
+| Sandbox (conceptual) | The same contract as isolated, tightened with stronger isolation or restricted egress. Not a shipped Kitaru execution target today — provided via adapters / your platform. | Yes, where integrated |
+| External tool / MCP server | Performs work through a remote API or capability | Outside Kitaru |
+| Metadata store | Stores runs, versions, checkpoint statuses, replay lineage | No |
+| Artifact / state store | Stores checkpoint outputs, files, logs, replay lineage | No |
+
+## The run, step by step
+
+Here is what actually happens when a consumer invokes a flow.
+
+<Steps>
+  <Step>
+    **Request arrives.** A user, service, or upstream agent calls the Kitaru invocation API (via CLI, SDK, MCP, or HTTP).
+  </Step>
+  <Step>
+    **Server resolves the flow.** The server authenticates the caller, resolves the target flow (and optionally a version or tag), validates the input schema, and creates a run record plus a `FlowHandle`.
+  </Step>
+  <Step>
+    **Runner starts.** The control plane schedules a runner on your configured stack — a Kubernetes pod, a cloud job, or the local process in dev. The runner loads the selected flow snapshot.
+  </Step>
+  <Step>
+    **Runner executes checkpoints in order.** For each checkpoint, the runner either executes inline or delegates to an isolated target. It waits for the result, persists the output to the artifact/state store, and advances.
+  </Step>
+  <Step>
+    **State is durable the entire time.** If a checkpoint fails, if the runner dies, or if a `kitaru.wait()` suspends the run, the server retains everything needed to retry, replay, or resume later.
+  </Step>
+  <Step>
+    **Consumer observes results.** The caller uses the returned `FlowHandle` (or the UI / CLI / SDK / MCP) to tail logs, inspect checkpoints, provide human input, replay, or cancel.
+  </Step>
+</Steps>
+
+## Runner vs sandbox
+
+This is the idea that tends to click last and matter most.
+
+> The runner is the durable brain of a run.<br/>
+> The sandbox (or isolated runtime) is the hands that perform work.
+
+If a sandbox dies mid-execution — a container evicted, a network partition, a pod OOM — **the runner still holds durable checkpoint state** and can retry that single checkpoint, resume from the last known boundary, or replay the run with a modified input or code version. The sandbox's failure is localized to the checkpoint that was executing, not the whole agent.
+
+This is why platform teams should not confuse "I have a sandbox provider" with "I have durable execution". A sandbox is a bounded execution environment. Durable execution is a property of the surrounding runner — and of the checkpoints it persists.
+
+## Inline vs isolated checkpoints
+
+Every checkpoint picks an execution target. Two are built in today: `inline`
+(same process as the runner) and `isolated` (a separate container or job on the
+configured stack). Code examples, decision rules for when to reach for
+`isolated`, and the interaction with `.submit()` live on the
+[Checkpoints page](/concepts/checkpoints#isolated-runtime).
+
+## A failed checkpoint is durable context
+
+In classical pipelines, a failed step is a crash. In Kitaru, a failed checkpoint is **durable context** — something the runner, the agent loop, a human, or a retry policy can reason about.
+
+Consider a document-synthesis agent:
+
+<FailedCheckpointDiagram />
+
+Because the retrieval checkpoint's failure is persisted as a typed artifact, a downstream consumer has several real options:
+
+- Retry the same checkpoint with the same input
+- Replay with a modified input (e.g. a corrected document id)
+- Replay with modified code (e.g. a new retrieval strategy)
+- Feed the error artifact back into the agent loop so it can self-correct
+- Wait for a human to provide a correction via `kitaru.wait()`, then resume
+
+This is what "agent-native error handling" means in practice: failures become data, and durable state survives them.
+
+## How deep do you integrate?
+
+You don't have to restructure your agent to get value. Pick the depth that fits.
+
+### Level 0 — Black-box harness
+
+Wrap the entire agent run as one checkpoint.
+
+```text
+flow
+└── checkpoint: run_agent()
+    └── PydanticAI / LangGraph / Claude Agent SDK / custom loop
+```
+
+- Fastest integration
+- Minimal code changes
+- Framework-agnostic
+
+The tradeoff: replay boundary is coarse (one per agent run) and you see less of the agent's internal state.
+
+### Level 1 — Coarse workflow checkpoints
+
+Add checkpoints around the phases that matter to your team.
+
+```text
+flow
+├── checkpoint: plan()
+├── checkpoint: retrieve()
+├── checkpoint: act()
+├── checkpoint: synthesize()
+└── checkpoint: validate()
+```
+
+- Useful replay points
+- Better audit trail
+- Good balance of portability and durability
+
+The tradeoff: you (not the framework) decide where the boundaries go.
+
+### Level 2 — Framework-aware adapter
+
+Use a Kitaru adapter that tracks the framework's internals (model calls, tool calls, intermediate state) as child events under the enclosing checkpoint.
+
+```text
+flow
+└── checkpointed framework runtime
+    ├── model calls
+    ├── tool calls
+    ├── intermediate state
+    └── final output
+```
+
+- Richer introspection
+- Better debugging
+- Tighter developer experience
+
+The tradeoff: adapters are per-framework and need maintenance. The [Pydantic AI adapter](/guides/pydantic-ai-adapter) is the first one shipped.
+
+## Framework-agnostic by construction
+
+Kitaru does not require your agent to be written as a graph. `@checkpoint` wraps ordinary Python function boundaries, independent of the harness.
+
+That means a platform team supporting multiple harnesses — PydanticAI here, LangGraph there, Claude Agent SDK for one team, a raw-Python loop for another — can still standardize **durability, replay, and execution metadata** on a single runtime primitive. The harness choice stays a per-team decision.
+
+## Fits behind your platform
+
+Kitaru can be used directly through its invocation API, or placed **behind** your existing platform/gateway:
+
+<GatewayStackDiagram />
+
+You keep your auth, entitlements, interceptors, observability, and UI. Kitaru handles the durable execution layer underneath. This is how Kitaru drops into a finance- or regulated-industry-style internal agent platform without asking you to rebuild the surrounding system.
 
 ## Local development
 
@@ -70,43 +212,26 @@ to browse executions in a web UI.
 In production, the three components separate across your infrastructure:
 
 - The **server** runs as a long-lived Kubernetes pod (deployed via
-  [Helm](/deploy/helm)). It stores execution state in a
-  database and serves the UI UI. Your whole team connects to it.
+  [Helm](/deploy/helm)). It stores execution state in a database and serves the
+  UI. Your whole team connects to it.
+- The **runner** runs on the compute backend defined by your [stack](/stacks) —
+  Kubernetes, Vertex AI, SageMaker, AzureML. When you call `.run()`, the client
+  fetches short-lived credentials from the server and dispatches the execution
+  directly to the compute backend. The runner executes your checkpoints and
+  writes outputs to cloud storage. If the execution crashes, replay picks up
+  from the last completed checkpoint.
+- **Artifacts and state** live in your own S3 / GCS / Azure Blob bucket. The
+  server tracks metadata but does not access storage directly; when a client
+  needs to read files, it fetches temporary credentials brokered by the server.
 
-- The **runner** runs on the compute backend defined by your
-  [stack](/stacks) — Kubernetes pods, AWS / GCP / Azure managed jobs,
-  or any other supported environment. When you call `.run()`,
-  the client fetches short-lived credentials from the server and dispatches
-  the execution directly to the compute backend. The runner executes your
-  checkpoints and writes outputs to cloud storage. If the execution crashes,
-  replay picks up from the last completed checkpoint.
+There is no mandatory SaaS control plane in the path of your agent's data.
 
-- The **client** runs wherever you are — your laptop, CI, or another service.
-  It connects to the server to kick off executions, tail logs, provide human
-  input to waiting flows, or replay failed runs.
+## Related
 
-The runner writes checkpoint outputs and artifacts to the cloud storage
-backend (S3, GCS, or Azure Blob) defined by the stack. The server tracks
-execution metadata but does not access storage directly. When a client needs to
-read files — artifacts, checkpoint outputs, logs — it can fetch temporary
-credentials brokered by the server to access storage directly.
-
-## What goes where
-
-| Component | What it does | Where it runs |
-|---|---|---|
-| Runner | Executes your flow code, writes checkpoint outputs | Your process locally or Kubernetes pods |
-| Server | Stores execution state, checkpoint results, logs | Embedded locally or Kubernetes pod |
-| Client | Observe executions, provide input, replay, cancel | Your machine — SDK, CLI, UI, or MCP |
-| Storage | Persists all data | Local filesystem, S3, GCS, Azure Blob |
-
-## Next steps
-
-- [Harness, Runtime, Platform](/concepts/harness-runtime-platform) — where
-  Kitaru fits in your stack and where it doesn't
-- [Execution Architecture](/concepts/execution-architecture) — the three
-  planes, inline vs isolated checkpoints, and how Kitaru separates durable
-  control flow from code execution
-- [Stacks](/stacks) — how compute, storage, and container
-  registry are bundled into a named runtime
-- [Deploy Your Agent](/getting-started/deploy) — move from local to production
+<Cards>
+  <Card title="Harness, Runtime, Platform" href="/concepts/harness-runtime-platform" description="Where Kitaru fits in the broader agent stack." />
+  <Card title="Flows" href="/concepts/flows" description="The outer durable boundary of a Kitaru run." />
+  <Card title="Checkpoints" href="/concepts/checkpoints" description="Durable work units. The contract between the runner and execution targets." />
+  <Card title="Wait and Input" href="/concepts/wait-and-input" description="Pause a run, release compute, resume when input arrives." />
+  <Card title="Stacks" href="/stacks" description="Compute, storage, and container registry, bundled as a named runtime." />
+</Cards>

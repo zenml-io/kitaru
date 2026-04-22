@@ -1,5 +1,5 @@
 ---
-// PlatformBuilder.astro — "Primitive, not platform" three-layer stack
+// PlatformBuilder.astro — "Primitive, not platform" four-layer stack
 ---
 
 <section id="platform-builder" class="pb-section section-pad">
@@ -10,20 +10,36 @@
         Runtime primitives, under what you already run.
       </h2>
       <p class="pb-desc">
-        Agent tooling really lives in three layers. Kitaru owns one of them &mdash; the runtime &mdash; and leaves the other two to the tools your teams already picked.
+        Agent tooling really lives in four layers. Kitaru owns one of them &mdash; the runtime &mdash; and leaves the other three to the tools your teams already picked.
       </p>
     </div>
 
     <div class="pb-stack">
 
-      <div class="pb-layer pb-layer-harness" data-reveal="fade-up" data-reveal-delay="1">
+      <div class="pb-layer pb-layer-model" data-reveal="fade-up" data-reveal-delay="1">
         <div class="pb-layer-head">
-          <span class="pb-layer-label">Harness layer</span>
-          <span class="pb-layer-role">how the agent thinks</span>
+          <span class="pb-layer-label">Model layer</span>
+          <span class="pb-layer-role">the LLM itself</span>
         </div>
         <div class="pb-layer-tags">
-          <span class="pb-tag">Pydantic AI</span>
-          <span class="pb-tag">Deep Agents</span>
+          <span class="pb-tag">OpenAI</span>
+          <span class="pb-tag">Anthropic</span>
+          <span class="pb-tag">Google</span>
+          <span class="pb-tag">Open-weights</span>
+          <span class="pb-tag">Fine-tuned in-house</span>
+          <span class="pb-tag pb-tag-ghost">your pick</span>
+        </div>
+      </div>
+
+      <div class="pb-connector" aria-hidden="true"></div>
+
+      <div class="pb-layer pb-layer-harness" data-reveal="fade-up" data-reveal-delay="2">
+        <div class="pb-layer-head">
+          <span class="pb-layer-label">Harness layer</span>
+          <span class="pb-layer-role">the loop around the model</span>
+        </div>
+        <div class="pb-layer-tags">
+          <span class="pb-tag">Pydantic AI / Harness</span>
           <span class="pb-tag">LangGraph</span>
           <span class="pb-tag">Claude Agent SDK</span>
           <span class="pb-tag">OpenAI Agents SDK</span>
@@ -34,7 +50,7 @@
 
       <div class="pb-connector" aria-hidden="true"></div>
 
-      <div class="pb-layer pb-layer-kitaru" data-reveal="fade-up" data-reveal-delay="2">
+      <div class="pb-layer pb-layer-kitaru" data-reveal="fade-up" data-reveal-delay="3">
         <div class="pb-layer-head">
           <span class="pb-layer-label">Runtime layer</span>
           <span class="pb-layer-role"><strong>Kitaru</strong> &mdash; how the agent survives</span>
@@ -53,7 +69,7 @@
 
       <div class="pb-connector" aria-hidden="true"></div>
 
-      <div class="pb-layer pb-layer-platform" data-reveal="fade-up" data-reveal-delay="3">
+      <div class="pb-layer pb-layer-platform" data-reveal="fade-up" data-reveal-delay="4">
         <div class="pb-layer-head">
           <span class="pb-layer-label">Platform layer</span>
           <span class="pb-layer-role">how the org governs</span>
@@ -120,6 +136,7 @@
     transition: border-color 0.25s, transform 0.25s;
   }
 
+  .pb-layer-model,
   .pb-layer-harness,
   .pb-layer-platform {
     background: var(--color-surface);
