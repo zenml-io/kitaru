@@ -123,6 +123,7 @@ class TestBuildCommandTree:
         tree = build_command_tree(app)
         assert [sub.name for sub in tree.subcommands] == [
             "analytics",
+            "auth",
             "build",
             "clean",
             "deploy",
@@ -171,6 +172,7 @@ class TestBuildCommandTree:
         ]
         deployments = _find_command(tree, "flow", "deployments")
         assert [sub.name for sub in deployments.subcommands] == [
+            "curl",
             "delete",
             "list",
             "logs",
@@ -454,6 +456,7 @@ class TestWriteDocsTree:
         assert meta["title"] == "CLI Reference"
         assert meta["pages"] == [
             "analytics",
+            "auth",
             "build",
             "clean",
             "deploy",
@@ -543,9 +546,10 @@ class TestWriteDocsTree:
         status_page = (output_dir / "status.mdx").read_text()
         assert "`--output`, `-o`" in status_page
 
-        # executions, flow, log-store, memory, model, secrets, and stack all
+        # auth, executions, flow, log-store, memory, model, secrets, and stack all
         # have nested subcommands.
         for command in (
+            "auth",
             "executions",
             "flow",
             "log-store",
@@ -556,6 +560,9 @@ class TestWriteDocsTree:
         ):
             assert (output_dir / command / "index.mdx").exists()
             assert (output_dir / command / "meta.json").exists()
+
+        assert (output_dir / "auth" / "token.mdx").exists()
+        assert "auth/token.mdx" in files
 
         for command in (
             "cancel",
@@ -573,7 +580,7 @@ class TestWriteDocsTree:
         for command in ("list", "show", "tag", "untag"):
             assert (output_dir / "flow" / f"{command}.mdx").exists()
             assert f"flow/{command}.mdx" in files
-        for command in ("delete", "list", "logs", "show"):
+        for command in ("curl", "delete", "list", "logs", "show"):
             assert (output_dir / "flow" / "deployments" / f"{command}.mdx").exists()
             assert f"flow/deployments/{command}.mdx" in files
 

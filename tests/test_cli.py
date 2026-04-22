@@ -29,6 +29,7 @@ from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
+    KitaruConfig,
     KubernetesStackSpec,
     ModelAliasConfig,
     ModelRegistryConfig,
@@ -423,7 +424,7 @@ def test_flow_deployments_help_lists_supported_subcommands(
         app(["flow", "deployments", "--help"])
     assert exc_info.value.code == 0
     output = capsys.readouterr().out.lower()
-    for command in ("list", "show", "logs", "delete"):
+    for command in ("list", "show", "curl", "logs", "delete"):
         assert command in output
 
 
@@ -458,6 +459,115 @@ def test_memory_help_lists_all_supported_subcommands(
     output = capsys.readouterr().out.lower()
     for command in ("list", "get", "set", "delete", "history", "scopes", "reindex"):
         assert command in output
+
+
+def test_auth_help_lists_token_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru auth --help` should show the token helper."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["auth", "--help"])
+    assert exc_info.value.code == 0
+    assert "token" in capsys.readouterr().out.lower()
+
+
+def test_auth_token_text_prints_token_only(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text mode should print only the access token plus a newline."""
+    fake_store = SimpleNamespace(
+        get_or_generate_api_token=Mock(return_value="server-access-token")
+    )
+    fake_client = SimpleNamespace(zen_store=fake_store)
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru._cli._auth.resolve_connection_config") as resolve_mock,
+        patch("kitaru._cli._auth.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "token"])
+
+    assert exc_info.value.code == 0
+    resolve_mock.assert_called_once_with(validate_for_use=True)
+    assert capsys.readouterr().out == "server-access-token\n"
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.AUTH_TOKEN_PRINTED,
+        {"command": "auth.token"},
+    )
+
+
+def test_auth_token_json_includes_token(capsys: pytest.CaptureFixture[str]) -> None:
+    """JSON mode should wrap the access token in the standard command envelope."""
+    fake_store = SimpleNamespace(
+        get_or_generate_api_token=Mock(return_value="server-access-token")
+    )
+    fake_client = SimpleNamespace(zen_store=fake_store)
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru._cli._auth.resolve_connection_config"),
+        patch("kitaru._cli._auth.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "token", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "auth.token",
+        "item": {"token": "server-access-token"},
+    }
+
+
+def test_auth_token_uses_public_env_active_connection(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Public auth env vars should be enough to mint a server access token."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://env-kitaru.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "org-level-token")
+    monkeypatch.setenv("KITARU_PROJECT", "demo-project")
+    fake_store = SimpleNamespace(
+        get_or_generate_api_token=Mock(return_value="server-access-token")
+    )
+    fake_client = SimpleNamespace(zen_store=fake_store)
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru._cli._auth.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "token"])
+
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out == "server-access-token\n"
+    fake_store.get_or_generate_api_token.assert_called_once_with()
+
+
+def test_auth_token_token_only_env_reports_clean_cli_error(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Token-only env should fail as a Kitaru CLI error, not a traceback."""
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "dummy-token")
+    monkeypatch.delenv("KITARU_SERVER_URL", raising=False)
+
+    with (
+        patch(
+            "kitaru.config._read_global_connection_config", return_value=KitaruConfig()
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "token"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 1
+    assert captured.out == ""
+    assert (
+        "Error: KITARU_AUTH_TOKEN is set but no Kitaru server URL is available"
+        in captured.err
+    )
+    assert "set KITARU_SERVER_URL or run `kitaru login`" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_build_json_output_creates_deployment_from_target(
@@ -629,6 +739,271 @@ def test_invoke_selector_conflict_returns_json_error(
     payload = json.loads(capsys.readouterr().err)
     assert payload["command"] == "invoke"
     assert "version` and `tag` are mutually exclusive" in payload["error"]["message"]
+
+
+def test_flow_deployments_curl_json_resolves_default_and_formats_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`flow deployments curl` should generate a pinned curl command as JSON."""
+    deployment = _deployment_stub(
+        flow="demo_flow",
+        version=2,
+        deployment_id="7d3176d6-7453-411b-a3f5-91ca5c663d1c",
+    )
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = deployment
+    fake_connection = SimpleNamespace(server_url="https://kitaru.example.com/")
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        patch("kitaru._cli._flows.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "curl",
+                "demo_flow",
+                "--input",
+                '{"prompt":"Review data retention."}',
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.get.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="default",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "flow.deployments.curl"
+    item = payload["item"]
+    assert item["selector"] == {"version": None, "tag": "default"}
+    assert item["resolved_deployment_version"] == 2
+    assert item["server_url"] == "https://kitaru.example.com"
+    assert item["invoke_url"] == (
+        "https://kitaru.example.com/api/v1/pipeline_snapshots/"
+        "7d3176d6-7453-411b-a3f5-91ca5c663d1c/runs"
+    )
+    assert item["request_body"] == {
+        "run_configuration": {"parameters": {"prompt": "Review data retention."}}
+    }
+    assert item["token_env_var"] == "KITARU_SERVER_ACCESS_TOKEN"
+    assert item["token_command"] == "kitaru auth token"
+    assert item["token_assignment"] == (
+        'KITARU_SERVER_ACCESS_TOKEN="$(kitaru auth token)"'
+    )
+    assert item["token_assignment"] in item["curl_command"]
+    assert "Authorization: Bearer ${KITARU_SERVER_ACCESS_TOKEN}" in item["curl_command"]
+    assert "Review data retention" in item["curl_command"]
+    assert "KITARU_AUTH_TOKEN" not in item["curl_command"]
+    assert "kat_" not in item["curl_command"]
+    assert "This command is pinned to v2" in item["warning"]
+    assert item["warning_lines"] == [
+        "Resolved demo_flow tag 'default' to deployment version v2.",
+        "This command is pinned to v2. Regenerate it if you move the tag.",
+    ]
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.DEPLOYMENT_CURL_GENERATED,
+        {
+            "command": "flow.deployments.curl",
+            "has_input": True,
+            "selector": "default",
+        },
+    )
+
+
+def test_flow_deployments_curl_uses_kitaru_server_url_env_without_login_store(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`KITARU_SERVER_URL` should work even without a login-backed store URL."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://env-kitaru.example.com/")
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=2,
+        deployment_id="dep-env",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.config.GlobalConfiguration",
+            return_value=SimpleNamespace(store=None),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    item = json.loads(capsys.readouterr().out)["item"]
+    assert item["server_url"] == "https://env-kitaru.example.com"
+    assert item["invoke_url"] == (
+        "https://env-kitaru.example.com/api/v1/pipeline_snapshots/dep-env/runs"
+    )
+
+
+def test_flow_deployments_curl_text_warns_for_tag_selector(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text output should warn when a movable tag is resolved to a version."""
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=3,
+        tags={"stable": True},
+        deployment_id="dep-123",
+    )
+    fake_connection = SimpleNamespace(server_url="https://kitaru.example.com")
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        patch("kitaru._cli._flows.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "--tag", "stable"])
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.get.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="stable",
+    )
+    output = capsys.readouterr().out
+    assert (
+        "# Resolved demo_flow tag 'stable' to deployment version v3.\n"
+        "# This command is pinned to v3. Regenerate it if you move the tag.\n"
+    ) in output
+    assert 'KITARU_SERVER_ACCESS_TOKEN="$(kitaru auth token)"' in output
+    assert "curl -sS -X POST" in output
+    assert "${KITARU_SERVER_ACCESS_TOKEN}" in output
+
+
+def test_flow_deployments_curl_version_selector_uses_empty_body_without_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exact-version curl generation should not emit tag-pinning warnings."""
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=5,
+        deployment_id="dep-5",
+    )
+    fake_connection = SimpleNamespace(server_url="https://kitaru.example.com")
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "curl",
+                "demo_flow",
+                "--version",
+                "5",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.get.assert_called_once_with(
+        flow="demo_flow",
+        version=5,
+        tag=None,
+    )
+    item = json.loads(capsys.readouterr().out)["item"]
+    assert item["selector"] == {"version": 5, "tag": None}
+    assert item["request_body"] == {}
+    assert "warning" not in item
+    assert "-d '{}'" in item["curl_command"]
+
+
+def test_flow_deployments_curl_single_quotes_literal_url_parts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Literal URL pieces should not allow shell expansion when pasted."""
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=1,
+        deployment_id="dep-safe",
+    )
+    fake_connection = SimpleNamespace(
+        server_url="https://kitaru.example.com/$(touch /tmp/pwn)"
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    command = json.loads(capsys.readouterr().out)["item"]["curl_command"]
+    assert "'https://kitaru.example.com/$(touch /tmp/pwn)/api/v1/" in command
+    assert '"https://kitaru.example.com/$(touch /tmp/pwn)' not in command
+    assert "Authorization: Bearer ${KITARU_SERVER_ACCESS_TOKEN}" in command
+
+
+def test_flow_deployments_curl_reads_input_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--input @file` should be accepted when generating curl commands."""
+    input_file = tmp_path / "inputs.json"
+    input_file.write_text('{"topic":"cats"}')
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=1,
+        deployment_id="dep-file",
+    )
+    fake_connection = SimpleNamespace(server_url="https://kitaru.example.com")
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "curl",
+                "demo_flow",
+                "--input",
+                f"@{input_file}",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    item = json.loads(capsys.readouterr().out)["item"]
+    assert item["request_body"] == {
+        "run_configuration": {"parameters": {"topic": "cats"}}
+    }
 
 
 def test_flow_list_json_groups_deployment_backed_flows(

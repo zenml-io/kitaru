@@ -180,15 +180,16 @@ That gives a clean producer/consumer split:
 Inputs passed at invocation time override the deployment-time defaults for that
 new execution.
 
-## Authentication and workspace context
+## Authentication and Kitaru server access
 
 Deployments do not have per-deployment tokens. Access is controlled by the same
-workspace/project connection that the CLI, SDK, and MCP server already use.
+active Kitaru server connection that the CLI, SDK, and MCP server already use.
 
-For a remote workspace, authenticate once and choose the project context:
+For a remote Kitaru server, authenticate once and choose the project you want to
+work in:
 
 ```bash
-kitaru login my-workspace --api-key kat_abc123 --project production
+kitaru login https://kitaru.example.com --api-key kat_abc123 --project production
 kitaru status
 ```
 
@@ -201,9 +202,26 @@ export KITARU_AUTH_TOKEN=kat_abc123
 export KITARU_PROJECT=production
 ```
 
+Those three values are the whole connection puzzle: where the Kitaru server is,
+how to authenticate to it, and which project to use once you are there. If any
+piece is missing, commands that need the server fail with a short error telling
+you what to set. `kitaru info` shows which connection values Kitaru currently
+sees.
+
 After that, `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, and MCP
-`kitaru_deployments_invoke(...)` use that active workspace API key / auth context. The
-invocation request does not carry a separate deployment-specific token.
+`kitaru_deployments_invoke(...)` all use the active Kitaru server connection.
+The invocation request does not carry a separate deployment-specific token.
+
+For shell scripts or CI jobs, `kitaru flow deployments curl FLOW` generates a
+copy-pasteable curl command for the active Kitaru server. Kitaru resolves the
+requested tag or version first, then prints a command that starts a new
+execution for that resolved deployment version. The generated snippet calls
+`kitaru auth token` to get a short-lived server bearer token from your active
+connection, but the curl generator itself does not inline real token values.
+
+When you generate curl from a tag such as `default` or `stable`, the printed
+command is pinned to the deployment version that tag resolved to at generation
+time. Regenerate the command if the producer moves the tag later.
 
 Runtime secrets for the flow itself should live in Kitaru secrets or stack
 configuration, not in deployment tags or invocation examples.

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import shlex
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from cyclopts import Parameter
 
@@ -24,6 +27,8 @@ from kitaru._interface_executions import (
 )
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.cli_output import CLIOutputFormat
+from kitaru.config import resolve_connection_config
+from kitaru.errors import KitaruUsageError
 from kitaru.inspection import (
     serialize_deployment,
     serialize_flow_deployment_summary,
@@ -58,6 +63,9 @@ from ._helpers import (
     _resolve_output_format,
     _validate_pagination,
 )
+
+SERVER_ACCESS_TOKEN_COMMAND = "kitaru auth token"
+SERVER_ACCESS_TOKEN_ENV = "KITARU_SERVER_ACCESS_TOKEN"
 
 
 def _format_deployment_tags(tags: Mapping[str, bool]) -> str:
@@ -155,6 +163,124 @@ def _build_deploy_kwargs(
         inputs=inputs,
         input_label="`--input`",
     )
+
+
+def _active_kitaru_server_url() -> str:
+    """Return the active Kitaru server URL for generated HTTP examples."""
+    try:
+        resolved_connection = resolve_connection_config()
+    except Exception as exc:
+        raise KitaruUsageError(
+            "No active Kitaru server connection could be read. Run `kitaru login` "
+            "or set KITARU_SERVER_URL before generating a deployment curl command."
+        ) from exc
+
+    server_url = (resolved_connection.server_url or "").strip()
+    if not server_url.startswith(("http://", "https://")):
+        raise KitaruUsageError(
+            "Deployment curl generation requires an active Kitaru server connection. "
+            "Run `kitaru login` or set KITARU_SERVER_URL."
+        )
+    return server_url.rstrip("/")
+
+
+def _deployment_invoke_url(*, server_url: str, deployment_id: str) -> str:
+    encoded_id = quote(str(deployment_id), safe="")
+    return f"{server_url}/api/v1/pipeline_snapshots/{encoded_id}/runs"
+
+
+def _deployment_curl_body(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    if not inputs:
+        return {}
+    return {"run_configuration": {"parameters": dict(inputs)}}
+
+
+def _shell_double_quote(value: str) -> str:
+    """Double-quote a shell argument while preserving env-var expansion."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
+    return f'"{escaped}"'
+
+
+def _server_access_token_assignment() -> str:
+    """Return the shell assignment used by generated curl snippets."""
+    return f'{SERVER_ACCESS_TOKEN_ENV}="$({SERVER_ACCESS_TOKEN_COMMAND})"'
+
+
+def _format_deployment_curl_command(
+    *,
+    invoke_url: str,
+    body: Mapping[str, Any],
+) -> str:
+    """Format a copy-pasteable curl command without inlining real credentials."""
+    body_json = json.dumps(body, separators=(",", ":"), sort_keys=True)
+    auth_header = _shell_double_quote(
+        f"Authorization: Bearer ${{{SERVER_ACCESS_TOKEN_ENV}}}"
+    )
+    curl_lines = "\n".join(
+        [
+            "curl -sS -X POST \\",
+            f"  {shlex.quote(invoke_url)} \\",
+            f"  -H {auth_header} \\",
+            f"  -H {shlex.quote('Content-Type: application/json')} \\",
+            f"  -H {shlex.quote('Accept: application/json')} \\",
+            f"  -d {shlex.quote(body_json)}",
+        ]
+    )
+    return f"{_server_access_token_assignment()}\n\n{curl_lines}"
+
+
+def _deployment_curl_warning_lines(
+    *,
+    flow: str,
+    tag: str | None,
+    deployment_version: int,
+) -> list[str]:
+    if tag is None:
+        return []
+    return [
+        f"Resolved {flow} tag {tag!r} to deployment version v{deployment_version}.",
+        f"This command is pinned to v{deployment_version}. "
+        "Regenerate it if you move the tag.",
+    ]
+
+
+def _deployment_curl_payload(
+    *,
+    flow: str,
+    selector_version: int | None,
+    selector_tag: str | None,
+    deployment: Any,
+    server_url: str,
+    inputs: Mapping[str, Any],
+) -> dict[str, Any]:
+    body = _deployment_curl_body(inputs)
+    invoke_url = _deployment_invoke_url(
+        server_url=server_url,
+        deployment_id=str(deployment.deployment_id),
+    )
+    curl_command = _format_deployment_curl_command(invoke_url=invoke_url, body=body)
+    warning_lines = _deployment_curl_warning_lines(
+        flow=flow,
+        tag=selector_tag,
+        deployment_version=int(deployment.version),
+    )
+    payload: dict[str, Any] = {
+        "flow": flow,
+        "selector": {"version": selector_version, "tag": selector_tag},
+        "resolved_deployment_version": deployment.version,
+        "deployment_id": deployment.deployment_id,
+        "server_url": server_url,
+        "invoke_url": invoke_url,
+        "token_env_var": SERVER_ACCESS_TOKEN_ENV,
+        "token_command": SERVER_ACCESS_TOKEN_COMMAND,
+        "token_assignment": _server_access_token_assignment(),
+        "request_body": body,
+        "curl_command": curl_command,
+    }
+    if warning_lines:
+        payload["warning_lines"] = warning_lines
+        payload["warning"] = " ".join(warning_lines)
+    return payload
 
 
 def _resolve_latest_deployment_execution_id(
@@ -557,6 +683,73 @@ def show__(
         return
 
     _emit_snapshot("Kitaru deployment", _deployment_rows(deployment))
+
+
+@flow_deployments_app.command
+def curl(
+    flow: Annotated[str, Parameter(help="Deployment-backed flow name.")],
+    *,
+    version: Annotated[int | None, Parameter(help="Exact deployment version.")] = None,
+    tag: Annotated[str | None, Parameter(help="Deployment tag selector.")] = None,
+    input_: Annotated[
+        str | None,
+        Parameter(alias="--input", help="Invocation inputs as JSON or `@file`."),
+    ] = None,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Generate a curl command that starts a deployment execution."""
+    command = "flow.deployments.curl"
+    output_format = _resolve_output_format(output)
+
+    def _generate_curl() -> dict[str, Any]:
+        inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
+        resolved_version, resolved_tag = validate_deployment_selector(
+            version=version,
+            tag=tag,
+            default_tag=DEFAULT_DEPLOYMENT_TAG,
+        )
+        client = _facade_module().KitaruClient()
+        deployment = client.deployments.get(
+            flow=flow,
+            version=resolved_version,
+            tag=resolved_tag,
+        )
+        server_url = _active_kitaru_server_url()
+        payload = _deployment_curl_payload(
+            flow=flow,
+            selector_version=resolved_version,
+            selector_tag=resolved_tag,
+            deployment=deployment,
+            server_url=server_url,
+            inputs=inputs,
+        )
+        track(
+            AnalyticsEvent.DEPLOYMENT_CURL_GENERATED,
+            {
+                "command": command,
+                "has_input": bool(inputs),
+                "selector": _selector_kind(version=resolved_version, tag=resolved_tag),
+            },
+        )
+        return payload
+
+    payload = run_with_cli_error_boundary(
+        _generate_curl,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    warning_lines = payload.get("warning_lines") or []
+    for line in warning_lines:
+        print(f"# {line}")
+    if warning_lines:
+        print()
+    print(payload["curl_command"])
 
 
 @flow_deployments_app.command

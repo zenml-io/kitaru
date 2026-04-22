@@ -23,6 +23,7 @@ from kitaru._cleanup import (
 from kitaru._cli import (
     _UNKNOWN_VERSION,
     app,
+    auth_app,
     clean_app,
     executions_app,
     flow_app,
@@ -34,6 +35,8 @@ from kitaru._cli import (
     secrets_app,
     stack_app,
 )
+from kitaru._cli._auth import _active_server_access_token
+from kitaru._cli._auth import token as auth_token
 from kitaru._cli._clean import all_, global_, project
 from kitaru._cli._executions import (
     _auto_detect_single_pending_wait,
@@ -70,6 +73,9 @@ from kitaru._cli._flows import (
     build,
     deploy,
     invoke,
+)
+from kitaru._cli._flows import (
+    curl as flow_deployments_curl,
 )
 from kitaru._cli._flows import (
     delete as deployment_delete,
@@ -250,6 +256,7 @@ app.version = _UNKNOWN_VERSION
 _DEFERRED_BOOTSTRAP_COMMANDS: frozenset[str] = frozenset(
     {
         "analytics",
+        "auth",
         "clean",
         "info",
         "init",
@@ -297,6 +304,7 @@ def _apply_runtime_version() -> None:
 _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
     {
         "analytics",
+        "auth",
         "clean",
         "executions",
         "flow",
@@ -367,6 +375,7 @@ __all__ = [
     "ZenKeyError",
     "_InteractiveWaitCandidate",
     "_StackCreateInputs",
+    "_active_server_access_token",
     "_apply_runtime_version",
     "_auto_detect_single_pending_wait",
     "_build_info_sections",
@@ -461,6 +470,8 @@ __all__ = [
     "_value_style",
     "all_",
     "app",
+    "auth_app",
+    "auth_token",
     "build",
     "build_cleanup_plan",
     "cancel_",
@@ -479,6 +490,7 @@ __all__ = [
     "executions_app",
     "flow_app",
     "flow_deployments_app",
+    "flow_deployments_curl",
     "flow_deployments_list",
     "flow_deployments_logs",
     "flow_deployments_show",

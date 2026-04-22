@@ -232,18 +232,49 @@ def _merge_connection_layer(
     )
 
 
+def _nonempty_env(name: str) -> str | None:
+    """Return a non-empty environment value, treating blanks as unset."""
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return stripped
+
+
 def _environment_has_remote_server_override() -> bool:
     """Return whether env vars are driving a remote connection."""
-    if _normalized_kitaru_env(KITARU_SERVER_URL_ENV) is not None:
-        return True
-    raw_zenml = os.environ.get(ZENML_STORE_URL_ENV)
-    return raw_zenml is not None and bool(raw_zenml.strip())
+    return (
+        _nonempty_env(KITARU_SERVER_URL_ENV) is not None
+        or _nonempty_env(ZENML_STORE_URL_ENV) is not None
+    )
+
+
+def _environment_has_auth_override() -> bool:
+    """Return whether env vars are driving remote authentication."""
+    return (
+        _nonempty_env(KITARU_AUTH_TOKEN_ENV) is not None
+        or _nonempty_env(ZENML_STORE_API_KEY_ENV) is not None
+    )
 
 
 def _validate_connection_config_for_use(
     resolved: ResolvedConnectionConfig,
 ) -> None:
     """Validate connection config at first use."""
+    if _environment_has_auth_override() and not resolved.server_url:
+        raise KitaruUsageError(
+            "KITARU_AUTH_TOKEN is set but no Kitaru server URL is available; "
+            "set KITARU_SERVER_URL or run `kitaru login`."
+        )
+
+    if _environment_has_remote_server_override() and not resolved.auth_token:
+        raise KitaruUsageError(
+            "KITARU_SERVER_URL is set but no Kitaru auth token is available; "
+            "set KITARU_AUTH_TOKEN or run `kitaru login`."
+        )
+
     if _environment_has_remote_server_override() and not resolved.project:
         raise KitaruUsageError(
             "A remote Kitaru server is configured via environment variables, but "

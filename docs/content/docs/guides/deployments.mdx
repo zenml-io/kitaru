@@ -245,6 +245,82 @@ kitaru invoke research_agent --tag benchmark --input '{"topic": "..."}'
 
 When a tag should be invocable by consumers, make it exclusive.
 
+## Generate a curl command
+
+If you need to trigger a deployment from a shell script, CI job, or another
+system that can make HTTP requests, ask Kitaru to generate the curl command for
+the active Kitaru server.
+
+Before you do that, make sure Kitaru knows three things:
+
+1. the Kitaru server URL,
+2. an auth token or API key that can access that server, and
+3. the project to use on that server.
+
+You can provide those by logging in once:
+
+```bash
+kitaru login https://kitaru.example.com --api-key kat_abc123 --project production
+```
+
+Or, in CI and other headless environments, with environment variables:
+
+```bash
+export KITARU_SERVER_URL=https://kitaru.example.com
+export KITARU_AUTH_TOKEN=kat_abc123
+export KITARU_PROJECT=production
+```
+
+Run `kitaru info` if you want to check which connection Kitaru is using. If one
+of those three pieces is missing, `kitaru auth token` exits with a short error
+that says what to set next.
+
+Then generate the curl command:
+
+```bash
+kitaru flow deployments curl research_agent \
+  --tag stable \
+  --input '{"topic": "consumer request"}'
+```
+
+The output is copy-pasteable and uses your active connection's server URL:
+
+```bash
+# Resolved research_agent tag 'stable' to deployment version v2.
+# This command is pinned to v2. Regenerate it if you move the tag.
+
+KITARU_SERVER_ACCESS_TOKEN="$(kitaru auth token)"
+
+curl -sS -X POST \
+  'https://kitaru.example.com/api/v1/pipeline_snapshots/7d3176d6-7453-411b-a3f5-91ca5c663d1c/runs' \
+  -H "Authorization: Bearer ${KITARU_SERVER_ACCESS_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{"run_configuration":{"parameters":{"topic":"consumer request"}}}'
+```
+
+Kitaru resolves `research_agent` plus `stable` before printing the command. That
+means the generated URL is pinned to the resolved deployment version. If the
+producer later moves `stable` to another version, regenerate the command.
+
+`kitaru auth token` exchanges your active Kitaru connection for a short-lived
+server bearer token. The generated curl snippet stores it in
+`KITARU_SERVER_ACCESS_TOKEN` for the current shell command only; the curl
+generator itself does not print or store the real token.
+
+One important practical detail: external HTTP invocation only works for
+deployments that the Kitaru server can run by itself. If you deployed a version
+on a local/default stack, Kitaru can still list it as a deployment version, but
+the remote server may reject a curl invocation because that version depends on
+local machine components. For HTTP-triggered deployments, deploy on a remote
+stack such as Kubernetes, Vertex, SageMaker, or AzureML.
+
+For machine-readable output, add `-o json`:
+
+```bash
+kitaru flow deployments curl research_agent --version 2 -o json
+```
+
 ## Invoke from MCP
 
 MCP clients use the same deployment model with structured tool calls.

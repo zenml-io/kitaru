@@ -48,6 +48,10 @@ analytics_app = cyclopts.App(
     name="analytics",
     help="Manage anonymous usage analytics preferences.",
 )
+auth_app = cyclopts.App(
+    name="auth",
+    help="Manage active Kitaru server authentication helpers.",
+)
 flow_app = cyclopts.App(
     name="flow",
     help="Inspect flows and manage deployment routing.",
@@ -67,6 +71,7 @@ app.command(executions_app)
 app.command(memory_app)
 app.command(clean_app)
 app.command(analytics_app)
+app.command(auth_app)
 app.command(flow_app)
 flow_app.command(flow_deployments_app)
 
@@ -87,6 +92,7 @@ def main(
 
 from . import (  # noqa: F401,E402
     _analytics,
+    _auth,
     _clean,
     _executions,
     _flows,
@@ -102,6 +108,7 @@ __all__ = [
     "_UNKNOWN_VERSION",
     "analytics_app",
     "app",
+    "auth_app",
     "clean_app",
     "executions_app",
     "flow_app",
