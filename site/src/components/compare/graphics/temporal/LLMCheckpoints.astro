@@ -6,7 +6,7 @@
     <span class="tag tag--muted">Temporal Activity</span>
     <div class="opaque">
       <code>await call_openai(prompt)</code>
-      <span class="dim">opaque · you own logging + cost</span>
+      <span class="dim">unstructured by default · instrument it yourself</span>
     </div>
   </div>
 
@@ -17,7 +17,7 @@
     </div>
 
     <div class="mono-call">
-      <span class="fn">kitaru.llm</span>(<span class="str">prompt</span>, <span class="str">model=</span><span class="val">"claude-sonnet-4-6"</span>)
+      <span class="fn">kitaru.llm</span>(<span class="str">prompt</span>, <span class="str">model=</span><span class="val">"fast"</span>)
     </div>
 
     <dl class="fields">
@@ -34,10 +34,10 @@
           <span class="chip-k">tokens</span><span class="chip-v">1,247</span>
         </div>
         <div class="chip">
-          <span class="chip-k">cost</span><span class="chip-v">$0.028</span>
+          <span class="chip-k">latency</span><span class="chip-v">1.4s</span>
         </div>
         <div class="chip">
-          <span class="chip-k">model</span><span class="chip-v">claude-sonnet-4-6</span>
+          <span class="chip-k">model</span><span class="chip-v">fast → claude-sonnet-4-6</span>
         </div>
       </div>
     </dl>

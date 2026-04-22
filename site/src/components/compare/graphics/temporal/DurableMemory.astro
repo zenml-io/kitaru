@@ -5,6 +5,7 @@
   <div class="memory">
     <div class="memory-head">
       <span class="tag tag--accent">kitaru.memory</span>
+      <span class="scope-label">scope: <span class="scope-val">namespace</span></span>
       <span class="hint">versioned · persists across runs</span>
     </div>
     <ul class="entries">
@@ -50,7 +51,8 @@
 
   <div class="contrast">
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 2 L12 22 M2 12 L22 12" />
+      <rect x="3" y="7" width="18" height="10" rx="1.5" />
+      <text x="12" y="14" text-anchor="middle" font-size="6" font-family="ui-sans-serif, system-ui" font-weight="700" fill="currentColor" stroke="none">1 exec</text>
     </svg>
     <span><strong>Temporal:</strong> workflow variables are scoped to one execution, reconstituted from event history.</span>
   </div>
@@ -87,13 +89,28 @@
   .memory-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
     margin-bottom: 10px;
+  }
+  .scope-label {
+    font-size: 10.5px;
+    color: var(--color-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .scope-val {
+    font-family: var(--font-mono);
+    color: var(--color-accent-deep);
+    text-transform: none;
+    letter-spacing: 0;
   }
   .hint {
     font-size: 11px;
     color: var(--color-muted);
     font-style: italic;
+    margin-left: auto;
   }
 
   .entries { list-style: none; padding: 0; margin: 0; }

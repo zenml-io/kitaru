@@ -2,15 +2,16 @@
 ---
 
 <figure class="fig">
-  <div class="tree tree--a">
+  <div class="tree tree--b">
     <div class="head">
-      <span class="exec">exec_id 9f2a</span>
-      <span class="ts">today · 14:02</span>
+      <span class="exec">exec_id 7c1b</span>
+      <span class="ts">Mon · 11:47</span>
+      <span class="total">total $0.15</span>
     </div>
     <div class="step">
       <div class="step-head">
         <span class="cp">@checkpoint research</span>
-        <span class="cost">$0.03</span>
+        <span class="cost">$0.04</span>
       </div>
       <div class="artifacts">
         <span class="artifact">brief.json</span>
@@ -20,7 +21,7 @@
     <div class="step">
       <div class="step-head">
         <span class="cp">@checkpoint draft</span>
-        <span class="cost">$0.08</span>
+        <span class="cost">$0.09</span>
       </div>
       <div class="artifacts">
         <span class="artifact">draft.md</span>
@@ -41,30 +42,32 @@
   <div class="diff">
     <span class="diff-label">kitaru.load()</span>
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8 4 L4 8 L8 12" />
-      <path d="M4 8 L20 8" />
+      <path d="M4 12 L20 12" />
+      <path d="M16 8 L20 12 L16 16" />
     </svg>
+    <span class="diff-hint">reuses brief.json</span>
   </div>
 
-  <div class="tree tree--b">
+  <div class="tree tree--a">
     <div class="head">
-      <span class="exec">exec_id 7c1b</span>
-      <span class="ts">Mon · 11:47</span>
+      <span class="exec">exec_id 9f2a</span>
+      <span class="ts">today · 14:02</span>
+      <span class="total">total $0.10</span>
     </div>
-    <div class="step">
+    <div class="step step--reused">
       <div class="step-head">
         <span class="cp">@checkpoint research</span>
-        <span class="cost">$0.04</span>
+        <span class="badge-reused">loaded</span>
       </div>
       <div class="artifacts">
-        <span class="artifact">brief.json</span>
+        <span class="artifact artifact--reused">brief.json · from 7c1b</span>
       </div>
     </div>
     <svg class="conn" viewBox="0 0 6 14" aria-hidden="true"><path d="M3 0 L3 14" /></svg>
     <div class="step">
       <div class="step-head">
         <span class="cp">@checkpoint draft</span>
-        <span class="cost">$0.09</span>
+        <span class="cost">$0.08</span>
       </div>
       <div class="artifacts">
         <span class="artifact">draft.md</span>
@@ -99,12 +102,14 @@
     background: var(--color-surface);
     padding: 14px 14px 16px;
   }
-  .tree--b { opacity: 0.88; }
+  .tree--b { opacity: 0.82; }
 
   .head {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 6px;
+    flex-wrap: wrap;
     margin-bottom: 12px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--color-border-light);
@@ -119,12 +124,46 @@
     font-size: 10.5px;
     color: var(--color-muted);
   }
+  .total {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--color-primary);
+    padding: 2px 7px;
+    background: var(--color-accent-light);
+    border-radius: 4px;
+    width: 100%;
+    text-align: right;
+    margin-top: 2px;
+  }
 
   .step {
     padding: 8px 10px;
     border: 1px solid var(--color-border-light);
     border-radius: 6px;
     background: var(--color-surface-warm);
+  }
+  .step--reused {
+    border-color: var(--color-accent);
+    background: var(--color-accent-light);
+    border-style: dashed;
+  }
+  .badge-reused {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--color-accent-deep);
+    padding: 2px 6px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-accent);
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .artifact--reused {
+    background: var(--color-surface);
+    border: 1px dashed var(--color-accent);
+    color: var(--color-accent-deep);
   }
   .step-head {
     display: flex;
@@ -179,6 +218,14 @@
     align-items: center;
     gap: 6px;
     padding-top: 60px;
+  }
+  .diff-hint {
+    font-size: 9.5px;
+    color: var(--color-muted);
+    font-style: italic;
+    text-align: center;
+    max-width: 80px;
+    line-height: 1.3;
   }
   .diff-label {
     font-family: var(--font-mono);
