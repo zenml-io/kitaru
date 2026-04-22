@@ -1,0 +1,196 @@
+---
+competitor: "Restate"
+competitorLogo: "/compare/restate.svg"
+title: "Kitaru vs Restate: Durable execution, shaped for Python agents"
+description: "Restate is a polyglot, open-source durable runtime for services, Virtual Objects, and workflows. Kitaru is a Python-native durable runtime shaped for agent loops, with typed artifact lineage and an opinionated cloud-stack abstraction."
+cardSubtitle: "Durable execution for Python agents, with agent-native primitives such as llm(), wait(), save()/load(), and memory."
+order: 40
+ctaHeading: "Durable execution, shaped for your Python agent"
+---
+
+import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
+import ComparisonTable from '../../components/compare/ComparisonTable.astro';
+import CodeCompare from '../../components/compare/CodeCompare.astro';
+import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import PullQuote from '../../components/compare/PullQuote.astro';
+import AgentShapedRuntime from '../../components/compare/graphics/restate/AgentShapedRuntime.astro';
+import ArtifactLineage from '../../components/compare/graphics/restate/ArtifactLineage.astro';
+import StackAbstraction from '../../components/compare/graphics/restate/StackAbstraction.astro';
+import EmbeddedVsServerRegistered from '../../components/compare/graphics/restate/EmbeddedVsServerRegistered.astro';
+
+Restate is a serious durable runtime. Polyglot SDKs across TypeScript, Java, Kotlin, Go, Rust, and Python. Apache 2.0. Three handler shapes (services, Virtual Objects with keyed per-entity state and strongly-consistent access, and workflows), journaled execution, awakeables for human-in-the-loop, OpenTelemetry tracing, self-hostable on every major cloud. If your durability problem is polyglot and backend-services-shaped, Restate is the pragmatic answer. That's the honest thing to say up front.
+
+Kitaru is narrower on purpose. We built it for Python agents, because that's the workload most teams we talk to are trying to ship right now. Today, it's increasingly obvious that every company running agents in production needs the same capabilities: a durable `llm()` call, wait/resume, typed versioned memory, artifact lineage across runs, human/agent approval gates, and a runtime that understands the cloud underneath it. Those don't come in the box with any general-purpose durable runtime. So we put them there.
+
+<WhenToUseEach
+  kitaru={{
+    title: "Use Kitaru if you are",
+    items: [
+      "Running Python agents and want `kitaru.llm()`, `kitaru.wait()`, `kitaru.memory`, and artifact lineage as primitives, not glue code your platform team maintains forever",
+      "Deploying across Kubernetes, AWS, GCP, or Azure and want an opinionated stack abstraction where one config switches every flow's backend",
+      "Happy with embedded durability (`@flow` and `@checkpoint` on ordinary Python) rather than handlers that register with a separate server",
+      "Designing around dynamic agent loops: tool calls, conditional branches, human/agent approval gates, hours-long waits",
+    ],
+  }}
+  competitor={{
+    title: "Use Restate if you are",
+    items: [
+      "Running a polyglot services stack (TypeScript, Java, Kotlin, Go, Rust, Python) that needs one durability primitive across all of it",
+      "Doing durable RPC, sagas, or long-running backend workflows, not agent loops with LLM calls",
+      "Modeling keyed per-entity state with strongly-consistent access (chat sessions, orders, devices, users) as a first-class abstraction",
+      "Fine with running `restate-server` as infra and using awakeables / durable promises as the core HITL primitive",
+    ],
+  }}
+/>
+
+<PullQuote
+  quote="Restate adds durability to your services. Kitaru adds durability to your Python agents."
+/>
+
+<FeatureWithGraphic title="Agent-shaped vs app-shaped runtime">
+  <AgentShapedRuntime slot="graphic" />
+
+  Defaults tell you what a tool is actually for. Restate's defaults are services, Virtual Objects, and workflows. Real durability primitives, shaped for backend app workloads. Kitaru's defaults are `kitaru.llm()`, `kitaru.wait()`, `kitaru.memory`, and versioned artifacts per checkpoint. Different opinion about the workload, same commitment to durability.
+
+  - **In-the-box primitives:** `kitaru.llm()` resolves the model alias, injects the provider key, and logs prompt, response, latency, tokens, and model on every call. Restate's equivalent surface is services, Virtual Objects, workflows, and awakeables. Durability primitives, not agent primitives.
+  - **Framework adapters:** Kitaru ships a PydanticAI adapter, so wrapping an existing agent harness in `@flow` and `@checkpoint` is a five-minute job. Restate works alongside agent SDKs via generic wrappers.
+  - **Both can be bent to the other's shape.** What ships in the box tells you what the team was watching when they set the defaults.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Artifact lineage vs journal and Virtual Object state" reverse={true}>
+  <ArtifactLineage slot="graphic" />
+
+  Both tools persist state. The data models are different, and they're optimized for different shapes of work. Worth saying clearly.
+
+  - **Kitaru:** Every `@checkpoint` output lands as a typed, versioned artifact in your own S3, GCS, or Azure Blob bucket, linked to the execution record. Pick two runs, diff the artifacts at each checkpoint in the same UI. We took this straight from ZenML, where five years of ML work taught us that platform teams live or die on artifact lineage.
+  - **Restate:** Handler progress is journaled for deterministic replay. Virtual Objects expose keyed per-entity state with strongly-consistent access and single-writer semantics per object. That's the right shape for "the chat session", "the order", "the device".
+  - **Honest read:** VO-keyed per-entity state and versioned artifacts aren't two answers to the same question. They're two shapes of state, fit for different workloads.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Opinionated cloud-stack abstraction vs bring-your-own deployment">
+  <StackAbstraction slot="graphic" />
+
+  We spent five years at ZenML watching ML teams re-solve cloud topology for every new pipeline. Artifacts, secrets, compute, IAM: every cloud has its own version. JetBrains runs their AI globally on ZenML specifically to avoid re-solving this for every team. Same story is playing out for agent teams now. Kitaru's answer is to ship the stack abstraction in the runtime.
+
+  - **Kitaru:** Configure a stack once (AWS, GCP, Azure, Kubernetes). Every flow gets artifacts in your object store, secrets through the cloud's provider, orchestration on the chosen compute. Swap the stack to switch clouds without changing flow code.
+  - **Restate:** `restate-server` self-hosts on any of those clouds. That's a real feature. The wedge isn't where Restate can run, it's that the runtime doesn't abstract the cloud backend. You deploy handlers however you already deploy backend services.
+  - **The trade:** Polyglot backend teams often want exactly Restate's model. Python agent teams usually want the cloud topology handled by the runtime, not by the platform team for the tenth time.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Embedded library vs server-registered handlers" reverse={true}>
+  <EmbeddedVsServerRegistered slot="graphic" />
+
+  Both runtimes have a server. The wedge is whether your request path has to cross it.
+
+  - **Kitaru:** `pip install kitaru`, add `@flow` and `@checkpoint` to ordinary Python, your flow runs in your process. The Kitaru server stores execution metadata and powers the UI, CLI, and auth. It's not a proxy every invocation crosses.
+  - **Restate:** Handlers register with `restate-server`, and invocations flow through it. The server journals progress, routes requests, handles retries, and drives replay. That's not incidental; it's the durability model.
+  - **Selfishly, the Kitaru shape is what we want when we're shipping an agent.** Decorators on ordinary Python, flow runs where our code runs, metadata on the side. If your team wants server-mediated invocation by design, Restate's shape fits better.
+</FeatureWithGraphic>
+
+## What makes Kitaru unique
+
+<ComparisonTable
+  competitorLabel="Restate"
+  rows={[
+    { feature: "Durable execution and replay", kitaru: true, competitor: true },
+    { feature: "Human-in-the-loop waiting with compute released", kitaru: true, competitor: true },
+    { feature: "Self-hostable, Apache 2.0", kitaru: true, competitor: true },
+    { feature: "OpenTelemetry tracing", kitaru: true, competitor: true },
+    { feature: "Python-agent-shaped primitives (`kitaru.llm()`, `kitaru.wait()`, `kitaru.memory`)", kitaru: true, competitor: false },
+    { feature: "Built-in LLM primitive with alias-resolved secrets and per-call token/latency logging", kitaru: true, competitor: false },
+    { feature: "Typed, versioned artifact lineage per checkpoint (cross-run diff)", kitaru: true, competitor: false },
+    { feature: "Opinionated stack abstraction for Kubernetes, AWS, GCP, Azure", kitaru: true, competitor: false },
+    { feature: "Embedded library (no separate server process in the request path)", kitaru: true, competitor: false },
+    { feature: "Polyglot handler SDKs (TypeScript, Java, Kotlin, Go, Rust, Python)", kitaru: false, competitor: true },
+    { feature: "Virtual Objects: keyed per-entity state with strongly-consistent access", kitaru: false, competitor: true },
+    { feature: "Awakeables and durable promises as a primitive", kitaru: false, competitor: true },
+  ]}
+/>
+
+## How the two surfaces map
+
+| Concept | Restate | Kitaru |
+|---|---|---|
+| Durable unit | Handler (Service / Virtual Object / Workflow) | `@flow` + `@checkpoint` |
+| Durability mechanism | Journaled event log | Versioned artifacts per checkpoint |
+| Per-entity state | Virtual Object (keyed, strongly-consistent) | `kitaru.memory` scopes + artifact store |
+| Human-in-the-loop | Awakeable / durable promise | `kitaru.wait()` |
+| Invocation | Handler call via `restate-server` | `flow.run()`, `kitaru invoke`, CLI, SDK, MCP, curl |
+| Deployment model | Self-hosted `restate-server` + registered handlers | Stack abstraction for Kubernetes, AWS, GCP, Azure |
+| LLM call | Your code inside a journaled step | `kitaru.llm()` with alias, key injection, token/latency logging |
+
+## Code comparison
+
+<CodeCompare
+  kitaruLabel="Kitaru"
+  competitorLabel="Restate (Python SDK)"
+  kitaruCode={`import kitaru
+from kitaru import checkpoint, flow
+
+@checkpoint
+def research(topic: str) -> str:
+    return kitaru.llm(
+        prompt=f"Research: {topic}. Return a brief.",
+        model="fast",
+    )
+
+@checkpoint
+def draft(brief: str) -> str:
+    return kitaru.llm(
+        prompt=f"Write a draft from this brief:\\n{brief}",
+        model="fast",
+    )
+
+@flow
+def review_flow(topic: str) -> str:
+    brief = research(topic)
+    text = draft(brief)
+    approved = kitaru.wait(
+        name="approve_draft",
+        question="Approve draft?",
+        schema=bool,
+    )
+    return text if approved else "Rejected"
+
+review_flow.run("Durable agents")`}
+  competitorCode={`import restate
+
+review = restate.Workflow("ReviewWorkflow")
+
+@review.main()
+async def run(ctx: restate.WorkflowContext, topic: str) -> str:
+    # Journaled step. Non-deterministic work lives inside ctx.run().
+    brief = await ctx.run(
+        "research",
+        lambda: call_llm(f"Research: {topic}"),
+    )
+    text = await ctx.run(
+        "draft",
+        lambda: call_llm(f"Draft: {brief}"),
+    )
+
+    # Awakeable: durable promise resolved by an external caller.
+    approval_id, approval = ctx.awakeable()
+    send_approval_link(approval_id, text)
+    approved = await approval
+    return text if approved else "Rejected"
+
+app = restate.app([review])
+
+# Register the workflow with restate-server, deploy the handler,
+# and resolve the awakeable from wherever approvals come in.`}
+/>
+
+## Ready to try Kitaru?
+
+If your durability problem is shaped like a polyglot backend with keyed per-entity state, Restate is the right tool and I'd tell any team that. For Python agent work (LLM calls, memory, artifacts, human/agent approval gates), the glue code you'd write on top of a general-purpose durable runtime is the stuff we ship in the box.
+
+We've spent five years building the MLOps-ready version of this problem space at ZenML. Kitaru is that team two years into the agent version. Bet on us for agent infrastructure and you're betting on the group that's been doing this the whole time.
+
+- Read [our docs](/docs) and see how `@flow`, `@checkpoint`, `kitaru.llm()`, `kitaru.wait()`, and `kitaru.memory` compose
+- `pip install kitaru` and run your first durable agent in an afternoon
+- [Talk to our team](/get-started) if you want help mapping a Restate workflow or Virtual Object onto Kitaru primitives
+
+<div class="compare-inline-cta">
+  <a href="/get-started" class="btn-primary">Get Started</a>
+</div>
