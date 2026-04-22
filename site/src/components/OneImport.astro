@@ -14,14 +14,14 @@
 
     <!-- Tabs -->
     <div class="one-import-tabs" role="tablist" data-reveal data-reveal-delay="3">
-      <button class="one-import-tab is-active" role="tab" aria-selected="true" data-tab="openai">OpenAI Agents SDK</button>
+      <button class="one-import-tab is-active" role="tab" aria-selected="true" data-tab="pydanticai">PydanticAI</button>
+      <button class="one-import-tab" role="tab" aria-selected="false" data-tab="openai">OpenAI Agents SDK</button>
       <button class="one-import-tab" role="tab" aria-selected="false" data-tab="anthropic">Anthropic Agent SDK</button>
-      <button class="one-import-tab" role="tab" aria-selected="false" data-tab="pydanticai">PydanticAI</button>
       <button class="one-import-tab" role="tab" aria-selected="false" data-tab="custom">Raw Python</button>
     </div>
 
     <!-- OpenAI panel -->
-      <div class="one-import-panel is-active" id="panel-openai" role="tabpanel">
+      <div class="one-import-panel" id="panel-openai" role="tabpanel" hidden>
         <div class="one-import-codes">
           <div class="one-import-code">
             <div class="one-import-code-header">
@@ -114,7 +114,7 @@ options <span class="op">=</span> <span class="fn">ClaudeAgentOptions</span>(
       </div>
 
       <!-- PydanticAI panel -->
-      <div class="one-import-panel" id="panel-pydanticai" role="tabpanel" hidden>
+      <div class="one-import-panel is-active" id="panel-pydanticai" role="tabpanel">
         <div class="one-import-codes">
           <div class="one-import-code">
             <div class="one-import-code-header">
