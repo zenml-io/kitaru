@@ -287,10 +287,10 @@ def _resolve_latest_deployment_execution_id(
     deployment: Any,
 ) -> str:
     """Best-effort lookup of the latest execution associated with a deployment."""
-    # Cap the scan to the most recent executions: executions.list already
-    # returns desc:created, so the first match is by definition the latest.
-    # Without a limit, this paginates the entire history of the flow.
-    executions = client.executions.list(flow=flow, limit=50)
+    # executions.list returns desc:created, so the first match is the latest.
+    # Intentionally do not cap this lookup: a deployment can still be valid even
+    # when its latest execution is older than the first page of recent flow runs.
+    executions = client.executions.list(flow=flow)
     for execution in executions:
         metadata = getattr(execution, "metadata", {}) or {}
         if not isinstance(metadata, Mapping):
@@ -797,6 +797,9 @@ def logs(
 
     def _resolve_logs_target() -> tuple[Any, str]:
         client = _facade_module().KitaruClient()
+        if exec_id:
+            return client, exec_id
+
         resolved_version, resolved_tag = validate_deployment_selector(
             version=version,
             tag=tag,
@@ -807,7 +810,7 @@ def logs(
             version=resolved_version,
             tag=resolved_tag,
         )
-        resolved_exec_id = exec_id or _resolve_latest_deployment_execution_id(
+        resolved_exec_id = _resolve_latest_deployment_execution_id(
             client=client,
             flow=flow,
             deployment=deployment,

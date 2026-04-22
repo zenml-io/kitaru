@@ -1027,6 +1027,102 @@ def test_flow_list_json_groups_deployment_backed_flows(
     assert payload["items"][0]["latest_version"] == 2
 
 
+def test_flow_deployments_logs_explicit_exec_id_skips_deployment_resolution(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--exec-id` should be a true override for deleted or moved deployments."""
+    entry = LogEntry(message="Starting deployment", level="INFO")
+    fake_client = Mock()
+    fake_client.deployments.get.side_effect = AssertionError(
+        "deployment selector should not be resolved when --exec-id is provided"
+    )
+    fake_client.executions.logs.return_value = [entry]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "logs",
+                "demo_flow",
+                "--exec-id",
+                "kr-explicit",
+                "--version",
+                "999",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.get.assert_not_called()
+    fake_client.executions.list.assert_not_called()
+    fake_client.executions.logs.assert_called_once_with(
+        "kr-explicit",
+        checkpoint=None,
+        source="step",
+        limit=None,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "flow.deployments.logs"
+    assert payload["count"] == 1
+
+
+def test_flow_deployments_logs_searches_all_flow_executions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deployment log lookup should not stop after an arbitrary first page."""
+    deployment = _deployment_stub(
+        flow="demo_flow",
+        version=7,
+        deployment_id="dep-target",
+    )
+    unrelated = SimpleNamespace(
+        exec_id="kr-unrelated",
+        metadata={"kitaru_deployment_id": "dep-other"},
+    )
+    matching = SimpleNamespace(
+        exec_id="kr-matching",
+        metadata={"kitaru_deployment_id": "dep-target"},
+    )
+    entry = LogEntry(message="Older matching deployment", level="INFO")
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = deployment
+    fake_client.executions.list.return_value = [unrelated, matching]
+    fake_client.executions.logs.return_value = [entry]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "logs",
+                "demo_flow",
+                "--version",
+                "7",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.list.assert_called_once_with(flow="demo_flow")
+    fake_client.executions.logs.assert_called_once_with(
+        "kr-matching",
+        checkpoint=None,
+        source="step",
+        limit=None,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["count"] == 1
+
+
 def test_flow_deployments_logs_follow_json_uses_command_name(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
