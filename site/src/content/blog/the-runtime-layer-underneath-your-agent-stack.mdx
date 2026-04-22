@@ -1,0 +1,113 @@
+---
+title: "The runtime layer underneath your agent stack"
+description: "The agent stack is three layers in a trench coat. Here's what belongs in each one, and why conflating them costs you durability."
+date: 2026-04-22
+author: "Hamza Tahir"
+draft: false
+category: "Philosophy"
+---
+
+"The agent stack" is three layers in a trench coat.
+
+We talk about it like one thing because, for a single agent in a single harness, it *is* one thing. The place where you write the prompt, the place where the run survives a crash, and the place where someone in your org decides whether you're allowed to run this at all — they collapse into one file on your laptop. Fine for a prototype. Not fine for a platform.
+
+The moment two teams in your org pick different harnesses, the compression breaks. The durability you thought you had was harness-coupled. The replay was inside the graph. The "wait for a human" was a blocking input(). Everything you liked about how the prototype ran doesn't extend to the agent your colleague built next door.
+
+This post is about pulling those three layers apart and looking at them separately. What belongs in each. Why treating them as one thing costs you durability. And the one split inside the runtime layer — runner vs execution target — that I think is the most under-discussed architectural idea in this whole space.
+
+## Three layers
+
+The three layers:
+
+**Harness.** How the agent *thinks*. Prompts, tool loops, model calls, structured output, context management, in-turn memory. Pydantic AI, LangGraph, Deep Agents, the Claude Agent SDK, the OpenAI Agents SDK, hand-rolled loops. Harness design is a very active area. It should be. This is where the reasoning quality lives.
+
+**Runtime.** How the agent *survives and executes over time*. Checkpoints, replay, resume, wait states, versioned deployments, invocation routing, artifact and state persistence, execution placement. The part that doesn't change when the harness changes. The part nobody ships by default.
+
+**Platform.** How your organization *governs*. Auth, entitlements, request interceptors, guardrails, observability pipelines, product UI, policy engines. The part that usually already exists at your company, ten years before anyone said the word "agent."
+
+Cleaner in principle than in practice. Some tools straddle. LangGraph is a harness *and* runs its own checkpointer and time-travel inside its graph model. LangSmith Deployment packages runtime plus sandboxes plus auth proxy as a hosted product. Those hybrids are fine — they just have an opinion about the other layers, and if your org's shape doesn't match theirs, you feel it at adoption time.
+
+## The questions each layer answers
+
+A useful test, when you're staring at a new tool in this space, is to ask which of these questions it actually helps with:
+
+- *How does this agent reason in a single turn?* → harness
+- *What does its output look like when a downstream system has to consume it?* → harness
+- *What happens when the pod running this agent dies at step 4 of 7?* → runtime
+- *How do I roll a new version of this agent out to 5% of traffic?* → runtime
+- *Where do the intermediate artifacts of the last 10,000 runs live?* → runtime
+- *Who is allowed to invoke this flow?* → platform
+- *How do we prove this agent only read data the caller is authorized to see?* → platform
+- *What does our SRE team get paged on when this misbehaves?* → platform
+
+Most confusion in this space comes from a tool answering question A and a buyer reading it as answering question B. If you get clarity on which question you actually need answered, you can tell very quickly which layer a tool belongs to.
+
+## What you lose when you compress
+
+Here's the part I think is worth being precise about. When the three layers compress into one piece of software, you typically lose durability — and you lose it in a way that's hard to notice until production.
+
+Consider: a harness-native durable runtime (pick your favorite) stores checkpoints indexed by graph node, or by workflow step, or by some abstraction internal to the harness. That's great for the agent written in that harness. An agent written in a different harness, on the same org's infrastructure, gets none of it. Its crashes are full crashes. Its waits are blocking. Its deploys are bespoke.
+
+A platform team staring at two or three harnesses has a choice:
+
+1. Mandate one harness across the org, so the harness-native durability covers everything.
+2. Put durability underneath the harness — at a layer all harnesses can share.
+
+The first choice is hard to make for good reasons. Teams pick harnesses for real reasons (type ergonomics, graph-native reasoning, specific tool integrations), and forcing convergence creates more friction than it saves. The second choice is what a runtime layer is for. It's the only choice that scales with harness plurality.
+
+The other thing you lose when you compress is the ability to reason about failure. "The sandbox died" is not the same as "the run failed." "The agent crashed" is not the same as "this step can't complete." Durable execution is a property of the runtime around the code; a bounded sandbox is a property of *where* the code runs. If a team says "we have sandboxes" and a platform engineer hears "so you have durable execution," somebody is going to be surprised in production.
+
+## Runner vs execution target
+
+Inside the runtime layer there's a second split, and I think it's the most architecturally substantive idea in this whole conversation.
+
+For every flow invocation, there's a **runner**: the durable brain of that one run. It holds checkpoint order. It persists state after every boundary. It handles retry, replay, resume, and `wait`. It's per-run, and it survives transient failures *of the code it's running*.
+
+Separately, there's an **execution target**: the actual thing that runs the code inside a given checkpoint. Inline (same process as the runner), isolated (a separate container or Kubernetes job), sandbox (restricted egress, model-generated code), external tool (MCP server, internal API, whatever).
+
+Checkpoints are the contract between them.
+
+Why does this matter? Because once you separate the runner from the execution target, a lot of things stop being contradictions:
+
+- A checkpoint can fail without the run failing. The runner holds the pre-failure state; the checkpoint's output becomes a typed error artifact; retry, replay, and human correction all become data, not crashes.
+- Different checkpoints in the same run can have different execution policies. Inline for cheap orchestration. Isolated for untrusted code. Sandbox for anything model-generated. External tool for capabilities that live outside Kitaru's scope. The runner doesn't care; it just waits on results.
+- Scaling the runtime doesn't mean scaling everything. The runner is lightweight — it's orchestration. The execution targets are where compute actually goes, and they scale independently per workload shape.
+
+The test for whether a system has made this split cleanly: *if the sandbox dies mid-step, does the run die?* If yes, you have a sandbox with retries. If no — if the runner is still holding state and can retry, replay, or resume at exactly the checkpoint that was in flight — you have durable execution.
+
+Most agent runtime design in 2026 is still conflating these. It's worth being specific.
+
+## Why failed checkpoints are durable context
+
+A direct consequence of the runner/execution-target split: a failed checkpoint is not a crash. It's durable context.
+
+When a checkpoint fails, the runner captures the error, the input that produced it, and the state of the run up to that point. That's data, and data can be acted on:
+
+- Retry the same checkpoint with the same input (transient failures).
+- Replay with a modified input (bad data in the retrieval step; fixed upstream).
+- Replay with modified code (the agent logic had a bug; fix, redeploy, replay).
+- Feed the error artifact back into the agent loop (let the model see what went wrong and correct itself).
+- Pause the run until a human approves a correction via `wait()`, then resume.
+
+Every one of those options requires that the runner is still running. None of them work if the failure killed the run. This is the operational difference between agents that feel like production systems and agents that feel like scripts with extra steps.
+
+## The buyer axis
+
+This is orthogonal to the layer split but worth naming.
+
+If you're *buying* an agent stack — you want a hosted control plane, you're fine with someone else's UI, you don't want to operate the runtime — a packaged product (LangSmith Deployment being the obvious current example) is probably the right shape. Fewer pieces to wire up.
+
+If you're *building* one — your platform already runs on your infra, you have auth, you have observability, and you need the durable-execution layer specifically — a runtime primitive without the rest is the right shape. You're not buying a platform; you already have one. You're buying the middle row.
+
+A lot of positioning confusion in this space is really buyer confusion. The same tool can look like "too much platform" to one team and "not enough platform" to another, depending on which of those camps they fall into.
+
+## Closing
+
+The layers are real. Conflating them costs durability. Splitting them, especially splitting the runner from the execution target inside the runtime, is where the architectural work actually lives.
+
+If you're a platform engineer with more than one agent harness showing up in your org, the middle row is the one I'd think about first. There are several projects in it now — LangGraph's checkpointer, LangSmith Deployment, Temporal, DBOS, [Kitaru](/docs/concepts/harness-runtime-platform) — each with real tradeoffs and a real audience. What matters less is which one you pick, and more that you notice the middle row is its own row.
+
+More on the layer model and the runner/execution-target split, if you want to go deeper:
+
+- [Harness, Runtime, Platform](/docs/concepts/harness-runtime-platform) — the three layers in full.
+- [Execution Architecture](/docs/concepts/execution-architecture) — the runner, the execution target, and the checkpoint contract.
