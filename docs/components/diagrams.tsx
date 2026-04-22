@@ -1038,7 +1038,7 @@ export function ComponentsDiagram() {
           }}
         >
           <Node
-            title="Agent runtime"
+            title="Runner"
             subtitle="your Python process or pod"
             tone="warn"
             bullets={[

@@ -4,8 +4,16 @@ description: Durable work units with persistence and concurrency support
 ---
 
 A **checkpoint** is a unit of work inside a flow whose output is automatically
-persisted. When a flow re-executes, checkpoints that already succeeded can
-return their recorded results instead of running again.
+persisted. It&rsquo;s also the **contract between the runner and the
+[execution target](/concepts/execution-architecture)**: the runner owns
+durable control flow (order, retry, replay, resume, wait), the execution
+target (inline, isolated container, sandbox, external tool) does the work,
+and the checkpoint is what they agree on.
+
+That separation is why a checkpoint failure is never just a crash &mdash;
+it&rsquo;s persisted context the runner, agent loop, or a human can retry,
+replay, or feed back into the flow. See
+[Execution Architecture](/concepts/execution-architecture) for the full model.
 
 ## Checkpoints are replay boundaries
 
@@ -112,9 +120,13 @@ Like flow options, `retries` must be non-negative.
 
 ### Isolated runtime
 
-By default, checkpoints run **inline** — in the same process or thread as the
-flow. Set `runtime="isolated"` to run a checkpoint in its own container on
-remote orchestrators that support it (Kubernetes, AWS, GCP, Azure):
+By default, checkpoints run **inline** &mdash; in the same process/pod as the
+runner. This is the right default for most orchestration. For checkpoints that
+run untrusted code, need a different image or resources, or must be strongly
+isolated from the rest of the run, set `runtime="isolated"` and the runner
+will place the checkpoint on a separate container/job on the configured stack
+(Kubernetes, AWS, GCP, Azure). Locally it falls back to inline so dev loops
+stay fast.
 
 ```python
 @checkpoint(runtime="isolated")

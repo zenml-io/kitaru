@@ -131,10 +131,18 @@ less work you repeat when something goes wrong.
 
 This works the same whether you use `kitaru.llm()` or bring your own client.
 
+That&rsquo;s the runtime layer running on your laptop. The same flow survives
+the move into production unchanged: the harness inside your checkpoints keeps
+owning how the agent thinks, Kitaru keeps owning the durable run, and your
+platform (auth, policy, UI) keeps sitting in front. When you&rsquo;re ready,
+`my_agent.deploy()` captures an immutable versioned snapshot that your
+platform invokes by flow name &mdash; no per-deployment tokens, no separate
+service per version.
+
 ## Deploy to a remote stack
 
 Everything above runs locally. To run on remote infrastructure (Kubernetes,
-Vertex AI, etc.), point your flow at a remote stack. When targeting a remote stack, Kitaru automatically builds a container image
+AWS, GCP, Azure), point your flow at a remote stack. When targeting a remote stack, Kitaru automatically builds a container image
 with your code and dependencies. You can control the base image, Python
 packages, system packages, and environment variables through the `image`
 parameter:
