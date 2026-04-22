@@ -37,8 +37,8 @@ Agent stacks break cleanly into three layers. Kitaru is exactly one of them.
 
 | Layer | What it does | Examples |
 |---|---|---|
-| **Harness** | How the agent *thinks* — prompts, tools, model loop, framework choice | PydanticAI, Deep Agents, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
-| **Runtime (Kitaru)** | How the agent *survives and executes over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `kitaru.wait()`, `kitaru.memory` |
+| **Harness** | How the agent *thinks* — prompts, tools, model loop, framework choice | Pydantic AI / Pydantic AI Harness, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
+| **Runtime (Kitaru)** | How the agent *survives and executes over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()`, `kitaru.memory` |
 | **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
 
 Kitaru lives in the middle row. Harnesses define behavior, your stack defines
@@ -79,7 +79,7 @@ def research_flow(topic: str) -> str:
 
 Write normal Python. Use `if`, `for`, `try/except` — whatever your agent needs.
 Kitaru gives you two decorators (`@flow` and `@checkpoint`) and a handful of
-utility functions. That's it.
+utility functions. That's all you need.
 
 ```python
 from kitaru import checkpoint, flow
@@ -119,8 +119,8 @@ control plane in the path of your agent's data.
 ### Built-in UI
 
 Every execution is observable from day one. See your agent runs, inspect
-checkpoint outputs, and approve human-in-the-loop wait steps, all from a visual
-dashboard that ships with the Kitaru server.
+checkpoint outputs, and approve human-in-the-loop wait steps, all from a UI
+that ships with the Kitaru server.
 
 To start the server locally, run `kitaru login` after installing `kitaru[local]`.
 To connect to an existing remote server, run `kitaru login <server>`.

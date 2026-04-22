@@ -1170,7 +1170,7 @@ export function HarnessRuntimePlatformDiagram() {
             <Node title="Versions + tag routing" tone="accent" minWidth={200} isMono />
             <Node title="Invocation" tone="accent" minWidth={130} isMono />
             <Node title="Artifacts + state" tone="accent" minWidth={160} isMono />
-            <Node title="Execution placement" tone="accent" minWidth={180} isMono />
+            <Node title="Isolated execution" tone="accent" minWidth={180} isMono />
           </div>
         </Subgraph>
 
