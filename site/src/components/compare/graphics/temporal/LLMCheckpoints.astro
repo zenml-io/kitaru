@@ -135,7 +135,7 @@
   .val { color: var(--color-accent-deep); }
 
   .fields { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  .fields > div { display: grid; grid-template-columns: 70px 1fr; gap: 10px; align-items: center; }
+  .fields > div:not(.row) { display: grid; grid-template-columns: 70px 1fr; gap: 10px; align-items: center; }
   .fields dt {
     font-size: 10px;
     font-weight: 700;
@@ -157,9 +157,8 @@
   }
 
   .row {
-    display: flex !important;
-    grid-template-columns: none !important;
-    gap: 8px !important;
+    display: flex;
+    gap: 8px;
     flex-wrap: wrap;
   }
   .chip {

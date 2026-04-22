@@ -5,7 +5,8 @@
   <div class="memory">
     <div class="memory-head">
       <span class="tag tag--accent">kitaru.memory</span>
-      <span class="scope-label">scope: <span class="scope-val">namespace</span></span>
+      <span class="scope-label">scope</span>
+      <span class="scope-val">namespace</span>
       <span class="hint">versioned · persists across runs</span>
     </div>
     <ul class="entries">
@@ -50,10 +51,7 @@
   </div>
 
   <div class="contrast">
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3" y="7" width="18" height="10" rx="1.5" />
-      <text x="12" y="14" text-anchor="middle" font-size="6" font-family="ui-sans-serif, system-ui" font-weight="700" fill="currentColor" stroke="none">1 exec</text>
-    </svg>
+    <span class="exec-badge">1 exec</span>
     <span><strong>Temporal:</strong> workflow variables are scoped to one execution, reconstituted from event history.</span>
   </div>
 </figure>
@@ -89,7 +87,7 @@
   .memory-head {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
     flex-wrap: wrap;
     margin-bottom: 10px;
   }
@@ -99,12 +97,12 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    margin-left: 4px;
   }
   .scope-val {
     font-family: var(--font-mono);
+    font-size: 11px;
     color: var(--color-accent-deep);
-    text-transform: none;
-    letter-spacing: 0;
   }
   .hint {
     font-size: 11px;
@@ -215,16 +213,18 @@
     font-size: 12px;
     color: var(--color-secondary);
   }
-  .contrast svg {
-    width: 14px;
-    height: 14px;
+  .exec-badge {
     flex-shrink: 0;
-    margin-top: 2px;
-    fill: none;
-    stroke: var(--color-muted);
-    stroke-width: 1.6;
-    stroke-linecap: round;
-    opacity: 0.6;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--color-muted);
+    padding: 2px 7px;
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    background: var(--color-surface);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
   .contrast strong {
     color: var(--color-primary);

@@ -17,7 +17,6 @@
         <span class="artifact">brief.json</span>
       </div>
     </div>
-    <svg class="conn" viewBox="0 0 6 14" aria-hidden="true"><path d="M3 0 L3 14" /></svg>
     <div class="step">
       <div class="step-head">
         <span class="cp">@checkpoint draft</span>
@@ -27,7 +26,6 @@
         <span class="artifact">draft.md</span>
       </div>
     </div>
-    <svg class="conn" viewBox="0 0 6 14" aria-hidden="true"><path d="M3 0 L3 14" /></svg>
     <div class="step">
       <div class="step-head">
         <span class="cp">@checkpoint review</span>
@@ -63,7 +61,6 @@
         <span class="artifact artifact--reused">brief.json · from 7c1b</span>
       </div>
     </div>
-    <svg class="conn" viewBox="0 0 6 14" aria-hidden="true"><path d="M3 0 L3 14" /></svg>
     <div class="step">
       <div class="step-head">
         <span class="cp">@checkpoint draft</span>
@@ -73,7 +70,6 @@
         <span class="artifact">draft.md</span>
       </div>
     </div>
-    <svg class="conn" viewBox="0 0 6 14" aria-hidden="true"><path d="M3 0 L3 14" /></svg>
     <div class="step">
       <div class="step-head">
         <span class="cp">@checkpoint review</span>
@@ -201,14 +197,18 @@
     color: var(--color-accent-deep);
     border-radius: 4px;
   }
-  .conn {
-    display: block;
-    width: 6px;
+  .step + .step {
+    margin-top: 18px;
+    position: relative;
+  }
+  .step + .step::before {
+    content: '';
+    position: absolute;
+    top: -16px;
+    left: 50%;
+    width: 0;
     height: 14px;
-    margin: 2px auto;
-    fill: none;
-    stroke: var(--color-border);
-    stroke-width: 1.5;
+    border-left: 1.5px solid var(--color-border);
   }
 
   .diff {
