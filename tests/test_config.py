@@ -3801,6 +3801,21 @@ def test_resolve_execution_config_rejects_invalid_cache_env(
         resolve_execution_config()
 
 
+def test_resolve_execution_config_default_cache_is_unset() -> None:
+    """With no cache configured anywhere, resolved cache must be None.
+
+    A concrete default would become a run-level enable_cache override at
+    compile time and clobber per-checkpoint cache settings.
+    """
+    with patch(
+        "kitaru.config.current_stack",
+        return_value=SimpleNamespace(name="global-stack"),
+    ):
+        resolved = resolve_execution_config()
+
+    assert resolved.cache is None
+
+
 def test_resolve_execution_config_supports_string_image_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -4142,6 +4157,120 @@ def test_platform_round_trip() -> None:
     extras = round_tripped.build_config.build_options.model_extra
     assert extras is not None
     assert extras.get("platform") == "linux/amd64"
+
+
+def test_secret_environment_from_trims_and_preserves_order() -> None:
+    """Secret refs should be stripped while preserving order and duplicates."""
+    settings = ImageSettings(
+        secret_environment_from=[
+            " openai-creds ",
+            "anthropic",
+            "openai-creds",
+        ],
+    )
+    assert settings.secret_environment_from == [
+        "openai-creds",
+        "anthropic",
+        "openai-creds",
+    ]
+
+
+@pytest.mark.parametrize(
+    "invalid_refs",
+    [
+        [""],
+        ["   "],
+        ["valid", ""],
+        ["valid", "   "],
+    ],
+)
+def test_secret_environment_from_rejects_empty_entries(
+    invalid_refs: list[str],
+) -> None:
+    """Empty or whitespace-only entries should fail validation."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="cannot contain empty"):
+        ImageSettings(secret_environment_from=invalid_refs)
+
+
+def test_secret_environment_from_empty_list_is_preserved() -> None:
+    """An explicit empty list must be preserved so merge can clear inherited refs."""
+    assert ImageSettings(secret_environment_from=[]).secret_environment_from == []
+
+
+def test_secret_environment_from_makes_settings_non_empty() -> None:
+    """Configuring secret refs alone should mark ImageSettings as non-empty."""
+    assert ImageSettings(secret_environment_from=["openai-creds"]).is_empty() is False
+
+
+def test_secret_environment_from_rejects_unknown_extra_field() -> None:
+    """extra='forbid' should still keep typos from silently passing through."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ImageSettings.model_validate(
+            {"secret_environment_from_typo": ["openai-creds"]},
+        )
+
+
+def test_secret_environment_from_does_not_enter_docker_environment() -> None:
+    """Secret refs must never leak into DockerSettings.environment."""
+    image_settings = ImageSettings(
+        environment={"LOG_LEVEL": "INFO"},
+        secret_environment_from=["openai-creds", "anthropic-creds"],
+    )
+
+    docker_settings = image_settings_to_docker_settings(image_settings)
+
+    assert docker_settings.environment == {"LOG_LEVEL": "INFO"}
+
+
+def test_coerce_docker_settings_leaves_secret_environment_from_unset() -> None:
+    """DockerSettings has no notion of secret refs; coercion must leave it None."""
+    docker = DockerSettings(environment={"LOG_LEVEL": "INFO"})
+    result = _coerce_image_input(docker)
+    assert result is not None
+    assert result.secret_environment_from is None
+
+
+@pytest.mark.parametrize(
+    ("override_refs", "expected"),
+    [
+        (["override-secret"], ["override-secret"]),
+        (None, ["base-secret"]),
+        ([], []),
+    ],
+    ids=["override-wins", "none-preserves-base", "empty-clears"],
+)
+def test_merge_image_settings_secret_environment_from(
+    override_refs: list[str] | None,
+    expected: list[str],
+) -> None:
+    """Merge policy mirrors other list fields: None preserves, list replaces."""
+    base = ImageSettings(secret_environment_from=["base-secret"])
+    override = ImageSettings(secret_environment_from=override_refs)
+    merged = _merge_image_settings(base=base, override=override)
+    assert merged.secret_environment_from == expected
+
+
+def test_resolve_execution_config_parses_secret_environment_from_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KITARU_IMAGE JSON must accept secret_environment_from."""
+    monkeypatch.setenv(
+        KITARU_IMAGE_ENV,
+        '{"secret_environment_from": ["openai-creds"]}',
+    )
+
+    with patch(
+        "kitaru.config.current_stack",
+        return_value=SimpleNamespace(name="global-stack"),
+    ):
+        resolved = resolve_execution_config()
+
+    assert resolved.image is not None
+    assert resolved.image.secret_environment_from == ["openai-creds"]
 
 
 def test_connection_resolution_precedence(
@@ -4489,6 +4618,7 @@ def test_build_and_persist_frozen_execution_spec() -> None:
                     "OPENAI_API_KEY": "sk-real-secret",
                     "BATCH_SIZE": "32",
                 },
+                secret_environment_from=["openai-creds"],
             ),
         ),
         flow_defaults=KitaruConfig(cache=False),
@@ -4514,6 +4644,10 @@ def test_build_and_persist_frozen_execution_spec() -> None:
         "OPENAI_API_KEY": "***",
         "BATCH_SIZE": "32",
     }
+    # Secret refs are names, not values, so they persist as-is.
+    assert frozen_execution_spec.resolved_execution.image.secret_environment_from == [
+        "openai-creds",
+    ]
 
     with patch("kitaru.config.Client") as client_cls:
         persist_frozen_execution_spec(

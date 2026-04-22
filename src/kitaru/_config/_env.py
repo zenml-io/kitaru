@@ -279,7 +279,7 @@ def resolve_execution_config_impl(
         ResolvedExecutionConfig(
             stack=None,
             image=None,
-            cache=True,
+            cache=None,
             retries=0,
         ),
         (

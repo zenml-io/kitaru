@@ -11,6 +11,8 @@ export default defineConfig({
   redirects: {
     '/banner': { status: 302, destination: '/' },
     '/onepager': { status: 302, destination: '/' },
+    '/roadmap': { status: 302, destination: 'https://github.com/orgs/zenml-io/projects/5' },
+    '/community': { status: 302, destination: 'https://github.com/zenml-io/kitaru/discussions' },
   },
   integrations: [sitemap(), mdx()],
   markdown: {

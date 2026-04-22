@@ -53,7 +53,8 @@ kitaru.configure(
     retries=1,
     image=kitaru.ImageSettings(
         base_image="python:3.12-slim",
-        environment={"OPENAI_API_KEY": "{{ OPENAI_KEY }}"},
+        environment={"LOG_LEVEL": "INFO"},
+        secret_environment_from=["openai-creds"],
     ),
 )
 ```
@@ -84,6 +85,32 @@ The important distinction is:
 - `@flow(stack="...")` sets a default for one flow definition
 - `my_flow.run(stack="...")` overrides both for one execution
 - none of those change the persisted active stack selected by `kitaru stack use ...`
+
+## Checkpoint cache overrides
+
+You can set cache behavior at checkpoint granularity:
+
+```python
+from kitaru import checkpoint, flow
+
+@checkpoint(cache=False)
+def always_fresh(topic: str) -> str:
+    ...
+
+@flow
+def my_flow(topic: str) -> str:
+    return always_fresh(topic)
+```
+
+- `@checkpoint(cache=False)` disables cache for that checkpoint.
+- `@checkpoint(cache=True)` enables cache for that checkpoint.
+- Omitting `cache` defers to the execution-level setting (or the orchestrator default).
+
+For mixed cache behavior in one flow, leave execution-level cache unset and
+configure `cache` only on the checkpoints that need different behavior. If you
+set cache at execution level (`KITARU_CACHE`, `kitaru.configure(cache=...)`,
+`@flow(cache=...)`, or `my_flow.run(cache=...)`), that value is treated as an
+execution-wide override for the run and replaces any checkpoint-level setting.
 
 ## Environment variables
 
@@ -130,7 +157,9 @@ Execution settings:
 - `KITARU_STACK`
 - `KITARU_CACHE`
 - `KITARU_RETRIES`
-- `KITARU_IMAGE` (JSON object or plain image string)
+- `KITARU_IMAGE` (JSON object or plain image string; the JSON form accepts every
+  `ImageSettings` field, including `secret_environment_from` for secret
+  references resolved at runtime)
 
 ### LLM
 
@@ -171,7 +200,7 @@ active. Secret values such as `KITARU_AUTH_TOKEN` and
 4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
 6. Persisted active stack fallback plus global user config (for example connection defaults)
-7. Built-in defaults (`cache=True`, `retries=0`)
+7. Built-in defaults (`retries=0`; cache is left unset so per-checkpoint cache settings and orchestrator defaults apply)
 
 In practice, `stack` starts unset in the built-in defaults and is then resolved
 from the persisted active stack when one is available.
@@ -193,10 +222,19 @@ retries = 2
 
 [tool.kitaru.image]
 base_image = "python:3.12-slim"
+secret_environment_from = ["openai-creds"]
 
 [tool.kitaru.image.environment]
-OPENAI_API_KEY = "{{ OPENAI_KEY }}"
+LOG_LEVEL = "INFO"
 ```
+
+<Callout type="warn">
+  `environment` is for non-secret values only. Put credentials in
+  `secret_environment_from` instead — those references are resolved at runtime
+  via the ZenML pipeline secret mechanism and never appear in image metadata,
+  log output, or the frozen execution spec. See
+  [Containerization → Secret-backed environment variables](/guides/containerization#secret-backed-environment-variables).
+</Callout>
 
 ## Automatic package injection
 
@@ -308,6 +346,9 @@ export KITARU_RETRIES=2
 # LLM
 export OPENAI_API_KEY=sk-...
 export KITARU_DEFAULT_MODEL=openai/gpt-5-nano
+
+# Remote secret references — resolved at runtime, never written into image env
+export KITARU_IMAGE='{"secret_environment_from": ["openai-creds"]}'
 
 # Observability
 export KITARU_LOG_STORE_BACKEND=datadog

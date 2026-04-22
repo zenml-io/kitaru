@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import re
 from typing import Annotated, Any
 
 from cyclopts import Parameter
-from zenml.exceptions import EntityExistsError, ZenKeyError
+from zenml.exceptions import EntityExistsError
 from zenml.models import SecretResponse
 
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
+from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 from kitaru.inspection import serialize_secret_detail, serialize_secret_summary
+from kitaru.secrets import _SECRET_KEY_PATTERN, _get_secret_response_exact
 
 from . import secrets_app
 from ._helpers import (
@@ -31,13 +32,6 @@ from ._helpers import (
     _resolve_output_format,
     _validate_pagination,
 )
-
-_SECRET_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _secret_visibility(secret: SecretResponse) -> str:
-    """Return a human-readable visibility label for a secret."""
-    return "private" if secret.private else "public"
 
 
 def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
@@ -109,14 +103,8 @@ def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
 def _resolve_secret_exact(client: Any, name_or_id: str) -> SecretResponse:
     """Fetch one secret by exact name or exact ID."""
     try:
-        return client.get_secret(
-            name_id_or_prefix=name_or_id,
-            allow_partial_name_match=False,
-            allow_partial_id_match=False,
-        )
-    except KeyError as exc:
-        raise ValueError(f"Secret `{name_or_id}` was not found.") from exc
-    except ZenKeyError as exc:
+        return _get_secret_response_exact(name_or_id, client=client)
+    except (KitaruRuntimeError, KitaruUsageError) as exc:
         raise ValueError(str(exc)) from exc
 
 
@@ -142,7 +130,7 @@ def _secret_show_rows(
     rows: list[tuple[str, str]] = [
         ("Name", secret.name),
         ("Secret ID", str(secret.id)),
-        ("Visibility", _secret_visibility(secret)),
+        ("Visibility", "private" if secret.private else "public"),
         ("Keys", ", ".join(keys) if keys else "none"),
         ("Missing values", "yes" if secret.has_missing_values else "no"),
     ]
@@ -166,7 +154,10 @@ def _secret_list_rows(secrets: list[SecretResponse]) -> list[tuple[str, str]]:
         return [("Secrets", "none found")]
 
     return [
-        (secret.name, f"{secret.id} ({_secret_visibility(secret)})")
+        (
+            secret.name,
+            f"{secret.id} ({'private' if secret.private else 'public'})",
+        )
         for secret in secrets
     ]
 
@@ -184,9 +175,13 @@ def set_(
             allow_leading_hyphen=True,
         ),
     ],
+    private: Annotated[
+        bool,
+        Parameter(help="Create a private secret instead of the default public secret."),
+    ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Set a secret with env-var-style key names, creating it if needed."""
+    """Set a public secret by default, or create it privately with --private."""
     command = "secrets.set"
     output_format = _resolve_output_format(output)
     facade = _facade_module()
@@ -199,7 +194,7 @@ def set_(
             secret = client.create_secret(
                 name=name,
                 values=parsed_assignments,
-                private=True,
+                private=private,
             )
             action = "Created"
         except EntityExistsError:

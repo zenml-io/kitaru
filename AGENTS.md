@@ -46,6 +46,7 @@ Use `uv` for Python dependency management and `just` as the command stack.
 
 - `uv sync`: install and sync dependencies
 - `uv sync --extra local`: install with local ZenML runtime components
+- `uv run kitaru init`: **required in a fresh `git worktree`.** Creates the `.kitaru/` project marker that ZenML's dynamic pipeline resolver needs to re-import example modules by dotted path. Without it, ~14 `test_phase*_example::*_runs_end_to_end` tests fail with `RuntimeError: Unable to resolve dynamic pipeline source`. Worktrees do not inherit `.kitaru/` from the main checkout.
 
 **Core dev loop — these three commands handle the vast majority of development needs:**
 
@@ -83,6 +84,7 @@ These require Node 22+ and pnpm.
 - Follow US English spelling in code and docs (`initialize`, `serialize`, `color`).
 - Use type hints on all public functions and return values.
 - Prefer modern annotations (`list[str]`, `str | None`) over legacy `typing` aliases.
+- **Do not use `from __future__ import annotations` in files that define Kitaru `@flow`/`@checkpoint` functions or ZenML `@pipeline`/`@step` functions.** ZenML inspects step output annotations at runtime and currently rejects postponed/string annotations such as `"dict[str, Any]"`. Use real runtime annotations instead; Python 3.11+ supports `list[str]` / `str | None` without the future import.
 - Follow Google Python style for docstrings.
 - Keep comments focused on *why* (intent/trade-offs), not line-by-line narration.
 - Treat leading underscore names as private to module/class boundaries.
@@ -181,6 +183,7 @@ Runs on push to `main` (production deploy) and PRs touching `docs/`, `site/`, `s
 - **Environment-variable docs:** document `KITARU_*` env vars as the public surface. Mention `ZENML_*` only as a compatibility note when necessary to explain migration or interop.
 - **Model-registry docs:** `kitaru model register` still writes aliases to local config, but submitted/replayed runs automatically receive a transported registry snapshot via `KITARU_MODEL_REGISTRY`. `kitaru model list` should be described as listing aliases available in the current environment, not just aliases stored locally.
 - **Frontmatter required:** every `.mdx` page needs `title` and `description`.
+- **Example READMEs are user-facing, not contributor-facing:** `examples/**/README.md` files exist to teach new users what Kitaru does and walk them through the specific example. Keep them focused on concepts, the primitives used, and how to run the example. Do **not** add maintainer-oriented sections such as "Testing" (internal test commands), CI-only credential setup, or notes about how stubbed/mocked test runs work — those are implementation details for the Kitaru team and belong in `tests/`, contributor docs, or PR descriptions. If a section would not help a first-time user understand Kitaru, it does not belong in an example README.
 
 ## Security & Configuration Notes
 

@@ -59,7 +59,8 @@ def my_agent(topic: str) -> str:
 | `requirements` | `list[str]` | Python packages to install (pip format) |
 | `dockerfile` | `str` | Path to a custom Dockerfile instead of auto-building |
 | `build_context_root` | `str` | Root directory for the Docker build context |
-| `environment` | `dict[str, str]` | Environment variables set inside the container |
+| `environment` | `dict[str, str]` | Environment variables set inside the container (non-secret values only) |
+| `secret_environment_from` | `list[str]` | Names/IDs of ZenML secrets whose keys are exposed as runtime environment variables during step execution |
 | `apt_packages` | `list[str]` | System packages to install via apt |
 | `replicate_local_python_environment` | `bool` | Mirror your local `pip freeze` into the container |
 | `image_tag` | `str` | Custom tag for the built image |
@@ -167,15 +168,16 @@ kitaru.configure(image=kitaru.ImageSettings(requirements=["httpx"]))
 
 ## Environment variables inside the container
 
-Use `environment` to inject env vars into the running container. This is useful
-for API keys, feature flags, or runtime configuration:
+Use `environment` for non-sensitive runtime configuration such as feature flags
+or log levels. Values listed here are treated as literal Docker build/runtime
+env vars, so they are **not** safe for API keys, tokens, or passwords:
 
 ```python
 @flow(
     image=kitaru.ImageSettings(
         environment={
-            "OPENAI_API_KEY": "{{ OPENAI_KEY }}",
             "LOG_LEVEL": "DEBUG",
+            "FEATURE_FLAG_X": "1",
         },
     ),
 )
@@ -183,11 +185,55 @@ def my_agent(topic: str) -> str:
     ...
 ```
 
+<Callout type="warn">
+  Do not put API keys, tokens, or passwords in `environment`. Those values
+  travel through Docker build metadata, image checksums, and log output. Use
+  `secret_environment_from` instead.
+</Callout>
+
+## Secret-backed environment variables
+
+For credentials, configure `secret_environment_from` with a list of ZenML
+secret names or IDs. Every key in each referenced secret is exposed as an
+environment variable during step execution, and Kitaru never copies the
+values into Docker build metadata:
+
+```python
+@flow(
+    image=kitaru.ImageSettings(
+        requirements=["openai"],
+        environment={"LOG_LEVEL": "INFO"},
+        secret_environment_from=["openai-creds"],
+    ),
+)
+def my_agent(topic: str) -> str:
+    import os
+
+    # If the `openai-creds` secret has a key named OPENAI_API_KEY, user code
+    # and provider SDKs can read it from the runtime environment directly.
+    return os.environ["OPENAI_API_KEY"]
+```
+
+Under the hood, Kitaru forwards the list to ZenML via
+`Pipeline.with_options(secrets=[...])`. The backend resolves the secret
+values at runtime, so plaintext credentials never enter your image, config
+files, or frozen execution spec. Secret references (names/IDs) are the only
+thing persisted.
+
+Current limitations:
+
+- The common case is that the secret's key names already match the desired
+  environment variable names (e.g., a secret with a `OPENAI_API_KEY` key is
+  read as `os.environ["OPENAI_API_KEY"]`). Per-key renaming or selecting a
+  single key from a multi-key secret is not supported yet.
+- `kitaru.llm()` continues to auto-resolve alias-linked secrets without needing
+  this field; use `secret_environment_from` when user code or a third-party
+  SDK needs raw environment variables.
+
 <Callout type="info">
-  For sensitive values like API keys, prefer
-  [Kitaru secrets](/guides/secrets-and-model-registration) over hardcoded
-  environment variables. `kitaru.llm()` resolves alias-linked secrets
-  automatically.
+  `secret_environment_from` merges in list-replacement style. An override layer
+  with a non-`None` list replaces the inherited list (an empty `[]` explicitly
+  clears inherited references).
 </Callout>
 
 ## How source code is packaged

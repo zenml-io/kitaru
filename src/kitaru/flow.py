@@ -37,6 +37,7 @@ from kitaru.config import (
     ImageSettings,
     KitaruConfig,
     ModelRegistryConfig,
+    ResolvedExecutionConfig,
     _read_env_model_registry,
     _read_model_registry_config,
     build_frozen_execution_spec,
@@ -170,6 +171,33 @@ def _build_settings(
         Pipeline settings dictionary.
     """
     return {DOCKER_SETTINGS_KEY: image_settings_to_docker_settings(image)}
+
+
+def _build_pipeline_options(
+    *,
+    resolved_execution: ResolvedExecutionConfig,
+    transport_image: ImageSettings | None,
+) -> dict[str, Any]:
+    """Build kwargs for ``Pipeline.with_options(...)``.
+
+    ``enable_cache`` is only forwarded when the user explicitly configured
+    cache at some execution layer. Passing a concrete bool here makes ZenML's
+    compiler overwrite every step's ``enable_cache``, which would clobber any
+    ``@checkpoint(cache=...)`` overrides.
+
+    ``secrets`` is forwarded only when non-empty so ZenML does not overwrite
+    its own defaults with an empty list. Secret references intentionally
+    bypass Docker settings so values never enter image/build metadata.
+    """
+    options: dict[str, Any] = {
+        "retry": _to_retry_config(_normalize_retries(resolved_execution.retries)),
+        "settings": _build_settings(transport_image),
+    }
+    if resolved_execution.cache is not None:
+        options["enable_cache"] = resolved_execution.cache
+    if transport_image is not None and transport_image.secret_environment_from:
+        options["secrets"] = list(transport_image.secret_environment_from)
+    return options
 
 
 def _inject_model_registry_env(
@@ -781,9 +809,10 @@ class _FlowDefinition:
             model_registry=effective_model_registry,
         )
         configured_pipeline = self._pipeline.with_options(
-            enable_cache=resolved_execution.cache,
-            retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
-            settings=_build_settings(transport_image),
+            **_build_pipeline_options(
+                resolved_execution=resolved_execution,
+                transport_image=transport_image,
+            )
         )
 
         with _temporary_active_stack(resolved_execution.stack):
@@ -889,9 +918,10 @@ class _FlowDefinition:
             model_registry=effective_model_registry,
         )
         configured_pipeline = self._pipeline.with_options(
-            enable_cache=resolved_execution.cache,
-            retry=_to_retry_config(_normalize_retries(resolved_execution.retries)),
-            settings=_build_settings(transport_image),
+            **_build_pipeline_options(
+                resolved_execution=resolved_execution,
+                transport_image=transport_image,
+            )
         )
 
         with _temporary_active_stack(resolved_execution.stack):

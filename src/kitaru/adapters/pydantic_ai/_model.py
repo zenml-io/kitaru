@@ -1,6 +1,11 @@
-"""Model interception for Kitaru's PydanticAI adapter."""
+"""PydanticAI Model wrapper that records each request as a Kitaru event.
 
-from __future__ import annotations
+We do not route through ``kitaru.llm`` — it is a text-in/text-out facade over
+OpenAI and Anthropic only and would discard streaming, tool calls, structured
+output, and every other provider PydanticAI supports. Granular mode reuses the
+``type='llm_call'`` checkpoint convention so dashboards group native and adapter
+LLM calls uniformly.
+"""
 
 import time
 from collections.abc import AsyncIterator, Callable
@@ -8,103 +13,63 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, cast
 
+import kitaru
 from pydantic import TypeAdapter
-from pydantic_ai import ModelMessage, ModelResponse, ModelResponseStreamEvent
+from pydantic_core import PydanticSerializationError
+
+from pydantic_ai._run_context import RunContext
+from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter, ModelResponse, ModelResponseStreamEvent
 from pydantic_ai.models import ModelRequestParameters, StreamedResponse
 from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
-from pydantic_ai.tools import RunContext
 from pydantic_ai.usage import RequestUsage
 
-from kitaru._safe_save import _safe_save
-from kitaru.artifacts import save
-from kitaru.logging import log
-from kitaru.runtime import _is_inside_checkpoint
-
-from ._tracking import ModelEventContext, get_current_tracker
+from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
+from ._logging import logger
+from ._otel import attach_model_correlation
+from ._policy import CapturePolicy
+from ._tracking import artifact_name, get_current_tracker
+from ._utils import CheckpointConfig, checkpoint_cache_key, run_async_in_checkpoint, with_default_type
 
 _MODEL_RESPONSE_ADAPTER = TypeAdapter(ModelResponse)
-_MODEL_MESSAGES_ADAPTER = TypeAdapter(list[ModelMessage])
 _MODEL_STREAM_EVENT_ADAPTER = TypeAdapter(ModelResponseStreamEvent)
 
 
 def _serialize_messages(messages: list[ModelMessage]) -> list[dict[str, Any]]:
-    """Serialize model messages to JSON-compatible data."""
-    return cast(
-        list[dict[str, Any]],
-        _MODEL_MESSAGES_ADAPTER.dump_python(messages, mode="json"),
-    )
+    return cast(list[dict[str, Any]], ModelMessagesTypeAdapter.dump_python(messages, mode='json'))
 
 
 def _serialize_model_response(response: ModelResponse) -> dict[str, Any]:
-    """Serialize a model response to JSON-compatible data."""
-    return cast(
-        dict[str, Any],
-        _MODEL_RESPONSE_ADAPTER.dump_python(response, mode="json"),
-    )
+    return cast(dict[str, Any], _MODEL_RESPONSE_ADAPTER.dump_python(response, mode='json'))
 
 
 def _serialize_stream_event(event: Any) -> dict[str, Any]:
-    """Serialize one stream event with a resilient fallback shape."""
     try:
-        return cast(
-            dict[str, Any],
-            _MODEL_STREAM_EVENT_ADAPTER.dump_python(event, mode="json"),
-        )
-    except Exception:
+        return cast(dict[str, Any], _MODEL_STREAM_EVENT_ADAPTER.dump_python(event, mode='json'))
+    except (TypeError, ValueError, PydanticSerializationError):
+        logger.warning('Failed to serialize PydanticAI stream event; falling back to repr.', exc_info=True)
         return {
-            "event_type": event.__class__.__name__,
-            "repr": repr(event),
+            'event_type': type(event).__name__,
+            'repr': repr(event),
+            'serialization_error': 'stream_event_serialization_failed',
         }
 
 
-def _usage_payload(response: ModelResponse) -> dict[str, int | None]:
-    """Extract token usage metrics from a model response."""
-    usage = response.usage
-    return {
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_tokens": usage.total_tokens,
-    }
-
-
-def _error_payload(error: Exception) -> dict[str, str]:
-    """Build a lightweight error payload for child-event metadata."""
-    return {
-        "type": error.__class__.__name__,
-        "message": str(error),
-    }
-
-
 class KitaruStreamedResponse(StreamedResponse):
-    """Proxy stream response that tees events for transcript recording."""
+    """`StreamedResponse` proxy that invokes `on_event` for each streamed event."""
 
-    def __init__(
-        self,
-        wrapped: StreamedResponse,
-        *,
-        on_event: Callable[[Any], None],
-    ) -> None:
+    def __init__(self, wrapped: StreamedResponse, *, on_event: Callable[[Any], None]) -> None:
         super().__init__(wrapped.model_request_parameters)
         self._wrapped = wrapped
         self._on_event = on_event
 
-    def __aiter__(self) -> AsyncIterator[Any]:
-        async def _iter() -> AsyncIterator[Any]:
+    async def _get_event_iterator(self) -> AsyncIterator[ModelResponseStreamEvent]:
+        try:
             async for event in self._wrapped:
-                self.final_result_event = self._wrapped.final_result_event
                 self._on_event(event)
                 yield event
+        finally:
             self.final_result_event = self._wrapped.final_result_event
-
-        return _iter()
-
-    async def _get_event_iterator(self) -> AsyncIterator[ModelResponseStreamEvent]:
-        async for event in self._wrapped:
-            self.final_result_event = self._wrapped.final_result_event
-            self._on_event(event)
-            yield event
-        self.final_result_event = self._wrapped.final_result_event
 
     def get(self) -> ModelResponse:
         return self._wrapped.get()
@@ -117,8 +82,8 @@ class KitaruStreamedResponse(StreamedResponse):
         return self._wrapped.model_name
 
     @property
-    def provider_name(self) -> str | None:
-        return self._wrapped.provider_name
+    def provider_name(self) -> str:
+        return self._wrapped.provider_name or ''
 
     @property
     def provider_url(self) -> str | None:
@@ -130,50 +95,23 @@ class KitaruStreamedResponse(StreamedResponse):
 
 
 class KitaruModel(WrapperModel):
-    """Model wrapper that records model requests as checkpoint child events."""
+    """Wrapper model that records each request as a `ModelEvent` when inside a checkpoint."""
 
-    def _build_model_event_payload(
+    def __init__(
         self,
+        wrapped: Any,
         *,
-        event_context: ModelEventContext,
-        status: str,
-        duration_ms: float,
-        prompt_artifact: str,
-        response_artifact: str | None,
-        transcript_artifact: str | None,
-        model_response: ModelResponse | None,
-        error: Exception | None = None,
-        stream_event_count: int | None = None,
-    ) -> dict[str, Any]:
-        """Build metadata payload for one tracked model call."""
-        artifacts: dict[str, str] = {"prompt": prompt_artifact}
-        if response_artifact is not None:
-            artifacts["response"] = response_artifact
-        if transcript_artifact is not None:
-            artifacts["stream_transcript"] = transcript_artifact
+        capture: CapturePolicy,
+        agent_name: str,
+        checkpoint_config: CheckpointConfig | None = None,
+    ) -> None:
+        super().__init__(wrapped)
+        self._capture = capture
+        self._agent_name = agent_name
+        self._checkpoint_config = checkpoint_config
 
-        payload: dict[str, Any] = {
-            "type": "llm_call",
-            "status": status,
-            "sequence_index": event_context.sequence_index,
-            "turn_index": event_context.turn_index,
-            "parent_event_ids": event_context.parent_event_ids,
-            "fan_in_from": event_context.fan_in_from,
-            "duration_ms": duration_ms,
-            "artifacts": artifacts,
-        }
-
-        if model_response is not None:
-            payload["model_name"] = model_response.model_name
-            payload["usage"] = _usage_payload(model_response)
-
-        if stream_event_count is not None:
-            payload["stream_event_count"] = stream_event_count
-
-        if error is not None:
-            payload["error"] = _error_payload(error)
-
-        return payload
+    def _should_track(self) -> bool:
+        return self._capture.emit_child_events and is_inside_checkpoint()
 
     async def request(
         self,
@@ -181,72 +119,84 @@ class KitaruModel(WrapperModel):
         model_settings: ModelSettings | None,
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
-        tracker = get_current_tracker()
-        if not _is_inside_checkpoint() or tracker is None:
-            return await super().request(
-                messages, model_settings, model_request_parameters
+        if (
+            self._checkpoint_config is not None
+            and is_inside_flow()
+            and not is_inside_checkpoint()
+        ):
+            # `_in_checkpoint` closes over live `messages` / `self`; safe only for
+            # inline runtime. `run_async_in_checkpoint` rejects `runtime='isolated'`
+            # to stop these references from hitting a pickling boundary.
+            async def _in_checkpoint() -> ModelResponse:
+                return await self._tracked_request(
+                    messages, model_settings, model_request_parameters
+                )
+
+            return await run_async_in_checkpoint(
+                config=with_default_type(self._checkpoint_config, 'llm_call'),
+                step_name=f'{self._agent_name}_model_request',
+                body=_in_checkpoint,
+                cache_key=checkpoint_cache_key(
+                    {
+                        'messages': _serialize_messages(messages),
+                        'model_settings': model_settings,
+                        'model_request_parameters': model_request_parameters,
+                    }
+                ),
             )
+        return await self._tracked_request(
+            messages, model_settings, model_request_parameters
+        )
+
+    async def _tracked_request(
+        self,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
+        tracker = get_current_tracker()
+        if tracker is None or not self._should_track():
+            return await super().request(messages, model_settings, model_request_parameters)
 
         event_id, event_context = tracker.start_model_event()
-        prompt_artifact = f"{event_id}_prompt"
-        response_artifact = f"{event_id}_response"
+        if self._capture.correlate_otel_spans:
+            attach_model_correlation(event_id, event_context)
 
-        _safe_save(
-            prompt_artifact,
-            _serialize_messages(messages),
-            artifact_type="prompt",
-            save_func=save,
-        )
+        artifacts: dict[str, str] = {}
+        if self._capture.save_prompts:
+            prompt_key = artifact_name(event_id, 'prompt')
+            kitaru.save(prompt_key, _serialize_messages(messages), type='prompt')
+            artifacts['prompt'] = prompt_key
 
         started_at = time.perf_counter()
         try:
-            response = await super().request(
-                messages,
-                model_settings,
-                model_request_parameters,
-            )
+            response = await super().request(messages, model_settings, model_request_parameters)
         except Exception as error:
-            duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
-            tracker.fail_model_event(event_id)
-            log(
-                pydantic_ai_events={
-                    event_id: self._build_model_event_payload(
-                        event_context=event_context,
-                        status="failed",
-                        duration_ms=duration_ms,
-                        prompt_artifact=prompt_artifact,
-                        response_artifact=None,
-                        transcript_artifact=None,
-                        model_response=None,
-                        error=error,
-                    )
-                }
+            tracker.record_model_event(
+                event_id,
+                event_context,
+                status='failed',
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+                artifacts=artifacts,
+                error=error,
             )
             raise
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
+        if self._capture.save_responses:
+            response_key = artifact_name(event_id, 'response')
+            kitaru.save(response_key, _serialize_model_response(response), type='response')
+            artifacts['response'] = response_key
 
-        _safe_save(
-            response_artifact,
-            _serialize_model_response(response),
-            artifact_type="response",
-            save_func=save,
+        tracker.record_model_event(
+            event_id,
+            event_context,
+            status='completed',
+            duration_ms=duration_ms,
+            artifacts=artifacts,
+            model_name=response.model_name,
+            usage=response.usage,
         )
-
-        log(
-            pydantic_ai_events={
-                event_id: self._build_model_event_payload(
-                    event_context=event_context,
-                    status="completed",
-                    duration_ms=duration_ms,
-                    prompt_artifact=prompt_artifact,
-                    response_artifact=response_artifact,
-                    transcript_artifact=None,
-                    model_response=response,
-                )
-            }
-        )
-        tracker.complete_model_event(event_id)
         return response
 
     @asynccontextmanager
@@ -258,99 +208,83 @@ class KitaruModel(WrapperModel):
         run_context: RunContext[Any] | None = None,
     ) -> AsyncIterator[StreamedResponse]:
         tracker = get_current_tracker()
-        if not _is_inside_checkpoint() or tracker is None:
+        if tracker is None or not self._should_track():
             async with super().request_stream(
-                messages,
-                model_settings,
-                model_request_parameters,
-                run_context,
+                messages, model_settings, model_request_parameters, run_context
             ) as streamed_response:
                 yield streamed_response
             return
 
         event_id, event_context = tracker.start_model_event()
-        prompt_artifact = f"{event_id}_prompt"
-        response_artifact = f"{event_id}_response"
-        transcript_artifact = f"{event_id}_stream_transcript"
+        if self._capture.correlate_otel_spans:
+            attach_model_correlation(event_id, event_context)
 
-        _safe_save(
-            prompt_artifact,
-            _serialize_messages(messages),
-            artifact_type="prompt",
-            save_func=save,
-        )
+        artifacts: dict[str, str] = {}
+        if self._capture.save_prompts:
+            prompt_key = artifact_name(event_id, 'prompt')
+            kitaru.save(prompt_key, _serialize_messages(messages), type='prompt')
+            artifacts['prompt'] = prompt_key
 
+        save_transcripts = self._capture.save_stream_transcripts
+        save_responses = self._capture.save_responses
         stream_events: list[dict[str, Any]] = []
+        stream_event_count = 0
+
+        def _on_stream_event(event: Any) -> None:
+            nonlocal stream_event_count
+            stream_event_count += 1
+            if save_transcripts:
+                stream_events.append(_serialize_stream_event(event))
+
         started_at = time.perf_counter()
         try:
             async with super().request_stream(
-                messages,
-                model_settings,
-                model_request_parameters,
-                run_context,
+                messages, model_settings, model_request_parameters, run_context
             ) as streamed_response:
-                tracked_stream = KitaruStreamedResponse(
-                    streamed_response,
-                    on_event=lambda event: stream_events.append(
-                        _serialize_stream_event(event)
-                    ),
-                )
+                tracked_stream = KitaruStreamedResponse(streamed_response, on_event=_on_stream_event)
                 yield tracked_stream
-
             response = tracked_stream.get()
         except Exception as error:
-            duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
-            tracker.fail_model_event(event_id)
-            log(
-                pydantic_ai_events={
-                    event_id: self._build_model_event_payload(
-                        event_context=event_context,
-                        status="failed",
-                        duration_ms=duration_ms,
-                        prompt_artifact=prompt_artifact,
-                        response_artifact=None,
-                        transcript_artifact=None,
-                        model_response=None,
-                        error=error,
-                        stream_event_count=len(stream_events),
-                    )
-                }
+            tracker.record_model_event(
+                event_id,
+                event_context,
+                status='failed',
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+                artifacts=artifacts,
+                error=error,
+                stream_event_count=stream_event_count,
             )
             raise
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
+        serialized_response: dict[str, Any] | None = None
+        if save_responses or save_transcripts:
+            serialized_response = _serialize_model_response(response)
+        if save_responses:
+            response_key = artifact_name(event_id, 'response')
+            kitaru.save(response_key, serialized_response, type='response')
+            artifacts['response'] = response_key
+        if save_transcripts:
+            transcript_key = artifact_name(event_id, 'stream_transcript')
+            kitaru.save(
+                transcript_key,
+                {
+                    'event_count': stream_event_count,
+                    'duration_ms': duration_ms,
+                    'events': stream_events,
+                    'final_response': serialized_response,
+                },
+                type='context',
+            )
+            artifacts['stream_transcript'] = transcript_key
 
-        _safe_save(
-            response_artifact,
-            _serialize_model_response(response),
-            artifact_type="response",
-            save_func=save,
+        tracker.record_model_event(
+            event_id,
+            event_context,
+            status='completed',
+            duration_ms=duration_ms,
+            artifacts=artifacts,
+            model_name=response.model_name,
+            usage=response.usage,
+            stream_event_count=stream_event_count,
         )
-
-        _safe_save(
-            transcript_artifact,
-            {
-                "event_count": len(stream_events),
-                "duration_ms": duration_ms,
-                "events": stream_events,
-                "final_response": _serialize_model_response(response),
-            },
-            artifact_type="context",
-            save_func=save,
-        )
-
-        log(
-            pydantic_ai_events={
-                event_id: self._build_model_event_payload(
-                    event_context=event_context,
-                    status="completed",
-                    duration_ms=duration_ms,
-                    prompt_artifact=prompt_artifact,
-                    response_artifact=response_artifact,
-                    transcript_artifact=transcript_artifact,
-                    model_response=response,
-                    stream_event_count=len(stream_events),
-                )
-            }
-        )
-        tracker.complete_model_event(event_id)

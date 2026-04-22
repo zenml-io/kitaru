@@ -1,0 +1,94 @@
+---
+/**
+ * FeatureWithGraphic — alternating feature row.
+ *
+ * Two-column layout pairing prose (slot) with a graphic image. Pass `reverse`
+ * to flip the layout so the graphic appears on the left. Collapses to a
+ * single column on narrow viewports with the graphic always below the title.
+ */
+interface Props {
+  title: string;
+  image: string;
+  imageAlt?: string;
+  reverse?: boolean;
+}
+
+const { title, image, imageAlt = '', reverse = false } = Astro.props;
+---
+
+<section class:list={["feature-graphic", { "feature-graphic--reverse": reverse }]} data-reveal>
+  <div class="feature-graphic-grid">
+    <div class="feature-graphic-copy">
+      <h2>{title}</h2>
+      <div class="feature-graphic-body">
+        <slot />
+      </div>
+    </div>
+    <div class="feature-graphic-media">
+      <img src={image} alt={imageAlt} loading="lazy" decoding="async" />
+    </div>
+  </div>
+</section>
+
+<style>
+  .feature-graphic {
+    margin: 56px auto;
+    /* Break out of the narrow 820px prose column so graphics have room to breathe. */
+    width: min(1120px, calc(100vw - 48px));
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .feature-graphic-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    gap: 56px;
+    align-items: center;
+  }
+  /* Reverse layout: flip both the column widths and the visual order so the
+     graphic still lands in the wider column on the opposite side. */
+  .feature-graphic--reverse .feature-graphic-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  }
+  .feature-graphic--reverse .feature-graphic-copy { order: 2; }
+  .feature-graphic--reverse .feature-graphic-media { order: 1; }
+
+  .feature-graphic-copy h2 {
+    font-size: clamp(24px, 2.6vw, 30px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    margin: 0 0 14px;
+    color: var(--color-primary);
+  }
+  .feature-graphic-body :global(p) {
+    font-size: 17px;
+    line-height: 1.7;
+    color: var(--color-secondary);
+    margin: 0 0 14px;
+  }
+  .feature-graphic-body :global(p:last-child) { margin-bottom: 0; }
+
+  .feature-graphic-media {
+    display: flex;
+    justify-content: center;
+  }
+  .feature-graphic-media img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  @media (max-width: 820px) {
+    .feature-graphic { margin: 40px 0; }
+    .feature-graphic-grid {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+    .feature-graphic--reverse .feature-graphic-copy,
+    .feature-graphic--reverse .feature-graphic-media {
+      order: initial;
+    }
+    .feature-graphic-media img { max-width: 420px; }
+  }
+</style>

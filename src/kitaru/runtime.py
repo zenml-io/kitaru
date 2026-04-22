@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.steps.step_context import StepContext
@@ -195,9 +195,38 @@ def _suspend_checkpoint_scope() -> Iterator[None]:
     """
     checkpoint_token = _CURRENT_CHECKPOINT_SCOPE.set(None)
     try:
-        yield
+        with _suspend_step_context():
+            yield
     finally:
         _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
+
+
+def _get_step_context_var() -> ContextVar[StepContext | None]:
+    """Return ZenML's internal `StepContext` ContextVar with a hard failure.
+
+    The adapter currently needs to clear ZenML's step-local state to allow a
+    flow-scope `kitaru.wait()` from inside framework-managed checkpoint code.
+    Keep the private-attribute reach-through in one place so a ZenML rename
+    fails loudly and contract tests can pin the dependency.
+    """
+    context_var = getattr(StepContext, "__context_var__", None)
+    if not isinstance(context_var, ContextVar):
+        raise KitaruFeatureNotAvailableError(
+            "Installed ZenML build does not expose StepContext context state "
+            "required for adapter-managed waits."
+        )
+    return cast(ContextVar[StepContext | None], context_var)
+
+
+@contextmanager
+def _suspend_step_context() -> Iterator[None]:
+    """Temporarily clear ZenML's step-local context."""
+    step_context_var = _get_step_context_var()
+    step_ctx_token = step_context_var.set(None)
+    try:
+        yield
+    finally:
+        step_context_var.reset(step_ctx_token)
 
 
 def _get_current_flow() -> _FlowScope | None:
@@ -220,6 +249,13 @@ def _is_inside_flow() -> bool:
 def _get_current_checkpoint() -> _CheckpointScope | None:
     """Get the currently active checkpoint scope, if any."""
     return _CURRENT_CHECKPOINT_SCOPE.get()
+
+
+def _get_current_checkpoint_name() -> str | None:
+    """Get the current checkpoint name from active Kitaru scope."""
+    if (checkpoint_scope := _get_current_checkpoint()) and checkpoint_scope.name:
+        return checkpoint_scope.name
+    return None
 
 
 def _is_inside_checkpoint() -> bool:

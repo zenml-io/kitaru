@@ -25,6 +25,7 @@ Current status:
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
   ``save()``, ``load()``, ``wait()``, rich ``llm()`` responses,
   ``LLMResponse`` / ``LLMToolCall`` / ``LLMUsage``,
+  ``get_secret()``, ``create_secret()``, ``delete_secret()``,
   ``memory.configure/set/get/list/history/delete()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
@@ -86,6 +87,7 @@ from kitaru.errors import (
     KitaruFeatureNotAvailableError,
     KitaruLLMRateLimitError,
     KitaruLogRetrievalError,
+    KitaruMemoryArtifactUnavailableError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -103,6 +105,13 @@ from kitaru.llm import (
     llm_text,
 )
 from kitaru.logging import log
+from kitaru.secrets import (
+    Secret,
+    SecretSummary,
+    create_secret,
+    delete_secret,
+    get_secret,
+)
 from kitaru.wait import wait
 
 __all__ = [
@@ -119,6 +128,7 @@ __all__ = [
     "KitaruFeatureNotAvailableError",
     "KitaruLLMRateLimitError",
     "KitaruLogRetrievalError",
+    "KitaruMemoryArtifactUnavailableError",
     "KitaruRuntimeError",
     "KitaruStateError",
     "KitaruUsageError",
@@ -129,14 +139,19 @@ __all__ = [
     "LLMToolCall",
     "LLMToolDefinition",
     "LLMUsage",
+    "Secret",
+    "SecretSummary",
     "StackInfo",
     "checkpoint",
     "configure",
     "connect",
+    "create_secret",
     "create_stack",
     "current_stack",
+    "delete_secret",
     "delete_stack",
     "flow",
+    "get_secret",
     "list_stacks",
     "llm",
     "llm_text",

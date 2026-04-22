@@ -1,0 +1,170 @@
+---
+competitor: "Claude Agent SDK"
+competitorLogo: "/compare/claude-agent-sdk.svg"
+competitorTagline: "Build AI agents that autonomously read files, run commands, search the web, edit code, and more."
+title: "Kitaru vs Claude Agent SDK: The lifecycle layer for agents you build with Claude Agent SDK"
+description: "Kitaru and the Claude Agent SDK solve different problems. Keep the SDK, add Kitaru underneath for durable execution, artifact lineage, memory, and deployment on your own cloud."
+cardSubtitle: "Keep the SDK. Add durable execution, memory, and cloud-native deployment underneath."
+ctaHeading: "Put the runtime underneath your Agent SDK"
+order: 10
+---
+
+import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
+import ComparisonTable from '../../components/compare/ComparisonTable.astro';
+import CodeCompare from '../../components/compare/CodeCompare.astro';
+import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import PullQuote from '../../components/compare/PullQuote.astro';
+
+Kitaru and the Claude Agent SDK solve different problems. The Agent SDK builds agents that read files, run commands, and solve coding tasks in a session you kick off yourself. Kitaru is the lifecycle layer above your SDK: durable execution, artifact lineage, durable memory, and deployment on your own infrastructure.
+
+Keep your SDK, model, and sandbox; for local, one-off use, you don't need Kitaru. But if you're running background services that must survive crashes, wait on humans or agents for inputs, and scale without blowing up your bill, try Kitaru.
+
+<WhenToUseEach
+  competitorLabel="Claude Agent SDK"
+  kitaru={{
+    title: "Use Kitaru if you are",
+    items: [
+      "Running agents as long-lived background services, remotely and not just locally",
+      "Processing enough volume that per-run cost and token efficiency start to matter",
+      "Deploying into your own cloud (Kubernetes, Vertex AI, SageMaker, AzureML) for security or compliance",
+      "Building flows that must survive crashes, replay from failure, or wait on humans for hours or days",
+      "Mixing models (Claude for some steps, Gemini Flash or OSS for others) to keep costs sane at scale",
+    ],
+  }}
+  competitor={{
+    title: "Use the Claude Agent SDK if you are",
+    items: [
+      "Building autonomous coding agents that edit files, run bash, and search codebases",
+      "Running interactive sessions where you are at the keyboard to approve and guide",
+      "Prototyping one-off tasks or short-lived workflows",
+    ],
+  }}
+/>
+
+<PullQuote
+  quote="Most production teams end up using both — an SDK to build the agent, and a runtime to operate it."
+/>
+
+<FeatureWithGraphic
+  title="Durable execution and replay"
+  image="https://assets.kitaru.ai/content/compare/kitaru-vs-claude-agent-sdk/d3999bfa/durable-execution-card.avif"
+  imageAlt="Kitaru durable execution and replay"
+>
+Every `@flow` creates an execution record, and checkpoints persist intermediate results before the next step runs. A crash, timeout, or pod eviction doesn't send the agent back to step 1 — fix the bug, replay, and earlier steps return cached output instead of re-running. Reliability goes up, token spend comes down.
+
+The Agent SDK writes session history to disk and rewinds file edits from Write, Edit, and NotebookEdit — useful for coding, but not the step-level workflow state you can replay after process failure. Prompt caching and Haiku help with cost inside the Claude stack; Kitaru eliminates avoidable re-execution entirely.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic
+  title="Infrastructure ownership and deployment flexibility"
+  image="https://assets.kitaru.ai/content/compare/kitaru-vs-claude-agent-sdk/2f52da59/infra-ownership-and-deployment-flexibility.avif"
+  imageAlt="Deploy Kitaru on your own cloud"
+  reverse={true}
+>
+The Agent SDK gives you multiple model access paths — Anthropic, Bedrock, Vertex AI, Azure AI Foundry — and several container patterns. What you still own is the runtime around it: how the agent is packaged, resumed, and supervised as a durable service.
+
+Kitaru is opinionated about that layer. The same flow code runs locally first, then as a durable workflow on Kubernetes, AWS, GCP, or Azure once you configure a stack. Platform teams define the stack once; every downstream team ships on the same runtime.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic
+  title="Long-running state and memory"
+  image="https://assets.kitaru.ai/content/compare/kitaru-vs-claude-agent-sdk/83026385/long-running-state-and-memory.avif"
+  imageAlt="Kitaru versioned memory across Python, CLI, and MCP"
+>
+Agent SDK sessions resume with prior conversation context. For many local and coding-centric use cases, that's enough. But sessions persist the conversation — not a versioned memory system for production agent state.
+
+Kitaru gives you that: scoped, versioned state accessible across Python, CLI, and MCP. It's useful when an agent needs long-lived operational memory, when teams want an audit trail of what the agent knew and when, or when a reviewer asks "what state existed at this point in the run?" — and you need an answer that doesn't depend on `grep`.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic
+  title="Artifact lineage and run tracking"
+  image="https://assets.kitaru.ai/content/compare/kitaru-vs-claude-agent-sdk/e21ddc22/artifact-lineage-and-run-tracking.avif"
+  imageAlt="Kitaru artifact lineage and run tracking"
+  reverse={true}
+>
+Production agents produce a lot of work: inputs, intermediate outputs, tool call results, model responses. If you can't inspect what a run produced and compare it to the run before it, you're flying blind when something regresses.
+
+Kitaru captures artifacts from every `@checkpoint` automatically and links them to the execution record. Each run has an `exec_id`, a checkpoint tree, the artifacts each one produced, the LLM calls beneath it, and attached cost. Browse runs in the dashboard, diff artifacts across runs, and trace a bad output back to the specific step and inputs that made it. The Agent SDK gives you OpenTelemetry traces and per-session logs — real observability for interactive work, but not a persisted artifact graph across runs.
+</FeatureWithGraphic>
+
+## What makes Kitaru unique
+
+<ComparisonTable
+  competitorLabel="Claude Agent SDK"
+  rows={[
+    { feature: "Durable execution", kitaru: true, competitor: false },
+    { feature: "Replay from checkpoint boundary", kitaru: true, competitor: false },
+    { feature: "Durable pause/resume with compute release", kitaru: true, competitor: false },
+    { feature: "Versioned durable memory", kitaru: true, competitor: false },
+    { feature: "Artifact lineage and run tracking", kitaru: true, competitor: false },
+    { feature: "First-class deployment to Kubernetes, SageMaker, Vertex AI, and AzureML", kitaru: true, competitor: false },
+    { feature: "Multi-provider model runtime support", kitaru: true, competitor: false },
+    { feature: "Execution inspection, logs, and lifecycle control", kitaru: true, competitor: true },
+  ]}
+/>
+
+## Code comparison
+
+<CodeCompare
+  kitaruLabel="Kitaru + Agent SDK"
+  competitorLabel="Claude Agent SDK alone"
+  kitaruCode={`import asyncio
+from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
+from kitaru import checkpoint, flow, wait
+
+@checkpoint
+def draft(topic: str) -> str:
+    # One Agent SDK turn == one durable checkpoint.
+    # On replay, the cached result is returned — no re-billing.
+    async def run() -> str:
+        async for msg in query(
+            prompt=f"Draft a short blog post on: {topic}",
+            options=ClaudeAgentOptions(allowed_tools=["Read"]),
+        ):
+            if isinstance(msg, ResultMessage):
+                return msg.result or ""
+        return ""
+    return asyncio.run(run())
+
+@flow
+def review_flow(topic: str) -> str:
+    text = draft(topic)
+    # Compute is released while we wait. Survives crashes.
+    approved = wait(
+        name="approve",
+        question=f"Approve?\\n{text}",
+        schema=bool,
+    )
+    return text if approved else "Rejected"
+
+review_flow.run("Durable agents")`}
+  competitorCode={`import asyncio
+from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
+
+async def review_flow(topic: str) -> str:
+    draft_text = ""
+    async for msg in query(
+        prompt=f"Draft a short blog post on: {topic}",
+        options=ClaudeAgentOptions(allowed_tools=["Read"]),
+    ):
+        if isinstance(msg, ResultMessage):
+            draft_text = msg.result or ""
+
+    # Blocking input(). If the container dies, the draft is lost.
+    approved = input(f"Approve?\\n{draft_text}\\n[y/n]: ") == "y"
+    return draft_text if approved else "Rejected"
+
+asyncio.run(review_flow("Durable agents"))`}
+/>
+
+## Ready to try Kitaru?
+
+If you are running agents locally or in short interactive sessions, stick with what you have. If you are taking an Agent SDK prototype to a long-running production service, Kitaru is the lifecycle layer underneath.
+
+- Read [our documentation](/docs) and see how `@flow` and `@checkpoint` work
+- `pip install kitaru` and run your first durable flow in an afternoon
+- [Talk to the team](/get-started) if you want help mapping an Agent SDK prototype to a production deployment
+
+<div class="compare-inline-cta">
+  <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
+</div>

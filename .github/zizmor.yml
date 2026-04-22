@@ -1,0 +1,11 @@
+---
+# Kitaru's zizmor policy:
+# - Fix GitHub Actions security findings whenever practical.
+# - Keep this file limited to narrow, documented exceptions.
+# - Do not copy broad suppressions from the larger ZenML monorepo config.
+rules:
+  # dangerous-triggers: site.yml uses pull_request_target only for preview
+  # cleanup on closed same-repo PRs. The cleanup job does not checkout or run
+  # PR-controlled code; it only deletes a deterministic Cloudflare Worker name.
+  dangerous-triggers:
+    ignore: [site.yml:3]

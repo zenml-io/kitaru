@@ -37,6 +37,12 @@ class TestPublicExports:
     def test_load_exists(self) -> None:
         assert hasattr(kitaru, "load")
 
+    def test_secret_exists(self) -> None:
+        assert hasattr(kitaru, "Secret")
+
+    def test_get_secret_exists(self) -> None:
+        assert hasattr(kitaru, "get_secret")
+
     def test_log_exists(self) -> None:
         assert hasattr(kitaru, "log")
 
@@ -79,6 +85,7 @@ class TestPublicExports:
             "KitaruFeatureNotAvailableError",
             "KitaruLLMRateLimitError",
             "KitaruLogRetrievalError",
+            "KitaruMemoryArtifactUnavailableError",
             "KitaruRuntimeError",
             "KitaruStateError",
             "KitaruUsageError",
@@ -89,14 +96,19 @@ class TestPublicExports:
             "LLMToolCall",
             "LLMToolDefinition",
             "LLMUsage",
+            "Secret",
+            "SecretSummary",
             "StackInfo",
             "checkpoint",
             "configure",
             "connect",
+            "create_secret",
             "create_stack",
             "current_stack",
+            "delete_secret",
             "delete_stack",
             "flow",
+            "get_secret",
             "list_stacks",
             "llm",
             "llm_text",

@@ -15,6 +15,7 @@ from zenml.exceptions import EntityExistsError
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
+    ActiveConfigSelectionProvenance,
     RuntimeSnapshot,
     _build_runtime_snapshot,
     _describe_local_server,
@@ -36,7 +37,7 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruMemoryArtifactUnavailableError, KitaruUsageError
 
 
 class _BrokenGlobalConfig:
@@ -2644,6 +2645,7 @@ def test_memory_get_renders_value_sections(capsys: pytest.CaptureFixture[str]) -
         key="repo_conventions",
         scope="my_repo",
         scope_type="flow",
+        strict=False,
     )
     output = capsys.readouterr().out
     assert "Kitaru memory" in output
@@ -2716,6 +2718,149 @@ def test_memory_get_errors_when_missing(capsys: pytest.CaptureFixture[str]) -> N
         "No memory entry found for key `prefs` in scope `my_repo (namespace)`."
         in capsys.readouterr().err
     )
+
+
+def _memory_unavailable_payload(
+    *,
+    key: str = "prefs",
+    scope: str = "my_repo",
+    scope_type: str = "namespace",
+    version: int = 3,
+) -> dict[str, Any]:
+    """Build a lenient-mode payload representing an unreachable value."""
+    payload = _memory_payload(
+        key=key,
+        scope=scope,
+        scope_type=scope_type,
+        version=version,
+    )
+    payload["value_available"] = False
+    payload["value_unavailable"] = {
+        "error_type": KitaruMemoryArtifactUnavailableError.__name__,
+        "cause_type": FileNotFoundError.__name__,
+        "message": (
+            f"Memory key '{key}' in scope '{scope}' ({scope_type}) points "
+            f"to artifact 'artifact-{key}-{version}', but the artifact "
+            "value could not be loaded from this environment: "
+            "FileNotFoundError: /local/path does not exist."
+        ),
+    }
+    return payload
+
+
+def test_memory_get_renders_unavailable_value_with_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Lenient text mode warns and still renders metadata for unreachable values."""
+    payload = _memory_unavailable_payload()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.get_memory_payload", return_value=payload),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "memory",
+                "get",
+                "prefs",
+                "--scope",
+                "my_repo",
+                "--scope-type",
+                "namespace",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    # Warning surfaces to stderr on non-TTY (default in tests).
+    assert "Memory value is unavailable" in captured.err
+    assert "could not be loaded from this environment" in captured.err
+    # Metadata and structured unavailable diagnostics show up on stdout.
+    assert "Metadata" in captured.out
+    assert "unavailable" in captured.out
+    assert "KitaruMemoryArtifactUnavailableError" in captured.out
+    assert "FileNotFoundError" in captured.out
+
+
+def test_memory_get_json_output_preserves_unavailable_shape(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON stdout must stay parseable; warning goes to stderr."""
+    payload = _memory_unavailable_payload()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=Mock()),
+        patch("kitaru.cli.get_memory_payload", return_value=payload),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "memory",
+                "get",
+                "prefs",
+                "--scope",
+                "my_repo",
+                "--scope-type",
+                "namespace",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    envelope = json.loads(captured.out)
+    assert envelope["command"] == "memory.get"
+    item = envelope["item"]
+    assert item["value_available"] is False
+    assert item["value_unavailable"]["cause_type"] == "FileNotFoundError"
+    # Warning must not pollute stdout JSON.
+    assert "Warning" not in captured.out
+    assert "Warning" in captured.err
+
+
+def test_memory_get_strict_propagates_typed_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--strict` must forward and surface the typed error as a non-zero exit."""
+    fake_client = Mock()
+    strict_error = KitaruMemoryArtifactUnavailableError(
+        "Memory key 'prefs' in scope 'my_repo' (namespace) points to artifact "
+        "'artifact-prefs-3', but the artifact value could not be loaded from "
+        "this environment: FileNotFoundError: /local/path does not exist."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.cli.get_memory_payload",
+            side_effect=strict_error,
+        ) as mock_get_memory,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "memory",
+                "get",
+                "prefs",
+                "--scope",
+                "my_repo",
+                "--scope-type",
+                "namespace",
+                "--strict",
+            ]
+        )
+
+    assert exc_info.value.code != 0
+    mock_get_memory.assert_called_once_with(
+        fake_client,
+        key="prefs",
+        scope="my_repo",
+        scope_type="namespace",
+        strict=True,
+    )
+    assert "could not be loaded from this environment" in capsys.readouterr().err
 
 
 def test_memory_set_parses_json_value_and_reports_success(
@@ -3386,7 +3531,7 @@ class TestMemoryMaintenance:
 def test_secrets_set_creates_secret(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`kitaru secrets set` should create private secrets by default."""
+    """`kitaru secrets set` should create public secrets by default."""
     fake_client = Mock()
     fake_client.create_secret.return_value = SimpleNamespace(
         name="openai-creds",
@@ -3410,11 +3555,77 @@ def test_secrets_set_creates_secret(
     fake_client.create_secret.assert_called_once_with(
         name="openai-creds",
         values={"OPENAI_API_KEY": "sk-123"},
-        private=True,
+        private=False,
     )
     output = capsys.readouterr().out
     assert "Created secret: openai-creds" in output
     assert "Secret ID: secret-id" in output
+
+
+def test_secrets_set_creates_private_secret_when_requested(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru secrets set --private` should opt into private creation."""
+    fake_client = Mock()
+    fake_client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "--private",
+                "--OPENAI_API_KEY=sk-123",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123"},
+        private=True,
+    )
+    assert "Created secret: openai-creds" in capsys.readouterr().out
+
+
+def test_secrets_set_accepts_private_after_assignments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--private` should remain a CLI flag after leading-hyphen assignments."""
+    fake_client = Mock()
+    fake_client.create_secret.return_value = SimpleNamespace(
+        name="openai-creds",
+        id="secret-id",
+    )
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "secrets",
+                "set",
+                "openai-creds",
+                "--OPENAI_API_KEY=sk-123",
+                "--private",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123"},
+        private=True,
+    )
+    assert "Created secret: openai-creds" in capsys.readouterr().out
 
 
 def test_secrets_set_updates_existing_secret(
@@ -3443,6 +3654,11 @@ def test_secrets_set_updates_existing_secret(
         )
 
     assert exc_info.value.code == 0
+    fake_client.create_secret.assert_called_once_with(
+        name="openai-creds",
+        values={"OPENAI_API_KEY": "sk-123"},
+        private=False,
+    )
     fake_client.get_secret.assert_called_once_with(
         name_id_or_prefix="openai-creds",
         allow_partial_name_match=False,
@@ -3482,7 +3698,7 @@ def test_secrets_set_json_output_accepts_output_after_assignments(
     fake_client.create_secret.return_value = SimpleNamespace(
         name="openai-creds",
         id="secret-id",
-        private=True,
+        private=False,
         values={"OPENAI_API_KEY": object()},
         has_missing_values=False,
         secret_values={"OPENAI_API_KEY": "sk-123"},
@@ -3508,6 +3724,7 @@ def test_secrets_set_json_output_accepts_output_after_assignments(
     assert payload["command"] == "secrets.set"
     assert payload["item"]["name"] == "openai-creds"
     assert payload["item"]["result"] == "created"
+    assert payload["item"]["visibility"] == "public"
 
 
 def test_secrets_show_hides_values_by_default(
@@ -6128,7 +6345,7 @@ def test_secrets_set_json_output_accepts_output_before_assignments(
     fake_client.create_secret.return_value = SimpleNamespace(
         name="openai-creds",
         id="secret-id",
-        private=True,
+        private=False,
         values={"OPENAI_API_KEY": object()},
         has_missing_values=False,
         secret_values={"OPENAI_API_KEY": "sk-123"},
@@ -6154,6 +6371,7 @@ def test_secrets_set_json_output_accepts_output_before_assignments(
     assert payload["command"] == "secrets.set"
     assert payload["item"]["name"] == "openai-creds"
     assert payload["item"]["result"] == "created"
+    assert payload["item"]["visibility"] == "public"
 
 
 def test_status_json_output(capsys: pytest.CaptureFixture[str]) -> None:
@@ -7058,6 +7276,186 @@ def test_info_shows_system_info(
     output = capsys.readouterr().out
     assert "System" in output
     assert "Python version: 3.12.4" in output
+
+
+def _snapshot_with_active_context_provenance() -> RuntimeSnapshot:
+    return RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="remote Kitaru server",
+        connection_target="https://example.com",
+        config_directory="/tmp/config",
+        active_stack="prod",
+        active_project="default",
+        active_stack_provenance=ActiveConfigSelectionProvenance(
+            resource="active_stack",
+            effective_source="repo-local config",
+            effective_source_detail="/work/repo/.kitaru/config.yaml",
+            effective_id="repo-stack-id",
+            resolved_id="resolved-stack-id",
+            resolved_name="prod",
+            environment_variable="ZENML_ACTIVE_STACK_ID",
+            environment_id=None,
+            repository_root="/work/repo",
+            repository_config_path="/work/repo/.kitaru/config.yaml",
+            repository_id="repo-stack-id",
+            global_config_path="/tmp/config/config.yaml",
+            global_id="global-stack-id",
+            notes=[
+                "KITARU_STACK is an execution default and does not set "
+                "ZenML's active stack."
+            ],
+        ),
+        active_project_provenance=ActiveConfigSelectionProvenance(
+            resource="active_project",
+            effective_source="environment",
+            effective_source_detail="KITARU_PROJECT -> ZENML_ACTIVE_PROJECT_ID",
+            effective_id="env-project-id",
+            resolved_id="resolved-project-id",
+            resolved_name="default",
+            environment_variable="KITARU_PROJECT -> ZENML_ACTIVE_PROJECT_ID",
+            environment_id="env-project-id",
+            repository_root="/work/repo",
+            repository_config_path="/work/repo/.kitaru/config.yaml",
+            repository_id="repo-project-id",
+            global_config_path="/tmp/config/config.yaml",
+            global_id="global-project-id",
+        ),
+    )
+
+
+def test_info_default_does_not_render_active_context_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default `kitaru info` should not show the verbose provenance section."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot", return_value=snapshot
+        ) as mock_build,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    mock_build.assert_called_once_with(
+        include_packages=False,
+        package_names=None,
+        include_environment_type=False,
+        include_provenance_details=False,
+    )
+    output = capsys.readouterr().out
+    assert "Active context provenance" not in output
+    assert "repo-stack-id" not in output
+    assert "global-project-id" not in output
+
+
+def test_status_does_not_render_active_context_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru status` should stay compact even if a snapshot has provenance."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Kitaru status" in output
+    assert "Active context provenance" not in output
+    assert "repo-stack-id" not in output
+
+
+def test_info_all_renders_active_context_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info --all` should show active stack/project provenance."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot", return_value=snapshot
+        ) as mock_build,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--all"])
+
+    assert exc_info.value.code == 0
+    mock_build.assert_called_once_with(
+        include_packages=True,
+        package_names=None,
+        include_environment_type=True,
+        include_provenance_details=True,
+    )
+    output = capsys.readouterr().out
+    assert "Active context provenance" in output
+    assert "Active stack source: repo-local config" in output
+    assert "Active stack configured ID: repo-stack-id" in output
+    assert "Active stack resolved: prod (resolved-stack-id)" in output
+    assert "Active project source: environment" in output
+    assert "Active project configured ID: env-project-id" in output
+    assert "KITARU_STACK is an execution default" in output
+
+
+def test_info_all_json_includes_active_context_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info --all -o json` should serialize structured provenance."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot", return_value=snapshot
+        ) as mock_build,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--all", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    mock_build.assert_called_once_with(
+        include_packages=True,
+        package_names=None,
+        include_environment_type=True,
+        include_provenance_details=True,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "info"
+    item = payload["item"]
+    assert item["active_stack_provenance"]["effective_id"] == "repo-stack-id"
+    assert item["active_stack_provenance"]["resolved_name"] == "prod"
+    assert item["active_project_provenance"]["environment_id"] == "env-project-id"
+
+
+def test_info_all_file_export_includes_active_context_provenance(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info --all --file` should export structured provenance."""
+    snapshot = _snapshot_with_active_context_provenance()
+    export_path = tmp_path / "debug.json"
+
+    with (
+        patch(
+            "kitaru.cli._build_runtime_snapshot", return_value=snapshot
+        ) as mock_build,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "--all", "--file", str(export_path)])
+
+    assert exc_info.value.code == 0
+    mock_build.assert_called_once_with(
+        include_packages=True,
+        package_names=None,
+        include_environment_type=True,
+        include_provenance_details=True,
+    )
+    assert str(export_path) in capsys.readouterr().out
+    payload = json.loads(export_path.read_text())
+    assert payload["active_stack_provenance"]["effective_id"] == "repo-stack-id"
+    assert payload["active_project_provenance"]["resolved_id"] == "resolved-project-id"
 
 
 def test_info_all_includes_packages(

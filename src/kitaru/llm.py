@@ -21,7 +21,6 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from zenml.client import Client
 
 from kitaru._safe_save import _safe_save
 from kitaru.artifacts import save
@@ -41,6 +40,7 @@ from kitaru.runtime import (
     _next_llm_call_name,
     _register_llm_call_name,
 )
+from kitaru.secrets import _read_secret_values
 
 _LLM_OUTSIDE_FLOW_ERROR = "kitaru.llm() can only be called inside a @flow."
 _MOCK_RESPONSE_ENV = "KITARU_LLM_MOCK_RESPONSE"
@@ -381,42 +381,6 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
 # ---------------------------------------------------------------------------
 # Credential resolution
 # ---------------------------------------------------------------------------
-
-
-def _read_secret_values(secret_name: str) -> dict[str, str]:
-    """Read secret key/value pairs from ZenML for env injection."""
-    try:
-        secret = Client().get_secret(
-            name_id_or_prefix=secret_name,
-            allow_partial_name_match=False,
-            allow_partial_id_match=False,
-        )
-    except KeyError as exc:
-        raise KitaruRuntimeError(f"Secret `{secret_name}` was not found.") from exc
-    except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to load secret `{secret_name}` for kitaru.llm(): {exc}"
-        ) from exc
-
-    secret_values = getattr(secret, "secret_values", None)
-    if not isinstance(secret_values, Mapping) or not secret_values:
-        raise KitaruRuntimeError(
-            f"Secret `{secret_name}` does not contain readable key/value pairs."
-        )
-    normalized_values: dict[str, str] = {}
-    for key, value in secret_values.items():
-        key_string = str(key).strip()
-        if not key_string:
-            continue
-        if value is None:
-            continue
-        normalized_values[key_string] = str(value)
-
-    if not normalized_values:
-        raise KitaruRuntimeError(
-            f"Secret `{secret_name}` does not contain non-empty values."
-        )
-    return normalized_values
 
 
 def _resolve_credential_overlay(

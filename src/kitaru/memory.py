@@ -19,6 +19,7 @@ Current status:
 import builtins
 import logging
 import re
+import warnings
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -41,6 +42,7 @@ from kitaru.errors import (
     KitaruBackendError,
     KitaruContextError,
     KitaruError,
+    KitaruMemoryArtifactUnavailableError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -1327,15 +1329,37 @@ def _set_impl(scope: _MemoryScope, key: str, value: Any) -> None:
     )
 
 
+def _memory_artifact_unavailable_message(
+    *,
+    key: str,
+    scope_name: str,
+    scope_type: str,
+    artifact_id: str,
+    cause: Exception,
+) -> str:
+    """Render the one-true message for an unreachable memory artifact value.
+
+    Shared by the SDK read path and the interface helper so strict-mode
+    error text, lenient-mode warnings, and CLI/MCP payload diagnostics
+    all agree verbatim.
+    """
+    return (
+        f"Memory key {key!r} in scope {scope_name!r} ({scope_type}) "
+        f"points to artifact {artifact_id!r}, but the artifact value could "
+        f"not be loaded from this environment: {type(cause).__name__}: {cause}"
+    )
+
+
 def _get_impl(
     scope: _MemoryScope,
     key: str,
     version: int | None = None,
     *,
+    strict: bool = False,
     client_factory: Callable[[], Client] | None = None,
     project: str | None = None,
 ) -> Any | None:
-    """Read a memory key for the resolved scope."""
+    """Read a memory key for the resolved scope. See ``memory.get`` for semantics."""
     try:
         client = _resolve_memory_client_factory(client_factory)()
         selected = _fetch_memory_artifact(
@@ -1358,9 +1382,19 @@ def _get_impl(
     try:
         return selected.load()
     except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to load memory key {key!r} in scope {scope.scope!r}: {exc}"
-        ) from exc
+        message = _memory_artifact_unavailable_message(
+            key=key,
+            scope_name=scope.scope,
+            scope_type=scope.scope_type,
+            artifact_id=str(selected.id),
+            cause=exc,
+        )
+        if strict:
+            raise KitaruMemoryArtifactUnavailableError(message) from exc
+        # stacklevel=3 surfaces the warning at the public memory.get(...)
+        # caller: _get_impl -> get() wrapper -> user code.
+        warnings.warn(message, RuntimeWarning, stacklevel=3)
+        return None
 
 
 def _list_impl(
@@ -2203,6 +2237,7 @@ def _memory_get_step(
     scope_type: str,
     key: str,
     version: int | None = None,
+    strict: bool = False,
 ) -> Any:
     """Synthetic non-cacheable step for `memory.get()`.
 
@@ -2210,7 +2245,12 @@ def _memory_get_step(
     introspection does not reliably handle union return types for
     materializer selection on synthetic memory steps.
     """
-    return _get_impl(_coerce_memory_scope(scope, scope_type), key, version)
+    return _get_impl(
+        _coerce_memory_scope(scope, scope_type),
+        key,
+        version,
+        strict=strict,
+    )
 
 
 @_memory_step(name="kitaru_memory_list", operation="list")
@@ -2280,12 +2320,18 @@ def set(key: str, value: Any) -> None:
     return None
 
 
-def get(key: str, *, version: int | None = None) -> Any | None:
+def get(key: str, *, version: int | None = None, strict: bool = False) -> Any | None:
     """Return the current value for a memory key in the active scope.
 
-    Inside a flow, reads run through a synthetic non-cacheable ZenML step so the
-    lookup happens at runtime. Outside a flow, reads query the artifact store
-    directly using the configured process-local scope.
+    Inside a flow, reads run through a synthetic non-cacheable ZenML step so
+    the lookup happens at runtime. Outside a flow, reads query the artifact
+    store directly using the configured process-local scope.
+
+    If the memory entry exists but its backing artifact cannot be loaded from
+    the current runtime, lenient mode (``strict=False``, the default) emits a
+    ``RuntimeWarning`` and returns ``None``; strict mode raises
+    ``KitaruMemoryArtifactUnavailableError``. Missing or tombstoned entries
+    always return ``None`` regardless of mode.
     """
     scope = _resolve_memory_scope_for_operation("get")
     normalized_key = _validate_memory_identifier(key, kind="key")
@@ -2296,8 +2342,9 @@ def get(key: str, *, version: int | None = None) -> Any | None:
             scope.scope_type,
             normalized_key,
             normalized_version,
+            strict,
         )
-    return _get_impl(scope, normalized_key, normalized_version)
+    return _get_impl(scope, normalized_key, normalized_version, strict=strict)
 
 
 def list() -> _list[MemoryEntry]:

@@ -17,4 +17,20 @@ const blog = defineCollection({
   }),
 });
 
-export const collections = { blog };
+const comparisons = defineCollection({
+  loader: glob({ pattern: '**/*.{md,mdx}', base: './src/content/comparisons' }),
+  schema: z.object({
+    competitor: z.string(),
+    competitorLogo: z.string().optional(),
+    competitorTagline: z.string(),
+    title: z.string(),
+    description: z.string(),
+    cardSubtitle: z.string(),
+    ctaHeading: z.string().default('Ready to try Kitaru?'),
+    order: z.number().default(100),
+    draft: z.boolean().default(false),
+    ogImage: z.string().url().optional(),
+  }),
+});
+
+export const collections = { blog, comparisons };

@@ -1,0 +1,67 @@
+{
+  "id": "financial_statements_2024",
+  "kind": "company_document",
+  "title": "Financial Statements 2024",
+  "domain": "internal_consistency",
+  "department": "Finance",
+  "effective_date": "2024-12-31",
+  "last_reviewed": "2025-01-22",
+  "status": "draft",
+  "summary": "Synthetic draft annual financial statements covering executive summary, quarterly revenue, Q3 breakdown, and notes.",
+  "metadata": {
+    "owner": "Finance",
+    "document_type": "financial_statement",
+    "currency": "EUR",
+    "scale": "millions",
+    "related_standards": [],
+    "keywords": [
+      "financial statements",
+      "Q3 revenue",
+      "internal consistency",
+      "revenue breakdown"
+    ]
+  },
+  "sections": [
+    {
+      "id": "executive_summary",
+      "title": "Executive summary",
+      "content": "Acme Corp reported full-year 2024 revenue of EUR 46.9 million and positive operating cash flow. The Q3 management summary states that Q3 revenue was EUR 12.4 million."
+    },
+    {
+      "id": "quarterly_revenue_table",
+      "title": "Quarterly revenue table",
+      "content": "Quarterly revenue by management report: Q1 EUR 10.8 million, Q2 EUR 11.5 million, Q3 EUR 12.4 million, Q4 EUR 12.2 million."
+    },
+    {
+      "id": "q3_revenue_breakdown",
+      "title": "Q3 detailed revenue breakdown",
+      "content": "Detailed Q3 revenue breakdown: Europe platform subscriptions EUR 4.2 million, North America platform subscriptions EUR 3.9 million, professional services EUR 1.6 million, support and maintenance EUR 2.1 million. The detailed Q3 line items total EUR 11.8 million."
+    },
+    {
+      "id": "notes",
+      "title": "Notes",
+      "content": "Finance flagged that Q3 revenue reconciliation was still open at the time this draft was exported. No adjustment note has been added to explain the difference between the Q3 summary and detailed breakdown."
+    }
+  ],
+  "known_planted_findings": [
+    {
+      "id": "finding_financial_statements_q3_revenue_mismatch",
+      "status": "gap",
+      "severity": "medium",
+      "standard_id": null,
+      "requirement_id": null,
+      "summary": "Revenue figures in the Q3 summary do not match the detailed breakdown.",
+      "evidence_section_ids": [
+        "executive_summary",
+        "quarterly_revenue_table",
+        "q3_revenue_breakdown",
+        "notes"
+      ],
+      "evidence": [
+        "The Q3 summary reports EUR 12.4 million.",
+        "The detailed Q3 line items total EUR 11.8 million.",
+        "No adjustment note explains the EUR 0.6 million difference."
+      ]
+    }
+  ]
+}

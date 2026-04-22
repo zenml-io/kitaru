@@ -1,0 +1,112 @@
+---
+import { Code } from 'astro:components';
+import type { ThemeRegistrationRaw } from 'shiki';
+import kitaruLight from '../../styles/kitaru-light.json';
+
+interface Props {
+  kitaruLabel?: string;
+  competitorLabel?: string;
+  kitaruCode: string;
+  competitorCode: string;
+  lang?: string;
+}
+const {
+  kitaruLabel = 'Kitaru',
+  competitorLabel = 'Alternative',
+  kitaruCode,
+  competitorCode,
+  lang = 'python',
+} = Astro.props;
+---
+
+<section class="codecompare" data-reveal>
+  <div class="codecompare-grid">
+    <article class="codecompare-pane codecompare-pane--kitaru">
+      <header>
+        <span class="codecompare-dot codecompare-dot--kitaru" aria-hidden="true"></span>
+        <span class="codecompare-label">{kitaruLabel}</span>
+      </header>
+      <div class="codecompare-code">
+        <Code code={kitaruCode} lang={lang} theme={kitaruLight as ThemeRegistrationRaw} />
+      </div>
+    </article>
+    <article class="codecompare-pane">
+      <header>
+        <span class="codecompare-dot codecompare-dot--competitor" aria-hidden="true"></span>
+        <span class="codecompare-label">{competitorLabel}</span>
+      </header>
+      <div class="codecompare-code">
+        <Code code={competitorCode} lang={lang} theme={kitaruLight as ThemeRegistrationRaw} />
+      </div>
+    </article>
+  </div>
+</section>
+
+<style>
+  /* Break out of the 820px article column so the two panes have room.
+     Pattern mirrors FeatureWithGraphic.astro for cross-component consistency. */
+  .codecompare {
+    margin: 32px auto 48px;
+    width: min(1120px, calc(100vw - 48px));
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .codecompare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .codecompare-pane {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .codecompare-pane--kitaru {
+    border-color: oklch(0.85 0.08 60);
+  }
+  .codecompare-pane header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--color-border-light);
+    background: var(--color-surface-warm);
+  }
+  .codecompare-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-muted);
+  }
+  .codecompare-dot--kitaru { background: var(--color-accent); }
+  .codecompare-dot--competitor { background: var(--color-accent-warm); }
+  .codecompare-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-secondary);
+    letter-spacing: 0.02em;
+  }
+  .codecompare-code {
+    flex: 1;
+  }
+  .codecompare-code :global(pre) {
+    margin: 0;
+    padding: 20px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    background: transparent !important;
+    overflow-x: auto;
+  }
+  .codecompare-code :global(code) {
+    font-family: inherit;
+  }
+
+  @media (max-width: 900px) {
+    .codecompare-grid { grid-template-columns: 1fr; }
+  }
+</style>

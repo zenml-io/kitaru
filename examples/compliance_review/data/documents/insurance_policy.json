@@ -1,0 +1,66 @@
+{
+  "id": "insurance_policy",
+  "kind": "company_document",
+  "title": "Insurance Policy Summary",
+  "domain": "insurance",
+  "department": "Finance",
+  "effective_date": "2025-01-01",
+  "last_reviewed": "2025-01-05",
+  "status": "active",
+  "summary": "Synthetic insurance schedule covering general liability, technology errors and omissions, property, D&O, crime, and business interruption lines.",
+  "metadata": {
+    "owner": "Finance and Risk",
+    "broker": "Example Risk Partners",
+    "document_type": "insurance_policy",
+    "related_standards": [
+      "insurance_coverage_standards"
+    ],
+    "keywords": [
+      "insurance",
+      "cyber",
+      "technology E&O",
+      "general liability",
+      "business interruption"
+    ]
+  },
+  "sections": [
+    {
+      "id": "covered_lines",
+      "title": "Covered lines",
+      "content": "The policy package includes commercial general liability, employer's liability, property coverage for leased offices, directors and officers coverage, crime coverage, and technology errors and omissions coverage for software services."
+    },
+    {
+      "id": "technology_errors_and_omissions",
+      "title": "Technology errors and omissions",
+      "content": "Technology errors and omissions coverage applies to claims alleging negligent acts, errors, or omissions in Acme Corp's professional software services. The annual aggregate limit is EUR 5,000,000."
+    },
+    {
+      "id": "business_interruption",
+      "title": "Business interruption",
+      "content": "Business interruption coverage applies to physical loss or damage at insured office premises. Digital service outage, ransomware, cloud provider outage, privacy breach response, and cyber incident remediation costs are excluded unless separately endorsed."
+    },
+    {
+      "id": "cyber_exclusion",
+      "title": "Cyber exclusion",
+      "content": "This policy does not include standalone cyber liability coverage. Privacy breach notification costs, forensic investigation, ransomware payments, cyber extortion, and digital business interruption are excluded from the current policy period."
+    }
+  ],
+  "known_planted_findings": [
+    {
+      "id": "finding_insurance_policy_missing_cyber_coverage",
+      "status": "gap",
+      "severity": "high",
+      "standard_id": "insurance_coverage_standards",
+      "requirement_id": "INS-CYBER-001",
+      "summary": "No cyber incident coverage despite IT-dependent operations.",
+      "evidence_section_ids": [
+        "business_interruption",
+        "cyber_exclusion"
+      ],
+      "evidence": [
+        "Digital service outage, ransomware, cloud provider outage, privacy breach response, and cyber incident remediation costs are excluded unless separately endorsed.",
+        "The policy says it does not include standalone cyber liability coverage."
+      ]
+    }
+  ]
+}
