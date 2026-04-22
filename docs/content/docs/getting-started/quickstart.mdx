@@ -110,7 +110,7 @@ What happens here:
 
 1. `@flow` marks the top-level execution boundary — everything inside is tracked
 2. Each `@checkpoint` persists its return value automatically
-3. `kitaru.llm()` picks up your API key from the environment, calls the model, and captures the prompt, response, token usage, and cost
+3. `kitaru.llm()` picks up your API key from the environment, calls the model, and captures the prompt, response, token usage, and latency
 4. `.run()` starts the execution and blocks until completion
 
 ## Why checkpoints matter

@@ -42,13 +42,15 @@ Agent stacks break cleanly into three layers. Kitaru is exactly one of them.
 | **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
 
 Kitaru lives in the middle row. Harnesses define behavior, your stack defines
-policy, and Kitaru gives you the durable execution layer in between. 
+policy, and Kitaru gives you the durable execution layer in between.
 
-If you're *buying* an agent platform, Kitaru may feel low-level. If you're                                                                    *building* one, that's the point.  
+If you're *buying* an agent platform, Kitaru may feel low-level. If you're
+*building* one, that's the point.
 
-Platform teams get the durable execution layer they'd otherwise build themselves — 
-run lifecycle, checkpoint boundaries, replay, invocation routing, and self-hosted execution — 
-without mandating which harness application teams use on top.                                                                                                                                     
+Platform teams get the durable execution layer they'd otherwise build
+themselves — run lifecycle, checkpoint boundaries, replay, invocation
+routing, and self-hosted execution — without mandating which harness
+application teams use on top.
 
 ## Why Kitaru?
 

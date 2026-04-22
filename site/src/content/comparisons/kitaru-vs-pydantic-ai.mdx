@@ -16,7 +16,7 @@ import PullQuote from '../../components/compare/PullQuote.astro';
 
 Pydantic AI and Kitaru solve different problems at different layers. Pydantic AI is an **agent harness**: it&rsquo;s the best-in-class Pythonic library for writing type-safe agent logic &mdash; tool calling, structured outputs, dependency injection, streaming. Kitaru is a **durable runtime**: checkpoints, replay, resume, wait states, versioned deployments, artifact lineage, and self-hosted execution.
 
-They don&rsquo;t compete. They compose. Kitaru ships a [first-class Pydantic AI adapter](/docs/concepts/flows) that tracks model requests and tool calls as child events under the enclosing checkpoint.
+They don&rsquo;t compete. They compose. Kitaru ships a [first-class Pydantic AI adapter](/docs/guides/pydantic-ai-adapter) that tracks model requests and tool calls as child events under the enclosing checkpoint.
 
 <WhenToUseEach
   competitorLabel="Pydantic AI"
@@ -172,7 +172,7 @@ If none of that applies, Pydantic AI on its own is the right answer.
 
 ## Ready to try Kitaru?
 
-- Read the [Pydantic AI adapter docs](/docs/concepts/flows) for the composition pattern.
+- Read the [Pydantic AI adapter docs](/docs/guides/pydantic-ai-adapter) for the composition pattern.
 - See the [harness, runtime, platform](/docs/concepts/harness-runtime-platform) page for the layer split.
 - `pip install kitaru` and wrap an existing Pydantic AI agent in `@flow` in an afternoon.
 
