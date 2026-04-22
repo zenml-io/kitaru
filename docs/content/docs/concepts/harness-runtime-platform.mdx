@@ -86,10 +86,10 @@ Kitaru actually takes responsibility for:
 | Secrets storage | Partly | Alias-linked secret resolution for `kitaru.llm()`; integrate with your secret manager |
 | Auth to invoke flows | Yes | Workspace keys / service accounts; no per-deployment tokens |
 | Enterprise entitlements / RBAC | No | Integrate with your platform |
-| Network egress policy | Partly | Exposed on execution targets; integrate with your infra |
+| Network egress policy | No | Determined by the execution target your stack provides; Kitaru does not enforce it |
 | Interceptors / guardrails | No | Harness or your platform owns this |
 | Observability | Partly | Runtime metadata, logs, artifact lineage; integrate with your tracing |
-| Data compliance policy | No | Runtime exposes hooks; policy stays yours |
+| Data compliance policy | No | Policy stays with your platform; Kitaru does not mandate one |
 
 The line to remember:
 

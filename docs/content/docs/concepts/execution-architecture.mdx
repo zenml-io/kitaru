@@ -1,13 +1,13 @@
 ---
 title: Execution Architecture
-description: Server, runner, checkpoints, and sandboxes — what actually happens when a Kitaru flow runs.
+description: Server, runner, checkpoints, and execution targets — what actually happens when a Kitaru flow runs.
 ---
 
 Kitaru separates **durable control flow** from **code execution**.
 
 - The **Kitaru server** stores shared metadata, deployment snapshots, checkpoint state, execution logs, and control-plane data.
 - For each run, a **runner** (the durable brain of an execution) executes the selected flow snapshot, manages checkpoint order, persists state, and handles retry, replay, resume, and wait.
-- Individual checkpoints can run **inline** in the runner, or be delegated to **isolated execution targets** — a separate container, a Kubernetes job, a sandbox, an external tool, or a custom compute backend.
+- Individual checkpoints can run **inline** in the runner or in an **isolated** runtime (a separate container, Kubernetes job, or cloud job on the configured stack). The runner/target split is also where sandboxes, external tools, and custom compute backends conceptually plug in — the two shipped execution targets today are `inline` and `isolated`.
 
 <Callout type="info">
   **Key idea.** The runner owns the durable run: checkpoint order, state, retry, replay, resume, and wait. Execution targets do the work. **Checkpoints are the contract between the two.**
@@ -25,7 +25,7 @@ Kitaru breaks cleanly into three layers, each with a single responsibility.
 |---|---|---|
 | **Control plane** | Kitaru server, UI, metadata DB, deployment registry, CLI/SDK/MCP APIs, auth and credential brokering | Knows what exists and who can call what |
 | **Orchestration plane** | The runner for a single execution | Owns durable control flow for one run |
-| **Execution plane** | Inline process, isolated container, sandbox, external tool, or custom backend | Performs work |
+| **Execution plane** | Inline process or isolated container (shipped today); sandboxes, external tools, and custom backends are conceptual extensions of the same contract | Performs work |
 
 This split is the thing to remember. The control plane is long-lived and shared. The orchestration plane is per-run and durable. The execution plane is where your code (and your agent's code) actually executes.
 
@@ -39,7 +39,7 @@ The most common confusion is which component runs user code. This table makes it
 | Runner (orchestration plane) | Runs the selected flow snapshot, controls checkpoint order, persists durable state, handles retry / replay / resume / wait | **Yes**, for inline checkpoints |
 | Inline execution | Runs a checkpoint inside the runner process/pod | Yes |
 | Isolated runtime | Runs a checkpoint in a separate container, job, pod, or remote compute backend | Yes |
-| Sandbox | Runs constrained code/tool execution with stronger isolation or restricted egress | Yes |
+| Sandbox (conceptual) | The same contract as isolated, tightened with stronger isolation or restricted egress. Not a shipped Kitaru execution target today — provided via adapters / your platform. | Yes, where integrated |
 | External tool / MCP server | Performs work through a remote API or capability | Outside Kitaru |
 | Metadata store | Stores runs, versions, checkpoint statuses, replay lineage | No |
 | Artifact / state store | Stores checkpoint outputs, files, logs, replay lineage | No |
@@ -110,7 +110,7 @@ def coding_agent(task: str) -> str:
 - needs different CPU/memory/GPU resources
 - must be strongly isolated from other checkpoints in the same run
 
-On remote stacks (Kubernetes, AWS, GCP, Azure), `runtime="isolated"` provisions a separate pod/job per invocation. Locally it falls back to inline so dev loops stay fast.
+On remote stacks (Kubernetes, Vertex AI, SageMaker, AzureML), `runtime="isolated"` provisions a separate pod/job per invocation. Locally it falls back to inline so dev loops stay fast.
 
 ## A failed checkpoint is durable context
 
@@ -207,7 +207,7 @@ You keep your auth, entitlements, interceptors, observability, and UI. Kitaru ha
 All three planes run on your infrastructure:
 
 - The **server** is a Helm-deployed service (see [Deploy with Helm](/deploy/helm)).
-- The **runner** runs on whichever [stack](/stacks) you configure — Kubernetes, AWS, GCP, Azure, or local.
+- The **runner** runs on whichever [stack](/stacks) you configure — Kubernetes, Vertex AI, SageMaker, AzureML, or local.
 - **Artifacts and state** live in your own S3 / GCS / Azure Blob bucket.
 
 The Kitaru server brokers short-lived credentials when a client needs to read artifacts. There is no mandatory SaaS control plane in the path of your agent's data.

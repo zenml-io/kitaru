@@ -132,15 +132,17 @@ def review_case(case: dict) -> str:
 @flow
 def review_flow(case: dict) -> str:
     draft = review_case(case)
-    # Compute released while we wait; survives crashes.
-    ok = wait(name="approve", question=draft, schema=bool)
+    # Load the text for the human-facing wait question;
+    # the raw checkpoint output still flows to the next step.
+    draft_text = draft.load()
+    ok = wait(name="approve", question=draft_text, schema=bool)
     return draft if ok else "rejected"
 
 # Durable ad-hoc run
 review_flow.run(case={"id": "C-001"})
 
 # Or deploy as versioned snapshot, invoke by name
-review_flow.deploy()
+review_flow.deploy(case={"id": "C-001"})
 review_flow.invoke(case={"id": "C-001"})`}
   competitorCode={`from pydantic_ai import Agent
 

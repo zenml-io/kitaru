@@ -14,8 +14,11 @@ bigger picture.
 
 ## The shape of a flow
 
-Everything inside the `@flow` boundary is durable. Checkpoints become persisted
-work units; the rest is ordinary Python that orchestrates them.
+The `@flow` boundary defines the durable execution. Checkpoints inside it are
+the persisted replay boundaries; the flow body is ordinary Python that
+orchestrates those checkpoints. Side effects in the flow body itself are not
+automatically durable — put anything that needs to survive a crash, be replayed,
+or be rolled back behind a `@checkpoint`.
 
 <FlowShapeDiagram />
 
@@ -102,7 +105,7 @@ handle = my_agent.run(url="https://example.com", retries=3, cache=True)
 | Option | Default | What it controls |
 |---|---|---|
 | `retries` | `0` | Number of automatic retries on failure |
-| `cache` | `True` | Whether checkpointed outputs can be reused from previous runs |
+| `cache` | `None` | Whether checkpointed outputs can be reused from previous runs. `None` leaves the choice to each checkpoint's own `cache` setting; set `True` or `False` at the flow level to force it uniformly. |
 | `stack` | `None` | Target execution environment for this run (overrides the active stack default) |
 | `image` | `None` | Container image for remote execution (string, mapping, or settings object). Supports `base_image`, `requirements`, `environment`, `apt_packages`, `replicate_local_python_environment`, and `dockerfile`. |
 
@@ -137,11 +140,20 @@ workspace-scoped; there are no per-deployment tokens to rotate.
 # Ad-hoc run from the current process
 handle = my_agent.run(url="https://example.com")
 
-# Deploy an immutable snapshot (new version each call)
-my_agent.deploy()
+# Deploy an immutable snapshot (new version each call).
+# Parameterized flows take representative deployment-time inputs;
+# consumers can override them at invocation time.
+my_agent.deploy(url="https://example.com")
 
-# Consumers invoke by flow name — no source needed
+# Consumers that have the flow imported can invoke by attribute
 handle = my_agent.invoke(url="https://example.com")
+
+# Or invoke source-free by flow name (from Python, CLI, MCP, or HTTP)
+from kitaru import KitaruClient
+handle = KitaruClient().deployments.invoke(
+    flow="my_agent",
+    inputs={"url": "https://example.com"},
+)
 ```
 
 ## Rules to know

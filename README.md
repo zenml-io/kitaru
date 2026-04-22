@@ -229,11 +229,16 @@ name — no redeploy of whatever *calls* the agent.
 
 ```python
 # Freeze the current code + dependencies as a versioned snapshot.
-my_agent.deploy()
+# Parameterized flows take representative deployment-time inputs;
+# consumers can override them at invocation time.
+my_agent.deploy(url="https://example.com")
 
 # Consumers invoke by name — from Python, CLI, MCP, or HTTP.
-from kitaru.client import KitaruClient
-KitaruClient().invoke("my_agent", url="https://example.com")
+from kitaru import KitaruClient
+KitaruClient().deployments.invoke(
+    flow="my_agent",
+    inputs={"url": "https://example.com"},
+)
 ```
 
 ```bash

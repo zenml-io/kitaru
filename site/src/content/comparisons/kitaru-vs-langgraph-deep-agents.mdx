@@ -157,7 +157,7 @@ handle = research.run(topic="durable agents")
 
 # Or deploy + invoke: immutable versioned snapshots,
 # tag routing, workspace-scoped auth.
-research.deploy()
+research.deploy(topic="durable agents")
 handle = research.invoke(topic="durable agents")`}
   competitorCode={`from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver

@@ -113,6 +113,7 @@ def call_model(prompt: str) -> str:
 | Option | Default | What it controls |
 |---|---|---|
 | `retries` | `0` | Automatic retries on checkpoint failure |
+| `cache` | `None` | Reuse the persisted output from a previous run when inputs and code match. `None` falls back to the flow-level or active default; set `True` or `False` to pin it for this checkpoint. |
 | `type` | `None` | A label for UI visualization (e.g. `"llm_call"`, `"tool_call"`) |
 | `runtime` | `None` | Execution runtime: `"inline"` or `"isolated"` (see below) |
 
@@ -125,8 +126,8 @@ runner. This is the right default for most orchestration. For checkpoints that
 run untrusted code, need a different image or resources, or must be strongly
 isolated from the rest of the run, set `runtime="isolated"` and the runner
 will place the checkpoint on a separate container/job on the configured stack
-(Kubernetes, AWS, GCP, Azure). Locally it falls back to inline so dev loops
-stay fast.
+(Kubernetes, Vertex AI, SageMaker, AzureML). Locally it falls back to inline so
+dev loops stay fast.
 
 ```python
 @checkpoint(runtime="isolated")
