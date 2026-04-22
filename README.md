@@ -31,7 +31,7 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-## Where Kitaru fits
+## 🧩 Where Kitaru fits
 
 Agent stacks break cleanly into three layers. Kitaru is exactly one of them.
 
@@ -52,28 +52,28 @@ themselves — run lifecycle, checkpoint boundaries, replay, invocation
 routing, and self-hosted execution — without mandating which harness
 application teams use on top.
 
-## Why Kitaru?
+## 🎯 Why Kitaru?
 
-### Works with your agent SDK
+### Durable execution and memory
 
-Wrap an existing PydanticAI agent with `KitaruAgent` — no rewrite. For agents
-built on the OpenAI Agents SDK, Anthropic Agent SDK, or raw Python, use `@flow`
-and `@checkpoint` around your calls. Your model, your tools, your framework —
-Kitaru wraps them, not the other way around.
-
-```python
-from kitaru import flow
-from kitaru.adapters.pydantic_ai import KitaruAgent
-from pydantic_ai import Agent
-
-researcher = KitaruAgent(
-    Agent("openai:gpt-5.4", system_prompt="You summarize research topics.")
-)
-
-@flow
-def research_flow(topic: str) -> str:
-    return researcher.run_sync(topic).output
-```
+- **Durable execution.** A crash, pod eviction, or timeout doesn't send the run
+  back to zero. Fix the bug, replay, and the completed checkpoints return cached
+  output instead of re-burning tokens.
+- **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and
+  resumes minutes, hours, or days later when input lands from a human, another
+  agent, a webhook, or a CLI call.
+- **Versioned deployments.** `flow.deploy()` captures an immutable snapshot.
+  Consumers invoke by flow name; tag routing and rollback are a
+  `kitaru flow tag` away.
+- **Artifact lineage.** Every checkpoint writes a typed, versioned artifact.
+  Diff artifacts across runs, trace a bad output back to the specific step, and
+  build audit trails without grepping logs.
+- **Isolated execution.** `@checkpoint(runtime="isolated")` runs a specific
+  step in its own pod or job on Kubernetes, AWS, GCP, or Azure. Heavy or risky
+  steps stay isolated; orchestration stays inline.
+- **Durable memory.** Scoped, versioned state for long-running agents. Write
+  from Python, read from the CLI or MCP. Agents remember conventions, context,
+  and prior work across runs.
 
 ### Python-first, no graph DSL
 
@@ -100,14 +100,6 @@ def writing_agent(topic: str) -> str:
 result = writing_agent.run("quantum computing").wait()
 ```
 
-### Durable execution and memory
-
-Kitaru keeps agent state on disk and in infrastructure, not just in process
-memory. Checkpoints persist intermediate outputs so you can replay from failure,
-resume waiting runs, and inspect what happened. Durable memory adds scoped,
-versioned state for long-running agents across Python, CLI, client, and MCP
-surfaces.
-
 ### Deploy on your cloud
 
 Kitaru runs locally with zero config and scales to production as a single
@@ -125,7 +117,28 @@ that ships with the Kitaru server.
 To start the server locally, run `kitaru login` after installing `kitaru[local]`.
 To connect to an existing remote server, run `kitaru login <server>`.
 
-## Quick Start
+### Works with your agent SDK
+
+Wrap an existing PydanticAI agent with `KitaruAgent` — no rewrite. For agents
+built on the OpenAI Agents SDK, Anthropic Agent SDK, or raw Python, use `@flow`
+and `@checkpoint` around your calls. Your model, your tools, your framework —
+Kitaru wraps them, not the other way around.
+
+```python
+from kitaru import flow
+from kitaru.adapters.pydantic_ai import KitaruAgent
+from pydantic_ai import Agent
+
+researcher = KitaruAgent(
+    Agent("openai:gpt-5.4", system_prompt="You summarize research topics.")
+)
+
+@flow
+def research_flow(topic: str) -> str:
+    return researcher.run_sync(topic).output
+```
+
+## 🚀 Quick Start
 
 ### Install
 
@@ -211,7 +224,7 @@ kitaru executions logs <EXECUTION_ID>
 kitaru executions replay <EXECUTION_ID> --from process_data
 ```
 
-## Learn more
+## 📚 Learn more
 
 | Resource | Description |
 |---|---|
@@ -222,27 +235,27 @@ kitaru executions replay <EXECUTION_ID> --from process_data
 | [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://kitaru.ai/docs/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 
-## Origins
+## 🌱 Origins
 
 Kitaru is built by the team behind [ZenML](https://zenml.io), drawing on five
 years of production orchestration experience (JetBrains, Adeo, Brevo). The
 orchestration primitives (stacks, artifacts, lineage) are purpose-rebuilt here
 for autonomous agents.
 
-## Contributing
+## 🤝 Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for development
 setup, code style, and how to submit changes. The default branch is `develop` —
 all PRs should target it.
 
-## Community and support
+## 💬 Community and support
 
 - [Discussions](https://kitaru.ai/community) — ask questions, share ideas
 - [Issues](https://github.com/zenml-io/kitaru/issues) — report bugs, request features
 - [Roadmap](https://kitaru.ai/roadmap) — see what's coming next
 - [Docs](https://kitaru.ai/docs) — guides and reference
 
-## License
+## 📄 License
 
 [Apache 2.0](LICENSE)
 
