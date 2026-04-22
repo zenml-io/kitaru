@@ -1097,7 +1097,7 @@ export function DeploymentsDiagram() {
         </div>
 
         {/* Versions */}
-        <Subgraph label="Immutable versions" tone="accent" annotation="kept forever · all invokable">
+        <Subgraph label="Immutable versions" tone="accent" annotation="kept forever · all invocable">
           <div style={{ ...row, justifyContent: 'center' }}>
             {versionBox('coding-agent v1')}
             {versionBox('coding-agent v2', 'default', 'accent')}
