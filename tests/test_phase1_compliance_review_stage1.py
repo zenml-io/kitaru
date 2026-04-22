@@ -117,7 +117,7 @@ def test_stage1_run_workflow_uses_flow_run_and_wait(
     result = stage1_module.run_workflow("custom flow prompt")
 
     assert result == expected
-    fake_flow.run.assert_called_once_with("custom flow prompt", stack=None)
+    fake_flow.run.assert_called_once_with("custom flow prompt", stack=None, cache=False)
     fake_handle.wait.assert_called_once_with()
 
 
@@ -142,7 +142,9 @@ def test_stage1_run_workflow_passes_stack_override(
     result = stage1_module.run_workflow("custom flow prompt", stack="prod-k8s")
 
     assert result == expected
-    fake_flow.run.assert_called_once_with("custom flow prompt", stack="prod-k8s")
+    fake_flow.run.assert_called_once_with(
+        "custom flow prompt", stack="prod-k8s", cache=False
+    )
     fake_handle.wait.assert_called_once_with()
 
 
@@ -174,6 +176,7 @@ def test_stage1_run_workflow_can_opt_into_runtime_secret_environment(
     fake_flow.run.assert_called_once_with(
         "custom flow prompt",
         stack="prod-k8s",
+        cache=False,
         image={
             "requirements": [
                 stage1_module.CLAUDE_AGENT_SDK_REQUIREMENT,

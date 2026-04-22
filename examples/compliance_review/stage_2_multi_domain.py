@@ -22,6 +22,7 @@ from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
+from zenml.utils.source_utils import set_custom_source_root
 
 import kitaru
 from kitaru import checkpoint, flow
@@ -32,6 +33,7 @@ from kitaru import checkpoint, flow
 _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+set_custom_source_root(_REPO_ROOT)
 
 import examples.compliance_review.materializers as _materializers  # noqa: E402,F401
 from examples.compliance_review.claude_agent import (  # noqa: E402
@@ -231,9 +233,17 @@ def run_workflow(
     *,
     stack: str | None = None,
     use_secret_environment: bool = False,
+    cache: bool = False,
 ) -> ClaudeAgentResult:
-    """Execute the full Stage 2 audit and return the final report result."""
-    run_kwargs: dict[str, Any] = {"stack": stack}
+    """Execute the full Stage 2 audit and return the final report result.
+
+    Caching defaults to off so each run exercises Claude fresh. ZenML's
+    implicit cache-hit on identical inputs would otherwise make the
+    second run a no-op that hides the agent behavior the example is
+    meant to demonstrate. Replay (`.replay()`) is independent of this
+    flag and continues to reuse durable checkpoint outputs.
+    """
+    run_kwargs: dict[str, Any] = {"stack": stack, "cache": cache}
     if use_secret_environment:
         run_kwargs["image"] = {
             "requirements": [CLAUDE_AGENT_SDK_REQUIREMENT, KITARU_REQUIREMENT],
@@ -250,9 +260,17 @@ def main() -> None:
 
 
 def _required_result_text(result: ClaudeAgentResult, *, domain: str) -> str:
-    """Return result text or fail clearly before building the synthesis prompt."""
+    """Return result text or raise with diagnostic context for the synthesis step."""
     if result.result is None or not result.result.strip():
-        raise ValueError(f"{domain} checkpoint returned no result text.")
+        raise ValueError(
+            f"{domain} checkpoint returned no result text "
+            f"(session_id={result.session_id!r}, "
+            f"stop_reason={result.stop_reason!r}, "
+            f"num_turns={result.num_turns}). "
+            f"If you opted into `cache=True` and this keeps recurring, a "
+            f"prior run may have cached an empty Claude response — re-run "
+            f"with the default `cache=False` to force a fresh call."
+        )
     return result.result
 
 

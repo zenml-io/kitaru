@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib
+import shutil
+import sys
 import threading
 import time
 from contextlib import suppress
@@ -12,6 +14,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+from zenml.utils.source_utils import get_source_root
 
 from kitaru import KitaruClient
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruStateError
@@ -126,6 +129,7 @@ def test_stage4_run_workflow_can_opt_into_runtime_secret_environment(
         conversation_label="my-conversation",
         max_turns=2,
         stack="prod-k8s",
+        cache=False,
         image={
             "requirements": [
                 stage4_module.CLAUDE_AGENT_SDK_REQUIREMENT,
@@ -204,6 +208,109 @@ def test_stage4_checkpoint_resumes_existing_claude_session(
             "resumed": True,
             "resume_session_id": "existing-claude-session",
             "session_id": "existing-claude-session",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "repository_marker",
+    ["without-kitaru", "too-deep-kitaru"],
+)
+def test_stage4_flow_loads_claude_result_from_checkout_with_unstable_repository_root(
+    request,
+    monkeypatch,
+    tmp_path,
+    primed_zenml,
+    repository_marker: str,
+) -> None:
+    """Stage 4 should load Claude results when source root discovery is unstable."""
+    del primed_zenml
+    copied_checkout = tmp_path / "copied_checkout"
+    copied_examples_dir = copied_checkout / "examples"
+    copied_example_dir = copied_examples_dir / "compliance_review"
+    source_examples_dir = Path(__file__).resolve().parent.parent / "examples"
+    source_example_dir = source_examples_dir / "compliance_review"
+    copied_examples_dir.mkdir(parents=True)
+    shutil.copy2(
+        source_examples_dir / "__init__.py",
+        copied_examples_dir / "__init__.py",
+    )
+    shutil.copytree(
+        source_example_dir,
+        copied_example_dir,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    if repository_marker == "too-deep-kitaru":
+        too_deep_kitaru_dir = copied_example_dir / ".kitaru"
+        too_deep_kitaru_dir.mkdir()
+        (too_deep_kitaru_dir / "config.yaml").write_text("{}\n")
+    assert not (copied_checkout / ".kitaru").exists()
+
+    configure_fake_claude_home(monkeypatch, tmp_path)
+    install_fake_claude_agent_sdk(monkeypatch)
+    clear_compliance_review_modules()
+    sys.modules.pop("examples", None)
+    monkeypatch.syspath_prepend(str(copied_checkout))
+
+    # Unbind the tmp-path-imported package on teardown so subsequent tests
+    # re-import compliance_review from the real repo path.
+    def _restore_compliance_modules() -> None:
+        clear_compliance_review_modules()
+        sys.modules.pop("examples", None)
+
+    request.addfinalizer(_restore_compliance_modules)
+
+    stage4_module = importlib.import_module(
+        "examples.compliance_review.stage_4_conversational"
+    )
+    stage4_path = Path(stage4_module.__file__).resolve()
+    assert copied_checkout.resolve() in stage4_path.parents
+    assert get_source_root() == str(copied_checkout.resolve())
+
+    calls: list[dict[str, Any]] = []
+    session_id = f"{repository_marker}-checkout-session"
+    result_text = f"Loaded from copied checkout with {repository_marker}."
+
+    async def fake_run_agent_turn(
+        prompt: str,
+        *,
+        allowed_tools: list[str],
+        resume: str | None,
+        cwd: Path,
+    ) -> dict[str, Any]:
+        calls.append(
+            {
+                "prompt": prompt,
+                "allowed_tools": allowed_tools,
+                "resume": resume,
+                "cwd": cwd,
+            }
+        )
+        return fake_claude_response(
+            prompt=prompt,
+            cwd=cwd,
+            session_id=session_id,
+            result=result_text,
+        )
+
+    monkeypatch.setattr(stage4_module, "run_agent_turn", fake_run_agent_turn)
+
+    result = stage4_module.conversational_compliance_review.run(
+        f"Start {repository_marker} checkout review.",
+        f"{repository_marker}-checkout-review",
+        1,
+        cache=False,
+    ).wait()
+
+    assert isinstance(result, stage4_module.ClaudeAgentResult)
+    assert result.session_id == session_id
+    assert result.result == result_text
+    assert calls == [
+        {
+            "prompt": f"Start {repository_marker} checkout review.",
+            "allowed_tools": stage4_module.DEFAULT_ALLOWED_TOOLS,
+            "resume": None,
+            "cwd": stage4_module.EXAMPLE_DIR,
         }
     ]
 

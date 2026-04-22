@@ -20,6 +20,7 @@ from zenml.constants import (
     ENV_ZENML_SERVER,
     ENV_ZENML_STORE_PREFIX,
 )
+from zenml.utils.source_utils import set_custom_source_root
 
 _EARLY_TEST_ENV_VARS = (
     "KITARU_SERVER_URL",
@@ -133,6 +134,7 @@ def isolated_zenml_global_config(
         monkeypatch.delenv(env_name, raising=False)
     monkeypatch.delenv("KITARU_RUNNER", raising=False)
 
+    set_custom_source_root(None)
     _reset_runtime_configuration()
     _reset_env_applied()
 
@@ -150,6 +152,7 @@ def isolated_zenml_global_config(
 
     Client._reset_instance()
     GlobalConfiguration._reset_instance()
+    set_custom_source_root(None)
     _reset_runtime_configuration()
     _reset_env_applied()
 
