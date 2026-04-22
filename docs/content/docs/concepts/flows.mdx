@@ -136,9 +136,6 @@ my_agent.deploy()
 handle = my_agent.invoke(url="https://example.com")
 ```
 
-See [Deployments](/concepts/deployments) for versioning, tag routing, rollback,
-and invocation patterns.
-
 ## Rules to know
 
 - **Flow functions should compose checkpoints.** The flow body is the
@@ -154,7 +151,6 @@ and invocation patterns.
 
 - Learn how to break work into durable units with
   [Checkpoints](/concepts/checkpoints)
-- Ship a versioned, invocable flow with [Deployments](/concepts/deployments)
 - Attach structured data to your executions with
   [Logging and Metadata](/concepts/logging)
 - Understand how results and errors surface in the
