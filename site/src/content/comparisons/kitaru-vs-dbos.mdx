@@ -1,10 +1,11 @@
 ---
 competitor: "DBOS"
 competitorLogo: "/compare/dbos.svg"
-competitorTagline: "Durable, fault-tolerant, and scalable apps, built on Postgres."
+competitorTagline: ""
 title: "Kitaru vs DBOS: Durable execution, shaped around Python agents"
-description: "DBOS is a library for building reliable programs and durable workflows on Postgres, with SDKs for Python, TypeScript, Go, and Java. For operations, DBOS offers Conductor, and its paid plans advertise SOC 2/HIPAA-compliant tooling."
-cardSubtitle: "Same durability contract. Agent-native primitives (LLM calls, memory, artifacts) in the box."
+description: "DBOS and Kitaru both make code durable. DBOS is polyglot, Postgres-backed, and built for general app workflows. Kitaru is Python-first and shaped for agent loops: LLM calls, wait/resume, artifact lineage, and stack retargeting are primitives."
+cardSubtitle: "Durable execution, shaped around Python agents. LLM calls, memory, and artifacts in the box."
+ctaHeading: "Durable execution, shaped for your Python agent"
 ogImage: "https://assets.kitaru.ai/compare/9abe6a89/og-card.avif"
 order: 30
 ---
@@ -14,14 +15,16 @@ import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
 import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
 import PullQuote from '../../components/compare/PullQuote.astro';
-import DurableExecution from '../../components/compare/graphics/dbos/DurableExecution.astro';
 import LLMPrimitive from '../../components/compare/graphics/dbos/LLMPrimitive.astro';
 import ArtifactVersioning from '../../components/compare/graphics/dbos/ArtifactVersioning.astro';
-import FrameworkAgnostic from '../../components/compare/graphics/dbos/FrameworkAgnostic.astro';
+import StackDeployment from '../../components/compare/graphics/dbos/StackDeployment.astro';
+import NamedDeployments from '../../components/compare/graphics/dbos/NamedDeployments.astro';
 
-Kitaru is narrower on purpose. It's built for Python agents, with `@flow`, `@checkpoint`, `wait()`, `kitaru.llm()`, and first-class replay in the box.
+DBOS and Kitaru solve the same first-order problem. Code crashes, and you shouldn't start over. Both are durable-runtime libraries, both are Apache-2.0, both are self-hostable, both do checkpoint, replay, and resume. The honest differences start further down the stack.
 
-DBOS and Kitaru both solve the same first-order problem. When your agent crashes, you shouldn't start over. Where they differ is the shape of the code sitting on top, and the workload they were shaped for.
+DBOS is a polyglot durable workflow library on Postgres. It was shaped for the workloads every backend team ships: order processing, payment sagas, document approval, transactional side effects. Workflow state sits alongside your OLTP data in the same database, and Conductor gives ops a UI for scheduled workflows and durable queues.
+
+We built Kitaru around a different shape of work. An agent loop has expensive LLM calls, tool runs measured in minutes, humans approving drafts hours later, and artifact outputs you want to inspect after the fact. So we put those in the box: `kitaru.llm()` with alias-resolved secrets and per-checkpoint cost, `wait()` as a typed primitive, versioned artifact lineage across runs, and stack-based deploy to Kubernetes, SageMaker, Vertex AI, or AzureML without a rewrite.
 
 <WhenToUseEach
   kitaru={{
@@ -39,54 +42,55 @@ DBOS and Kitaru both solve the same first-order problem. When your agent crashes
     items: [
       "Running durable workflows across Python, TypeScript, Go, and Java services with one contract",
       "Leaning on durable queues, cron schedules, and the Conductor UI for ops",
-      "Need DBOS Conductor's managed workflow console and, on paid plans, SOC 2/HIPAA-compliant tooling",
-      "Already deep into Postgres and want durable state living in the same database",
+      "Needing DBOS Conductor's managed workflow console, and on paid plans, SOC 2/HIPAA-compliant tooling",
+      "Already deep into Postgres and want durable state living in the same database as your app",
     ],
   }}
 />
 
 <PullQuote
-  quote="DBOS makes workflow steps durable and recoverable. Kitaru is opinionated around Python agent workloads, with tracked LLM calls, artifacts, and a first-class wait/resume flow."
+  quote="DBOS was shaped for app workflows on Postgres. Kitaru was shaped for Python agent loops. Both are durable runtimes. The ergonomics diverge at the primitives each one ships."
 />
 
-<FeatureWithGraphic title="Durable execution, shaped around dynamic agent loops">
-  <DurableExecution slot="graphic" />
-
-  DBOS and Kitaru both survive crashes. The real fight is over what kind of code sits on top.
-
-  - **Code structure:** DBOS expects `@DBOS.workflow` bodies to be deterministic, with side effects pushed into `@DBOS.step`. Kitaru flows are plain Python functions. if/else, while, try/except, runtime-decided branches, all first-class.
-  - **Checkpoint boundary:** In DBOS, every step is durable. In Kitaru, you mark with `@checkpoint` what's expensive enough that re-running it would burn real tokens. Everything a checkpoint returns is a versioned artifact.
-  - **Replay:** `kitaru replay` resumes from the last completed `@checkpoint` and loads cached artifacts for everything upstream. You fix the bug at step 9, you don't re-pay for steps 1 through 8.
-</FeatureWithGraphic>
-
-<FeatureWithGraphic title="LLM calls as a first-class primitive" reverse={true}>
+<FeatureWithGraphic title="LLM calls as a first-class primitive">
   <LLMPrimitive slot="graphic" />
 
-  In DBOS, an LLM call is usually something you make inside your own step or through one of DBOS's AI integrations; it is not a DBOS-specific primitive in the way `kitaru.llm()` is. Kitaru treats it as the primary unit of cost, latency, and failure in an agent, and it shows in the API surface.
+  In DBOS, an LLM call is something you make inside your own `@DBOS.step`. DBOS ships OpenTelemetry instrumentation for OpenAI, LiteLLM, and LangChain, so traces show up in Conductor. That gets you visibility. It doesn't get you a primitive. We built `kitaru.llm()` so the call itself is part of the runtime.
 
-  - **API surface:** In DBOS you call `openai.chat.completions.create(...)` yourself inside a `@DBOS.step`. In Kitaru you call `kitaru.llm(prompt, model="fast")`.
-  - **Key handling:** DBOS leaves it to you. Kitaru resolves the model alias and injects the provider key from the active stack.
-  - **Cost and latency observability:** `kitaru.llm()` logs latency, token counts, and cost against the enclosing checkpoint. You don't need a separate LLM logging pipeline.
+  - **Alias-resolved secrets:** `kitaru.llm(prompt, model="fast")` resolves the model alias and injects the provider key from the active stack. The same call retargets from OpenAI to Anthropic to a self-hosted model without touching code.
+  - **Per-checkpoint cost roll-up:** Latency, token counts, and cost land under the enclosing `@checkpoint` automatically. Run inspection shows you the cost of step 9 without a separate LLM logging pipeline.
+  - **Replay:** On replay, the captured response is loaded from the checkpoint. The provider isn't hit again unless the input changed.
 </FeatureWithGraphic>
 
-<FeatureWithGraphic title="Artifact versioning across every checkpoint">
+<FeatureWithGraphic title="Artifact versioning across every checkpoint" reverse={true}>
   <ArtifactVersioning slot="graphic" />
 
-  In Kitaru, every checkpoint's inputs and outputs are persisted and versioned automatically, not just stashed for resumption.
+  Every `@checkpoint` in Kitaru persists its inputs and outputs as versioned artifacts. Not just cached for resumption. Referenced, diffed, loaded into the next run, inspected through the UI.
 
-  - **Cross-run lineage:** When using Kitaru, outputs from one run are artifacts you can reference, diff against, or feed into the next run. DBOS stores step I/O for resumption, not for comparison across executions.
-  - **Diff in the same UI as the run:** With Kitaru, you can inspect execution artifacts, checkpoints, and logs through the UI or client APIs instead of digging through database tables.
-  - **Cost attached to artifacts:** Each checkpoint in Kitaru carries the LLM calls beneath it and the dollars spent. Reasoning about what a run cost is part of the same view.
+  - **Cross-run lineage:** Outputs from yesterday's run are artifacts you can reference or diff against today's. DBOS step I/O is persisted in Postgres to resume a workflow. It isn't surfaced as versioned, cross-run artifacts with a dedicated diff view.
+  - **Payload shape:** Artifacts live in your own S3, GCS, or Azure Blob. When a checkpoint output is a 50MB model completion or a document bundle, that's the right storage. DBOS keeps durable state next to your OLTP data, which is the right call when durable state is transactional rows.
+  - **Same UI as the run:** Artifacts, checkpoints, logs, and costs show up in one place. No `psql` console required to reconstruct what the agent produced.
 </FeatureWithGraphic>
 
-<FeatureWithGraphic title="Framework agnostic, by design" reverse={true}>
-  <FrameworkAgnostic slot="graphic" />
+<FeatureWithGraphic title="Stack-based deploy to your own cloud">
+  <StackDeployment slot="graphic" />
 
-  Kitaru isn't trying to replace PydanticAI, OpenAI SDK, Claude Agent SDK, or raw Python. It sits underneath them.
+  DBOS is a library. You deploy the Python app however you already deploy Python apps, and state lives in whatever Postgres you point it at. That's simple and portable. Kitaru treats "where does this run" as a stack, and a stack is the unit of retarget.
 
-  - **Adapter model:** Wrap your existing agent in a `@flow` and `@checkpoint` and you get durability without a rewrite.
-  - **Inner loop vs outer loop:** Framework handles the inner loop (tool calling, context management, compaction). Kitaru handles the outer loop (durability, replay, artifact tracking, sandboxes, sessions).
-  - **Not a framework or a tracing tool:** If you want a dashboard that logs spans, Kitaru isn't that. But if you want something that stops your 2-hour run from blowing up at the 97th minute, this is it.
+  - **One config swap, four clouds:** `kitaru deploy --stack sagemaker` moves the same flow from your laptop to AWS SageMaker. Swap `sagemaker` for `kubernetes`, `vertex`, or `azureml` and the flow retargets without a rewrite.
+  - **Cloud integration for free:** IAM, GPU quotas, autoscaling, and the right object store are inherited from the target stack. Under DBOS, that's wiring you do yourself in the deployment tool of your choice.
+  - **Build once, serve once, deploy anywhere:** `kitaru build` packages the flow as a container. `kitaru serve` runs it locally with the full durability contract. `kitaru deploy` ships it to the remote stack. Same code path each time.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Named deployments you invoke by name" reverse={true}>
+  <NamedDeployments slot="graphic" />
+
+  DBOS gives you scheduled workflows and durable queues with concurrency limits and deduplication. That's the operational shape: queue a job, assign a workflow ID from your code, recover on failure. Kitaru ships a different shape: immutable versioned deployments you invoke by name.
+
+  - **Named, versioned, tag-routed:** A flow ships as `review_flow@v3`. Tags (`default`, `staging`, whatever you want) route traffic. Roll a new version forward by moving a tag, not redeploying every caller.
+  - **Invoke from anywhere:** CLI, Python SDK, MCP server, or the generated curl snippet. The dashboard gives you a handle the rest of your stack can call. DBOS workflows start from application code with a workflow ID you assign.
+  - **Workspace-scoped auth:** No per-deployment tokens to rotate when you ship a new version. Keys are scoped to the workspace, not the individual flow.
+  - **Scheduling is honest:** DBOS ships `@DBOS.scheduled()` with cron and `Queue` with concurrency + dedup. Kitaru stacks lean on the underlying cloud's scheduler or a periodic invocation at the call site. If cron and queues are your happy path, DBOS has a thicker story there.
 </FeatureWithGraphic>
 
 ## What makes Kitaru unique
@@ -95,18 +99,17 @@ DBOS and Kitaru both solve the same first-order problem. When your agent crashes
   competitorLabel="DBOS"
   rows={[
     { feature: "Durable execution with checkpoint replay", kitaru: true, competitor: true },
-    { feature: "Replay skips completed checkpoints without re-running LLM calls", kitaru: true, competitor: true },
-    { feature: "`kitaru.llm()` primitive with token and cost tracking per checkpoint", kitaru: true, competitor: false },
-    { feature: "Artifact versioning across runs", kitaru: true, competitor: false },
-    { feature: "First-class `wait()` / input / resume primitive", kitaru: true, competitor: false },
-    { feature: "Dynamic Python flows without determinism constraints", kitaru: true, competitor: false },
-    { feature: "Per-checkpoint compute target (mix local, Kubernetes, sandboxes)", kitaru: true, competitor: false },
+    { feature: "Replay skips completed steps without re-running LLM calls", kitaru: true, competitor: true },
+    { feature: "`kitaru.llm()` primitive with alias-resolved keys and per-checkpoint cost roll-up", kitaru: true, competitor: false },
+    { feature: "Artifact versioning across runs (diffable across executions)", kitaru: true, competitor: false },
+    { feature: "Typed `wait()` with schema-validated input", kitaru: true, competitor: false },
+    { feature: "Isolated checkpoints (`runtime=\"isolated\"`) for container-per-step on remote stacks", kitaru: true, competitor: false },
     { feature: "Stack retarget to Kubernetes, SageMaker, Vertex AI, AzureML", kitaru: true, competitor: false },
-    { feature: "Framework adapters (PydanticAI, OpenAI SDK, CrewAI)", kitaru: true, competitor: false },
+    { feature: "Named, versioned deployments with tag routing", kitaru: true, competitor: false },
+    { feature: "Documented framework adapter for PydanticAI (more coming)", kitaru: true, competitor: false },
     { feature: "Polyglot SDKs (Python, TypeScript, Go, Java)", kitaru: false, competitor: true },
     { feature: "Native cron scheduling and durable queues", kitaru: false, competitor: true },
     { feature: "SOC 2 / HIPAA compliant managed control plane", kitaru: false, competitor: true },
-    { feature: "Execution inspection, logs, and lifecycle control", kitaru: true, competitor: true },
   ]}
 />
 
@@ -138,43 +141,56 @@ def review_flow(topic: str) -> str:
     text = draft(brief)
 
     approved = wait(
+        name="approve",
         schema=bool,
         question=f"Approve this draft?\\n\\n{text[:500]}",
     )
     return text if approved else "Rejected"
 
 review_flow.run("Durable agents")`}
-  competitorCode={`from dbos import DBOS, Queue
+  competitorCode={`from dbos import DBOS
+import openai
 
-queue = Queue("agent-queue")
+client = openai.OpenAI()
 
 @DBOS.step()
 def research(topic: str) -> str:
-    # You own the LLM call, key handling, prompt/cost logging.
-    return call_llm(f"Research: {topic}")
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user",
+                   "content": f"Research: {topic}"}],
+    )
+    return resp.choices[0].message.content
 
 @DBOS.step()
 def draft(brief: str) -> str:
-    return call_llm(f"Write a draft:\\n{brief}")
+    resp = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user",
+                   "content": f"Write a draft:\\n{brief}"}],
+    )
+    return resp.choices[0].message.content
 
 @DBOS.workflow()
 def review_flow(topic: str) -> str:
     brief = research(topic)
     text = draft(brief)
 
-    # Human approval via DBOS.send / recv on a separate topic.
-    approved = DBOS.recv("approval", timeout_seconds=86400)
+    # Human approval via DBOS.send / recv messaging.
+    approved = DBOS.recv(timeout_seconds=86400)
     return text if approved else "Rejected"
 
-# Plus: Postgres connection, start the DBOS runtime,
-# send the approval via DBOS.send from a separate process.`}
+# Plus: start the DBOS runtime, send approval
+# from another process via DBOS.send.`}
+/>
+
+<PullQuote
+  quote="If your durability problem is polyglot services against Postgres with a SOC 2 or HIPAA control plane on day one, DBOS is better-shaped for that workload. Be honest about which side you're on."
 />
 
 ## Ready to try Kitaru?
 
-If your durability problem spans Python, TypeScript, Go, and Java services, and your compliance story needs a SOC 2/HIPAA control plane today, DBOS is the tool for the job.
-
-If your durability problem is shaped like a Python agent loop, Kitaru removes the glue layer you'd otherwise write on top.
+If your durability problem is shaped like a Python agent loop, Kitaru removes the glue layer you'd otherwise write on top of a general-purpose workflow engine.
 
 `pip install kitaru`, add `@flow` and `@checkpoint`, and run your first durable agent in minutes. Check [the docs](/docs) for how `@flow`, `@checkpoint`, `kitaru.llm()`, `wait()`, and replay compose.
 

@@ -72,7 +72,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 6 L20 6 M4 12 L20 12 M4 18 L20 18" />
     </svg>
-    <span><strong>DBOS:</strong> step inputs and outputs are cached in Postgres for resumption. Not indexed as cross-run artifacts you can diff.</span>
+    <span><strong>DBOS:</strong> step I/O is persisted in Postgres to resume workflows. It isn't surfaced as versioned, cross-run artifacts with a dedicated diff view.</span>
   </div>
 </figure>
 

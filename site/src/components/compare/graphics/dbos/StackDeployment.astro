@@ -1,0 +1,232 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">DBOS</span>
+      <span class="panel-sub">Library embedded in your Python service</span>
+    </div>
+    <div class="stack">
+      <div class="card">
+        <span class="mono dim">your_app.py</span>
+        <span class="mono accent">import DBOS</span>
+      </div>
+      <svg class="arrow" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4 L12 20 M6 14 L12 20 L18 14" />
+      </svg>
+      <div class="card card--soft">
+        <span class="mono primary">deploy anywhere Python deploys</span>
+        <span class="mono dim">your container · your VM · your FaaS</span>
+      </div>
+      <svg class="arrow" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4 L12 20 M6 14 L12 20 L18 14" />
+      </svg>
+      <div class="db">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <ellipse cx="12" cy="5" rx="8" ry="3" />
+          <path d="M4 5 L4 19 A8 3 0 0 0 20 19 L20 5" />
+          <path d="M4 12 A8 3 0 0 0 20 12" />
+        </svg>
+        <span class="mono">your Postgres</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru</span>
+      <span class="panel-sub">Stack-targeted deploy, one config swap</span>
+    </div>
+    <div class="flow">
+      <div class="cmd">
+        <span class="mono accent">kitaru build</span>
+        <span class="mono dim">package flow as container</span>
+      </div>
+      <svg class="arrow" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4 L12 20 M6 14 L12 20 L18 14" />
+      </svg>
+      <div class="cmd">
+        <span class="mono accent">kitaru deploy --stack sagemaker</span>
+      </div>
+    </div>
+    <div class="targets">
+      <div class="target">
+        <span class="target-key">K8s</span>
+        <span class="target-val">kubernetes</span>
+      </div>
+      <div class="target">
+        <span class="target-key">AWS</span>
+        <span class="target-val">SageMaker</span>
+      </div>
+      <div class="target">
+        <span class="target-key">GCP</span>
+        <span class="target-val">Vertex AI</span>
+      </div>
+      <div class="target">
+        <span class="target-key">Az</span>
+        <span class="target-val">AzureML</span>
+      </div>
+    </div>
+    <div class="bucket">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 8 L20 8 L18.5 20 L5.5 20 Z M4 8 L6 4 L18 4 L20 8" />
+      </svg>
+      <span class="mono">artifacts in your own S3 · GCS · Azure Blob</span>
+    </div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 18px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 14px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .stack, .flow {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .card, .cmd {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    background: var(--color-surface);
+  }
+  .card--soft { background: var(--color-surface-warm); border-style: dashed; }
+  .cmd { background: var(--color-bg); }
+
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+  }
+  .primary { color: var(--color-primary); font-weight: 600; }
+  .accent { color: var(--color-accent); font-weight: 600; }
+  .dim { color: var(--color-muted); }
+
+  .arrow {
+    width: 16px;
+    height: 16px;
+    align-self: center;
+    fill: none;
+    stroke: var(--color-muted);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .db {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-bg);
+  }
+  .db svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: var(--color-secondary);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+  }
+  .db .mono {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  .targets {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+    margin: 10px 0 8px;
+  }
+  .target {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 10px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-surface-warm);
+  }
+  .target-key {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--color-accent);
+    letter-spacing: 0.02em;
+  }
+  .target-val {
+    font-size: 11px;
+    color: var(--color-primary);
+    font-weight: 500;
+  }
+
+  .bucket {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-accent);
+    border-radius: 8px;
+    background: var(--color-accent-light);
+    margin-top: auto;
+  }
+  .bucket svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+  }
+  .bucket .mono {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+    .targets { grid-template-columns: 1fr 1fr; }
+  }
+</style>
