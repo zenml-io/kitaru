@@ -1,0 +1,200 @@
+---
+---
+
+<figure class="fig">
+  <div class="layer layer--inner">
+    <div class="layer-label">
+      <span class="label-main">Inner loop</span>
+      <span class="label-sub">tool calling · context · compaction</span>
+    </div>
+    <div class="frameworks">
+      <span class="fw-pill">PydanticAI</span>
+      <span class="fw-pill">OpenAI SDK</span>
+      <span class="fw-pill">Claude Agent SDK</span>
+      <span class="fw-pill fw-pill--muted">raw Python</span>
+    </div>
+  </div>
+
+  <svg class="connector" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M20 0 L20 30 Q20 50 40 50 L60 50 Q80 50 80 30 L80 0" />
+    <path d="M50 0 L50 55" />
+  </svg>
+
+  <div class="wrapper">
+    <div class="wrapper-chip">
+      <span class="mono accent">@flow</span>
+      <span class="mono dim">wraps your agent</span>
+    </div>
+    <svg class="arrow-down" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4 L12 20 M6 14 L12 20 L18 14" />
+    </svg>
+  </div>
+
+  <div class="layer layer--outer">
+    <div class="layer-label">
+      <span class="label-main label-main--accent">Kitaru · outer loop</span>
+      <span class="label-sub">durability · replay · artifacts · sessions</span>
+    </div>
+    <div class="primitives">
+      <div class="prim">
+        <span class="prim-key">@checkpoint</span>
+        <span class="prim-val">versioned artifacts</span>
+      </div>
+      <div class="prim">
+        <span class="prim-key">wait()</span>
+        <span class="prim-val">hours-long pauses</span>
+      </div>
+      <div class="prim">
+        <span class="prim-key">replay</span>
+        <span class="prim-val">skip the expensive parts</span>
+      </div>
+      <div class="prim">
+        <span class="prim-key">sessions</span>
+        <span class="prim-val">sandboxed compute</span>
+      </div>
+    </div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  .layer {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 14px 16px 16px;
+    background: var(--color-surface);
+  }
+  .layer--inner {
+    background: var(--color-surface-warm);
+  }
+  .layer--outer {
+    border-color: var(--color-accent);
+    background: var(--color-surface);
+  }
+
+  .layer-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .label-main {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .label-main--accent { color: var(--color-accent); }
+  .label-sub {
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+
+  .frameworks {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .fw-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+  .fw-pill--muted {
+    color: var(--color-muted);
+    background: var(--color-surface-warm);
+    font-weight: 500;
+    font-style: italic;
+  }
+
+  .connector {
+    width: 100%;
+    height: 28px;
+    margin: -2px 0;
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 1.2;
+    stroke-linecap: round;
+  }
+  .connector path { vector-effect: non-scaling-stroke; }
+
+  .wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin: 0 auto 2px;
+  }
+  .wrapper-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    border: 1px solid var(--color-accent);
+    border-radius: 999px;
+    background: var(--color-accent-light);
+  }
+  .wrapper-chip .mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .wrapper-chip .accent { color: var(--color-accent); font-weight: 700; }
+  .wrapper-chip .dim { color: var(--color-secondary); }
+
+  .arrow-down {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .primitives {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .prim {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px 12px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-surface-warm);
+  }
+  .prim-key {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+  .prim-val {
+    font-size: 11px;
+    color: var(--color-secondary);
+  }
+
+  @media (max-width: 520px) {
+    .primitives { grid-template-columns: 1fr; }
+  }
+</style>

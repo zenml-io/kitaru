@@ -1,0 +1,182 @@
+---
+competitor: "DBOS"
+competitorLogo: "/compare/dbos.svg"
+competitorTagline: "Durable, fault-tolerant, and scalable apps, built on Postgres."
+title: "Kitaru vs DBOS: Durable execution, shaped around Python agents"
+description: "DBOS is a library for building reliable programs and durable workflows on Postgres, with SDKs for Python, TypeScript, Go, and Java. For operations, DBOS offers Conductor, and its paid plans advertise SOC 2/HIPAA-compliant tooling."
+cardSubtitle: "Same durability contract. Agent-native primitives (LLM calls, memory, artifacts) in the box."
+ogImage: "https://assets.kitaru.ai/compare/9abe6a89/og-card.avif"
+order: 30
+---
+
+import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
+import ComparisonTable from '../../components/compare/ComparisonTable.astro';
+import CodeCompare from '../../components/compare/CodeCompare.astro';
+import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import PullQuote from '../../components/compare/PullQuote.astro';
+import DurableExecution from '../../components/compare/graphics/dbos/DurableExecution.astro';
+import LLMPrimitive from '../../components/compare/graphics/dbos/LLMPrimitive.astro';
+import ArtifactVersioning from '../../components/compare/graphics/dbos/ArtifactVersioning.astro';
+import FrameworkAgnostic from '../../components/compare/graphics/dbos/FrameworkAgnostic.astro';
+
+Kitaru is narrower on purpose. It's built for Python agents, with `@flow`, `@checkpoint`, `wait()`, `kitaru.llm()`, and first-class replay in the box.
+
+DBOS and Kitaru both solve the same first-order problem. When your agent crashes, you shouldn't start over. Where they differ is the shape of the code sitting on top, and the workload they were shaped for.
+
+<WhenToUseEach
+  kitaru={{
+    title: "Use Kitaru if you are",
+    items: [
+      "Building Python agents and want `@flow`, `@checkpoint`, `kitaru.llm()`, `wait()`, and replay as the base primitives, not patterns you hand-roll on top of steps",
+      "Replaying a failed run from the last good checkpoint without paying for the LLM calls that already succeeded upstream",
+      "Retargeting the same agent across Kubernetes, SageMaker, Vertex AI, or AzureML with one stack swap, not a rewrite",
+      "Wrapping an existing Python agent in durability, or using Kitaru's documented PydanticAI adapter, without rewriting the core agent logic",
+      "Writing agent loops with runtime branches, tool calls, and human-in-the-loop waits measured in hours or days",
+    ],
+  }}
+  competitor={{
+    title: "Use DBOS if you are",
+    items: [
+      "Running durable workflows across Python, TypeScript, Go, and Java services with one contract",
+      "Leaning on durable queues, cron schedules, and the Conductor UI for ops",
+      "Need DBOS Conductor's managed workflow console and, on paid plans, SOC 2/HIPAA-compliant tooling",
+      "Already deep into Postgres and want durable state living in the same database",
+    ],
+  }}
+/>
+
+<PullQuote
+  quote="DBOS makes workflow steps durable and recoverable. Kitaru is opinionated around Python agent workloads, with tracked LLM calls, artifacts, and a first-class wait/resume flow."
+/>
+
+<FeatureWithGraphic title="Durable execution, shaped around dynamic agent loops">
+  <DurableExecution slot="graphic" />
+
+  DBOS and Kitaru both survive crashes. The real fight is over what kind of code sits on top.
+
+  - **Code structure:** DBOS expects `@DBOS.workflow` bodies to be deterministic, with side effects pushed into `@DBOS.step`. Kitaru flows are plain Python functions. if/else, while, try/except, runtime-decided branches, all first-class.
+  - **Checkpoint boundary:** In DBOS, every step is durable. In Kitaru, you mark with `@checkpoint` what's expensive enough that re-running it would burn real tokens. Everything a checkpoint returns is a versioned artifact.
+  - **Replay:** `kitaru replay` resumes from the last completed `@checkpoint` and loads cached artifacts for everything upstream. You fix the bug at step 9, you don't re-pay for steps 1 through 8.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="LLM calls as a first-class primitive" reverse={true}>
+  <LLMPrimitive slot="graphic" />
+
+  In DBOS, an LLM call is usually something you make inside your own step or through one of DBOS's AI integrations; it is not a DBOS-specific primitive in the way `kitaru.llm()` is. Kitaru treats it as the primary unit of cost, latency, and failure in an agent, and it shows in the API surface.
+
+  - **API surface:** In DBOS you call `openai.chat.completions.create(...)` yourself inside a `@DBOS.step`. In Kitaru you call `kitaru.llm(prompt, model="fast")`.
+  - **Key handling:** DBOS leaves it to you. Kitaru resolves the model alias and injects the provider key from the active stack.
+  - **Cost and latency observability:** `kitaru.llm()` logs latency, token counts, and cost against the enclosing checkpoint. You don't need a separate LLM logging pipeline.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Artifact versioning across every checkpoint">
+  <ArtifactVersioning slot="graphic" />
+
+  In Kitaru, every checkpoint's inputs and outputs are persisted and versioned automatically, not just stashed for resumption.
+
+  - **Cross-run lineage:** When using Kitaru, outputs from one run are artifacts you can reference, diff against, or feed into the next run. DBOS stores step I/O for resumption, not for comparison across executions.
+  - **Diff in the same UI as the run:** With Kitaru, you can inspect execution artifacts, checkpoints, and logs through the UI or client APIs instead of digging through database tables.
+  - **Cost attached to artifacts:** Each checkpoint in Kitaru carries the LLM calls beneath it and the dollars spent. Reasoning about what a run cost is part of the same view.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Framework agnostic, by design" reverse={true}>
+  <FrameworkAgnostic slot="graphic" />
+
+  Kitaru isn't trying to replace PydanticAI, OpenAI SDK, Claude Agent SDK, or raw Python. It sits underneath them.
+
+  - **Adapter model:** Wrap your existing agent in a `@flow` and `@checkpoint` and you get durability without a rewrite.
+  - **Inner loop vs outer loop:** Framework handles the inner loop (tool calling, context management, compaction). Kitaru handles the outer loop (durability, replay, artifact tracking, sandboxes, sessions).
+  - **Not a framework or a tracing tool:** If you want a dashboard that logs spans, Kitaru isn't that. But if you want something that stops your 2-hour run from blowing up at the 97th minute, this is it.
+</FeatureWithGraphic>
+
+## What makes Kitaru unique
+
+<ComparisonTable
+  rows={[
+    { feature: "Durable execution with checkpoint replay", kitaru: true, competitor: true },
+    { feature: "Replay skips completed checkpoints without re-running LLM calls", kitaru: true, competitor: true },
+    { feature: "`kitaru.llm()` primitive with token and cost tracking per checkpoint", kitaru: true, competitor: false },
+    { feature: "Artifact versioning across runs", kitaru: true, competitor: false },
+    { feature: "First-class `wait()` / input / resume primitive", kitaru: true, competitor: false },
+    { feature: "Dynamic Python flows without determinism constraints", kitaru: true, competitor: false },
+    { feature: "Per-checkpoint compute target (mix local, Kubernetes, sandboxes)", kitaru: true, competitor: false },
+    { feature: "Stack retarget to Kubernetes, SageMaker, Vertex AI, AzureML", kitaru: true, competitor: false },
+    { feature: "Framework adapters (PydanticAI, OpenAI SDK, CrewAI)", kitaru: true, competitor: false },
+    { feature: "Polyglot SDKs (Python, TypeScript, Go, Java)", kitaru: false, competitor: true },
+    { feature: "Native cron scheduling and durable queues", kitaru: false, competitor: true },
+    { feature: "SOC 2 / HIPAA compliant managed control plane", kitaru: false, competitor: true },
+    { feature: "Execution inspection, logs, and lifecycle control", kitaru: true, competitor: true },
+  ]}
+/>
+
+## Code comparison
+
+<CodeCompare
+  kitaruLabel="Kitaru"
+  competitorLabel="DBOS (Python SDK)"
+  kitaruCode={`from kitaru import flow, checkpoint, wait
+import kitaru
+
+@checkpoint
+def research(topic: str) -> str:
+    return kitaru.llm(
+        prompt=f"Research: {topic}. Return a brief.",
+        model="fast",
+    )
+
+@checkpoint
+def draft(brief: str) -> str:
+    return kitaru.llm(
+        prompt=f"Write a draft from this brief:\\n{brief}",
+        model="claude-sonnet-4-6",
+    )
+
+@flow
+def review_flow(topic: str) -> str:
+    brief = research(topic)
+    text = draft(brief)
+
+    approved = wait(
+        schema=bool,
+        question=f"Approve this draft?\\n\\n{text[:500]}",
+    )
+    return text if approved else "Rejected"
+
+review_flow.run("Durable agents")`}
+  competitorCode={`from dbos import DBOS, Queue
+
+queue = Queue("agent-queue")
+
+@DBOS.step()
+def research(topic: str) -> str:
+    # You own the LLM call, key handling, prompt/cost logging.
+    return call_llm(f"Research: {topic}")
+
+@DBOS.step()
+def draft(brief: str) -> str:
+    return call_llm(f"Write a draft:\\n{brief}")
+
+@DBOS.workflow()
+def review_flow(topic: str) -> str:
+    brief = research(topic)
+    text = draft(brief)
+
+    # Human approval via DBOS.send / recv on a separate topic.
+    approved = DBOS.recv("approval", timeout_seconds=86400)
+    return text if approved else "Rejected"
+
+# Plus: Postgres connection, start the DBOS runtime,
+# send the approval via DBOS.send from a separate process.`}
+/>
+
+## Ready to try Kitaru?
+
+If your durability problem spans Python, TypeScript, Go, and Java services, and your compliance story needs a SOC 2/HIPAA control plane today, DBOS is the tool for the job.
+
+If your durability problem is shaped like a Python agent loop, Kitaru removes the glue layer you'd otherwise write on top.
+
+`pip install kitaru`, add `@flow` and `@checkpoint`, and run your first durable agent in minutes. Check [the docs](/docs) for how `@flow`, `@checkpoint`, `kitaru.llm()`, `wait()`, and replay compose.
+
+<div class="compare-inline-cta">
+  <a href="/get-started" class="btn-primary">Get Started</a>
+</div>
