@@ -93,16 +93,22 @@ options <span class="op">=</span> <span class="fn">ClaudeAgentOptions</span>(
               <span class="one-import-code-label is-after">With Kitaru</span>
               <span class="one-import-code-filename">agent.py</span>
             </div>
-            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru.adapters.claude_agent <span class="kw">import</span> kitaru_query
-<span class="kw">from</span> claude_agent_sdk <span class="kw">import</span> ClaudeAgentOptions
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru <span class="kw">import</span> flow, checkpoint
+<span class="kw">from</span> claude_agent_sdk <span class="kw">import</span> query, ClaudeAgentOptions
 
 options <span class="op">=</span> <span class="fn">ClaudeAgentOptions</span>(
     system_prompt<span class="op">=</span><span class="str">"You are a compliance reviewer."</span>,
     allowed_tools<span class="op">=</span>[<span class="str">"search_docs"</span>, <span class="str">"fetch_policy"</span>],
 )
 
-<span class="kw">async for</span> msg <span class="kw">in</span> <span class="fn">kitaru_query</span>(prompt<span class="op">=</span>task, options<span class="op">=</span>options):
-    process(msg)</code></pre>
+<span class="dec">@checkpoint</span>
+<span class="kw">async def</span> <span class="fn">run_claude</span>(task: <span class="var">str</span>) <span class="op">-></span> <span class="var">list</span>:
+    <span class="kw">return</span> [msg <span class="kw">async for</span> msg <span class="kw">in</span> <span class="fn">query</span>(prompt<span class="op">=</span>task, options<span class="op">=</span>options)]
+
+<span class="dec">@flow</span>
+<span class="kw">async def</span> <span class="fn">review</span>(task: <span class="var">str</span>):
+    <span class="kw">for</span> msg <span class="kw">in</span> <span class="kw">await</span> <span class="fn">run_claude</span>(task):
+        process(msg)</code></pre>
           </div>
         </div>
       </div>
