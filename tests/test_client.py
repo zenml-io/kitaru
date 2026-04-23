@@ -640,6 +640,52 @@ def test_deployments_create_moves_exclusive_tags_from_previous_versions() -> Non
     assert client_mock.update_snapshot.call_count == 2
 
 
+def test_deployments_create_warns_if_exclusive_tag_cleanup_fails() -> None:
+    source_snapshot = _DummySnapshot(name="temporary-source")
+    v1 = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("stable", exclusive=True)],
+    )
+    created_v2 = _DummySnapshot(
+        name="kitaru::research_flow::v2",
+        tags=[deployment_public_tag("stable", exclusive=True)],
+    )
+
+    def update_snapshot(
+        *,
+        name_id_or_prefix: str,
+        name: str | None = None,
+        **_: Any,
+    ) -> _DummySnapshot:
+        if name is not None:
+            assert str(name_id_or_prefix) == str(source_snapshot.id)
+            return created_v2
+        raise RuntimeError("temporary backend outage")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[v1])
+        client_mock.update_snapshot.side_effect = update_snapshot
+
+        client = KitaruClient()
+        with pytest.warns(UserWarning, match="failed to remove create-time exclusive"):
+            deployment = client.deployments.create(
+                flow="research_flow",
+                source_snapshot=source_snapshot,
+                tags={"stable": True},
+            )
+
+    assert deployment.version == 2
+    assert deployment.tags == {"stable": True}
+    assert client_mock.update_snapshot.call_count == 2
+
+
 def test_deployments_tag_default_is_exclusive_and_untag_rejects_default() -> None:
     v1 = _DummySnapshot(
         name="kitaru::research_flow::v1",

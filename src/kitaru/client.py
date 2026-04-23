@@ -18,6 +18,7 @@ from __future__ import annotations
 import builtins
 import importlib
 import sys
+import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any, Literal, Protocol, cast, runtime_checkable
@@ -1450,7 +1451,7 @@ class _DeploymentsAPI:
         target: DeploymentRecord,
         previous_snapshots: builtins.list[Any],
     ) -> None:
-        """Remove create-time exclusive tags from older deployment versions."""
+        """Best-effort removal of create-time exclusive tags from older versions."""
         exclusive_tags = [tag for tag, exclusive in target.tags.items() if exclusive]
         if not exclusive_tags:
             return
@@ -1517,10 +1518,28 @@ class _DeploymentsAPI:
                     "Backend created a snapshot that does not have a valid "
                     f"Kitaru deployment name: {getattr(created, 'name', None)!r}."
                 )
-            self._enforce_create_exclusive_tags(
-                target=deployment,
-                previous_snapshots=snapshots,
-            )
+            try:
+                self._enforce_create_exclusive_tags(
+                    target=deployment,
+                    previous_snapshots=snapshots,
+                )
+            except Exception as exc:
+                exclusive_tags = sorted(
+                    tag for tag, exclusive in deployment.tags.items() if exclusive
+                )
+                tag_text = ", ".join(exclusive_tags) if exclusive_tags else "(none)"
+                warnings.warn(
+                    "Created deployment "
+                    f"{deployment.flow!r} v{deployment.version}, but failed to "
+                    "remove create-time exclusive tag(s) from older versions: "
+                    f"{tag_text}. The deployment exists and can be used, but older "
+                    "versions might still hold those exclusive tags. Retry by "
+                    f"re-applying the tag(s) to v{deployment.version} (for example "
+                    "via `deployments.tag(..., exclusive=True)`). "
+                    f"Cleanup error: {exc}",
+                    UserWarning,
+                    stacklevel=2,
+                )
             mark_deployment_known(deployment)
             return self._wrap(deployment)
 
