@@ -24,6 +24,7 @@ const comparisons = defineCollection({
     competitorLogo: z.string().optional(),
     competitorTagline: z.string(),
     title: z.string(),
+    shortTitle: z.string().optional(),
     description: z.string(),
     cardSubtitle: z.string(),
     ctaHeading: z.string().default('Ready to try Kitaru?'),
