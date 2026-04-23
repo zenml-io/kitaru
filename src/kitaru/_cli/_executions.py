@@ -124,6 +124,11 @@ def _parse_image_option(
     if isinstance(parsed, (dict, str)):
         return parsed
 
+    if not from_file:
+        stripped = raw_value.lstrip()
+        if not stripped.startswith(("{", "[")):
+            return raw_value
+
     if from_file and path is not None:
         raise ValueError(
             f"`{option_name}` file '{path}' must contain a JSON string or object."

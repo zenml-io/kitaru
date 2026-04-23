@@ -901,10 +901,37 @@ def test_build_image_file_parses_json_object(
     assert json.loads(capsys.readouterr().out)["command"] == "build"
 
 
-def test_build_rejects_non_string_non_object_image_json(
+@pytest.mark.parametrize("inline_value", ["null", "true", "123"])
+def test_build_accepts_inline_json_scalar_spelling_as_base_image(
+    inline_value: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`--image` should reject JSON lists/scalars instead of forwarding them."""
+    """Inline scalar-looking values should be treated as base-image shorthand."""
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub(tags={})
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["build", "demo.py:demo_flow", "--image", inline_value, "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        image=ImageSettings(base_image=inline_value),
+        publish_default_on_first_deploy=False,
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "build"
+
+
+def test_build_rejects_structured_non_object_image_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--image` should reject JSON arrays even though object payloads are allowed."""
     with (
         patch("kitaru._cli._flows._load_deployable_flow_target") as mock_loader,
         pytest.raises(SystemExit) as exc_info,
