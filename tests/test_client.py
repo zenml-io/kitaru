@@ -68,9 +68,7 @@ def _without_loaded_modules(*module_names: str) -> Iterator[None]:
         )
 
     removed_modules = {
-        name: module
-        for name, module in list(sys.modules.items())
-        if _matches(name)
+        name: module for name, module in list(sys.modules.items()) if _matches(name)
     }
     for name in removed_modules:
         sys.modules.pop(name, None)
