@@ -19,7 +19,7 @@ import builtins
 import importlib
 import sys
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -267,8 +267,14 @@ def _is_retryable_replay_import_error(
 ) -> bool:
     """Return whether a replay import error is for the target module itself."""
     missing_name = getattr(exc, "name", None)
-    top_level_package = module_name.split(".", 1)[0]
-    return missing_name in {module_name, top_level_package}
+    if not isinstance(missing_name, str) or not missing_name:
+        return False
+
+    module_parts = module_name.split(".")
+    retryable_names = {
+        ".".join(module_parts[:index]) for index in range(1, len(module_parts) + 1)
+    }
+    return missing_name in retryable_names
 
 
 def _module_name_matches(candidate_name: str | None, module_name: str) -> bool:
@@ -321,16 +327,16 @@ def _module_candidate_paths(module_name: str, cwd: Path) -> tuple[Path, Path]:
 @contextmanager
 def _temporary_sys_path_prepend(path: str) -> Iterator[None]:
     """Temporarily prepend one entry to ``sys.path`` for a scoped import."""
-    if path in sys.path:
+    if sys.path and sys.path[0] == path:
         yield
         return
 
+    original_sys_path = list(sys.path)
     sys.path.insert(0, path)
     try:
         yield
     finally:
-        with suppress(ValueError):
-            sys.path.remove(path)
+        sys.path[:] = original_sys_path
 
 
 def _import_module_from_cwd(module_name: str) -> Any | None:
