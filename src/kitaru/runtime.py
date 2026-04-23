@@ -178,14 +178,23 @@ def _suspend_checkpoint_scope() -> Iterator[None]:
     """Temporarily clear checkpoint scope while keeping flow scope active.
 
     This internal helper is used by framework adapters that need to trigger
-    flow-level operations (for example `kitaru.wait()`) during framework-internal
-    execution that otherwise runs inside a checkpoint.
+    flow-level operations (for example ``kitaru.wait()``) during
+    framework-internal execution that otherwise runs inside a checkpoint.
+
+    Both Kitaru's checkpoint scope and ZenML's ``StepContext`` are suspended:
+    ZenML's dynamic runner rejects ``wait()`` whenever ``StepContext`` is
+    active, so suspending Kitaru's scope alone is not enough to let an
+    adapter-driven HITL tool call reach the pipeline-level wait machinery.
     """
     checkpoint_token = _CURRENT_CHECKPOINT_SCOPE.set(None)
+    step_context_var = _get_step_context_var()
+    # Setting to None mirrors the "unset" default used by BaseContext.get();
+    # is_active() returns False as a result.
+    step_context_token = step_context_var.set(None)
     try:
-        with _suspend_step_context():
-            yield
+        yield
     finally:
+        step_context_var.reset(step_context_token)
         _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)
 
 

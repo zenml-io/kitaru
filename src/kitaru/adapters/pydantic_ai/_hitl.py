@@ -13,6 +13,7 @@ class HitlConfig:
     question: str | None = None
     name: str | None = None
     schema: Any = None
+    question_arg: str | None = 'question'
 
 
 def _config_from_target(target: object) -> HitlConfig | None:
@@ -22,14 +23,29 @@ def _config_from_target(target: object) -> HitlConfig | None:
     return None
 
 
+def resolve_hitl_question(
+    config: HitlConfig,
+    tool_args: dict[str, Any],
+) -> str | None:
+    """Pick the wait question: LLM-supplied tool arg wins, static decorator loses."""
+    if config.question_arg:
+        dynamic = tool_args.get(config.question_arg)
+        if isinstance(dynamic, str) and dynamic.strip():
+            return dynamic
+    return config.question
+
+
 def hitl_tool(
     *,
     question: str | None = None,
     name: str | None = None,
     schema: Any = None,
+    question_arg: str | None = 'question',
 ) -> Callable[[Any], Any]:
     """Mark a tool as requiring a flow-level wait when called under Kitaru."""
-    config = HitlConfig(question=question, name=name, schema=schema)
+    config = HitlConfig(
+        question=question, name=name, schema=schema, question_arg=question_arg
+    )
 
     def decorator(target: Any) -> Any:
         setattr(target, _HITL_MARKER, config)

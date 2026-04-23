@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import inspect
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 from typing import get_type_hints
+from uuid import uuid4
 
 import kitaru
 from pydantic_core import to_jsonable_python
@@ -16,9 +18,10 @@ from pydantic_ai.toolsets import AbstractToolset, FunctionToolset, ToolsetTool, 
 
 from kitaru.errors import KitaruUsageError
 
+from ._constants import ADAPTER_ID, ADAPTER_METADATA_KEY
 from ._events import DeferredKind, ToolsetKind
-from ._hitl import HitlConfig, hitl_config_from_tool_metadata
-from ._kitaru_internal import is_inside_checkpoint, is_inside_flow, suspend_checkpoint_scope
+from ._hitl import HitlConfig, hitl_config_from_tool_metadata, resolve_hitl_question
+from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._otel import attach_tool_correlation
 from ._policy import CapturePolicy
@@ -31,6 +34,7 @@ from ._utils import (
     run_async_in_checkpoint,
     with_default_type,
 )
+
 
 
 class _ToolApprovalDenied(Exception):
@@ -216,12 +220,14 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         hitl_config: HitlConfig | None,
         tracker: EventTracker | None,
     ) -> Any:
+        call_suffix = _wait_call_suffix(getattr(ctx, 'tool_call_id', None))
+
         if hitl_config is not None:
             request = _DeferredRequest(
                 kind='hitl',
-                wait_name=hitl_config.name or name,
+                wait_name=f'{hitl_config.name or name}_{call_suffix}',
                 schema=hitl_config.schema,
-                question=hitl_config.question,
+                question=resolve_hitl_question(hitl_config, tool_args),
                 exception_metadata=None,
                 run_after_wait=False,
             )
@@ -234,7 +240,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         except ApprovalRequired as error:
             request = _DeferredRequest(
                 kind='approval_required',
-                wait_name=f'approve_{name}',
+                wait_name=f'approve_{name}_{call_suffix}',
                 schema=bool,
                 question=f'Approve tool call: {name}?',
                 exception_metadata=error.metadata,
@@ -243,7 +249,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         except CallDeferred as error:
             request = _DeferredRequest(
                 kind='call_deferred',
-                wait_name=f'defer_{name}',
+                wait_name=f'defer_{name}_{call_suffix}',
                 schema=self._schema_for_deferred_tool(name, ctx),
                 question=f'Provide result for deferred tool: {name}',
                 exception_metadata=error.metadata,
@@ -313,7 +319,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         exception_metadata: dict[str, Any] | None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
-            'adapter': 'pydantic_ai',
+            ADAPTER_METADATA_KEY: ADAPTER_ID,
             'tool_name': name,
             'tool_call_id': ctx.tool_call_id,
             'tool_args': safe_args,
@@ -330,8 +336,26 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         question: str | None,
         metadata: dict[str, Any],
     ) -> Any:
-        with suspend_checkpoint_scope():
-            return kitaru.wait(schema=schema, name=wait_name, question=question, metadata=metadata)
+        return kitaru.wait(
+            schema=schema, name=wait_name, question=question, metadata=metadata
+        )
+
+
+_NON_WORD_PATTERN = re.compile(r'\W+')
+
+
+def _wait_call_suffix(tool_call_id: str | None) -> str:
+    """Build a wait-name suffix: unique per call, stable across replays.
+
+    Uses PydanticAI's ``tool_call_id`` so two calls to the same tool in one run
+    get distinct wait names, while a replayed run reuses the same ids and hits
+    the cached human inputs instead of re-prompting.
+    """
+    if isinstance(tool_call_id, str) and tool_call_id:
+        sanitized = _NON_WORD_PATTERN.sub('_', tool_call_id).strip('_')
+        if sanitized:
+            return sanitized
+    return uuid4().hex[:8]
 
 
 def _elapsed_ms(started_at: float) -> float:
