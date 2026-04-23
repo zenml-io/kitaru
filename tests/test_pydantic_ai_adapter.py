@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from pydantic import BaseModel
 from pydantic_ai import (
     Agent,
     CallDeferred,
@@ -47,6 +48,19 @@ from kitaru.runtime import (
     _is_inside_checkpoint,
     _is_inside_flow,
 )
+
+
+class _BugReport(BaseModel):
+    """Module-scope schema for HITL free-form-input tests.
+
+    PydanticAI's tool registration calls ``get_type_hints()`` to inspect the
+    tool signature, which can't resolve a locally-scoped class — so the model
+    used in return annotations has to live at module scope.
+    """
+
+    title: str
+    description: str
+
 
 MCPServer: type[Any] | None
 try:
@@ -433,6 +447,49 @@ def test_hitl_tool_translates_to_flow_level_wait(
     ]
     assert tool_events
     assert tool_events[0]["hitl"] is True
+
+
+def test_hitl_tool_supports_pydantic_schema_for_free_form_input(
+    monkeypatch: pytest.MonkeyPatch,
+    capture_adapter_io: tuple[list[tuple[str, str, Any]], list[dict[str, Any]]],
+) -> None:
+    """HITL tools should forward an arbitrary Pydantic schema to wait()."""
+    expected = _BugReport(title="login broken", description="500 on /auth")
+    wait_calls: list[dict[str, Any]] = []
+
+    def fake_wait(**kwargs: Any) -> _BugReport:
+        wait_calls.append(kwargs)
+        return expected
+
+    monkeypatch.setattr(adapter_toolset, "wait", fake_wait)
+
+    @kp.hitl_tool(
+        name="collect_bug_report",
+        question="Describe the bug.",
+        schema=_BugReport,
+    )
+    def collect_bug_report() -> _BugReport:
+        raise AssertionError("HITL tools should not execute their Python body.")
+
+    agent = kp.wrap(Agent(TestModel(), name="triage", tools=[collect_bug_report]))
+    execution_id, checkpoint_id = _scope_ids()
+
+    with (
+        _flow_scope(name="demo_flow", execution_id=execution_id),
+        _checkpoint_scope(
+            name="demo_checkpoint",
+            checkpoint_type="llm_call",
+            execution_id=execution_id,
+            checkpoint_id=checkpoint_id,
+        ),
+    ):
+        result = agent.run_sync("Collect a bug report.")
+
+    assert result.output is not None
+    assert len(wait_calls) == 1
+    assert wait_calls[0]["schema"] is _BugReport
+    assert wait_calls[0]["name"] == "collect_bug_report"
+    assert wait_calls[0]["question"] == "Describe the bug."
 
 
 async def test_deferred_tool_approval_required_raises_clear_adapter_error(

@@ -58,6 +58,8 @@ You can set a global default with `tool_capture_config` and override individual 
 
 ## 4) Add adapter-level HITL tools (optional)
 
+### Approval (boolean gate)
+
 ```python
 @kp.hitl_tool(question="Approve publish?", schema=bool)
 def approve_publish(summary: str) -> bool:
@@ -66,6 +68,38 @@ def approve_publish(summary: str) -> bool:
 ```
 
 When the agent invokes this tool, the adapter translates it to a flow-level `kitaru.wait(...)` under the hood.
+
+### Free-form structured input
+
+`schema` accepts any Python type — including a Pydantic model — not just `bool`. The validated value returned from `kitaru.wait(...)` becomes the tool's return value, so the agent continues as if the tool produced it.
+
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+class BugReport(BaseModel):
+    title: str
+    description: str
+    severity: Literal["low", "medium", "high"]
+
+@kp.hitl_tool(
+    name="collect_bug_report",
+    question="Describe the bug: title, description, severity.",
+    schema=BugReport,
+)
+def collect_bug_report() -> BugReport:
+    # Body is skipped in HITL mode; schema drives the wait.
+    raise NotImplementedError
+```
+
+Running locally, Kitaru prompts in the terminal. Running against a deployed server, the execution pauses and can be resumed from anywhere:
+
+```bash
+kitaru executions input <exec_id> --value '{"title": "login broken", "description": "500 on /auth", "severity": "high"}'
+kitaru executions resume <exec_id>
+```
+
+See [`examples/pydantic_ai_agent/pydantic_ai_hitl_input.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/pydantic_ai_agent/pydantic_ai_hitl_input.py) for the full runnable example.
 
 ## Runtime behavior and guardrails
 
@@ -79,15 +113,18 @@ When the agent invokes this tool, the adapter translates it to a flow-level `kit
 
 ```bash
 uv sync --extra local --extra pydantic-ai
-uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py
+uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py       # base wrap
+uv run examples/pydantic_ai_agent/pydantic_ai_hitl_input.py    # structured HITL input
 uv run pytest tests/test_phase17_pydantic_ai_example.py
 ```
 
-The example prints:
+The adapter example prints:
 
 - execution ID
 - final result
 - child-event count captured under checkpoint metadata
 - run summary count for wrapped agent runs
+
+The HITL-input example pauses for a `BugReport` from the human (terminal prompt locally, or `kitaru executions input` remotely).
 
 For the broader catalog, see [Examples](/getting-started/examples).

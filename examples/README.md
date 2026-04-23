@@ -27,6 +27,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Replay from a checkpoint with overrides:** `examples/replay/replay_with_overrides.py`
 - **Track a model call inside a flow:** `examples/llm/flow_with_llm.py`
 - **Wrap an existing PydanticAI agent:** `examples/pydantic_ai_agent/pydantic_ai_adapter.py`
+- **Ask a wrapped PydanticAI agent for structured human input:** `examples/pydantic_ai_agent/pydantic_ai_hitl_input.py`
 - **Build a full coding agent with tool calling and HITL:** `examples/coding_agent/agent.py`
 - **Explore Kitaru through MCP tools:** `examples/mcp/mcp_query_tools.py`
 
@@ -85,6 +86,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 |---|---|---|---|---|---|
 | [Tracked LLM calls](llm/flow_with_llm.py) | `uv run examples/llm/flow_with_llm.py` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | [tests/test_phase12_llm_example.py](../tests/test_phase12_llm_example.py) |
 | [PydanticAI adapter](pydantic_ai_agent/pydantic_ai_adapter.py) | `uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py` | `uv sync --extra local --extra pydantic-ai` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](https://kitaru.ai/docs/getting-started/pydantic-ai-adapter) | [tests/test_phase17_pydantic_ai_example.py](../tests/test_phase17_pydantic_ai_example.py) |
+| [PydanticAI HITL input](pydantic_ai_agent/pydantic_ai_hitl_input.py) | `uv run examples/pydantic_ai_agent/pydantic_ai_hitl_input.py` | `uv sync --extra local --extra pydantic-ai` | `kp.hitl_tool(schema=...)` with a Pydantic model — pause the agent for structured human input, resume via CLI | [PydanticAI Adapter](https://kitaru.ai/docs/guides/pydantic-ai-adapter) | — |
 | [Coding agent](coding_agent/agent.py) | `cd examples/coding_agent && uv run python agent.py "Your task"` | `uv sync --extra local` + model alias / provider credentials | Full agent loop with provider SDK tool calling, `kitaru.wait()` HITL, custom materializers, and artifact persistence | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | — |
 | [MCP query tools](mcp/mcp_query_tools.py) | `uv run examples/mcp/mcp_query_tools.py` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [Execution Management](https://kitaru.ai/docs/getting-started/execution-management) | [tests/mcp/test_phase19_mcp_example.py](../tests/mcp/test_phase19_mcp_example.py) |
 
