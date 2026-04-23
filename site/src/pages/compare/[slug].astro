@@ -4,6 +4,8 @@ import Base from '../../layouts/Base.astro';
 import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
 import ComparisonHero from '../../components/compare/ComparisonHero.astro';
+import CompareToc from '../../components/compare/CompareToc.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 
 export async function getStaticPaths() {
   const entries = await getCollection('comparisons', ({ data }) => !data.draft);
@@ -15,6 +17,16 @@ export async function getStaticPaths() {
 
 const { entry } = Astro.props;
 const { Content } = await render(entry);
+
+// Hardcoded default sections — anchor targets (#when-to-use, #features, #code, #cta)
+// will only work once MDX adds explicit <h2 id="..."> elements (follow-up PR).
+// Until then the links are inert but not broken.
+const defaultSections = [
+  { id: 'when-to-use', label: 'When to use each' },
+  { id: 'features', label: 'Feature comparison' },
+  { id: 'code', label: 'Code comparison' },
+  { id: 'cta', label: 'Get started' },
+];
 ---
 
 <Base title={entry.data.title} description={entry.data.description} ogImage={entry.data.ogImage}>
@@ -28,33 +40,69 @@ const { Content } = await render(entry);
       competitorTagline={entry.data.competitorTagline}
     />
 
-    <article class="compare-body">
-      <div class="compare-body-inner">
-        <Content />
-      </div>
-    </article>
+    <!-- TOC component: renders sticky rail (desktop) + mobile chip + scroll-progress bar -->
+    <CompareToc sections={defaultSections} />
 
-    <section class="compare-footer-cta">
-      <div class="compare-footer-inner">
-        <h2>{entry.data.ctaHeading}</h2>
-        <p>No cost, no commitment. Install Kitaru and run your first durable flow in an afternoon.</p>
-        <div class="compare-footer-ctas">
-          <a href="/get-started" class="btn-primary">Get started</a>
-          <a href="/docs" class="btn-secondary">Read the docs</a>
-        </div>
-      </div>
-    </section>
+    <div class="compare-body">
+      <article class="compare-body-inner">
+        <Content />
+      </article>
+    </div>
+
+    <ComparisonCta headline={entry.data.ctaHeading} />
   </main>
+
+  <!-- Mobile sticky bottom CTA bar (≤820px) -->
+  <div class="compare-mobile-cta" aria-label="Quick actions" role="complementary">
+    <a href="/get-started" class="btn-primary">Install Kitaru</a>
+    <a href="/docs" class="btn-secondary">Docs</a>
+  </div>
+
   <Footer />
 </Base>
 
 <style>
   .compare-page { padding-top: 0; }
-  .compare-body { padding: 40px 24px 60px; }
+
+  /* ─── Body layout ─── */
+  /* On desktop: CSS grid with TOC rail left + article right.
+     The TOC rail itself is sticky (handled inside CompareToc.astro). */
+  .compare-body {
+    padding: 40px 24px 60px;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
   .compare-body-inner {
     max-width: 820px;
     margin: 0 auto;
   }
+
+  /* Add bottom padding so mobile sticky bar never covers content */
+  @media (max-width: 820px) {
+    .compare-body {
+      padding-bottom: 72px;
+    }
+  }
+
+  /* At ≥1100px: two-column grid — TOC rail (220px) + article */
+  @media (min-width: 1100px) {
+    .compare-body {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 48px;
+      padding: 48px 48px 80px;
+      max-width: 1240px;
+    }
+
+    /* Article caps at 820px within its grid cell */
+    .compare-body-inner {
+      max-width: 820px;
+      margin: 0; /* let grid alignment do the work */
+    }
+  }
+
+  /* ─── Article typography ─── */
   .compare-body-inner :global(h2) {
     font-size: clamp(26px, 3vw, 34px);
     font-weight: 700;
@@ -107,36 +155,61 @@ const { Content } = await render(entry);
     text-decoration-thickness: 2px;
   }
 
-  .compare-footer-cta {
-    padding: 80px 24px 100px;
-    background: var(--color-surface-warm);
-    border-top: 1px solid var(--color-border-light);
-    text-align: center;
-  }
-  .compare-footer-inner { max-width: 640px; margin: 0 auto; }
-  .compare-footer-inner h2 {
-    font-size: clamp(26px, 3vw, 34px);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    line-height: 1.2;
-    margin: 0 0 12px;
-  }
-  .compare-footer-inner p {
-    font-size: 17px;
-    line-height: 1.6;
-    color: var(--color-secondary);
-    margin: 0 0 28px;
-  }
-  .compare-footer-ctas {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-    flex-wrap: wrap;
-  }
-
   .compare-body-inner :global(.compare-inline-cta) {
     display: flex;
     justify-content: flex-start;
     margin: 24px 0 8px;
   }
+
+  /* ─── Mobile sticky bottom CTA bar ─── */
+  .compare-mobile-cta {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    z-index: 40;
+    /* Fade in via JS after hero scrolls past, but render hidden by default */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+
+  .compare-mobile-cta.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Hidden on desktop */
+  @media (min-width: 820px) {
+    .compare-mobile-cta {
+      display: none;
+    }
+  }
 </style>
+
+<script>
+  // Show mobile sticky CTA bar after user scrolls past the hero
+  const mobileCta = document.querySelector<HTMLElement>('.compare-mobile-cta');
+  const hero = document.getElementById('chero') ?? document.querySelector('header');
+
+  if (mobileCta && hero) {
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          mobileCta.classList.remove('visible');
+        } else {
+          mobileCta.classList.add('visible');
+        }
+      },
+      { threshold: 0 }
+    );
+    obs.observe(hero);
+  }
+</script>

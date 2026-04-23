@@ -12,14 +12,17 @@ interface Props {
   imageAlt: string;
   reverse?: boolean;
   headingLevel?: 2 | 3;
+  number?: string;
+  bgStrip?: boolean;
 }
 
-const { title, image, imageAlt, reverse = false, headingLevel = 2 } = Astro.props;
+const { title, image, imageAlt, reverse = false, headingLevel = 2, number, bgStrip = false } = Astro.props;
 ---
 
-<section class:list={["feature-graphic", { "feature-graphic--reverse": reverse }]} data-reveal>
+<section class:list={["feature-graphic", { "feature-graphic--reverse": reverse, "feature-graphic--bg-strip": bgStrip }]} data-reveal>
   <div class="feature-graphic-grid">
     <div class="feature-graphic-copy">
+      {number && <span class="feature-graphic-eyebrow">{number}</span>}
       {headingLevel === 3 ? <h3>{title}</h3> : <h2>{title}</h2>}
       <div class="feature-graphic-body">
         <slot />
@@ -40,6 +43,15 @@ const { title, image, imageAlt, reverse = false, headingLevel = 2 } = Astro.prop
     left: 50%;
     transform: translateX(-50%);
   }
+  .feature-graphic--bg-strip {
+    background: var(--color-surface-warm);
+    border-radius: 24px;
+    padding: 56px 48px;
+    margin-left: -48px;
+    margin-right: -48px;
+    width: calc(100% + 96px);
+    left: calc(50% - 48px);
+  }
   .feature-graphic-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
@@ -54,6 +66,15 @@ const { title, image, imageAlt, reverse = false, headingLevel = 2 } = Astro.prop
   .feature-graphic--reverse .feature-graphic-copy { order: 2; }
   .feature-graphic--reverse .feature-graphic-media { order: 1; }
 
+  .feature-graphic-eyebrow {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 12px;
+  }
   .feature-graphic-copy h2,
   .feature-graphic-copy h3 {
     font-size: clamp(24px, 2.6vw, 30px);
@@ -83,6 +104,14 @@ const { title, image, imageAlt, reverse = false, headingLevel = 2 } = Astro.prop
 
   @media (max-width: 820px) {
     .feature-graphic { margin: 40px 0; }
+    .feature-graphic--bg-strip {
+      margin-left: -24px;
+      margin-right: -24px;
+      padding: 32px 24px;
+      border-radius: 16px;
+      width: calc(100% + 48px);
+      left: calc(50% - 24px);
+    }
     .feature-graphic-grid {
       grid-template-columns: 1fr;
       gap: 24px;
