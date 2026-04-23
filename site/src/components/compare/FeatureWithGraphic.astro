@@ -9,17 +9,18 @@
 interface Props {
   title: string;
   image: string;
-  imageAlt?: string;
+  imageAlt: string;
   reverse?: boolean;
+  headingLevel?: 2 | 3;
 }
 
-const { title, image, imageAlt = '', reverse = false } = Astro.props;
+const { title, image, imageAlt, reverse = false, headingLevel = 2 } = Astro.props;
 ---
 
 <section class:list={["feature-graphic", { "feature-graphic--reverse": reverse }]} data-reveal>
   <div class="feature-graphic-grid">
     <div class="feature-graphic-copy">
-      <h2>{title}</h2>
+      {headingLevel === 3 ? <h3>{title}</h3> : <h2>{title}</h2>}
       <div class="feature-graphic-body">
         <slot />
       </div>
@@ -53,7 +54,8 @@ const { title, image, imageAlt = '', reverse = false } = Astro.props;
   .feature-graphic--reverse .feature-graphic-copy { order: 2; }
   .feature-graphic--reverse .feature-graphic-media { order: 1; }
 
-  .feature-graphic-copy h2 {
+  .feature-graphic-copy h2,
+  .feature-graphic-copy h3 {
     font-size: clamp(24px, 2.6vw, 30px);
     font-weight: 700;
     letter-spacing: -0.01em;

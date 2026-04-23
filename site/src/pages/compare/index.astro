@@ -122,6 +122,12 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
     transform: translateY(-2px);
     box-shadow: 0 12px 28px -18px oklch(0.13 0.015 60 / 0.25);
   }
+  .compare-card:focus-visible {
+    outline: none;
+    border-color: var(--color-accent);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px -18px oklch(0.13 0.015 60 / 0.25), 0 0 0 3px oklch(0.65 0.16 45 / 0.2);
+  }
   .compare-card-head { display: flex; flex-direction: column; gap: 6px; }
   .compare-card-vs {
     font-size: 12px;

@@ -26,16 +26,28 @@ const { rows, competitorLabel = 'Alternative' } = Astro.props;
           <td class="col-feature">{row.feature}</td>
           <td class="col-kitaru" data-value={row.kitaru ? 'yes' : 'no'}>
             {row.kitaru ? (
-              <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
+              <>
+                <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
+                <span class="sr-only">Yes</span>
+              </>
             ) : (
-              <svg class="icon icon-no" viewBox="0 0 24 24" aria-label="No"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              <>
+                <svg class="icon icon-no" viewBox="0 0 24 24" aria-label="No"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                <span class="sr-only">Not supported</span>
+              </>
             )}
           </td>
           <td class="col-competitor" data-value={row.competitor ? 'yes' : 'no'}>
             {row.competitor ? (
-              <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
+              <>
+                <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
+                <span class="sr-only">Yes</span>
+              </>
             ) : (
-              <svg class="icon icon-no" viewBox="0 0 24 24" aria-label="No"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              <>
+                <svg class="icon icon-no" viewBox="0 0 24 24" aria-label="No"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                <span class="sr-only">Not supported</span>
+              </>
             )}
           </td>
         </tr>
@@ -73,7 +85,7 @@ const { rows, competitorLabel = 'Alternative' } = Astro.props;
     color: var(--color-secondary);
   }
   .ctable tbody tr:nth-child(even) td {
-    background: oklch(0.985 0.005 75);
+    background: var(--color-surface-subtle);
   }
   .col-feature {
     width: 56%;
@@ -93,7 +105,16 @@ const { rows, competitorLabel = 'Alternative' } = Astro.props;
     vertical-align: middle;
   }
   .icon-yes { color: var(--color-success); }
-  .icon-no { color: var(--color-border); }
+  .icon-no { color: var(--color-negative); }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 
   @media (max-width: 640px) {
     .ctable th,

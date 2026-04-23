@@ -40,6 +40,13 @@
   /* Borders */
   --color-border: oklch(0.91 0.01 70);
   --color-border-light: oklch(0.95 0.008 70);
+  --color-border-accent: oklch(0.85 0.08 60);
+
+  /* Surfaces */
+  --color-surface-subtle: oklch(0.985 0.005 75);
+
+  /* Semantic status */
+  --color-negative: oklch(0.55 0.015 60);
 
   /* Fonts */
   --font-ui: 'DM Sans', -apple-system, sans-serif;

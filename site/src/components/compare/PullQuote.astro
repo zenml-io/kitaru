@@ -1,9 +1,10 @@
 ---
 interface Props {
   quote: string;
-  attribution?: string;
+  attribution: string;
+  source?: string;
 }
-const { quote, attribution } = Astro.props;
+const { quote, attribution, source } = Astro.props;
 ---
 
 <figure class="pullquote" data-reveal>
@@ -11,7 +12,13 @@ const { quote, attribution } = Astro.props;
     <path fill="currentColor" d="M13 10c0-2.2-1.8-4-4-4H8c-2.2 0-4 1.8-4 4v3c0 5 3 8 7 9v-3c-2-.8-3-2.5-3-5V13h1c1.7 0 3-1.3 3-3zm15 0c0-2.2-1.8-4-4-4h-1c-2.2 0-4 1.8-4 4v3c0 5 3 8 7 9v-3c-2-.8-3-2.5-3-5V13h1c1.7 0 3-1.3 3-3z"/>
   </svg>
   <blockquote>{quote}</blockquote>
-  {attribution && <figcaption>— {attribution}</figcaption>}
+  <figcaption>
+    {source ? (
+      <a href={source}>— {attribution}</a>
+    ) : (
+      <>— {attribution}</>
+    )}
+  </figcaption>
 </figure>
 
 <style>
@@ -45,5 +52,11 @@ const { quote, attribution } = Astro.props;
     margin-top: 12px;
     font-size: 14px;
     color: var(--color-muted);
+  }
+  figcaption a {
+    color: var(--color-muted);
+    text-decoration: underline;
+    text-decoration-color: var(--color-border);
+    text-underline-offset: 3px;
   }
 </style>

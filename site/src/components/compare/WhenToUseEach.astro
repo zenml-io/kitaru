@@ -16,7 +16,7 @@ const { kitaru, competitor, competitorLabel = 'Alternative' } = Astro.props;
     <article class="when-card when-card--kitaru">
       <div class="when-card-head">
         <span class="when-tag when-tag--kitaru">Kitaru</span>
-        <h3>{kitaru.title}</h3>
+        <h2>{kitaru.title}</h2>
       </div>
       <ul>
         {kitaru.items.map((item) => (
@@ -31,7 +31,7 @@ const { kitaru, competitor, competitorLabel = 'Alternative' } = Astro.props;
     <article class="when-card when-card--competitor">
       <div class="when-card-head">
         <span class="when-tag when-tag--competitor">{competitorLabel}</span>
-        <h3>{competitor.title}</h3>
+        <h2>{competitor.title}</h2>
       </div>
       <ul>
         {competitor.items.map((item) => (
@@ -59,8 +59,8 @@ const { kitaru, competitor, competitorLabel = 'Alternative' } = Astro.props;
     padding: 28px;
   }
   .when-card--kitaru {
-    background: linear-gradient(180deg, oklch(0.98 0.015 65) 0%, var(--color-surface) 100%);
-    border-color: oklch(0.85 0.08 60);
+    background: linear-gradient(180deg, var(--color-surface-warm) 0%, var(--color-surface) 100%);
+    border-color: var(--color-border-accent);
   }
   .when-card-head {
     display: flex;
@@ -86,7 +86,7 @@ const { kitaru, competitor, competitorLabel = 'Alternative' } = Astro.props;
     background: var(--color-accent-light);
     color: var(--color-secondary);
   }
-  .when-card h3 {
+  .when-card h2 {
     font-size: 20px;
     font-weight: 700;
     letter-spacing: -0.01em;
