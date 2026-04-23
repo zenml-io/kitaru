@@ -18,9 +18,7 @@ const { code, lang = 'python' } = Astro.props;
 ---
 
 <article class="codepane">
-  <div class="codepane-code">
-    <Code code={code} lang={lang} theme={kitaruLight as ThemeRegistrationRaw} />
-  </div>
+  <Code code={code} lang={lang} theme={kitaruLight as ThemeRegistrationRaw} />
 </article>
 
 <style>
@@ -31,31 +29,18 @@ const { code, lang = 'python' } = Astro.props;
     background: var(--color-surface);
     overflow: hidden;
   }
-  .codepane-code { flex: 1; }
-  .codepane-code :global(pre) {
+  .codepane :global(pre) {
     margin: 0;
     padding: 20px;
     font-family: var(--font-mono);
     font-size: 13px;
     line-height: 1.6;
     background: transparent !important;
-    border: 0 !important;
-    border-radius: 0 !important;
+    border: 0;
+    border-radius: 0;
     overflow-x: auto;
   }
-  .codepane-code :global(code) {
-    font-family: inherit;
-  }
-  .codepane-code :global(pre) {
-    margin: 0;
-    padding: 20px;
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.6;
-    background: transparent !important;
-    overflow-x: auto;
-  }
-  .codepane-code :global(code) {
+  .codepane :global(code) {
     font-family: inherit;
   }
 </style>
