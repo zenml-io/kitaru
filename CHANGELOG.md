@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-23
+
 ### Added
 - `kitaru auth token` for printing a short-lived bearer token for the active Kitaru server, suitable for shell command substitution. (#210)
 - `kitaru flow deployments curl FLOW` for generating a copy-pasteable curl command that starts a deployment execution through the active Kitaru server without inlining real tokens. (#210)
