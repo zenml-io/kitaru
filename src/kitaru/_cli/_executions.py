@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any
 
 from cyclopts import Parameter
@@ -56,11 +57,29 @@ def _parse_json_object(
     raw_value: str | None,
     *,
     option_name: str,
+    allow_file: bool = False,
 ) -> dict[str, Any]:
-    """Parse a CLI JSON option that must decode to an object."""
+    """Parse a CLI JSON option that must decode to an object.
+
+    With `allow_file=True`, a leading ``@`` resolves the remainder as a
+    filesystem path whose contents are parsed as JSON instead.
+    """
     if raw_value is None:
         return {}
-    parsed = _parse_json_value(raw_value, option_name=option_name)
+
+    source_label = option_name
+    payload = raw_value
+    if allow_file and raw_value.startswith("@"):
+        path = Path(raw_value[1:]).expanduser()
+        source_label = f"{option_name} file '{path}'"
+        try:
+            payload = path.read_text()
+        except OSError as exc:
+            raise ValueError(
+                f"Unable to read `{option_name}` file '{path}': {exc}"
+            ) from exc
+
+    parsed = _parse_json_value(payload, option_name=source_label)
     if not isinstance(parsed, dict):
         raise ValueError(
             f"`{option_name}` must be a JSON object "
@@ -161,12 +180,17 @@ def _emit_control_message(message: str, *, output: CLIOutputFormat) -> None:
         print(message)
 
 
-def _emit_json_log_event(event: str, item: dict[str, Any]) -> None:
+def _emit_json_log_event(
+    event: str,
+    item: dict[str, Any],
+    *,
+    command: str = "executions.logs",
+) -> None:
     """Emit one JSONL log-stream event."""
     print(
         json.dumps(
             {
-                "command": "executions.logs",
+                "command": command,
                 "event": event,
                 "item": item,
             }
@@ -180,11 +204,12 @@ def _emit_log_entries(
     output: CLIOutputFormat,
     grouped: bool,
     verbosity: int,
+    command: str = "executions.logs",
 ) -> None:
     """Emit log entries in text or JSON follow-stream format."""
     if output == CLIOutputFormat.JSON:
         for entry in entries:
-            _emit_json_log_event("log", serialize_log_entry(entry))
+            _emit_json_log_event("log", serialize_log_entry(entry), command=command)
         return
 
     if not grouped:
@@ -251,6 +276,7 @@ def _follow_execution_logs(
     grouped: bool,
     verbosity: int,
     interval: float,
+    command: str = "executions.logs",
 ) -> int:
     """Poll execution logs until terminal status and stream only new entries."""
     seen_entries: set[tuple[Any, ...]] = set()
@@ -278,6 +304,7 @@ def _follow_execution_logs(
                 output=output,
                 grouped=grouped,
                 verbosity=verbosity,
+                command=command,
             )
 
         execution = client.executions.get(exec_id)
@@ -289,6 +316,7 @@ def _follow_execution_logs(
                         "status": ExecutionStatus.COMPLETED.value,
                         "message": "Execution completed successfully",
                     },
+                    command=command,
                 )
             else:
                 _emit_control_message(
@@ -309,7 +337,7 @@ def _follow_execution_logs(
                 }
                 if recovery_cmd:
                     terminal_item["recovery_command"] = recovery_cmd
-                _emit_json_log_event("terminal", terminal_item)
+                _emit_json_log_event("terminal", terminal_item, command=command)
             else:
                 _emit_control_message(
                     f"[Execution failed: {failure_reason}]",
@@ -327,6 +355,7 @@ def _follow_execution_logs(
                         "status": ExecutionStatus.CANCELLED.value,
                         "message": "Execution cancelled",
                     },
+                    command=command,
                 )
             else:
                 _emit_control_message("[Execution cancelled]", output=output)
@@ -349,6 +378,7 @@ def _follow_execution_logs(
                             "wait_id": wait_id,
                             "question": wait_question,
                         },
+                        command=command,
                     )
                 else:
                     _emit_control_message(

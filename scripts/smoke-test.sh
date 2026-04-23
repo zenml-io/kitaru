@@ -102,6 +102,25 @@ run_test() {
     return $rc
 }
 
+run_expected_failure() {
+    local label="$1"; local expected="$2"; shift 2
+    local output
+    output=$("$@" 2>&1)
+    local rc=$?
+    if [[ $rc -ne 0 ]] && [[ "$output" == *"$expected"* ]]; then
+        printf "  ${GREEN}✓${RESET} %s\n" "$label"
+        PASSED+=("$label")
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$output" | sed 's/^/    /'
+        fi
+    else
+        printf "  ${RED}✗${RESET} %s\n" "$label"
+        echo "$output" | tail -30 | sed 's/^/    /'
+        FAILED+=("$label")
+    fi
+    return 0
+}
+
 skip_test() {
     local label="$1"; local reason="$2"
     printf "  ${YELLOW}○${RESET} %s ${YELLOW}(%s)${RESET}\n" "$label" "$reason"
@@ -232,6 +251,15 @@ run_test "kitaru model list"             $UV_RUN kitaru model list
 run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
 run_test "kitaru analytics opt-in --help"  $UV_RUN kitaru analytics opt-in --help
 run_test "kitaru analytics opt-out --help" $UV_RUN kitaru analytics opt-out --help
+run_test "kitaru auth token --help"        $UV_RUN kitaru auth token --help
+run_test "kitaru build --help"            $UV_RUN kitaru build --help
+run_test "kitaru deploy --help"           $UV_RUN kitaru deploy --help
+run_test "kitaru invoke --help"           $UV_RUN kitaru invoke --help
+run_test "kitaru flow --help"             $UV_RUN kitaru flow --help
+run_test "kitaru flow deployments --help" $UV_RUN kitaru flow deployments --help
+run_test "kitaru flow deployments curl --help" $UV_RUN kitaru flow deployments curl --help
+run_test "kitaru flow list"               $UV_RUN kitaru flow list
+run_test "kitaru flow list -o json"       $UV_RUN kitaru flow list -o json
 ANALYTICS_OUT=$($UV_RUN kitaru analytics status -o json 2>&1) || true
 ANALYTICS_DISABLED=$(echo "$ANALYTICS_OUT" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['item']['analytics_opt_in'])" 2>/dev/null) || true
@@ -269,6 +297,10 @@ run_test "examples/pydantic_ai_agent/pydantic_ai_adapter.py" \
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run
+run_expected_failure "kitaru build rejects local stack deployments" \
+    "not one the Kitaru server can execute remotely" \
+    $UV_RUN kitaru build examples/basic_flow/first_working_flow.py:research_agent \
+        --input '{"topic":"smoke"}'
 
 # ---------------------------------------------------------------------------
 # Secret API

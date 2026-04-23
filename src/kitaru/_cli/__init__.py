@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 import cyclopts
+from cyclopts import Parameter
 
 _UNKNOWN_VERSION = "unknown"
 
 app = cyclopts.App(
     name="kitaru",
-    help="Durable execution for AI agents.",
+    help=(
+        "Durable execution for AI agents. Create deployments with `kitaru "
+        "deploy`; inspect existing deployments with `kitaru flow`."
+    ),
     version=_UNKNOWN_VERSION,
-    version_flags=["--version", "-V"],
+    version_flags=["-V"],
 )
 
 log_store_app = cyclopts.App(
@@ -45,6 +51,23 @@ analytics_app = cyclopts.App(
     name="analytics",
     help="Manage anonymous usage analytics preferences.",
 )
+auth_app = cyclopts.App(
+    name="auth",
+    help="Manage active Kitaru server authentication helpers.",
+)
+flow_app = cyclopts.App(
+    name="flow",
+    help=(
+        "Inspect existing deployments and manage deployment routing. Create "
+        "new deployments with `kitaru deploy`."
+    ),
+    version_flags=[],
+)
+flow_deployments_app = cyclopts.App(
+    name="deployments",
+    help="Inspect and manage existing deployment versions for a flow.",
+    version_flags=[],
+)
 
 app.command(log_store_app)
 app.command(stack_app)
@@ -54,18 +77,31 @@ app.command(executions_app)
 app.command(memory_app)
 app.command(clean_app)
 app.command(analytics_app)
+app.command(auth_app)
+app.command(flow_app)
+flow_app.command(flow_deployments_app)
 
 
 @app.default
-def main() -> None:
+def main(
+    version: Annotated[
+        bool,
+        Parameter(alias="--version", help="Show the Kitaru version and exit."),
+    ] = False,
+) -> None:
     """Show help when invoked without arguments."""
+    if version:
+        print(app.version)
+        raise SystemExit(0)
     app.help_print()
 
 
 from . import (  # noqa: F401,E402
     _analytics,
+    _auth,
     _clean,
     _executions,
+    _flows,
     _init,
     _memory,
     _models,
@@ -78,8 +114,11 @@ __all__ = [
     "_UNKNOWN_VERSION",
     "analytics_app",
     "app",
+    "auth_app",
     "clean_app",
     "executions_app",
+    "flow_app",
+    "flow_deployments_app",
     "log_store_app",
     "main",
     "memory_app",

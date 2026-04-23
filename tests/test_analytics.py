@@ -156,6 +156,7 @@ def test_core_funnel_event_canonical_strings() -> None:
     """Core-funnel events should carry the expected canonical strings."""
     assert AnalyticsEvent.PROJECT_INITIALIZED == "Kitaru project initialized"
     assert AnalyticsEvent.LOGIN_COMPLETED == "Kitaru login completed"
+    assert AnalyticsEvent.AUTH_TOKEN_PRINTED == "Kitaru auth token printed"
     assert AnalyticsEvent.LOCAL_SERVER_STARTED == "Kitaru local server started"
     assert AnalyticsEvent.LOCAL_SERVER_STOPPED == "Kitaru local server stopped"
     assert AnalyticsEvent.FLOW_TERMINAL == "Kitaru flow terminal"
@@ -164,6 +165,19 @@ def test_core_funnel_event_canonical_strings() -> None:
     assert AnalyticsEvent.EXECUTION_RETRIED == "Kitaru execution retried"
     assert AnalyticsEvent.EXECUTION_RESUMED == "Kitaru execution resumed"
     assert AnalyticsEvent.EXECUTION_CANCELLED == "Kitaru execution cancelled"
+
+
+def test_deployment_event_canonical_strings() -> None:
+    """Deployment events should carry the expected canonical strings."""
+    assert AnalyticsEvent.DEPLOYMENT_BUILT == "Kitaru deployment built"
+    assert AnalyticsEvent.DEPLOYMENT_DEPLOYED == "Kitaru deployment deployed"
+    assert AnalyticsEvent.DEPLOYMENT_INVOKED == "Kitaru deployment invoked"
+    assert (
+        AnalyticsEvent.DEPLOYMENT_CURL_GENERATED == "Kitaru deployment curl generated"
+    )
+    assert AnalyticsEvent.DEPLOYMENT_TAGGED == "Kitaru deployment tagged"
+    assert AnalyticsEvent.DEPLOYMENT_UNTAGGED == "Kitaru deployment untagged"
+    assert AnalyticsEvent.DEPLOYMENT_DELETED == "Kitaru deployment deleted"
 
 
 def test_feature_adoption_event_canonical_strings() -> None:
@@ -231,6 +245,46 @@ def test_cli_entrypoint_tracks_memory_subcommand_granularity() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.CLI_INVOKED,
         {"command": "memory compact"},
+    )
+
+
+def test_cli_entrypoint_tracks_auth_subcommand_granularity() -> None:
+    """Auth commands should track command + subcommand without secret values."""
+    with (
+        patch("kitaru.analytics.set_source"),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        patch("kitaru.cli._apply_runtime_version"),
+        patch("kitaru.cli.app"),
+        patch("sys.argv", ["kitaru", "auth", "token"]),
+    ):
+        from kitaru.cli import cli
+
+        cli()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CLI_INVOKED,
+        {"command": "auth token"},
+    )
+
+
+def test_cli_entrypoint_tracks_flow_subcommand_granularity() -> None:
+    """Flow commands should track command + subcommand without flow names."""
+    with (
+        patch("kitaru.analytics.set_source"),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        patch("kitaru.cli.GlobalConfiguration") as gc_mock,
+        patch("kitaru.cli._apply_runtime_version"),
+        patch("kitaru.cli.app"),
+        patch("sys.argv", ["kitaru", "flow", "deployments", "list", "demo"]),
+    ):
+        gc_mock.return_value = MagicMock()
+        from kitaru.cli import cli
+
+        cli()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CLI_INVOKED,
+        {"command": "flow deployments"},
     )
 
 

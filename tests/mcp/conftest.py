@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from kitaru._client._models import Deployment as DeploymentRecord
 from kitaru.client import (
     ArtifactRef,
     CheckpointAttempt,
@@ -21,12 +22,30 @@ from kitaru.errors import FailureOrigin
 
 @pytest.fixture
 def mock_kitaru_client() -> MagicMock:
-    """Mocked `KitaruClient` with executions/artifacts/memories namespaces."""
+    """Mocked `KitaruClient` with common API namespaces."""
     client = MagicMock()
     client.executions = MagicMock()
     client.artifacts = MagicMock()
     client.memories = MagicMock()
+    client.deployments = MagicMock()
     return client
+
+
+@pytest.fixture
+def sample_deployment() -> DeploymentRecord:
+    """Sample deployment record used in MCP deployment tool tests."""
+    return DeploymentRecord(
+        deployment_id="dep-content-v2",
+        flow="content_pipeline",
+        version=2,
+        tags={"default": True, "canary": False},
+        commit_sha="abc1234",
+        commit_dirty=False,
+        image_digest="sha256:deadbeef",
+        created_at=datetime(2026, 3, 8, 12, 0, tzinfo=UTC),
+        schema={"type": "object"},
+        stack="prod",
+    )
 
 
 @pytest.fixture

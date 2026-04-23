@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from zenml.exceptions import EntityExistsError
+from zenml.zen_stores.rest_zen_store import RestZenStore
 
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
@@ -29,6 +30,7 @@ from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
+    KitaruConfig,
     KubernetesStackSpec,
     ModelAliasConfig,
     ModelRegistryConfig,
@@ -37,7 +39,13 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
-from kitaru.errors import KitaruMemoryArtifactUnavailableError, KitaruUsageError
+from kitaru.errors import (
+    KitaruDeploymentInputValuesError,
+    KitaruMemoryArtifactUnavailableError,
+    KitaruStackNotRemoteExecutableUsageError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 
 
 class _BrokenGlobalConfig:
@@ -55,6 +63,28 @@ class _BrokenGlobalConfig:
         raise AssertionError("uses_local_store should not be reached")
 
 
+def _deployment_stub(
+    *,
+    flow: str = "demo_flow",
+    version: int = 1,
+    tags: dict[str, bool] | None = None,
+    deployment_id: str | None = None,
+) -> SimpleNamespace:
+    """Build a lightweight deployment-shaped object for CLI tests."""
+    return SimpleNamespace(
+        deployment_id=deployment_id or f"dep-{flow}-{version}",
+        flow=flow,
+        version=version,
+        tags=tags or {"default": True},
+        commit_sha="abc123",
+        commit_dirty=False,
+        image_digest=None,
+        created_at=datetime(2026, 4, 21, 10, 0, 0),
+        schema={"type": "object"},
+        stack="local",
+    )
+
+
 def _execution_stub(
     *,
     exec_id: str,
@@ -69,6 +99,7 @@ def _execution_stub(
     """Build a lightweight execution-shaped object for CLI tests."""
     return SimpleNamespace(
         exec_id=exec_id,
+        flow_id=f"flow-{flow_name}",
         flow_name=flow_name,
         status=status,
         started_at=datetime(2026, 3, 7, 10, 0, 0),
@@ -279,6 +310,10 @@ def test_help_flag_lists_available_commands(
         "model",
         "executions",
         "memory",
+        "build",
+        "deploy",
+        "invoke",
+        "flow",
     ):
         assert command in output
 
@@ -372,6 +407,30 @@ class TestInit:
         assert (tmp_path / ".kitaru").is_dir() or (tmp_path / ".zen").is_dir()
 
 
+def test_flow_help_lists_deployment_subcommands(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru flow --help` should show the deployment management surface."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["flow", "--help"])
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out.lower()
+    for command in ("list", "show", "deployments", "tag", "untag"):
+        assert command in output
+
+
+def test_flow_deployments_help_lists_supported_subcommands(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru flow deployments --help` should show version commands."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["flow", "deployments", "--help"])
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out.lower()
+    for command in ("list", "show", "curl", "logs", "delete"):
+        assert command in output
+
+
 def test_executions_help_lists_all_supported_subcommands(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -403,6 +462,1160 @@ def test_memory_help_lists_all_supported_subcommands(
     output = capsys.readouterr().out.lower()
     for command in ("list", "get", "set", "delete", "history", "scopes", "reindex"):
         assert command in output
+
+
+def test_auth_help_lists_token_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
+    """`kitaru auth --help` should show the token helper."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["auth", "--help"])
+    assert exc_info.value.code == 0
+    assert "token" in capsys.readouterr().out.lower()
+
+
+def test_auth_token_text_prints_token_only(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text mode should print only the access token plus a newline."""
+    fake_store = Mock(spec=RestZenStore)
+    fake_store.get_or_generate_api_token.return_value = "server-access-token"
+    fake_client = SimpleNamespace(zen_store=fake_store)
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru._cli._auth.resolve_connection_config") as resolve_mock,
+        patch("kitaru._cli._auth.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "token"])
+
+    assert exc_info.value.code == 0
+    resolve_mock.assert_called_once_with(validate_for_use=True)
+    assert capsys.readouterr().out == "server-access-token\n"
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.AUTH_TOKEN_PRINTED,
+        {"command": "auth.token"},
+    )
+
+
+def test_auth_token_json_includes_token(capsys: pytest.CaptureFixture[str]) -> None:
+    """JSON mode should wrap the access token in the standard command envelope."""
+    fake_store = Mock(spec=RestZenStore)
+    fake_store.get_or_generate_api_token.return_value = "server-access-token"
+    fake_client = SimpleNamespace(zen_store=fake_store)
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru._cli._auth.resolve_connection_config"),
+        patch("kitaru._cli._auth.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "token", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "auth.token",
+        "item": {"token": "server-access-token"},
+    }
+
+
+def test_auth_token_uses_public_env_active_connection(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Public auth env vars should be enough to mint a server access token."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://env-kitaru.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "org-level-token")
+    monkeypatch.setenv("KITARU_PROJECT", "demo-project")
+    fake_store = Mock(spec=RestZenStore)
+    fake_store.get_or_generate_api_token.return_value = "server-access-token"
+    fake_client = SimpleNamespace(zen_store=fake_store)
+
+    with (
+        patch("kitaru.cli.Client", return_value=fake_client),
+        patch("kitaru._cli._auth.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "token"])
+
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out == "server-access-token\n"
+    fake_store.get_or_generate_api_token.assert_called_once_with()
+
+
+def test_auth_token_token_only_env_reports_clean_cli_error(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Token-only env should fail as a Kitaru CLI error, not a traceback."""
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "dummy-token")
+    monkeypatch.delenv("KITARU_SERVER_URL", raising=False)
+
+    with (
+        patch(
+            "kitaru.config._read_global_connection_config", return_value=KitaruConfig()
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "token"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 1
+    assert captured.out == ""
+    assert (
+        "Error: KITARU_AUTH_TOKEN is set but no Kitaru server URL is available"
+        in captured.err
+    )
+    assert "set KITARU_SERVER_URL or run `kitaru login`" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_build_requires_initialized_project_for_file_targets(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru build` should fail fast outside an initialized project."""
+    flow_file = tmp_path / "demo.py"
+    flow_file.write_text("demo_flow = object()\n")
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["build", f"{flow_file}:demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "initialized Kitaru project" in payload["error"]["message"]
+    assert "kitaru init" in payload["error"]["message"]
+
+
+def test_deploy_accepts_legacy_zen_project_marker(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy `.zen/` markers should satisfy the CLI deploy preflight."""
+    (tmp_path / ".zen").mkdir()
+    flow_file = tmp_path / "demo.py"
+    flow_file.write_text("demo_flow = object()\n")
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub()
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["deploy", f"{flow_file}:demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(tags={"default": True})
+    assert json.loads(capsys.readouterr().out)["command"] == "deploy"
+
+
+def test_build_missing_file_still_reports_loader_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Preflight should not mask the clearer missing-file loader error."""
+    missing = tmp_path / "missing.py"
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["build", f"{missing}:demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "Flow module path does not exist" in payload["error"]["message"]
+
+
+def test_build_json_output_creates_deployment_from_target(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru build` should deploy a version without routing tags."""
+    deployment = _deployment_stub(flow="demo_flow", version=1, tags={})
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = deployment
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        patch("kitaru._cli._flows.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["build", "demo.py:demo_flow", "--input", '{"topic":"AI"}', "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        topic="AI",
+        publish_default_on_first_deploy=False,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "build"
+    assert payload["item"]["flow"] == "demo_flow"
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.DEPLOYMENT_BUILT,
+        {"command": "build", "has_input": True},
+    )
+
+
+def test_deploy_default_tag_passes_exclusive_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru deploy` should attach the reserved default tag by default."""
+    deployment = _deployment_stub(flow="demo_flow", version=1)
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = deployment
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        patch("kitaru._cli._flows.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["deploy", "demo.py:demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(tags={"default": True})
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["item"]["tags"] == {"default": True}
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.DEPLOYMENT_DEPLOYED,
+        {
+            "command": "deploy",
+            "has_input": False,
+            "selector": "default",
+            "exclusive": True,
+        },
+    )
+
+
+def test_deploy_help_mentions_single_tag_follow_up(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deploy help should explain single-tag routing and follow-up tagging."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["deploy", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "one routing tag" in output
+    assert "kitaru flow tag" in output
+
+
+@pytest.mark.parametrize(
+    ("command", "argv"),
+    [
+        ("build", ["build", "demo.py:demo_flow", "-o", "json"]),
+        ("deploy", ["deploy", "demo.py:demo_flow", "-o", "json"]),
+    ],
+)
+def test_build_and_deploy_stack_error_includes_stack_remedy(
+    command: str,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Build/deploy errors should point users to `--stack` and `kitaru stack use`."""
+    fake_flow = Mock()
+    fake_flow.deploy.side_effect = KitaruStackNotRemoteExecutableUsageError(
+        "Flow 'demo_flow' cannot be deployed with stack 'local' because that "
+        "stack is not one the Kitaru server can execute remotely."
+    )
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(argv)
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == command
+    message = payload["error"]["message"]
+    assert "--stack <stack>" in message
+    assert "kitaru stack use <stack>" in message
+
+
+@pytest.mark.parametrize(
+    ("command", "argv"),
+    [
+        ("build", ["build", "demo.py:demo_flow", "-o", "json"]),
+        ("deploy", ["deploy", "demo.py:demo_flow", "-o", "json"]),
+    ],
+)
+def test_build_and_deploy_input_error_includes_input_remedy(
+    command: str,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Build/deploy input-shape errors should point users to `--input`."""
+    fake_flow = Mock()
+    fake_flow.deploy.side_effect = KitaruDeploymentInputValuesError(
+        "Unable to create this deployment because Kitaru needs concrete input "
+        "values to prepare the saved deployment snapshot. Pass representative "
+        "input values when calling flow.deploy(...), then override them later "
+        "when invoking it."
+    )
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(argv)
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == command
+    message = payload["error"]["message"]
+    assert "--input" in message
+    assert "@inputs.json" in message
+
+
+def test_build_input_file_parses_json_object(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--input @file` should read deployment-time inputs from JSON."""
+    input_file = tmp_path / "inputs.json"
+    input_file.write_text('{"topic":"cats"}')
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub(tags={})
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["build", "demo.py:demo_flow", "--input", f"@{input_file}", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        topic="cats",
+        publish_default_on_first_deploy=False,
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "build"
+
+
+def test_build_rejects_non_object_input_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--input` must decode to a JSON object."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["build", "demo.py:demo_flow", "--input", "[]", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "must be a JSON object" in payload["error"]["message"]
+
+
+def test_deploy_rejects_reserved_input_keys(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Flow inputs must not override deployment-control kwargs like tags."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(
+            [
+                "deploy",
+                "demo.py:demo_flow",
+                "--input",
+                '{"tags":{}, "topic":"AI"}',
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "deploy"
+    assert "reserved deployment option key" in payload["error"]["message"]
+    assert "tags" in payload["error"]["message"]
+
+
+def test_invoke_defaults_to_default_deployment_tag(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru invoke FLOW` should route through the default deployment tag."""
+    fake_client = Mock()
+    fake_client.deployments.invoke.return_value = SimpleNamespace(exec_id="kr-123")
+    fake_client.executions.get.return_value = _execution_stub(
+        exec_id="kr-123",
+        flow_name="demo_flow",
+        status=ExecutionStatus.RUNNING,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._flows.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["invoke", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.invoke.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="default",
+        selector_source="implicit_default",
+        inputs={},
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "invoke"
+    assert payload["item"]["selector"] == {"version": None, "tag": "default"}
+    assert payload["item"]["exec_id"] == "kr-123"
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.DEPLOYMENT_INVOKED,
+        {"command": "invoke", "has_input": False, "selector": "default"},
+    )
+
+
+def test_invoke_missing_flow_without_selector_omits_default_in_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Implicit default lookup should not pretend the user asked for `default`."""
+    fake_client = Mock()
+    fake_client.deployments.invoke.side_effect = LookupError(
+        "No deployments found for flow 'demo_flow'. Deploy this flow first, "
+        "then invoke it by version or tag."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["invoke", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    fake_client.deployments.invoke.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="default",
+        selector_source="implicit_default",
+        inputs={},
+    )
+    payload = json.loads(capsys.readouterr().err)
+    message = payload["error"]["message"]
+    assert message.startswith("No deployments found for flow 'demo_flow'.")
+    assert "tag 'default'" not in message
+
+
+def test_invoke_missing_implicit_default_route_explains_remediation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Implicit default lookup should explain what to do when no route owns it."""
+    fake_client = Mock()
+    fake_client.deployments.invoke.side_effect = KitaruStateError(
+        "Flow 'demo_flow' has deployments, but none is currently routed as "
+        "the default deployment. Invoke it with an explicit version or tag, "
+        "or move the reserved 'default' tag to the version you want."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["invoke", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    message = payload["error"]["message"]
+    assert "default deployment" in message
+    assert "explicit version or tag" in message
+    assert "reserved 'default' tag" in message
+
+
+def test_invoke_explicit_missing_tag_remains_tag_specific(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit tags should still get tag-specific lookup errors."""
+    fake_client = Mock()
+    fake_client.deployments.invoke.side_effect = LookupError(
+        "No deployment found for flow 'demo_flow' with tag 'stable'."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["invoke", "demo_flow", "--tag", "stable", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    fake_client.deployments.invoke.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="stable",
+        selector_source="tag",
+        inputs={},
+    )
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["error"]["message"] == (
+        "No deployment found for flow 'demo_flow' with tag 'stable'."
+    )
+
+
+def test_invoke_selector_conflict_returns_json_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deployment selectors should use the shared mutual-exclusion error."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["invoke", "demo_flow", "--version", "1", "--tag", "prod", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "invoke"
+    assert "version` and `tag` are mutually exclusive" in payload["error"]["message"]
+
+
+def test_flow_deployments_curl_json_resolves_default_and_formats_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`flow deployments curl` should generate a pinned curl command as JSON."""
+    deployment = _deployment_stub(
+        flow="demo_flow",
+        version=2,
+        deployment_id="7d3176d6-7453-411b-a3f5-91ca5c663d1c",
+    )
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = deployment
+    fake_connection = SimpleNamespace(server_url="https://kitaru.example.com/")
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        patch("kitaru._cli._flows.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "curl",
+                "demo_flow",
+                "--input",
+                '{"prompt":"Review data retention."}',
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.get.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="default",
+    )
+    fake_client.deployments._ensure_deployment_server_runnable.assert_called_once_with(
+        deployment,
+        operation="curl",
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "flow.deployments.curl"
+    item = payload["item"]
+    assert item["selector"] == {"version": None, "tag": "default"}
+    assert item["resolved_deployment_version"] == 2
+    assert item["server_url"] == "https://kitaru.example.com"
+    assert item["invoke_url"] == (
+        "https://kitaru.example.com/api/v1/pipeline_snapshots/"
+        "7d3176d6-7453-411b-a3f5-91ca5c663d1c/runs"
+    )
+    assert item["request_body"] == {
+        "run_configuration": {"parameters": {"prompt": "Review data retention."}}
+    }
+    assert item["token_env_var"] == "KITARU_SERVER_ACCESS_TOKEN"
+    assert item["token_command"] == "kitaru auth token"
+    assert 'KITARU_SERVER_ACCESS_TOKEN="$(kitaru auth token)"' in item["curl_command"]
+    assert "Authorization: Bearer ${KITARU_SERVER_ACCESS_TOKEN}" in item["curl_command"]
+    assert "Review data retention" in item["curl_command"]
+    assert "KITARU_AUTH_TOKEN" not in item["curl_command"]
+    assert "kat_" not in item["curl_command"]
+    assert "This command is pinned to v2" in item["warning"]
+    assert item["warning_lines"] == [
+        "Resolved demo_flow tag 'default' to deployment version v2.",
+        "This command is pinned to v2. Regenerate it if you move the tag.",
+    ]
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.DEPLOYMENT_CURL_GENERATED,
+        {
+            "command": "flow.deployments.curl",
+            "has_input": True,
+            "selector": "default",
+        },
+    )
+
+
+def test_flow_deployments_curl_rejects_non_runnable_deployments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Curl generation should hard-fail for deployments the server cannot run."""
+    deployment = _deployment_stub(
+        flow="demo_flow",
+        version=2,
+        deployment_id="dep-legacy",
+    )
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = deployment
+    fake_client.deployments._ensure_deployment_server_runnable.side_effect = (
+        KitaruStateError("server cannot run this deployment")
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="https://kitaru.example.com"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "flow.deployments.curl"
+    assert "server cannot run this deployment" in payload["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("env", "message_fragment"),
+    [
+        pytest.param(
+            {"KITARU_SERVER_URL": "https://env-kitaru.example.com/"},
+            "no Kitaru auth token is available",
+            id="missing-auth-token",
+        ),
+        pytest.param(
+            {
+                "KITARU_SERVER_URL": "https://env-kitaru.example.com/",
+                "KITARU_AUTH_TOKEN": "org-token",
+            },
+            "no project is active",
+            id="missing-project",
+        ),
+    ],
+)
+def test_flow_deployments_curl_rejects_invalid_env_backed_connection(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    env: dict[str, str],
+    message_fragment: str,
+) -> None:
+    """Curl generation should fail before printing a known-broken command."""
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=2,
+        deployment_id="dep-env",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "flow.deployments.curl"
+    assert message_fragment in payload["error"]["message"]
+    fake_client.deployments.get.assert_not_called()
+
+
+def test_flow_deployments_curl_uses_complete_env_backed_connection_without_login_store(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A complete env-backed remote connection should still generate curl output."""
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://env-kitaru.example.com/")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "org-token")
+    monkeypatch.setenv("KITARU_PROJECT", "demo-project")
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=2,
+        deployment_id="dep-env",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru.config.GlobalConfiguration",
+            return_value=SimpleNamespace(store=None),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    item = json.loads(capsys.readouterr().out)["item"]
+    assert item["server_url"] == "https://env-kitaru.example.com"
+    assert item["invoke_url"] == (
+        "https://env-kitaru.example.com/api/v1/pipeline_snapshots/dep-env/runs"
+    )
+
+
+def test_flow_deployments_curl_text_warns_for_tag_selector(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text output should warn when a movable tag is resolved to a version."""
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=3,
+        tags={"stable": True},
+        deployment_id="dep-123",
+    )
+    fake_connection = SimpleNamespace(server_url="https://kitaru.example.com")
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        patch("kitaru._cli._flows.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "--tag", "stable"])
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.get.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="stable",
+    )
+    output = capsys.readouterr().out
+    assert (
+        "# Resolved demo_flow tag 'stable' to deployment version v3.\n"
+        "# This command is pinned to v3. Regenerate it if you move the tag.\n"
+    ) in output
+    assert 'KITARU_SERVER_ACCESS_TOKEN="$(kitaru auth token)"' in output
+    assert "curl -sS -X POST" in output
+    assert "${KITARU_SERVER_ACCESS_TOKEN}" in output
+
+
+def test_flow_deployments_curl_version_selector_uses_empty_body_without_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exact-version curl generation should not emit tag-pinning warnings."""
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=5,
+        deployment_id="dep-5",
+    )
+    fake_connection = SimpleNamespace(server_url="https://kitaru.example.com")
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "curl",
+                "demo_flow",
+                "--version",
+                "5",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.get.assert_called_once_with(
+        flow="demo_flow",
+        version=5,
+        tag=None,
+    )
+    item = json.loads(capsys.readouterr().out)["item"]
+    assert item["selector"] == {"version": 5, "tag": None}
+    assert item["request_body"] == {}
+    assert "warning" not in item
+    assert "-d '{}'" in item["curl_command"]
+
+
+def test_flow_deployments_curl_single_quotes_literal_url_parts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Literal URL pieces should not allow shell expansion when pasted."""
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=1,
+        deployment_id="dep-safe",
+    )
+    fake_connection = SimpleNamespace(
+        server_url="https://kitaru.example.com/$(touch /tmp/pwn)"
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    command = json.loads(capsys.readouterr().out)["item"]["curl_command"]
+    assert "'https://kitaru.example.com/$(touch /tmp/pwn)/api/v1/" in command
+    assert '"https://kitaru.example.com/$(touch /tmp/pwn)' not in command
+    assert "Authorization: Bearer ${KITARU_SERVER_ACCESS_TOKEN}" in command
+
+
+def test_flow_deployments_curl_reads_input_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--input @file` should be accepted when generating curl commands."""
+    input_file = tmp_path / "inputs.json"
+    input_file.write_text('{"topic":"cats"}')
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=1,
+        deployment_id="dep-file",
+    )
+    fake_connection = SimpleNamespace(server_url="https://kitaru.example.com")
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config", return_value=fake_connection
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "curl",
+                "demo_flow",
+                "--input",
+                f"@{input_file}",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    item = json.loads(capsys.readouterr().out)["item"]
+    assert item["request_body"] == {
+        "run_configuration": {"parameters": {"topic": "cats"}}
+    }
+
+
+def test_flow_list_json_groups_deployment_backed_flows(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru flow list -o json` should summarize deployments by flow."""
+    fake_client = Mock()
+    fake_client.deployments.list.return_value = [
+        _deployment_stub(flow="alpha", version=1),
+        _deployment_stub(flow="alpha", version=2, tags={"prod": False}),
+        _deployment_stub(flow="beta", version=1),
+    ]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "list", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.list.assert_called_once_with()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "flow.list"
+    assert payload["count"] == 2
+    assert payload["items"][0]["flow"] == "alpha"
+    assert payload["items"][0]["latest_version"] == 2
+
+
+def test_flow_deployments_logs_explicit_exec_id_skips_deployment_resolution(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--exec-id` should be a true override for deleted or moved deployments."""
+    entry = LogEntry(message="Starting deployment", level="INFO")
+    fake_client = Mock()
+    fake_client.deployments.get.side_effect = AssertionError(
+        "deployment selector should not be resolved when --exec-id is provided"
+    )
+    fake_client.executions.logs.return_value = [entry]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "logs",
+                "demo_flow",
+                "--exec-id",
+                "kr-explicit",
+                "--version",
+                "999",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.get.assert_not_called()
+    fake_client.executions.list.assert_not_called()
+    fake_client.executions.logs.assert_called_once_with(
+        "kr-explicit",
+        checkpoint=None,
+        source="step",
+        limit=None,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "flow.deployments.logs"
+    assert payload["count"] == 1
+
+
+def test_flow_deployments_logs_searches_all_flow_executions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deployment log lookup should not stop after an arbitrary first page."""
+    deployment = _deployment_stub(
+        flow="demo_flow",
+        version=7,
+        deployment_id="dep-target",
+    )
+    unrelated = SimpleNamespace(
+        exec_id="kr-unrelated",
+        metadata={"kitaru_deployment_id": "dep-other"},
+    )
+    matching = SimpleNamespace(
+        exec_id="kr-matching",
+        metadata={"kitaru_deployment_id": "dep-target"},
+    )
+    entry = LogEntry(message="Older matching deployment", level="INFO")
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = deployment
+    fake_client.executions.list.return_value = [unrelated, matching]
+    fake_client.executions.logs.return_value = [entry]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "logs",
+                "demo_flow",
+                "--version",
+                "7",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.executions.list.assert_called_once_with(flow="demo_flow")
+    fake_client.executions.logs.assert_called_once_with(
+        "kr-matching",
+        checkpoint=None,
+        source="step",
+        limit=None,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["count"] == 1
+
+
+def test_flow_deployments_logs_follow_json_uses_command_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deployment log follow JSONL should preserve the invoking command name."""
+    running = _execution_stub(
+        exec_id="kr-123",
+        flow_name="demo_flow",
+        status=ExecutionStatus.RUNNING,
+    )
+    completed = _execution_stub(
+        exec_id="kr-123",
+        flow_name="demo_flow",
+        status=ExecutionStatus.COMPLETED,
+    )
+    entry = LogEntry(message="Starting deployment", level="INFO")
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(flow="demo_flow")
+    fake_client.executions.logs.side_effect = [[entry], [entry]]
+    fake_client.executions.get.side_effect = [running, completed]
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru.cli.time.sleep") as sleep_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "logs",
+                "demo_flow",
+                "--exec-id",
+                "kr-123",
+                "--follow",
+                "-o",
+                "json",
+                "--interval",
+                "0.01",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    sleep_mock.assert_called_once_with(0.01)
+    lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    assert {line["command"] for line in lines} == {"flow.deployments.logs"}
+    assert lines[0]["event"] == "log"
+    assert lines[-1]["event"] == "terminal"
+
+
+def test_flow_deployments_delete_calls_public_api(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deployment deletion should go through `client.deployments.delete`."""
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._flows.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "delete",
+                "demo_flow",
+                "--version",
+                "2",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.deployments.delete.assert_called_once_with(flow="demo_flow", version=2)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["item"] == {"flow": "demo_flow", "version": 2, "deleted": True}
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.DEPLOYMENT_DELETED,
+        {"command": "flow.deployments.delete", "selector": "version"},
+    )
+
+
+def test_flow_deployments_delete_surfaces_public_api_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exclusive-tag delete protection should surface from the public API."""
+    fake_client = Mock()
+    fake_client.deployments.delete.side_effect = KitaruStateError(
+        "Cannot delete deployment while it holds exclusive tag(s): default."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "flow",
+                "deployments",
+                "delete",
+                "demo_flow",
+                "--version",
+                "1",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "flow.deployments.delete"
+    assert "exclusive tag" in payload["error"]["message"]
+
+
+def test_flow_tag_and_untag_call_public_apis(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Tag management commands should call public deployment APIs."""
+    fake_client = Mock()
+    fake_client.deployments.tag.return_value = _deployment_stub(tags={"prod": True})
+    fake_client.deployments.untag.return_value = _deployment_stub(tags={})
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._flows.track", return_value=True),
+        pytest.raises(SystemExit) as tag_exit,
+    ):
+        app(
+            [
+                "flow",
+                "tag",
+                "demo_flow",
+                "prod",
+                "--version",
+                "1",
+                "--exclusive",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert tag_exit.value.code == 0
+    fake_client.deployments.tag.assert_called_once_with(
+        flow="demo_flow",
+        version=1,
+        tag="prod",
+        exclusive=True,
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "flow.tag"
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._flows.track", return_value=True),
+        pytest.raises(SystemExit) as untag_exit,
+    ):
+        app(["flow", "untag", "demo_flow", "prod", "--version", "1", "-o", "json"])
+
+    assert untag_exit.value.code == 0
+    fake_client.deployments.untag.assert_called_once_with(
+        flow="demo_flow",
+        version=1,
+        tag="prod",
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "flow.untag"
 
 
 def test_executions_get_renders_execution_details(

@@ -67,6 +67,24 @@ see the
 
 The sections below show what to put in your values file for common scenarios.
 
+## Deployment invocation support (workload manager)
+
+Snapshot-backed deployment execution (`kitaru invoke`,
+`KitaruClient().deployments.invoke(...)`, and
+`kitaru flow deployments curl`) requires server workload-manager support.
+
+The default Kitaru chart/image path already includes this support. If you
+override the image (for example using plain `zenmldocker/zenml-server`) or
+replace environment settings, preserve a compatible workload-manager
+configuration explicitly under `kitaru.server.environment`.
+
+```yaml
+kitaru:
+  server:
+    environment:
+      ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE: "zenml.zen_server.pipeline_execution.in_memory_workload_manager.InMemoryWorkloadManager"
+```
+
 ## Persist your data
 
 ### Default: SQLite with a PVC

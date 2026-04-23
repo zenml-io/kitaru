@@ -23,6 +23,36 @@ class ExecutionStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+    @property
+    def is_finished(self) -> bool:
+        """Whether the execution is in a terminal state."""
+        return self in {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+        }
+
+    @property
+    def is_successful(self) -> bool:
+        """Whether the execution finished successfully."""
+        return self is ExecutionStatus.COMPLETED
+
+
+@dataclass(frozen=True)
+class Deployment:
+    """Public view of a versioned Kitaru deployment snapshot."""
+
+    deployment_id: str
+    flow: str
+    version: int
+    tags: dict[str, bool]
+    commit_sha: str | None
+    commit_dirty: bool | None
+    image_digest: str | None
+    created_at: datetime | None
+    schema: dict[str, Any] | None
+    stack: str | None
+
 
 @dataclass(frozen=True)
 class PendingWait:
@@ -176,6 +206,7 @@ __all__ = [
     "ArtifactRef",
     "CheckpointAttempt",
     "CheckpointCall",
+    "Deployment",
     "Execution",
     "ExecutionStatus",
     "FailureInfo",

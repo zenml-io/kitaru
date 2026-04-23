@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `kitaru auth token` for printing a short-lived bearer token for the active Kitaru server, suitable for shell command substitution.
+- `kitaru flow deployments curl FLOW` for generating a copy-pasteable curl command that starts a deployment execution through the active Kitaru server without inlining real tokens.
+- CLI commands for building, deploying, invoking, listing, tagging, logging, and deleting snapshot-backed flow deployments.
+- MCP deployment tools for deploying, invoking, listing, inspecting, deleting, tagging, and untagging snapshot-backed flow deployments.
+- Deployment model docs covering auto-versioning, reserved/default tag routing, serverless invocation, active Kitaru server authentication, and producer/consumer examples.
 - Python SDK secret write helpers: `kitaru.create_secret(...)` and `kitaru.delete_secret(...)`.
 - MCP secret creation tool `kitaru_secrets_create` for metadata-only secret creation from MCP clients.
 

@@ -92,6 +92,15 @@ def test_dockerfile_downloads_kitaru_ui() -> None:
     assert "sha256sum" in dockerfile or "sha256" in dockerfile
 
 
+def test_dockerfile_configures_workload_manager_for_deployments() -> None:
+    """Official server image must keep workload-manager support enabled."""
+    dockerfile = _read_dockerfile()
+    assert (
+        "ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE="
+        "zenml.zen_server.pipeline_execution.in_memory_workload_manager.InMemoryWorkloadManager"
+    ) in dockerfile
+
+
 def test_dockerfile_verifies_dashboard_sentinel() -> None:
     """The image build should fail if index.html is missing."""
     dockerfile = _read_dockerfile()

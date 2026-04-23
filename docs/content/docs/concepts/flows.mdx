@@ -69,6 +69,27 @@ To target a remote stack for one execution, pass `stack=`:
 handle = my_agent.run(url="https://example.com", stack="production")
 ```
 
+## Deploying and invoking flows
+
+Use `.run()` when the current source process is starting a flow directly. Use
+`.deploy()` when you want to save a reusable, versioned flow entrypoint that
+other processes can invoke later.
+
+```python
+# Producer side: create a reusable deployment version.
+my_agent.deploy(url="https://example.com")
+
+# Consumer side: start a new execution from the deployed default route.
+handle = my_agent.invoke(url="https://example.com")
+```
+
+`.invoke()` is the remote invocation verb for deployed flows. If you do not pass
+`version=` or `tag=`, it invokes the reserved `default` tag. To pin a specific
+version, pass `version=2`; to route through a named tag, pass `tag="stable"`.
+
+See [Deployments](/concepts/deployments) for auto-versioning, tag semantics,
+auth context, and worked producer/consumer examples.
+
 ## FlowHandle
 
 A `FlowHandle` is returned by `.run()`. It gives you
@@ -176,9 +197,10 @@ handle = KitaruClient().deployments.invoke(
 - **Flow functions should compose checkpoints.** The flow body is the
   orchestration layer — heavy work belongs in
   [checkpoints](/concepts/checkpoints).
-- **Use `.run()` to invoke flows.** Direct calls (`my_agent(...)`) are not
-  supported and raise `KitaruUsageError`. Use `my_agent.run(...)` to start an
-  execution.
+- **Use `.run()` to start flows directly from source.** Direct calls
+  (`my_agent(...)`) are not supported and raise `KitaruUsageError`. Use
+  `my_agent.run(...)` for source-backed executions, or `.invoke(...)` for
+  deployment-backed executions.
 - **Retries must be non-negative.** Passing a negative `retries` value raises a
   `KitaruUsageError`.
 

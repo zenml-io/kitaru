@@ -61,6 +61,7 @@ _default_analytics_source = os.environ.get(
 )
 set_source(_default_analytics_source)
 
+from kitaru._interface_deployments import Deployment
 from kitaru.artifacts import load, save
 from kitaru.checkpoint import checkpoint
 from kitaru.client import KitaruClient
@@ -105,6 +106,7 @@ from kitaru.secrets import (
 from kitaru.wait import wait
 
 __all__ = [
+    "Deployment",
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",

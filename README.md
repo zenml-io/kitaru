@@ -137,6 +137,8 @@ def research_flow(topic: str) -> str:
     return researcher.run_sync(topic).output
 ```
 
+<a id="quick-start"></a>
+
 ## 🚀 Quick Start
 
 ### Install

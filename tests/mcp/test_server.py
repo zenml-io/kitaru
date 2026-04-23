@@ -26,13 +26,20 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
-from kitaru.errors import KitaruRuntimeError
+from kitaru.errors import KitaruRuntimeError, KitaruStateError, KitaruUsageError
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
     get_execution_logs,
     kitaru_artifacts_get,
     kitaru_artifacts_list,
     kitaru_clean_preview,
+    kitaru_deployments_delete,
+    kitaru_deployments_deploy,
+    kitaru_deployments_get,
+    kitaru_deployments_invoke,
+    kitaru_deployments_list,
+    kitaru_deployments_tag,
+    kitaru_deployments_untag,
     kitaru_executions_cancel,
     kitaru_executions_get,
     kitaru_executions_input,
@@ -369,6 +376,7 @@ def test_executions_run_fetches_execution(
     """Run tool should run a flow and include execution details when available."""
     invocation_result = execution_interface.FlowInvocationResult(
         handle=SimpleNamespace(exec_id=sample_execution.exec_id),
+        exec_id=sample_execution.exec_id,
     )
 
     with (
@@ -415,6 +423,7 @@ def test_executions_run_returns_warning_when_details_unavailable(
             "kitaru._interface_executions.invoke_flow_target",
             return_value=execution_interface.FlowInvocationResult(
                 handle=SimpleNamespace(exec_id="kr-new"),
+                exec_id="kr-new",
             ),
         ),
         patch(
@@ -438,6 +447,308 @@ def test_executions_run_returns_warning_when_details_unavailable(
     assert payload["exec_id"] == "kr-new"
     assert payload["execution"] is None
     assert "details are not available yet" in payload["warning"]
+
+
+def test_deployments_deploy_loads_target_and_serializes(sample_deployment) -> None:
+    """kitaru_deployments_deploy should load, deploy, and serialize the record."""
+    flow_target = SimpleNamespace(deploy=MagicMock(return_value=sample_deployment))
+
+    with patch(
+        "kitaru.mcp.server._load_deployable_flow_target",
+        return_value=flow_target,
+    ) as mock_loader:
+        payload = kitaru_deployments_deploy(
+            "agent.py:content_pipeline",
+            inputs={"topic": "ai safety"},
+            stack="prod",
+            cache=False,
+            retries=2,
+        )
+
+    mock_loader.assert_called_once_with(
+        "agent.py:content_pipeline",
+        module_name_prefix="_kitaru_mcp_deploy_target_",
+    )
+    flow_target.deploy.assert_called_once_with(
+        topic="ai safety",
+        tags={"default": True},
+        stack="prod",
+        cache=False,
+        retries=2,
+    )
+    assert payload["deployment_id"] == sample_deployment.deployment_id
+    assert payload["tags"] == sample_deployment.tags
+
+
+def test_deployments_deploy_forwards_non_default_tag_exclusivity(
+    sample_deployment,
+) -> None:
+    """Non-default deployment tags should honor the explicit exclusive flag."""
+    flow_target = SimpleNamespace(deploy=MagicMock(return_value=sample_deployment))
+
+    with patch(
+        "kitaru.mcp.server._load_deployable_flow_target",
+        return_value=flow_target,
+    ):
+        kitaru_deployments_deploy(
+            "agent.py:content_pipeline",
+            inputs={"topic": "ai safety"},
+            tag="canary",
+            exclusive=True,
+        )
+
+    flow_target.deploy.assert_called_once_with(
+        topic="ai safety",
+        tags={"canary": True},
+    )
+
+
+def test_deployments_deploy_rejects_reserved_input_keys() -> None:
+    """Flow inputs must not shadow deployment-control options."""
+    with (
+        patch("kitaru.mcp.server._load_deployable_flow_target") as mock_loader,
+        pytest.raises(ValueError, match="`inputs` contains reserved"),
+    ):
+        kitaru_deployments_deploy(
+            "agent.py:content_pipeline",
+            inputs={"stack": "not-a-stack"},
+        )
+
+    mock_loader.assert_not_called()
+
+
+def test_deployments_deploy_rejects_non_object_inputs() -> None:
+    """MCP inputs should be structured JSON objects, not scalars/lists."""
+    with pytest.raises(ValueError, match="`inputs` must be an object"):
+        kitaru_deployments_deploy("agent.py:content_pipeline", inputs=["topic"])
+
+
+def test_deployments_deploy_surfaces_shared_stack_guard() -> None:
+    """MCP deploy should surface the shared non-runnable-stack error unchanged."""
+    flow_target = SimpleNamespace(
+        deploy=MagicMock(
+            side_effect=KitaruUsageError("the Kitaru server cannot run that stack")
+        )
+    )
+
+    with (
+        patch(
+            "kitaru.mcp.server._load_deployable_flow_target",
+            return_value=flow_target,
+        ),
+        pytest.raises(KitaruUsageError, match="cannot run that stack"),
+    ):
+        kitaru_deployments_deploy("agent.py:content_pipeline", inputs={"topic": "ai"})
+
+
+def test_deployments_invoke_defaults_to_default_tag(
+    mock_kitaru_client: MagicMock,
+    sample_execution,
+) -> None:
+    """kitaru_deployments_invoke should default to the reserved default tag."""
+    mock_kitaru_client.deployments.invoke.return_value = SimpleNamespace(
+        exec_id=sample_execution.exec_id
+    )
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru._interface_executions.resolve_started_execution_details",
+            return_value=execution_interface.StartedExecutionDetails(
+                exec_id=sample_execution.exec_id,
+                execution=sample_execution,
+                warning=None,
+            ),
+        ) as mock_resolve,
+    ):
+        payload = kitaru_deployments_invoke(
+            "content_pipeline",
+            inputs={"topic": "ai safety"},
+        )
+
+    mock_kitaru_client.deployments.invoke.assert_called_once_with(
+        flow="content_pipeline",
+        version=None,
+        tag="default",
+        selector_source="implicit_default",
+        inputs={"topic": "ai safety"},
+    )
+    mock_resolve.assert_called_once_with(
+        exec_id=sample_execution.exec_id,
+        client=mock_kitaru_client,
+    )
+    assert payload["flow"] == "content_pipeline"
+    assert payload["selector"] == {"version": None, "tag": "default"}
+    assert payload["execution"]["exec_id"] == sample_execution.exec_id
+
+
+def test_deployments_invoke_surfaces_non_runnable_deployment_error(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """MCP invoke should preserve the shared early failure for legacy deployments."""
+    mock_kitaru_client.deployments.invoke.side_effect = KitaruStateError(
+        "server cannot run this deployment"
+    )
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        pytest.raises(KitaruStateError, match="server cannot run this deployment"),
+    ):
+        kitaru_deployments_invoke("content_pipeline")
+
+
+def test_deployments_invoke_passes_explicit_tag_source(
+    mock_kitaru_client: MagicMock,
+    sample_execution,
+) -> None:
+    """Explicit MCP tag selection should stay tag-specific downstream."""
+    mock_kitaru_client.deployments.invoke.return_value = SimpleNamespace(
+        exec_id=sample_execution.exec_id
+    )
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru._interface_executions.resolve_started_execution_details",
+            return_value=execution_interface.StartedExecutionDetails(
+                exec_id=sample_execution.exec_id,
+                execution=sample_execution,
+                warning=None,
+            ),
+        ),
+    ):
+        payload = kitaru_deployments_invoke(
+            "content_pipeline",
+            tag="stable",
+            inputs={"topic": "ai safety"},
+        )
+
+    mock_kitaru_client.deployments.invoke.assert_called_once_with(
+        flow="content_pipeline",
+        version=None,
+        tag="stable",
+        selector_source="tag",
+        inputs={"topic": "ai safety"},
+    )
+    assert payload["selector"] == {"version": None, "tag": "stable"}
+
+
+def test_deployments_invoke_rejects_version_and_tag_together(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """MCP selector validation should match the shared deployment rules."""
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        pytest.raises(ValueError, match="mutually exclusive"),
+    ):
+        kitaru_deployments_invoke("content_pipeline", version=2, tag="canary")
+
+    mock_kitaru_client.deployments.invoke.assert_not_called()
+
+
+def test_deployments_list_forwards_filter_and_serializes(
+    mock_kitaru_client: MagicMock,
+    sample_deployment,
+) -> None:
+    """kitaru_deployments_list should delegate to the public deployments API."""
+    mock_kitaru_client.deployments.list.return_value = [sample_deployment]
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_deployments_list(flow="content_pipeline")
+
+    mock_kitaru_client.deployments.list.assert_called_once_with(flow="content_pipeline")
+    assert payload == [
+        {
+            "deployment_id": "dep-content-v2",
+            "flow": "content_pipeline",
+            "version": 2,
+            "tags": {"default": True, "canary": False},
+            "commit_sha": "abc1234",
+            "commit_dirty": False,
+            "image_digest": "sha256:deadbeef",
+            "created_at": "2026-03-08T12:00:00+00:00",
+            "schema": {"type": "object"},
+            "stack": "prod",
+        }
+    ]
+
+
+def test_deployments_get_defaults_to_default_tag(
+    mock_kitaru_client: MagicMock,
+    sample_deployment,
+) -> None:
+    """kitaru_deployments_get should use the same default selector as CLI/SDK."""
+    mock_kitaru_client.deployments.get.return_value = sample_deployment
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_deployments_get("content_pipeline")
+
+    mock_kitaru_client.deployments.get.assert_called_once_with(
+        flow="content_pipeline",
+        version=None,
+        tag="default",
+    )
+    assert payload["version"] == 2
+
+
+def test_deployments_delete_delegates_by_version(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """kitaru_deployments_delete should leave safety checks to the SDK API."""
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_deployments_delete("content_pipeline", version=2)
+
+    mock_kitaru_client.deployments.delete.assert_called_once_with(
+        flow="content_pipeline",
+        version=2,
+    )
+    assert payload == {"flow": "content_pipeline", "version": 2, "deleted": True}
+
+
+def test_deployments_tag_delegates_and_serializes(
+    mock_kitaru_client: MagicMock,
+    sample_deployment,
+) -> None:
+    """kitaru_deployments_tag should forward version/tag/exclusive to SDK API."""
+    mock_kitaru_client.deployments.tag.return_value = sample_deployment
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_deployments_tag(
+            "content_pipeline",
+            version=2,
+            tag="stable",
+            exclusive=True,
+        )
+
+    mock_kitaru_client.deployments.tag.assert_called_once_with(
+        flow="content_pipeline",
+        version=2,
+        tag="stable",
+        exclusive=True,
+    )
+    assert payload["deployment_id"] == sample_deployment.deployment_id
+
+
+def test_deployments_untag_delegates_and_serializes(
+    mock_kitaru_client: MagicMock,
+    sample_deployment,
+) -> None:
+    """kitaru_deployments_untag should forward tag removal to SDK API."""
+    mock_kitaru_client.deployments.untag.return_value = sample_deployment
+
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_deployments_untag(
+            "content_pipeline",
+            version=2,
+            tag="canary",
+        )
+
+    mock_kitaru_client.deployments.untag.assert_called_once_with(
+        flow="content_pipeline",
+        version=2,
+        tag="canary",
+    )
+    assert payload["flow"] == "content_pipeline"
 
 
 def test_executions_input_validates_wait_schema(
