@@ -40,7 +40,9 @@ from kitaru.config import (
     VertexStackSpec,
 )
 from kitaru.errors import (
+    KitaruDeploymentInputValuesError,
     KitaruMemoryArtifactUnavailableError,
+    KitaruStackNotRemoteExecutableUsageError,
     KitaruStateError,
     KitaruUsageError,
 )
@@ -691,6 +693,93 @@ def test_deploy_default_tag_passes_exclusive_default(
     )
 
 
+def test_deploy_help_mentions_single_tag_follow_up(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deploy help should explain single-tag routing and follow-up tagging."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["deploy", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "one routing tag" in output
+    assert "kitaru flow tag" in output
+
+
+@pytest.mark.parametrize(
+    ("command", "argv"),
+    [
+        ("build", ["build", "demo.py:demo_flow", "-o", "json"]),
+        ("deploy", ["deploy", "demo.py:demo_flow", "-o", "json"]),
+    ],
+)
+def test_build_and_deploy_stack_error_includes_stack_remedy(
+    command: str,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Build/deploy errors should point users to `--stack` and `kitaru stack use`."""
+    fake_flow = Mock()
+    fake_flow.deploy.side_effect = KitaruStackNotRemoteExecutableUsageError(
+        "Flow 'demo_flow' cannot be deployed with stack 'local' because that "
+        "stack is not one the Kitaru server can execute remotely."
+    )
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(argv)
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == command
+    message = payload["error"]["message"]
+    assert "--stack <stack>" in message
+    assert "kitaru stack use <stack>" in message
+
+
+@pytest.mark.parametrize(
+    ("command", "argv"),
+    [
+        ("build", ["build", "demo.py:demo_flow", "-o", "json"]),
+        ("deploy", ["deploy", "demo.py:demo_flow", "-o", "json"]),
+    ],
+)
+def test_build_and_deploy_input_error_includes_input_remedy(
+    command: str,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Build/deploy input-shape errors should point users to `--input`."""
+    fake_flow = Mock()
+    fake_flow.deploy.side_effect = KitaruDeploymentInputValuesError(
+        "Unable to create this deployment because Kitaru needs concrete input "
+        "values to prepare the saved deployment snapshot. Pass representative "
+        "input values when calling flow.deploy(...), then override them later "
+        "when invoking it."
+    )
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(argv)
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == command
+    message = payload["error"]["message"]
+    assert "--input" in message
+    assert "@inputs.json" in message
+
+
 def test_build_input_file_parses_json_object(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -775,6 +864,7 @@ def test_invoke_defaults_to_default_deployment_tag(
         flow="demo_flow",
         version=None,
         tag="default",
+        selector_source="implicit_default",
         inputs={},
     )
     payload = json.loads(capsys.readouterr().out)
@@ -784,6 +874,90 @@ def test_invoke_defaults_to_default_deployment_tag(
     track_mock.assert_called_once_with(
         AnalyticsEvent.DEPLOYMENT_INVOKED,
         {"command": "invoke", "has_input": False, "selector": "default"},
+    )
+
+
+def test_invoke_missing_flow_without_selector_omits_default_in_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Implicit default lookup should not pretend the user asked for `default`."""
+    fake_client = Mock()
+    fake_client.deployments.invoke.side_effect = LookupError(
+        "No deployments found for flow 'demo_flow'. Deploy this flow first, "
+        "then invoke it by version or tag."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["invoke", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    fake_client.deployments.invoke.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="default",
+        selector_source="implicit_default",
+        inputs={},
+    )
+    payload = json.loads(capsys.readouterr().err)
+    message = payload["error"]["message"]
+    assert message.startswith("No deployments found for flow 'demo_flow'.")
+    assert "tag 'default'" not in message
+
+
+def test_invoke_missing_implicit_default_route_explains_remediation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Implicit default lookup should explain what to do when no route owns it."""
+    fake_client = Mock()
+    fake_client.deployments.invoke.side_effect = KitaruStateError(
+        "Flow 'demo_flow' has deployments, but none is currently routed as "
+        "the default deployment. Invoke it with an explicit version or tag, "
+        "or move the reserved 'default' tag to the version you want."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["invoke", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    message = payload["error"]["message"]
+    assert "default deployment" in message
+    assert "explicit version or tag" in message
+    assert "reserved 'default' tag" in message
+
+
+def test_invoke_explicit_missing_tag_remains_tag_specific(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit tags should still get tag-specific lookup errors."""
+    fake_client = Mock()
+    fake_client.deployments.invoke.side_effect = LookupError(
+        "No deployment found for flow 'demo_flow' with tag 'stable'."
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["invoke", "demo_flow", "--tag", "stable", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    fake_client.deployments.invoke.assert_called_once_with(
+        flow="demo_flow",
+        version=None,
+        tag="stable",
+        selector_source="tag",
+        inputs={},
+    )
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["error"]["message"] == (
+        "No deployment found for flow 'demo_flow' with tag 'stable'."
     )
 
 

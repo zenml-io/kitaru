@@ -19,9 +19,14 @@ from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
     build_deployment_deploy_kwargs,
+    resolve_deployment_selector,
     validate_deployment_selector,
 )
-from kitaru._interface_errors import run_with_cli_error_boundary
+from kitaru._interface_errors import (
+    InterfaceErrorDetails,
+    run_with_cli_error_boundary,
+    translate_to_user_error,
+)
 from kitaru._interface_executions import (
     build_started_deployment_payload,
     flow_handle_exec_id,
@@ -30,7 +35,11 @@ from kitaru._interface_executions import (
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.config import resolve_connection_config
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import (
+    KitaruDeploymentInputValuesError,
+    KitaruUsageError,
+    StackNotRemoteExecutable,
+)
 from kitaru.inspection import (
     serialize_deployment,
     serialize_flow_deployment_summary,
@@ -69,6 +78,31 @@ from ._helpers import (
 SERVER_ACCESS_TOKEN_COMMAND = "kitaru auth token"
 SERVER_ACCESS_TOKEN_ENV = "KITARU_SERVER_ACCESS_TOKEN"
 _LEGACY_REPOSITORY_DIRECTORY_NAME = ".zen"
+
+
+def _translate_build_or_deploy_error(exc: Exception) -> InterfaceErrorDetails:
+    """Add CLI-specific remediation guidance for build/deploy failures."""
+    details = translate_to_user_error(exc)
+    if isinstance(exc, StackNotRemoteExecutable):
+        return InterfaceErrorDetails(
+            message=(
+                f"{details.message} Use `--stack <stack>` to select a stack the "
+                "Kitaru server can execute remotely, or run `kitaru stack use "
+                "<stack>` to change your active stack before retrying."
+            ),
+            error_type=details.error_type,
+        )
+
+    if isinstance(exc, KitaruDeploymentInputValuesError):
+        return InterfaceErrorDetails(
+            message=(
+                f"{details.message} From the CLI, pass representative input values "
+                'with `--input \'{"key": "value"}\'` (or `--input @inputs.json`).'
+            ),
+            error_type=details.error_type,
+        )
+
+    return details
 
 
 def _project_marker_root(start: Path) -> Path | None:
@@ -407,6 +441,7 @@ def build(
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
+        translator=_translate_build_or_deploy_error,
     )
 
     if output_format == CLIOutputFormat.JSON:
@@ -424,16 +459,22 @@ def deploy(
     ],
     *,
     tag: Annotated[
-        str, Parameter(help="Routing tag to attach to the new version.")
+        str,
+        Parameter(
+            help=(
+                "Single routing tag to attach at deploy time. Use `kitaru flow "
+                "tag` to add or move tags later."
+            )
+        ),
     ] = DEFAULT_DEPLOYMENT_TAG,
     exclusive: Annotated[
-        bool, Parameter(help="Make a non-default tag exclusive.")
+        bool, Parameter(help="Make this deploy-time tag exclusive.")
     ] = False,
     input_: Annotated[
         str | None,
         Parameter(
             alias="--input",
-            help="Deployment-time default flow inputs as JSON or `@file`.",
+            help="Representative deployment-time flow inputs as JSON or `@file`.",
         ),
     ] = None,
     stack: Annotated[str | None, Parameter(help="Optional stack override.")] = None,
@@ -441,7 +482,11 @@ def deploy(
     retries: Annotated[int | None, Parameter(help="Optional retry override.")] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Deploy a new flow version and attach a routing tag."""
+    """Deploy a new flow version and attach one routing tag.
+
+    `kitaru deploy` attaches exactly one routing tag at deploy time. To add or
+    move more tags later, use `kitaru flow tag`.
+    """
     command = "deploy"
     output_format = _resolve_output_format(output)
 
@@ -484,6 +529,7 @@ def deploy(
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
+        translator=_translate_build_or_deploy_error,
     )
 
     if output_format == CLIOutputFormat.JSON:
@@ -508,13 +554,18 @@ def invoke(
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Invoke a deployed flow snapshot."""
+    """Invoke a deployed flow snapshot.
+
+    If you omit `--version` and `--tag`, Kitaru tries the implicit `default`
+    route. If that route is missing, invoke with an explicit tag/version or move
+    `default` with `kitaru flow tag`.
+    """
     command = "invoke"
     output_format = _resolve_output_format(output)
 
     def _invoke_deployment() -> tuple[Any, dict[str, Any], int | None, str | None]:
         inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
-        resolved_version, resolved_tag = validate_deployment_selector(
+        selector = resolve_deployment_selector(
             version=version,
             tag=tag,
             default_tag=DEFAULT_DEPLOYMENT_TAG,
@@ -522,16 +573,17 @@ def invoke(
         client = _facade_module().KitaruClient()
         handle = client.deployments.invoke(
             flow=flow,
-            version=resolved_version,
-            tag=resolved_tag,
+            version=selector.version,
+            tag=selector.tag,
+            selector_source=selector.source,
             inputs=inputs,
         )
         exec_id = flow_handle_exec_id(handle)
         details = resolve_started_execution_details(exec_id=exec_id, client=client)
         payload = build_started_deployment_payload(
             flow=flow,
-            version=resolved_version,
-            tag=resolved_tag,
+            version=selector.version,
+            tag=selector.tag,
             details=details,
         )
         track(
@@ -539,10 +591,13 @@ def invoke(
             {
                 "command": command,
                 "has_input": bool(inputs),
-                "selector": _selector_kind(version=resolved_version, tag=resolved_tag),
+                "selector": _selector_kind(
+                    version=selector.version,
+                    tag=selector.tag,
+                ),
             },
         )
-        return handle, payload, resolved_version, resolved_tag
+        return handle, payload, selector.version, selector.tag
 
     handle, payload, resolved_version, resolved_tag = run_with_cli_error_boundary(
         _invoke_deployment,
@@ -972,15 +1027,22 @@ def delete(
 @flow_app.command
 def tag(
     flow: Annotated[str, Parameter(help="Deployment-backed flow name.")],
-    tag: Annotated[str, Parameter(help="Public deployment tag to attach.")],
+    tag: Annotated[
+        str,
+        Parameter(help="Public deployment tag to attach or move after deploy time."),
+    ],
     *,
     version: Annotated[int, Parameter(help="Exact deployment version to tag.")],
     exclusive: Annotated[
-        bool, Parameter(help="Move this tag from older versions.")
+        bool, Parameter(help="Move this tag away from older versions.")
     ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Attach a public tag to one deployment version."""
+    """Attach or move a public tag on one deployment version.
+
+    Use this after `kitaru deploy` when you want to add another route or move an
+    existing one without creating a new deployment version.
+    """
     command = "flow.tag"
     output_format = _resolve_output_format(output)
 

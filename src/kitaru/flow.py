@@ -32,6 +32,7 @@ from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
 from kitaru._interface_deployments import (
     Deployment,
     ensure_stack_is_server_runnable,
+    resolve_deployment_selector,
     validate_deployment_selector,
 )
 from kitaru._source_aliases import (
@@ -59,6 +60,7 @@ from kitaru.config import (
 from kitaru.errors import (
     FailureOrigin,
     KitaruBackendError,
+    KitaruDeploymentInputValuesError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -868,12 +870,11 @@ class _FlowDefinition:
             try:
                 configured_pipeline.prepare(*args, **kwargs)
             except (RuntimeError, ValueError) as exc:
-                raise KitaruUsageError(
-                    "Unable to create this deployment without valid deployment-time "
-                    "input defaults. Kitaru may need representative inputs to prepare "
-                    "the saved deployment snapshot; pass representative inputs when "
-                    "creating the deployment, then override those defaults later when "
-                    "invoking it."
+                raise KitaruDeploymentInputValuesError(
+                    "Unable to create this deployment because Kitaru needs concrete "
+                    "input values to prepare the saved deployment snapshot. Pass "
+                    "representative input values when calling flow.deploy(...), then "
+                    "override them later when invoking it."
                 ) from exc
 
             metadata = _deployment_extra_metadata(
@@ -927,14 +928,17 @@ class _FlowDefinition:
         **flow_inputs: Any,
     ) -> FlowHandle:
         """Invoke a deployed flow snapshot and return an execution handle."""
-        version, tag = validate_deployment_selector(
-            version=version, tag=tag, default_tag=DEFAULT_DEPLOYMENT_TAG
+        selector = resolve_deployment_selector(
+            version=version,
+            tag=tag,
+            default_tag=DEFAULT_DEPLOYMENT_TAG,
         )
         deployments_api, flow_name = self._deployments_api_and_flow_name()
         return deployments_api.invoke(
             flow=flow_name,
-            version=version,
-            tag=tag,
+            version=selector.version,
+            tag=selector.tag,
+            selector_source=selector.source,
             inputs=flow_inputs,
         )
 

@@ -27,6 +27,7 @@ from kitaru._config import _stacks as stack_ops
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
     build_deployment_deploy_kwargs,
+    resolve_deployment_selector,
     validate_deployment_selector,
 )
 from kitaru._interface_errors import run_with_mcp_error_boundary
@@ -250,7 +251,7 @@ def kitaru_deployments_invoke(
 
     def _invoke() -> dict[str, Any]:
         flow_inputs = execution_interface.ensure_inputs_object(inputs)
-        resolved_version, resolved_tag = validate_deployment_selector(
+        selector = resolve_deployment_selector(
             version=version,
             tag=tag,
             default_tag=DEFAULT_DEPLOYMENT_TAG,
@@ -258,8 +259,9 @@ def kitaru_deployments_invoke(
         client = client_api.KitaruClient()
         handle = client.deployments.invoke(
             flow=flow,
-            version=resolved_version,
-            tag=resolved_tag,
+            version=selector.version,
+            tag=selector.tag,
+            selector_source=selector.source,
             inputs=flow_inputs,
         )
         exec_id = execution_interface.flow_handle_exec_id(handle)
@@ -269,8 +271,8 @@ def kitaru_deployments_invoke(
         )
         return execution_interface.build_started_deployment_payload(
             flow=flow,
-            version=resolved_version,
-            tag=resolved_tag,
+            version=selector.version,
+            tag=selector.tag,
             details=details,
         )
 

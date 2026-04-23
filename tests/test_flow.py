@@ -381,9 +381,10 @@ def test_flow_deploy_rewords_input_defaults_error() -> None:
             wrapped.deploy(1)
 
     message = str(exc_info.value)
-    assert "deployment-time input defaults" in message
+    assert "needs concrete input values" in message
     assert "saved deployment snapshot" in message
-    assert "creating the deployment" in message
+    assert "flow.deploy(...)" in message
+    assert "deployment-time input defaults" not in message
     assert "ZenML currently" not in message
     deployments_api.create.assert_not_called()
 
@@ -419,14 +420,25 @@ def test_flow_invoke_validates_selectors_and_delegates_to_client() -> None:
         wrapped = flow(lambda answer=0: answer)
         with pytest.raises(KitaruUsageError, match="mutually exclusive"):
             wrapped.invoke(version=1, tag="default")
+        assert wrapped.invoke(answer=21) is handle
         assert wrapped.invoke(version=7, answer=42) is handle
 
-    deployments_api.invoke.assert_called_once_with(
-        flow="_lambda_",
-        version=7,
-        tag=None,
-        inputs={"answer": 42},
-    )
+    assert deployments_api.invoke.call_args_list == [
+        call(
+            flow="_lambda_",
+            version=None,
+            tag="default",
+            selector_source="implicit_default",
+            inputs={"answer": 21},
+        ),
+        call(
+            flow="_lambda_",
+            version=7,
+            tag=None,
+            selector_source="version",
+            inputs={"answer": 42},
+        ),
+    ]
 
 
 def test_build_pipeline_options_omits_enable_cache_when_unset() -> None:

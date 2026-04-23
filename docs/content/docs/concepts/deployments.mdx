@@ -31,12 +31,17 @@ be resolved correctly.
 
 Deploying a flow creates a Kitaru-managed saved snapshot that Kitaru treats as
 an immutable deployment version. Kitaru records the public flow name, an integer
-version, deployment-time input defaults, the stack context, and any public
-routing tags.
+version, representative deployment-time input values, the stack context, and
+any public routing tags.
 
-Deployment-time inputs are representative defaults. They let Kitaru prepare the
-saved deployment snapshot, especially for flows whose shape depends on concrete
-parameters. Later invocations can override those defaults by passing new inputs.
+Deployment-time inputs should be representative values. They let Kitaru prepare
+the saved deployment snapshot, especially for flows whose shape depends on
+concrete parameters. Later invocations can override those values by passing new
+inputs.
+
+Each `kitaru deploy` call attaches exactly one routing tag at deploy time. If
+you want to add another tag later, or move an existing route after testing, use
+`kitaru flow tag` against the deployed version instead of redeploying.
 
 ```bash
 kitaru deploy flows/research.py:research_agent \
@@ -111,11 +116,21 @@ Concrete routing story:
 kitaru flow tag research_agent stable --version 2 --exclusive
 ```
 
-## Server-runnable stack requirement
+That split keeps deploy-time routing simple: create the version with one route,
+then use `kitaru flow tag` to mix in later routing changes. For example, you
+might deploy version `2` with an exclusive `canary` route, then add a shared
+`benchmark` label afterward:
 
-Deployment creation is only supported for stacks that the Kitaru server can run
-from a saved snapshot. If the selected stack is local or otherwise not
-server-runnable, deployment creation is rejected (CLI, SDK, and MCP).
+```bash
+kitaru flow tag research_agent benchmark --version 2
+```
+
+## Remote-executable stack requirement
+
+Deployment creation is only supported for stacks that the Kitaru server can
+execute remotely from a saved snapshot. If the selected stack is local or
+otherwise not remotely executable by the Kitaru server, deployment creation is
+rejected (CLI, SDK, and MCP).
 
 This guard keeps deploy-time behavior aligned with invoke/curl behavior.
 
@@ -129,11 +144,16 @@ kitaru invoke research_agent \
   --input '{"topic": "serverless routing"}'
 ```
 
-If you omit both `--version` and `--tag`, Kitaru invokes the `default` tag:
+If you omit both `--version` and `--tag`, Kitaru tries the implicit `default`
+route:
 
 ```bash
 kitaru invoke research_agent --input '{"topic": "default route"}'
 ```
+
+If the flow has no deployments, Kitaru tells you that directly. If deployments
+exist but none is currently routed as `default`, invoke with an explicit tag or
+version, or move `default` with `kitaru flow tag ... --exclusive`.
 
 You can pin an exact version when you need reproducibility:
 

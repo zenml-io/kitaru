@@ -298,7 +298,7 @@ run_test "examples/pydantic_ai_agent/pydantic_ai_adapter.py" \
 # when no project is found).
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run
 run_expected_failure "kitaru build rejects local stack deployments" \
-    "Kitaru server cannot run that stack" \
+    "not one the Kitaru server can execute remotely" \
     $UV_RUN kitaru build examples/basic_flow/first_working_flow.py:research_agent \
         --input '{"topic":"smoke"}'
 

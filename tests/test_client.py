@@ -395,6 +395,102 @@ def test_deployments_get_rejects_ambiguous_shared_tag() -> None:
             client.deployments.get(flow="research_flow", tag="shared")
 
 
+def test_deployments_invoke_implicit_default_without_deployments_is_flow_centric() -> (
+    None
+):
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_cls.return_value.list_snapshots.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        with pytest.raises(LookupError) as exc_info:
+            client.deployments.invoke(
+                flow="research_flow",
+                tag="default",
+                selector_source="implicit_default",
+            )
+
+    message = str(exc_info.value)
+    assert message == (
+        "No deployments found for flow 'research_flow'. Deploy this flow first, "
+        "then invoke it by version or tag."
+    )
+    assert "tag 'default'" not in message
+
+
+def test_deployments_invoke_implicit_default_without_default_route_guides_user() -> (
+    None
+):
+    snapshots = [
+        _DummySnapshot(
+            name="kitaru::research_flow::v1",
+            tags=[deployment_public_tag("stable", exclusive=True)],
+        ),
+        _DummySnapshot(
+            name="kitaru::research_flow::v2",
+            tags=[deployment_public_tag("benchmark", exclusive=False)],
+        ),
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_cls.return_value.list_snapshots.return_value = SimpleNamespace(
+            items=snapshots
+        )
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError) as exc_info:
+            client.deployments.invoke(
+                flow="research_flow",
+                tag="default",
+                selector_source="implicit_default",
+            )
+
+    message = str(exc_info.value)
+    assert "has deployments" in message
+    assert "default deployment" in message
+    assert "explicit version or tag" in message
+    assert "reserved 'default' tag" in message
+
+
+def test_deployments_invoke_explicit_missing_tag_remains_tag_specific() -> None:
+    snapshots = [
+        _DummySnapshot(
+            name="kitaru::research_flow::v1",
+            tags=[deployment_public_tag("default", exclusive=True)],
+        )
+    ]
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_cls.return_value.list_snapshots.return_value = SimpleNamespace(
+            items=snapshots
+        )
+
+        client = KitaruClient()
+        with pytest.raises(LookupError) as exc_info:
+            client.deployments.invoke(flow="research_flow", tag="stable")
+
+    assert str(exc_info.value) == (
+        "No deployment found for flow 'research_flow' with tag 'stable'."
+    )
+
+
 def test_deployments_delete_blocks_exclusive_tags_before_backend_delete() -> None:
     snapshot = _DummySnapshot(
         name="kitaru::research_flow::v1",

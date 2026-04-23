@@ -90,6 +90,31 @@ class KitaruWaitValidationError(KitaruUsageError):
     """Raised when wait-resume input fails schema validation."""
 
 
+class StackNotRemoteExecutable:
+    """Marker mixin for errors caused by a stack the server cannot execute remotely.
+
+    Interface layers (CLI, MCP, SDK error boundaries) use ``isinstance(exc,
+    StackNotRemoteExecutable)`` to add stack-remediation guidance without
+    coupling to any specific user-facing wording.
+    """
+
+
+class KitaruStackNotRemoteExecutableUsageError(
+    StackNotRemoteExecutable, KitaruUsageError
+):
+    """Raised when deploy uses a stack the server cannot execute remotely."""
+
+
+class KitaruStackNotRemoteExecutableStateError(
+    StackNotRemoteExecutable, KitaruStateError
+):
+    """Raised when invoke/curl finds a deployment stack that is not remote."""
+
+
+class KitaruDeploymentInputValuesError(KitaruUsageError):
+    """Raised when deploy needs concrete input values to prepare the snapshot."""
+
+
 class KitaruFeatureNotAvailableError(KitaruError, NotImplementedError):
     """Raised when a documented API is intentionally not implemented yet."""
 
@@ -221,6 +246,7 @@ __all__ = [
     "FailureOrigin",
     "KitaruBackendError",
     "KitaruContextError",
+    "KitaruDeploymentInputValuesError",
     "KitaruDivergenceError",
     "KitaruError",
     "KitaruExecutionError",
@@ -228,10 +254,13 @@ __all__ = [
     "KitaruLogRetrievalError",
     "KitaruMemoryArtifactUnavailableError",
     "KitaruRuntimeError",
+    "KitaruStackNotRemoteExecutableStateError",
+    "KitaruStackNotRemoteExecutableUsageError",
     "KitaruStateError",
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "StackNotRemoteExecutable",
     "build_recovery_command",
     "classify_failure_origin",
     "execution_error_from_failure",

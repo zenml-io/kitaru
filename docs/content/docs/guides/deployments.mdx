@@ -61,9 +61,14 @@ kitaru deploy flows/research.py:research_agent \
   --input '{"topic": "durable execution"}'
 ```
 
-The `--input` value is a representative deployment-time default. Kitaru uses it
-to prepare the saved deployment snapshot. Consumers can override it later when
-they invoke the deployment.
+The `--input` value should contain representative deployment-time input values.
+Kitaru uses them to prepare the saved deployment snapshot. Consumers can
+override those values later when they invoke the deployment.
+
+Each `kitaru deploy` command attaches exactly one routing tag at deploy time.
+That first deploy gets the reserved `default` route automatically. Later deploys
+can choose one other route such as `canary`, and any extra tags are added or
+moved afterward with `kitaru flow tag`.
 
 Because this is the first deployment for `research_agent`, Kitaru creates:
 
@@ -92,10 +97,14 @@ kitaru invoke research_agent \
   --input '{"topic": "serverless routing"}'
 ```
 
-Because you did not specify `--version` or `--tag`, Kitaru uses the reserved
-`default` tag. It resolves `research_agent` + `default` to the saved deployment
-snapshot for that version, starts a new execution from it, and returns an
-execution ID.
+Because you did not specify `--version` or `--tag`, Kitaru tries the reserved
+implicit `default` route. It resolves `research_agent` + `default` to the saved
+deployment snapshot for that version, starts a new execution from it, and
+returns an execution ID.
+
+If the flow has no deployments yet, Kitaru says so directly. If deployments
+exist but none is currently routed as `default`, invoke with `--tag` or
+`--version`, or move `default` with `kitaru flow tag ... --exclusive`.
 
 The same invocation from Python looks like this:
 
@@ -136,6 +145,16 @@ Kitaru creates version `2` and attaches `canary*`:
 |---|---:|---|
 | `research_agent` | `1` | `default*` |
 | `research_agent` | `2` | `canary*` |
+
+At deploy time, that is still just one route. If you later want to add another
+label without redeploying, do it with `kitaru flow tag`, for example:
+
+```bash
+kitaru flow tag research_agent benchmark --version 2
+```
+
+That gives version `2` an exclusive `canary` route plus a shared `benchmark`
+label.
 
 Now you can test only the canary route:
 
@@ -234,7 +253,9 @@ kitaru flow deployments delete research_agent --version 1
 
 ### Shared tags
 
-Non-exclusive tags can point to more than one version. That can be useful for
+Non-exclusive tags can point to more than one version. A common mixed pattern
+is: deploy one exclusive route at create time (`--tag canary --exclusive`), then
+add shared labels later with `kitaru flow tag`. Shared tags are useful for
 marking a group of deployments:
 
 ```bash
@@ -316,13 +337,14 @@ server bearer token. The generated curl snippet stores it in
 generator itself does not print or store the real token.
 
 One important practical detail: deployment creation is rejected up front when
-the selected stack is local or otherwise not runnable by the Kitaru server.
-Use a server-runnable stack (for example Kubernetes, Vertex, SageMaker, or
-AzureML) for deployment routes you plan to invoke remotely.
+the selected stack is local or otherwise not executable remotely by the Kitaru
+server. Use a stack the Kitaru server can execute remotely (for example
+Kubernetes, Vertex, SageMaker, or AzureML) for deployment routes you plan to
+invoke remotely.
 
 For older deployments created before this guard existed, `kitaru invoke` and
-`kitaru flow deployments curl` may fail with a stack-runnability error until you
-redeploy on a server-runnable stack.
+`kitaru flow deployments curl` may fail with a stack-compatibility error until
+you redeploy using a stack the Kitaru server can execute remotely.
 
 The official `zenmldocker/kitaru` server image already enables workload-manager
 support for snapshot-backed invocation. If you run a custom image or a plain

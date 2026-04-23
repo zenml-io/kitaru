@@ -33,6 +33,7 @@ from zenml.utils.run_utils import stop_run
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
 from kitaru._client._deployments import (
+    DEFAULT_DEPLOYMENT_TAG,
     build_deployment_snapshot_name,
     deployment_native_tags,
     deployment_public_tag,
@@ -94,6 +95,7 @@ from kitaru._client._models import (
 )
 from kitaru._interface_deployments import (
     Deployment,
+    DeploymentSelectorSource,
     deployment_tags_for_create,
     ensure_stack_is_server_runnable,
     is_deployment_known,
@@ -1254,6 +1256,7 @@ class _DeploymentsAPI:
         flow: str,
         version: int | None = None,
         tag: str | None = None,
+        selector_source: DeploymentSelectorSource | None = None,
     ) -> DeploymentRecord:
         """Resolve a raw deployment record by exact version or tag selector."""
         version, tag = validate_deployment_selector(
@@ -1273,6 +1276,18 @@ class _DeploymentsAPI:
         assert tag is not None
         matches = [deployment for deployment in deployments if tag in deployment.tags]
         if not matches:
+            if selector_source == "implicit_default" and tag == DEFAULT_DEPLOYMENT_TAG:
+                if not deployments:
+                    raise LookupError(
+                        f"No deployments found for flow {flow!r}. Deploy this "
+                        "flow first, then invoke it by version or tag."
+                    )
+                raise KitaruStateError(
+                    f"Flow {flow!r} has deployments, but none is currently routed "
+                    "as the default deployment. Invoke it with an explicit "
+                    "version or tag, or move the reserved 'default' tag to the "
+                    "version you want."
+                )
             raise LookupError(
                 f"No deployment found for flow {flow!r} with tag {tag!r}."
             )
@@ -1322,15 +1337,17 @@ class _DeploymentsAPI:
                     f"Deployment {deployment_record.flow!r} "
                     f"v{deployment_record.version} references stack "
                     f"{deployment_record.stack!r}, but Kitaru could not load "
-                    "that stack to verify whether the server can run it. "
-                    "Rebuild the deployment on a server-runnable stack and try again."
+                    "that stack to verify whether the server can execute it remotely. "
+                    "Rebuild the deployment using a stack the Kitaru server can "
+                    "execute remotely and try again."
                 ) from exc
         if stack is None:
             raise KitaruStateError(
                 f"Deployment {deployment_record.flow!r} "
                 f"v{deployment_record.version} is missing stack metadata, "
-                "so Kitaru cannot verify whether the server can run it. "
-                "Rebuild the deployment on a server-runnable stack and try again."
+                "so Kitaru cannot verify whether the server can execute it remotely. "
+                "Rebuild the deployment using a stack the Kitaru server can execute "
+                "remotely and try again."
             )
         return stack
 
@@ -1369,6 +1386,7 @@ class _DeploymentsAPI:
         flow: str,
         version: int | None = None,
         tag: str | None = None,
+        selector_source: DeploymentSelectorSource | None = None,
         inputs: Mapping[str, Any] | None = None,
     ) -> Any:
         """Invoke a deployment by version or tag and return a flow handle."""
@@ -1381,7 +1399,12 @@ class _DeploymentsAPI:
         known_before = (
             is_deployment_known(flow, version) if version is not None else True
         )
-        deployment = self._resolve_record(flow=flow, version=version, tag=tag)
+        deployment = self._resolve_record(
+            flow=flow,
+            version=version,
+            tag=tag,
+            selector_source=selector_source,
+        )
         mark_deployment_known(deployment)
         warn_if_deployment_drifted(
             deployment,

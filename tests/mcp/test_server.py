@@ -570,6 +570,7 @@ def test_deployments_invoke_defaults_to_default_tag(
         flow="content_pipeline",
         version=None,
         tag="default",
+        selector_source="implicit_default",
         inputs={"topic": "ai safety"},
     )
     mock_resolve.assert_called_once_with(
@@ -594,6 +595,42 @@ def test_deployments_invoke_surfaces_non_runnable_deployment_error(
         pytest.raises(KitaruStateError, match="server cannot run this deployment"),
     ):
         kitaru_deployments_invoke("content_pipeline")
+
+
+def test_deployments_invoke_passes_explicit_tag_source(
+    mock_kitaru_client: MagicMock,
+    sample_execution,
+) -> None:
+    """Explicit MCP tag selection should stay tag-specific downstream."""
+    mock_kitaru_client.deployments.invoke.return_value = SimpleNamespace(
+        exec_id=sample_execution.exec_id
+    )
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch(
+            "kitaru._interface_executions.resolve_started_execution_details",
+            return_value=execution_interface.StartedExecutionDetails(
+                exec_id=sample_execution.exec_id,
+                execution=sample_execution,
+                warning=None,
+            ),
+        ),
+    ):
+        payload = kitaru_deployments_invoke(
+            "content_pipeline",
+            tag="stable",
+            inputs={"topic": "ai safety"},
+        )
+
+    mock_kitaru_client.deployments.invoke.assert_called_once_with(
+        flow="content_pipeline",
+        version=None,
+        tag="stable",
+        selector_source="tag",
+        inputs={"topic": "ai safety"},
+    )
+    assert payload["selector"] == {"version": None, "tag": "stable"}
 
 
 def test_deployments_invoke_rejects_version_and_tag_together(

@@ -19,7 +19,12 @@ from kitaru._client._deployments import (
     validate_deployment_version,
 )
 from kitaru._client._models import Deployment as DeploymentRecord
-from kitaru.errors import KitaruStateError, KitaruUsageError
+from kitaru.errors import (
+    KitaruError,
+    KitaruStackNotRemoteExecutableStateError,
+    KitaruStackNotRemoteExecutableUsageError,
+    KitaruUsageError,
+)
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
@@ -47,6 +52,53 @@ def is_deployment_known(flow: str, version: int) -> bool:
     return deployment_key(flow, version) in _KNOWN_DEPLOYMENTS
 
 
+DeploymentSelectorSource = Literal["version", "tag", "implicit_default"]
+
+
+@dataclass(frozen=True)
+class DeploymentSelector:
+    """Normalized deployment selector plus how it was chosen."""
+
+    version: int | None
+    tag: str | None
+    source: DeploymentSelectorSource | None
+
+
+def resolve_deployment_selector(
+    *,
+    version: int | None = None,
+    tag: str | None = None,
+    default_tag: str | None = None,
+    require_one: bool = False,
+) -> DeploymentSelector:
+    """Validate selectors and preserve whether default routing was implicit."""
+    if version is not None and tag is not None:
+        raise KitaruUsageError("`version` and `tag` are mutually exclusive.")
+
+    normalized_version = (
+        validate_deployment_version(version) if version is not None else None
+    )
+    normalized_tag = validate_deployment_tag(tag) if tag is not None else None
+    source: DeploymentSelectorSource | None = None
+
+    if normalized_version is not None:
+        source = "version"
+    elif normalized_tag is not None:
+        source = "tag"
+    elif default_tag is not None:
+        normalized_tag = validate_deployment_tag(default_tag)
+        source = "implicit_default"
+
+    if require_one and normalized_version is None and normalized_tag is None:
+        raise KitaruUsageError("Exactly one of `version` or `tag` is required.")
+
+    return DeploymentSelector(
+        version=normalized_version,
+        tag=normalized_tag,
+        source=source,
+    )
+
+
 def validate_deployment_selector(
     *,
     version: int | None = None,
@@ -59,21 +111,13 @@ def validate_deployment_selector(
     When both selectors are None, ``default_tag`` (if given) is used as the
     resolved tag. ``require_one`` raises if neither selector resolves.
     """
-    if version is not None and tag is not None:
-        raise KitaruUsageError("`version` and `tag` are mutually exclusive.")
-    normalized_version = (
-        validate_deployment_version(version) if version is not None else None
+    selector = resolve_deployment_selector(
+        version=version,
+        tag=tag,
+        default_tag=default_tag,
+        require_one=require_one,
     )
-    normalized_tag = validate_deployment_tag(tag) if tag is not None else None
-    if (
-        normalized_version is None
-        and normalized_tag is None
-        and default_tag is not None
-    ):
-        normalized_tag = validate_deployment_tag(default_tag)
-    if require_one and normalized_version is None and normalized_tag is None:
-        raise KitaruUsageError("Exactly one of `version` or `tag` is required.")
-    return normalized_version, normalized_tag
+    return selector.version, selector.tag
 
 
 def deployment_tags_for_create(
@@ -147,6 +191,51 @@ def _stack_label(stack: Any) -> str:
     return "<unknown>"
 
 
+def _stack_validation_detail(exc: ValueError) -> str | None:
+    """Return safe stack-validation details, filtering backend-internal phrasing."""
+    detail = str(exc).strip()
+    if not detail:
+        return None
+    if "unable to run pipeline from the server" in detail.lower():
+        return None
+    if not detail.endswith((".", "!", "?")):
+        detail += "."
+    return detail
+
+
+_REMOTE_EXECUTABLE_HINT = (
+    "Choose a stack the Kitaru server can execute remotely (for example "
+    "Kubernetes, Vertex, SageMaker, or AzureML)"
+)
+
+_DEPLOY_MESSAGE = (
+    "{subject} cannot be deployed with stack {stack_name!r} because that "
+    "stack is not one the Kitaru server can execute remotely. "
+    + _REMOTE_EXECUTABLE_HINT
+    + " and try again."
+)
+_INVOKE_MESSAGE = (
+    "{subject} was created from stack {stack_name!r}, which the Kitaru "
+    "server cannot execute remotely. Rebuild the deployment using a stack "
+    "the Kitaru server can execute remotely before invoking it."
+)
+_CURL_MESSAGE = (
+    "{subject} was created from stack {stack_name!r}, which the Kitaru "
+    "server cannot execute remotely. Rebuild the deployment using a stack "
+    "the Kitaru server can execute remotely before generating a curl "
+    "command for it."
+)
+
+_OPERATION_ERRORS: dict[
+    Literal["deploy", "invoke", "curl"],
+    tuple[type[KitaruError], str],
+] = {
+    "deploy": (KitaruStackNotRemoteExecutableUsageError, _DEPLOY_MESSAGE),
+    "invoke": (KitaruStackNotRemoteExecutableStateError, _INVOKE_MESSAGE),
+    "curl": (KitaruStackNotRemoteExecutableStateError, _CURL_MESSAGE),
+}
+
+
 def ensure_stack_is_server_runnable(
     *,
     zen_store: Any,
@@ -159,31 +248,19 @@ def ensure_stack_is_server_runnable(
     try:
         validate_stack_is_runnable_from_server(zen_store=zen_store, stack=stack)
     except ValueError as exc:
+        exc_cls, template = _OPERATION_ERRORS[operation]
         subject = _deployment_operation_subject(
             operation=operation,
             flow=flow,
             version=version,
         )
-        stack_name = _stack_label(stack)
-        detail = str(exc)
-        if operation == "deploy":
-            raise KitaruUsageError(
-                f"{subject} cannot be deployed with stack {stack_name!r} because "
-                "the Kitaru server cannot run that stack. Switch to a server-runnable "
-                "stack (for example Kubernetes, Vertex, SageMaker, or AzureML) and "
-                f"try again. Details: {detail}"
-            ) from exc
-        if operation == "invoke":
-            raise KitaruStateError(
-                f"{subject} was created from stack {stack_name!r}, which the Kitaru "
-                "server cannot run. Rebuild the deployment on a server-runnable stack "
-                f"before invoking it. Details: {detail}"
-            ) from exc
-        raise KitaruStateError(
-            f"{subject} was created from stack {stack_name!r}, which the Kitaru "
-            "server cannot run. Rebuild the deployment on a server-runnable stack "
-            f"before generating a curl command for it. Details: {detail}"
-        ) from exc
+        detail = _stack_validation_detail(exc)
+        detail_suffix = f" Details: {detail}" if detail else ""
+        message = template.format(
+            subject=subject,
+            stack_name=_stack_label(stack),
+        )
+        raise exc_cls(f"{message}{detail_suffix}") from exc
 
 
 def build_deployment_deploy_kwargs(
@@ -316,11 +393,14 @@ class Deployment:
 __all__ = [
     "DEPLOYMENT_CONTROL_INPUT_KEYS",
     "Deployment",
+    "DeploymentSelector",
+    "DeploymentSelectorSource",
     "build_deployment_deploy_kwargs",
     "deployment_tags_for_create",
     "ensure_stack_is_server_runnable",
     "is_deployment_known",
     "mark_deployment_known",
+    "resolve_deployment_selector",
     "validate_deployment_input_keys",
     "validate_deployment_selector",
     "validate_remove_deployment_tag",
