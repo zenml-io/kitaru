@@ -40,10 +40,10 @@ const defaultSections = [
       competitorTagline={entry.data.competitorTagline}
     />
 
-    <!-- TOC component: renders sticky rail (desktop) + mobile chip + scroll-progress bar -->
-    <CompareToc sections={defaultSections} />
-
     <div class="compare-body">
+      <!-- TOC rail occupies grid column 1 on desktop; mobile chip + scroll-progress bar
+           use position: fixed and are unaffected by grid placement. -->
+      <CompareToc sections={defaultSections} />
       <article class="compare-body-inner">
         <Content />
       </article>
@@ -145,13 +145,14 @@ const defaultSections = [
   .compare-body-inner :global(pre code) {
     background: transparent;
   }
-  .compare-body-inner :global(a) {
+  /* Style prose links but exclude button-style anchors (.btn-primary/-secondary/-accent) */
+  .compare-body-inner :global(a:not([class*="btn-"])) {
     color: var(--color-accent);
     text-decoration: underline;
     text-decoration-thickness: 1px;
     text-underline-offset: 3px;
   }
-  .compare-body-inner :global(a:hover) {
+  .compare-body-inner :global(a:not([class*="btn-"]):hover) {
     text-decoration-thickness: 2px;
   }
 
