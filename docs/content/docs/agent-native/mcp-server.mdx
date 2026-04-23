@@ -278,10 +278,21 @@ deployment controls:
   "tag": "canary",
   "exclusive": true,
   "stack": "production",
+  "image": {
+    "requirements": ["kitaru[openai]"],
+    "secret_environment_from": ["openai-creds"]
+  },
   "cache": false,
   "retries": 1
 }
 ```
+
+`image` accepts either a base image string or an object matching
+`kitaru.ImageSettings`.
+
+That deploy-time image config is saved into the deployment snapshot. Later
+`kitaru_deployments_invoke` calls can override flow inputs, but they do not
+rewrite the deployment image.
 
 The first deployment of a flow gets the reserved `default` tag automatically.
 `default` is always exclusive and cannot be removed. Non-default tags are shared

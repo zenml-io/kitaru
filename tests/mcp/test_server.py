@@ -19,6 +19,7 @@ from kitaru.config import (
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
     CloudProvider,
+    ImageSettings,
     KubernetesStackSpec,
     SagemakerStackSpec,
     StackComponentConfigOverrides,
@@ -461,6 +462,7 @@ def test_deployments_deploy_loads_target_and_serializes(sample_deployment) -> No
             "agent.py:content_pipeline",
             inputs={"topic": "ai safety"},
             stack="prod",
+            image="python:3.12-slim",
             cache=False,
             retries=2,
         )
@@ -473,6 +475,7 @@ def test_deployments_deploy_loads_target_and_serializes(sample_deployment) -> No
         topic="ai safety",
         tags={"default": True},
         stack="prod",
+        image=ImageSettings(base_image="python:3.12-slim"),
         cache=False,
         retries=2,
     )
@@ -521,6 +524,49 @@ def test_deployments_deploy_rejects_non_object_inputs() -> None:
     """MCP inputs should be structured JSON objects, not scalars/lists."""
     with pytest.raises(ValueError, match="`inputs` must be an object"):
         kitaru_deployments_deploy("agent.py:content_pipeline", inputs=["topic"])
+
+
+def test_deployments_deploy_accepts_structured_image_object(
+    sample_deployment,
+) -> None:
+    """MCP deploy should accept ImageSettings-like dict payloads for image."""
+    flow_target = SimpleNamespace(deploy=MagicMock(return_value=sample_deployment))
+
+    with patch(
+        "kitaru.mcp.server._load_deployable_flow_target",
+        return_value=flow_target,
+    ):
+        kitaru_deployments_deploy(
+            "agent.py:content_pipeline",
+            inputs={"topic": "ai safety"},
+            image={"requirements": ["kitaru[openai]"]},
+        )
+
+    flow_target.deploy.assert_called_once_with(
+        topic="ai safety",
+        tags={"default": True},
+        image=ImageSettings(requirements=["kitaru[openai]"]),
+    )
+
+
+def test_deployments_deploy_rejects_invalid_image_before_loading_target() -> None:
+    """Invalid MCP image payloads should fail before the flow target is loaded."""
+    with (
+        patch("kitaru.mcp.server._load_deployable_flow_target") as mock_loader,
+        pytest.raises(
+            KitaruUsageError,
+            match=(
+                "`image` must be either a base image string or an image settings object"
+            ),
+        ),
+    ):
+        kitaru_deployments_deploy(
+            "agent.py:content_pipeline",
+            inputs={"topic": "ai safety"},
+            image={"requirements": [" "]},
+        )
+
+    mock_loader.assert_not_called()
 
 
 def test_deployments_deploy_surfaces_shared_stack_guard() -> None:

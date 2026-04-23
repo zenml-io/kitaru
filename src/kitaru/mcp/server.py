@@ -208,6 +208,7 @@ def kitaru_deployments_deploy(
     tag: str = DEFAULT_DEPLOYMENT_TAG,
     exclusive: bool = False,
     stack: str | None = None,
+    image: str | dict[str, Any] | None = None,
     cache: bool | None = None,
     retries: int | None = None,
 ) -> dict[str, Any]:
@@ -225,10 +226,12 @@ def kitaru_deployments_deploy(
         }
         deploy_kwargs = build_deployment_deploy_kwargs(
             stack=stack,
+            image=image,
             cache=cache,
             retries=retries,
             tags=resolved_tags,
             inputs=flow_inputs,
+            image_label="`image`",
         )
         flow_target = _load_deployable_flow_target(
             target,
