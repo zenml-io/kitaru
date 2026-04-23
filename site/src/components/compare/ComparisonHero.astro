@@ -1,12 +1,13 @@
 ---
 interface Props {
   title: string;
+  shortTitle?: string;
   description: string;
   competitor: string;
   competitorLogo?: string;
   competitorTagline?: string;
 }
-const { title, description, competitor, competitorLogo, competitorTagline } = Astro.props;
+const { title, shortTitle, description, competitor, competitorLogo, competitorTagline } = Astro.props;
 ---
 
 <header class="chero" id="chero">
@@ -53,7 +54,7 @@ const { title, description, competitor, competitorLogo, competitorTagline } = As
     )}
 
     <!-- Hero title -->
-    <h1 class="chero-title" data-reveal data-reveal-delay={competitorTagline ? "3" : "2"}>{title}</h1>
+    <h1 class="chero-title" data-reveal data-reveal-delay={competitorTagline ? "3" : "2"}>{shortTitle ?? title}</h1>
 
     <!-- Description -->
     <p class="chero-desc" data-reveal data-reveal-delay={competitorTagline ? "4" : "3"}>{description}</p>

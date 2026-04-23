@@ -33,6 +33,7 @@ const defaultSections = [
   <main id="main-content" class="compare-page">
     <ComparisonHero
       title={entry.data.title}
+      shortTitle={entry.data.shortTitle}
       description={entry.data.description}
       competitor={entry.data.competitor}
       competitorLogo={entry.data.competitorLogo}
@@ -84,20 +85,33 @@ const defaultSections = [
     }
   }
 
-  /* At ≥1100px: two-column grid — TOC rail (220px) + article */
+  /* At ≥1100px: two-column grid — TOC rail (220px) + article.
+     Wider container (1440px) gives prose + graphics more breathing room and
+     lets FeatureWithGraphic + CodeCompare fill the article cell (≈1060px)
+     instead of breaking out over the TOC rail. */
   @media (min-width: 1100px) {
     .compare-body {
       display: grid;
       grid-template-columns: 220px minmax(0, 1fr);
-      gap: 48px;
-      padding: 48px 48px 80px;
-      max-width: 1240px;
+      gap: 56px;
+      padding: 48px 56px 80px;
+      max-width: 1440px;
     }
 
-    /* Article caps at 820px within its grid cell */
+    /* Article fills its grid cell — no 820px cap at desktop; heading/paragraph
+       widths are controlled per-element below for readability. */
     .compare-body-inner {
+      max-width: none;
+      margin: 0;
+    }
+    /* Cap readable prose at ~820px — but let full-cell children (tables,
+       code panes, feature graphics) use the whole column via a class escape. */
+    .compare-body-inner :global(p),
+    .compare-body-inner :global(ul),
+    .compare-body-inner :global(h1),
+    .compare-body-inner :global(h2),
+    .compare-body-inner :global(h3) {
       max-width: 820px;
-      margin: 0; /* let grid alignment do the work */
     }
   }
 

@@ -44,14 +44,21 @@ const {
 </section>
 
 <style>
-  /* Break out of the 820px article column so the two panes have room.
-     Pattern mirrors FeatureWithGraphic.astro for cross-component consistency. */
+  /* At ≥1100px the TOC rail occupies the left gutter — stay in-column so
+     we don't overlap the rail. Below the grid breakpoint, break out of the
+     820px prose cap so the two panes have room. Matches FeatureWithGraphic. */
   .codecompare {
-    margin: 32px auto 48px;
-    width: min(1120px, calc(100vw - 48px));
-    position: relative;
-    left: 50%;
-    transform: translateX(-50%);
+    margin: 32px 0 48px;
+    width: 100%;
+  }
+  @media (max-width: 1099px) {
+    .codecompare {
+      margin: 32px auto 48px;
+      width: min(1120px, calc(100vw - 48px));
+      position: relative;
+      left: 50%;
+      transform: translateX(-50%);
+    }
   }
   .codecompare-grid {
     display: grid;

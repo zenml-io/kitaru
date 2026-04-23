@@ -35,22 +35,34 @@ const { title, image, imageAlt, reverse = false, headingLevel = 2, number, bgStr
 </section>
 
 <style>
+  /* Default: fill the article column. The viewport-centered break-out used to
+     escape the 820px prose cap, but at ≥1100px the TOC rail occupies the
+     left gutter — a viewport break-out would overlap the rail. Stay in-column
+     at desktop; break out only below the grid breakpoint. */
   .feature-graphic {
-    margin: 56px auto;
-    /* Break out of the narrow 820px prose column so graphics have room to breathe. */
-    width: min(1120px, calc(100vw - 48px));
-    position: relative;
-    left: 50%;
-    transform: translateX(-50%);
+    margin: 56px 0;
+    width: 100%;
   }
   .feature-graphic--bg-strip {
     background: var(--color-surface-warm);
     border-radius: 24px;
     padding: 56px 48px;
-    margin-left: -48px;
-    margin-right: -48px;
-    width: calc(100% + 96px);
-    left: calc(50% - 48px);
+  }
+  /* Below grid breakpoint: no TOC rail, safe to break out of the 820px cap. */
+  @media (max-width: 1099px) {
+    .feature-graphic {
+      margin: 56px auto;
+      width: min(1120px, calc(100vw - 48px));
+      position: relative;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    .feature-graphic--bg-strip {
+      margin-left: -48px;
+      margin-right: -48px;
+      width: calc(100% + 96px);
+      left: calc(50% - 48px);
+    }
   }
   .feature-graphic-grid {
     display: grid;
@@ -112,7 +124,9 @@ const { title, image, imageAlt, reverse = false, headingLevel = 2, number, bgStr
       width: calc(100% + 48px);
       left: calc(50% - 24px);
     }
-    .feature-graphic-grid {
+    /* Include the higher-specificity reverse selector so both layouts collapse. */
+    .feature-graphic-grid,
+    .feature-graphic--reverse .feature-graphic-grid {
       grid-template-columns: 1fr;
       gap: 24px;
     }
