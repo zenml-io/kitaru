@@ -187,13 +187,12 @@ def _suspend_checkpoint_scope() -> Iterator[None]:
     adapter-driven HITL tool call reach the pipeline-level wait machinery.
     """
     checkpoint_token = _CURRENT_CHECKPOINT_SCOPE.set(None)
-    step_context_var = StepContext.__context_var__
+    step_context_var = _get_step_context_var()
     # Setting to None mirrors the "unset" default used by BaseContext.get();
     # is_active() returns False as a result.
     step_context_token = step_context_var.set(None)
     try:
-        with _suspend_step_context():
-            yield
+        yield
     finally:
         step_context_var.reset(step_context_token)
         _CURRENT_CHECKPOINT_SCOPE.reset(checkpoint_token)

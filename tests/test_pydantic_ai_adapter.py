@@ -161,7 +161,7 @@ class TestWaitForInput:
             "extra": 1,
         }
 
-    def test_wait_for_input_caller_metadata_is_last_write_wins(
+    def test_wait_for_input_adapter_metadata_wins_over_caller_metadata(
         self, monkeypatch
     ) -> None:
         import kitaru as kitaru_module
@@ -180,8 +180,8 @@ class TestWaitForInput:
             metadata={"adapter": "impostor", "source": "impostor"},
         )
 
-        assert captured["metadata"]["adapter"] == "impostor"
-        assert captured["metadata"]["source"] == "impostor"
+        assert captured["metadata"]["adapter"] == "pydantic_ai"
+        assert captured["metadata"]["source"] == "tool_body"
 
 
 class TestResolveHitlQuestion:
@@ -376,6 +376,51 @@ async def test_capture_off_still_routes_hitl(monkeypatch: pytest.MonkeyPatch) ->
         result = await wrapped.call_tool("approve_release", {}, ctx, tool)
 
     assert result is True
+
+
+@pytest.mark.anyio
+async def test_named_hitl_tool_uses_name_as_unique_wait_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import Any
+
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, hitl_tool
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    @hitl_tool(name="collect_bug_report", schema=str, question="Describe it")
+    def collect_bug_report() -> str:
+        return "never reached"
+
+    wrapped = kitaruify_toolset(
+        toolset, capture=CapturePolicy(correlate_otel_spans=False)
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["collect_bug_report"]
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset._wait_call_suffix",
+        lambda _: "call_123",
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.wait",
+        lambda **kwargs: captured.update(kwargs) or "approved",
+    )
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("collect_bug_report", {}, ctx, tool)
+
+    assert result == "approved"
+    assert captured["name"] == "collect_bug_report_call_123"
 
 
 @pytest.mark.anyio

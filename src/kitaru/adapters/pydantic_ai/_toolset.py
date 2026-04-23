@@ -18,6 +18,7 @@ from pydantic_ai.toolsets import AbstractToolset, FunctionToolset, ToolsetTool, 
 
 from kitaru.errors import KitaruUsageError
 
+from ._constants import ADAPTER_ID, ADAPTER_METADATA_KEY
 from ._events import DeferredKind, ToolsetKind
 from ._hitl import HitlConfig, hitl_config_from_tool_metadata, resolve_hitl_question
 from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
@@ -34,9 +35,6 @@ from ._utils import (
     with_default_type,
 )
 
-
-_ADAPTER_ID = 'pydantic_ai'
-_ADAPTER_METADATA_KEY = 'adapter'
 
 
 class _ToolApprovalDenied(Exception):
@@ -227,7 +225,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         if hitl_config is not None:
             request = _DeferredRequest(
                 kind='hitl',
-                wait_name=hitl_config.name or f'{name}_{call_suffix}',
+                wait_name=f'{hitl_config.name or name}_{call_suffix}',
                 schema=hitl_config.schema,
                 question=resolve_hitl_question(hitl_config, tool_args),
                 exception_metadata=None,
@@ -321,7 +319,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         exception_metadata: dict[str, Any] | None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
-            _ADAPTER_METADATA_KEY: _ADAPTER_ID,
+            ADAPTER_METADATA_KEY: ADAPTER_ID,
             'tool_name': name,
             'tool_call_id': ctx.tool_call_id,
             'tool_args': safe_args,
