@@ -67,9 +67,11 @@ Kitaru uses them to prepare the saved deployment snapshot. Consumers can
 override those values later when they invoke the deployment.
 
 `--image` is for deploy-time image config. It accepts a base image string, a
-JSON object matching `kitaru.ImageSettings`, or `@file`. That image config is
-saved into the deployment snapshot. Later invokes can override flow inputs, but
-they do not rewrite the deployment image.
+JSON object matching `kitaru.ImageSettings`, or `@file`. For `@file`, you can
+use either plain text (for example a file containing `python:3.12-slim`) or a
+JSON string/object. That image config is saved into the deployment snapshot.
+Later invokes can override flow inputs, but they do not rewrite the deployment
+image.
 
 Each `kitaru deploy` command attaches exactly one routing tag at deploy time.
 That first deploy gets the reserved `default` route automatically. Later deploys

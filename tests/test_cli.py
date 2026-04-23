@@ -918,13 +918,50 @@ def test_build_rejects_non_string_non_object_image_json(
     assert "base image string or a JSON object" in payload["error"]["message"]
 
 
-def test_build_rejects_invalid_image_file_json(
+def test_build_image_file_accepts_plain_base_image_string(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`--image @file` should fail loudly when the file is not valid JSON."""
+    """`--image @file` should treat plain text as a base-image shorthand."""
+    image_file = tmp_path / "image.txt"
+    image_file.write_text("python:3.12-slim\n")
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub(tags={})
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "build",
+                "demo.py:demo_flow",
+                "--image",
+                f"@{image_file}",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        image=ImageSettings(base_image="python:3.12-slim"),
+        publish_default_on_first_deploy=False,
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "build"
+
+
+def test_build_rejects_json_like_but_invalid_image_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--image @file` should still fail for malformed JSON-looking payloads."""
     image_file = tmp_path / "image.json"
-    image_file.write_text("python:3.12-slim")
+    image_file.write_text('{"requirements":["numpy"]')
 
     with (
         patch("kitaru._cli._flows._load_deployable_flow_target") as mock_loader,

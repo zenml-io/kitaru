@@ -116,11 +116,10 @@ def _parse_image_option(
     try:
         parsed = _parse_json_value(payload, option_name=source_label)
     except ValueError:
-        if from_file:
+        fallback_value = payload.strip() if from_file else raw_value
+        if fallback_value.lstrip().startswith(("{", "[", '"')):
             raise
-        if raw_value.lstrip().startswith(("{", "[", '"')):
-            raise
-        return raw_value
+        return fallback_value
 
     if isinstance(parsed, (dict, str)):
         return parsed
