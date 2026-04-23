@@ -3,12 +3,18 @@ title: Core Concepts
 description: The mental model behind Kitaru's durable execution primitives
 ---
 
-Kitaru gives you durable execution for AI agent workflows using a small set of
-Python primitives. You write normal Python — Kitaru handles persistence,
-observability, and recovery underneath.
+Kitaru sits in the **runtime layer** of your agent stack. Underneath it are the
+**harness** your team picked (Pydantic AI / Pydantic AI Harness, LangGraph, Claude
+Agent SDK, raw Python) and the **model(s)** that harness drives. On top sits the
+**platform** your org already runs (auth, observability, policy, UI). Kitaru's
+job is to make the run durable — checkpoints, replay, resume, wait states,
+versioned deployments — without forcing a graph DSL or a rewrite of your
+control flow.
 
-This section explains the ideas you need to understand before using Kitaru
-effectively.
+Start with [Harness, Runtime, Platform](/concepts/harness-runtime-platform)
+if you want the big-picture split, or [How It Works](/concepts/how-it-works)
+for the three-planes model (control / orchestration / execution) and
+what-runs-where in local dev vs production.
 
 ## Core ideas
 
@@ -48,6 +54,16 @@ Kitaru's current release includes:
 
 <Cards>
   <Card
+    title="Harness, Runtime, Platform"
+    description="Where Kitaru fits in an agent stack, and where it doesn't"
+    href="/concepts/harness-runtime-platform"
+  />
+  <Card
+    title="How It Works"
+    description="Server, runner, execution targets; three planes; local dev vs production"
+    href="/concepts/how-it-works"
+  />
+  <Card
     title="Flows"
     description="Define durable execution boundaries and control how workflows run"
     href="/concepts/flows"
@@ -66,10 +82,5 @@ Kitaru's current release includes:
     title="Logging and Metadata"
     description="Attach structured data to executions and checkpoints"
     href="/concepts/logging"
-  />
-  <Card
-    title="Execution Model"
-    description="Understand how flows run, return results, and surface errors"
-    href="/concepts/execution-model"
   />
 </Cards>

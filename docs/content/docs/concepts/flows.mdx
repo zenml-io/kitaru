@@ -3,8 +3,27 @@ title: Flows
 description: Define durable execution boundaries for your AI agent workflows
 ---
 
-A **flow** is the outer durable boundary in Kitaru. It marks the top-level
-function whose execution becomes persistent, replayable, and observable.
+A **flow** is the outer durable boundary in Kitaru — the unit of work
+your platform invokes and the runner executes. Everything inside the flow is
+tracked at checkpoint boundaries: persisted outputs, retry, replay, resume,
+and wait. Your harness (Pydantic AI, LangGraph, Claude Agent SDK, raw Python)
+lives inside the checkpoints. Your platform sits in front of the flow's
+invocation API. See
+[Harness, Runtime, Platform](/concepts/harness-runtime-platform) for the
+bigger picture.
+
+## The shape of a flow
+
+The `@flow` boundary defines the durable execution. Checkpoints inside it are
+the persisted replay boundaries; the flow body is ordinary Python that
+orchestrates those checkpoints. Side effects in the flow body itself are not
+automatically durable — put anything that needs to survive a crash, be replayed,
+or be rolled back behind a `@checkpoint`.
+
+<FlowShapeDiagram />
+
+The flow body is the orchestration layer. The checkpoints inside are the
+replay boundaries.
 
 ## Defining a flow
 
@@ -88,6 +107,21 @@ access to the running execution:
   a `KitaruStateError`. Use `handle.wait()` when you want to block.
 </Callout>
 
+### How errors surface
+
+If the flow execution fails, `handle.wait()` raises a typed
+`KitaruExecutionError` (or a more specific subclass) with the execution ID,
+final status, and the failure origin attached:
+
+```python
+import kitaru
+
+try:
+    result = my_agent.run(url="bad-input").wait()
+except kitaru.KitaruExecutionError as exc:
+    print(exc.exec_id, exc.status, exc.failure_origin)
+```
+
 ## Runtime options
 
 You can configure execution behavior at the decorator level (defaults) or
@@ -107,7 +141,7 @@ handle = my_agent.run(url="https://example.com", retries=3, cache=True)
 | Option | Default | What it controls |
 |---|---|---|
 | `retries` | `0` | Number of automatic retries on failure |
-| `cache` | `True` | Whether checkpointed outputs can be reused from previous runs |
+| `cache` | `True` | Whether checkpointed outputs can be reused from previous runs. Set `False` to disable. |
 | `stack` | `None` | Target execution environment for this run (overrides the active stack default) |
 | `image` | `None` | Container image for remote execution (string, mapping, or settings object). Supports `base_image`, `requirements`, `environment`, `apt_packages`, `replicate_local_python_environment`, and `dockerfile`. |
 
@@ -127,6 +161,37 @@ When a higher layer supplies `stack`, Kitaru binds that stack only for the
 submission of that execution and then restores the previous active stack.
 That override does **not** permanently switch your default stack.
 
+## Run, then deploy
+
+`.run()` starts an ad-hoc execution from the current process. It's the
+right loop for iteration and for calls made from your own code.
+
+For production, a flow is **deployed**: `.deploy()` captures an immutable
+versioned snapshot that consumers invoke by flow name. Tags route traffic
+between versions (`default` is the tag your platform normally targets), so you
+can roll a new version out without changing the invocation surface. Auth is
+workspace-scoped; there are no per-deployment tokens to rotate.
+
+```python
+# Ad-hoc run from the current process
+handle = my_agent.run(url="https://example.com")
+
+# Deploy an immutable snapshot (new version each call).
+# Parameterized flows take representative deployment-time inputs;
+# consumers can override them at invocation time.
+my_agent.deploy(url="https://example.com")
+
+# Consumers that have the flow imported can invoke by attribute
+handle = my_agent.invoke(url="https://example.com")
+
+# Or invoke source-free by flow name (from Python, CLI, MCP, or HTTP)
+from kitaru import KitaruClient
+handle = KitaruClient().deployments.invoke(
+    flow="my_agent",
+    inputs={"url": "https://example.com"},
+)
+```
+
 ## Rules to know
 
 - **Flow functions should compose checkpoints.** The flow body is the
@@ -145,5 +210,3 @@ That override does **not** permanently switch your default stack.
   [Checkpoints](/concepts/checkpoints)
 - Attach structured data to your executions with
   [Logging and Metadata](/concepts/logging)
-- Understand how results and errors surface in the
-  [Execution Model](/concepts/execution-model)

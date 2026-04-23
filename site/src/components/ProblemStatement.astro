@@ -4,13 +4,12 @@
 
 <section class="section-pad problem-section">
   <div class="section-inner">
-    <span class="section-eyebrow" data-reveal>INSIDE VS OUTSIDE</span>
+    <span class="section-eyebrow" data-reveal>HARNESS VS RUNTIME</span>
     <h2 class="section-title problem-headline" data-reveal data-reveal-delay="1">
-      The agent loop is solved. The platform around it isn't.
+      You picked a harness. Now what runs it?
     </h2>
     <p class="problem-lede" data-reveal data-reveal-delay="2">
-      Agent SDKs solve <em>the inner loop</em>: tool calls, LLM calls, sandboxes. That's the easy part now.<br>
-      Everything in the outer loop (how the agent is deployed, what state it remembers, how it's dispatched, how runs are tracked) gets rebuilt from scratch, company by company.
+      Harnesses &mdash; <em>Pydantic AI, LangGraph, Claude Agent SDK, or your own</em> &mdash; own the inner loop. The runtime underneath gets rebuilt from scratch, company by company.
     </p>
 
     <div class="problem-grid">
@@ -33,9 +32,9 @@
           <img src="https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif" srcset="https://assets.kitaru.ai/content/site/bfd1b9bd/k-prob-2-sm.avif 664w, https://assets.kitaru.ai/content/site/80283a6e/k-prob-2-800.avif 800w" alt="One agent, three runtimes" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <span class="why-card-tag">Orchestration</span>
-          <h3>Dispatch from anywhere.</h3>
-          <p>CLI, Python script, or HTTP. Define the agent once and call it from any entry point. Kitaru's runtime absorbs the differences so the same flow runs the same way.</p>
+          <span class="why-card-tag">Deployment</span>
+          <h3>Deploy once. Invoke anywhere.</h3>
+          <p><code>flow.deploy()</code> captures an immutable versioned snapshot. Consumers invoke by flow name &mdash; from CLI, Python, MCP, or a generated curl &mdash; with tag routing for rollout and rollback.</p>
         </div>
       </div>
 
@@ -45,9 +44,9 @@
           <img src="https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif" srcset="https://assets.kitaru.ai/content/site/71979af8/k-prob-3-sm.avif 664w, https://assets.kitaru.ai/content/site/79a5c5af/k-prob-3-800.avif 800w" alt="Runs you can actually compare" loading="lazy" decoding="async" width="400" height="225" sizes="(max-width: 768px) 100vw, 33vw" onerror="this.style.display='none'" />
         </div>
         <div class="why-card-content">
-          <span class="why-card-tag">Tracking</span>
+          <span class="why-card-tag">Artifacts</span>
           <h3>Inspect every run.</h3>
-          <p>Every execution is versioned, every checkpoint persisted, every artifact tracked. Open the dashboard and see exactly what happened. Built in, not bolted on.</p>
+          <p>Every checkpoint writes a typed, versioned artifact you can diff across runs. Trace a bad output back to the exact step and inputs that made it. Built in, not bolted on.</p>
         </div>
       </div>
 

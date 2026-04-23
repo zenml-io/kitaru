@@ -5,6 +5,18 @@ import { Callout } from 'fumadocs-ui/components/callout';
 import { Step, Steps } from 'fumadocs-ui/components/steps';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import type { MDXComponents } from 'mdx/types';
+import {
+  BuyerMatrixDiagram,
+  CheckpointReplayDiagram,
+  ComponentsDiagram,
+  ExecutionArchitectureDiagram,
+  FailedCheckpointDiagram,
+  FlowShapeDiagram,
+  GatewayStackDiagram,
+  HarnessRuntimePlatformDiagram,
+  ThreePlanesDiagram,
+  WaitResumeDiagram,
+} from '@/components/diagrams';
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
@@ -17,6 +29,16 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     Steps,
     Tab,
     Tabs,
+    FlowShapeDiagram,
+    CheckpointReplayDiagram,
+    WaitResumeDiagram,
+    ComponentsDiagram,
+    GatewayStackDiagram,
+    ExecutionArchitectureDiagram,
+    ThreePlanesDiagram,
+    FailedCheckpointDiagram,
+    HarnessRuntimePlatformDiagram,
+    BuyerMatrixDiagram,
     ...components,
   };
 }
