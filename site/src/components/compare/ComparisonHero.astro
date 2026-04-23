@@ -9,130 +9,393 @@ interface Props {
 const { title, description, competitor, competitorLogo, competitorTagline } = Astro.props;
 ---
 
-<header class="chero">
-  <div class="chero-inner">
-    <span class="chero-eyebrow">Compare</span>
+<header class="chero" id="chero">
+  <!-- Atmospheric mesh gradient background -->
+  <div class="chero-mesh" aria-hidden="true">
+    <div class="chero-blob chero-blob-1"></div>
+    <div class="chero-blob chero-blob-2"></div>
+    <div class="chero-blob chero-blob-3"></div>
+  </div>
 
-    <div class="chero-logos" aria-hidden="true">
-      <span class="chero-logo chero-logo--kitaru">
-        <svg viewBox="0 0 81 82" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M40.5 0.426758C18.1325 0.426758 0 18.5592 0 40.9268C0 63.2943 18.1325 81.4268 40.5 81.4268C62.8675 81.4268 81 63.2943 81 40.9268C81 18.5592 62.8675 0.426758 40.5 0.426758ZM40.5 11.998C56.4767 11.998 69.4285 24.9501 69.4287 40.9268C69.4287 56.9036 56.4768 69.8555 40.5 69.8555C24.5234 69.8552 11.5723 56.9034 11.5723 40.9268C11.5724 24.9503 24.5235 11.9983 40.5 11.998Z" fill="#F17829"/>
-        </svg>
-        <span class="chero-name">Kitaru</span>
-      </span>
-      <span class="chero-vs">vs</span>
-      <span class="chero-logo chero-logo--competitor">
-        {competitorLogo ? (
-          <img src={competitorLogo} alt={`${competitor} logo`} />
-        ) : (
-          <span class="chero-logo-placeholder">{competitor.charAt(0)}</span>
-        )}
-        <span class="chero-name">{competitor}</span>
+  <div class="chero-inner">
+    <!-- Pill badge eyebrow -->
+    <div class="chero-eyebrow-wrap" data-reveal>
+      <span class="pill-badge">
+        <span aria-hidden="true"><span class="pulse-dot"></span></span>
+        Compare
       </span>
     </div>
 
-    {competitorTagline && <p class="chero-tagline">{competitorTagline}</p>}
+    <!-- Logo row -->
+    <div class="chero-logos" data-reveal data-reveal-delay="1">
+      <span class="chero-chip">
+        <svg viewBox="0 0 81 82" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="chero-chip-mark">
+          <path d="M40.5 0.426758C18.1325 0.426758 0 18.5592 0 40.9268C0 63.2943 18.1325 81.4268 40.5 81.4268C62.8675 81.4268 81 63.2943 81 40.9268C81 18.5592 62.8675 0.426758 40.5 0.426758ZM40.5 11.998C56.4767 11.998 69.4285 24.9501 69.4287 40.9268C69.4287 56.9036 56.4768 69.8555 40.5 69.8555C24.5234 69.8552 11.5723 56.9034 11.5723 40.9268C11.5724 24.9503 24.5235 11.9983 40.5 11.998Z" fill="#F17829"/>
+        </svg>
+        <span class="chero-chip-name">Kitaru</span>
+      </span>
 
-    <h1 class="chero-title">{title}</h1>
-    <p class="chero-desc">{description}</p>
+      <span class="chero-vs" aria-label="versus">vs</span>
 
-    <div class="chero-ctas">
-      <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
+      <span class="chero-chip">
+        {competitorLogo ? (
+          <img src={competitorLogo} alt={`${competitor} logo`} class="chero-chip-mark chero-chip-img" />
+        ) : (
+          <span class="chero-chip-circle" aria-hidden="true">{competitor.charAt(0)}</span>
+        )}
+        <span class="chero-chip-name">{competitor}</span>
+      </span>
+    </div>
+
+    <!-- Optional competitor tagline -->
+    {competitorTagline && (
+      <p class="chero-tagline" data-reveal data-reveal-delay="2">{competitorTagline}</p>
+    )}
+
+    <!-- Hero title -->
+    <h1 class="chero-title" data-reveal data-reveal-delay={competitorTagline ? "3" : "2"}>{title}</h1>
+
+    <!-- Description -->
+    <p class="chero-desc" data-reveal data-reveal-delay={competitorTagline ? "4" : "3"}>{description}</p>
+
+    <!-- CTA row: install chip + primary + secondary -->
+    <div class="chero-ctas" data-reveal data-reveal-delay={competitorTagline ? "5" : "4"}>
+      <div class="chero-install">
+        <code class="chero-install-cmd">pip install kitaru</code>
+        <button
+          class="chero-copy-btn"
+          aria-label="Copy install command"
+          data-copy="pip install kitaru"
+        >
+          <svg class="chero-copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+          </svg>
+          <svg class="chero-check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </button>
+      </div>
+      <a href="/get-started" class="btn-primary">Get started</a>
       <a href="/docs" class="btn-secondary">Read the docs</a>
     </div>
   </div>
 </header>
 
 <style>
+  /* ─── Hero shell ─── */
   .chero {
-    padding: 120px 24px 60px;
+    position: relative;
+    padding: 120px 24px 64px;
     text-align: center;
-    background: linear-gradient(180deg, var(--color-surface-warm) 0%, var(--color-bg) 100%);
+    overflow: hidden;
     border-bottom: 1px solid var(--color-border-light);
   }
+
+  /* ─── Mesh gradient atmosphere ─── */
+  /* decorative mesh gradient — accent alpha on warm bg */
+  .chero-mesh {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 0;
+  }
+
+  .chero-blob {
+    position: absolute;
+    border-radius: 50%;
+    will-change: transform;
+  }
+
+  /* top-left warm blob */
+  .chero-blob-1 {
+    width: 900px;
+    height: 900px;
+    top: -30%;
+    left: -20%;
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.25) 0%, oklch(0.65 0.16 45 / 0.08) 40%, transparent 65%);
+    filter: blur(40px);
+    animation: cheroFloat1 11s ease-in-out infinite alternate;
+  }
+
+  /* right-middle amber blob */
+  .chero-blob-2 {
+    width: 800px;
+    height: 800px;
+    top: 10%;
+    right: -20%;
+    background: radial-gradient(circle, oklch(0.68 0.08 55 / 0.20) 0%, oklch(0.68 0.08 55 / 0.06) 40%, transparent 65%);
+    filter: blur(50px);
+    animation: cheroFloat2 14s ease-in-out infinite alternate;
+  }
+
+  /* bottom-center soft glow */
+  .chero-blob-3 {
+    width: 700px;
+    height: 700px;
+    bottom: -20%;
+    left: 25%;
+    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.18) 0%, oklch(0.65 0.16 45 / 0.05) 40%, transparent 65%);
+    filter: blur(40px);
+    animation: cheroFloat3 9s ease-in-out infinite alternate;
+  }
+
+  @keyframes cheroFloat1 {
+    0%   { transform: translate(0, 0) scale(1); }
+    50%  { transform: translate(12%, 15%) scale(1.1); }
+    100% { transform: translate(-6%, 8%) scale(0.95); }
+  }
+
+  @keyframes cheroFloat2 {
+    0%   { transform: translate(0, 0) scale(1); }
+    50%  { transform: translate(-10%, 12%) scale(1.12); }
+    100% { transform: translate(6%, -8%) scale(0.9); }
+  }
+
+  @keyframes cheroFloat3 {
+    0%   { transform: translate(0, 0) scale(1); }
+    50%  { transform: translate(-15%, -10%) scale(1.15); }
+    100% { transform: translate(10%, 6%) scale(0.92); }
+  }
+
+  /* ─── Inner content ─── */
   .chero-inner {
+    position: relative;
+    z-index: 1;
     max-width: 820px;
     margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
   }
-  .chero-eyebrow {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--color-accent);
-    margin-bottom: 24px;
+
+  /* ─── Eyebrow ─── */
+  .chero-eyebrow-wrap {
+    margin-bottom: 28px;
   }
+
+  /* ─── Logo row ─── */
   .chero-logos {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 24px;
-    margin-bottom: 32px;
+    gap: 20px;
+    margin-bottom: 20px;
     flex-wrap: wrap;
   }
-  .chero-logo {
+
+  .chero-chip {
     display: inline-flex;
     align-items: center;
     gap: 12px;
     padding: 10px 20px;
     border: 1px solid var(--color-border);
-    border-radius: 12px;
+    border-radius: 14px;
     background: var(--color-surface);
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 600;
     color: var(--color-primary);
   }
-  .chero-logo svg,
-  .chero-logo img {
+
+  .chero-chip-mark {
     width: 28px;
     height: 28px;
+    flex-shrink: 0;
+  }
+
+  .chero-chip-img {
     object-fit: contain;
   }
-  .chero-logo-placeholder {
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-    background: var(--color-accent-light);
-    color: var(--color-secondary);
+
+  /* Filled accent circle fallback for competitor logo */
+  .chero-chip-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--color-accent-darker);
+    color: oklch(1 0 0);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 700;
+    flex-shrink: 0;
   }
+
+  .chero-chip-name {
+    /* inherits chip font-size + weight */
+  }
+
+  /* DM Serif Display italic "vs" */
   .chero-vs {
     font-family: 'DM Serif Display', serif;
     font-style: italic;
-    font-size: 20px;
+    font-size: 26px;
     color: var(--color-muted);
+    user-select: none;
   }
+
+  /* ─── Competitor tagline (optional) ─── */
   .chero-tagline {
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.55;
     color: var(--color-muted);
-    max-width: 560px;
-    margin: 0 auto 24px;
     font-style: italic;
-  }
-  .chero-title {
-    font-size: clamp(32px, 4.4vw, 48px);
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.15;
+    max-width: 520px;
     margin: 0 0 20px;
   }
+
+  /* ─── Title ─── */
+  .chero-title {
+    font-size: clamp(32px, 4.4vw, 56px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: var(--color-primary);
+    margin: 0 0 20px;
+  }
+
+  /* ─── Description ─── */
   .chero-desc {
     font-size: 18px;
     line-height: 1.6;
     color: var(--color-secondary);
-    margin: 0 auto 32px;
     max-width: 680px;
+    margin: 0 0 32px;
   }
+
+  /* ─── CTA row ─── */
   .chero-ctas {
     display: flex;
+    align-items: center;
     gap: 12px;
     justify-content: center;
     flex-wrap: wrap;
   }
+
+  /* Install chip */
+  .chero-install {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 4px 4px 4px 20px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  .chero-install:hover {
+    border-color: oklch(0.65 0.16 45 / 0.3);
+    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.06);
+  }
+
+  .chero-install-cmd {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-primary);
+    user-select: all;
+    letter-spacing: -0.01em;
+  }
+
+  .chero-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: var(--color-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+    margin-left: 8px;
+    flex-shrink: 0;
+  }
+
+  .chero-copy-btn:hover {
+    color: var(--color-primary);
+    background: oklch(0 0 0 / 0.04);
+  }
+
+  .chero-copy-btn .chero-copy-icon,
+  .chero-copy-btn .chero-check-icon {
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s;
+  }
+
+  .chero-copy-btn .chero-check-icon {
+    display: none;
+    color: var(--color-success);
+  }
+
+  .chero-copy-btn.copied .chero-copy-icon {
+    display: none;
+  }
+
+  .chero-copy-btn.copied .chero-check-icon {
+    display: block;
+    animation: chero-check-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes chero-check-pop {
+    0%   { transform: scale(0); opacity: 0; }
+    60%  { transform: scale(1.2); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 640px) {
+    .chero {
+      padding: 80px 20px 48px;
+    }
+
+    .chero-chip {
+      font-size: 16px;
+      padding: 8px 14px;
+    }
+
+    .chero-ctas {
+      flex-direction: column;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    .chero-ctas .btn-primary,
+    .chero-ctas .btn-secondary {
+      width: 100%;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .chero-blob-1 { width: 420px; height: 420px; }
+    .chero-blob-2 { width: 350px; height: 350px; }
+    .chero-blob-3 { width: 280px; height: 280px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chero-blob {
+      animation: none;
+    }
+  }
 </style>
+
+<script>
+  // ─── Copy-to-clipboard for ComparisonHero install chip ───
+  import { copyToClipboard } from '../../scripts/clipboard';
+
+  document.querySelectorAll<HTMLButtonElement>('#chero .chero-copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const text = btn.dataset.copy ?? '';
+      copyToClipboard(text).then(() => {
+        btn.classList.add('copied');
+        setTimeout(() => btn.classList.remove('copied'), 1500);
+      }).catch(() => {
+        btn.setAttribute('aria-label', 'Copy failed');
+        setTimeout(() => btn.setAttribute('aria-label', 'Copy install command'), 2000);
+      });
+    });
+  });
+</script>
