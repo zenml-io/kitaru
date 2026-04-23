@@ -107,6 +107,43 @@ const { Content } = await render(entry);
     text-decoration-thickness: 2px;
   }
 
+  .compare-body-inner :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0 32px;
+    font-size: 15px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .compare-body-inner :global(th) {
+    text-align: left;
+    padding: 12px 16px;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    color: var(--color-primary);
+    background: var(--color-surface-warm);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .compare-body-inner :global(td) {
+    padding: 12px 16px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--color-secondary);
+    border-bottom: 1px solid var(--color-border-light);
+    vertical-align: top;
+  }
+  .compare-body-inner :global(tr:last-child td) {
+    border-bottom: none;
+  }
+  .compare-body-inner :global(td:first-child) {
+    font-weight: 600;
+    color: var(--color-primary);
+    width: 28%;
+  }
+
   .compare-footer-cta {
     padding: 80px 24px 100px;
     background: var(--color-surface-warm);
