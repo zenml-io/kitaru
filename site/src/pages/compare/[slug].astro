@@ -18,13 +18,12 @@ export async function getStaticPaths() {
 const { entry } = Astro.props;
 const { Content } = await render(entry);
 
-// Hardcoded default sections — anchor targets (#when-to-use, #features, #code, #cta)
-// will only work once MDX adds explicit <h2 id="..."> elements (follow-up PR).
-// Until then the links are inert but not broken.
+// TOC sections — IDs match real anchors emitted by MDX H2s and ComparisonCta's
+// section id="cta". Active-section tracking works because these IDs exist in the DOM.
 const defaultSections = [
-  { id: 'when-to-use', label: 'When to use each' },
-  { id: 'features', label: 'Feature comparison' },
-  { id: 'code', label: 'Code comparison' },
+  { id: 'what-makes-kitaru-unique', label: 'Feature comparison' },
+  { id: 'code-comparison', label: 'Code comparison' },
+  { id: 'ready-to-try-kitaru', label: 'Ready to try' },
   { id: 'cta', label: 'Get started' },
 ];
 ---
@@ -53,10 +52,10 @@ const defaultSections = [
   </main>
 
   <!-- Mobile sticky bottom CTA bar (≤820px) -->
-  <div class="compare-mobile-cta" aria-label="Quick actions" role="complementary">
+  <nav class="compare-mobile-cta" aria-label="Quick actions">
     <a href="/get-started" class="btn-primary">Install Kitaru</a>
     <a href="/docs" class="btn-secondary">Docs</a>
-  </div>
+  </nav>
 
   <Footer />
 </Base>

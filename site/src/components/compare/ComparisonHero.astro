@@ -60,6 +60,8 @@ const { title, description, competitor, competitorLogo, competitorTagline } = As
 
     <!-- CTA row: install chip + primary + secondary -->
     <div class="chero-ctas" data-reveal data-reveal-delay={competitorTagline ? "5" : "4"}>
+      <!-- Visually-hidden live region announces copy success to screen readers -->
+      <span class="sr-only" id="chero-copy-status" aria-live="polite" aria-atomic="true"></span>
       <div class="chero-install">
         <code class="chero-install-cmd">pip install kitaru</code>
         <button
@@ -114,7 +116,8 @@ const { title, description, competitor, competitorLogo, competitorTagline } = As
     height: 900px;
     top: -30%;
     left: -20%;
-    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.25) 0%, oklch(0.65 0.16 45 / 0.08) 40%, transparent 65%);
+    /* decorative mesh gradient */
+    background: var(--mesh-accent-strong);
     filter: blur(40px);
     animation: cheroFloat1 11s ease-in-out infinite alternate;
   }
@@ -125,7 +128,8 @@ const { title, description, competitor, competitorLogo, competitorTagline } = As
     height: 800px;
     top: 10%;
     right: -20%;
-    background: radial-gradient(circle, oklch(0.68 0.08 55 / 0.20) 0%, oklch(0.68 0.08 55 / 0.06) 40%, transparent 65%);
+    /* decorative mesh gradient */
+    background: var(--mesh-warm);
     filter: blur(50px);
     animation: cheroFloat2 14s ease-in-out infinite alternate;
   }
@@ -136,7 +140,8 @@ const { title, description, competitor, competitorLogo, competitorTagline } = As
     height: 700px;
     bottom: -20%;
     left: 25%;
-    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.18) 0%, oklch(0.65 0.16 45 / 0.05) 40%, transparent 65%);
+    /* decorative mesh gradient */
+    background: var(--mesh-accent-soft);
     filter: blur(40px);
     animation: cheroFloat3 9s ease-in-out infinite alternate;
   }
@@ -288,7 +293,7 @@ const { title, description, competitor, competitorLogo, competitorTagline } = As
 
   .chero-install:hover {
     border-color: oklch(0.65 0.16 45 / 0.3);
-    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.06);
+    box-shadow: var(--focus-ring-accent);
   }
 
   .chero-install-cmd {
@@ -352,6 +357,16 @@ const { title, description, competitor, competitorLogo, competitorTagline } = As
       padding: 80px 20px 48px;
     }
 
+    /* Stack logos vertically so "vs" gets its own line instead of orphaning at line-end */
+    .chero-logos {
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .chero-vs {
+      margin: 0;
+    }
+
     .chero-chip {
       font-size: 16px;
       padding: 8px 14px;
@@ -392,6 +407,12 @@ const { title, description, competitor, competitorLogo, competitorTagline } = As
       copyToClipboard(text).then(() => {
         btn.classList.add('copied');
         setTimeout(() => btn.classList.remove('copied'), 1500);
+        // Announce to screen readers via the live region
+        const status = document.getElementById('chero-copy-status');
+        if (status) {
+          status.textContent = 'Install command copied to clipboard';
+          setTimeout(() => { status.textContent = ''; }, 1500);
+        }
       }).catch(() => {
         btn.setAttribute('aria-label', 'Copy failed');
         setTimeout(() => btn.setAttribute('aria-label', 'Copy install command'), 2000);

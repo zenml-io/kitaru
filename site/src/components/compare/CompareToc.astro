@@ -14,7 +14,6 @@ const { sections } = Astro.props;
 <!-- Scroll-progress bar: purely decorative, sits above nav -->
 <div
   class="ctoc-progress"
-  role="progressbar"
   aria-hidden="true"
   id="ctoc-progress"
 ></div>
@@ -25,7 +24,6 @@ const { sections } = Astro.props;
   <ul class="ctoc-list">
     {sections.map((s) => (
       <li>
-        {/* Anchor targets may not exist yet — links are inert until MDX adds explicit IDs. */}
         <a class="ctoc-link" href={`#${s.id}`} data-section={s.id}>
           {s.label}
         </a>
@@ -68,13 +66,14 @@ const { sections } = Astro.props;
 
 <style>
   /* ─── Scroll-progress bar ─── */
+  /* Progress sits above nav (z-index: 100 on Nav) */
   .ctoc-progress {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     height: 3px;
-    z-index: 100;
+    z-index: 110;
     background: var(--color-accent);
     transform: scaleX(0);
     transform-origin: 0 50%;

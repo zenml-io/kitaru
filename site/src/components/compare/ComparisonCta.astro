@@ -92,7 +92,8 @@ const {
     height: 900px;
     top: -30%;
     left: -5%;
-    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.25) 0%, oklch(0.65 0.16 45 / 0.08) 40%, transparent 65%);
+    /* decorative mesh gradient */
+    background: var(--mesh-accent-strong);
     animation: cctaMesh1 10s ease-in-out infinite alternate;
   }
 
@@ -101,7 +102,8 @@ const {
     height: 850px;
     bottom: -35%;
     right: -5%;
-    background: radial-gradient(circle, oklch(0.68 0.08 55 / 0.18) 0%, oklch(0.68 0.08 55 / 0.06) 40%, transparent 65%);
+    /* decorative mesh gradient */
+    background: var(--mesh-warm);
     animation: cctaMesh2 14s ease-in-out infinite alternate;
   }
 
@@ -110,7 +112,8 @@ const {
     height: 750px;
     top: 10%;
     right: 20%;
-    background: radial-gradient(circle, oklch(0.65 0.16 45 / 0.16) 0%, oklch(0.65 0.16 45 / 0.05) 40%, transparent 65%);
+    /* decorative mesh gradient */
+    background: var(--mesh-accent-soft);
     animation: cctaMesh3 8s ease-in-out infinite alternate;
   }
 
@@ -190,7 +193,7 @@ const {
 
   .ccta-install:hover {
     border-color: oklch(0.65 0.16 45 / 0.4);
-    box-shadow: 0 0 0 3px oklch(0.65 0.16 45 / 0.08);
+    box-shadow: var(--focus-ring-accent);
   }
 
   .ccta-install-cmd {

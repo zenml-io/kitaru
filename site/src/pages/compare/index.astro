@@ -15,7 +15,7 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
 >
   <Nav />
   <main class="compare-index" id="main-content">
-    <section class="section-pad" id="hero">
+    <section class="section-pad compare-index-hero" id="hero">
       <div class="section-inner" style="text-align: center; max-width: 760px;">
         <span class="section-eyebrow" data-reveal>Compare</span>
         <h1 class="section-title" data-reveal data-reveal-delay="1">Kitaru vs. the alternatives</h1>
@@ -50,10 +50,10 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
             ))}
             {/* Coming-soon ghost tiles */}
             {[
-              { competitor: 'LangGraph', note: 'Coming soon' },
-              { competitor: 'Temporal', note: 'Coming soon' },
-              { competitor: 'Prefect', note: 'Coming soon' },
-              { competitor: 'Restate', note: 'Coming soon' },
+              { competitor: 'LangGraph', teaser: 'Graph-based agent workflows, durably.', note: 'Coming soon' },
+              { competitor: 'Temporal', teaser: 'Workflow runtime for AI agents.', note: 'Coming soon' },
+              { competitor: 'Prefect', teaser: 'Agent orchestration with Prefect semantics.', note: 'Coming soon' },
+              { competitor: 'Restate', teaser: 'Durable execution for agent loops.', note: 'Coming soon' },
             ].map((upcoming, index) => (
               <li>
                 <div class="compare-card compare-card--soon" data-reveal="scale-up" data-reveal-delay={String(3 + comparisons.length + index)}>
@@ -61,7 +61,7 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
                     <span class="compare-card-vs">Kitaru <em>vs</em></span>
                     <h2>{upcoming.competitor}</h2>
                   </div>
-                  <p style="opacity: 0.6; flex: 1;"></p>
+                  <p class="compare-card-teaser">{upcoming.teaser}</p>
                   <span class="compare-card-soon-pill">{upcoming.note}</span>
                 </div>
               </li>
@@ -76,6 +76,12 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
 
 <style>
   .compare-index { padding-top: 0; }
+
+  /* Ensure first section clears the fixed nav (64px + breathing room) */
+  .compare-index-hero {
+    padding-top: clamp(96px, 18vw, 140px);
+  }
+
   .compare-desc {
     font-size: 18px;
     line-height: 1.6;
@@ -168,6 +174,14 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
     font-weight: 600;
     color: var(--color-accent);
     margin-top: 8px;
+  }
+  .compare-card-teaser {
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--color-secondary);
+    margin: 0;
+    flex: 1;
+    opacity: 0.6;
   }
   .compare-card-soon-pill {
     display: inline-flex;

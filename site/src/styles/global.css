@@ -48,6 +48,14 @@
   /* Semantic status */
   --color-negative: oklch(0.55 0.015 60);
 
+  /* Decorative mesh gradient stops — accent alphas on warm ground */
+  --mesh-accent-strong: radial-gradient(circle, oklch(0.65 0.16 45 / 0.25) 0%, oklch(0.65 0.16 45 / 0.08) 40%, transparent 65%);
+  --mesh-accent-soft: radial-gradient(circle, oklch(0.65 0.16 45 / 0.18) 0%, oklch(0.65 0.16 45 / 0.05) 40%, transparent 65%);
+  --mesh-warm: radial-gradient(circle, oklch(0.68 0.08 55 / 0.20) 0%, oklch(0.68 0.08 55 / 0.06) 40%, transparent 65%);
+
+  /* Focus ring for accent-colored interactives */
+  --focus-ring-accent: 0 0 0 3px oklch(0.65 0.16 45 / 0.08);
+
   /* Fonts */
   --font-ui: 'DM Sans', -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
