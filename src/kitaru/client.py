@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import builtins
 import importlib
+import logging
 import sys
 import warnings
 from collections.abc import Iterator, Mapping
@@ -154,6 +155,8 @@ from kitaru.memory import (
     _validate_memory_version,
 )
 from kitaru.replay import build_replay_plan
+
+logger = logging.getLogger(__name__)
 
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 _WAIT_CONDITION_RESOLUTION_ABORT = "abort"
@@ -1397,15 +1400,13 @@ class _DeploymentsAPI:
             version=version, tag=tag, require_one=True
         )
 
-        known_before = (
-            is_deployment_known(flow, version) if version is not None else True
-        )
         deployment = self._resolve_record(
             flow=flow,
             version=version,
             tag=tag,
             selector_source=selector_source,
         )
+        known_before = is_deployment_known(flow, deployment.version)
         mark_deployment_known(deployment)
         warn_if_deployment_drifted(
             deployment,
@@ -1476,6 +1477,37 @@ class _DeploymentsAPI:
             if remove_tags:
                 self._update_snapshot_tags(deployment, remove_tags=remove_tags)
 
+    def _report_exclusive_tag_cleanup_failure(
+        self,
+        *,
+        target: DeploymentRecord,
+        operation: Literal["create", "tag"],
+        exclusive_tag_count: int,
+        warning_message: str,
+        exc: Exception,
+    ) -> None:
+        """Emit warning/logging/analytics for best-effort cleanup failures."""
+        logger.warning(
+            "Deployment %s v%d exclusive-tag cleanup failed during %s: %s",
+            target.flow,
+            target.version,
+            operation,
+            exc,
+            exc_info=True,
+        )
+        track(
+            AnalyticsEvent.DEPLOYMENT_TAG_CLEANUP_FAILED,
+            {
+                "operation": operation,
+                "exclusive_tag_count": exclusive_tag_count,
+            },
+        )
+        warnings.warn(
+            warning_message,
+            UserWarning,
+            stacklevel=3,
+        )
+
     def create(
         self,
         *,
@@ -1483,6 +1515,7 @@ class _DeploymentsAPI:
         source_snapshot: Any,
         tags: Mapping[str, bool] | None = None,
         max_attempts: int = 3,
+        publish_default_on_first_deploy: bool = True,
     ) -> Deployment:
         """Create a versioned deployment snapshot from a source snapshot."""
         validate_deployment_flow(flow)
@@ -1495,6 +1528,7 @@ class _DeploymentsAPI:
             resolved_tags = deployment_tags_for_create(
                 is_first_deploy=version == 1,
                 tags=tags,
+                publish_default_on_first_deploy=publish_default_on_first_deploy,
             )
             snapshot_name = build_deployment_snapshot_name(flow, version)
 
@@ -1528,17 +1562,21 @@ class _DeploymentsAPI:
                     tag for tag, exclusive in deployment.tags.items() if exclusive
                 )
                 tag_text = ", ".join(exclusive_tags) if exclusive_tags else "(none)"
-                warnings.warn(
-                    "Created deployment "
-                    f"{deployment.flow!r} v{deployment.version}, but failed to "
-                    "remove create-time exclusive tag(s) from older versions: "
-                    f"{tag_text}. The deployment exists and can be used, but older "
-                    "versions might still hold those exclusive tags. Retry by "
-                    f"re-applying the tag(s) to v{deployment.version} (for example "
-                    "via `deployments.tag(..., exclusive=True)`). "
-                    f"Cleanup error: {exc}",
-                    UserWarning,
-                    stacklevel=2,
+                self._report_exclusive_tag_cleanup_failure(
+                    target=deployment,
+                    operation="create",
+                    exclusive_tag_count=len(exclusive_tags),
+                    warning_message=(
+                        "Created deployment "
+                        f"{deployment.flow!r} v{deployment.version}, but failed to "
+                        "remove create-time exclusive tag(s) from older versions: "
+                        f"{tag_text}. The deployment exists and can be used, but older "
+                        "versions might still hold those exclusive tags. Retry by "
+                        f"re-applying the tag(s) to v{deployment.version} (for example "
+                        "via `deployments.tag(..., exclusive=True)`). "
+                        f"Cleanup error: {exc}"
+                    ),
+                    exc=exc,
                 )
             mark_deployment_known(deployment)
             return self._wrap(deployment)
@@ -1585,23 +1623,6 @@ class _DeploymentsAPI:
                 f"No deployment found for flow {flow!r} version {version}."
             )
 
-        if effective_exclusive:
-            for deployment in deployments:
-                if deployment.version == target.version:
-                    continue
-                existing_exclusive = deployment.tags.get(normalized_tag)
-                if existing_exclusive is None:
-                    continue
-                self._update_snapshot_tags(
-                    deployment,
-                    remove_tags=[
-                        deployment_public_tag(
-                            normalized_tag,
-                            exclusive=existing_exclusive,
-                        )
-                    ],
-                )
-
         self._update_snapshot_tags(
             target,
             add_tags=[
@@ -1614,6 +1635,38 @@ class _DeploymentsAPI:
                 ),
             ],
         )
+
+        if effective_exclusive:
+            try:
+                for deployment in deployments:
+                    if deployment.version == target.version:
+                        continue
+                    existing_exclusive = deployment.tags.get(normalized_tag)
+                    if existing_exclusive is None:
+                        continue
+                    self._update_snapshot_tags(
+                        deployment,
+                        remove_tags=[
+                            deployment_public_tag(
+                                normalized_tag,
+                                exclusive=existing_exclusive,
+                            )
+                        ],
+                    )
+            except Exception as exc:
+                self._report_exclusive_tag_cleanup_failure(
+                    target=target,
+                    operation="tag",
+                    exclusive_tag_count=1,
+                    warning_message=(
+                        "Applied exclusive deployment tag "
+                        f"{normalized_tag!r} to {target.flow!r} v{target.version}, "
+                        "but failed to remove that tag from older versions. The tag "
+                        "now exists on the target deployment, but older versions "
+                        f"might still hold it. Cleanup error: {exc}"
+                    ),
+                    exc=exc,
+                )
         return self.get(flow=flow, version=version)
 
     def untag(self, *, flow: str, version: int, tag: str) -> Deployment:

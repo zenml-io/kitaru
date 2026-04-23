@@ -23,12 +23,13 @@ from zenml.client import Client
 from zenml.config.constants import DOCKER_SETTINGS_KEY
 from zenml.config.docker_settings import DockerSettings
 from zenml.config.retry_config import StepRetryConfig
-from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
 from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
+from kitaru._client._mappers import _to_public_status
+from kitaru._client._models import ExecutionStatus
 from kitaru._interface_deployments import (
     Deployment,
     ensure_stack_is_server_runnable,
@@ -590,7 +591,7 @@ def _raise_for_unsuccessful_run(
     raise execution_error_from_failure(
         message,
         exec_id=str(run.id),
-        status=run.status.value,
+        status=_to_public_status(run.status),
         origin=failure_origin,
     )
 
@@ -630,7 +631,7 @@ class FlowHandle:
     @property
     def status(self) -> ExecutionStatus:
         """Current execution status."""
-        return self._refresh().status
+        return _to_public_status(self._refresh().status)
 
     def _track_terminal_once(
         self,
@@ -831,6 +832,7 @@ class _FlowDefinition:
         cache: bool | None = None,
         retries: int | None = None,
         tags: dict[str, bool] | None = None,
+        publish_default_on_first_deploy: bool = True,
         **kwargs: Any,
     ) -> Deployment:
         """Create a versioned deployment snapshot for this flow.
@@ -896,11 +898,15 @@ class _FlowDefinition:
                     f"{flow_name!r}: {exc}"
                 ) from exc
 
-        return deployments_api.create(
-            flow=flow_name,
-            source_snapshot=source_snapshot,
-            tags=tags,
-        )
+        create_kwargs: dict[str, Any] = {
+            "flow": flow_name,
+            "source_snapshot": source_snapshot,
+            "tags": tags,
+        }
+        if not publish_default_on_first_deploy:
+            create_kwargs["publish_default_on_first_deploy"] = False
+
+        return deployments_api.create(**create_kwargs)
 
     def deployments(self) -> list[Deployment]:
         """List deployment versions for this flow."""

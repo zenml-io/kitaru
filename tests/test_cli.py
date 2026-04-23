@@ -650,7 +650,11 @@ def test_build_json_output_creates_deployment_from_target(
         app(["build", "demo.py:demo_flow", "--input", '{"topic":"AI"}', "-o", "json"])
 
     assert exc_info.value.code == 0
-    fake_flow.deploy.assert_called_once_with(tags={}, topic="AI")
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        topic="AI",
+        publish_default_on_first_deploy=False,
+    )
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "build"
     assert payload["item"]["flow"] == "demo_flow"
@@ -800,7 +804,11 @@ def test_build_input_file_parses_json_object(
         app(["build", "demo.py:demo_flow", "--input", f"@{input_file}", "-o", "json"])
 
     assert exc_info.value.code == 0
-    fake_flow.deploy.assert_called_once_with(tags={}, topic="cats")
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        topic="cats",
+        publish_default_on_first_deploy=False,
+    )
     assert json.loads(capsys.readouterr().out)["command"] == "build"
 
 
@@ -1070,6 +1078,10 @@ def test_flow_deployments_curl_rejects_non_runnable_deployments(
 
     with (
         patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch(
+            "kitaru._cli._flows.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="https://kitaru.example.com"),
+        ),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
@@ -1080,12 +1092,62 @@ def test_flow_deployments_curl_rejects_non_runnable_deployments(
     assert "server cannot run this deployment" in payload["error"]["message"]
 
 
-def test_flow_deployments_curl_uses_kitaru_server_url_env_without_login_store(
+@pytest.mark.parametrize(
+    ("env", "message_fragment"),
+    [
+        pytest.param(
+            {"KITARU_SERVER_URL": "https://env-kitaru.example.com/"},
+            "no Kitaru auth token is available",
+            id="missing-auth-token",
+        ),
+        pytest.param(
+            {
+                "KITARU_SERVER_URL": "https://env-kitaru.example.com/",
+                "KITARU_AUTH_TOKEN": "org-token",
+            },
+            "no project is active",
+            id="missing-project",
+        ),
+    ],
+)
+def test_flow_deployments_curl_rejects_invalid_env_backed_connection(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    env: dict[str, str],
+    message_fragment: str,
+) -> None:
+    """Curl generation should fail before printing a known-broken command."""
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = _deployment_stub(
+        flow="demo_flow",
+        version=2,
+        deployment_id="dep-env",
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "flow.deployments.curl"
+    assert message_fragment in payload["error"]["message"]
+    fake_client.deployments.get.assert_not_called()
+
+
+def test_flow_deployments_curl_uses_complete_env_backed_connection_without_login_store(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`KITARU_SERVER_URL` should work even without a login-backed store URL."""
+    """A complete env-backed remote connection should still generate curl output."""
     monkeypatch.setenv("KITARU_SERVER_URL", "https://env-kitaru.example.com/")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "org-token")
+    monkeypatch.setenv("KITARU_PROJECT", "demo-project")
     fake_client = Mock()
     fake_client.deployments.get.return_value = _deployment_stub(
         flow="demo_flow",

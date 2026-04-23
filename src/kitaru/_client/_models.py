@@ -23,6 +23,20 @@ class ExecutionStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+    @property
+    def is_finished(self) -> bool:
+        """Whether the execution is in a terminal state."""
+        return self in {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+        }
+
+    @property
+    def is_successful(self) -> bool:
+        """Whether the execution finished successfully."""
+        return self is ExecutionStatus.COMPLETED
+
 
 @dataclass(frozen=True)
 class Deployment:

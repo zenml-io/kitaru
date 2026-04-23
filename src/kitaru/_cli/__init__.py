@@ -11,7 +11,10 @@ _UNKNOWN_VERSION = "unknown"
 
 app = cyclopts.App(
     name="kitaru",
-    help="Durable execution for AI agents.",
+    help=(
+        "Durable execution for AI agents. Create deployments with `kitaru "
+        "deploy`; inspect existing deployments with `kitaru flow`."
+    ),
     version=_UNKNOWN_VERSION,
     version_flags=["-V"],
 )
@@ -54,12 +57,15 @@ auth_app = cyclopts.App(
 )
 flow_app = cyclopts.App(
     name="flow",
-    help="Inspect flows and manage deployment routing.",
+    help=(
+        "Inspect existing deployments and manage deployment routing. Create "
+        "new deployments with `kitaru deploy`."
+    ),
     version_flags=[],
 )
 flow_deployments_app = cyclopts.App(
     name="deployments",
-    help="Inspect and manage deployment versions for a flow.",
+    help="Inspect and manage existing deployment versions for a flow.",
     version_flags=[],
 )
 

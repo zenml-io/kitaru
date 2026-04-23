@@ -588,6 +588,34 @@ def test_deployments_create_auto_adds_default_tag_on_first_deploy() -> None:
     assert deployment_public_tag("default", exclusive=True) in add_tags
 
 
+def test_deployments_create_can_skip_default_tag_on_first_build() -> None:
+    source_snapshot = _DummySnapshot(name="temporary-source")
+    created_v1 = _DummySnapshot(name="kitaru::research_flow::v1")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[])
+        client_mock.update_snapshot.return_value = created_v1
+
+        client = KitaruClient()
+        deployment = client.deployments.create(
+            flow="research_flow",
+            source_snapshot=source_snapshot,
+            publish_default_on_first_deploy=False,
+        )
+
+    assert deployment.version == 1
+    assert deployment.tags == {}
+    add_tags = client_mock.update_snapshot.call_args.kwargs["add_tags"]
+    assert deployment_public_tag("default", exclusive=True) not in add_tags
+
+
 def test_deployments_create_moves_exclusive_tags_from_previous_versions() -> None:
     source_snapshot = _DummySnapshot(name="temporary-source")
     v1 = _DummySnapshot(
@@ -668,6 +696,8 @@ def test_deployments_create_warns_if_exclusive_tag_cleanup_fails() -> None:
             return_value=_resolved_connection(),
         ),
         patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.logger") as logger_mock,
     ):
         client_mock = client_cls.return_value
         client_mock.list_snapshots.return_value = SimpleNamespace(items=[v1])
@@ -684,6 +714,14 @@ def test_deployments_create_warns_if_exclusive_tag_cleanup_fails() -> None:
     assert deployment.version == 2
     assert deployment.tags == {"stable": True}
     assert client_mock.update_snapshot.call_count == 2
+    logger_mock.warning.assert_called_once()
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.DEPLOYMENT_TAG_CLEANUP_FAILED,
+        {
+            "operation": "create",
+            "exclusive_tag_count": 1,
+        },
+    )
 
 
 def test_deployments_tag_default_is_exclusive_and_untag_rejects_default() -> None:
@@ -735,6 +773,70 @@ def test_deployments_tag_default_is_exclusive_and_untag_rejects_default() -> Non
     assert tagged.version == 2
     assert tagged.tags["default"] is True
     assert "default" not in map_deployment_snapshot(v1).tags  # type: ignore[union-attr]
+
+
+def test_deployments_tag_warns_but_still_updates_target_if_cleanup_fails() -> None:
+    v1 = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("stable", exclusive=True)],
+    )
+    v2 = _DummySnapshot(name="kitaru::research_flow::v2")
+    snapshots = [v1, v2]
+
+    def update_snapshot(
+        *,
+        name_id_or_prefix: str,
+        add_tags: list[str] | None = None,
+        remove_tags: list[str] | None = None,
+        **_: Any,
+    ) -> _DummySnapshot:
+        snapshot = next(
+            item for item in snapshots if str(item.id) == str(name_id_or_prefix)
+        )
+        if snapshot is v1:
+            raise RuntimeError("temporary backend outage")
+        tag_names = {tag.name for tag in snapshot.resources.tags}
+        tag_names.update(add_tags or [])
+        tag_names.difference_update(remove_tags or [])
+        snapshot.resources.tags = [SimpleNamespace(name=tag) for tag in tag_names]
+        return snapshot
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track") as track_mock,
+        patch("kitaru.client.logger") as logger_mock,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=snapshots)
+        client_mock.update_snapshot.side_effect = update_snapshot
+
+        client = KitaruClient()
+        with pytest.warns(
+            UserWarning, match="failed to remove that tag from older versions"
+        ):
+            tagged = client.deployments.tag(
+                flow="research_flow",
+                version=2,
+                tag="stable",
+                exclusive=True,
+            )
+
+    assert tagged.version == 2
+    assert tagged.tags == {"stable": True}
+    assert map_deployment_snapshot(v1).tags == {"stable": True}  # type: ignore[union-attr]
+    assert client_mock.update_snapshot.call_count == 2
+    logger_mock.warning.assert_called_once()
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.DEPLOYMENT_TAG_CLEANUP_FAILED,
+        {
+            "operation": "tag",
+            "exclusive_tag_count": 1,
+        },
+    )
 
 
 def test_deployment_facade_methods_forward_to_client_api() -> None:
@@ -882,6 +984,40 @@ def test_deployments_invoke_warns_for_unknown_explicit_version() -> None:
         "run_configuration"
     ]
     assert run_configuration.parameters == {"answer": 42}
+
+
+def test_deployments_invoke_warns_for_unknown_tag_resolution() -> None:
+    run = _as_pipeline_run(
+        _DummyRun(status=ZenMLExecutionStatus.RUNNING, flow_name="tag_drift_flow")
+    )
+    snapshot = _DummySnapshot(
+        name="kitaru::tag_drift_flow::v19",
+        tags=[deployment_public_tag("stable", exclusive=True)],
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
+        client_mock.trigger_pipeline.return_value = run
+
+        client = KitaruClient()
+        with (
+            patch("kitaru.client.ensure_stack_is_server_runnable"),
+            pytest.warns(UserWarning, match="not previously known"),
+        ):
+            handle = client.deployments.invoke(
+                flow="tag_drift_flow",
+                tag="stable",
+            )
+
+    assert handle.exec_id == str(run.id)
 
 
 def test_deployments_invoke_rejects_non_server_runnable_deployment_early() -> None:

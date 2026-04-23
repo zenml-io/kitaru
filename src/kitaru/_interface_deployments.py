@@ -124,6 +124,7 @@ def deployment_tags_for_create(
     *,
     is_first_deploy: bool,
     tags: Mapping[str, bool] | None = None,
+    publish_default_on_first_deploy: bool = True,
 ) -> dict[str, bool]:
     """Return normalized deployment tags, adding first-deploy default if needed."""
     normalized: dict[str, bool] = {}
@@ -134,7 +135,7 @@ def deployment_tags_for_create(
             exclusive,
         )
 
-    if is_first_deploy:
+    if is_first_deploy and publish_default_on_first_deploy:
         normalized[DEFAULT_DEPLOYMENT_TAG] = True
     return normalized
 

@@ -73,6 +73,7 @@ class AnalyticsEvent(StrEnum):
     DEPLOYMENT_DEPLOYED = "Kitaru deployment deployed"
     DEPLOYMENT_INVOKED = "Kitaru deployment invoked"
     DEPLOYMENT_CURL_GENERATED = "Kitaru deployment curl generated"
+    DEPLOYMENT_TAG_CLEANUP_FAILED = "Kitaru deployment tag cleanup failed"
     DEPLOYMENT_TAGGED = "Kitaru deployment tagged"
     DEPLOYMENT_UNTAGGED = "Kitaru deployment untagged"
     DEPLOYMENT_DELETED = "Kitaru deployment deleted"

@@ -17,6 +17,7 @@ from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
 from kitaru import memory
+from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
 from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import checkpoint
 from kitaru.config import (
@@ -35,6 +36,7 @@ from kitaru.errors import (
     KitaruUsageError,
     KitaruUserCodeError,
     build_recovery_command,
+    execution_error_from_failure,
     format_recovery_hint,
 )
 from kitaru.flow import (
@@ -302,6 +304,48 @@ def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
         flow="_lambda_",
         source_snapshot=source_snapshot,
         tags={"canary": False},
+    )
+
+
+def test_flow_deploy_can_skip_first_deploy_default_publish() -> None:
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    source_snapshot = object()
+    configured_pipeline._create_snapshot.return_value = source_snapshot
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(create=MagicMock(return_value=object()))
+    client = SimpleNamespace(deployments=deployments_api)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable"),
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.deploy(1, publish_default_on_first_deploy=False)
+
+    deployments_api.create.assert_called_once_with(
+        flow="_lambda_",
+        source_snapshot=source_snapshot,
+        tags=None,
+        publish_default_on_first_deploy=False,
     )
 
 
@@ -1114,6 +1158,35 @@ def test_flow_handle_wait_polls_until_complete() -> None:
     sleep_mock.assert_called_once_with(1)
 
 
+def test_flow_handle_status_returns_kitaru_execution_status() -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        status = handle.status
+
+    assert status == KitaruExecutionStatus.RUNNING
+    assert isinstance(status, KitaruExecutionStatus)
+    assert status.is_finished is False
+    assert status.is_successful is False
+
+
+def test_execution_status_compatibility_helpers() -> None:
+    assert KitaruExecutionStatus.RUNNING.is_finished is False
+    assert KitaruExecutionStatus.WAITING.is_finished is False
+    assert KitaruExecutionStatus.COMPLETED.is_finished is True
+    assert KitaruExecutionStatus.FAILED.is_finished is True
+    assert KitaruExecutionStatus.CANCELLED.is_finished is True
+
+    assert KitaruExecutionStatus.RUNNING.is_successful is False
+    assert KitaruExecutionStatus.WAITING.is_successful is False
+    assert KitaruExecutionStatus.FAILED.is_successful is False
+    assert KitaruExecutionStatus.CANCELLED.is_successful is False
+    assert KitaruExecutionStatus.COMPLETED.is_successful is True
+
+
 def test_flow_handle_get_raises_when_still_running() -> None:
     running = _DummyRun(status=ExecutionStatus.RUNNING)
     client_mock = MagicMock()
@@ -1146,7 +1219,8 @@ def test_flow_handle_get_raises_with_failure_context() -> None:
         handle.get()
 
     assert exc_info.value.exec_id == str(failed.id)
-    assert exc_info.value.status == failed.status.value
+    assert exc_info.value.status == KitaruExecutionStatus.FAILED
+    assert isinstance(exc_info.value.status, KitaruExecutionStatus)
     assert exc_info.value.failure_origin == FailureOrigin.USER_CODE
 
 
@@ -1889,6 +1963,16 @@ class TestCheckpointCountFromRun:
 
 class TestRecoveryHintHelpers:
     """Tests for the recovery hint formatting helpers in errors.py."""
+
+    def test_execution_error_status_coerces_to_kitaru_enum(self) -> None:
+        error = execution_error_from_failure(
+            "run failed",
+            exec_id="exec-123",
+            status="failed",
+            origin=FailureOrigin.UNKNOWN,
+        )
+        assert error.status == KitaruExecutionStatus.FAILED
+        assert isinstance(error.status, KitaruExecutionStatus)
 
     def test_build_recovery_command_for_failed(self) -> None:
         assert build_recovery_command("kr-abc", status="failed") == (

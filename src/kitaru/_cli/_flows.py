@@ -240,11 +240,14 @@ def _build_deploy_kwargs(
 
 def _active_kitaru_server_url() -> str:
     try:
-        resolved_connection = resolve_connection_config()
+        resolved_connection = resolve_connection_config(validate_for_use=True)
+    except KitaruUsageError:
+        raise
     except Exception as exc:
         raise KitaruUsageError(
-            "No active Kitaru server connection could be read. Run `kitaru login` "
-            "or set KITARU_SERVER_URL before generating a deployment curl command."
+            "Could not load the active Kitaru server connection. Run `kitaru login` "
+            "or set KITARU_SERVER_URL, KITARU_AUTH_TOKEN, and KITARU_PROJECT "
+            "before generating a deployment curl command."
         ) from exc
 
     server_url = (resolved_connection.server_url or "").strip()
@@ -429,7 +432,10 @@ def build(
             target,
             module_name_prefix="kitaru_cli_deploy_",
         )
-        deployment = flow_target.deploy(**deploy_kwargs)
+        deployment = flow_target.deploy(
+            **deploy_kwargs,
+            publish_default_on_first_deploy=False,
+        )
         track(
             AnalyticsEvent.DEPLOYMENT_BUILT,
             {"command": command, "has_input": bool(inputs)},
@@ -803,6 +809,7 @@ def curl(
             tag=tag,
             default_tag=DEFAULT_DEPLOYMENT_TAG,
         )
+        server_url = _active_kitaru_server_url()
         client = _facade_module().KitaruClient()
         deployment = client.deployments.get(
             flow=flow,
@@ -813,7 +820,6 @@ def curl(
             deployment,
             operation="curl",
         )
-        server_url = _active_kitaru_server_url()
         payload = _deployment_curl_payload(
             flow=flow,
             selector_version=resolved_version,
