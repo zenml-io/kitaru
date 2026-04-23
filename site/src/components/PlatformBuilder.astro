@@ -1,0 +1,296 @@
+---
+// PlatformBuilder.astro — "Primitive, not platform" four-layer stack
+---
+
+<section id="platform-builder" class="pb-section section-pad">
+  <div class="section-inner">
+    <div class="pb-header" data-reveal>
+      <span class="section-eyebrow">FOR PLATFORM BUILDERS</span>
+      <h2 class="section-title">
+        Runtime primitives, under what you already run.
+      </h2>
+      <p class="pb-desc">
+        Agent tooling really lives in four layers. Kitaru owns one of them &mdash; the runtime &mdash; and leaves the other three to the tools your teams already picked.
+      </p>
+    </div>
+
+    <div class="pb-stack">
+
+      <div class="pb-layer pb-layer-model" data-reveal="fade-up" data-reveal-delay="1">
+        <div class="pb-layer-head">
+          <span class="pb-layer-label">Model layer</span>
+          <span class="pb-layer-role">the LLM itself</span>
+        </div>
+        <div class="pb-layer-tags">
+          <span class="pb-tag">OpenAI</span>
+          <span class="pb-tag">Anthropic</span>
+          <span class="pb-tag">Google</span>
+          <span class="pb-tag">Open-weights</span>
+          <span class="pb-tag">Fine-tuned in-house</span>
+          <span class="pb-tag pb-tag-ghost">your pick</span>
+        </div>
+      </div>
+
+      <div class="pb-connector" aria-hidden="true"></div>
+
+      <div class="pb-layer pb-layer-harness" data-reveal="fade-up" data-reveal-delay="2">
+        <div class="pb-layer-head">
+          <span class="pb-layer-label">Harness layer</span>
+          <span class="pb-layer-role">the loop around the model</span>
+        </div>
+        <div class="pb-layer-tags">
+          <span class="pb-tag">Pydantic AI / Harness</span>
+          <span class="pb-tag">LangGraph</span>
+          <span class="pb-tag">Claude Agent SDK</span>
+          <span class="pb-tag">OpenAI Agents SDK</span>
+          <span class="pb-tag">Raw Python</span>
+          <span class="pb-tag pb-tag-ghost">your pick</span>
+        </div>
+      </div>
+
+      <div class="pb-connector" aria-hidden="true"></div>
+
+      <div class="pb-layer pb-layer-kitaru" data-reveal="fade-up" data-reveal-delay="3">
+        <div class="pb-layer-head">
+          <span class="pb-layer-label">Runtime layer</span>
+          <span class="pb-layer-role"><strong>Kitaru</strong> &mdash; how the agent survives</span>
+        </div>
+        <div class="pb-layer-tags">
+          <span class="pb-tag pb-tag-accent">checkpoints</span>
+          <span class="pb-tag pb-tag-accent">replay</span>
+          <span class="pb-tag pb-tag-accent">resume</span>
+          <span class="pb-tag pb-tag-accent">wait()</span>
+          <span class="pb-tag pb-tag-accent">versions + tag routing</span>
+          <span class="pb-tag pb-tag-accent">invocation</span>
+          <span class="pb-tag pb-tag-accent">artifacts + state</span>
+          <span class="pb-tag pb-tag-accent">isolated execution</span>
+        </div>
+      </div>
+
+      <div class="pb-connector" aria-hidden="true"></div>
+
+      <div class="pb-layer pb-layer-platform" data-reveal="fade-up" data-reveal-delay="4">
+        <div class="pb-layer-head">
+          <span class="pb-layer-label">Platform layer</span>
+          <span class="pb-layer-role">how the org governs</span>
+        </div>
+        <div class="pb-layer-tags">
+          <span class="pb-tag">auth</span>
+          <span class="pb-tag">entitlements</span>
+          <span class="pb-tag">interceptors</span>
+          <span class="pb-tag">guardrails</span>
+          <span class="pb-tag">observability</span>
+          <span class="pb-tag">product UI</span>
+          <span class="pb-tag pb-tag-ghost">yours, unchanged</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="pb-callout" data-reveal data-reveal-delay="4">
+      <p class="pb-callout-line">
+        Kitaru isn&rsquo;t an agent platform. It&rsquo;s the runtime layer underneath one.
+      </p>
+      <p class="pb-callout-sub">
+        Checkpoints, replay, resume, versioned deployments. The layer platform teams keep rebuilding from scratch.
+      </p>
+      <p class="pb-callout-sub">
+        Open source. Self-hosted. No lock-in to a harness or a platform.
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .pb-section {
+    background: var(--color-accent-light);
+  }
+
+  .pb-header {
+    margin-bottom: 48px;
+    max-width: 760px;
+  }
+
+  .pb-desc {
+    margin-top: 16px;
+    color: var(--color-secondary);
+    font-size: clamp(1rem, 1.6vw, 1.1rem);
+    line-height: 1.65;
+    font-weight: 300;
+  }
+
+  /* ─── Three-layer stack ─── */
+
+  .pb-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pb-layer {
+    position: relative;
+    padding: 22px 28px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-surface);
+    transition: border-color 0.25s, transform 0.25s;
+  }
+
+  .pb-layer-model,
+  .pb-layer-harness,
+  .pb-layer-platform {
+    background: var(--color-surface);
+    opacity: 0.92;
+  }
+
+  .pb-layer-kitaru {
+    border-color: oklch(0.65 0.16 45 / 0.45);
+    background: linear-gradient(
+      180deg,
+      oklch(0.65 0.16 45 / 0.08) 0%,
+      oklch(0.65 0.16 45 / 0.04) 100%
+    );
+    box-shadow:
+      0 0 0 1px oklch(0.65 0.16 45 / 0.15),
+      0 12px 28px -18px oklch(0.65 0.16 45 / 0.35);
+    padding: 30px 32px;
+  }
+
+  .pb-layer-kitaru::before {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: -1px;
+    bottom: -1px;
+    width: 4px;
+    background: var(--color-accent);
+    border-radius: 14px 0 0 14px;
+  }
+
+  .pb-layer-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  .pb-layer-label {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .pb-layer-kitaru .pb-layer-label {
+    color: var(--color-accent);
+  }
+
+  .pb-layer-role {
+    font-family: var(--font-ui);
+    font-size: 13px;
+    color: var(--color-secondary);
+    font-weight: 400;
+  }
+
+  .pb-layer-role strong {
+    color: var(--color-accent);
+    font-weight: 600;
+    margin-right: 4px;
+  }
+
+  .pb-layer-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .pb-tag {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: var(--color-surface-warm);
+    border: 1px solid var(--color-border);
+    color: var(--color-muted);
+  }
+
+  .pb-tag-accent {
+    color: var(--color-accent);
+    background: oklch(0.65 0.16 45 / 0.1);
+    border-color: oklch(0.65 0.16 45 / 0.3);
+  }
+
+  .pb-tag-ghost {
+    background: transparent;
+    border-style: dashed;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+
+  /* Connector dots between layers */
+  .pb-connector {
+    align-self: center;
+    width: 2px;
+    height: 18px;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      var(--color-border) 40%,
+      var(--color-border) 60%,
+      transparent 100%
+    );
+  }
+
+  /* ─── Callout ─── */
+
+  .pb-callout {
+    margin-top: 48px;
+    padding: 32px 36px;
+    border-left: 3px solid var(--color-accent);
+    background: oklch(0.65 0.16 45 / 0.04);
+    border-radius: 0 10px 10px 0;
+  }
+
+  .pb-callout-line {
+    font-size: clamp(1.05rem, 1.8vw, 1.25rem);
+    line-height: 1.5;
+    color: var(--color-primary);
+    margin: 0;
+    font-weight: 400;
+  }
+
+  .pb-callout-line em {
+    font-style: italic;
+    color: var(--color-muted);
+    font-weight: 300;
+  }
+
+  .pb-callout-line strong {
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+
+  .pb-callout-sub {
+    margin: 16px 0 0;
+    font-size: 0.95rem;
+    color: var(--color-secondary);
+    font-weight: 300;
+    line-height: 1.65;
+  }
+
+  @media (max-width: 600px) {
+    .pb-layer {
+      padding: 18px 20px;
+    }
+    .pb-layer-kitaru {
+      padding: 22px 22px;
+    }
+    .pb-callout {
+      padding: 24px 22px;
+    }
+  }
+</style>

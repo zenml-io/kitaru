@@ -26,7 +26,7 @@ Keep your SDK, model, and sandbox; for local, one-off use, you don't need Kitaru
     items: [
       "Running agents as long-lived background services, remotely and not just locally",
       "Processing enough volume that per-run cost and token efficiency start to matter",
-      "Deploying into your own cloud (Kubernetes, Vertex AI, SageMaker, AzureML) for security or compliance",
+      "Deploying into your own cloud (Kubernetes, AWS, GCP, Azure) for security or compliance",
       "Building flows that must survive crashes, replay from failure, or wait on humans for hours or days",
       "Mixing models (Claude for some steps, Gemini Flash or OSS for others) to keep costs sane at scale",
     ],
@@ -97,7 +97,7 @@ Kitaru captures artifacts from every `@checkpoint` automatically and links them 
     { feature: "Durable pause/resume with compute release", kitaru: true, competitor: false },
     { feature: "Versioned durable memory", kitaru: true, competitor: false },
     { feature: "Artifact lineage and run tracking", kitaru: true, competitor: false },
-    { feature: "First-class deployment to Kubernetes, SageMaker, Vertex AI, and AzureML", kitaru: true, competitor: false },
+    { feature: "First-class deployment to Kubernetes, AWS, GCP, and Azure", kitaru: true, competitor: false },
     { feature: "Multi-provider model runtime support", kitaru: true, competitor: false },
     { feature: "Execution inspection, logs, and lifecycle control", kitaru: true, competitor: true },
   ]}
