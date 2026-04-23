@@ -18,13 +18,14 @@ This creates a `.kitaru/` directory that marks your project root.
 ## Set up a model
 
 `kitaru.llm()` needs to know which model to call and how to authenticate.
-Set your provider API key as an environment variable:
+Set your provider API key and a default model:
 
 ```bash
 export OPENAI_API_KEY=sk-...
+export KITARU_DEFAULT_MODEL=openai/gpt-5-nano
 ```
 
-That's it — `kitaru.llm()` will pick it up automatically.
+`kitaru.llm()` picks up both from the environment.
 
 <Callout type="info">
   For production, register a model alias so you can swap models or credentials
@@ -88,7 +89,7 @@ def research_agent(topic: str) -> str:
     return draft_report(summary)
 
 if __name__ == "__main__":
-    research_agent.run(topic="durable execution for AI agents")
+    research_agent.run(topic="durable execution for AI agents").wait()
 ```
 
 Then run it:
@@ -110,8 +111,8 @@ What happens here:
 
 1. `@flow` marks the top-level execution boundary — everything inside is tracked
 2. Each `@checkpoint` persists its return value automatically
-3. `kitaru.llm()` picks up your API key from the environment, calls the model, and captures the prompt, response, token usage, and cost
-4. `.run()` starts the execution and blocks until completion
+3. `kitaru.llm()` picks up your API key from the environment, calls the model, and captures the prompt, response, token usage, and latency
+4. `.run()` starts the execution and returns a `FlowHandle`; `.wait()` blocks until completion
 
 ## Why checkpoints matter
 
@@ -131,10 +132,18 @@ less work you repeat when something goes wrong.
 
 This works the same whether you use `kitaru.llm()` or bring your own client.
 
+That&rsquo;s the runtime layer running on your laptop. The same flow survives
+the move into production unchanged: the harness inside your checkpoints keeps
+owning how the agent thinks, Kitaru keeps owning the durable run, and your
+platform (auth, policy, UI) keeps sitting in front. When you&rsquo;re ready,
+`my_agent.deploy(...)` captures an immutable versioned snapshot that your
+platform invokes by flow name &mdash; no per-deployment tokens, no separate
+service per version.
+
 ## Deploy to a remote stack
 
 Everything above runs locally. To run on remote infrastructure (Kubernetes,
-Vertex AI, etc.), point your flow at a remote stack. When targeting a remote stack, Kitaru automatically builds a container image
+Vertex AI, SageMaker, or AzureML), point your flow at a remote stack. When targeting a remote stack, Kitaru automatically builds a container image
 with your code and dependencies. You can control the base image, Python
 packages, system packages, and environment variables through the `image`
 parameter:

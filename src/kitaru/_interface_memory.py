@@ -6,8 +6,9 @@ from typing import Any
 
 import kitaru.inspection as inspection
 from kitaru.client import KitaruClient
-from kitaru.errors import KitaruBackendError
+from kitaru.errors import KitaruMemoryArtifactUnavailableError
 from kitaru.memory import (
+    _memory_artifact_unavailable_message,
     _MemoryCompactionSourceMode,
     _MemoryScopeType,
     _validate_memory_compaction_source_mode,
@@ -73,8 +74,17 @@ def get_memory_payload(
     scope: str,
     scope_type: str,
     version: int | None = None,
+    strict: bool = False,
 ) -> dict[str, Any] | None:
-    """Build a serialized payload for reading one memory value."""
+    """Build a serialized payload for reading one memory value.
+
+    Lenient mode (``strict=False``, the default) returns the memory
+    metadata plus ``value_available: False`` and nested ``value_unavailable``
+    diagnostics when the artifact cannot be loaded, letting CLI/MCP callers
+    distinguish "no entry at all" (``None``) from "entry exists but its
+    value is currently unreachable". Strict mode raises
+    ``KitaruMemoryArtifactUnavailableError`` instead.
+    """
     entry = client.memories.get(
         normalize_memory_key(key),
         scope=normalize_memory_scope(scope),
@@ -84,16 +94,33 @@ def get_memory_payload(
     if entry is None:
         return None
 
+    entry_payload = inspection.serialize_memory_entry(entry)
     try:
         loaded_value = client.artifacts.get(entry.artifact_id).load()
     except Exception as exc:
-        raise KitaruBackendError(
-            f"Failed to load value for memory key {key!r} "
-            f"(artifact {entry.artifact_id}): {exc}"
-        ) from exc
+        message = _memory_artifact_unavailable_message(
+            key=key,
+            scope_name=entry.scope,
+            scope_type=entry.scope_type,
+            artifact_id=entry.artifact_id,
+            cause=exc,
+        )
+        if strict:
+            raise KitaruMemoryArtifactUnavailableError(message) from exc
+        return {
+            **entry_payload,
+            "value_available": False,
+            "value_unavailable": {
+                "error_type": KitaruMemoryArtifactUnavailableError.__name__,
+                "cause_type": type(exc).__name__,
+                "message": message,
+            },
+        }
+
     value_payload = inspection.serialize_memory_value(loaded_value)
     return {
-        **inspection.serialize_memory_entry(entry),
+        **entry_payload,
+        "value_available": True,
         "value": value_payload["value"],
         "value_format": value_payload["value_format"],
     }

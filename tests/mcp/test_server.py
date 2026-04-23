@@ -26,6 +26,7 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
+from kitaru.errors import KitaruRuntimeError
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
     get_execution_logs,
@@ -50,6 +51,7 @@ from kitaru.mcp.server import (
     kitaru_memory_purge,
     kitaru_memory_purge_scope,
     kitaru_memory_set,
+    kitaru_secrets_create,
     kitaru_stacks_list,
     kitaru_start_local_server,
     kitaru_status,
@@ -57,6 +59,7 @@ from kitaru.mcp.server import (
     manage_stack,
     tracked_mcp_tool,
 )
+from kitaru.secrets import SecretSummary
 
 
 def _write_flow_target_module(path: Path, *, marker: str) -> None:
@@ -705,6 +708,7 @@ def test_memory_get_delegates_to_shared_interface(
         scope="repo/demo",
         scope_type="namespace",
         version=3,
+        strict=False,
     )
     assert result == payload
 
@@ -732,8 +736,165 @@ def test_memory_get_returns_none_when_missing(
         scope="repo/demo",
         scope_type="namespace",
         version=None,
+        strict=False,
     )
     assert result is None
+
+
+def test_memory_get_passes_through_unavailable_payload_in_lenient_mode(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Lenient MCP reads return the value-unavailable payload so agents can branch."""
+    from kitaru.errors import KitaruMemoryArtifactUnavailableError
+
+    unavailable_payload = {
+        "key": "preferences/theme",
+        "scope": "repo/demo",
+        "scope_type": "namespace",
+        "version": 3,
+        "artifact_id": "artifact-123",
+        "value_available": False,
+        "value_unavailable": {
+            "error_type": KitaruMemoryArtifactUnavailableError.__name__,
+            "cause_type": FileNotFoundError.__name__,
+            "message": "Memory value could not be loaded from this environment.",
+        },
+    }
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch.object(
+            memory_interface,
+            "get_memory_payload",
+            return_value=unavailable_payload,
+        ) as mock_get,
+    ):
+        result = kitaru_memory_get(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+        )
+
+    assert result == unavailable_payload
+    mock_get.assert_called_once_with(
+        mock_kitaru_client,
+        key="preferences/theme",
+        scope="repo/demo",
+        scope_type="namespace",
+        version=None,
+        strict=False,
+    )
+
+
+def test_memory_get_strict_propagates_typed_error(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """Strict mode must forward and raise the typed error for agent-side handling."""
+    from kitaru.errors import KitaruMemoryArtifactUnavailableError
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        patch.object(
+            memory_interface,
+            "get_memory_payload",
+            side_effect=KitaruMemoryArtifactUnavailableError("unreachable"),
+        ) as mock_get,
+        pytest.raises(KitaruMemoryArtifactUnavailableError, match="unreachable"),
+    ):
+        kitaru_memory_get(
+            "preferences/theme",
+            scope="repo/demo",
+            scope_type="namespace",
+            strict=True,
+        )
+
+    mock_get.assert_called_once_with(
+        mock_kitaru_client,
+        key="preferences/theme",
+        scope="repo/demo",
+        scope_type="namespace",
+        version=None,
+        strict=True,
+    )
+
+
+def test_secrets_create_returns_metadata_without_values() -> None:
+    """MCP secret creation should delegate to SDK creation safely."""
+    summary = SecretSummary(
+        name="openai-creds",
+        id="secret-id",
+        private=False,
+        keys=["OPENAI_API_KEY"],
+    )
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.create_secret",
+        return_value=summary,
+    ) as mock_create:
+        payload = kitaru_secrets_create(
+            "openai-creds",
+            {"OPENAI_API_KEY": "sk-123"},
+        )
+
+    mock_create.assert_called_once_with(
+        "openai-creds",
+        {"OPENAI_API_KEY": "sk-123"},
+        private=False,
+    )
+    assert payload == {
+        "id": "secret-id",
+        "name": "openai-creds",
+        "visibility": "public",
+        "keys": ["OPENAI_API_KEY"],
+        "has_missing_values": False,
+    }
+    assert "values" not in payload
+
+
+def test_secrets_create_forwards_private_flag() -> None:
+    """MCP callers can opt into private secret creation."""
+    summary = SecretSummary(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        keys=["OPENAI_API_KEY"],
+    )
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.create_secret",
+        return_value=summary,
+    ) as mock_create:
+        payload = kitaru_secrets_create(
+            "openai-creds",
+            {"OPENAI_API_KEY": "sk-123"},
+            private=True,
+        )
+
+    mock_create.assert_called_once_with(
+        "openai-creds",
+        {"OPENAI_API_KEY": "sk-123"},
+        private=True,
+    )
+    assert payload["visibility"] == "private"
+
+
+def test_secrets_create_propagates_sdk_errors() -> None:
+    """SDK errors should pass through the MCP boundary for clients to inspect."""
+    with (
+        patch(
+            "kitaru.mcp.server.secrets_api.create_secret",
+            side_effect=KitaruRuntimeError("already exists"),
+        ),
+        pytest.raises(KitaruRuntimeError, match="already exists"),
+    ):
+        kitaru_secrets_create("openai-creds", {"OPENAI_API_KEY": "sk-123"})
+
+
+def test_mcp_does_not_expose_secret_delete_tool() -> None:
+    """MCP intentionally supports secret creation, not deletion."""
+    import kitaru.mcp.server as server
+
+    assert not hasattr(server, "kitaru_secrets_delete")
 
 
 def test_memory_set_delegates_to_shared_interface(
@@ -2271,6 +2432,7 @@ class TestKitaruInfo:
             include_packages=False,
             package_names=None,
             include_environment_type=False,
+            include_provenance_details=False,
         )
         mock_serialize.assert_called_once_with(snapshot)
         assert payload == {"sdk_version": "0.2.0"}
@@ -2284,6 +2446,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": True,
+                    "include_provenance_details": True,
                 },
                 id="all_includes_packages_and_env",
             ),
@@ -2293,6 +2456,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": False,
+                    "include_provenance_details": False,
                 },
                 id="all_packages_without_env",
             ),
@@ -2302,6 +2466,7 @@ class TestKitaruInfo:
                     "include_packages": False,
                     "package_names": ["zenml", "kitaru"],
                     "include_environment_type": False,
+                    "include_provenance_details": False,
                 },
                 id="specific_packages",
             ),
@@ -2311,6 +2476,7 @@ class TestKitaruInfo:
                     "include_packages": True,
                     "package_names": None,
                     "include_environment_type": True,
+                    "include_provenance_details": True,
                 },
                 id="all_overrides_specific_packages",
             ),

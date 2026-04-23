@@ -593,6 +593,7 @@ class TestWriteDocsTree:
 
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content
+        assert "`--private`" in secrets_set_content
 
         for list_page in (
             output_dir / "executions" / "list.mdx",
@@ -632,6 +633,7 @@ class TestWriteDocsTree:
 
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content
+        assert "`--private`" in secrets_set_content
         assert "| `ASSIGNMENTS...` | `list[str]` | Yes |  |" in secrets_set_content
 
         stack_use_content = (output_dir / "stack" / "use.mdx").read_text()

@@ -20,9 +20,9 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">01 — Wait & Resume</div>
+          <div class="feature-number">01 · Wait & Resume</div>
           <h3>Pause. Get input. Continue later.</h3>
-          <p>Suspends at decision points, releases compute, and resumes when input arrives from a human, another agent, or a webhook &mdash; even hours or days later.</p>
+          <p>Suspends at decision points, releases compute, and resumes when input arrives from a human, another agent, or a webhook, even hours or days later.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-pause-resume" id="animPause">
@@ -48,7 +48,7 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">02 — Replay from Failure</div>
+          <div class="feature-number">02 · Replay from Failure</div>
           <h3>Crash at step 6? Resume from step 6.</h3>
           <p>Every step is checkpointed. Fix the issue and replay from the point of failure instead of re-burning tokens.</p>
         </div>
@@ -64,7 +64,6 @@
               <div class="rstep" data-idx="6">7</div>
             </div>
             <div class="replay-status" id="replayStatus">Running agent...</div>
-            <div class="cost-saved" id="costSaved">$12.40 in tokens saved</div>
           </div>
         </div>
       </div>
@@ -75,18 +74,18 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">03 — Framework Portability</div>
-          <h3>Keep your framework. Add durability.</h3>
-          <p>PydanticAI, CrewAI, or raw Python &mdash; wrap it with Kitaru and get checkpointed execution without rewriting your agent.</p>
+          <div class="feature-number">03 · Framework Portability</div>
+          <h3>Keep your framework. Add durable execution.</h3>
+          <p>OpenAI Agents SDK, Anthropic Agent SDK, PydanticAI, LangGraph, or raw Python. Wrap it with Kitaru and get checkpointed execution without rewriting your agent.</p>
         </div>
         <div class="feature-visual">
           <div class="anim-framework" id="animFramework">
             <div class="framework-orbit"></div>
             <div class="kitaru-core">kitaru</div>
-            <div class="fw-item" style="top: 12%; left: 50%; transform: translateX(-50%);">PydanticAI</div>
-            <div class="fw-item" style="top: 50%; right: 5%; transform: translateY(-50%);">OpenAI SDK</div>
-            <div class="fw-item" style="bottom: 12%; left: 50%; transform: translateX(-50%);">Your code</div>
-            <div class="fw-item" style="top: 50%; left: 5%; transform: translateY(-50%);">CrewAI</div>
+            <div class="fw-item" style="top: 10%; left: 50%; transform: translateX(-50%);">OpenAI Agents SDK</div>
+            <div class="fw-item" style="top: 50%; right: 2%; transform: translateY(-50%);">Anthropic Agent SDK</div>
+            <div class="fw-item" style="bottom: 10%; left: 50%; transform: translateX(-50%);">PydanticAI</div>
+            <div class="fw-item" style="top: 50%; left: 2%; transform: translateY(-50%);">LangGraph</div>
           </div>
         </div>
       </div>
@@ -97,7 +96,7 @@
       <div class="card-glow"></div>
       <div class="feature-card-inner">
         <div class="feature-text">
-          <div class="feature-number">04 — Parallel Recovery</div>
+          <div class="feature-number">04 · Parallel Recovery</div>
           <h3>Fan out work without losing recovery.</h3>
           <p><code style="font-family:var(--font-mono);font-size:0.82em;color:var(--color-accent);">checkpoint.submit()</code> dispatches branches concurrently. Each keeps its own checkpoint history, so you can replay only the failed branch.</p>
         </div>
@@ -144,7 +143,7 @@
   }
 
   .features-header {
-    padding: 80px clamp(24px, 5vw, 80px) 48px;
+    padding: 56px clamp(24px, 5vw, 80px) 36px;
   }
 
   /* Override global .section-inner overflow:clip — it prevents the
@@ -414,19 +413,6 @@
 
   .replay-status.error { color: var(--color-cost-up); }
   .replay-status.success { color: var(--color-success); }
-
-  .cost-saved {
-    position: absolute;
-    top: 15%;
-    right: 10%;
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--color-success);
-    opacity: 0;
-    transition: opacity 0.4s;
-  }
-
-  .cost-saved.visible { opacity: 1; }
 
   /* ═══ ANIMATION: Framework Orbit (light) ═══ */
   .anim-framework {
@@ -703,11 +689,9 @@
     if (!container) return;
     const steps = container.querySelectorAll('.rstep');
     const status = document.getElementById('replayStatus');
-    const cost = document.getElementById('costSaved');
 
     steps.forEach(s => { s.className = 'rstep'; });
     if (status) { status.textContent = 'Running agent...'; status.className = 'replay-status'; }
-    cost?.classList.remove('visible');
 
     let i = 0;
     function nextRStep() {
@@ -720,7 +704,6 @@
             steps[i].className = 'rstep';
             scheduleTimer(ci, () => {
               steps[i].classList.add('replay');
-              cost?.classList.add('visible');
               scheduleTimer(ci, () => {
                 steps[i].classList.remove('replay');
                 steps[i].classList.add('ok');
@@ -821,7 +804,6 @@
         container.querySelectorAll('.rstep').forEach(s => { s.className = 'rstep'; });
         const status = document.getElementById('replayStatus');
         if (status) { status.textContent = 'Running agent...'; status.className = 'replay-status'; }
-        document.getElementById('costSaved')?.classList.remove('visible');
       }
     } else if (cardIdx === 2) {
       const container = document.getElementById('animFramework');

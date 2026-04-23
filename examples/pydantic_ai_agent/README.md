@@ -24,11 +24,11 @@ and verify with `kitaru status`.
 
 ## `pydantic_ai_adapter.py` — Wrap an agent, keep your replay boundary
 
-Wraps a PydanticAI `Agent` with `kp.wrap(agent)`. The outer `@checkpoint`
-becomes the replay boundary — if the flow is replayed, the entire agent
-call is treated as a single unit. Internal model requests and tool calls
-are tracked as child events under that checkpoint, giving you full
-observability without changing the agent's control flow.
+Wraps a PydanticAI `Agent` with `KitaruAgent(agent, ...)`. The outer
+`@checkpoint` becomes the replay boundary — if the flow is replayed, the
+entire agent call is treated as a single unit. Internal model requests
+and tool calls are tracked as child events under that checkpoint, giving
+you full observability without changing the agent's control flow.
 
 Uses `TestModel` so no API keys are needed to run it.
 

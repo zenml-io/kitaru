@@ -24,6 +24,7 @@ Current status:
 
 - Implemented: ``@flow``, ``@checkpoint``, ``kitaru.log()``,
   ``save()``, ``load()``, ``wait()``, ``llm()``, ``get_secret()``,
+  ``create_secret()``, ``delete_secret()``,
   ``memory.configure/set/get/list/history/delete()``, ``connect()``,
   ``configure()``, stack lifecycle helpers (``list_stacks()``,
   ``current_stack()``, ``use_stack()``, ``create_stack()``,
@@ -84,6 +85,7 @@ from kitaru.errors import (
     KitaruExecutionError,
     KitaruFeatureNotAvailableError,
     KitaruLogRetrievalError,
+    KitaruMemoryArtifactUnavailableError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -93,7 +95,13 @@ from kitaru.errors import (
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
-from kitaru.secrets import Secret, get_secret
+from kitaru.secrets import (
+    Secret,
+    SecretSummary,
+    create_secret,
+    delete_secret,
+    get_secret,
+)
 from kitaru.wait import wait
 
 __all__ = [
@@ -109,18 +117,22 @@ __all__ = [
     "KitaruExecutionError",
     "KitaruFeatureNotAvailableError",
     "KitaruLogRetrievalError",
+    "KitaruMemoryArtifactUnavailableError",
     "KitaruRuntimeError",
     "KitaruStateError",
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
     "Secret",
+    "SecretSummary",
     "StackInfo",
     "checkpoint",
     "configure",
     "connect",
+    "create_secret",
     "create_stack",
     "current_stack",
+    "delete_secret",
     "delete_stack",
     "flow",
     "get_secret",

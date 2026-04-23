@@ -30,6 +30,10 @@ from kitaru._interface_memory import (
     set_memory_payload,
 )
 from kitaru.client import KitaruClient
+from kitaru.errors import (
+    KitaruBackendError,
+    KitaruMemoryArtifactUnavailableError,
+)
 from kitaru.memory import (
     CompactionRecord,
     CompactResult,
@@ -139,6 +143,7 @@ def test_get_memory_payload_merges_entry_and_serialized_value() -> None:
         "execution_id": None,
         "flow_id": "flow-456",
         "flow_name": "repo_memory_demo",
+        "value_available": True,
         "value": {"theme": "dark"},
         "value_format": "json",
     }
@@ -164,6 +169,76 @@ def test_get_memory_payload_returns_none_when_key_missing() -> None:
 
     assert payload is None
     artifacts.get.assert_not_called()
+
+
+def test_get_memory_payload_returns_unavailable_when_artifact_unreachable() -> None:
+    client, memories, artifacts = _client_with_mocks()
+    entry = _sample_memory_entry(
+        scope="repo_scope",
+        scope_type="namespace",
+        version=3,
+    )
+    memories.get.return_value = entry
+    cause = FileNotFoundError(
+        "/Users/alex/Library/Application Support/kitaru/.../data.json does not exist."
+    )
+    artifacts.get.return_value = SimpleNamespace(load=MagicMock(side_effect=cause))
+
+    payload = get_memory_payload(
+        cast(KitaruClient, client),
+        key="prefs",
+        scope="repo_scope",
+        scope_type="namespace",
+    )
+
+    assert payload is not None
+    # Metadata fields are preserved so agents can still reason about the entry.
+    assert payload["key"] == "prefs"
+    assert payload["version"] == 3
+    assert payload["artifact_id"] == entry.artifact_id
+    # Availability marker plus structured diagnostics.
+    assert payload["value_available"] is False
+    assert "value" not in payload
+    assert "value_format" not in payload
+    unavailable = payload["value_unavailable"]
+    assert unavailable["error_type"] == KitaruMemoryArtifactUnavailableError.__name__
+    assert unavailable["cause_type"] == FileNotFoundError.__name__
+    assert "could not be loaded" in unavailable["message"]
+
+
+def test_get_memory_payload_strict_raises_typed_error_when_unreachable() -> None:
+    client, memories, artifacts = _client_with_mocks()
+    entry = _sample_memory_entry(
+        scope="repo_scope",
+        scope_type="namespace",
+        version=3,
+    )
+    memories.get.return_value = entry
+    cause = FileNotFoundError("local artifact missing")
+    artifacts.get.return_value = SimpleNamespace(load=MagicMock(side_effect=cause))
+
+    with pytest.raises(
+        KitaruMemoryArtifactUnavailableError,
+        match=r"could not be loaded",
+    ) as exc_info:
+        get_memory_payload(
+            cast(KitaruClient, client),
+            key="prefs",
+            scope="repo_scope",
+            scope_type="namespace",
+            strict=True,
+        )
+
+    # Strict errors inherit from KitaruBackendError so broad handlers still catch them.
+    assert isinstance(exc_info.value, KitaruBackendError)
+    assert exc_info.value.__cause__ is cause
+    # Metadata path must stay untouched regardless of strict.
+    memories.get.assert_called_once_with(
+        "prefs",
+        scope="repo_scope",
+        scope_type="namespace",
+        version=None,
+    )
 
 
 def test_list_and_history_memory_payloads_serialize_entries() -> None:

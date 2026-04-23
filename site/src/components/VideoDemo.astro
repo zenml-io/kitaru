@@ -6,6 +6,19 @@
   <div class="video-wrapper" data-reveal>
     <div class="video-container" id="videoContainer">
       <div class="video-placeholder" id="videoPlaceholder">
+        <img
+          class="video-poster"
+          src="https://i.ytimg.com/vi/javCy_e3iwQ/sddefault.jpg"
+          srcset="https://i.ytimg.com/vi/javCy_e3iwQ/hqdefault.jpg 480w, https://i.ytimg.com/vi/javCy_e3iwQ/sddefault.jpg 640w"
+          sizes="(max-width: 768px) 100vw, 900px"
+          alt="Kitaru demo video preview"
+          loading="lazy"
+          decoding="async"
+          width="640"
+          height="480"
+          onerror="this.onerror=null; this.src='https://i.ytimg.com/vi/javCy_e3iwQ/hqdefault.jpg';"
+        />
+        <div class="video-placeholder-overlay" aria-hidden="true"></div>
         <button class="video-play-btn" id="videoPlayBtn" aria-label="Watch the demo">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M8 5.14v13.72a1 1 0 001.5.86l11.04-6.86a1 1 0 000-1.72L9.5 4.28a1 1 0 00-1.5.86z" fill="#fff"/>
@@ -56,6 +69,39 @@
     gap: 16px;
     position: relative;
     cursor: pointer;
+    overflow: hidden;
+  }
+
+  .video-poster {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    transition: transform 0.35s ease;
+  }
+
+  .video-placeholder:hover .video-poster {
+    transform: scale(1.02);
+  }
+
+  .video-placeholder-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(
+      180deg,
+      oklch(0.16 0.015 60 / 0.35) 0%,
+      oklch(0.16 0.015 60 / 0.55) 100%
+    );
+    pointer-events: none;
+  }
+
+  .video-placeholder > .video-play-btn,
+  .video-placeholder > .video-label {
+    position: relative;
+    z-index: 2;
   }
 
   .video-play-btn {

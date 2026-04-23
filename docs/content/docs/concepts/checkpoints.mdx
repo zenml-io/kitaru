@@ -4,8 +4,29 @@ description: Durable work units with persistence and concurrency support
 ---
 
 A **checkpoint** is a unit of work inside a flow whose output is automatically
-persisted. When a flow re-executes, checkpoints that already succeeded can
-return their recorded results instead of running again.
+persisted. It's also the **contract between the runner and the
+[execution target](/concepts/how-it-works)**: the runner owns
+durable control flow (order, retry, replay, resume, wait), the execution
+target (inline, isolated container, sandbox, external tool) does the work,
+and the checkpoint is what they agree on.
+
+That separation is why a checkpoint failure is never just a crash —
+it's persisted context the runner, agent loop, or a human can retry,
+replay, or feed back into the flow. See
+[How It Works](/concepts/how-it-works) for the full model.
+
+## Checkpoints are replay boundaries
+
+Every checkpoint is a boundary the runner remembers. On the first run,
+checkpoint outputs are computed and stored. On replay, completed checkpoints
+return their persisted outputs — execution only re-enters the first
+incomplete one.
+
+<CheckpointReplayDiagram />
+
+You can also **override** a cached checkpoint's output during replay —
+useful when you want to correct a single step's result and let the rest of
+the flow continue. See [Replay and overrides](/guides/replay-and-overrides).
 
 ## Defining a checkpoint
 
@@ -92,6 +113,7 @@ def call_model(prompt: str) -> str:
 | Option | Default | What it controls |
 |---|---|---|
 | `retries` | `0` | Automatic retries on checkpoint failure |
+| `cache` | `True` | Reuse the persisted output from a previous run when inputs and code match. Set `False` to disable on this checkpoint (overrides the flow-level default). |
 | `type` | `None` | A label for UI visualization (e.g. `"llm_call"`, `"tool_call"`) |
 | `runtime` | `None` | Execution runtime: `"inline"` or `"isolated"` (see below) |
 
@@ -99,9 +121,13 @@ Like flow options, `retries` must be non-negative.
 
 ### Isolated runtime
 
-By default, checkpoints run **inline** — in the same process or thread as the
-flow. Set `runtime="isolated"` to run a checkpoint in its own container on
-remote orchestrators that support it (Kubernetes, Vertex, SageMaker, AzureML):
+By default, checkpoints run **inline** — in the same process/pod as the
+runner. This is the right default for most orchestration. For checkpoints that
+run untrusted code, need a different image or resources, or must be strongly
+isolated from the rest of the run, set `runtime="isolated"` and the runner
+will place the checkpoint on a separate container/job on the configured stack
+(Kubernetes, Vertex AI, SageMaker, AzureML). Locally it falls back to inline so
+dev loops stay fast.
 
 ```python
 @checkpoint(runtime="isolated")
@@ -204,8 +230,8 @@ def outer():
 
 - Add structured metadata to your checkpoints with
   [Logging and Metadata](/concepts/logging)
-- Understand how checkpoint results and errors surface in the
-  [Execution Model](/concepts/execution-model)
+- Understand how results and errors surface in
+  [Flows](/concepts/flows#how-errors-surface)
 - See the full API in the
   [Checkpoint Reference](/reference/python/checkpoint)
 

@@ -1,12 +1,20 @@
 ---
 title: Overview
-description: Durable execution and memory for long-running agents
+description: The runtime layer underneath your agent stack
 ---
 
-Kitaru is an open-source runtime and orchestration layer for long-running
-Python agents. It keeps agent workflows **persistent**, **replayable**,
-**observable**, and **stateful** without requiring you to learn a graph DSL or
-change your Python control flow.
+Kitaru is the runtime layer underneath your agent stack. It gives you durable
+execution for Python agents &mdash; checkpoints, replay, resume, `wait()`,
+versioned deployments &mdash; while the harness you already picked (Pydantic
+AI, Deep Agents, LangGraph, Claude Agent SDK, raw Python) keeps owning how the
+agent thinks, and your existing platform keeps owning auth, observability, and
+policy.
+
+Kitaru is self-host-first: a single-service server on your own Kubernetes,
+artifacts in your own S3/GCS/Azure Blob. No mandatory SaaS control plane in
+the path of your agent&rsquo;s data. See
+[Harness, Runtime, Platform](/concepts/harness-runtime-platform) for the full
+picture of where Kitaru fits.
 
 ## Create a durable agent
 
@@ -33,25 +41,28 @@ if __name__ == "__main__":
 
 Each `@checkpoint` is a durable unit of work — its output is persisted
 automatically. If the flow fails at `draft_report`, replaying it skips
-`research` and reuses its recorded result. `kitaru.llm()` tracks model
-calls with prompt, response, usage, and cost capture built in.
+`research` and reuses its recorded result. `kitaru.llm()` logs model calls
+with prompt, response, tokens, and latency per call.
 
 See the [Quickstart](/getting-started/quickstart) to install and run this yourself.
 
 ## What your agent can do with Kitaru
 
-These are the shipped primitives Kitaru adds to ordinary Python agent code — no rewrites required.
+These are the runtime primitives Kitaru adds on top of your existing Python
+agent code. You keep your harness and your control flow; Kitaru makes the run
+durable.
 
 - **Durable execution:** Wrap steps in [`@checkpoint`](/concepts/checkpoints) and your agent picks up where it left off without re-running expensive work
 - **Replay from failure:** Re-run only the failed part of a flow by replaying from a checkpoint instead of starting from scratch
-- **Wait and resume:** Add [`kitaru.wait()`](/guides/wait-and-resume) and let agents pause for a human, another system, or later input while compute is released
+- **Wait and resume:** Add [`kitaru.wait()`](/guides/wait-and-resume) and let agents pause for a human, another system, or later input; after the polling timeout, compute is released and the run resumes when input lands
 - **Durable memory:** [`kitaru.memory`](/guides/memory) stores scoped, versioned key-value state you can seed, inspect, compact, and reuse across executions
+- **Artifact lineage:** Every checkpoint output is written to your object store as a typed, versioned artifact — step through runs, diff outputs across runs, and trace a bad final output back to the exact step that produced it
 - **Execution management:** [`KitaruClient`](/guides/execution-management) lets you inspect, replay, retry, resume, and cancel executions from code or CLI
-- **Tracked LLM calls:** Use [`kitaru.llm()`](/guides/llm-calls) and every call gets automatic secret resolution, prompt/response capture, and cost tracking
+- **Tracked LLM calls:** Use [`kitaru.llm()`](/guides/llm-calls) and every call gets automatic secret resolution, prompt/response capture, and token/latency logging
 - **Persistent data:** [`kitaru.save()` / `kitaru.load()`](/guides/artifacts) let agents store and retrieve files, objects, and results across executions
 - **Structured observability:** [`kitaru.log()`](/concepts/logging) attaches key-value metadata to any checkpoint or flow for debugging and the UI
 - **Runtime configuration:** [`kitaru.configure()`](/guides/configuration) sets your model, log store, and stack defaults in one call
-- **Framework and infrastructure portability:** Keep your Python control flow, use your preferred framework, and run locally or on remote stacks across Kubernetes, Vertex, SageMaker, and AzureML
+- **Framework and infrastructure portability:** Keep your Python control flow, use your preferred framework, and run locally or on remote stacks — Kubernetes, Vertex AI, SageMaker, AzureML
 
 ## Next Steps
 
@@ -72,8 +83,18 @@ These are the shipped primitives Kitaru adds to ordinary Python agent code — n
     href="/getting-started/examples"
   />
   <Card
+    title="Harness, Runtime, Platform"
+    description="Where Kitaru fits in an agent stack, and where it doesn't"
+    href="/concepts/harness-runtime-platform"
+  />
+  <Card
+    title="How It Works"
+    description="Server, runner, execution targets, and what lives where in local dev vs production"
+    href="/concepts/how-it-works"
+  />
+  <Card
     title="Core Concepts"
-    description="Understand flows, checkpoints, and the execution model for long-running agents"
+    description="Flows, checkpoints, and the execution model"
     href="/concepts"
   />
   <Card
@@ -108,7 +129,7 @@ These are the shipped primitives Kitaru adds to ordinary Python agent code — n
   />
   <Card
     title="Stacks"
-    description="Create, inspect, switch, and clean up local and remote stacks across Kubernetes, Vertex, SageMaker, and AzureML"
+    description="Create, inspect, switch, and clean up local and remote stacks across Kubernetes, AWS, GCP, and Azure"
     href="/stacks"
   />
   <Card

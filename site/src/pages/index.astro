@@ -1,44 +1,37 @@
 ---
 import Base from '../layouts/Base.astro';
+import WebinarBanner from '../components/WebinarBanner.astro';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
 import ProblemStatement from '../components/ProblemStatement.astro';
 import VideoDemo from '../components/VideoDemo.astro';
+import OneImport from '../components/OneImport.astro';
 import CodeShowcase from '../components/CodeShowcase.astro';
 import Features from '../components/Features.astro';
-import Memory from '../components/Memory.astro';
-import WhyKitaru from '../components/WhyKitaru.astro';
+import PlatformBuilder from '../components/PlatformBuilder.astro';
 import Architecture from '../components/Architecture.astro';
+import Deploy from '../components/Deploy.astro';
 import SocialProof from '../components/SocialProof.astro';
 import Cta from '../components/Cta.astro';
 import Footer from '../components/Footer.astro';
 ---
 
 <Base>
+  <WebinarBanner />
   <Nav />
   <main id="main-content">
-    <!-- 1. Hero (light) -->
     <Hero />
-    <!-- 2. Video demo (dark) — no divider, bg change is the break -->
     <VideoDemo />
-    <!-- 3. Problem statement (light) — "why now" narrative -->
     <ProblemStatement />
-    <!-- 4. Code showcase (dark) — full code example -->
-    <CodeShowcase />
-    <!-- 5. Features (light) — full-width sticky stacking cards -->
+    <PlatformBuilder />
+    <OneImport />
     <Features />
-    <div class="gradient-divider"></div>
-    <!-- 6. Memory (light) — durable agent memory -->
-    <Memory />
-    <div class="gradient-divider"></div>
-    <!-- 7. Why Kitaru (light) -->
-    <WhyKitaru />
-    <!-- 7. Architecture (dark) — no divider, bg change is the break -->
+    <CodeShowcase />
+    <Deploy />
     <Architecture />
-    <!-- 8. Social proof (light) — no divider after dark section -->
+    <div class="gradient-divider"></div>
     <SocialProof />
     <div class="gradient-divider"></div>
-    <!-- 9. CTA -->
     <Cta />
   </main>
   <Footer />

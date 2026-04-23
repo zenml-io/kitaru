@@ -7,7 +7,7 @@
     <h2 class="sr-only">Foundations and proof for Kitaru</h2>
 
     <div class="sp-header" data-reveal>
-      <span class="section-eyebrow">FOUNDATIONS & PROOF</span>
+      <span class="section-eyebrow">FOUNDATIONS</span>
       <div class="sp-companies">
         <span class="sp-label">ZenML lineage</span>
         <a class="sp-company" href="https://www.zenml.io/case-study/jetbrains" target="_blank" rel="noopener">JetBrains</a>
@@ -19,10 +19,7 @@
     </div>
 
     <p class="sp-tagline" data-reveal data-reveal-delay="1">
-      From production-proven foundations to purpose-built agent primitives.
-    </p>
-    <p class="sp-subtext" data-reveal data-reveal-delay="1">
-      Kitaru inherits orchestration foundations from ZenML and provides its own concrete primitives &mdash; durable execution, replay, wait/resume, durable memory, and portability.
+      Five years of production workflows. Rebuilt for autonomous agents.
     </p>
 
     <div class="sp-stats">
@@ -30,23 +27,36 @@
         <div class="sp-stat-accent" aria-hidden="true"></div>
         <span class="sp-stat-number" data-count-to="5" data-suffix="+">5+</span>
         <span class="sp-stat-unit">years of ZenML lineage</span>
-        <span class="sp-stat-desc">These reference customers are lineage proof for the orchestration foundations underneath Kitaru &mdash; not direct Kitaru adoption proof.</span>
       </div>
 
       <div class="sp-stat" data-reveal="scale-up" data-reveal-delay="3">
         <div class="sp-stat-accent" aria-hidden="true"></div>
         <span class="sp-stat-number sp-stat-text">Built</span>
         <span class="sp-stat-unit">in Kitaru today</span>
-        <span class="sp-stat-desc">Checkpointed execution, replay from failure, human-in-the-loop wait/resume, durable memory, framework portability, and infrastructure portability are live product capabilities.</span>
       </div>
     </div>
 
-    <div class="sp-links" data-reveal data-reveal-delay="4">
-      <span class="sp-links-label">Background and research</span>
-      <div class="sp-links-list">
-        <a class="sp-proof-link" href="/blog/from-zenml-to-kitaru">From ZenML to Kitaru</a>
-        <a class="sp-proof-link" href="/blog/why-agents-need-durable-execution">Why agents need durable execution</a>
-        <a class="sp-proof-link" href="/blog/agents-need-more-than-traces">Why agents need more than traces</a>
+    <div class="sp-articles" data-reveal data-reveal-delay="4">
+      <span class="sp-articles-label">From the blog</span>
+      <div class="sp-articles-grid">
+        <a class="sp-article" href="/blog/from-zenml-to-kitaru">
+          <span class="sp-article-kind">Origin story</span>
+          <h3 class="sp-article-title">From ZenML to Kitaru</h3>
+          <p class="sp-article-summary">Why we rebuilt the orchestration primitives for autonomous agents, and what stayed the same.</p>
+          <span class="sp-article-cta">Read post <span aria-hidden="true">→</span></span>
+        </a>
+        <a class="sp-article" href="/blog/why-agents-need-durable-execution">
+          <span class="sp-article-kind">Concept</span>
+          <h3 class="sp-article-title">Why agents need durable execution</h3>
+          <p class="sp-article-summary">Crashes, timeouts, and human waits are routine. Without durability, every failure means starting over.</p>
+          <span class="sp-article-cta">Read post <span aria-hidden="true">→</span></span>
+        </a>
+        <a class="sp-article" href="/blog/agents-need-more-than-traces">
+          <span class="sp-article-kind">Perspective</span>
+          <h3 class="sp-article-title">Agents need more than traces</h3>
+          <p class="sp-article-summary">Observability tools score runs. But lineage, versioning, and gates live at the infrastructure layer.</p>
+          <span class="sp-article-cta">Read post <span aria-hidden="true">→</span></span>
+        </a>
       </div>
     </div>
   </div>
@@ -55,7 +65,7 @@
 <style>
   .social-proof-section {
     background: var(--color-accent-light);
-    padding: 120px 0;
+    padding: 48px 0 56px;
     position: relative;
     overflow: hidden;
   }
@@ -82,8 +92,8 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 10px;
-    margin-bottom: 20px;
+    gap: 8px;
+    margin-bottom: 14px;
   }
 
   .sp-companies {
@@ -125,22 +135,13 @@
   }
 
   .sp-tagline {
-    font-size: clamp(26px, 3.5vw, 42px);
+    font-size: clamp(22px, 2.6vw, 30px);
     font-weight: 600;
     color: var(--color-primary);
-    letter-spacing: -0.03em;
-    line-height: 1.15;
-    margin: 0 0 16px;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+    margin: 0 0 10px;
     max-width: 860px;
-  }
-
-  .sp-subtext {
-    font-size: clamp(15px, 1.8vw, 18px);
-    font-weight: 400;
-    color: var(--color-secondary);
-    line-height: 1.6;
-    margin: 0 0 56px;
-    max-width: 720px;
   }
 
   .sp-stats {
@@ -154,7 +155,7 @@
 
   .sp-stat {
     background: var(--color-surface);
-    padding: 40px 36px;
+    padding: 24px 28px;
     display: flex;
     flex-direction: column;
     position: relative;
@@ -163,8 +164,8 @@
   .sp-stat-accent {
     position: absolute;
     top: 0;
-    left: 36px;
-    right: 36px;
+    left: 28px;
+    right: 28px;
     height: 2px;
     background: linear-gradient(90deg, var(--color-accent), oklch(0.68 0.08 55));
     border-radius: 0 0 2px 2px;
@@ -177,83 +178,110 @@
   }
 
   .sp-stat-number {
-    font-size: clamp(56px, 7vw, 80px);
+    font-size: clamp(40px, 5vw, 56px);
     font-weight: 700;
-    letter-spacing: -0.04em;
+    letter-spacing: -0.035em;
     color: var(--color-primary);
     line-height: 1;
     font-variant-numeric: tabular-nums;
   }
 
   .sp-stat-text {
-    font-size: clamp(36px, 4.5vw, 52px);
-    letter-spacing: -0.03em;
+    font-size: clamp(26px, 3.2vw, 36px);
+    letter-spacing: -0.025em;
   }
 
   .sp-stat-unit {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--color-accent);
     margin-top: 4px;
-    margin-bottom: 16px;
+    margin-bottom: 10px;
   }
 
-  .sp-stat-desc {
-    font-size: 0.9rem;
-    line-height: 1.6;
-    color: var(--color-secondary);
-    font-weight: 300;
-    max-width: 360px;
+  .sp-articles {
+    margin-top: 24px;
   }
 
-  .sp-links {
-    margin-top: 28px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .sp-links-label {
+  .sp-articles-label {
+    display: block;
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--color-muted);
+    margin-bottom: 10px;
   }
 
-  .sp-links-list {
+  .sp-articles-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+
+  .sp-article {
     display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
+    flex-direction: column;
+    gap: 6px;
+    padding: 16px 18px 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    text-decoration: none;
+    color: var(--color-primary);
+    transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
   }
 
-  .sp-proof-link {
+  .sp-article:hover {
+    border-color: oklch(0.65 0.16 45 / 0.35);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px oklch(0 0 0 / 0.05);
+  }
+
+  .sp-article-kind {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 2px;
+  }
+
+  .sp-article-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    color: var(--color-primary);
+    margin: 0;
+  }
+
+  .sp-article-summary {
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--color-secondary);
+    margin: 0;
+    flex: 1;
+  }
+
+  .sp-article-cta {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 14px;
-    border-radius: 999px;
-    border: 1px solid var(--color-border);
-    background: var(--color-surface);
-    color: var(--color-primary);
-    text-decoration: none;
-    font-size: 0.85rem;
-    transition: border-color 0.2s, transform 0.2s, background 0.2s;
-  }
-
-  .sp-proof-link::after {
-    content: '→';
+    gap: 4px;
+    font-size: 0.78rem;
+    font-weight: 500;
     color: var(--color-accent);
+    margin-top: 2px;
+    transition: gap 0.2s;
   }
 
-  .sp-proof-link:hover {
-    border-color: oklch(0.65 0.16 45 / 0.3);
-    background: oklch(1 0 0 / 0.8);
-    transform: translateY(-1px);
+  .sp-article:hover .sp-article-cta {
+    gap: 8px;
   }
 
   @media (max-width: 768px) {
@@ -265,10 +293,6 @@
       font-size: 22px;
       line-height: 1.25;
       margin-bottom: 12px;
-    }
-
-    .sp-subtext {
-      margin-bottom: 36px;
     }
 
     .sp-stats {
@@ -291,12 +315,15 @@
       left: 28px;
       right: 28px;
     }
+
+    .sp-articles-grid {
+      grid-template-columns: 1fr;
+    }
   }
 
   @media (max-width: 480px) {
     .social-proof-section { padding: 60px 0; }
     .sp-tagline { font-size: 19px; margin-bottom: 10px; }
-    .sp-subtext { font-size: 14px; margin-bottom: 28px; }
     .sp-stat { padding: 24px 20px; }
     .sp-stat-number { font-size: 44px; }
     .sp-stat-text { font-size: 28px; }
