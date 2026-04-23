@@ -74,6 +74,7 @@ USER zenml
 ENV KITARU_DEBUG=false \
     KITARU_ANALYTICS_OPT_IN=true \
     KITARU_DEFAULT_ANALYTICS_SOURCE=kitaru-api \
-    ZENML_DEFAULT_ANALYTICS_SOURCE=kitaru-api
+    ZENML_DEFAULT_ANALYTICS_SOURCE=kitaru-api \
+    ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE=zenml.zen_server.pipeline_execution.in_memory_workload_manager.InMemoryWorkloadManager
 
 EXPOSE 8080
