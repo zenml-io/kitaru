@@ -23,6 +23,7 @@ from ._model import KitaruModel
 from ._policy import CaptureMode, CapturePolicy
 from ._toolset import KitaruToolset, kitaruify_toolset
 from ._utils import CheckpointConfig, CheckpointRuntime
+from ._wait_for_input import wait_for_input
 
 LegacyCaptureMode = Literal['full', 'metadata_only', 'off']
 
@@ -103,5 +104,6 @@ __all__ = [
     'hitl_tool',
     'kitaruify_mcp_server',
     'kitaruify_toolset',
+    'wait_for_input',
     'wrap',
 ]

@@ -252,21 +252,32 @@ class TestPlaceholderBehavior:
         with pytest.raises(kitaru.KitaruContextError, match=r"@flow"):
             kitaru.wait()
 
-    def test_wait_rejects_checkpoint_context(self) -> None:
-        from kitaru.runtime import _checkpoint_scope, _flow_scope
+    def test_wait_suspends_checkpoint_scope_inside_checkpoint(self) -> None:
+        from kitaru.runtime import (
+            _checkpoint_scope,
+            _flow_scope,
+            _is_inside_checkpoint,
+        )
+
+        inside_checkpoint_at_wait: list[bool] = []
+
+        def fake_zenml_wait(**_kwargs):
+            inside_checkpoint_at_wait.append(_is_inside_checkpoint())
+            return "resolved"
 
         with (
             _flow_scope(name="flow_a"),
-            _checkpoint_scope(
-                name="checkpoint_a",
-                checkpoint_type=None,
-            ),
-            pytest.raises(
-                kitaru.KitaruContextError,
-                match=r"@checkpoint",
+            _checkpoint_scope(name="checkpoint_a", checkpoint_type=None),
+            patch(
+                "kitaru.wait._resolve_zenml_wait",
+                return_value=fake_zenml_wait,
             ),
         ):
-            kitaru.wait()
+            result = kitaru.wait(question="ask")
+            assert _is_inside_checkpoint() is True
+
+        assert result == "resolved"
+        assert inside_checkpoint_at_wait == [False]
 
     def test_wait_delegates_to_zenml_wait(self) -> None:
         from kitaru.runtime import _flow_scope

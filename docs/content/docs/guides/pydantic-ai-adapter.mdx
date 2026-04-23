@@ -87,28 +87,35 @@ print(handle.wait())
 
 Replay the flow with the original run ID to serve cached outputs for completed checkpoints and re-execute only what changed. See [Replay and overrides](/guides/replay-and-overrides).
 
-### Free-form structured input
+### Ask the human from a tool body (recommended)
 
-`schema` accepts any Python type — including a Pydantic model — not just `bool`. The validated value returned from `kitaru.wait(...)` becomes the tool's return value, so the agent continues as if the tool produced it.
+The simplest pattern is a regular PydanticAI tool that calls `kp.wait_for_input(...)`. The LLM picks the question, the tool returns the human's typed answer, and the agent continues with that value as the tool result — no decorator, no exception, no marker metadata.
 
 ```python
 from typing import Literal
 from pydantic import BaseModel
+from kitaru.adapters import pydantic_ai as kp
 
 class BugReport(BaseModel):
     title: str
     description: str
     severity: Literal["low", "medium", "high"]
 
-@kp.hitl_tool(
-    name="collect_bug_report",
-    question="Describe the bug: title, description, severity.",
-    schema=BugReport,
-)
+def ask_user(question: str) -> str:
+    """Ask the human a free-form clarifying question."""
+    return kp.wait_for_input(schema=str, question=question)
+
 def collect_bug_report() -> BugReport:
-    # Body is skipped in HITL mode; schema drives the wait.
-    raise NotImplementedError
+    """Collect a structured bug report."""
+    return kp.wait_for_input(
+        schema=BugReport,
+        question="Describe the bug: title, description, severity.",
+    )
 ```
+
+Both `question` and `schema` are ordinary arguments, so the tool body can compute them, branch on agent state, prepend context, or call multiple waits. The adapter attaches identifying metadata (`adapter=pydantic_ai`, `source=tool_body`) so these waits are distinguishable from hand-written `kitaru.wait()` calls in flow code.
+
+`kp.wait_for_input` is a thin alias for `kitaru.wait(...)`, which now works from anywhere inside a flow — flow body, `@checkpoint` body, or a framework-wrapped tool body. Scope suspension is handled by the primitive.
 
 Running locally, Kitaru prompts in the terminal. Running against a deployed server, the execution pauses and can be resumed from anywhere:
 
@@ -117,7 +124,34 @@ kitaru executions input <exec_id> --value '{"title": "login broken", "descriptio
 kitaru executions resume <exec_id>
 ```
 
-See [`examples/pydantic_ai_agent/pydantic_ai_hitl_input.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/pydantic_ai_agent/pydantic_ai_hitl_input.py) for the full runnable example.
+### Declarative sugar: `@hitl_tool`
+
+When a tool is *purely* a wait — nothing computed in the body, no branching — the `@hitl_tool` decorator is a compact alternative. The body is skipped entirely.
+
+```python
+from kitaru.adapters.pydantic_ai import hitl_tool
+
+@hitl_tool(question="Approve publish?", schema=bool)
+def approve(summary: str) -> bool: ...
+
+@hitl_tool(schema=str)
+def ask_user(question: str) -> str: ...   # LLM-supplied question via `question_arg`
+
+@hitl_tool(
+    name="collect_bug_report",
+    question="Describe the bug: title, description, severity.",
+    schema=BugReport,
+)
+def collect_bug_report() -> BugReport: ...
+```
+
+`@hitl_tool(schema=..., question_arg=...)` picks up the LLM-supplied argument at runtime (defaults to looking for `question`). Pass `question_arg=None` to force the static prompt.
+
+See [`examples/pydantic_ai_agent/pydantic_ai_hitl_input.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/pydantic_ai_agent/pydantic_ai_hitl_input.py) for both styles wired on one agent.
+
+### Replay semantics
+
+A wait inside a checkpoint pauses the flow; on resume, the enclosing checkpoint re-runs from the top. That's cheap for tight checkpoints (one agent turn, one wait), but it means expensive work placed before the wait is repeated. If an agent turn has many model / tool calls before the wait, use `granular_checkpoints=True` so each call becomes its own cacheable unit — on resume, the pre-wait calls serve from cache and only the wait point re-executes.
 
 ## Runtime behavior and guardrails
 ### Human-in-the-loop tools
