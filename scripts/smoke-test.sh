@@ -102,6 +102,25 @@ run_test() {
     return $rc
 }
 
+run_expected_failure() {
+    local label="$1"; local expected="$2"; shift 2
+    local output
+    output=$("$@" 2>&1)
+    local rc=$?
+    if [[ $rc -ne 0 ]] && [[ "$output" == *"$expected"* ]]; then
+        printf "  ${GREEN}✓${RESET} %s\n" "$label"
+        PASSED+=("$label")
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$output" | sed 's/^/    /'
+        fi
+    else
+        printf "  ${RED}✗${RESET} %s\n" "$label"
+        echo "$output" | tail -30 | sed 's/^/    /'
+        FAILED+=("$label")
+    fi
+    return 0
+}
+
 skip_test() {
     local label="$1"; local reason="$2"
     printf "  ${YELLOW}○${RESET} %s ${YELLOW}(%s)${RESET}\n" "$label" "$reason"
@@ -278,6 +297,10 @@ run_test "examples/pydantic_ai_agent/pydantic_ai_adapter.py" \
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run
+run_expected_failure "kitaru build rejects local stack deployments" \
+    "Kitaru server cannot run that stack" \
+    $UV_RUN kitaru build examples/basic_flow/first_working_flow.py:research_agent \
+        --input '{"topic":"smoke"}'
 
 # ---------------------------------------------------------------------------
 # Secret API

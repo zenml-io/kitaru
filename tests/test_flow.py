@@ -260,6 +260,11 @@ def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
     )
     client = SimpleNamespace(deployments=deployments_api)
 
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+    )
+
     with (
         patch("kitaru.flow.pipeline", return_value=zenml_decorator),
         patch(
@@ -271,10 +276,19 @@ def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
             return_value=(None, ModelRegistryConfig()),
         ),
         patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable") as validate_stack_mock,
         patch("kitaru.client.KitaruClient", return_value=client),
     ):
         wrapped = flow(lambda x: x)
         deployment = wrapped.deploy(1, tags={"canary": False})
+
+    validate_stack_mock.assert_called_once_with(
+        zen_store=stack_client.zen_store,
+        stack=stack_client.active_stack_model,
+        operation="deploy",
+        flow="_lambda_",
+    )
 
     assert deployment is public_deployment
     configured_pipeline.prepare.assert_called_once_with(1)
@@ -289,6 +303,89 @@ def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
         source_snapshot=source_snapshot,
         tags={"canary": False},
     )
+
+
+def test_flow_deploy_rejects_non_server_runnable_stack_before_prepare() -> None:
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(create=MagicMock())
+    client = SimpleNamespace(deployments=deployments_api)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="local"),
+        zen_store=object(),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="local"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable") as validate_stack_mock,
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        validate_stack_mock.side_effect = KitaruUsageError(
+            "the Kitaru server cannot run that stack"
+        )
+        wrapped = flow(lambda x: x)
+        with pytest.raises(KitaruUsageError, match="cannot run that stack"):
+            wrapped.deploy(1)
+
+    configured_pipeline.prepare.assert_not_called()
+    configured_pipeline._create_snapshot.assert_not_called()
+    deployments_api.create.assert_not_called()
+
+
+def test_flow_deploy_rewords_input_defaults_error() -> None:
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    configured_pipeline.prepare.side_effect = ValueError("missing input")
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+    )
+    deployments_api = SimpleNamespace(create=MagicMock())
+    client = SimpleNamespace(deployments=deployments_api)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable"),
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: x)
+        with pytest.raises(KitaruUsageError) as exc_info:
+            wrapped.deploy(1)
+
+    message = str(exc_info.value)
+    assert "deployment-time input defaults" in message
+    assert "saved deployment snapshot" in message
+    assert "creating the deployment" in message
+    assert "ZenML currently" not in message
+    deployments_api.create.assert_not_called()
 
 
 def test_flow_deployment_and_deployments_delegate_to_client() -> None:

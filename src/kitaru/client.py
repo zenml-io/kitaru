@@ -20,7 +20,7 @@ import importlib
 import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from pydantic import ValidationError
 from zenml.client import Client
@@ -95,6 +95,7 @@ from kitaru._client._models import (
 from kitaru._interface_deployments import (
     Deployment,
     deployment_tags_for_create,
+    ensure_stack_is_server_runnable,
     is_deployment_known,
     mark_deployment_known,
     validate_deployment_selector,
@@ -1283,6 +1284,73 @@ class _DeploymentsAPI:
             f"matched versions: {', '.join(str(match.version) for match in matches)}."
         )
 
+    @staticmethod
+    def _unwrap_deployment_record(
+        deployment: DeploymentRecord | Deployment,
+    ) -> DeploymentRecord:
+        """Return the raw deployment record for a facade or record input."""
+        if isinstance(deployment, DeploymentRecord):
+            return deployment
+        return deployment._record
+
+    def _resolve_deployment_stack(
+        self,
+        deployment: DeploymentRecord | Deployment,
+    ) -> Any:
+        """Load the stored stack model for a deployment snapshot."""
+        deployment_record = self._unwrap_deployment_record(deployment)
+        snapshot = self._client_ref._get_snapshot(
+            deployment_record.deployment_id,
+            hydrate=True,
+        )
+        stack = getattr(snapshot, "stack", None)
+        if stack is None:
+            resources = getattr(snapshot, "resources", None)
+            stack = getattr(resources, "stack", None) if resources is not None else None
+        if stack is None:
+            build = getattr(snapshot, "build", None)
+            stack = getattr(build, "stack", None) if build is not None else None
+        if stack is None and deployment_record.stack is not None:
+            try:
+                stack = self._client_ref._client().get_stack(
+                    name_id_or_prefix=deployment_record.stack,
+                    allow_name_prefix_match=False,
+                    hydrate=True,
+                )
+            except Exception as exc:
+                raise KitaruStateError(
+                    f"Deployment {deployment_record.flow!r} "
+                    f"v{deployment_record.version} references stack "
+                    f"{deployment_record.stack!r}, but Kitaru could not load "
+                    "that stack to verify whether the server can run it. "
+                    "Rebuild the deployment on a server-runnable stack and try again."
+                ) from exc
+        if stack is None:
+            raise KitaruStateError(
+                f"Deployment {deployment_record.flow!r} "
+                f"v{deployment_record.version} is missing stack metadata, "
+                "so Kitaru cannot verify whether the server can run it. "
+                "Rebuild the deployment on a server-runnable stack and try again."
+            )
+        return stack
+
+    def _ensure_deployment_server_runnable(
+        self,
+        deployment: DeploymentRecord | Deployment,
+        *,
+        operation: Literal["invoke", "curl"],
+    ) -> None:
+        """Fail early if a stored deployment cannot run from the server."""
+        deployment_record = self._unwrap_deployment_record(deployment)
+        stack = self._resolve_deployment_stack(deployment_record)
+        ensure_stack_is_server_runnable(
+            zen_store=self._client_ref._client().zen_store,
+            stack=stack,
+            operation=operation,
+            flow=deployment_record.flow,
+            version=deployment_record.version,
+        )
+
     def get(
         self,
         *,
@@ -1319,6 +1387,7 @@ class _DeploymentsAPI:
             deployment,
             known_before_resolution=known_before,
         )
+        self._ensure_deployment_server_runnable(deployment, operation="invoke")
 
         zenml_client = self._client_ref._client()
         trigger_pipeline = getattr(zenml_client, "trigger_pipeline", None)
@@ -1591,6 +1660,25 @@ class KitaruClient:
         except Exception as exc:
             raise KitaruBackendError(
                 f"Failed to load execution '{exec_id}': {exc}"
+            ) from exc
+
+    def _get_snapshot(
+        self,
+        snapshot_id: str,
+        *,
+        hydrate: bool,
+    ) -> Any:
+        """Fetch a snapshot by ID with strict ID matching."""
+        try:
+            return self._client().get_snapshot(
+                name_id_or_prefix=snapshot_id,
+                allow_prefix_match=False,
+                project=self._project,
+                hydrate=hydrate,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to load deployment snapshot '{snapshot_id}': {exc}"
             ) from exc
 
     def _get_artifact_version(

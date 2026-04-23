@@ -6,7 +6,9 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from zenml.pipelines.run_utils import validate_stack_is_runnable_from_server
 
 from kitaru._client._deployments import (
     DEFAULT_DEPLOYMENT_TAG,
@@ -17,7 +19,7 @@ from kitaru._client._deployments import (
     validate_deployment_version,
 )
 from kitaru._client._models import Deployment as DeploymentRecord
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruStateError, KitaruUsageError
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
@@ -115,6 +117,73 @@ def validate_deployment_input_keys(
             f"{input_label} contains reserved deployment option key(s): "
             + ", ".join(sorted(collisions))
         )
+
+
+def _deployment_operation_subject(
+    *,
+    operation: Literal["deploy", "invoke", "curl"],
+    flow: str,
+    version: int | None = None,
+) -> str:
+    """Return a human-readable subject for deployment validation errors."""
+    normalized_flow = validate_deployment_flow(flow)
+    if operation == "deploy":
+        return f"Flow {normalized_flow!r}"
+    if version is None:
+        raise KitaruUsageError(
+            f"`version` is required when validating deployment {operation}."
+        )
+    return f"Deployment {normalized_flow!r} v{validate_deployment_version(version)}"
+
+
+def _stack_label(stack: Any) -> str:
+    """Return the best available stack label for user-facing errors."""
+    name = getattr(stack, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    stack_id = getattr(stack, "id", None)
+    if stack_id is not None:
+        return str(stack_id)
+    return "<unknown>"
+
+
+def ensure_stack_is_server_runnable(
+    *,
+    zen_store: Any,
+    stack: Any,
+    operation: Literal["deploy", "invoke", "curl"],
+    flow: str,
+    version: int | None = None,
+) -> None:
+    """Validate that a stack can be executed by the server-backed runtime."""
+    try:
+        validate_stack_is_runnable_from_server(zen_store=zen_store, stack=stack)
+    except ValueError as exc:
+        subject = _deployment_operation_subject(
+            operation=operation,
+            flow=flow,
+            version=version,
+        )
+        stack_name = _stack_label(stack)
+        detail = str(exc)
+        if operation == "deploy":
+            raise KitaruUsageError(
+                f"{subject} cannot be deployed with stack {stack_name!r} because "
+                "the Kitaru server cannot run that stack. Switch to a server-runnable "
+                "stack (for example Kubernetes, Vertex, SageMaker, or AzureML) and "
+                f"try again. Details: {detail}"
+            ) from exc
+        if operation == "invoke":
+            raise KitaruStateError(
+                f"{subject} was created from stack {stack_name!r}, which the Kitaru "
+                "server cannot run. Rebuild the deployment on a server-runnable stack "
+                f"before invoking it. Details: {detail}"
+            ) from exc
+        raise KitaruStateError(
+            f"{subject} was created from stack {stack_name!r}, which the Kitaru "
+            "server cannot run. Rebuild the deployment on a server-runnable stack "
+            f"before generating a curl command for it. Details: {detail}"
+        ) from exc
 
 
 def build_deployment_deploy_kwargs(
@@ -249,6 +318,7 @@ __all__ = [
     "Deployment",
     "build_deployment_deploy_kwargs",
     "deployment_tags_for_create",
+    "ensure_stack_is_server_runnable",
     "is_deployment_known",
     "mark_deployment_known",
     "validate_deployment_input_keys",

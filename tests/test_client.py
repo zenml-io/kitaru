@@ -159,14 +159,21 @@ class _DummySnapshot:
         tags: list[str] | None = None,
         created: datetime | None = None,
         metadata: dict[str, Any] | None = None,
-        stack: str | None = "prod",
+        stack: Any | None = "prod",
     ) -> None:
         self.id = snapshot_id or uuid4()
         self.name = name
         self.body = SimpleNamespace(created=created)
+        stack_model = stack
+        if isinstance(stack, str):
+            stack_model = SimpleNamespace(name=stack)
         self.resources = SimpleNamespace(
             tags=[SimpleNamespace(name=tag) for tag in tags or []],
-            stack=SimpleNamespace(name=stack) if stack is not None else None,
+            stack=stack_model,
+        )
+        self.stack = stack_model
+        self.build = (
+            SimpleNamespace(stack=stack_model) if stack_model is not None else None
         )
         self.kitaru_deployment = metadata or {}
 
@@ -648,13 +655,17 @@ def test_deployment_facade_remove_default_guard_and_invoke_backend_error() -> No
     ):
         client_mock = client_cls.return_value
         client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
         client_mock.trigger_pipeline = None
 
         client = KitaruClient()
         deployment = client.deployments.get(flow="research_flow", version=1)
         with pytest.raises(KitaruUsageError, match="cannot be removed"):
             deployment.remove_tag("default")
-        with pytest.raises(KitaruBackendError, match="trigger_pipeline"):
+        with (
+            patch("kitaru.client.ensure_stack_is_server_runnable"),
+            pytest.raises(KitaruBackendError, match="trigger_pipeline"),
+        ):
             deployment.invoke()
 
 
@@ -676,13 +687,18 @@ def test_deployment_facade_invoke_returns_flow_handle_with_parameters() -> None:
     ):
         client_mock = client_cls.return_value
         client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
         client_mock.trigger_pipeline.return_value = run
 
         client = KitaruClient()
         deployment = client.deployments.get(flow="research_flow", version=1)
-        handle = deployment.invoke(question="hello")
+        with patch(
+            "kitaru.client.ensure_stack_is_server_runnable"
+        ) as validate_stack_mock:
+            handle = deployment.invoke(question="hello")
 
     assert handle.exec_id == str(run.id)
+    validate_stack_mock.assert_called_once()
     client_mock.trigger_pipeline.assert_called_once()
     invoke_kwargs = client_mock.trigger_pipeline.call_args.kwargs
     assert invoke_kwargs["snapshot_name_or_id"] == deployment.deployment_id
@@ -705,10 +721,14 @@ def test_deployments_invoke_warns_for_unknown_explicit_version() -> None:
     ):
         client_mock = client_cls.return_value
         client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
         client_mock.trigger_pipeline.return_value = run
 
         client = KitaruClient()
-        with pytest.warns(UserWarning, match="not previously known"):
+        with (
+            patch("kitaru.client.ensure_stack_is_server_runnable"),
+            pytest.warns(UserWarning, match="not previously known"),
+        ):
             handle = client.deployments.invoke(
                 flow="warn_flow",
                 version=7,
@@ -720,6 +740,114 @@ def test_deployments_invoke_warns_for_unknown_explicit_version() -> None:
         "run_configuration"
     ]
     assert run_configuration.parameters == {"answer": 42}
+
+
+def test_deployments_invoke_rejects_non_server_runnable_deployment_early() -> None:
+    snapshot = _DummySnapshot(
+        name="kitaru::legacy_flow::v3",
+        stack=SimpleNamespace(name="local"),
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
+        client_mock.trigger_pipeline = MagicMock()
+
+        client = KitaruClient()
+        with (
+            patch(
+                "kitaru.client.ensure_stack_is_server_runnable",
+                side_effect=KitaruStateError("server cannot run it"),
+            ),
+            pytest.raises(KitaruStateError, match="server cannot run it"),
+        ):
+            client.deployments.invoke(flow="legacy_flow", version=3)
+
+    client_mock.trigger_pipeline.assert_not_called()
+
+
+def test_deployments_invoke_falls_back_to_named_stack_lookup() -> None:
+    listed_snapshot = _DummySnapshot(
+        name="kitaru::legacy_flow::v4",
+        metadata={"stack": "prod"},
+        stack="prod",
+    )
+    hydrated_snapshot = _DummySnapshot(
+        name="kitaru::legacy_flow::v4",
+        metadata={"stack": "prod"},
+        stack=None,
+    )
+    hydrated_snapshot.build = None
+    hydrated_snapshot.resources = SimpleNamespace(tags=[], stack=None)
+    hydrated_snapshot.stack = None
+    run = _as_pipeline_run(
+        _DummyRun(status=ZenMLExecutionStatus.RUNNING, flow_name="legacy_flow")
+    )
+    resolved_stack = SimpleNamespace(name="prod")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(
+            items=[listed_snapshot]
+        )
+        client_mock.get_snapshot.return_value = hydrated_snapshot
+        client_mock.get_stack.return_value = resolved_stack
+        client_mock.trigger_pipeline.return_value = run
+
+        client = KitaruClient()
+        with patch(
+            "kitaru.client.ensure_stack_is_server_runnable"
+        ) as validate_stack_mock:
+            handle = client.deployments.invoke(flow="legacy_flow", version=4)
+
+    assert handle.exec_id == str(run.id)
+    client_mock.get_stack.assert_called_once_with(
+        name_id_or_prefix="prod",
+        allow_name_prefix_match=False,
+        hydrate=True,
+    )
+    validate_stack_mock.assert_called_once_with(
+        zen_store=client_mock.zen_store,
+        stack=resolved_stack,
+        operation="invoke",
+        flow="legacy_flow",
+        version=4,
+    )
+
+
+def test_deployments_invoke_rejects_missing_snapshot_stack_metadata() -> None:
+    snapshot = _DummySnapshot(name="kitaru::legacy_flow::v5", stack=None)
+    snapshot.build = None
+    snapshot.resources = SimpleNamespace(tags=[], stack=None)
+    snapshot.stack = None
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
+
+        client = KitaruClient()
+        with pytest.raises(KitaruStateError, match="missing stack metadata"):
+            client.deployments.invoke(flow="legacy_flow", version=5)
 
 
 def test_client_rejects_connection_overrides() -> None:

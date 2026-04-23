@@ -23,6 +23,10 @@ You can then invoke the deployed flow without the original target path:
 If you want a step-by-step producer/consumer walkthrough, see the
 [Deploy and invoke flows guide](/guides/deployments).
 
+When you deploy from source targets (`path.py:flow_name`) via CLI, run
+`kitaru init` in the repository first so build/deploy-from-source metadata can
+be resolved correctly.
+
 ## What gets saved
 
 Deploying a flow creates a Kitaru-managed saved snapshot that Kitaru treats as
@@ -31,7 +35,7 @@ version, deployment-time input defaults, the stack context, and any public
 routing tags.
 
 Deployment-time inputs are representative defaults. They let Kitaru prepare the
-saved flow entrypoint, especially for flows whose shape depends on concrete
+saved deployment snapshot, especially for flows whose shape depends on concrete
 parameters. Later invocations can override those defaults by passing new inputs.
 
 ```bash
@@ -106,6 +110,14 @@ Concrete routing story:
 ```bash
 kitaru flow tag research_agent stable --version 2 --exclusive
 ```
+
+## Server-runnable stack requirement
+
+Deployment creation is only supported for stacks that the Kitaru server can run
+from a saved snapshot. If the selected stack is local or otherwise not
+server-runnable, deployment creation is rejected (CLI, SDK, and MCP).
+
+This guard keeps deploy-time behavior aligned with invoke/curl behavior.
 
 ## Invocation model
 
@@ -222,6 +234,14 @@ connection, but the curl generator itself does not inline real token values.
 When you generate curl from a tag such as `default` or `stable`, the printed
 command is pinned to the deployment version that tag resolved to at generation
 time. Regenerate the command if the producer moves the tag later.
+
+Snapshot-backed invocation (`kitaru invoke`,
+`KitaruClient().deployments.invoke(...)`, and
+`kitaru flow deployments curl`) depends on server workload-manager support.
+The official `zenmldocker/kitaru` image already enables this. If you run a
+custom image or plain ZenML server setup, preserve or configure workload-manager
+support explicitly (for example via
+`ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE`).
 
 Runtime secrets for the flow itself should live in Kitaru secrets or stack
 configuration, not in deployment tags or invocation examples.

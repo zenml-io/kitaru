@@ -47,16 +47,23 @@ other processes can invoke the flow without importing `flows/research.py`.
 
 ## Step 1: deploy the first version
 
-Deploy from the source target:
+If you deploy from a source target (`path.py:flow_name`), initialize the
+repository first:
+
+```bash
+kitaru init
+```
+
+Then deploy from the source target:
 
 ```bash
 kitaru deploy flows/research.py:research_agent \
   --input '{"topic": "durable execution"}'
 ```
 
-The `--input` value is a deployment-time default. It is useful because Kitaru may
-need concrete input values to prepare the saved flow entrypoint. Consumers can
-override it later when they invoke the deployment.
+The `--input` value is a representative deployment-time default. Kitaru uses it
+to prepare the saved deployment snapshot. Consumers can override it later when
+they invoke the deployment.
 
 Because this is the first deployment for `research_agent`, Kitaru creates:
 
@@ -308,12 +315,20 @@ server bearer token. The generated curl snippet stores it in
 `KITARU_SERVER_ACCESS_TOKEN` for the current shell command only; the curl
 generator itself does not print or store the real token.
 
-One important practical detail: external HTTP invocation only works for
-deployments that the Kitaru server can run by itself. If you deployed a version
-on a local/default stack, Kitaru can still list it as a deployment version, but
-the remote server may reject a curl invocation because that version depends on
-local machine components. For HTTP-triggered deployments, deploy on a remote
-stack such as Kubernetes, Vertex, SageMaker, or AzureML.
+One important practical detail: deployment creation is rejected up front when
+the selected stack is local or otherwise not runnable by the Kitaru server.
+Use a server-runnable stack (for example Kubernetes, Vertex, SageMaker, or
+AzureML) for deployment routes you plan to invoke remotely.
+
+For older deployments created before this guard existed, `kitaru invoke` and
+`kitaru flow deployments curl` may fail with a stack-runnability error until you
+redeploy on a server-runnable stack.
+
+The official `zenmldocker/kitaru` server image already enables workload-manager
+support for snapshot-backed invocation. If you run a custom image or a plain
+ZenML server setup, preserve or configure workload-manager support explicitly
+(e.g. set `ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE`) so deployment
+invoke/curl routes remain executable.
 
 For machine-readable output, add `-o json`:
 

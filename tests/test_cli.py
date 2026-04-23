@@ -568,6 +568,67 @@ def test_auth_token_token_only_env_reports_clean_cli_error(
     assert "Traceback" not in captured.err
 
 
+def test_build_requires_initialized_project_for_file_targets(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru build` should fail fast outside an initialized project."""
+    flow_file = tmp_path / "demo.py"
+    flow_file.write_text("demo_flow = object()\n")
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["build", f"{flow_file}:demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "initialized Kitaru project" in payload["error"]["message"]
+    assert "kitaru init" in payload["error"]["message"]
+
+
+def test_deploy_accepts_legacy_zen_project_marker(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy `.zen/` markers should satisfy the CLI deploy preflight."""
+    (tmp_path / ".zen").mkdir()
+    flow_file = tmp_path / "demo.py"
+    flow_file.write_text("demo_flow = object()\n")
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub()
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["deploy", f"{flow_file}:demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(tags={"default": True})
+    assert json.loads(capsys.readouterr().out)["command"] == "deploy"
+
+
+def test_build_missing_file_still_reports_loader_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Preflight should not mask the clearer missing-file loader error."""
+    missing = tmp_path / "missing.py"
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["build", f"{missing}:demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "Flow module path does not exist" in payload["error"]["message"]
+
+
 def test_build_json_output_creates_deployment_from_target(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -779,6 +840,10 @@ def test_flow_deployments_curl_json_resolves_default_and_formats_command(
         version=None,
         tag="default",
     )
+    fake_client.deployments._ensure_deployment_server_runnable.assert_called_once_with(
+        deployment,
+        operation="curl",
+    )
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "flow.deployments.curl"
     item = payload["item"]
@@ -812,6 +877,33 @@ def test_flow_deployments_curl_json_resolves_default_and_formats_command(
             "selector": "default",
         },
     )
+
+
+def test_flow_deployments_curl_rejects_non_runnable_deployments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Curl generation should hard-fail for deployments the server cannot run."""
+    deployment = _deployment_stub(
+        flow="demo_flow",
+        version=2,
+        deployment_id="dep-legacy",
+    )
+    fake_client = Mock()
+    fake_client.deployments.get.return_value = deployment
+    fake_client.deployments._ensure_deployment_server_runnable.side_effect = (
+        KitaruStateError("server cannot run this deployment")
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "deployments", "curl", "demo_flow", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "flow.deployments.curl"
+    assert "server cannot run this deployment" in payload["error"]["message"]
 
 
 def test_flow_deployments_curl_uses_kitaru_server_url_env_without_login_store(

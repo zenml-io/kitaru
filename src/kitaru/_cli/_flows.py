@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -14,6 +15,7 @@ from kitaru._client._deployments import (
     DEFAULT_DEPLOYMENT_TAG,
     resolve_deployment_exclusive,
 )
+from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
     build_deployment_deploy_kwargs,
@@ -66,6 +68,43 @@ from ._helpers import (
 
 SERVER_ACCESS_TOKEN_COMMAND = "kitaru auth token"
 SERVER_ACCESS_TOKEN_ENV = "KITARU_SERVER_ACCESS_TOKEN"
+_LEGACY_REPOSITORY_DIRECTORY_NAME = ".zen"
+
+
+def _project_marker_root(start: Path) -> Path | None:
+    """Walk upward from a starting path to find a Kitaru project marker."""
+    for parent in (start, *start.parents):
+        for marker_name in (
+            KITARU_REPOSITORY_DIRECTORY_NAME,
+            _LEGACY_REPOSITORY_DIRECTORY_NAME,
+        ):
+            if (parent / marker_name).is_dir():
+                return parent
+    return None
+
+
+def _ensure_deployment_project_initialized(target: str) -> None:
+    """Fail early when build/deploy is launched outside an initialized project."""
+    module_ref, separator, _ = target.partition(":")
+    if separator != ":" or not module_ref:
+        return
+
+    if not module_ref.endswith(".py"):
+        return
+
+    candidate = Path(module_ref).expanduser()
+    if not candidate.exists():
+        return
+
+    search_root = candidate.resolve().parent
+    if _project_marker_root(search_root) is not None:
+        return
+
+    raise KitaruUsageError(
+        "Building or deploying from source requires an initialized Kitaru project. "
+        "Run `kitaru init` in the repository root, or `cd` into an initialized "
+        "Kitaru project before using `kitaru build` or `kitaru deploy`."
+    )
 
 
 def _format_deployment_tags(tags: Mapping[str, bool]) -> str:
@@ -329,7 +368,8 @@ def build(
     input_: Annotated[
         str | None,
         Parameter(
-            alias="--input", help="Deployment-time flow inputs as JSON or `@file`."
+            alias="--input",
+            help="Deployment-time default flow inputs as JSON or `@file`.",
         ),
     ] = None,
     stack: Annotated[str | None, Parameter(help="Optional stack override.")] = None,
@@ -342,6 +382,7 @@ def build(
     output_format = _resolve_output_format(output)
 
     def _build_deployment() -> Any:
+        _ensure_deployment_project_initialized(target)
         inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
         deploy_kwargs = _build_deploy_kwargs(
             stack=stack,
@@ -391,7 +432,8 @@ def deploy(
     input_: Annotated[
         str | None,
         Parameter(
-            alias="--input", help="Deployment-time flow inputs as JSON or `@file`."
+            alias="--input",
+            help="Deployment-time default flow inputs as JSON or `@file`.",
         ),
     ] = None,
     stack: Annotated[str | None, Parameter(help="Optional stack override.")] = None,
@@ -404,6 +446,7 @@ def deploy(
     output_format = _resolve_output_format(output)
 
     def _deploy_flow() -> Any:
+        _ensure_deployment_project_initialized(target)
         inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
         _, normalized_tag = validate_deployment_selector(
             tag=tag,
@@ -710,6 +753,10 @@ def curl(
             flow=flow,
             version=resolved_version,
             tag=resolved_tag,
+        )
+        client.deployments._ensure_deployment_server_runnable(
+            deployment,
+            operation="curl",
         )
         server_url = _active_kitaru_server_url()
         payload = _deployment_curl_payload(

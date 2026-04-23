@@ -26,7 +26,7 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
-from kitaru.errors import KitaruRuntimeError
+from kitaru.errors import KitaruRuntimeError, KitaruStateError, KitaruUsageError
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
     get_execution_logs,
@@ -523,6 +523,24 @@ def test_deployments_deploy_rejects_non_object_inputs() -> None:
         kitaru_deployments_deploy("agent.py:content_pipeline", inputs=["topic"])
 
 
+def test_deployments_deploy_surfaces_shared_stack_guard() -> None:
+    """MCP deploy should surface the shared non-runnable-stack error unchanged."""
+    flow_target = SimpleNamespace(
+        deploy=MagicMock(
+            side_effect=KitaruUsageError("the Kitaru server cannot run that stack")
+        )
+    )
+
+    with (
+        patch(
+            "kitaru.mcp.server._load_deployable_flow_target",
+            return_value=flow_target,
+        ),
+        pytest.raises(KitaruUsageError, match="cannot run that stack"),
+    ):
+        kitaru_deployments_deploy("agent.py:content_pipeline", inputs={"topic": "ai"})
+
+
 def test_deployments_invoke_defaults_to_default_tag(
     mock_kitaru_client: MagicMock,
     sample_execution,
@@ -561,6 +579,21 @@ def test_deployments_invoke_defaults_to_default_tag(
     assert payload["flow"] == "content_pipeline"
     assert payload["selector"] == {"version": None, "tag": "default"}
     assert payload["execution"]["exec_id"] == sample_execution.exec_id
+
+
+def test_deployments_invoke_surfaces_non_runnable_deployment_error(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """MCP invoke should preserve the shared early failure for legacy deployments."""
+    mock_kitaru_client.deployments.invoke.side_effect = KitaruStateError(
+        "server cannot run this deployment"
+    )
+
+    with (
+        patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client),
+        pytest.raises(KitaruStateError, match="server cannot run this deployment"),
+    ):
+        kitaru_deployments_invoke("content_pipeline")
 
 
 def test_deployments_invoke_rejects_version_and_tag_together(

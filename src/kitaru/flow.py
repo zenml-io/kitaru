@@ -29,7 +29,11 @@ from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
 from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
-from kitaru._interface_deployments import Deployment, validate_deployment_selector
+from kitaru._interface_deployments import (
+    Deployment,
+    ensure_stack_is_server_runnable,
+    validate_deployment_selector,
+)
 from kitaru._source_aliases import (
     build_pipeline_registration_name,
     build_pipeline_source_alias,
@@ -854,15 +858,22 @@ class _FlowDefinition:
         source_name = f"kitaru-source::{flow_name}::{uuid4().hex}"
 
         with _temporary_active_stack(resolved_execution.stack):
+            stack_client = Client()
+            ensure_stack_is_server_runnable(
+                zen_store=stack_client.zen_store,
+                stack=stack_client.active_stack_model,
+                operation="deploy",
+                flow=flow_name,
+            )
             try:
                 configured_pipeline.prepare(*args, **kwargs)
             except (RuntimeError, ValueError) as exc:
                 raise KitaruUsageError(
-                    "Unable to deploy this flow without valid deployment-time "
-                    "input defaults. ZenML currently needs concrete inputs to "
-                    "compile some dynamic flow snapshots; pass representative "
-                    "inputs to flow.deploy(...), then override them when "
-                    "invoking the deployment."
+                    "Unable to create this deployment without valid deployment-time "
+                    "input defaults. Kitaru may need representative inputs to prepare "
+                    "the saved deployment snapshot; pass representative inputs when "
+                    "creating the deployment, then override those defaults later when "
+                    "invoking it."
                 ) from exc
 
             metadata = _deployment_extra_metadata(
