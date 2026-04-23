@@ -2,18 +2,21 @@
 /**
  * FeatureWithGraphic — alternating feature row.
  *
- * Two-column layout pairing prose (slot) with a graphic image. Pass `reverse`
- * to flip the layout so the graphic appears on the left. Collapses to a
- * single column on narrow viewports with the graphic always below the title.
+ * Two-column layout pairing prose (default slot) with a visual on the other
+ * side. The visual can be an image (via the `image` prop) or arbitrary markup
+ * passed via the `graphic` slot (custom Astro component, code block, etc.).
+ * Pass `reverse` to flip the layout so the visual appears on the left.
+ * Collapses to a single column on narrow viewports.
  */
 interface Props {
   title: string;
-  image: string;
+  image?: string;
   imageAlt?: string;
   reverse?: boolean;
 }
 
 const { title, image, imageAlt = '', reverse = false } = Astro.props;
+const hasGraphicSlot = Astro.slots.has('graphic');
 ---
 
 <section class:list={["feature-graphic", { "feature-graphic--reverse": reverse }]} data-reveal>
@@ -25,7 +28,11 @@ const { title, image, imageAlt = '', reverse = false } = Astro.props;
       </div>
     </div>
     <div class="feature-graphic-media">
-      <img src={image} alt={imageAlt} loading="lazy" decoding="async" />
+      {hasGraphicSlot ? (
+        <slot name="graphic" />
+      ) : (
+        image && <img src={image} alt={imageAlt} loading="lazy" decoding="async" />
+      )}
     </div>
   </div>
 </section>

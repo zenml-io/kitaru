@@ -13,6 +13,11 @@ import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
 import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
 import PullQuote from '../../components/compare/PullQuote.astro';
+import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import CodePane from '../../components/compare/CodePane.astro';
+import SelfHostVsPackaged from '../../components/compare/graphics/langgraph/SelfHostVsPackaged.astro';
+import SandboxSecurity from '../../components/compare/graphics/langgraph/SandboxSecurity.astro';
+import VersionedDeployments from '../../components/compare/graphics/langgraph/VersionedDeployments.astro';
 
 LangGraph is a real durable runtime. Deep Agents is a strong opinionated harness on top of it. LangSmith Deployment packages both with sandboxes, auth proxy, tracing, and hosted infra. If you adopt that stack, you get a lot for free.
 
@@ -45,30 +50,25 @@ Kitaru is a different bet. Kitaru is a **framework-agnostic durable runtime**: `
   quote="LangGraph is a runtime inside one harness. Kitaru is a runtime across any harness."
 />
 
-## Graph-native vs Python-native
-
-LangGraph&rsquo;s checkpointer, resume, and time-travel are powerful &mdash; inside the graph/state-machine model. Your agent is a graph of nodes and edges, and LangGraph persists state between supersteps.
-
-Kitaru doesn&rsquo;t require a graph. `@checkpoint` marks the durable boundaries around ordinary Python function calls. That means the agent harness inside a checkpoint can be anything &mdash; a LangGraph graph invocation, a Pydantic AI agent, a Claude Agent SDK turn, or hand-written code that calls an LLM. The flow body stays Python:
-
-```python
-@flow
+<FeatureWithGraphic title="Graph-native vs Python-native">
+  <CodePane
+    slot="graphic"
+    code={`@flow
 def research_agent(topic: str) -> str:
     plan = checkpoint(make_plan)(topic)
     docs = checkpoint(retrieve)(plan)
-    return checkpoint(synthesize)(docs)
-```
+    return checkpoint(synthesize)(docs)`}
+  />
 
-No graph, no state schema, no nodes and edges. Just Python boundaries you can replay and resume.
+  LangGraph&rsquo;s checkpointer, resume, and time-travel are powerful &mdash; inside the graph/state-machine model. Your agent is a graph of nodes and edges, and LangGraph persists state between supersteps.
 
-## Harness freedom
+  Kitaru doesn&rsquo;t require a graph. `@checkpoint` marks the durable boundaries around ordinary Python function calls. That means the agent harness inside a checkpoint can be anything &mdash; a LangGraph graph invocation, a Pydantic AI agent, a Claude Agent SDK turn, or hand-written code that calls an LLM. The flow body stays Python: no graph, no state schema, no nodes and edges. Just Python boundaries you can replay and resume.
+</FeatureWithGraphic>
 
-Platform teams at larger orgs rarely get to pick one harness for everyone. One team wants Pydantic AI for its typing. Another picked Deep Agents for multi-agent patterns. A third wrote a loop against the Anthropic SDK. A fourth uses an internal framework that predates all of this.
-
-LangGraph&rsquo;s durability is strongest when everyone adopts LangGraph. Kitaru&rsquo;s is strongest when they don&rsquo;t have to.
-
-```python
-# Pydantic AI inside a Kitaru checkpoint
+<FeatureWithGraphic title="Harness freedom" reverse={true}>
+  <CodePane
+    slot="graphic"
+    code={`# Pydantic AI inside a Kitaru checkpoint
 @checkpoint
 def plan(topic: str) -> Plan:
     return pydantic_agent.run_sync(topic).output
@@ -81,34 +81,43 @@ def research(plan: Plan) -> Docs:
 # Claude Agent SDK inside a Kitaru checkpoint
 @checkpoint
 def critique(docs: Docs) -> str:
-    return asyncio.run(_claude_critique(docs))
-```
+    return asyncio.run(_claude_critique(docs))`}
+  />
 
-Same durability contract, three different harnesses, one runtime.
+  Platform teams at larger orgs rarely get to pick one harness for everyone. One team wants Pydantic AI for its typing. Another picked Deep Agents for multi-agent patterns. A third wrote a loop against the Anthropic SDK. A fourth uses an internal framework that predates all of this.
 
-## Self-host vs packaged platform
+  LangGraph&rsquo;s durability is strongest when everyone adopts LangGraph. Kitaru&rsquo;s is strongest when they don&rsquo;t have to. Same durability contract, three different harnesses, one runtime.
+</FeatureWithGraphic>
 
-LangSmith Deployment packages runtime + sandboxes + auth proxy + tracing into a managed product. That&rsquo;s genuinely useful if you want to offload the platform layer.
+<FeatureWithGraphic title="Self-host vs packaged platform">
+  <SelfHostVsPackaged slot="graphic" />
 
-Kitaru ships the runtime layer as a primitive you self-host. The Kitaru server is a single service deployable via Helm. Artifacts and state live in your own S3, GCS, or Azure Blob bucket. Auth is workspace-scoped. There is no mandatory hosted control plane in the path of your agent&rsquo;s data.
+  LangSmith Deployment packages runtime + sandboxes + auth proxy + tracing into a managed product. That&rsquo;s genuinely useful if you want to offload the platform layer.
 
-If your security team needs to know exactly where prompts, outputs, and artifacts live, &ldquo;in our own bucket&rdquo; is a shorter conversation than a data-residency addendum on a hosted control plane.
+  Kitaru ships the runtime layer as a primitive you self-host. The Kitaru server is a single service deployable via Helm. Artifacts and state live in your own S3, GCS, or Azure Blob bucket. Auth is workspace-scoped. There is no mandatory hosted control plane in the path of your agent&rsquo;s data.
 
-## Sandbox and security
+  If your security team needs to know exactly where prompts, outputs, and artifacts live, &ldquo;in our own bucket&rdquo; is a shorter conversation than a data-residency addendum on a hosted control plane.
+</FeatureWithGraphic>
 
-LangSmith ships real security infrastructure: LangSmith Sandboxes (microVM isolation, Deep Agents integration), an auth proxy that keeps secrets out of the sandbox, and OpenTelemetry-native tracing. Adopt their stack and you get a usable isolation story out of the box.
+<FeatureWithGraphic title="Sandbox and security" reverse={true}>
+  <SandboxSecurity slot="graphic" />
 
-Kitaru takes a different posture. `@checkpoint(runtime="isolated")` runs a checkpoint in a separate pod or job on the stack you configured. For stronger isolation, bring your own sandbox provider. Secrets come from your own secret manager. The runtime exposes execution boundaries; policy at those boundaries belongs to your platform.
+  LangSmith ships real security infrastructure: LangSmith Sandboxes (microVM isolation, Deep Agents integration), an auth proxy that keeps secrets out of the sandbox, and OpenTelemetry-native tracing. Adopt their stack and you get a usable isolation story out of the box.
 
-Two legitimate answers to the same problem: security packaged with the runtime, or security configurable at each execution boundary.
+  Kitaru takes a different posture. `@checkpoint(runtime="isolated")` runs a checkpoint in a separate pod or job on the stack you configured. For stronger isolation, bring your own sandbox provider. Secrets come from your own secret manager. The runtime exposes execution boundaries; policy at those boundaries belongs to your platform.
 
-## Versioned deployments
+  Two legitimate answers to the same problem: security packaged with the runtime, or security configurable at each execution boundary.
+</FeatureWithGraphic>
 
-Both products have strong deployment stories &mdash; with different shapes.
+<FeatureWithGraphic title="Versioned deployments">
+  <VersionedDeployments slot="graphic" />
 
-LangSmith Deployment exposes agent endpoints (MCP, A2A, Agent Protocol, HITL, memory APIs) as part of its packaged runtime.
+  Both products have strong deployment stories &mdash; with different shapes.
 
-Kitaru deploys each flow as an immutable, auto-incrementing versioned snapshot. Consumers invoke by flow name using CLI, Python SDK, MCP, or a generated curl command pinned to a resolved version. Tag routing (`default`, `canary`, or your own exclusive tags) makes promotion and rollback a tag move, not a redeploy. Auth is workspace-scoped with no per-deployment tokens.
+  LangSmith Deployment exposes agent endpoints (MCP, A2A, Agent Protocol, HITL, memory APIs) as part of its packaged runtime.
+
+  Kitaru deploys each flow as an immutable, auto-incrementing versioned snapshot. Consumers invoke by flow name using CLI, Python SDK, MCP, or a generated curl command pinned to a resolved version. Tag routing (`default`, `canary`, or your own exclusive tags) makes promotion and rollback a tag move, not a redeploy. Auth is workspace-scoped with no per-deployment tokens.
+</FeatureWithGraphic>
 
 ## What makes Kitaru different
 
