@@ -1,57 +1,93 @@
 ---
+export type CellStatus = boolean | 'yes' | 'partial' | 'no';
+
 interface Row {
   feature: string;
-  kitaru: boolean;
-  competitor: boolean;
+  kitaru: CellStatus;
+  competitor: CellStatus;
+  note?: string;
 }
+
 interface Props {
   rows: Row[];
   competitorLabel?: string;
 }
+
 const { rows, competitorLabel = 'Alternative' } = Astro.props;
+
+// Normalize booleans to string literals for uniform rendering
+function normalize(status: CellStatus): 'yes' | 'partial' | 'no' {
+  if (status === true) return 'yes';
+  if (status === false) return 'no';
+  return status;
+}
+
+const hasNotes = rows.some((r) => r.note && r.note.trim().length > 0);
 ---
 
 <div class="ctable-wrap" data-reveal>
-  <table class="ctable">
+  <table class="ctable" class:list={[hasNotes ? 'has-notes' : '']}>
     <thead>
       <tr>
         <th class="col-feature">Feature</th>
         <th class="col-kitaru">Kitaru</th>
         <th class="col-competitor">{competitorLabel}</th>
+        {hasNotes && <th class="col-note">What that means</th>}
       </tr>
     </thead>
     <tbody>
-      {rows.map((row) => (
-        <tr>
-          <td class="col-feature">{row.feature}</td>
-          <td class="col-kitaru" data-value={row.kitaru ? 'yes' : 'no'}>
-            {row.kitaru ? (
-              <>
-                <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
-                <span class="sr-only">Yes</span>
-              </>
-            ) : (
-              <>
-                <svg class="icon icon-no" viewBox="0 0 24 24" aria-label="No"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-                <span class="sr-only">Not supported</span>
-              </>
+      {rows.map((row) => {
+        const kitaruStatus = normalize(row.kitaru);
+        const competitorStatus = normalize(row.competitor);
+        return (
+          <tr>
+            <td class="col-feature">{row.feature}</td>
+            <td class="col-kitaru" data-value={kitaruStatus}>
+              {kitaruStatus === 'yes' && (
+                <>
+                  <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
+                  <span class="sr-only">Yes</span>
+                </>
+              )}
+              {kitaruStatus === 'partial' && (
+                <>
+                  <span class="pill-partial" aria-label="Partial">Partial</span>
+                  <span class="sr-only">Partial support</span>
+                </>
+              )}
+              {kitaruStatus === 'no' && (
+                <>
+                  <svg class="icon icon-no" viewBox="0 0 20 20" aria-label="Not supported"><path fill="currentColor" d="M3 9h14v2H3z"/></svg>
+                  <span class="sr-only">Not supported</span>
+                </>
+              )}
+            </td>
+            <td class="col-competitor" data-value={competitorStatus}>
+              {competitorStatus === 'yes' && (
+                <>
+                  <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
+                  <span class="sr-only">Yes</span>
+                </>
+              )}
+              {competitorStatus === 'partial' && (
+                <>
+                  <span class="pill-partial" aria-label="Partial">Partial</span>
+                  <span class="sr-only">Partial support</span>
+                </>
+              )}
+              {competitorStatus === 'no' && (
+                <>
+                  <svg class="icon icon-no" viewBox="0 0 20 20" aria-label="Not supported"><path fill="currentColor" d="M3 9h14v2H3z"/></svg>
+                  <span class="sr-only">Not supported</span>
+                </>
+              )}
+            </td>
+            {hasNotes && (
+              <td class="col-note">{row.note ?? ''}</td>
             )}
-          </td>
-          <td class="col-competitor" data-value={row.competitor ? 'yes' : 'no'}>
-            {row.competitor ? (
-              <>
-                <svg class="icon icon-yes" viewBox="0 0 24 24" aria-label="Yes"><path fill="currentColor" d="m9 16.17-4.17-4.17L3.41 13.41 9 19l12-12-1.41-1.41z"/></svg>
-                <span class="sr-only">Yes</span>
-              </>
-            ) : (
-              <>
-                <svg class="icon icon-no" viewBox="0 0 24 24" aria-label="No"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-                <span class="sr-only">Not supported</span>
-              </>
-            )}
-          </td>
-        </tr>
-      ))}
+          </tr>
+        );
+      })}
     </tbody>
   </table>
 </div>
@@ -59,7 +95,7 @@ const { rows, competitorLabel = 'Alternative' } = Astro.props;
 <style>
   .ctable-wrap {
     margin: 32px 0 48px;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-accent);
     border-radius: 14px;
     overflow: hidden;
     background: var(--color-surface);
@@ -87,6 +123,8 @@ const { rows, competitorLabel = 'Alternative' } = Astro.props;
   .ctable tbody tr:nth-child(even) td {
     background: var(--color-surface-subtle);
   }
+
+  /* 3-column proportions (default) */
   .col-feature {
     width: 56%;
     font-weight: 500;
@@ -97,7 +135,21 @@ const { rows, competitorLabel = 'Alternative' } = Astro.props;
     text-align: center;
     width: 22%;
   }
+
+  /* 4-column proportions (when notes present) */
+  .has-notes .col-feature { width: 28%; }
+  .has-notes .col-kitaru { width: 12%; }
+  .has-notes .col-competitor { width: 14%; }
+  .has-notes .col-note { width: 46%; }
+
   .ctable thead .col-kitaru { color: var(--color-accent); }
+
+  .col-note {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--color-secondary);
+  }
+
   .icon {
     width: 22px;
     height: 22px;
@@ -105,7 +157,24 @@ const { rows, competitorLabel = 'Alternative' } = Astro.props;
     vertical-align: middle;
   }
   .icon-yes { color: var(--color-success); }
-  .icon-no { color: var(--color-negative); }
+  .icon-no {
+    color: var(--color-negative);
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Partial pill */
+  .pill-partial {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--color-accent-light);
+    color: var(--color-accent-darker);
+    font-size: 12px;
+    font-weight: 500;
+    vertical-align: middle;
+  }
+
   .sr-only {
     position: absolute;
     width: 1px;
@@ -120,5 +189,8 @@ const { rows, competitorLabel = 'Alternative' } = Astro.props;
     .ctable th,
     .ctable td { padding: 12px 14px; font-size: 14px; }
     .col-feature { width: 60%; }
+    .has-notes .col-feature { width: 60%; }
+    .col-note { display: none; }
+    .ctable thead .col-note { display: none; }
   }
 </style>
