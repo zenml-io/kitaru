@@ -1,0 +1,46 @@
+---
+/**
+ * CodePane — single syntax-highlighted code pane.
+ *
+ * Use inside a FeatureWithGraphic `graphic` slot when a feature row should
+ * pair prose with a code block instead of a custom graphic.
+ */
+import { Code } from 'astro:components';
+import type { ThemeRegistrationRaw } from 'shiki';
+import kitaruLight from '../../styles/kitaru-light.json';
+
+interface Props {
+  code: string;
+  lang?: string;
+}
+
+const { code, lang = 'python' } = Astro.props;
+---
+
+<article class="codepane">
+  <Code code={code} lang={lang} theme={kitaruLight as ThemeRegistrationRaw} />
+</article>
+
+<style>
+  .codepane {
+    width: 100%;
+    border: 1px solid oklch(0.85 0.08 60);
+    border-radius: 12px;
+    background: var(--color-surface);
+    overflow: hidden;
+  }
+  .codepane :global(pre) {
+    margin: 0;
+    padding: 20px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    overflow-x: auto;
+  }
+  .codepane :global(code) {
+    font-family: inherit;
+  }
+</style>
