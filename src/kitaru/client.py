@@ -342,7 +342,7 @@ def _module_name_matches(candidate_name: str | None, module_name: str) -> bool:
 
 def _find_loaded_replay_module(module_name: str) -> Any | None:
     """Return an already-loaded module whose name matches the replay source."""
-    for loaded_name, loaded_module in sys.modules.items():
+    for loaded_name, loaded_module in list(sys.modules.items()):
         if _module_name_matches(loaded_name, module_name) and loaded_module is not None:
             return loaded_module
     return None
@@ -358,6 +358,9 @@ def _matching_main_module(module_name: str) -> Any | None:
     spec_name = getattr(main_spec, "name", None)
     if isinstance(spec_name, str) and _module_name_matches(spec_name, module_name):
         return main_module
+
+    if "." in module_name:
+        return None
 
     main_file = getattr(main_module, "__file__", None)
     if not isinstance(main_file, str) or not main_file:
@@ -382,6 +385,7 @@ def _module_candidate_paths(module_name: str, cwd: Path) -> tuple[Path, Path]:
 def _temporary_sys_path_prepend(path: str) -> Iterator[None]:
     """Temporarily prepend one entry to ``sys.path`` for a scoped import."""
     with _REPLAY_IMPORT_LOCK:
+        original_path_count = sys.path.count(path)
         inserted = False
         if not sys.path or sys.path[0] != path:
             sys.path.insert(0, path)
@@ -390,8 +394,14 @@ def _temporary_sys_path_prepend(path: str) -> Iterator[None]:
         try:
             yield
         finally:
-            if inserted and sys.path and sys.path[0] == path:
-                sys.path.pop(0)
+            if inserted:
+                if sys.path and sys.path[0] == path:
+                    sys.path.pop(0)
+                elif sys.path.count(path) > original_path_count:
+                    for index, entry in enumerate(sys.path):
+                        if entry == path:
+                            del sys.path[index]
+                            break
 
 
 def _import_module_from_cwd(module_name: str, run_id: str | Any) -> Any | None:

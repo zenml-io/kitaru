@@ -2503,7 +2503,7 @@ def test_import_module_for_replay_accepts_matching_main_file_stem() -> None:
     assert resolved is replay_main
 
 
-def test_import_module_for_replay_accepts_dotted_main_file_stem() -> None:
+def test_import_module_for_replay_rejects_dotted_main_file_stem_without_spec() -> None:
     replay_main = _replay_main(
         spec_name=None,
         file_path="/tmp/replay_with_overrides.py",
@@ -2522,12 +2522,12 @@ def test_import_module_for_replay_accepts_dotted_main_file_stem() -> None:
             {"__main__": replay_main},
         ),
         patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+        pytest.raises(
+            KitaruRuntimeError,
+            match=r"Failed to import replay source module",
+        ),
     ):
-        resolved = _import_module_for_replay(
-            "examples.replay.replay_with_overrides", "run-123"
-        )
-
-    assert resolved is replay_main
+        _import_module_for_replay("examples.replay.replay_with_overrides", "run-123")
 
 
 def test_import_module_for_replay_prefers_loaded_suffix_match_before_main() -> None:
@@ -2759,6 +2759,36 @@ def test_import_module_for_replay_prepends_cwd_even_if_already_later_in_sys_path
 
     assert resolved is resolved_module
     assert import_attempts == 2
+
+
+def test_import_module_for_replay_removes_inserted_cwd_path_after_import_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_local_module_path_mutation_217"
+    module_path = tmp_path / f"{module_name}.py"
+    extra_path = tmp_path / "extra-path-entry"
+    extra_path.mkdir()
+    module_path.write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {str(extra_path)!r})\n"
+        "MARKER = 'loaded-with-sys-path-mutation'\n"
+    )
+
+    monkeypatch.chdir(tmp_path)
+    original_sys_path = list(sys.path)
+
+    try:
+        with (
+            _without_loaded_modules(module_name),
+            patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        ):
+            resolved = _import_module_for_replay(module_name, "run-123")
+
+        assert getattr(resolved, "MARKER", None) == "loaded-with-sys-path-mutation"
+        assert str(extra_path) in sys.path
+        assert str(tmp_path) not in sys.path
+    finally:
+        sys.path[:] = original_sys_path
 
 
 def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
