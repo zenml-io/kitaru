@@ -22,7 +22,6 @@ const comparisons = defineCollection({
   schema: z.object({
     competitor: z.string(),
     competitorLogo: z.string().optional(),
-    competitorTagline: z.string(),
     title: z.string(),
     description: z.string(),
     cardSubtitle: z.string(),

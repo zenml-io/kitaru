@@ -1,0 +1,201 @@
+---
+---
+
+<figure class="fig">
+  <div class="temporal-row">
+    <span class="tag tag--muted">Temporal Activity</span>
+    <div class="opaque">
+      <code>await call_openai(prompt)</code>
+      <span class="dim">unstructured by default · instrument it yourself</span>
+    </div>
+  </div>
+
+  <div class="record">
+    <div class="record-head">
+      <span class="tag tag--accent">Kitaru · @checkpoint</span>
+      <span class="mono exec">exec_id 9f2a&hellip;</span>
+    </div>
+
+    <div class="mono-call">
+      <span class="fn">kitaru.llm</span>(<span class="str">prompt</span>, <span class="str">model=</span><span class="val">"fast"</span>)
+    </div>
+
+    <dl class="fields">
+      <div>
+        <dt>prompt</dt>
+        <dd class="mono">Research: Durable agents&hellip;</dd>
+      </div>
+      <div>
+        <dt>response</dt>
+        <dd class="mono">Durable execution keeps&hellip;</dd>
+      </div>
+      <div class="row">
+        <div class="chip">
+          <span class="chip-k">tokens</span><span class="chip-v">1,247</span>
+        </div>
+        <div class="chip">
+          <span class="chip-k">latency</span><span class="chip-v">1.4s</span>
+        </div>
+        <div class="chip">
+          <span class="chip-k">model</span><span class="chip-v">fast → claude-sonnet-4-6</span>
+        </div>
+      </div>
+    </dl>
+
+    <div class="replay">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 12 A9 9 0 1 0 6 5 L3 8 M3 3 L3 8 L8 8" />
+      </svg>
+      <span>On replay, response is loaded from checkpoint. Provider isn't hit again.</span>
+    </div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+  .tag--muted {
+    background: var(--color-border-light);
+    color: var(--color-muted);
+  }
+  .tag--accent {
+    background: var(--color-accent-light);
+    color: var(--color-accent-deep);
+  }
+
+  .temporal-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+    border: 1px dashed var(--color-border);
+    border-radius: 10px;
+    background: var(--color-surface-warm);
+  }
+  .opaque {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .opaque code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+  .opaque .dim {
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+
+  .record {
+    padding: 16px 18px 18px;
+    border: 1px solid var(--color-accent);
+    border-radius: 12px;
+    background: var(--color-surface);
+    box-shadow: 0 1px 0 var(--color-border);
+  }
+  .record-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .exec {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-muted);
+  }
+  .mono-call {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--color-primary);
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--color-bg);
+    margin-bottom: 12px;
+  }
+  .fn { color: var(--color-accent); font-weight: 600; }
+  .str { color: var(--color-secondary); }
+  .val { color: var(--color-accent-deep); }
+
+  .fields { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .fields > div:not(.row) { display: grid; grid-template-columns: 70px 1fr; gap: 10px; align-items: center; }
+  .fields dt {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin: 0;
+  }
+  .fields dd {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--color-primary);
+    padding: 6px 10px;
+    background: var(--color-accent-light);
+    border-radius: 4px;
+  }
+  .fields .mono {
+    font-family: var(--font-mono);
+  }
+
+  .row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-surface);
+    font-size: 11px;
+  }
+  .chip-k { color: var(--color-muted); font-weight: 600; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.05em; }
+  .chip-v {
+    font-family: var(--font-mono);
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  .replay {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border-light);
+    font-size: 11.5px;
+    color: var(--color-secondary);
+  }
+  .replay svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex-shrink: 0;
+  }
+</style>

@@ -25,7 +25,6 @@ const { Content } = await render(entry);
       description={entry.data.description}
       competitor={entry.data.competitor}
       competitorLogo={entry.data.competitorLogo}
-      competitorTagline={entry.data.competitorTagline}
     />
 
     <article class="compare-body">
@@ -92,18 +91,6 @@ const { Content } = await render(entry);
     font-size: 0.92em;
     color: var(--color-primary);
   }
-  /* Fenced code blocks (Shiki's astro-code output) get padding + border +
-     rounded corners so the block reads as a styled code block rather than
-     edge-to-edge text on a tinted background. */
-  .compare-body-inner :global(pre.astro-code),
-  .compare-body-inner :global(pre) {
-    padding: 20px 22px;
-    border-radius: 10px;
-    margin: 22px 0 26px;
-    border: 1px solid var(--color-border-light);
-    font-size: 14px;
-    line-height: 1.7;
-  }
   /* Clear any inherited background on code inside fenced blocks so Shiki's
      theme shows through without a doubled layer. */
   .compare-body-inner :global(pre code) {
@@ -117,6 +104,43 @@ const { Content } = await render(entry);
   }
   .compare-body-inner :global(a:hover) {
     text-decoration-thickness: 2px;
+  }
+
+  .compare-body-inner :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0 32px;
+    font-size: 15px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .compare-body-inner :global(th) {
+    text-align: left;
+    padding: 12px 16px;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    color: var(--color-primary);
+    background: var(--color-surface-warm);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .compare-body-inner :global(td) {
+    padding: 12px 16px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--color-secondary);
+    border-bottom: 1px solid var(--color-border-light);
+    vertical-align: top;
+  }
+  .compare-body-inner :global(tr:last-child td) {
+    border-bottom: none;
+  }
+  .compare-body-inner :global(td:first-child) {
+    font-weight: 600;
+    color: var(--color-primary);
+    width: 28%;
   }
 
   .compare-footer-cta {
@@ -148,7 +172,7 @@ const { Content } = await render(entry);
 
   .compare-body-inner :global(.compare-inline-cta) {
     display: flex;
-    justify-content: center;
-    margin: 32px 0 8px;
+    justify-content: flex-start;
+    margin: 24px 0 8px;
   }
 </style>

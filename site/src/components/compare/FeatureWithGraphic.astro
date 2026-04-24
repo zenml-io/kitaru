@@ -8,12 +8,13 @@
  */
 interface Props {
   title: string;
-  image: string;
+  image?: string;
   imageAlt?: string;
   reverse?: boolean;
 }
 
 const { title, image, imageAlt = '', reverse = false } = Astro.props;
+const hasGraphic = Astro.slots.has('graphic');
 ---
 
 <section class:list={["feature-graphic", { "feature-graphic--reverse": reverse }]} data-reveal>
@@ -25,7 +26,7 @@ const { title, image, imageAlt = '', reverse = false } = Astro.props;
       </div>
     </div>
     <div class="feature-graphic-media">
-      <img src={image} alt={imageAlt} loading="lazy" decoding="async" />
+      {hasGraphic ? <slot name="graphic" /> : image && <img src={image} alt={imageAlt} loading="lazy" decoding="async" />}
     </div>
   </div>
 </section>

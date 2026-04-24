@@ -1,0 +1,201 @@
+---
+competitor: "Temporal"
+competitorLogo: "/compare/temporal.svg"
+title: "Kitaru vs Temporal: Durable execution, built for AI agents"
+description: "Temporal is a general-purpose durable execution platform with seven official SDKs. Kitaru is an open-source runtime for durable Python agents, with built-in primitives for LLM calls, wait/resume, replay, memory, and artifact handling."
+cardSubtitle: "Durable execution for Python agents, with agent-native primitives such as llm(), wait(), save()/load(), and memory."
+ctaHeading: "The runtime layer underneath your Python agents"
+order: 20
+ogImage: "https://assets.kitaru.ai/compare/f26cf06e/og-card.avif"
+---
+
+import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
+import ComparisonTable from '../../components/compare/ComparisonTable.astro';
+import CodeCompare from '../../components/compare/CodeCompare.astro';
+import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import PullQuote from '../../components/compare/PullQuote.astro';
+import DurableExecution from '../../components/compare/graphics/temporal/DurableExecution.astro';
+import LLMCheckpoints from '../../components/compare/graphics/temporal/LLMCheckpoints.astro';
+import DurableMemory from '../../components/compare/graphics/temporal/DurableMemory.astro';
+import ArtifactLineage from '../../components/compare/graphics/temporal/ArtifactLineage.astro';
+
+Temporal is a general-purpose durable execution platform with seven official SDKs (Go, Java, Python, TypeScript, Ruby, PHP, and .NET). It has been in production for a decade and has the battle scars to show for it. If your durability problem is polyglot or mission-critical and not agent-shaped, Temporal's track record is the pragmatic choice.
+
+Kitaru is the runtime layer shaped for Python agents — the same durable execution story, narrower in scope, with agent primitives in the box. The glue code every agent team ends up writing on top of a general-purpose workflow engine (a durable `llm()` call, a versioned memory store, an artifact graph, an opinionated stack abstraction for Kubernetes, AWS, GCP, and Azure), we ship as first-class primitives.
+
+<WhenToUseEach
+  kitaru={{
+    title: "Use Kitaru if you are",
+    items: [
+      "Running Python agents and want LLM calls, memory, and artifact lineage as primitives instead of glue code",
+      "Replaying a run from a specific checkpoint without paying for the LLM calls above it again",
+      "Deploying into your own cloud (Kubernetes, SageMaker, Vertex AI, AzureML) and want one runtime that targets all of them",
+      "Designing around dynamic agent loops (tool calls, conditional branches, hours-long waits for humans)",
+    ],
+  }}
+  competitor={{
+    title: "Use Temporal if you are",
+    items: [
+      "Operating a polyglot fleet where Go, Java, and TypeScript services must share one durability contract",
+      "Running general workflows (billing, provisioning, ETL, saga patterns), not specifically agents",
+      "Leaning heavily on cron, namespacing, and a battle-tested service tier",
+    ],
+  }}
+/>
+
+<PullQuote
+  quote="Temporal makes failure irrelevant. Kitaru makes failure irrelevant for the specific shape of work an AI agent does."
+/>
+
+<FeatureWithGraphic title="A simpler ops model for agent workloads">
+  <DurableExecution slot="graphic" />
+
+  Temporal's durable execution relies on the Temporal Service plus Workers; you can self-host it or use Temporal Cloud. Kitaru uses a Kitaru server plus stack-backed storage and compute. Both provide durable recovery, but their operational models are different.
+
+  - **Service tier:** Temporal Server consists of Frontend, History, Matching, and Worker services, backed by a persistence database. Kitaru's server stores execution metadata, checkpoint state, and logs, while stack backends use storage such as S3, GCS, or Azure Blob depending on the runtime.
+  - **Determinism:** Temporal Workflow code must follow deterministic constraints, and non-deterministic work such as external calls belongs in Activities. Kitaru lets you wrap plain Python with `@flow` and `@checkpoint` and reuse checkpoint outputs on replay.
+  - **Replay cost:** Temporal caches Activity results via Workflow Event History — the difference is Kitaru's caching boundary is an ordinary Python function, not a deterministic Workflow/Activity split. `kitaru executions replay <exec_id> --from <checkpoint>` re-runs the flow from the top; checkpoints before the replay point return cached output, and the named checkpoint and anything after it re-execute — so you don't re-pay for the LLM calls above the replay point.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="LLM calls as first-class checkpoints" reverse={true}>
+  <LLMCheckpoints slot="graphic" />
+
+  The LLM call is often the unit of cost, latency, and failure in an agent. In Temporal, LLM calls typically live in Activities. In Kitaru, `kitaru.llm()` is a built-in primitive.
+
+  - **Key handling:** In Temporal, API-key handling is part of your Activity or application code. In Kitaru, `kitaru.llm()` resolves model aliases and supports centralized secret handling.
+  - **Observability:** Temporal has a mature Web UI for workflow and activity visibility. What it leaves to you is the LLM-specific slice — prompt capture, token counts, latency, model identity. Kitaru captures prompt/response as artifacts and logs token counts, latency, and the resolved model on every `kitaru.llm()` call automatically. Cost accounting is glue you still write on top, but the raw material arrives for free.
+  - **Replay:** In Kitaru, the captured response is read from the checkpoint on replay. The provider isn't hit again unless the input changed.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Versioned durable memory, not workflow variables">
+  <DurableMemory slot="graphic" />
+
+  Temporal is a general-purpose workflow engine, so cross-run memory is an application concern — you bring your own store and plumb it through workflows. Kitaru is agent-shaped, so it ships a scoped memory primitive in the runtime. Same problem, different shape.
+
+  - **Scope:** Temporal durable state lives inside a workflow execution. In Kitaru, `kitaru.memory` is persisted with explicit `namespace`, `flow`, or `execution` scopes, so some memory can outlive a single run.
+  - **Escape hatch:** Anything that doesn't fit a KV shape goes through `kitaru.save()` / `kitaru.load()`, backed by the same artifact store.
+  - **Inspection:** Kitaru's Python surface exposes `set`, `get`, `list`, `history`, and `delete` on `kitaru.memory`, plus a `kitaru memory scope list` CLI command — so "what did I know last Tuesday?" is a documented call, not a workflow-variable archaeology job.
+</FeatureWithGraphic>
+
+<FeatureWithGraphic title="Artifact lineage across runs, not just event history" reverse={true}>
+  <ArtifactLineage slot="graphic" />
+
+  Temporal's Workflow Event History is a replay log, not an artifact store. Inspecting what a past workflow produced means threading your own artifact references through Activity return values. Kitaru persists checkpoint outputs as artifacts automatically and attaches them to the execution record.
+
+  - **Artifacts:** Kitaru stores each `@checkpoint` return value, plus prompt/response pairs from every `kitaru.llm()` call, as browsable artifacts on the execution.
+  - **Cross-run load:** A later run can pull an artifact from an earlier execution via `kitaru.load(exec_id, name)` from inside a `@checkpoint`. Artifact lineage across runs is a primitive, not something you build on top.
+  - **Inspection surface:** Executions, checkpoints, logs, and artifacts are exposed through the server, CLI, and client APIs — and every `kitaru.llm()` call contributes token counts, latency, and resolved model to the same record.
+</FeatureWithGraphic>
+
+## What makes Kitaru unique
+
+<ComparisonTable
+  rows={[
+    { feature: "Durable execution / recover after failure", kitaru: true, competitor: true },
+    { feature: "Recovery/replay avoids re-executing completed work after failure", kitaru: true, competitor: true },
+    { feature: "Prompt and token logging per `kitaru.llm()` call", kitaru: true, competitor: false },
+    { feature: "Versioned durable memory across runs", kitaru: true, competitor: false },
+    { feature: "Artifact lineage and run tracking across executions", kitaru: true, competitor: false },
+    { feature: "Opinionated stack abstraction for Kubernetes, AWS, GCP, Azure (configure once, every flow uses it)", kitaru: true, competitor: false },
+    { feature: "Durable human-in-the-loop waiting with no active compute", kitaru: true, competitor: true },
+    { feature: "Polyglot SDKs (Go, Java, TypeScript, Ruby, PHP, .NET)", kitaru: false, competitor: true },
+    { feature: "Native cron scheduling and namespacing", kitaru: false, competitor: true },
+    { feature: "Execution inspection, logs, and lifecycle control", kitaru: true, competitor: true },
+  ]}
+/>
+
+## How the two surfaces map
+
+| Concept | Temporal | Kitaru |
+|---|---|---|
+| Workflow boundary | `@workflow.defn` | `@flow` |
+| Durable step | Activity (non-deterministic) | `@checkpoint` (ordinary Python) |
+| Determinism requirement | Workflow must be deterministic | No determinism requirement on flow body |
+| Pause / resume | `wait_condition` + signal | `kitaru.wait()` |
+| Invocation | Workflow ID + start via client | `flow.run()`, `kitaru invoke`, CLI, SDK, MCP, curl |
+| Cross-run state | Bring your own store | `kitaru.memory` with scopes |
+| Artifacts | Thread through Activity returns | Automatic per-checkpoint artifact capture |
+
+## Code comparison
+
+<CodeCompare
+  kitaruLabel="Kitaru"
+  competitorLabel="Temporal (Python SDK)"
+  kitaruCode={`import kitaru
+from kitaru import checkpoint, flow
+
+@checkpoint
+def research(topic: str) -> str:
+    return kitaru.llm(
+        prompt=f"Research: {topic}. Return a brief.",
+        model="fast",
+    )
+
+@checkpoint
+def draft(brief: str) -> str:
+    return kitaru.llm(
+        prompt=f"Write a draft from this brief:\\n{brief}",
+        model="fast",
+    )
+
+@flow
+def review_flow(topic: str) -> str:
+    brief = research(topic)
+    text = draft(brief)
+    approved = kitaru.wait(
+        name="approve_draft",
+        question="Approve draft?",
+        schema=bool,
+    )
+    return text if approved else "Rejected"
+
+review_flow.run("Durable agents")`}
+  competitorCode={`from datetime import timedelta
+from temporalio import activity, workflow
+from temporalio.client import Client
+from temporalio.worker import Worker
+
+@activity.defn
+async def research(topic: str) -> str:
+    return await call_llm(f"Research: {topic}")
+
+@activity.defn
+async def draft(brief: str) -> str:
+    return await call_llm(f"Write a draft:\\n{brief}")
+
+@workflow.defn
+class ReviewFlow:
+    def __init__(self) -> None:
+        self._approved: bool | None = None
+
+    @workflow.signal
+    def approve(self, ok: bool) -> None:
+        self._approved = ok
+
+    @workflow.run
+    async def run(self, topic: str) -> str:
+        brief = await workflow.execute_activity(
+            research, topic, start_to_close_timeout=timedelta(minutes=5)
+        )
+        text = await workflow.execute_activity(
+            draft, brief, start_to_close_timeout=timedelta(minutes=5)
+        )
+        await workflow.wait_condition(lambda: self._approved is not None)
+        return text if self._approved else "Rejected"
+
+# Run via: await client.execute_workflow(ReviewFlow.run, topic,
+#   id=..., task_queue=...); approval arrives via
+# client.get_workflow_handle(...).signal(ReviewFlow.approve, True).`}
+/>
+
+## Ready to try Kitaru?
+
+If your durability problem spans Go services, Java backends, and cron-scheduled ETL, Temporal is the tool. If it's shaped like a Python agent (LLM calls, memory, tool outputs, humans in the loop), Kitaru removes the glue layer you'd otherwise write on top.
+
+- Read [our documentation](/docs) and see how `@flow`, `@checkpoint`, `kitaru.llm`, and `kitaru.memory` work together
+- `pip install kitaru` and run your first durable agent in an afternoon
+- [Talk to our team](/get-started) if you want help mapping a Temporal agent workflow onto Kitaru primitives
+
+<div class="compare-inline-cta">
+  <a href="/get-started" class="btn-primary">Get Started</a>
+</div>
