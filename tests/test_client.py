@@ -23,7 +23,13 @@ from kitaru._client._deployments import (
 )
 from kitaru._interface_deployments import Deployment
 from kitaru.analytics import AnalyticsEvent
-from kitaru.client import ExecutionStatus, KitaruClient
+from kitaru.client import (
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
+    ExecutionStatus,
+    KitaruClient,
+)
 from kitaru.config import (
     FrozenExecutionSpec,
     KitaruConfig,
@@ -186,6 +192,46 @@ def _resolved_connection(project: str | None = None) -> ResolvedConnectionConfig
     )
 
 
+def _service_account_response(
+    *,
+    name: str = "ci-runner",
+    service_account_id: str = "sa-123",
+    active: bool = True,
+) -> Any:
+    return SimpleNamespace(
+        id=service_account_id,
+        name=name,
+        full_name="CI Runner",
+        description="Automation account",
+        active=active,
+        created=datetime(2026, 4, 24, 8, 0, tzinfo=UTC),
+        updated=datetime(2026, 4, 24, 8, 5, tzinfo=UTC),
+        avatar_url=None,
+    )
+
+
+def _api_key_response(
+    *,
+    name: str = "default",
+    api_key_id: str = "key-123",
+    raw_key: str | None = None,
+    active: bool = True,
+) -> Any:
+    return SimpleNamespace(
+        id=api_key_id,
+        name=name,
+        service_account=SimpleNamespace(id="sa-123", name="ci-runner"),
+        description="Default CI key",
+        active=active,
+        created=datetime(2026, 4, 24, 8, 10, tzinfo=UTC),
+        updated=datetime(2026, 4, 24, 8, 15, tzinfo=UTC),
+        last_login=None,
+        last_rotated=datetime(2026, 4, 24, 8, 20, tzinfo=UTC),
+        retain_period_minutes=5,
+        key=raw_key,
+    )
+
+
 def _dummy_wait_condition(
     *,
     name: str,
@@ -254,6 +300,237 @@ def test_client_initializes_namespaces() -> None:
     assert hasattr(client, "artifacts")
     assert hasattr(client, "memories")
     assert hasattr(client, "deployments")
+    assert hasattr(client, "auth")
+    assert hasattr(client.auth, "service_accounts")
+    assert hasattr(client.auth, "api_keys")
+
+
+def test_client_initializes_with_strict_project_validation() -> None:
+    with patch(
+        "kitaru.client.resolve_connection_config",
+        return_value=_resolved_connection(),
+    ) as resolve_connection:
+        KitaruClient()
+
+    resolve_connection.assert_called_once_with(
+        validate_for_use=True,
+        require_project=True,
+    )
+
+
+def test_client_for_auth_management_skips_project_validation() -> None:
+    with patch(
+        "kitaru.client.resolve_connection_config",
+        return_value=_resolved_connection(),
+    ) as resolve_connection:
+        client = KitaruClient.for_auth_management()
+
+    assert hasattr(client.auth, "service_accounts")
+    assert hasattr(client.auth, "api_keys")
+    resolve_connection.assert_called_once_with(
+        validate_for_use=True,
+        require_project=False,
+    )
+
+
+def test_auth_management_client_allows_env_remote_without_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    client = KitaruClient.for_auth_management()
+
+    assert client._project is None
+    assert hasattr(client.auth, "service_accounts")
+    assert hasattr(client.auth, "api_keys")
+
+
+def test_auth_service_accounts_delegate_to_zenml_client() -> None:
+    service_account = _service_account_response()
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.create_service_account.return_value = service_account
+        zenml_client.get_service_account.return_value = service_account
+        zenml_client.list_service_accounts.return_value = SimpleNamespace(
+            items=[service_account]
+        )
+        zenml_client.update_service_account.return_value = service_account
+
+        client = KitaruClient()
+        created = client.auth.service_accounts.create(
+            "ci-runner",
+            full_name="CI Runner",
+            description="Automation account",
+        )
+        fetched = client.auth.service_accounts.get("ci-runner")
+        listed = client.auth.service_accounts.list(
+            active=True,
+            name="ci",
+            page=2,
+            size=10,
+        )
+        updated = client.auth.service_accounts.update(
+            "ci-runner",
+            name="ci-renamed",
+            description="Updated",
+            active=False,
+        )
+        client.auth.service_accounts.delete("ci-runner")
+
+    assert isinstance(created, AuthServiceAccount)
+    assert created.service_account_id == "sa-123"
+    assert fetched == created
+    assert listed == [created]
+    assert updated == created
+    zenml_client.create_service_account.assert_called_once_with(
+        name="ci-runner",
+        full_name="CI Runner",
+        description="Automation account",
+    )
+    zenml_client.get_service_account.assert_called_once_with(
+        name_id_or_prefix="ci-runner",
+        allow_name_prefix_match=False,
+        hydrate=True,
+    )
+    zenml_client.list_service_accounts.assert_called_once_with(
+        name="ci",
+        active=True,
+        page=2,
+        size=10,
+        hydrate=True,
+    )
+    zenml_client.update_service_account.assert_called_once_with(
+        name_id_or_prefix="ci-runner",
+        updated_name="ci-renamed",
+        description="Updated",
+        active=False,
+    )
+    zenml_client.delete_service_account.assert_called_once_with(
+        name_id_or_prefix="ci-runner"
+    )
+
+
+def test_auth_api_keys_delegate_and_preserve_one_time_key_rule() -> None:
+    created_key = _api_key_response(raw_key="created-secret")
+    rotated_key = _api_key_response(raw_key="rotated-secret")
+    metadata_key = _api_key_response(raw_key=None)
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.create_api_key.return_value = created_key
+        zenml_client.rotate_api_key.return_value = rotated_key
+        zenml_client.get_api_key.return_value = metadata_key
+        zenml_client.list_api_keys.return_value = SimpleNamespace(items=[metadata_key])
+        zenml_client.update_api_key.return_value = metadata_key
+
+        client = KitaruClient()
+        created = client.auth.api_keys.create(
+            "ci-runner",
+            "default",
+            description="Default CI key",
+            set_key=True,
+        )
+        fetched = client.auth.api_keys.get("ci-runner", "default")
+        listed = client.auth.api_keys.list(
+            "ci-runner",
+            active=True,
+            name="default",
+            limit=3,
+        )
+        updated = client.auth.api_keys.update(
+            "ci-runner",
+            "default",
+            name="renamed",
+            description="Updated",
+            active=False,
+        )
+        rotated = client.auth.api_keys.rotate(
+            "ci-runner",
+            "default",
+            retain_period_minutes=5,
+            set_key=False,
+        )
+        client.auth.api_keys.delete("ci-runner", "default")
+
+    assert isinstance(created, AuthAPIKeyWithValue)
+    assert created.key == "created-secret"
+    assert "created-secret" not in repr(created)
+    assert isinstance(created.api_key, AuthAPIKey)
+    assert not hasattr(created.api_key, "key")
+    assert isinstance(rotated, AuthAPIKeyWithValue)
+    assert rotated.key == "rotated-secret"
+    assert isinstance(fetched, AuthAPIKey)
+    assert not hasattr(fetched, "key")
+    assert listed == [fetched]
+    assert updated == fetched
+    zenml_client.create_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name="default",
+        description="Default CI key",
+        set_key=True,
+    )
+    zenml_client.get_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+        allow_name_prefix_match=False,
+        hydrate=True,
+    )
+    zenml_client.list_api_keys.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name="default",
+        active=True,
+        page=1,
+        size=3,
+        hydrate=True,
+    )
+    zenml_client.update_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+        name="renamed",
+        description="Updated",
+        active=False,
+    )
+    zenml_client.rotate_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+        retain_period_minutes=5,
+        set_key=False,
+    )
+    zenml_client.delete_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+    )
+
+
+def test_auth_api_key_create_requires_one_time_key_value() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_cls.return_value.create_api_key.return_value = _api_key_response(
+            raw_key=None
+        )
+        client = KitaruClient()
+
+        with pytest.raises(KitaruBackendError, match="one-time API key value"):
+            client.auth.api_keys.create("ci-runner", "default")
 
 
 def test_deployment_snapshot_names_build_and_parse() -> None:
@@ -1147,7 +1424,10 @@ def test_client_requires_project_for_env_driven_remote_connection() -> None:
     ):
         KitaruClient()
 
-    resolve_connection.assert_called_once_with(validate_for_use=True)
+    resolve_connection.assert_called_once_with(
+        validate_for_use=True,
+        require_project=True,
+    )
 
 
 def test_memories_get_delegates_to_entry_impl() -> None:

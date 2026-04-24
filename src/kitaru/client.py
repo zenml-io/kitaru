@@ -84,6 +84,9 @@ from kitaru._client._mappers import (
 )
 from kitaru._client._models import (
     ArtifactRef,
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
     CheckpointAttempt,
     CheckpointCall,
     Execution,
@@ -187,6 +190,83 @@ _CLIENT_FACADE_LINT_ANCHOR = (
     _to_plain_dict,
     _to_public_status,
 )
+
+
+def _validate_non_empty_auth_value(value: str, *, name: str) -> str:
+    """Validate a required auth-management string argument."""
+    if not isinstance(value, str) or not value.strip():
+        raise KitaruUsageError(f"`{name}` must be a non-empty string.")
+    return value
+
+
+def _validate_auth_pagination(
+    *,
+    limit: int | None,
+    page: int | None,
+    size: int | None,
+) -> tuple[int, int]:
+    """Validate shared auth list pagination and return backend page/size."""
+    if limit is not None:
+        if isinstance(limit, bool) or limit < 1:
+            raise KitaruUsageError("`limit` must be >= 1 when provided.")
+        if page is not None or size is not None:
+            raise KitaruUsageError("`limit` cannot be combined with `page` or `size`.")
+        return 1, limit
+    if page is not None and (isinstance(page, bool) or page < 1):
+        raise KitaruUsageError("`page` must be >= 1 when provided.")
+    if size is not None and (isinstance(size, bool) or size < 1):
+        raise KitaruUsageError("`size` must be >= 1 when provided.")
+    if page is not None and size is None:
+        raise KitaruUsageError("`size` is required when `page` is provided.")
+    if size is None:
+        return 1, 20
+    return page or 1, size
+
+
+def _map_auth_service_account(service_account: Any) -> AuthServiceAccount:
+    """Map a ZenML service-account response to the public Kitaru DTO."""
+    return AuthServiceAccount(
+        service_account_id=str(service_account.id),
+        name=str(service_account.name),
+        full_name=str(getattr(service_account, "full_name", "") or ""),
+        description=str(getattr(service_account, "description", "") or ""),
+        active=bool(getattr(service_account, "active", False)),
+        created_at=getattr(service_account, "created", None),
+        updated_at=getattr(service_account, "updated", None),
+        avatar_url=getattr(service_account, "avatar_url", None),
+    )
+
+
+def _map_auth_api_key(api_key: Any) -> AuthAPIKey:
+    """Map a ZenML API-key response to metadata-only public Kitaru DTO."""
+    service_account = getattr(api_key, "service_account", None)
+    return AuthAPIKey(
+        api_key_id=str(api_key.id),
+        name=str(api_key.name),
+        service_account_id=str(getattr(service_account, "id", "")),
+        service_account_name=str(getattr(service_account, "name", "")),
+        description=str(getattr(api_key, "description", "") or ""),
+        active=bool(getattr(api_key, "active", False)),
+        created_at=getattr(api_key, "created", None),
+        updated_at=getattr(api_key, "updated", None),
+        last_login=getattr(api_key, "last_login", None),
+        last_rotated=getattr(api_key, "last_rotated", None),
+        retain_period_minutes=int(getattr(api_key, "retain_period_minutes", 0) or 0),
+    )
+
+
+def _map_auth_api_key_with_value(api_key: Any) -> AuthAPIKeyWithValue:
+    """Map a create/rotate API-key response including its one-time raw value."""
+    raw_key = getattr(api_key, "key", None)
+    if not isinstance(raw_key, str) or not raw_key:
+        raise KitaruBackendError(
+            "The server did not return the one-time API key value for this "
+            "create/rotate operation."
+        )
+    return AuthAPIKeyWithValue(
+        api_key=_map_auth_api_key(api_key),
+        key=raw_key,
+    )
 
 
 @runtime_checkable
@@ -1688,6 +1768,236 @@ class _DeploymentsAPI:
         return self.get(flow=flow, version=version)
 
 
+class _AuthAPI:
+    """Namespace for server-level auth-management operations."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self.service_accounts = _ServiceAccountsAPI(client)
+        self.api_keys = _APIKeysAPI(client)
+
+
+class _ServiceAccountsAPI:
+    """Service-account management namespace."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self._client_ref = client
+
+    def create(
+        self,
+        name: str,
+        *,
+        full_name: str | None = None,
+        description: str = "",
+    ) -> AuthServiceAccount:
+        """Create a service account."""
+        service_account = self._client_ref._client().create_service_account(
+            name=_validate_non_empty_auth_value(name, name="name"),
+            full_name=full_name,
+            description=description,
+        )
+        return _map_auth_service_account(service_account)
+
+    def get(self, name_or_id: str) -> AuthServiceAccount:
+        """Get one service account by exact name or ID."""
+        service_account = self._client_ref._client().get_service_account(
+            name_id_or_prefix=_validate_non_empty_auth_value(
+                name_or_id,
+                name="name_or_id",
+            ),
+            allow_name_prefix_match=False,
+            hydrate=True,
+        )
+        return _map_auth_service_account(service_account)
+
+    def list(
+        self,
+        *,
+        active: bool | None = None,
+        name: str | None = None,
+        limit: int | None = None,
+        page: int | None = None,
+        size: int | None = None,
+    ) -> builtins.list[AuthServiceAccount]:
+        """List service accounts, optionally filtered and paginated."""
+        backend_page, backend_size = _validate_auth_pagination(
+            limit=limit,
+            page=page,
+            size=size,
+        )
+        service_accounts = self._client_ref._client().list_service_accounts(
+            name=name,
+            active=active,
+            page=backend_page,
+            size=backend_size,
+            hydrate=True,
+        )
+        return [_map_auth_service_account(item) for item in service_accounts.items]
+
+    def update(
+        self,
+        name_or_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        active: bool | None = None,
+    ) -> AuthServiceAccount:
+        """Update mutable service-account metadata."""
+        service_account = self._client_ref._client().update_service_account(
+            name_id_or_prefix=_validate_non_empty_auth_value(
+                name_or_id,
+                name="name_or_id",
+            ),
+            updated_name=name,
+            description=description,
+            active=active,
+        )
+        return _map_auth_service_account(service_account)
+
+    def delete(self, name_or_id: str) -> None:
+        """Delete a service account."""
+        self._client_ref._client().delete_service_account(
+            name_id_or_prefix=_validate_non_empty_auth_value(
+                name_or_id,
+                name="name_or_id",
+            )
+        )
+
+
+class _APIKeysAPI:
+    """Service-account API-key management namespace."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self._client_ref = client
+
+    def create(
+        self,
+        service_account: str,
+        name: str,
+        *,
+        description: str = "",
+        set_key: bool = False,
+    ) -> AuthAPIKeyWithValue:
+        """Create an API key and return its one-time raw key value."""
+        api_key = self._client_ref._client().create_api_key(
+            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
+                service_account,
+                name="service_account",
+            ),
+            name=_validate_non_empty_auth_value(name, name="name"),
+            description=description,
+            set_key=set_key,
+        )
+        return _map_auth_api_key_with_value(api_key)
+
+    def get(self, service_account: str, name_or_id: str) -> AuthAPIKey:
+        """Get metadata for one API key by exact name or ID."""
+        api_key = self._client_ref._client().get_api_key(
+            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
+                service_account,
+                name="service_account",
+            ),
+            name_id_or_prefix=_validate_non_empty_auth_value(
+                name_or_id,
+                name="name_or_id",
+            ),
+            allow_name_prefix_match=False,
+            hydrate=True,
+        )
+        return _map_auth_api_key(api_key)
+
+    def list(
+        self,
+        service_account: str,
+        *,
+        active: bool | None = None,
+        name: str | None = None,
+        limit: int | None = None,
+        page: int | None = None,
+        size: int | None = None,
+    ) -> builtins.list[AuthAPIKey]:
+        """List metadata for API keys owned by a service account."""
+        backend_page, backend_size = _validate_auth_pagination(
+            limit=limit,
+            page=page,
+            size=size,
+        )
+        api_keys = self._client_ref._client().list_api_keys(
+            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
+                service_account,
+                name="service_account",
+            ),
+            name=name,
+            active=active,
+            page=backend_page,
+            size=backend_size,
+            hydrate=True,
+        )
+        return [_map_auth_api_key(item) for item in api_keys.items]
+
+    def update(
+        self,
+        service_account: str,
+        name_or_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        active: bool | None = None,
+    ) -> AuthAPIKey:
+        """Update mutable API-key metadata."""
+        api_key = self._client_ref._client().update_api_key(
+            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
+                service_account,
+                name="service_account",
+            ),
+            name_id_or_prefix=_validate_non_empty_auth_value(
+                name_or_id,
+                name="name_or_id",
+            ),
+            name=name,
+            description=description,
+            active=active,
+        )
+        return _map_auth_api_key(api_key)
+
+    def rotate(
+        self,
+        service_account: str,
+        name_or_id: str,
+        *,
+        retain_period_minutes: int = 0,
+        set_key: bool = False,
+    ) -> AuthAPIKeyWithValue:
+        """Rotate an API key and return its one-time replacement value."""
+        if isinstance(retain_period_minutes, bool) or retain_period_minutes < 0:
+            raise KitaruUsageError("`retain_period_minutes` must be >= 0.")
+        api_key = self._client_ref._client().rotate_api_key(
+            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
+                service_account,
+                name="service_account",
+            ),
+            name_id_or_prefix=_validate_non_empty_auth_value(
+                name_or_id,
+                name="name_or_id",
+            ),
+            retain_period_minutes=retain_period_minutes,
+            set_key=set_key,
+        )
+        return _map_auth_api_key_with_value(api_key)
+
+    def delete(self, service_account: str, name_or_id: str) -> None:
+        """Delete an API key."""
+        self._client_ref._client().delete_api_key(
+            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
+                service_account,
+                name="service_account",
+            ),
+            name_id_or_prefix=_validate_non_empty_auth_value(
+                name_or_id,
+                name="name_or_id",
+            ),
+        )
+
+
 class KitaruClient:
     """Client for managing Kitaru executions, artifacts, and memories."""
 
@@ -1697,6 +2007,7 @@ class KitaruClient:
         server_url: str | None = None,
         auth_token: str | None = None,
         project: str | None = None,
+        _require_project: bool = True,
     ) -> None:
         """Initialize a Kitaru client.
 
@@ -1726,13 +2037,28 @@ class KitaruClient:
                 "project settings for now."
             )
 
-        resolved_connection = resolve_connection_config(validate_for_use=True)
+        resolved_connection = resolve_connection_config(
+            validate_for_use=True,
+            require_project=_require_project,
+        )
         self._project = resolved_connection.project
 
+        self.auth = _AuthAPI(self)
         self.executions = _ExecutionsAPI(self)
         self.artifacts = _ArtifactsAPI(self)
         self.memories = _MemoriesAPI(self)
         self.deployments = _DeploymentsAPI(self)
+
+    @classmethod
+    def for_auth_management(cls) -> KitaruClient:
+        """Create a client for server-level auth management.
+
+        Normal ``KitaruClient()`` construction remains strict and requires a
+        project for env-driven remote connections. Auth management is
+        server-level, so this constructor validates server/auth pairing while
+        intentionally skipping project validation.
+        """
+        return cls(_require_project=False)
 
     def _client(self) -> Client:
         """Return a ZenML client instance."""
@@ -1797,6 +2123,9 @@ class KitaruClient:
 
 __all__ = [
     "ArtifactRef",
+    "AuthAPIKey",
+    "AuthAPIKeyWithValue",
+    "AuthServiceAccount",
     "CheckpointAttempt",
     "CheckpointCall",
     "Deployment",
