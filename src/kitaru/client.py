@@ -18,6 +18,7 @@ from __future__ import annotations
 import builtins
 import importlib
 import sys
+import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -128,6 +129,12 @@ from kitaru.replay import build_replay_plan
 
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 _WAIT_CONDITION_RESOLUTION_ABORT = "abort"
+_REPLAY_IMPORT_LOCK = threading.RLock()
+
+
+class _ReplayImportDependencyError(KitaruRuntimeError):
+    """Replay source import failed because one of its dependencies is missing."""
+
 
 # The direct imports above preserve `kitaru.client.*` patch targets; this tuple
 # simply keeps intentionally re-exported private names alive for linting.
@@ -238,7 +245,7 @@ def _import_module_for_replay(module_name: str, run_id: str | Any) -> Any:
         return importlib.import_module(module_name)
     except ModuleNotFoundError as exc:
         if not _is_retryable_replay_import_error(exc, module_name):
-            raise
+            raise _missing_replay_dependency_error(module_name, run_id, exc) from exc
 
     loaded_module = _find_loaded_replay_module(module_name)
     if loaded_module is not None:
@@ -248,7 +255,7 @@ def _import_module_for_replay(module_name: str, run_id: str | Any) -> Any:
     if main_module is not None:
         return main_module
 
-    cwd_module = _import_module_from_cwd(module_name)
+    cwd_module = _import_module_from_cwd(module_name, run_id)
     if cwd_module is not None:
         return cwd_module
 
@@ -259,6 +266,22 @@ def _import_module_for_replay(module_name: str, run_id: str | Any) -> Any:
         f"matching '__main__', and a temporary cwd import from '{cwd}'. "
         "Run replay from the project directory or set PYTHONPATH when the "
         "source module is local."
+    )
+
+
+def _missing_replay_dependency_error(
+    module_name: str, run_id: str | Any, exc: ModuleNotFoundError
+) -> _ReplayImportDependencyError:
+    """Build a domain error for source modules with missing dependencies."""
+    missing_name = getattr(exc, "name", None)
+    dependency = (
+        f" '{missing_name}'" if isinstance(missing_name, str) and missing_name else ""
+    )
+    return _ReplayImportDependencyError(
+        f"Failed to import replay source module '{module_name}' for "
+        f"execution '{run_id}': the module imports missing dependency"
+        f"{dependency}. Install the dependency or run replay in an environment "
+        "that matches the original execution."
     )
 
 
@@ -303,14 +326,12 @@ def _matching_main_module(module_name: str) -> Any | None:
     if isinstance(spec_name, str) and _module_name_matches(spec_name, module_name):
         return main_module
 
-    if "." in module_name:
-        return None
-
     main_file = getattr(main_module, "__file__", None)
     if not isinstance(main_file, str) or not main_file:
         return None
 
-    if Path(main_file).stem == module_name:
+    expected_stem = module_name.rsplit(".", 1)[-1]
+    if Path(main_file).stem == expected_stem:
         return main_module
 
     return None
@@ -327,19 +348,20 @@ def _module_candidate_paths(module_name: str, cwd: Path) -> tuple[Path, Path]:
 @contextmanager
 def _temporary_sys_path_prepend(path: str) -> Iterator[None]:
     """Temporarily prepend one entry to ``sys.path`` for a scoped import."""
-    if sys.path and sys.path[0] == path:
-        yield
-        return
+    with _REPLAY_IMPORT_LOCK:
+        inserted = False
+        if not sys.path or sys.path[0] != path:
+            sys.path.insert(0, path)
+            inserted = True
 
-    original_sys_path = list(sys.path)
-    sys.path.insert(0, path)
-    try:
-        yield
-    finally:
-        sys.path[:] = original_sys_path
+        try:
+            yield
+        finally:
+            if inserted and sys.path and sys.path[0] == path:
+                sys.path.pop(0)
 
 
-def _import_module_from_cwd(module_name: str) -> Any | None:
+def _import_module_from_cwd(module_name: str, run_id: str | Any) -> Any | None:
     """Retry replay module import from the current directory when justified."""
     cwd = Path.cwd()
     module_path, package_path = _module_candidate_paths(module_name, cwd)
@@ -351,7 +373,9 @@ def _import_module_from_cwd(module_name: str) -> Any | None:
             return importlib.import_module(module_name)
         except ModuleNotFoundError as exc:
             if not _is_retryable_replay_import_error(exc, module_name):
-                raise
+                raise _missing_replay_dependency_error(
+                    module_name, run_id, exc
+                ) from exc
             return None
 
 
@@ -746,6 +770,8 @@ class _ExecutionsAPI:
         replay_flow: _ReplayFlowLike | None = None
         try:
             replay_flow = _resolve_flow_for_replay(source_run)
+        except _ReplayImportDependencyError:
+            raise
         except KitaruRuntimeError:
             replay_flow = None
 
