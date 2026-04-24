@@ -506,7 +506,11 @@ def test_deployments_deploy_forwards_non_default_tag_exclusivity(
     )
 
 
-def test_deployments_deploy_rejects_reserved_input_keys() -> None:
+@pytest.mark.parametrize(
+    "reserved_key",
+    ["stack", "publish_default_on_first_deploy"],
+)
+def test_deployments_deploy_rejects_reserved_input_keys(reserved_key: str) -> None:
     """Flow inputs must not shadow deployment-control options."""
     with (
         patch("kitaru.mcp.server._load_deployable_flow_target") as mock_loader,
@@ -514,7 +518,7 @@ def test_deployments_deploy_rejects_reserved_input_keys() -> None:
     ):
         kitaru_deployments_deploy(
             "agent.py:content_pipeline",
-            inputs={"stack": "not-a-stack"},
+            inputs={reserved_key: "not-a-flow-input"},
         )
 
     mock_loader.assert_not_called()

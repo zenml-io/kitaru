@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from kitaru.flow import FlowHandle
 
 DEPLOYMENT_CONTROL_INPUT_KEYS = frozenset(
-    {"cache", "image", "retries", "stack", "tags"}
+    {"cache", "image", "publish_default_on_first_deploy", "retries", "stack", "tags"}
 )
 
 _KNOWN_DEPLOYMENTS: set[tuple[str, int]] = set()

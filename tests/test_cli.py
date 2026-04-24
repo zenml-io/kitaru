@@ -1077,7 +1077,10 @@ def test_build_rejects_non_object_input_json(
     assert "must be a JSON object" in payload["error"]["message"]
 
 
-@pytest.mark.parametrize("reserved_key", ["tags", "image"])
+@pytest.mark.parametrize(
+    "reserved_key",
+    ["tags", "image", "publish_default_on_first_deploy"],
+)
 def test_deploy_rejects_reserved_input_keys(
     reserved_key: str,
     capsys: pytest.CaptureFixture[str],
