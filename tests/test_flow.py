@@ -32,6 +32,7 @@ from kitaru.errors import (
     KitaruBackendError,
     KitaruExecutionError,
     KitaruRuntimeError,
+    KitaruStackIntegrationDependencyError,
     KitaruStateError,
     KitaruUsageError,
     KitaruUserCodeError,
@@ -793,6 +794,100 @@ def test_run_restores_previous_stack_if_submission_fails() -> None:
         wrapped = flow(lambda: None)
         wrapped.run(stack="prod")
 
+    assert client_mock.activate_stack.call_args_list == [
+        call("prod"),
+        call(old_stack_id),
+    ]
+
+
+def test_run_translates_active_stack_hydration_import_error() -> None:
+    """Missing active-stack integration dependencies should fail before submit."""
+    configured_pipeline = MagicMock()
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    class _ClientWithMissingStackDependency:
+        def __init__(self) -> None:
+            self.active_stack_model = SimpleNamespace(id=old_stack_id)
+            self.activate_stack = MagicMock()
+
+        @property
+        def active_stack(self) -> object:
+            raise ImportError(
+                "Install the missing integration with "
+                "`zenml integration install s3`.\n"
+                "Export stack requirements with "
+                "`zenml stack export-requirements 'prod' "
+                "-o stack-requirements.txt`."
+            )
+
+    old_stack_id = uuid4()
+    client_mock = _ClientWithMissingStackDependency()
+    client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+    client_mock.activate_stack = MagicMock()
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        pytest.raises(KitaruStackIntegrationDependencyError) as exc_info,
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run(stack="prod")
+
+    message = str(exc_info.value)
+    assert "Cannot submit this Kitaru flow" in message
+    assert "stack integration dependency appears to be missing" in message
+    assert "zenml integration install s3" in message
+    assert "zenml stack export-requirements" in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    configured_pipeline.assert_not_called()
+    persist_mock.assert_not_called()
+    assert client_mock.activate_stack.call_args_list == [
+        call("prod"),
+        call(old_stack_id),
+    ]
+
+
+def test_run_does_not_translate_user_import_error_from_submission() -> None:
+    """User-code ImportError during ZenML submission should remain raw."""
+    configured_pipeline = MagicMock(
+        side_effect=ImportError("No module named user_dependency")
+    )
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    old_stack_id = uuid4()
+    client_mock = MagicMock()
+    client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+    client_mock.active_stack = object()
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        pytest.raises(ImportError, match="user_dependency") as exc_info,
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run(stack="prod")
+
+    assert not isinstance(exc_info.value, KitaruStackIntegrationDependencyError)
+    configured_pipeline.assert_called_once_with()
     assert client_mock.activate_stack.call_args_list == [
         call("prod"),
         call(old_stack_id),

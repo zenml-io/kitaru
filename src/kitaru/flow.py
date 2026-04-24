@@ -63,6 +63,7 @@ from kitaru.errors import (
     KitaruBackendError,
     KitaruDeploymentInputValuesError,
     KitaruRuntimeError,
+    KitaruStackIntegrationDependencyError,
     KitaruStateError,
     KitaruUsageError,
     classify_failure_origin,
@@ -99,6 +100,27 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
             yield
         finally:
             client.activate_stack(old_stack_id)
+
+
+def _preflight_active_stack_implementation_hydration(
+    *,
+    client_factory: Callable[[], Any] | None = None,
+) -> None:
+    """Verify that the active stack can be loaded as implementation objects."""
+    client = (client_factory or Client)()
+    try:
+        _ = client.active_stack
+    except ImportError as exc:
+        zenml_guidance = str(exc).strip()
+        message = (
+            "Cannot submit this Kitaru flow because the active stack could not "
+            "be loaded in this Python environment.\n\n"
+            "A stack integration dependency appears to be missing. Install the "
+            "missing ZenML integration or stack requirements, then retry."
+        )
+        if zenml_guidance:
+            message = f"{message}\n\nZenML guidance:\n\n{zenml_guidance}"
+        raise KitaruStackIntegrationDependencyError(message) from None
 
 
 def _register_pipeline_source_alias(
@@ -1130,6 +1152,7 @@ class _FlowDefinition:
         )
 
         with _temporary_active_stack(resolved_execution.stack):
+            _preflight_active_stack_implementation_hydration()
             deployment_metadata = _deployment_metadata_for_stack(
                 resolved_execution.stack
             )
