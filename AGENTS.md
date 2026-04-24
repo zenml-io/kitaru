@@ -136,6 +136,8 @@ For pull requests, use a clear human-readable title and include:
 
 Link related issues (for example `Fixes #123`) when applicable.
 
+Never include a "[Codex] " prefix to PR titles. Also all PR descriptions should include a "Reviewer Notes" H2 or H3 section which explains what they should take care to check out during their reviews (i.e. code highlights) and ideally it also includes a code snippet they can run (you can assume they have both the ability to run flows locally as well as against a Kubernetes remote stack) to reproduce either the fix or the error etc.
+
 ### Feature completion checklist
 
 When adding a new CLI command, MCP tool, or SDK feature:
