@@ -189,6 +189,49 @@ def test_replay_from_branch_leaf_skips_unrelated_branch() -> None:
     assert plan.steps_to_skip == {"a", "b", "c"}
 
 
+def test_checkpoint_override_fanout_reexecutes_consumer_branches() -> None:
+    """Override fan-out re-executes every direct consumer branch."""
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    step_a = _step(
+        name="a",
+        invocation_id="a",
+        started_at=t0,
+    )
+    step_b = _step(
+        name="b",
+        invocation_id="b",
+        started_at=t0 + timedelta(seconds=1),
+        upstream_steps=["a"],
+        inputs_v2={"a_input": [_input_spec("a", "output")]},
+    )
+    step_c = _step(
+        name="c",
+        invocation_id="c",
+        started_at=t0 + timedelta(seconds=2),
+        upstream_steps=["b"],
+        inputs_v2={"b_input": [_input_spec("b", "output")]},
+    )
+    step_d = _step(
+        name="d",
+        invocation_id="d",
+        started_at=t0 + timedelta(seconds=3),
+        upstream_steps=["a"],
+        inputs_v2={"a_input": [_input_spec("a", "output")]},
+    )
+
+    plan = build_replay_plan(
+        run=_run(step_a, step_b, step_c, step_d),
+        from_="d",
+        overrides={"checkpoint.a": "edited"},
+    )
+
+    assert plan.steps_to_skip == {"a"}
+    assert plan.step_input_overrides == {
+        "b": {"a_input": "edited"},
+        "d": {"a_input": "edited"},
+    }
+
+
 def test_dag_ordering_not_timestamp_ordering() -> None:
     """Steps should be ordered by DAG topology, not timestamps.
 
