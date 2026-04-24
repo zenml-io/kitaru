@@ -112,6 +112,19 @@ We built Kitaru around a different shape of work. An agent loop has expensive LL
   ]}
 />
 
+## How the two surfaces map
+
+| Concept | DBOS | Kitaru |
+|---|---|---|
+| Workflow boundary | `@DBOS.workflow()` | `@flow` |
+| Durable step | `@DBOS.step()` | `@checkpoint` (ordinary Python) |
+| State backend | Postgres, alongside your OLTP data | Your own S3 / GCS / Azure Blob |
+| LLM call | Inside a `@DBOS.step` with OTel instrumentation | `kitaru.llm()` with alias-resolved keys and per-checkpoint cost |
+| Pause / resume | `DBOS.send` / `DBOS.recv` messaging | `kitaru.wait()` with schema-validated input |
+| Cross-run state | Bring your own store | `kitaru.memory` with scopes |
+| Scheduling | `@DBOS.scheduled()` (cron) + `Queue` with concurrency + dedup | Stack scheduler, or periodic invocation at the call site |
+| Deployment | Library embedded in whatever Python app you already ship | Named, versioned deployments with tag routing |
+
 ## Code comparison
 
 <CodeCompare
@@ -183,16 +196,14 @@ def review_flow(topic: str) -> str:
 # from another process via DBOS.send.`}
 />
 
-<PullQuote
-  quote="If your durability problem is polyglot services against Postgres with a SOC 2 or HIPAA control plane on day one, DBOS is better-shaped for that workload. Be honest about which side you're on."
-/>
-
 ## Ready to try Kitaru?
 
-If your durability problem is shaped like a Python agent loop, Kitaru removes the glue layer you'd otherwise write on top of a general-purpose workflow engine.
+If your durability problem is polyglot services against Postgres with a SOC 2 or HIPAA control plane on day one, DBOS is better-shaped for that workload — be honest about which side you're on. If it's shaped like a Python agent loop (LLM calls, memory, artifacts, human/agent approval gates), Kitaru removes the glue layer you'd otherwise write on top of a general-purpose workflow engine.
 
-`pip install kitaru`, add `@flow` and `@checkpoint`, and run your first durable agent in minutes. Check [the docs](/docs) for how `@flow`, `@checkpoint`, `kitaru.llm()`, `wait()`, and replay compose.
+- Read [our documentation](/docs) and see how `@flow`, `@checkpoint`, `kitaru.llm()`, `wait()`, and artifact lineage compose
+- `pip install kitaru` and run your first durable agent in an afternoon
+- [Talk to our team](/get-started) if you want help mapping a DBOS workflow onto Kitaru primitives
 
 <div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get Started</a>
+  <a href="/get-started" class="btn-primary">Get started</a>
 </div>

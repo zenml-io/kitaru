@@ -118,7 +118,7 @@ def critique(docs: Docs) -> str:
   Kitaru deploys each flow as an immutable, auto-incrementing versioned snapshot. Consumers invoke by flow name using CLI, Python SDK, MCP, or a generated curl command pinned to a resolved version. Tag routing (`default`, `canary`, or your own exclusive tags) makes promotion and rollback a tag move, not a redeploy. Auth is workspace-scoped with no per-deployment tokens.
 </FeatureWithGraphic>
 
-## What makes Kitaru different
+## What makes Kitaru unique
 
 <ComparisonTable
   competitorLabel="LangGraph / Deep Agents"
@@ -137,6 +137,18 @@ def critique(docs: Docs) -> str:
     { feature: "Hosted control plane option", kitaru: false, competitor: true },
   ]}
 />
+
+## How the two surfaces map
+
+| Concept | LangGraph / Deep Agents | Kitaru |
+|---|---|---|
+| Execution model | Graph of nodes and edges with typed state | Ordinary Python with `@flow` + `@checkpoint` |
+| Durable unit | A node, persisted by the checkpointer between supersteps | A checkpoint boundary around any Python call |
+| Durability scope | Inside the LangGraph graph | Framework-agnostic — any harness inside a checkpoint |
+| Pause / resume | Graph pause/resume via checkpointer | `kitaru.wait()` |
+| Sandboxing | LangSmith Sandboxes (microVM, packaged) | `@checkpoint(runtime="isolated")` on your configured stack |
+| Deployment | LangSmith Deployment (packaged runtime + auth proxy + tracing) | `flow.deploy()` — immutable, versioned, tag-routed |
+| Control plane | Hosted by LangSmith (or their on-prem option) | Self-hosted Helm service, artifacts in your own bucket |
 
 ## Code comparison
 
@@ -194,23 +206,14 @@ app = graph.compile(checkpointer=MemorySaver())
 # routing / deployment / versioning via LangSmith.`}
 />
 
-## When LangGraph is the better pick
-
-If everyone on your team has standardized on LangGraph or Deep Agents, likes the graph model, and is moving onto LangSmith Deployment as the packaged runtime + platform, Kitaru adds less. Use what you have.
-
-## When Kitaru is the better pick
-
-- Multiple harnesses across teams, and you want a single durable runtime underneath all of them.
-- Self-hosted, on-prem, or regulated-industry constraints that rule out a hosted control plane.
-- You want durable execution that is a *primitive*, not a product your org has to adopt top-to-bottom.
-- You already have auth, observability, and secrets infrastructure and don&rsquo;t want a packaged runtime duplicating them.
-
 ## Ready to try Kitaru?
 
-- Read the [harness, runtime, platform](/docs/concepts/harness-runtime-platform) and [execution architecture](/docs/concepts/execution-architecture) docs for the full framing.
-- `pip install kitaru` and wrap your first agent with `@flow` and `@checkpoint` in an afternoon.
-- [Talk to the team](/get-started) if you&rsquo;re sizing up a move away from a hosted control plane.
+If everyone on your team has standardized on LangGraph or Deep Agents and you're moving onto LangSmith Deployment as the packaged runtime and platform, use what you have — Kitaru adds less. If multiple harnesses live across your teams, or a hosted control plane is not an option, Kitaru gives you one self-hosted durable runtime underneath all of them.
+
+- Read the [harness, runtime, platform](/docs/concepts/harness-runtime-platform) docs and see how `@flow` and `@checkpoint` wrap any harness
+- `pip install kitaru` and wrap your first agent with `@flow` and `@checkpoint` in an afternoon
+- [Talk to our team](/get-started) if you want help mapping a LangGraph or LangSmith setup onto Kitaru primitives
 
 <div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
+  <a href="/get-started" class="btn-primary">Get started</a>
 </div>

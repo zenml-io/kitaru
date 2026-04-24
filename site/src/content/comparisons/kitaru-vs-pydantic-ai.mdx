@@ -92,7 +92,7 @@ def review(case: dict) -> str:
   - **Self-hosted infrastructure.** The Kitaru server is a single Helm-deployed service. Artifacts and state live in your own S3 / GCS / Azure Blob bucket. No mandatory SaaS control plane.
 </FeatureWithGraphic>
 
-## What makes Kitaru different
+## What makes Kitaru unique
 
 <ComparisonTable
   competitorLabel="Pydantic AI"
@@ -111,6 +111,19 @@ def review(case: dict) -> str:
     { feature: "First-class adapter for the other", kitaru: true, competitor: false },
   ]}
 />
+
+## How the two surfaces map
+
+| Concept | Pydantic AI | Kitaru |
+|---|---|---|
+| Layer | Agent harness (how the agent thinks) | Durable runtime (how it runs over time and infra) |
+| Durable unit | — (not a durable runtime) | `@flow` + `@checkpoint` |
+| Composition | Standalone Pythonic agent | Pydantic AI agent wrapped by `KitaruAgent` adapter inside a `@checkpoint` |
+| Crash recovery | — | Replay from the last good checkpoint, cached work reused |
+| Long wait on a human | Blocking `input()` / your own polling | `kitaru.wait()` (compute released, survives crashes) |
+| Artifacts | — | Typed, versioned artifacts per checkpoint |
+| Versioning | — | Named versioned deployments with tag routing |
+| Deployment | Whatever Python service you wrap the agent in | Stack-based deploy to Kubernetes, AWS, GCP, Azure |
 
 ## Code comparison
 
@@ -163,23 +176,14 @@ def review_flow(case: dict) -> str:
 review_flow(case={"id": "C-001"})`}
 />
 
-## When to reach for Kitaru
-
-- The agent is becoming a **production workload**, not a notebook script.
-- A run can **take minutes to hours**, and you can&rsquo;t afford to re-run it on every crash.
-- A step sometimes needs a **human or another agent** to say yes, and you don&rsquo;t want a process sitting around paying for CPU while it waits.
-- You need to **version, roll out, and roll back** deployments without redeploying infrastructure.
-- You want **artifact-level audit trails**, not just log lines.
-- You need **self-hosted execution** on your own Kubernetes / cloud job backend.
-
-If none of that applies, Pydantic AI on its own is the right answer.
-
 ## Ready to try Kitaru?
 
-- Read the [Pydantic AI adapter docs](/docs/guides/pydantic-ai-adapter) for the composition pattern.
-- See the [harness, runtime, platform](/docs/concepts/harness-runtime-platform) page for the layer split.
-- `pip install kitaru` and wrap an existing Pydantic AI agent in `@flow` in an afternoon.
+If the Pydantic AI agent you wrote is still a notebook script or a short-lived interactive tool, Pydantic AI on its own is the right answer. If it's becoming a production workload — long-running, crash-surviving, approved by a human hours later, deployed on your own cloud — the durability layer is the stuff Kitaru ships in the box.
+
+- Read the [Pydantic AI adapter docs](/docs/guides/pydantic-ai-adapter) and see how `@flow` and `@checkpoint` wrap an existing agent
+- `pip install kitaru` and wrap your first Pydantic AI agent in an afternoon
+- [Talk to our team](/get-started) if you want help taking a Pydantic AI prototype to a production deployment
 
 <div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
+  <a href="/get-started" class="btn-primary">Get started</a>
 </div>

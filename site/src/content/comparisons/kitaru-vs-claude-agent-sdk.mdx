@@ -102,6 +102,18 @@ Kitaru captures artifacts from every `@checkpoint` automatically and links them 
   ]}
 />
 
+## How the two surfaces map
+
+| Concept | Claude Agent SDK | Kitaru |
+|---|---|---|
+| Execution boundary | Agent session / SDK loop | `@flow` + `@checkpoint` |
+| Durability unit | Session history on disk | Versioned artifacts per checkpoint |
+| Resumption | Rewinds file edits from Write / Edit / NotebookEdit | Replay from a specific checkpoint, cached work above it reused |
+| Human-in-the-loop | Tool approval prompts in the session | `kitaru.wait()` (compute released, survives crashes) |
+| Cross-run memory | Session-scoped conversation history | `kitaru.memory` with `namespace`, `flow`, or `execution` scopes |
+| Model access | Anthropic / Bedrock / Vertex / Azure AI Foundry paths | `kitaru.llm()` with alias-resolved providers + secrets |
+| Deployment | Container patterns you own and operate | Stack-based deploy to Kubernetes, AWS, GCP, Azure |
+
 ## Code comparison
 
 <CodeCompare
@@ -165,5 +177,5 @@ If you are running agents locally or in short interactive sessions, stick with w
 - [Talk to the team](/get-started) if you want help mapping an Agent SDK prototype to a production deployment
 
 <div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
+  <a href="/get-started" class="btn-primary">Get started</a>
 </div>
