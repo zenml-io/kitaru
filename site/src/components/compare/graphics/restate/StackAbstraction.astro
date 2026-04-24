@@ -1,0 +1,185 @@
+---
+---
+
+<figure class="fig">
+  <div class="top">
+    <div class="flow">
+      <span class="mono flow-name">review_flow</span>
+      <span class="flow-sub">one `@flow` decorator on your Python function</span>
+    </div>
+    <div class="switch">
+      <span class="switch-label">stack config</span>
+      <span class="switch-hint">switch backend without changing flow code</span>
+    </div>
+  </div>
+
+  <svg class="fan" viewBox="0 0 100 70" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M50 0 L50 18 Q50 30 35 30 L16 30 Q8 30 8 42 L8 70" />
+    <path d="M50 0 L50 18 Q50 30 40 30 L32 30 Q26 30 26 42 L26 70" />
+    <path d="M50 0 L50 18 Q50 30 60 30 L68 30 Q74 30 74 42 L74 70" />
+    <path d="M50 0 L50 18 Q50 30 65 30 L84 30 Q92 30 92 42 L92 70" />
+  </svg>
+
+  <div class="targets">
+    <div class="target">
+      <span class="t-label">Kubernetes</span>
+      <span class="t-sub">any cluster</span>
+    </div>
+    <div class="target">
+      <span class="t-label">AWS</span>
+      <span class="t-sub">S3 + IAM + EKS</span>
+    </div>
+    <div class="target">
+      <span class="t-label">GCP</span>
+      <span class="t-sub">GCS + Vertex AI</span>
+    </div>
+    <div class="target">
+      <span class="t-label">Azure</span>
+      <span class="t-sub">Blob + AzureML</span>
+    </div>
+  </div>
+
+  <div class="contrast">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 6 L20 6 M4 12 L20 12 M4 18 L20 18" />
+    </svg>
+    <span><strong>Restate:</strong> <code>restate-server</code> self-hosts on any of these; handlers deploy however you already deploy backend services. The runtime does not abstract the cloud backend for you.</span>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  .top {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 2px;
+  }
+  .flow {
+    border: 1px solid var(--color-accent);
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: var(--color-accent-light);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .flow-name {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+  .flow-sub {
+    font-size: 11px;
+    color: var(--color-accent-deep);
+  }
+  .switch {
+    border: 1px dashed var(--color-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .switch-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .switch-hint {
+    font-size: 11px;
+    color: var(--color-secondary);
+    font-style: italic;
+  }
+
+  .fan {
+    display: block;
+    width: 100%;
+    height: 50px;
+    margin: 0 0 4px;
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 1.2;
+    stroke-linecap: round;
+  }
+  .fan path { vector-effect: non-scaling-stroke; }
+
+  .targets {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .target {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px 10px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-surface-warm);
+    align-items: center;
+    text-align: center;
+  }
+  .t-label {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .t-sub {
+    font-size: 10px;
+    color: var(--color-muted);
+  }
+
+  .contrast {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    background: var(--color-surface-warm);
+    border-left: 2px solid var(--color-muted);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+  .contrast svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    fill: none;
+    stroke: var(--color-muted);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    opacity: 0.6;
+  }
+  .contrast code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--color-primary);
+    background: var(--color-surface);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .contrast strong {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  @media (max-width: 560px) {
+    .top { grid-template-columns: 1fr; }
+    .targets { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>

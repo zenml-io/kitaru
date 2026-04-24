@@ -1,0 +1,175 @@
+---
+---
+
+<figure class="fig">
+  <div class="layer layer--kitaru">
+    <div class="layer-head">
+      <span class="layer-label">Kitaru · runtime</span>
+      <span class="layer-sub">Adds on top — no agent rewrite</span>
+    </div>
+    <div class="caps">
+      <div class="cap">
+        <span class="mono ckey">durable execution</span>
+        <span class="cval">crash &rarr; replay · cached checkpoints, no re-burn</span>
+      </div>
+      <div class="cap">
+        <span class="mono ckey">kitaru.wait()</span>
+        <span class="cval">pause, release compute, resume hours later</span>
+      </div>
+      <div class="cap">
+        <span class="mono ckey">flow.deploy()</span>
+        <span class="cval">immutable versioned snapshots · tag routing</span>
+      </div>
+      <div class="cap">
+        <span class="mono ckey">artifact lineage</span>
+        <span class="cval">typed artifacts per checkpoint · cross-run diff</span>
+      </div>
+      <div class="cap">
+        <span class="mono ckey">@checkpoint(runtime="isolated")</span>
+        <span class="cval">per-step pod / job on K8s, AWS, GCP, Azure</span>
+      </div>
+      <div class="cap">
+        <span class="mono ckey">self-hosted</span>
+        <span class="cval">Helm service · artifacts in your own bucket</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector" aria-hidden="true">
+    <div class="connector-pill">
+      <span class="connector-arrow">&darr;</span>
+      <span class="connector-label">wraps</span>
+    </div>
+  </div>
+
+  <div class="layer layer--competitor">
+    <div class="layer-head">
+      <span class="layer-label layer-label--muted">Pydantic AI · harness</span>
+      <span class="layer-sub">Your existing agent, unchanged</span>
+    </div>
+    <div class="adapter">
+      <span class="mono adapter-key">KitaruAgent(Agent(...))</span>
+      <span class="adapter-sub">first-class adapter &middot; model + tool calls as child events</span>
+    </div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+  }
+
+  .layer {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+  }
+  .layer--kitaru {
+    border-color: var(--color-accent);
+    background: var(--color-accent-light);
+  }
+  .layer--competitor {
+    background: var(--color-surface-warm);
+  }
+
+  .layer-head {
+    margin-bottom: 12px;
+  }
+  .layer-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 4px;
+  }
+  .layer-label--muted { color: var(--color-muted); }
+  .layer-sub {
+    display: block;
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .caps {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .cap {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 9px 11px;
+    border: 1px solid var(--color-accent);
+    border-radius: 8px;
+    background: var(--color-surface);
+  }
+  .ckey {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+  .cval {
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: var(--color-secondary);
+  }
+
+  .connector {
+    display: flex;
+    justify-content: center;
+  }
+  .connector-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 12px;
+    border: 1px solid var(--color-accent);
+    border-radius: 999px;
+    background: var(--color-accent-light);
+  }
+  .connector-arrow {
+    font-size: 13px;
+    line-height: 1;
+    color: var(--color-accent);
+    font-weight: 700;
+  }
+  .connector-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+  }
+
+  .adapter {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+    background: var(--color-surface);
+  }
+  .adapter-key {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .adapter-sub {
+    font-size: 11px;
+    color: var(--color-secondary);
+  }
+
+  @media (max-width: 560px) {
+    .caps { grid-template-columns: 1fr; }
+  }
+</style>

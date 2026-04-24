@@ -53,12 +53,13 @@ const { kitaru, competitor, competitorLabel = 'Alternative' } = Astro.props;
     gap: 20px;
   }
   /* Both cards share identical surface treatment — differentiation comes from the
-     pill tag color only, so readers perceive the comparison as even-handed. */
+     pill tag color only, so readers perceive the comparison as even-handed.
+     Warm cream bg (--color-bg) pops against the near-white page. */
   .when-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 16px;
-    padding: 28px;
+    background: var(--color-bg);
+    border: none;
+    border-radius: 8px;
+    padding: 32px;
   }
   .when-card-head {
     display: flex;

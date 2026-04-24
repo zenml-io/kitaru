@@ -1,0 +1,157 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">Pydantic AI · harness</span>
+      <span class="panel-sub">How the agent thinks</span>
+    </div>
+    <div class="quote">
+      <div class="quote-mark" aria-hidden="true">?</div>
+      <div class="quote-text">
+        How do I write a typed, ergonomic agent loop with first-class tools and structured outputs?
+      </div>
+    </div>
+    <div class="concerns">
+      <span class="chip">typed I/O</span>
+      <span class="chip">tool calls</span>
+      <span class="chip">structured outputs</span>
+      <span class="chip">streaming</span>
+    </div>
+    <div class="foot">Scope: a single agent invocation.</div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru · runtime</span>
+      <span class="panel-sub">How the agent runs over time and infra</span>
+    </div>
+    <div class="quote quote--accent">
+      <div class="quote-mark quote-mark--accent" aria-hidden="true">?</div>
+      <div class="quote-text">
+        Once this agent exists, how does it survive crashes, resume after a human approves, replay from failure, version its deployments, and plug into my infra?
+      </div>
+    </div>
+    <div class="concerns">
+      <span class="chip chip--accent">durability</span>
+      <span class="chip chip--accent">replay</span>
+      <span class="chip chip--accent">wait / resume</span>
+      <span class="chip chip--accent">versioning</span>
+      <span class="chip chip--accent">placement</span>
+    </div>
+    <div class="foot foot--accent">Scope: a long-lived production workload.</div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 14px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    display: block;
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .quote {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    background: var(--color-surface);
+    margin-bottom: 10px;
+  }
+  .quote--accent {
+    border-color: var(--color-accent);
+    background: var(--color-accent-light);
+  }
+  .quote-mark {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--color-muted);
+    color: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .quote-mark--accent { background: var(--color-accent); }
+  .quote-text {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--color-primary);
+    font-style: italic;
+  }
+
+  .concerns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 9px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 999px;
+    background: var(--color-surface-warm);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-secondary);
+  }
+  .chip--accent {
+    border-color: var(--color-accent);
+    background: var(--color-accent-light);
+    color: var(--color-accent-deep);
+  }
+
+  .foot {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+  .foot--accent {
+    color: var(--color-accent-deep);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+  }
+</style>

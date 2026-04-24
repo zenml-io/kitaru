@@ -108,6 +108,176 @@ const {
   <img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=ed00dfa6-5202-4c95-a38f-d8c066bdcc71" alt="" aria-hidden="true" width="1" height="1" style="position:absolute" />
   <a href="#main-content" class="skip-link">Skip to content</a>
   <slot />
+
+  <!-- DEBUG: light/dark preview toggle. Remove before shipping to production. -->
+  <button id="debug-theme-toggle" type="button" aria-label="Toggle light/dark preview">
+    <svg class="sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    <svg class="moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
+  <script is:inline>
+    (function () {
+      const root = document.documentElement;
+      const stored = localStorage.getItem('debug-theme');
+      if (stored === 'dark') root.classList.add('debug-dark');
+      const btn = document.getElementById('debug-theme-toggle');
+      btn?.addEventListener('click', () => {
+        const next = root.classList.toggle('debug-dark');
+        localStorage.setItem('debug-theme', next ? 'dark' : 'light');
+      });
+    })();
+  </script>
+  <style is:global>
+    /* DEBUG-ONLY dark preview. Swaps the core tokens so designers can sanity-
+       check sections in dark mode without a full theming pass. Remove with the
+       toggle button above when design work wraps. */
+    #debug-theme-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 9999;
+      width: 38px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-primary);
+      cursor: pointer;
+      box-shadow: 0 2px 8px oklch(0 0 0 / 0.08);
+    }
+    #debug-theme-toggle:hover { border-color: var(--color-accent); }
+    #debug-theme-toggle .moon { display: none; }
+    .debug-dark #debug-theme-toggle .sun { display: none; }
+    .debug-dark #debug-theme-toggle .moon { display: block; }
+
+    html.debug-dark {
+      color-scheme: dark;
+      /* Token scale is inverted: body is the darkest layer, --color-bg is the
+         "card" layer (one step up), --color-surface is the "raised" layer. This
+         mirrors the light-mode intent where cards use var(--color-bg) against
+         a near-white page — swapping the whole stack keeps the visual
+         hierarchy intact. */
+      --color-page-bg: oklch(0.13 0.012 60);
+      --color-bg: oklch(0.2 0.012 60);
+      --color-surface: oklch(0.24 0.012 60);
+      --color-surface-warm: oklch(0.26 0.015 70);
+      --color-surface-subtle: oklch(0.22 0.01 60);
+      --color-primary: oklch(0.95 0.01 70);
+      --color-secondary: oklch(0.78 0.01 70);
+      --color-muted: oklch(0.62 0.01 70);
+      --color-border: oklch(0.32 0.015 65);
+      --color-border-light: oklch(0.28 0.012 65);
+      --color-border-accent: oklch(0.45 0.08 60);
+      --color-accent-light: oklch(0.32 0.06 55);
+    }
+    html.debug-dark body {
+      background: var(--color-page-bg);
+      color: var(--color-primary);
+    }
+
+    /* Override page/region backgrounds that use hardcoded light values. The
+       compare page's scoped style is specificity (0,2,1) via Astro's data-astro-cid
+       attribute; we match that with html.debug-dark so the cascade picks the
+       later rule. */
+    html.debug-dark .compare-page,
+    html.debug-dark main {
+      background: var(--color-page-bg);
+    }
+
+    /* Nav has a hardcoded cream-white sticky bg on .nav.scrolled — swap to
+       translucent dark. Use !important because the scoped style has equal or
+       higher specificity after Astro's data-astro-cid attribute is added. */
+    html.debug-dark .nav,
+    html.debug-dark .nav.scrolled {
+      background: oklch(0.2 0.012 60 / 0.92) !important;
+      border-bottom-color: var(--color-border) !important;
+    }
+    html.debug-dark .nav-mobile-menu {
+      background: var(--color-bg) !important;
+      border-color: var(--color-border) !important;
+    }
+
+    /* CTA sections (homepage .cta-section + comparison .ccta-section) use
+       --color-primary as bg — in light mode that's the dark contrast band. In
+       dark mode --color-primary flips to near-white which inverts the intent.
+       Lock the whole section (and its ::before radial overlay) to extra-dark. */
+    html.debug-dark .cta-section,
+    html.debug-dark .ccta-section {
+      background: oklch(0.08 0.015 60) !important;
+      color: oklch(0.95 0.01 70);
+    }
+    /* The ::before pseudo-element paints a radial gradient of --color-primary
+       over the section. In dark mode that becomes a huge cream glow — kill it
+       or swap it to a dark radial so the mesh blobs stay the only highlight. */
+    html.debug-dark .cta-section::before,
+    html.debug-dark .ccta-section::before {
+      background: radial-gradient(ellipse 70% 80% at 50% 50%, oklch(0.08 0.015 60) 0%, transparent 100%) !important;
+    }
+
+    /* .btn-primary uses --color-primary bg + pure-white text. In dark mode bg
+       flips to near-white, rendering the button invisible. Swap to the accent
+       so the primary CTA stays visible and on-brand. */
+    html.debug-dark .btn-primary {
+      background: var(--color-accent-darker) !important;
+      color: oklch(1 0 0) !important;
+    }
+
+    /* Homepage Features section has a fixed-image cream bg loaded from R2 —
+       hide the image in dark preview so the dark body bg shows through. */
+    html.debug-dark .features-section {
+      background: var(--color-bg) !important;
+    }
+    html.debug-dark .features-section.bg-loaded {
+      background-image: none !important;
+    }
+
+    /* Competitor logos are dark-stroke SVGs designed for light backgrounds —
+       invert them in dark mode so they read against the dark surface. */
+    html.debug-dark img[src^="/compare/"],
+    html.debug-dark img[src*="compare/dbos"],
+    html.debug-dark img[src*="compare/temporal"],
+    html.debug-dark img[src*="compare/restate"],
+    html.debug-dark img[src*="compare/pydantic-ai"],
+    html.debug-dark img[src*="compare/langgraph"],
+    html.debug-dark img[src*="compare/claude-agent-sdk"] {
+      filter: invert(1) hue-rotate(180deg);
+    }
+
+    /* Footer: ensure tokens show through any hardcoded light bg. */
+    html.debug-dark .footer,
+    html.debug-dark footer {
+      background: var(--color-bg);
+      color: var(--color-secondary);
+      border-top: 1px solid var(--color-border);
+    }
+
+    /* Tables: surface-warm header + surface rows flip cleanly, but force the
+       text color so any inline inheritance from parent wrappers doesn't leak. */
+    html.debug-dark .compare-body-inner table,
+    html.debug-dark .compare-body-inner td,
+    html.debug-dark .compare-body-inner th {
+      color: var(--color-secondary);
+    }
+    html.debug-dark .compare-body-inner th,
+    html.debug-dark .compare-body-inner td:first-child {
+      color: var(--color-primary);
+    }
+
+    /* WhenToUseEach / compare cards use var(--color-bg) + hardcoded white
+       text colors inside .when-card--kitaru — the oklch(1 0 0) would clash
+       with the already-dark card bg in dark mode. Keep as-is; accent pill
+       (--color-accent-darker) is orange and reads fine. */
+
+    /* Any section that layers a hardcoded oklch(0.985 0.003 90/X) background
+       (e.g. testimonial cards, partner logos) — broad catch-all that fades
+       them to surface-warm in dark. */
+    html.debug-dark [style*="oklch(0.985"] { background: var(--color-surface-warm) !important; }
+
+    /* CodeCompare / Shiki syntax theme stays light (acceptable for debug). */
+  </style>
+
   <script src="../scripts/scroll-reveal.ts"></script>
   <script is:inline>
     console.log(

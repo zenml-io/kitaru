@@ -1,4 +1,9 @@
 ---
+interface CompetitorOption {
+  slug: string;
+  competitor: string;
+  competitorLogo?: string;
+}
 interface Props {
   title: string;
   shortTitle?: string;
@@ -6,8 +11,20 @@ interface Props {
   competitor: string;
   competitorLogo?: string;
   competitorTagline?: string;
+  competitorOptions?: CompetitorOption[];
+  currentSlug?: string;
 }
-const { title, shortTitle, description, competitor, competitorLogo, competitorTagline } = Astro.props;
+const {
+  title,
+  shortTitle,
+  description,
+  competitor,
+  competitorLogo,
+  competitorTagline,
+  competitorOptions = [],
+  currentSlug,
+} = Astro.props;
+const hasOptions = competitorOptions.length > 0;
 ---
 
 <header class="chero" id="chero">
@@ -19,12 +36,9 @@ const { title, shortTitle, description, competitor, competitorLogo, competitorTa
   </div>
 
   <div class="chero-inner">
-    <!-- Pill badge eyebrow -->
+    <!-- Eyebrow -->
     <div class="chero-eyebrow-wrap" data-reveal>
-      <span class="pill-badge">
-        <span aria-hidden="true"><span class="pulse-dot"></span></span>
-        Compare
-      </span>
+      <span class="pill-badge">Compare</span>
     </div>
 
     <!-- Logo row -->
@@ -38,14 +52,91 @@ const { title, shortTitle, description, competitor, competitorLogo, competitorTa
 
       <span class="chero-vs" aria-label="versus">vs</span>
 
-      <span class="chero-chip">
-        {competitorLogo ? (
-          <img src={competitorLogo} alt={`${competitor} logo`} class="chero-chip-mark chero-chip-img" />
-        ) : (
-          <span class="chero-chip-circle" aria-hidden="true">{competitor.charAt(0)}</span>
-        )}
-        <span class="chero-chip-name">{competitor}</span>
-      </span>
+      {hasOptions ? (
+        <div class="chero-chip-dd" data-chero-dd>
+          <button
+            type="button"
+            id="chero-competitor-btn"
+            class="chero-chip chero-chip-trigger"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="chero-competitor-menu"
+            aria-label={`Switch comparison. Currently ${competitor}.`}
+            data-chero-trigger
+          >
+            {competitorLogo ? (
+              <img src={competitorLogo} alt="" class="chero-chip-mark chero-chip-img" />
+            ) : (
+              <span class="chero-chip-circle" aria-hidden="true">{competitor.charAt(0)}</span>
+            )}
+            <span class="chero-chip-name">{competitor}</span>
+            <svg
+              class="chero-chip-chevron"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          <ul
+            id="chero-competitor-menu"
+            class="chero-chip-menu"
+            role="menu"
+            aria-labelledby="chero-competitor-btn"
+            hidden
+            data-chero-menu
+          >
+            {competitorOptions.map((opt) => (
+              <li role="none">
+                <a
+                  href={`/compare/${opt.slug}`}
+                  role="menuitem"
+                  class="chero-chip-menu-item"
+                  aria-current={opt.slug === currentSlug ? 'page' : undefined}
+                >
+                  {opt.competitorLogo ? (
+                    <img src={opt.competitorLogo} alt="" class="chero-chip-menu-logo" />
+                  ) : (
+                    <span class="chero-chip-menu-avatar" aria-hidden="true">{opt.competitor.charAt(0)}</span>
+                  )}
+                  <span class="chero-chip-menu-name">{opt.competitor}</span>
+                  <svg
+                    class="chero-chip-menu-caret"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="9 6 15 12 9 18" />
+                  </svg>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <span class="chero-chip">
+          {competitorLogo ? (
+            <img src={competitorLogo} alt={`${competitor} logo`} class="chero-chip-mark chero-chip-img" />
+          ) : (
+            <span class="chero-chip-circle" aria-hidden="true">{competitor.charAt(0)}</span>
+          )}
+          <span class="chero-chip-name">{competitor}</span>
+        </span>
+      )}
     </div>
 
     <!-- Optional competitor tagline -->
@@ -180,9 +271,27 @@ const { title, shortTitle, description, competitor, competitorLogo, competitorTa
   .chero-eyebrow-wrap {
     margin-bottom: 28px;
   }
+  /* Scoped override of the shared .pill-badge inside the compare hero:
+     no background/border, primary color, all caps, JetBrains Mono. */
+  .chero-eyebrow-wrap .pill-badge {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--color-accent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
 
   /* ─── Logo row ─── */
+  /* Positioned + elevated so the competitor dropdown menu stacks above the
+     later-painted .chero-title, which data-reveal promotes to its own
+     stacking context via transform. */
   .chero-logos {
+    position: relative;
+    z-index: 5;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -202,6 +311,133 @@ const { title, shortTitle, description, competitor, competitorLogo, competitorTa
     font-size: 20px;
     font-weight: 600;
     color: var(--color-primary);
+  }
+
+  /* ─── Competitor chip as a dropdown trigger ─── */
+  /* The trigger inherits the static .chero-chip look exactly. We only add:
+     - cursor + button reset
+     - chevron icon with rotation on open
+     - subtle hover/focus state to hint interactivity */
+  .chero-chip-dd {
+    position: relative;
+    display: inline-block;
+  }
+
+  button.chero-chip-trigger {
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  }
+
+  .chero-chip-trigger:hover {
+    border-color: oklch(0.65 0.16 45 / 0.4);
+  }
+
+  .chero-chip-trigger:focus-visible {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring-accent);
+  }
+
+  .chero-chip-chevron {
+    margin-left: 2px;
+    color: var(--color-muted);
+    transition: transform 0.2s ease, color 0.2s;
+    flex-shrink: 0;
+  }
+
+  .chero-chip-trigger[aria-expanded="true"] .chero-chip-chevron {
+    transform: rotate(180deg);
+    color: var(--color-accent);
+  }
+
+  /* ─── Dropdown menu ─── */
+  .chero-chip-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 240px;
+    margin: 0;
+    padding: 6px;
+    list-style: none;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    box-shadow: 0 20px 40px -16px oklch(0 0 0 / 0.18), 0 2px 6px -2px oklch(0 0 0 / 0.08);
+    z-index: 20;
+    text-align: left;
+    animation: cheroMenuIn 0.14s ease-out;
+  }
+
+  .chero-chip-menu[hidden] {
+    display: none;
+  }
+
+  @keyframes cheroMenuIn {
+    from { opacity: 0; transform: translate(-50%, -4px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  .chero-chip-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .chero-chip-menu-item:hover,
+  .chero-chip-menu-item:focus-visible {
+    background: var(--color-surface-warm);
+    outline: none;
+  }
+
+  .chero-chip-menu-item[aria-current="page"] {
+    color: var(--color-accent);
+  }
+
+  .chero-chip-menu-logo {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+
+  .chero-chip-menu-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--color-accent-darker);
+    color: oklch(1 0 0);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .chero-chip-menu-name {
+    flex: 1;
+    white-space: nowrap;
+  }
+
+  .chero-chip-menu-caret {
+    color: var(--color-muted);
+    flex-shrink: 0;
+    transition: transform 0.15s, color 0.15s;
+  }
+
+  .chero-chip-menu-item:hover .chero-chip-menu-caret,
+  .chero-chip-menu-item:focus-visible .chero-chip-menu-caret {
+    transform: translateX(2px);
+    color: var(--color-accent);
   }
 
   .chero-chip-mark {
@@ -233,11 +469,13 @@ const { title, shortTitle, description, competitor, competitorLogo, competitorTa
     /* inherits chip font-size + weight */
   }
 
-  /* DM Serif Display italic "vs" */
+  /* Lowercase "vs" separator between the logo chips */
   .chero-vs {
-    font-family: 'DM Serif Display', serif;
-    font-style: italic;
-    font-size: 26px;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
     color: var(--color-muted);
     user-select: none;
   }
@@ -402,6 +640,75 @@ const { title, shortTitle, description, competitor, competitorLogo, competitorTa
   // ─── Copy-to-clipboard for ComparisonHero install chip ───
   import { copyToClipboard } from '../../scripts/clipboard';
 
+  // ─── Competitor dropdown ───
+  const ddRoot = document.querySelector<HTMLElement>('#chero [data-chero-dd]');
+  const ddTrigger = ddRoot?.querySelector<HTMLButtonElement>('[data-chero-trigger]');
+  const ddMenu = ddRoot?.querySelector<HTMLElement>('[data-chero-menu]');
+
+  function openMenu() {
+    if (!ddTrigger || !ddMenu) return;
+    ddMenu.removeAttribute('hidden');
+    ddTrigger.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeMenu(restoreFocus = false) {
+    if (!ddTrigger || !ddMenu) return;
+    ddMenu.setAttribute('hidden', '');
+    ddTrigger.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) ddTrigger.focus();
+  }
+
+  ddTrigger?.addEventListener('click', () => {
+    const open = ddTrigger.getAttribute('aria-expanded') === 'true';
+    if (open) closeMenu(); else openMenu();
+  });
+
+  // Keyboard: ArrowDown on trigger opens + focuses first item
+  ddTrigger?.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      const open = ddTrigger.getAttribute('aria-expanded') === 'true';
+      if (!open) {
+        e.preventDefault();
+        openMenu();
+        ddMenu?.querySelector<HTMLElement>('a[role="menuitem"]')?.focus();
+      }
+    }
+  });
+
+  // Arrow key navigation within the menu
+  ddMenu?.addEventListener('keydown', (e) => {
+    const items = Array.from(ddMenu.querySelectorAll<HTMLElement>('a[role="menuitem"]'));
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      items[(idx + 1) % items.length].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(idx - 1 + items.length) % items.length].focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0].focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    }
+  });
+
+  // Esc closes and restores focus
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && ddTrigger?.getAttribute('aria-expanded') === 'true') {
+      closeMenu(true);
+    }
+  });
+
+  // Click outside closes
+  document.addEventListener('pointerdown', (e) => {
+    if (!ddRoot || ddTrigger?.getAttribute('aria-expanded') !== 'true') return;
+    if (!ddRoot.contains(e.target as Node)) closeMenu();
+  });
+
+  // ─── Copy-to-clipboard ───
   document.querySelectorAll<HTMLButtonElement>('#chero .chero-copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const text = btn.dataset.copy ?? '';
