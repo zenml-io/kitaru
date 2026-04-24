@@ -114,7 +114,40 @@ In JSON mode the equivalent terminal information is emitted as a `terminal`
 event line. When execution is waiting for input, follow mode emits a waiting
 banner in text mode or a `waiting` event in JSON mode.
 
-## Python SDK example
+## SDK wait streaming
+
+When you start a flow from Python and then wait for it, Kitaru streams live
+backend step log lines by default:
+
+```python
+handle = my_flow.run(topic="renewable energy")
+result = handle.wait()  # streams live checkpoint logs while waiting
+```
+
+This uses the same follow loop as `kitaru executions logs --follow`, including
+polling the backend, deduplicating already-seen log entries, and stopping when
+the execution reaches a terminal state. If runtime log retrieval is not
+available for the current backend, `wait()` falls back to the older silent
+status-polling behavior and still returns or raises from the final execution
+status.
+
+To keep the previous silent behavior explicitly, opt out:
+
+```python
+result = handle.wait(stream_logs=False)
+```
+
+You can also receive raw log entries in your own callback instead of printing
+plain messages to stdout:
+
+```python
+def collect(entry):
+    print(entry.timestamp, entry.checkpoint_name, entry.message)
+
+result = handle.wait(log_sink=collect)
+```
+
+## Python SDK log retrieval example
 
 ```python
 from kitaru import KitaruClient

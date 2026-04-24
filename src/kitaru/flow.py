@@ -11,7 +11,7 @@ import logging
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from functools import update_wrapper, wraps
@@ -28,8 +28,9 @@ from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
 from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
+from kitaru._client._follow import follow_execution_logs
 from kitaru._client._mappers import _to_public_status
-from kitaru._client._models import ExecutionStatus
+from kitaru._client._models import ExecutionStatus, LogEntry
 from kitaru._interface_deployments import (
     Deployment,
     ensure_stack_is_server_runnable,
@@ -62,6 +63,8 @@ from kitaru.errors import (
     FailureOrigin,
     KitaruBackendError,
     KitaruDeploymentInputValuesError,
+    KitaruFeatureNotAvailableError,
+    KitaruLogRetrievalError,
     KitaruRuntimeError,
     KitaruStateError,
     KitaruUsageError,
@@ -596,6 +599,33 @@ def _raise_for_unsuccessful_run(
     )
 
 
+class _SDKWaitLogSink:
+    """Minimal SDK log sink used by ``FlowHandle.wait(stream_logs=True)``."""
+
+    def __init__(self, log_sink: Callable[[LogEntry], None] | None) -> None:
+        self._log_sink = log_sink
+
+    def emit_logs(self, entries: Sequence[LogEntry]) -> None:
+        """Emit new log entries to the configured callback or stdout."""
+        for entry in entries:
+            if self._log_sink is not None:
+                self._log_sink(entry)
+            else:
+                print(entry.message, flush=True)
+
+    def emit_waiting(self, wait: object | None) -> None:
+        """SDK wait streaming intentionally emits runtime log lines only."""
+
+    def emit_terminal(
+        self,
+        execution: object,
+        *,
+        message: str,
+        recovery_command: str | None,
+    ) -> None:
+        """SDK wait streaming intentionally emits runtime log lines only."""
+
+
 class FlowHandle:
     """Handle for a running or finished flow execution."""
 
@@ -668,8 +698,31 @@ class FlowHandle:
 
         track(AnalyticsEvent.FLOW_TERMINAL, metadata)
 
-    def wait(self) -> Any:
+    def wait(
+        self,
+        *,
+        stream_logs: bool = True,
+        log_source: str = "step",
+        log_checkpoint: str | None = None,
+        log_sink: Callable[[LogEntry], None] | None = None,
+        log_interval: float = 1.0,
+    ) -> Any:
         """Block until execution finishes and return its result.
+
+        By default, ``wait()`` streams live backend step log lines while it
+        waits. Pass ``stream_logs=False`` to keep the previous silent polling
+        behavior. Log streaming is best-effort: if runtime logs are unavailable
+        for the current backend, waiting falls back to the original poll-only
+        path and still returns or raises based on the final execution status.
+
+        Args:
+            stream_logs: Whether to stream live runtime log lines while waiting.
+            log_source: Runtime log source to follow (``"step"`` or ``"runner"``).
+            log_checkpoint: Optional checkpoint/function name to filter logs by.
+            log_sink: Optional callback invoked once for each new log entry.
+                Defaults to printing ``entry.message`` to stdout with flushing.
+            log_interval: Polling interval in seconds for streamed logs and
+                fallback status checks.
 
         Raises:
             KitaruExecutionError: If the run finishes unsuccessfully.
@@ -678,16 +731,81 @@ class FlowHandle:
         Returns:
             The flow return value.
         """
+        if log_interval <= 0:
+            raise KitaruUsageError("`log_interval` must be > 0.")
+
+        if stream_logs and self._try_stream_logs_until_terminal(
+            log_source=log_source,
+            log_checkpoint=log_checkpoint,
+            log_sink=log_sink,
+            log_interval=log_interval,
+        ):
+            run = self._refresh()
+            if run.status.is_finished:
+                return self._finish_terminal_run(run)
+
+        return self._wait_without_log_streaming(interval=log_interval)
+
+    def _wait_without_log_streaming(self, *, interval: float) -> Any:
+        """Poll the backend until this execution reaches terminal status."""
         while True:
             run = self._refresh()
             if run.status.is_finished:
-                if not run.status.is_successful:
-                    origin = _safe_classify_run_failure(run)
-                    self._track_terminal_once(run, failure_origin=origin)
-                    _raise_for_unsuccessful_run(run, failure_origin=origin)
-                self._track_terminal_once(run)
-                return _extract_flow_result(run)
-            time.sleep(1)
+                return self._finish_terminal_run(run)
+            time.sleep(interval)
+
+    def _finish_terminal_run(self, run: PipelineRunResponse) -> Any:
+        """Return the result or raise the existing typed terminal error."""
+        if not run.status.is_successful:
+            origin = _safe_classify_run_failure(run)
+            self._track_terminal_once(run, failure_origin=origin)
+            _raise_for_unsuccessful_run(run, failure_origin=origin)
+        self._track_terminal_once(run)
+        return _extract_flow_result(run)
+
+    def _try_stream_logs_until_terminal(
+        self,
+        *,
+        log_source: str,
+        log_checkpoint: str | None,
+        log_sink: Callable[[LogEntry], None] | None,
+        log_interval: float,
+    ) -> bool:
+        """Best-effort live log streaming; returns false when unavailable."""
+        from kitaru.client import KitaruClient
+
+        try:
+            client = KitaruClient()
+        except KitaruUsageError:
+            logger.debug(
+                "Runtime log streaming unavailable while constructing KitaruClient; "
+                "falling back to poll-only wait.",
+                exc_info=True,
+            )
+            return False
+
+        try:
+            follow_execution_logs(
+                client=client,
+                exec_id=self.exec_id,
+                checkpoint=log_checkpoint,
+                source=log_source,
+                limit=None,
+                interval=log_interval,
+                sink=_SDKWaitLogSink(log_sink),
+                sleep=time.sleep,
+            )
+        except (
+            KitaruBackendError,
+            KitaruFeatureNotAvailableError,
+            KitaruLogRetrievalError,
+        ):
+            logger.debug(
+                "Runtime log streaming unavailable; falling back to poll-only wait.",
+                exc_info=True,
+            )
+            return False
+        return True
 
     def get(self) -> Any:
         """Get the flow result without waiting.

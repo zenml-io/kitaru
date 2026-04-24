@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - `kitaru build --image`, `kitaru deploy --image`, and MCP `kitaru_deployments_deploy(image=...)` now accept deploy-time image configuration (base image string or `ImageSettings`-style object), so saved deployment snapshots can carry remote-only package installs and secret-backed environment injection.
 
+### Changed
+- `FlowHandle.wait()` now streams live backend step log lines by default while waiting for executions to finish. Pass `stream_logs=False` to keep the previous silent polling behavior. (#202)
+
 ## [0.6.0] - 2026-04-23
 
 ### Added

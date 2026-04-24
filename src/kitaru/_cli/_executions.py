@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
 from cyclopts import Parameter
 
+from kitaru._client._follow import (
+    follow_execution_logs,
+    log_entry_dedup_key,
+)
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.client import Execution, ExecutionStatus, LogEntry, PendingWait
-from kitaru.errors import build_recovery_command, format_recovery_hint
+from kitaru.errors import format_recovery_hint
 from kitaru.inspection import (
     serialize_execution,
     serialize_execution_summary,
@@ -249,7 +254,7 @@ def _emit_json_log_event(
 
 
 def _emit_log_entries(
-    entries: list[LogEntry],
+    entries: Sequence[LogEntry],
     *,
     output: CLIOutputFormat,
     grouped: bool,
@@ -304,15 +309,91 @@ def _emit_empty_logs_message(
 
 def _log_entry_dedup_key(entry: LogEntry) -> tuple[Any, ...]:
     """Build a stable key for follow-mode log deduplication."""
-    return (
-        entry.timestamp,
-        entry.level,
-        entry.checkpoint_name,
-        entry.module,
-        entry.filename,
-        entry.lineno,
-        entry.message,
-    )
+    return log_entry_dedup_key(entry)
+
+
+@dataclass
+class _CLIFollowEventSink:
+    """CLI formatter callbacks for the shared execution-log follow loop."""
+
+    output: CLIOutputFormat
+    grouped: bool
+    verbosity: int
+    command: str
+    exec_id: str
+
+    def emit_logs(self, entries: Sequence[LogEntry]) -> None:
+        """Emit new log entries using the existing CLI text/JSONL contracts."""
+        _emit_log_entries(
+            entries,
+            output=self.output,
+            grouped=self.grouped,
+            verbosity=self.verbosity,
+            command=self.command,
+        )
+
+    def emit_waiting(self, wait: PendingWait | None) -> None:
+        """Emit a waiting transition using the existing CLI contracts."""
+        wait_name = "unknown"
+        wait_id: str | None = None
+        wait_question: str | None = None
+        if wait is not None:
+            wait_name = wait.name
+            wait_id = wait.wait_id
+            wait_question = wait.question
+
+        if self.output == CLIOutputFormat.JSON:
+            _emit_json_log_event(
+                "waiting",
+                {
+                    "wait_name": wait_name,
+                    "wait_id": wait_id,
+                    "question": wait_question,
+                },
+                command=self.command,
+            )
+        else:
+            _emit_control_message(
+                f"[Execution is waiting for input on: {wait_name}]",
+                output=self.output,
+            )
+
+    def emit_terminal(
+        self,
+        execution: Execution,
+        *,
+        message: str,
+        recovery_command: str | None,
+    ) -> None:
+        """Emit terminal status using the existing CLI contracts."""
+        status_value = execution.status.value
+        if self.output == CLIOutputFormat.JSON:
+            terminal_item: dict[str, Any] = {
+                "status": status_value,
+                "message": message,
+            }
+            if recovery_command:
+                terminal_item["recovery_command"] = recovery_command
+            _emit_json_log_event("terminal", terminal_item, command=self.command)
+            return
+
+        if execution.status == ExecutionStatus.COMPLETED:
+            _emit_control_message(
+                "[Execution completed successfully]",
+                output=self.output,
+            )
+            return
+        if execution.status == ExecutionStatus.CANCELLED:
+            _emit_control_message("[Execution cancelled]", output=self.output)
+            return
+
+        _emit_control_message(
+            f"[Execution failed: {message}]",
+            output=self.output,
+        )
+        hint = format_recovery_hint(self.exec_id, status=status_value)
+        if hint:
+            _emit_control_message(hint, output=self.output)
 
 
 def _follow_execution_logs(
@@ -329,115 +410,23 @@ def _follow_execution_logs(
     command: str = "executions.logs",
 ) -> int:
     """Poll execution logs until terminal status and stream only new entries."""
-    seen_entries: set[tuple[Any, ...]] = set()
-    last_wait_name: str | None = None
-
-    while True:
-        entries = client.executions.logs(
-            exec_id,
-            checkpoint=checkpoint,
-            source=source,
-            limit=limit,
-        )
-
-        new_entries: list[LogEntry] = []
-        for entry in entries:
-            key = _log_entry_dedup_key(entry)
-            if key in seen_entries:
-                continue
-            seen_entries.add(key)
-            new_entries.append(entry)
-
-        if new_entries:
-            _emit_log_entries(
-                new_entries,
-                output=output,
-                grouped=grouped,
-                verbosity=verbosity,
-                command=command,
-            )
-
-        execution = client.executions.get(exec_id)
-        if execution.status == ExecutionStatus.COMPLETED:
-            if output == CLIOutputFormat.JSON:
-                _emit_json_log_event(
-                    "terminal",
-                    {
-                        "status": ExecutionStatus.COMPLETED.value,
-                        "message": "Execution completed successfully",
-                    },
-                    command=command,
-                )
-            else:
-                _emit_control_message(
-                    "[Execution completed successfully]",
-                    output=output,
-                )
-            return 0
-        if execution.status == ExecutionStatus.FAILED:
-            failure_reason = execution.status_reason or "execution failed"
-            if execution.failure is not None:
-                failure_reason = execution.failure.message
-            status_value = ExecutionStatus.FAILED.value
-            recovery_cmd = build_recovery_command(exec_id, status=status_value)
-            if output == CLIOutputFormat.JSON:
-                terminal_item: dict[str, Any] = {
-                    "status": status_value,
-                    "message": failure_reason,
-                }
-                if recovery_cmd:
-                    terminal_item["recovery_command"] = recovery_cmd
-                _emit_json_log_event("terminal", terminal_item, command=command)
-            else:
-                _emit_control_message(
-                    f"[Execution failed: {failure_reason}]",
-                    output=output,
-                )
-                hint = format_recovery_hint(exec_id, status=status_value)
-                if hint:
-                    _emit_control_message(hint, output=output)
-            return 1
-        if execution.status == ExecutionStatus.CANCELLED:
-            if output == CLIOutputFormat.JSON:
-                _emit_json_log_event(
-                    "terminal",
-                    {
-                        "status": ExecutionStatus.CANCELLED.value,
-                        "message": "Execution cancelled",
-                    },
-                    command=command,
-                )
-            else:
-                _emit_control_message("[Execution cancelled]", output=output)
-            return 1
-
-        if execution.status == ExecutionStatus.WAITING:
-            wait_name = "unknown"
-            wait_id: str | None = None
-            wait_question: str | None = None
-            if execution.pending_wait is not None:
-                wait_name = execution.pending_wait.name
-                wait_id = execution.pending_wait.wait_id
-                wait_question = execution.pending_wait.question
-            if wait_name != last_wait_name:
-                if output == CLIOutputFormat.JSON:
-                    _emit_json_log_event(
-                        "waiting",
-                        {
-                            "wait_name": wait_name,
-                            "wait_id": wait_id,
-                            "question": wait_question,
-                        },
-                        command=command,
-                    )
-                else:
-                    _emit_control_message(
-                        f"[Execution is waiting for input on: {wait_name}]",
-                        output=output,
-                    )
-                last_wait_name = wait_name
-
-        _facade_module().time.sleep(interval)
+    result = follow_execution_logs(
+        client=client,
+        exec_id=exec_id,
+        checkpoint=checkpoint,
+        source=source,
+        limit=limit,
+        interval=interval,
+        sink=_CLIFollowEventSink(
+            output=output,
+            grouped=grouped,
+            verbosity=verbosity,
+            command=command,
+            exec_id=exec_id,
+        ),
+        sleep=_facade_module().time.sleep,
+    )
+    return result.exit_code
 
 
 @executions_app.command
