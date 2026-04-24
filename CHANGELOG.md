@@ -8,7 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- `kitaru build --image`, `kitaru deploy --image`, and MCP `kitaru_deployments_deploy(image=...)` now accept deploy-time image configuration (base image string or `ImageSettings`-style object), so saved deployment snapshots can carry remote-only package installs and secret-backed environment injection.
+- `kitaru build --image`, `kitaru deploy --image`, and MCP `kitaru_deployments_deploy(image=...)` now accept deploy-time image configuration (base image string or `ImageSettings`-style object), so saved deployment snapshots can carry remote-only package installs and secret-backed environment injection. (#221)
+
+### Changed
+- **Breaking:** Replay planning now uses graph reachability from replay roots, so replaying from a branch leaf only re-executes that branch's downstream path. Checkpoint override semantics are aligned accordingly: `checkpoint.<selector>` injects into direct consumers, and replay roots include those consumers. Scripts relying on the previous ordering/index-based frontier may see different execution paths when replaying parallel branches. (#228)
+- Bumped the minimum ZenML version to `0.94.3`, picking up upstream artifact-store path validation alongside compatibility fixes to Kitaru's materializers and tests. (#232)
+- Clearer error when a stack references an integration whose dependencies are not installed — flow resolution now points users to the exact extra they need to install (e.g. `kitaru[k8s]`, `kitaru[vertex]`) instead of a low-level ZenML import error. (#227)
+
+### Fixed
+- `kitaru executions` URL logging now prints the correct dashboard URL for each execution. (#223)
 
 ## [0.6.0] - 2026-04-23
 
