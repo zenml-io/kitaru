@@ -447,7 +447,7 @@ jobs:
           target: server
           push: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
           build-args: |
-            ZENML_SERVER_TAG=0.94.1
+            ZENML_SERVER_TAG=0.94.3
             KITARU_UI_TAG=${{ env.KITARU_UI_TAG }}
             ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') && format('KITARU_VERSION={0}', env.VERSION) || '' }}
           tags: |
