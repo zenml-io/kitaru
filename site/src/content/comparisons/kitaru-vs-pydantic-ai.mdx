@@ -37,7 +37,7 @@ They don&rsquo;t compete. They compose. Kitaru ships a [first-class Pydantic AI 
     title: "Use Pydantic AI if you are",
     items: [
       "Writing agent logic in Python and want type-safe inputs, outputs, and tools",
-      "Building short-lived or interactive agents where durable runtime is overkill",
+      "Building short-lived or interactive agents, or using Pydantic AI&rsquo;s own durable execution integrations (Temporal, DBOS, Prefect, Restate) where they fit your stack",
       "Prototyping an agent before deciding whether it needs a production runtime around it",
       "Happy with your existing orchestration and only need better agent ergonomics",
     ],
@@ -82,7 +82,7 @@ def review(case: dict) -> str:
 <FeatureWithGraphic title="What Kitaru adds on top">
   <WhatKitaruAddsOnTop slot="graphic" />
 
-  Pydantic AI doesn&rsquo;t try to do any of this. Kitaru does:
+  Pydantic AI is primarily an agent harness &mdash; it now documents durable execution through integrations with Temporal, DBOS, Prefect, and Restate. Kitaru&rsquo;s difference is that it ships the durable runtime layer Kitaru-natively:
 
   - **Durable execution.** A crash, pod eviction, or timeout doesn&rsquo;t send the run back to zero. Fix the bug, replay, and the completed checkpoints return cached output instead of re-burning tokens.
   - **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and resumes minutes, hours, or days later when input lands from a human, another agent, a webhook, or a CLI call.
@@ -117,10 +117,10 @@ def review(case: dict) -> str:
 | Concept | Pydantic AI | Kitaru |
 |---|---|---|
 | Layer | Agent harness (how the agent thinks) | Durable runtime (how it runs over time and infra) |
-| Durable unit | — (not a durable runtime) | `@flow` + `@checkpoint` |
+| Durable unit | Agent run; durable execution via Temporal / DBOS / Prefect / Restate integrations | `@flow` + `@checkpoint` (Kitaru-native) |
 | Composition | Standalone Pythonic agent | Pydantic AI agent wrapped by `KitaruAgent` adapter inside a `@checkpoint` |
 | Crash recovery | — | Replay from the last good checkpoint, cached work reused |
-| Long wait on a human | Blocking `input()` / your own polling | `kitaru.wait()` (compute released, survives crashes) |
+| Long wait on a human | Deferred tools + HITL approval patterns; durable pause/resume depends on the chosen runtime integration | `kitaru.wait()` (compute released, survives crashes) |
 | Artifacts | — | Typed, versioned artifacts per checkpoint |
 | Versioning | — | Named versioned deployments with tag routing |
 | Deployment | Whatever Python service you wrap the agent in | Stack-based deploy to Kubernetes, AWS, GCP, Azure |

@@ -54,7 +54,7 @@ We built Kitaru around a different shape of work. An agent loop has expensive LL
 <FeatureWithGraphic title="LLM calls as a first-class primitive">
   <LLMPrimitive slot="graphic" />
 
-  In DBOS, an LLM call is something you make inside your own `@DBOS.step`. DBOS ships OpenTelemetry instrumentation for OpenAI, LiteLLM, and LangChain, so traces show up in Conductor. That gets you visibility. It doesn't get you a primitive. We built `kitaru.llm()` so the call itself is part of the runtime.
+  In DBOS, an LLM call is something you make inside your own `@DBOS.step`. DBOS can emit OpenTelemetry-compatible logs and traces for workflows and applications, so LLM visibility lands in Conductor if you wire up provider instrumentation yourself. That gets you visibility. It doesn't get you a primitive. We built `kitaru.llm()` so the call itself is part of the runtime.
 
   - **Alias-resolved secrets:** `kitaru.llm(prompt, model="fast")` resolves the model alias and injects the provider key from the active stack. The same call retargets from OpenAI to Anthropic to a self-hosted model without touching code.
   - **Per-checkpoint cost roll-up:** Latency, token counts, and cost land under the enclosing `@checkpoint` automatically. Run inspection shows you the cost of step 9 without a separate LLM logging pipeline.
@@ -119,7 +119,7 @@ We built Kitaru around a different shape of work. An agent loop has expensive LL
 | Workflow boundary | `@DBOS.workflow()` | `@flow` |
 | Durable step | `@DBOS.step()` | `@checkpoint` (ordinary Python) |
 | State backend | Postgres, alongside your OLTP data | Your own S3 / GCS / Azure Blob |
-| LLM call | Inside a `@DBOS.step` with OTel instrumentation | `kitaru.llm()` with alias-resolved keys and per-checkpoint cost |
+| LLM call | Inside a `@DBOS.step`; OTel-compatible traces and logs if you wire up provider instrumentation | `kitaru.llm()` with alias-resolved keys and per-checkpoint cost |
 | Pause / resume | `DBOS.send` / `DBOS.recv` messaging | `kitaru.wait()` with schema-validated input |
 | Cross-run state | Bring your own store | `kitaru.memory` with scopes |
 | Scheduling | `@DBOS.scheduled()` (cron) + `Queue` with concurrency + dedup | Stack scheduler, or periodic invocation at the call site |

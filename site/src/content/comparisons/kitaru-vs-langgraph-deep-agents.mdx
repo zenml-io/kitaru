@@ -101,7 +101,7 @@ def critique(docs: Docs) -> str:
 <FeatureWithGraphic title="Sandbox and security" reverse={true}>
   <SandboxSecurity slot="graphic" />
 
-  LangSmith ships real security infrastructure: LangSmith Sandboxes (microVM isolation, Deep Agents integration), an auth proxy that keeps secrets out of the sandbox, and OpenTelemetry-native tracing. Adopt their stack and you get a usable isolation story out of the box.
+  LangSmith ships real security infrastructure: LangSmith Sandboxes provide ephemeral, locked-down environments for running untrusted code, and LangSmith Deployment adds authentication, monitoring, and tracing around deployed agents. Adopt their stack and you get a usable isolation story out of the box.
 
   Kitaru takes a different posture. `@checkpoint(runtime="isolated")` runs a checkpoint in a separate pod or job on the stack you configured. For stronger isolation, bring your own sandbox provider. Secrets come from your own secret manager. The runtime exposes execution boundaries; policy at those boundaries belongs to your platform.
 
@@ -146,7 +146,7 @@ def critique(docs: Docs) -> str:
 | Durable unit | A node, persisted by the checkpointer between supersteps | A checkpoint boundary around any Python call |
 | Durability scope | Inside the LangGraph graph | Framework-agnostic — any harness inside a checkpoint |
 | Pause / resume | Graph pause/resume via checkpointer | `kitaru.wait()` |
-| Sandboxing | LangSmith Sandboxes (microVM, packaged) | `@checkpoint(runtime="isolated")` on your configured stack |
+| Sandboxing | LangSmith Sandboxes (ephemeral, locked-down environments) | `@checkpoint(runtime="isolated")` on your configured stack |
 | Deployment | LangSmith Deployment (packaged runtime + auth proxy + tracing) | `flow.deploy()` — immutable, versioned, tag-routed |
 | Control plane | Hosted by LangSmith (or their on-prem option) | Self-hosted Helm service, artifacts in your own bucket |
 

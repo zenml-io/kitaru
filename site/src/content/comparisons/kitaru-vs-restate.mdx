@@ -2,7 +2,7 @@
 competitor: "Restate"
 competitorLogo: "/compare/restate.svg"
 title: "Kitaru vs Restate: Durable execution, shaped for Python agents"
-description: "Restate is a polyglot, open-source durable runtime for services, Virtual Objects, and workflows. Kitaru is a Python-native durable runtime shaped for agent loops, with typed artifact lineage and an opinionated cloud-stack abstraction."
+description: "Restate is a polyglot, source-available durable runtime for services, Virtual Objects, and workflows. Kitaru is a Python-native durable runtime shaped for agent loops, with typed artifact lineage and an opinionated cloud-stack abstraction."
 cardSubtitle: "Durable execution for Python agents, with agent-native primitives such as llm(), wait(), save()/load(), and memory."
 ctaHeading: "Durable execution, shaped for your Python agent"
 order: 60
@@ -19,7 +19,7 @@ import ArtifactLineage from '../../components/compare/graphics/restate/ArtifactL
 import StackAbstraction from '../../components/compare/graphics/restate/StackAbstraction.astro';
 import EmbeddedVsServerRegistered from '../../components/compare/graphics/restate/EmbeddedVsServerRegistered.astro';
 
-Restate is a serious durable runtime. Polyglot SDKs across TypeScript, Java, Kotlin, Go, Rust, and Python. Apache 2.0. Three handler shapes (services, Virtual Objects with keyed per-entity state and strongly-consistent access, and workflows), journaled execution, awakeables for human-in-the-loop, OpenTelemetry tracing, self-hostable on every major cloud. If your durability problem is polyglot and backend-services-shaped, Restate is the pragmatic answer. That's the honest thing to say up front.
+Restate is a serious durable runtime. Polyglot SDKs across TypeScript, Java, Kotlin, Go, Rust, and Python. BSL 1.1 runtime license, with Apache 2.0 as the change license after the change date. Three handler shapes (services, Virtual Objects with keyed per-entity state and strongly-consistent access, and workflows), journaled execution, awakeables for human-in-the-loop, OpenTelemetry tracing, self-hostable on every major cloud. If your durability problem is polyglot and backend-services-shaped, Restate is the pragmatic answer. That's the honest thing to say up front.
 
 Kitaru is narrower on purpose. We built it for Python agents, because that's the workload most teams we talk to are trying to ship right now. Today, it's increasingly obvious that every company running agents in production needs the same capabilities: a durable `llm()` call, wait/resume, typed versioned memory, artifact lineage across runs, human/agent approval gates, and a runtime that understands the cloud underneath it. Those don't come in the box with any general-purpose durable runtime. So we put them there.
 
@@ -95,7 +95,7 @@ Kitaru is narrower on purpose. We built it for Python agents, because that's the
   rows={[
     { feature: "Durable execution and replay", kitaru: true, competitor: true },
     { feature: "Human-in-the-loop waiting with compute released", kitaru: true, competitor: true },
-    { feature: "Self-hostable, Apache 2.0", kitaru: true, competitor: true },
+    { feature: "Self-hostable (Kitaru: Apache 2.0; Restate: BSL 1.1, Apache 2.0 as the change license)", kitaru: true, competitor: true },
     { feature: "OpenTelemetry tracing", kitaru: true, competitor: true },
     { feature: "Python-agent-shaped primitives (`kitaru.llm()`, `kitaru.wait()`, `kitaru.memory`)", kitaru: true, competitor: false },
     { feature: "Built-in LLM primitive with alias-resolved secrets and per-call token/latency logging", kitaru: true, competitor: false },
