@@ -83,8 +83,8 @@ def test_build_replay_plan_skips_steps_before_checkpoint_selector() -> None:
     assert plan.step_input_overrides == {}
 
 
-def test_checkpoint_override_anchors_frontier_at_source_step() -> None:
-    """Checkpoint override frontier should use source.index, not consumer."""
+def test_checkpoint_override_reexecutes_override_source_path() -> None:
+    """Checkpoint overrides should replay from direct override consumers."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
     fetch = _step(
         name="fetch",
@@ -112,9 +112,9 @@ def test_checkpoint_override_anchors_frontier_at_source_step() -> None:
         overrides={"checkpoint.fetch": "edited research"},
     )
 
-    # source.index anchoring: fetch (index 0) is the frontier, so nothing is
-    # skipped. The override is injected on the consumer (write).
-    assert plan.steps_to_skip == set()
+    # Replay roots include publish (from_) and direct consumers of the override
+    # source (write). fetch remains skipped.
+    assert plan.steps_to_skip == {"fetch"}
     assert plan.step_input_overrides == {"write": {"research": "edited research"}}
 
 
@@ -141,19 +141,52 @@ def test_skip_override_disjointness_is_enforced() -> None:
         inputs_v2={"features": [_input_spec("transform", "output")]},
     )
 
-    # from_="train" means skip fetch and transform.
-    # But checkpoint.transform overrides inject into train, and the frontier
-    # from source.index (transform=1) should keep transform out of skip.
+    # from_="train" skips fetch/transform. Override on transform injects into
+    # train (already a replay root), so skip set remains unchanged.
     plan = build_replay_plan(
         run=_run(fetch, transform, train),
         from_="train",
         overrides={"checkpoint.transform": "new features"},
     )
 
-    # transform has step_input_overrides on its consumer (train), and
-    # source.index=1 means only fetch (index 0) is skipped.
+    assert plan.steps_to_skip == {"fetch", "transform"}
     assert "train" not in plan.steps_to_skip
     assert plan.step_input_overrides == {"train": {"features": "new features"}}
+
+
+def test_replay_from_branch_leaf_skips_unrelated_branch() -> None:
+    """Replay from a branch leaf should not re-execute sibling-branch work."""
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+    step_a = _step(
+        name="a",
+        invocation_id="a",
+        started_at=t0,
+    )
+    step_b = _step(
+        name="b",
+        invocation_id="b",
+        started_at=t0 + timedelta(seconds=1),
+        upstream_steps=["a"],
+        inputs_v2={"a_input": [_input_spec("a", "output")]},
+    )
+    step_c = _step(
+        name="c",
+        invocation_id="c",
+        started_at=t0 + timedelta(seconds=2),
+        upstream_steps=["b"],
+        inputs_v2={"b_input": [_input_spec("b", "output")]},
+    )
+    step_d = _step(
+        name="d",
+        invocation_id="d",
+        started_at=t0 + timedelta(seconds=3),
+        upstream_steps=["a"],
+        inputs_v2={"a_input": [_input_spec("a", "output")]},
+    )
+
+    plan = build_replay_plan(run=_run(step_a, step_b, step_c, step_d), from_="d")
+
+    assert plan.steps_to_skip == {"a", "b", "c"}
 
 
 def test_dag_ordering_not_timestamp_ordering() -> None:
@@ -187,8 +220,8 @@ def test_dag_ordering_not_timestamp_ordering() -> None:
     assert plan.steps_to_skip == {"extract"}
 
 
-def test_parallel_branches_ordered_deterministically() -> None:
-    """Parallel branches (no dependency) should get a deterministic order."""
+def test_replay_from_parallel_branch_only_skips_unrelated_peer() -> None:
+    """Replay should skip unrelated peer branch work."""
     t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
 
     branch_a = _step(
@@ -212,13 +245,41 @@ def test_parallel_branches_ordered_deterministically() -> None:
         },
     )
 
-    plan = build_replay_plan(
-        run=_run(branch_a, branch_b, merge),
-        from_="merge",
+    plan = build_replay_plan(run=_run(branch_a, branch_b, merge), from_="branch_a")
+
+    # Replaying from branch_a should not re-execute its sibling peer branch.
+    assert plan.steps_to_skip == {"branch_b"}
+
+
+def test_replay_from_parallel_branch_with_tied_start_times() -> None:
+    """Replay should be stable when peer branches share start times."""
+    t0 = datetime(2026, 3, 9, 10, 0, tzinfo=UTC)
+
+    beta = _step(
+        name="beta",
+        invocation_id="beta",
+        started_at=t0,
+    )
+    alpha = _step(
+        name="alpha",
+        invocation_id="alpha",
+        started_at=t0,
+    )
+    merge = _step(
+        name="merge",
+        invocation_id="merge",
+        started_at=t0 + timedelta(seconds=20),
+        upstream_steps=["alpha", "beta"],
+        inputs_v2={
+            "a": [_input_spec("alpha", "output")],
+            "b": [_input_spec("beta", "output")],
+        },
     )
 
-    # branch_a and branch_b are in the same layer (no deps) — both skipped
-    assert plan.steps_to_skip == {"branch_a", "branch_b"}
+    plan = build_replay_plan(run=_run(beta, alpha, merge), from_="beta")
+
+    # Replaying from beta still skips the sibling alpha branch.
+    assert plan.steps_to_skip == {"alpha"}
 
 
 def test_wait_overrides_are_rejected() -> None:

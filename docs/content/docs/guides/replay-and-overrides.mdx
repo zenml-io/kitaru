@@ -5,8 +5,8 @@ description: Replay executions from checkpoints with flow and checkpoint overrid
 
 Replay creates a **new execution** from a previous one.
 
-Use replay when you want to keep earlier durable work and rerun only a suffix of
-your workflow.
+Use replay when you want to keep earlier durable work and rerun only the branch
+affected by your replay roots (`from_` plus override consumers).
 
 ## SDK replay
 
@@ -70,6 +70,13 @@ Examples:
 - `checkpoint.fetch_data`
 
 Any other prefix raises `KitaruUsageError`.
+
+Override behavior:
+
+- Overrides target checkpoint outputs (`checkpoint.<selector>`).
+- The overridden checkpoint must expose a single output.
+- Replay roots include the direct consumers of the overridden checkpoint output,
+  so replay re-executes from those consumers forward.
 
 ## Waits during replay
 
