@@ -128,6 +128,12 @@ skip_test() {
 }
 
 cleanup() {
+    if [[ -n "${SMOKE_AUTH_SA:-}" ]]; then
+        timed 10 $UV_RUN kitaru auth api-keys delete \
+            "$SMOKE_AUTH_SA" "${SMOKE_AUTH_KEY:-smoke-key}" --yes &>/dev/null || true
+        timed 10 $UV_RUN kitaru auth service-accounts delete \
+            "$SMOKE_AUTH_SA" --yes &>/dev/null || true
+    fi
     if [[ "$KEEP_SERVER" == true ]] && [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
         printf "\n${CYAN}Server left running at %s${RESET}\n" "$DASHBOARD_URL"
     elif [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
@@ -251,7 +257,10 @@ run_test "kitaru model list"             $UV_RUN kitaru model list
 run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
 run_test "kitaru analytics opt-in --help"  $UV_RUN kitaru analytics opt-in --help
 run_test "kitaru analytics opt-out --help" $UV_RUN kitaru analytics opt-out --help
+run_test "kitaru auth --help"              $UV_RUN kitaru auth --help
 run_test "kitaru auth token --help"        $UV_RUN kitaru auth token --help
+run_test "kitaru auth service-accounts --help" $UV_RUN kitaru auth service-accounts --help
+run_test "kitaru auth api-keys --help"     $UV_RUN kitaru auth api-keys --help
 run_test "kitaru build --help"            $UV_RUN kitaru build --help
 run_test "kitaru deploy --help"           $UV_RUN kitaru deploy --help
 run_test "kitaru invoke --help"           $UV_RUN kitaru invoke --help
@@ -272,6 +281,25 @@ else
     echo "    Raw output: ${ANALYTICS_OUT:0:200}" | sed 's/^/    /'
     FAILED+=("analytics disabled in smoke test")
 fi
+
+# ---------------------------------------------------------------------------
+# Auth management API
+# ---------------------------------------------------------------------------
+section_header "Auth management"
+
+SMOKE_AUTH_SA="kitaru-smoke-auth-$$"
+SMOKE_AUTH_KEY="smoke-key-$$"
+run_test "kitaru auth service-accounts create smoke" \
+    $UV_RUN kitaru auth service-accounts create "$SMOKE_AUTH_SA" \
+        --description "Kitaru smoke-test service account"
+run_test "kitaru auth api-keys create smoke" \
+    $UV_RUN kitaru auth api-keys create "$SMOKE_AUTH_SA" "$SMOKE_AUTH_KEY" -o json
+run_test "kitaru auth api-keys list smoke" \
+    $UV_RUN kitaru auth api-keys list "$SMOKE_AUTH_SA"
+run_test "kitaru auth api-keys delete smoke" \
+    $UV_RUN kitaru auth api-keys delete "$SMOKE_AUTH_SA" "$SMOKE_AUTH_KEY" --yes
+run_test "kitaru auth service-accounts delete smoke" \
+    $UV_RUN kitaru auth service-accounts delete "$SMOKE_AUTH_SA" --yes
 
 # ---------------------------------------------------------------------------
 # Project init

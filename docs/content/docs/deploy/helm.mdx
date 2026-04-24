@@ -180,9 +180,21 @@ kitaru login http://$SERVICE_IP
 
 ### API key login (headless / CI)
 
+For automation, create an OSS service-account API key first:
+
+```bash
+kitaru auth service-accounts create ci-runner
+kitaru auth api-keys create ci-runner default -o json
+```
+
+Store the one-time `key` value from the create response, then use it to connect:
+
 ```bash
 kitaru login https://kitaru.example.com --api-key kat_abc123...
 ```
+
+See [Authentication](/guides/authentication) for the full service-account/API-key
+flow and how it relates to `kitaru auth token`.
 
 ### Disconnect
 

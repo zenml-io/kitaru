@@ -1999,7 +1999,7 @@ class _APIKeysAPI:
 
 
 class KitaruClient:
-    """Client for managing Kitaru executions, artifacts, and memories."""
+    """Client for Kitaru executions, artifacts, memory, deployments, and auth."""
 
     def __init__(
         self,
