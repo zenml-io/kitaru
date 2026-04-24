@@ -762,19 +762,20 @@ class FlowHandle:
         """Block until execution finishes and return its result.
 
         By default, ``wait()`` streams live backend step log lines while it
-        waits. Pass ``stream_logs=False`` to keep the previous silent polling
-        behavior. Log streaming is best-effort: if runtime logs are unavailable
-        for the current backend, waiting falls back to the original poll-only
-        path and still returns or raises based on the final execution status.
-        When ``log_sink`` is not provided, log lines auto-print only when
-        stdout is interactive.
+        waits only when there is an explicit or visible destination for those
+        logs: either ``log_sink`` is provided or stdout is interactive. Pass
+        ``stream_logs=False`` to keep silent polling behavior explicitly. Log
+        streaming is best-effort: if runtime logs are unavailable for the
+        current backend, waiting falls back to the original poll-only path and
+        still returns or raises based on the final execution status.
 
         Args:
             stream_logs: Whether to stream live runtime log lines while waiting.
             log_source: Runtime log source to follow (``"step"`` or ``"runner"``).
             log_checkpoint: Optional checkpoint/function name to filter logs by.
             log_sink: Optional callback invoked once for each new log entry.
-                Defaults to printing ``entry.message`` to stdout with flushing.
+                When omitted, Kitaru prints ``entry.message`` to stdout with
+                flushing only if stdout is interactive.
             log_interval: Polling interval in seconds for streamed logs and
                 fallback status checks.
 
@@ -788,11 +789,15 @@ class FlowHandle:
         if log_interval <= 0:
             raise KitaruUsageError("`log_interval` must be > 0.")
 
-        if stream_logs and self._try_stream_logs_until_terminal(
+        print_to_stdout = stream_logs and log_sink is None and _is_interactive_stdout()
+        should_stream_logs = stream_logs and (log_sink is not None or print_to_stdout)
+
+        if should_stream_logs and self._try_stream_logs_until_terminal(
             log_source=log_source,
             log_checkpoint=log_checkpoint,
             log_sink=log_sink,
             log_interval=log_interval,
+            print_to_stdout=print_to_stdout,
         ):
             run = self._refresh()
             if run.status.is_finished:
@@ -824,6 +829,7 @@ class FlowHandle:
         log_checkpoint: str | None,
         log_sink: Callable[[LogEntry], None] | None,
         log_interval: float,
+        print_to_stdout: bool,
     ) -> bool:
         """Best-effort live log streaming; returns false when unavailable."""
         from kitaru.client import KitaruClient
@@ -858,7 +864,7 @@ class FlowHandle:
                 interval=log_interval,
                 sink=_SDKWaitLogSink(
                     log_sink,
-                    print_to_stdout=(log_sink is None and _is_interactive_stdout()),
+                    print_to_stdout=print_to_stdout,
                 ),
                 sleep=time.sleep,
             )

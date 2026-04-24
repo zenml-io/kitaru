@@ -1270,6 +1270,7 @@ def test_flow_handle_wait_log_sink_receives_entries() -> None:
     with (
         patch("kitaru.flow.Client", return_value=zenml_client),
         patch("kitaru.client.KitaruClient", return_value=kitaru_client),
+        patch("kitaru.flow._is_interactive_stdout", return_value=False),
     ):
         result = handle.wait(log_sink=lambda log: emitted.append(log.message))
 
@@ -1319,7 +1320,7 @@ def test_flow_handle_wait_streaming_deduplicates_entries() -> None:
     assert emitted == ["same line"]
 
 
-def test_flow_handle_wait_default_non_interactive_does_not_print() -> None:
+def test_flow_handle_wait_default_non_interactive_uses_poll_only_path() -> None:
     run_id = uuid4()
     initial = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
     finished = _DummyRun(
@@ -1330,22 +1331,10 @@ def test_flow_handle_wait_default_non_interactive_does_not_print() -> None:
     zenml_client = MagicMock()
     zenml_client.get_pipeline_run.return_value = finished
 
-    entry = LogEntry(
-        message="checkpoint started",
-        timestamp="2026-04-24T08:00:00+00:00",
-        checkpoint_name="step",
-    )
-    kitaru_client = MagicMock()
-    kitaru_client.executions.logs.return_value = [entry]
-    kitaru_client.executions.get.return_value = _execution_status_stub(
-        str(run_id),
-        KitaruExecutionStatus.COMPLETED,
-    )
-
     handle = FlowHandle(_as_pipeline_run(initial))
     with (
         patch("kitaru.flow.Client", return_value=zenml_client),
-        patch("kitaru.client.KitaruClient", return_value=kitaru_client),
+        patch("kitaru.client.KitaruClient") as kitaru_client_cls,
         patch("kitaru.flow._is_interactive_stdout", return_value=False),
         patch("builtins.print") as print_mock,
     ):
@@ -1353,12 +1342,7 @@ def test_flow_handle_wait_default_non_interactive_does_not_print() -> None:
 
     assert result == 42
     print_mock.assert_not_called()
-    kitaru_client.executions.logs.assert_called_once_with(
-        str(run_id),
-        checkpoint=None,
-        source="step",
-        limit=None,
-    )
+    kitaru_client_cls.assert_not_called()
 
 
 def test_flow_handle_wait_default_interactive_prints_logs() -> None:
@@ -1476,7 +1460,7 @@ def test_flow_handle_wait_falls_back_when_client_construction_fails() -> None:
         ),
         patch("kitaru.flow.time.sleep") as sleep_mock,
     ):
-        result = handle.wait()
+        result = handle.wait(log_sink=lambda log: None)
 
     assert result == 42
     sleep_mock.assert_called_once_with(1.0)
@@ -1553,7 +1537,7 @@ def test_flow_handle_wait_rejects_empty_log_source() -> None:
         patch("kitaru.client.KitaruClient") as kitaru_client_cls,
         pytest.raises(KitaruUsageError, match="non-empty"),
     ):
-        handle.wait(log_source="   ")
+        handle.wait(log_source="   ", log_sink=lambda log: None)
 
     kitaru_client_cls.assert_not_called()
 
@@ -1566,7 +1550,11 @@ def test_flow_handle_wait_rejects_runner_with_checkpoint() -> None:
         patch("kitaru.client.KitaruClient") as kitaru_client_cls,
         pytest.raises(KitaruUsageError, match="log_checkpoint"),
     ):
-        handle.wait(log_source="runner", log_checkpoint="research")
+        handle.wait(
+            log_source="runner",
+            log_checkpoint="research",
+            log_sink=lambda log: None,
+        )
 
     kitaru_client_cls.assert_not_called()
 

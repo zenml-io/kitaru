@@ -116,8 +116,8 @@ banner in text mode or a `waiting` event in JSON mode.
 
 ## SDK wait streaming
 
-When you start a flow from Python and then wait for it, Kitaru follows live
-backend step log lines by default:
+When you start a flow from Python and then wait for it in an interactive
+terminal, Kitaru follows live backend step log lines by default:
 
 ```python
 handle = my_flow.run(topic="renewable energy")
@@ -132,8 +132,10 @@ status-polling behavior and still returns or raises from the final execution
 status.
 
 By default, `wait()` auto-prints log lines only when stdout is interactive
-(for example, in a terminal). In non-interactive/library contexts, `wait()`
-still follows logs but does not print unless you provide `log_sink=...`.
+(for example, in a terminal). If stdout is non-interactive and you do not
+provide `log_sink`, `wait()` does **not** start the log-follow loop; it uses
+normal status polling instead so CI jobs, notebooks, and library code do not
+create hidden backend log-retrieval traffic.
 
 To keep the previous silent behavior explicitly, opt out:
 
@@ -142,7 +144,8 @@ result = handle.wait(stream_logs=False)
 ```
 
 You can also receive raw log entries in your own callback instead of printing
-plain messages to stdout:
+plain messages to stdout. This is the opt-in path for streaming logs in CI,
+notebooks, services, and other non-interactive contexts:
 
 ```python
 def collect(entry):
