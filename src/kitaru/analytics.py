@@ -31,6 +31,7 @@ class AnalyticsEvent(StrEnum):
     MCP_TOOL_CALLED = "Kitaru MCP tool called"
     PROJECT_INITIALIZED = "Kitaru project initialized"
     LOGIN_COMPLETED = "Kitaru login completed"
+    AUTH_TOKEN_PRINTED = "Kitaru auth token printed"
     LOCAL_SERVER_STARTED = "Kitaru local server started"
     LOCAL_SERVER_STOPPED = "Kitaru local server stopped"
 
@@ -68,6 +69,14 @@ class AnalyticsEvent(StrEnum):
     INFO_VIEWED = "Kitaru info viewed"
     INFO_EXPORTED = "Kitaru info exported"
     STATUS_VIEWED = "Kitaru status viewed"
+    DEPLOYMENT_BUILT = "Kitaru deployment built"
+    DEPLOYMENT_DEPLOYED = "Kitaru deployment deployed"
+    DEPLOYMENT_INVOKED = "Kitaru deployment invoked"
+    DEPLOYMENT_CURL_GENERATED = "Kitaru deployment curl generated"
+    DEPLOYMENT_TAG_CLEANUP_FAILED = "Kitaru deployment tag cleanup failed"
+    DEPLOYMENT_TAGGED = "Kitaru deployment tagged"
+    DEPLOYMENT_UNTAGGED = "Kitaru deployment untagged"
+    DEPLOYMENT_DELETED = "Kitaru deployment deleted"
 
     # Adapter
     PYDANTIC_AI_WRAPPED = "Kitaru PydanticAI wrapped"
@@ -142,11 +151,20 @@ def track(event_name: AnalyticsEvent, metadata: dict[str, Any] | None = None) ->
         enriched_metadata["kitaru_version"] = _safe_kitaru_version()
         enriched_metadata["zenml_version"] = _safe_zenml_version()
 
-        from zenml.analytics import track as _zenml_track
+        # ZenML's analytics import chain emits a few INFO/DEBUG log lines on
+        # first import and during track(); those leak into CLI output where
+        # Kitaru owns the UX. Silence the root logger for the duration of the
+        # ZenML call and restore the prior level afterwards.
+        previous_disable_level = logging.root.manager.disable
+        try:
+            logging.disable(logging.CRITICAL)
+            from zenml.analytics import track as _zenml_track
 
-        return _zenml_track(
-            event=event_name, metadata=enriched_metadata
-        )  # ZenML accepts Union[AnalyticsEvent, str]
+            return _zenml_track(
+                event=event_name, metadata=enriched_metadata
+            )  # ZenML accepts Union[AnalyticsEvent, str]
+        finally:
+            logging.disable(previous_disable_level)
     except Exception:
         logger.debug("Analytics tracking failed", exc_info=True)
         return False

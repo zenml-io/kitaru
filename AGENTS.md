@@ -59,6 +59,7 @@ Use `uv` for Python dependency management and `just` as the command stack.
 **Typical loop:** write code → `just fix` → `just check` → `just test` → commit.
 
 - `just test tests/test_file.py::test_name`: run one test
+- **Agent tip:** the full suite takes ~4 minutes. When running it through a pager or any stream that may truncate output, pipe through grep so the failure names survive the truncation: `just test 2>&1 | grep -E "FAILED|ERROR|passed|failed" | tail -20`. This keeps the PASS/FAIL summary and every `FAILED` line without forcing a rerun just to recover the list.
 - `just lint`: lint only
 - `just typecheck`: type check only
 - `just typos`: typo check only
@@ -125,7 +126,7 @@ Kitaru collects anonymous usage analytics for opted-in users. When adding new fe
 
 ## Commit & Pull Request Guidelines
 
-Use short, imperative subjects (for example: `Add ...`, `Update ...`, `Create ...`). Keep commit titles concise (about 50 chars), and explain the why in the body when needed.
+Use short, imperative subjects (for example: `Add ...`, `Update ...`, `Create ...`). Keep commit titles concise (about 50 chars), and explain any important or useful implementation details (esp those relating to 'why' choices were made) in the commit body message.
 
 For pull requests, use a clear human-readable title and include:
 - what changed

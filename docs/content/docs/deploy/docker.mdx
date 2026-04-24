@@ -99,6 +99,22 @@ Then run it:
 docker run -d --name kitaru-server -p 8080:8080 kitaru-local:dev
 ```
 
+### Deployment invocation support (workload manager)
+
+Snapshot-backed deployment execution (`kitaru invoke`,
+`KitaruClient().deployments.invoke(...)`, and
+`kitaru flow deployments curl`) requires server workload-manager support.
+
+The official `zenmldocker/kitaru` image already enables this with:
+
+```text
+ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE=zenml.zen_server.pipeline_execution.in_memory_workload_manager.InMemoryWorkloadManager
+```
+
+If you build a custom image (especially from plain
+`zenmldocker/zenml-server`) or override server environment variables, preserve
+or set a compatible workload-manager implementation explicitly.
+
 ### Container management
 
 ```bash

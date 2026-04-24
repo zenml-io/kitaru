@@ -114,6 +114,18 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Validate protected-branch push token
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        env:
+          RELEASE_GIT_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_GIT_TOKEN" ]; then
+            echo "::error::secrets.RELEASE_GIT_TOKEN is required for non-dry-run releases."
+            echo "::error::This workflow uses it for protected branch pushes to develop, main, and release/* after publishing."
+            echo "::error::Configure the secret or rerun with dry-run=true."
+            exit 1
+          fi
 
       # --- Install uv (needed before version bump to regenerate lockfile) ---
       - name: Install uv
@@ -293,10 +305,10 @@ jobs:
       - name: Push release commit to develop
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_GIT_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
         run: |
           set -euo pipefail
-          AUTHENTICATED_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          AUTHENTICATED_REMOTE="https://x-access-token:${RELEASE_GIT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           REMOTE_DEVELOP=$(git ls-remote origin refs/heads/develop | awk '{print $1}')
           if [ "$REMOTE_DEVELOP" = "$RELEASE_SHA" ]; then
             echo "origin/develop is at RELEASE_SHA $RELEASE_SHA — skipping push"
@@ -327,10 +339,10 @@ jobs:
       - name: Create release branch
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_GIT_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
         run: |
           set -euo pipefail
-          AUTHENTICATED_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          AUTHENTICATED_REMOTE="https://x-access-token:${RELEASE_GIT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           REMOTE_SHA=$(git ls-remote --heads origin "refs/heads/release/$VERSION" | awk '{print $1}')
           if [ -z "$REMOTE_SHA" ]; then
             git push "$AUTHENTICATED_REMOTE" "$RELEASE_SHA:refs/heads/release/$VERSION"
@@ -345,10 +357,10 @@ jobs:
       - name: Update main to release
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_GIT_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
         run: |
           set -euo pipefail
-          AUTHENTICATED_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          AUTHENTICATED_REMOTE="https://x-access-token:${RELEASE_GIT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           REMOTE_MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')
           if [ "$REMOTE_MAIN" = "$RELEASE_SHA" ]; then
             echo "origin/main is already at RELEASE_SHA $RELEASE_SHA — skipping"

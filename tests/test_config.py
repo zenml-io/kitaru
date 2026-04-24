@@ -480,14 +480,15 @@ def test_apply_env_translations_is_idempotent_after_first_overwrite(
     assert len(recorded) == 0
 
 
-def test_apply_env_translations_rejects_partial_server_only_config(
+def test_apply_env_translations_allows_partial_server_only_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A server URL without any auth token should fail fast."""
+    """Import-time env translation should not reject partial remote config."""
     monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
 
-    with pytest.raises(RuntimeError, match="KITARU_AUTH_TOKEN"):
-        apply_env_translations()
+    apply_env_translations()
+
+    assert os.environ["ZENML_STORE_URL"] == "https://server.example.com"
 
 
 def test_apply_env_translations_accepts_cross_namespace_auth_fallback(
@@ -517,14 +518,15 @@ def test_apply_env_translations_ignores_empty_kitaru_overrides(
     assert os.environ["ZENML_STORE_API_KEY"] == "zenml-token"
 
 
-def test_apply_env_translations_rejects_partial_token_only_config(
+def test_apply_env_translations_allows_partial_token_only_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A token without any server URL should also fail fast."""
+    """Import-time env translation should not reject partial remote auth."""
     monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
 
-    with pytest.raises(RuntimeError, match="KITARU_SERVER_URL"):
-        apply_env_translations()
+    apply_env_translations()
+
+    assert os.environ["ZENML_STORE_API_KEY"] == "token-123"
 
 
 def test_apply_env_translations_defaults_rich_traceback_off(
@@ -4321,6 +4323,26 @@ def test_connection_resolution_reads_direct_zenml_env_below_kitaru(
     assert resolved.server_url == "https://kitaru.example.com"
     assert resolved.auth_token == "zenml-token"
     assert resolved.project == "kitaru-project"
+
+
+def test_connection_validation_rejects_env_server_without_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use-time validation should reject env server URL without auth."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+
+    with pytest.raises(KitaruUsageError, match="KITARU_AUTH_TOKEN"):
+        resolve_connection_config(validate_for_use=True)
+
+
+def test_connection_validation_rejects_env_auth_without_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use-time validation should reject env auth without a server URL."""
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    with pytest.raises(KitaruUsageError, match="KITARU_SERVER_URL"):
+        resolve_connection_config(validate_for_use=True)
 
 
 def test_connection_validation_requires_project_for_env_remote_server(
