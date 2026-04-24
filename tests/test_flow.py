@@ -1242,7 +1242,7 @@ def _execution_status_stub(
     )
 
 
-def test_flow_handle_wait_streams_logs_by_default() -> None:
+def test_flow_handle_wait_log_sink_receives_entries() -> None:
     run_id = uuid4()
     initial = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
     finished = _DummyRun(
@@ -1319,6 +1319,90 @@ def test_flow_handle_wait_streaming_deduplicates_entries() -> None:
     assert emitted == ["same line"]
 
 
+def test_flow_handle_wait_default_non_interactive_does_not_print() -> None:
+    run_id = uuid4()
+    initial = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    zenml_client = MagicMock()
+    zenml_client.get_pipeline_run.return_value = finished
+
+    entry = LogEntry(
+        message="checkpoint started",
+        timestamp="2026-04-24T08:00:00+00:00",
+        checkpoint_name="step",
+    )
+    kitaru_client = MagicMock()
+    kitaru_client.executions.logs.return_value = [entry]
+    kitaru_client.executions.get.return_value = _execution_status_stub(
+        str(run_id),
+        KitaruExecutionStatus.COMPLETED,
+    )
+
+    handle = FlowHandle(_as_pipeline_run(initial))
+    with (
+        patch("kitaru.flow.Client", return_value=zenml_client),
+        patch("kitaru.client.KitaruClient", return_value=kitaru_client),
+        patch("kitaru.flow._is_interactive_stdout", return_value=False),
+        patch("builtins.print") as print_mock,
+    ):
+        result = handle.wait()
+
+    assert result == 42
+    print_mock.assert_not_called()
+    kitaru_client.executions.logs.assert_called_once_with(
+        str(run_id),
+        checkpoint=None,
+        source="step",
+        limit=None,
+    )
+
+
+def test_flow_handle_wait_default_interactive_prints_logs() -> None:
+    run_id = uuid4()
+    initial = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    zenml_client = MagicMock()
+    zenml_client.get_pipeline_run.return_value = finished
+
+    entry = LogEntry(
+        message="checkpoint started",
+        timestamp="2026-04-24T08:00:00+00:00",
+        checkpoint_name="step",
+    )
+    kitaru_client = MagicMock()
+    kitaru_client.executions.logs.return_value = [entry]
+    kitaru_client.executions.get.return_value = _execution_status_stub(
+        str(run_id),
+        KitaruExecutionStatus.COMPLETED,
+    )
+
+    handle = FlowHandle(_as_pipeline_run(initial))
+    with (
+        patch("kitaru.flow.Client", return_value=zenml_client),
+        patch("kitaru.client.KitaruClient", return_value=kitaru_client),
+        patch("kitaru.flow._is_interactive_stdout", return_value=True),
+        patch("builtins.print") as print_mock,
+    ):
+        result = handle.wait()
+
+    assert result == 42
+    print_mock.assert_called_once_with("checkpoint started", flush=True)
+    kitaru_client.executions.logs.assert_called_once_with(
+        str(run_id),
+        checkpoint=None,
+        source="step",
+        limit=None,
+    )
+
+
 def test_flow_handle_wait_stream_logs_false_uses_poll_only_path() -> None:
     run_id = uuid4()
     initial = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
@@ -1370,6 +1454,32 @@ def test_flow_handle_wait_falls_back_when_logs_unavailable() -> None:
     assert emitted == []
     sleep_mock.assert_called_once_with(1.0)
     kitaru_client.executions.get.assert_not_called()
+
+
+def test_flow_handle_wait_falls_back_when_client_construction_fails() -> None:
+    run_id = uuid4()
+    initial = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
+    finished = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        run_id=run_id,
+        outputs=[("step", "output", 42)],
+    )
+    zenml_client = MagicMock()
+    zenml_client.get_pipeline_run.side_effect = [initial, finished]
+
+    handle = FlowHandle(_as_pipeline_run(initial))
+    with (
+        patch("kitaru.flow.Client", return_value=zenml_client),
+        patch(
+            "kitaru.client.KitaruClient",
+            side_effect=KitaruBackendError("no connection"),
+        ),
+        patch("kitaru.flow.time.sleep") as sleep_mock,
+    ):
+        result = handle.wait()
+
+    assert result == 42
+    sleep_mock.assert_called_once_with(1.0)
 
 
 def test_flow_handle_wait_streaming_failure_refreshes_and_raises_typed_error() -> None:
@@ -1435,6 +1545,32 @@ def test_flow_handle_wait_rejects_non_positive_log_interval() -> None:
     kitaru_client_cls.assert_not_called()
 
 
+def test_flow_handle_wait_rejects_empty_log_source() -> None:
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    handle = FlowHandle(_as_pipeline_run(run))
+
+    with (
+        patch("kitaru.client.KitaruClient") as kitaru_client_cls,
+        pytest.raises(KitaruUsageError, match="non-empty"),
+    ):
+        handle.wait(log_source="   ")
+
+    kitaru_client_cls.assert_not_called()
+
+
+def test_flow_handle_wait_rejects_runner_with_checkpoint() -> None:
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    handle = FlowHandle(_as_pipeline_run(run))
+
+    with (
+        patch("kitaru.client.KitaruClient") as kitaru_client_cls,
+        pytest.raises(KitaruUsageError, match="log_checkpoint"),
+    ):
+        handle.wait(log_source="runner", log_checkpoint="research")
+
+    kitaru_client_cls.assert_not_called()
+
+
 def test_flow_handle_wait_log_sink_errors_propagate() -> None:
     run_id = uuid4()
     initial = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
@@ -1454,6 +1590,38 @@ def test_flow_handle_wait_log_sink_errors_propagate() -> None:
         patch("kitaru.flow.Client") as zenml_client_cls,
         patch("kitaru.client.KitaruClient", return_value=kitaru_client),
         pytest.raises(RuntimeError, match="sink failed"),
+    ):
+        handle.wait(log_sink=broken_sink)
+
+    kitaru_client.executions.logs.assert_called_once_with(
+        str(run_id),
+        checkpoint=None,
+        source="step",
+        limit=None,
+    )
+    kitaru_client.executions.get.assert_not_called()
+    zenml_client_cls.assert_not_called()
+
+
+def test_flow_handle_wait_log_sink_kitaru_errors_propagate() -> None:
+    run_id = uuid4()
+    initial = _DummyRun(status=ExecutionStatus.RUNNING, run_id=run_id)
+    entry = LogEntry(
+        message="before sink crash",
+        timestamp="2026-04-24T08:02:00+00:00",
+        checkpoint_name="step",
+    )
+    kitaru_client = MagicMock()
+    kitaru_client.executions.logs.return_value = [entry]
+
+    def broken_sink(log: LogEntry) -> None:
+        raise KitaruBackendError(f"sink failed for {log.message}")
+
+    handle = FlowHandle(_as_pipeline_run(initial))
+    with (
+        patch("kitaru.flow.Client") as zenml_client_cls,
+        patch("kitaru.client.KitaruClient", return_value=kitaru_client),
+        pytest.raises(KitaruBackendError, match="sink failed"),
     ):
         handle.wait(log_sink=broken_sink)
 

@@ -29,6 +29,7 @@ from zenml.pipelines.pipeline_definition import Pipeline
 
 from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
 from kitaru._client._follow import follow_execution_logs
+from kitaru._client._logs import _normalize_log_source
 from kitaru._client._mappers import _to_public_status
 from kitaru._client._models import ExecutionStatus, LogEntry
 from kitaru._interface_deployments import (
@@ -599,18 +600,69 @@ def _raise_for_unsuccessful_run(
     )
 
 
+def _is_interactive_stdout(stream: Any | None = None) -> bool:
+    """Return whether stdout is interactive, never raising."""
+    target_stream = sys.stdout if stream is None else stream
+    isatty = getattr(target_stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    try:
+        return bool(isatty())
+    except Exception:
+        return False
+
+
+def _validate_wait_log_streaming_args(
+    *,
+    log_source: str,
+    log_checkpoint: str | None,
+) -> tuple[str, str | None]:
+    """Validate and normalize wait() log-follow arguments."""
+    normalized_source = _normalize_log_source(log_source)
+
+    normalized_checkpoint: str | None = None
+    if log_checkpoint is not None:
+        normalized_checkpoint = log_checkpoint.strip()
+        if not normalized_checkpoint:
+            raise KitaruUsageError("`log_checkpoint` must be non-empty when provided.")
+
+    if normalized_source == "runner" and normalized_checkpoint is not None:
+        raise KitaruUsageError(
+            "`log_checkpoint` cannot be combined with `log_source='runner'`."
+        )
+
+    return normalized_source, normalized_checkpoint
+
+
+class _SDKWaitLogSinkError(Exception):
+    """Internal wrapper to keep sink callback errors distinct from backend errors."""
+
+    def __init__(self, original: Exception) -> None:
+        super().__init__(str(original))
+        self.original = original
+
+
 class _SDKWaitLogSink:
     """Minimal SDK log sink used by ``FlowHandle.wait(stream_logs=True)``."""
 
-    def __init__(self, log_sink: Callable[[LogEntry], None] | None) -> None:
+    def __init__(
+        self,
+        log_sink: Callable[[LogEntry], None] | None,
+        *,
+        print_to_stdout: bool,
+    ) -> None:
         self._log_sink = log_sink
+        self._print_to_stdout = print_to_stdout
 
     def emit_logs(self, entries: Sequence[LogEntry]) -> None:
         """Emit new log entries to the configured callback or stdout."""
         for entry in entries:
             if self._log_sink is not None:
-                self._log_sink(entry)
-            else:
+                try:
+                    self._log_sink(entry)
+                except Exception as exc:
+                    raise _SDKWaitLogSinkError(exc) from exc
+            elif self._print_to_stdout:
                 print(entry.message, flush=True)
 
     def emit_waiting(self, wait: object | None) -> None:
@@ -714,6 +766,8 @@ class FlowHandle:
         behavior. Log streaming is best-effort: if runtime logs are unavailable
         for the current backend, waiting falls back to the original poll-only
         path and still returns or raises based on the final execution status.
+        When ``log_sink`` is not provided, log lines auto-print only when
+        stdout is interactive.
 
         Args:
             stream_logs: Whether to stream live runtime log lines while waiting.
@@ -774,9 +828,19 @@ class FlowHandle:
         """Best-effort live log streaming; returns false when unavailable."""
         from kitaru.client import KitaruClient
 
+        normalized_source, normalized_checkpoint = _validate_wait_log_streaming_args(
+            log_source=log_source,
+            log_checkpoint=log_checkpoint,
+        )
+
         try:
             client = KitaruClient()
-        except KitaruUsageError:
+        except (
+            KitaruBackendError,
+            KitaruFeatureNotAvailableError,
+            KitaruLogRetrievalError,
+            KitaruUsageError,
+        ):
             logger.debug(
                 "Runtime log streaming unavailable while constructing KitaruClient; "
                 "falling back to poll-only wait.",
@@ -788,13 +852,18 @@ class FlowHandle:
             follow_execution_logs(
                 client=client,
                 exec_id=self.exec_id,
-                checkpoint=log_checkpoint,
-                source=log_source,
+                checkpoint=normalized_checkpoint,
+                source=normalized_source,
                 limit=None,
                 interval=log_interval,
-                sink=_SDKWaitLogSink(log_sink),
+                sink=_SDKWaitLogSink(
+                    log_sink,
+                    print_to_stdout=(log_sink is None and _is_interactive_stdout()),
+                ),
                 sleep=time.sleep,
             )
+        except _SDKWaitLogSinkError as sink_error:
+            raise sink_error.original from sink_error
         except (
             KitaruBackendError,
             KitaruFeatureNotAvailableError,

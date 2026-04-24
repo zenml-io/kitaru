@@ -116,12 +116,12 @@ banner in text mode or a `waiting` event in JSON mode.
 
 ## SDK wait streaming
 
-When you start a flow from Python and then wait for it, Kitaru streams live
+When you start a flow from Python and then wait for it, Kitaru follows live
 backend step log lines by default:
 
 ```python
 handle = my_flow.run(topic="renewable energy")
-result = handle.wait()  # streams live checkpoint logs while waiting
+result = handle.wait()  # follows live checkpoint logs while waiting
 ```
 
 This uses the same follow loop as `kitaru executions logs --follow`, including
@@ -130,6 +130,10 @@ the execution reaches a terminal state. If runtime log retrieval is not
 available for the current backend, `wait()` falls back to the older silent
 status-polling behavior and still returns or raises from the final execution
 status.
+
+By default, `wait()` auto-prints log lines only when stdout is interactive
+(for example, in a terminal). In non-interactive/library contexts, `wait()`
+still follows logs but does not print unless you provide `log_sink=...`.
 
 To keep the previous silent behavior explicitly, opt out:
 
@@ -146,6 +150,10 @@ def collect(entry):
 
 result = handle.wait(log_sink=collect)
 ```
+
+`wait()` log following begins only after `.run()` returns a `FlowHandle`.
+If submission itself is still in progress, that pre-handle phase remains silent
+in this follow-up.
 
 ## Python SDK log retrieval example
 
