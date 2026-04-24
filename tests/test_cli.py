@@ -738,11 +738,17 @@ def test_auth_service_accounts_list_json_contract(
 def test_auth_api_keys_create_json_includes_one_time_key(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """API-key create JSON may include the raw key value exactly once."""
+    """API-key create JSON may include the raw key and activation status."""
     api_keys = Mock()
     api_keys.create.return_value = AuthAPIKeyWithValue(
         api_key=_auth_api_key_stub(),
         key="raw-api-key",
+        local_key_activation_requested=True,
+        local_key_activation_succeeded=False,
+        local_key_activation_error=(
+            "API key was created, but Kitaru could not set it as the active "
+            "local credential: local store rejected [redacted]"
+        ),
     )
     fake_client = _auth_management_client_stub(api_keys=api_keys)
 
@@ -760,6 +766,7 @@ def test_auth_api_keys_create_json_includes_one_time_key(
                 "default",
                 "--description",
                 "Default CI key",
+                "--set-key",
                 "-o",
                 "json",
             ]
@@ -770,12 +777,19 @@ def test_auth_api_keys_create_json_includes_one_time_key(
         "ci-runner",
         "default",
         description="Default CI key",
-        set_key=False,
+        set_key=True,
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "auth.api-keys.create"
     assert payload["item"]["key"] == "raw-api-key"
     assert payload["item"]["api_key_id"] == "key-123"
+    assert payload["item"]["local_key_activation_requested"] is True
+    assert payload["item"]["local_key_activation_succeeded"] is False
+    assert (
+        "local store rejected [redacted]"
+        in (payload["item"]["local_key_activation_error"])
+    )
+    assert json.dumps(payload).count("raw-api-key") == 1
 
 
 def test_auth_api_keys_list_and_show_json_do_not_leak_raw_key(
@@ -824,11 +838,17 @@ def test_auth_api_keys_list_and_show_json_do_not_leak_raw_key(
 def test_auth_api_keys_rotate_text_includes_warning_and_new_key(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """API-key rotate text should show the one-time key with a storage warning."""
+    """API-key rotate text should show the key and activation failure warning."""
     api_keys = Mock()
     api_keys.rotate.return_value = AuthAPIKeyWithValue(
         api_key=_auth_api_key_stub(),
         key="rotated-raw-api-key",
+        local_key_activation_requested=True,
+        local_key_activation_succeeded=False,
+        local_key_activation_error=(
+            "API key was rotated, but Kitaru could not set it as the active "
+            "local credential: local store rejected [redacted]"
+        ),
     )
     fake_client = _auth_management_client_stub(api_keys=api_keys)
 
@@ -846,6 +866,7 @@ def test_auth_api_keys_rotate_text_includes_warning_and_new_key(
                 "default",
                 "--retain-minutes",
                 "10",
+                "--set-key",
             ]
         )
 
@@ -854,12 +875,15 @@ def test_auth_api_keys_rotate_text_includes_warning_and_new_key(
         "ci-runner",
         "default",
         retain_period_minutes=10,
-        set_key=False,
+        set_key=True,
     )
     output = capsys.readouterr().out
     assert "Rotated API key: default" in output
     assert "Key: rotated-raw-api-key" in output
+    assert "Local activation: failed" in output
     assert "Store this key now; it cannot be retrieved later." in output
+    assert "local store rejected [redacted]" in output
+    assert output.count("rotated-raw-api-key") == 1
 
 
 def test_auth_delete_requires_yes_in_non_interactive_mode(

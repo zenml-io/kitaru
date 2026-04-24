@@ -84,7 +84,13 @@ def _api_key_payload(api_key: AuthAPIKey) -> dict[str, Any]:
 
 def _api_key_value_payload(result: AuthAPIKeyWithValue) -> dict[str, Any]:
     """Serialize create/rotate output including the one-time raw key."""
-    return {**_api_key_payload(result.api_key), "key": result.key}
+    return {
+        **_api_key_payload(result.api_key),
+        "key": result.key,
+        "local_key_activation_requested": result.local_key_activation_requested,
+        "local_key_activation_succeeded": result.local_key_activation_succeeded,
+        "local_key_activation_error": result.local_key_activation_error,
+    }
 
 
 def _service_account_rows(account: AuthServiceAccount) -> list[tuple[str, str]]:
@@ -116,6 +122,29 @@ def _api_key_rows(api_key: AuthAPIKey) -> list[tuple[str, str]]:
         ("Last rotated", _format_timestamp(api_key.last_rotated)),
         ("Retain period", f"{api_key.retain_period_minutes} minutes"),
     ]
+
+
+def _api_key_value_rows(result: AuthAPIKeyWithValue) -> list[tuple[str, str]]:
+    """Return text snapshot rows for create/rotate including activation status."""
+    rows = [*_api_key_rows(result.api_key), ("Key", result.key)]
+    if result.local_key_activation_requested:
+        activation_status = (
+            "succeeded" if result.local_key_activation_succeeded else "failed"
+        )
+        rows.append(("Local activation", activation_status))
+    return rows
+
+
+def _api_key_value_warning(result: AuthAPIKeyWithValue) -> str:
+    """Return the one-time-key warning plus any local activation warning."""
+    warning = "Store this key now; it cannot be retrieved later."
+    if not result.local_key_activation_error:
+        return warning
+    return (
+        f"{warning}\n\n"
+        f"{result.local_key_activation_error} The key is shown above; "
+        "fix the local credential issue and retry activation if needed."
+    )
 
 
 def _service_account_table_rows(
@@ -504,8 +533,8 @@ def api_keys_create(
     _print_success(f"Created API key: {result.api_key.name}")
     _emit_snapshot(
         "API key",
-        [*_api_key_rows(result.api_key), ("Key", result.key)],
-        warning="Store this key now; it cannot be retrieved later.",
+        _api_key_value_rows(result),
+        warning=_api_key_value_warning(result),
     )
 
 
@@ -702,8 +731,8 @@ def api_keys_rotate(
     _print_success(f"Rotated API key: {result.api_key.name}")
     _emit_snapshot(
         "API key",
-        [*_api_key_rows(result.api_key), ("Key", result.key)],
-        warning="Store this key now; it cannot be retrieved later.",
+        _api_key_value_rows(result),
+        warning=_api_key_value_warning(result),
     )
 
 

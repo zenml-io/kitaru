@@ -469,6 +469,9 @@ def test_auth_api_keys_delegate_and_preserve_one_time_key_rule() -> None:
     assert isinstance(created, AuthAPIKeyWithValue)
     assert created.key == "created-secret"
     assert "created-secret" not in repr(created)
+    assert created.local_key_activation_requested is True
+    assert created.local_key_activation_succeeded is True
+    assert created.local_key_activation_error is None
     assert isinstance(created.api_key, AuthAPIKey)
     assert not hasattr(created.api_key, "key")
     assert isinstance(rotated, AuthAPIKeyWithValue)
@@ -481,8 +484,9 @@ def test_auth_api_keys_delegate_and_preserve_one_time_key_rule() -> None:
         service_account_name_id_or_prefix="ci-runner",
         name="default",
         description="Default CI key",
-        set_key=True,
+        set_key=False,
     )
+    zenml_client.set_api_key.assert_called_once_with(key="created-secret")
     zenml_client.get_api_key.assert_called_once_with(
         service_account_name_id_or_prefix="ci-runner",
         name_id_or_prefix="default",
@@ -531,6 +535,193 @@ def test_auth_api_key_create_requires_one_time_key_value() -> None:
 
         with pytest.raises(KitaruBackendError, match="one-time API key value"):
             client.auth.api_keys.create("ci-runner", "default")
+
+
+def test_auth_api_key_create_set_key_failure_returns_sanitized_key_result() -> None:
+    """Local activation failure must not hide the one-time created key."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.create_api_key.return_value = _api_key_response(
+            raw_key="created-secret"
+        )
+        zenml_client.set_api_key.side_effect = RuntimeError(
+            "could not store created-secret locally"
+        )
+        client = KitaruClient()
+
+        result = client.auth.api_keys.create("ci-runner", "default", set_key=True)
+
+    assert result.key == "created-secret"
+    assert result.local_key_activation_requested is True
+    assert result.local_key_activation_succeeded is False
+    assert result.local_key_activation_error is not None
+    assert "created-secret" not in result.local_key_activation_error
+    assert "[redacted]" in result.local_key_activation_error
+    assert "could not set it as the active local credential" in (
+        result.local_key_activation_error
+    )
+    zenml_client.create_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name="default",
+        description="",
+        set_key=False,
+    )
+    zenml_client.set_api_key.assert_called_once_with(key="created-secret")
+
+
+def test_auth_api_key_rotate_set_key_failure_returns_sanitized_key_result() -> None:
+    """Local activation failure must not hide the one-time rotated key."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.rotate_api_key.return_value = _api_key_response(
+            raw_key="rotated-secret"
+        )
+        zenml_client.set_api_key.side_effect = RuntimeError(
+            "could not store rotated-secret locally"
+        )
+        client = KitaruClient()
+
+        result = client.auth.api_keys.rotate("ci-runner", "default", set_key=True)
+
+    assert result.key == "rotated-secret"
+    assert result.local_key_activation_requested is True
+    assert result.local_key_activation_succeeded is False
+    assert result.local_key_activation_error is not None
+    assert "rotated-secret" not in result.local_key_activation_error
+    assert "[redacted]" in result.local_key_activation_error
+    assert "could not set it as the active local credential" in (
+        result.local_key_activation_error
+    )
+    zenml_client.rotate_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+        retain_period_minutes=0,
+        set_key=False,
+    )
+    zenml_client.set_api_key.assert_called_once_with(key="rotated-secret")
+
+
+@pytest.mark.parametrize(
+    ("backend_method", "call_api", "expected_context"),
+    [
+        (
+            "create_service_account",
+            lambda client: client.auth.service_accounts.create("ci-runner"),
+            "Failed to create service account 'ci-runner'",
+        ),
+        (
+            "get_service_account",
+            lambda client: client.auth.service_accounts.get("ci-runner"),
+            "Failed to load service account 'ci-runner'",
+        ),
+        (
+            "list_service_accounts",
+            lambda client: client.auth.service_accounts.list(),
+            "Failed to list service accounts",
+        ),
+        (
+            "update_service_account",
+            lambda client: client.auth.service_accounts.update("ci-runner"),
+            "Failed to update service account 'ci-runner'",
+        ),
+        (
+            "delete_service_account",
+            lambda client: client.auth.service_accounts.delete("ci-runner"),
+            "Failed to delete service account 'ci-runner'",
+        ),
+        (
+            "create_api_key",
+            lambda client: client.auth.api_keys.create("ci-runner", "default"),
+            "Failed to create API key 'default' for service account 'ci-runner'",
+        ),
+        (
+            "get_api_key",
+            lambda client: client.auth.api_keys.get("ci-runner", "default"),
+            "Failed to load API key 'default' for service account 'ci-runner'",
+        ),
+        (
+            "list_api_keys",
+            lambda client: client.auth.api_keys.list("ci-runner"),
+            "Failed to list API keys for service account 'ci-runner'",
+        ),
+        (
+            "update_api_key",
+            lambda client: client.auth.api_keys.update("ci-runner", "default"),
+            "Failed to update API key 'default' for service account 'ci-runner'",
+        ),
+        (
+            "rotate_api_key",
+            lambda client: client.auth.api_keys.rotate("ci-runner", "default"),
+            "Failed to rotate API key 'default' for service account 'ci-runner'",
+        ),
+        (
+            "delete_api_key",
+            lambda client: client.auth.api_keys.delete("ci-runner", "default"),
+            "Failed to delete API key 'default' for service account 'ci-runner'",
+        ),
+    ],
+)
+def test_auth_backend_failures_are_wrapped_as_kitaru_errors(
+    backend_method: str,
+    call_api: Any,
+    expected_context: str,
+) -> None:
+    """ZenML auth-management failures should cross the SDK as Kitaru errors."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        getattr(zenml_client, backend_method).side_effect = RuntimeError(
+            "backend offline"
+        )
+        client = KitaruClient()
+
+        with pytest.raises(KitaruBackendError) as exc_info:
+            call_api(client)
+
+    assert expected_context in str(exc_info.value)
+    assert "backend offline" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+def test_auth_local_validation_errors_remain_usage_errors() -> None:
+    """Local caller mistakes should not be wrapped as backend failures."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client = KitaruClient()
+
+        with pytest.raises(KitaruUsageError, match="non-empty string"):
+            client.auth.api_keys.create("", "default")
+        with pytest.raises(KitaruUsageError, match="retain_period_minutes"):
+            client.auth.api_keys.rotate(
+                "ci-runner",
+                "default",
+                retain_period_minutes=-1,
+            )
+
+    client_cls.return_value.create_api_key.assert_not_called()
+    client_cls.return_value.rotate_api_key.assert_not_called()
 
 
 def test_deployment_snapshot_names_build_and_parse() -> None:

@@ -75,6 +75,9 @@ class AuthAPIKeyWithValue:
 
     api_key: AuthAPIKey
     key: str = field(repr=False)
+    local_key_activation_requested: bool = False
+    local_key_activation_succeeded: bool | None = None
+    local_key_activation_error: str | None = None
 
 
 @dataclass(frozen=True)

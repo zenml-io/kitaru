@@ -269,6 +269,54 @@ def _map_auth_api_key_with_value(api_key: Any) -> AuthAPIKeyWithValue:
     )
 
 
+def _sanitize_local_key_activation_error(exc: Exception, *, raw_key: str) -> str:
+    """Return local activation error text without leaking the raw API key."""
+    message = str(exc) or type(exc).__name__
+    return message.replace(raw_key, "[redacted]")
+
+
+def _with_local_key_activation_status(
+    result: AuthAPIKeyWithValue,
+    *,
+    succeeded: bool,
+    error: str | None = None,
+) -> AuthAPIKeyWithValue:
+    """Return an API-key result annotated with local activation status."""
+    return AuthAPIKeyWithValue(
+        api_key=result.api_key,
+        key=result.key,
+        local_key_activation_requested=True,
+        local_key_activation_succeeded=succeeded,
+        local_key_activation_error=error,
+    )
+
+
+def _attempt_local_key_activation(
+    result: AuthAPIKeyWithValue,
+    *,
+    zenml_client: Any,
+    operation: Literal["create", "rotate"],
+) -> AuthAPIKeyWithValue:
+    """Best-effort local activation that never discards the one-time key."""
+    try:
+        zenml_client.set_api_key(key=result.key)
+    except Exception as exc:
+        action = "created" if operation == "create" else "rotated"
+        sanitized_error = _sanitize_local_key_activation_error(
+            exc,
+            raw_key=result.key,
+        )
+        return _with_local_key_activation_status(
+            result,
+            succeeded=False,
+            error=(
+                f"API key was {action}, but Kitaru could not set it as the "
+                f"active local credential: {sanitized_error}"
+            ),
+        )
+    return _with_local_key_activation_status(result, succeeded=True)
+
+
 @runtime_checkable
 class _ReplayFlowLike(Protocol):
     """Flow wrapper protocol used by client-side replay resolution."""
@@ -1790,23 +1838,35 @@ class _ServiceAccountsAPI:
         description: str = "",
     ) -> AuthServiceAccount:
         """Create a service account."""
-        service_account = self._client_ref._client().create_service_account(
-            name=_validate_non_empty_auth_value(name, name="name"),
-            full_name=full_name,
-            description=description,
-        )
+        validated_name = _validate_non_empty_auth_value(name, name="name")
+        try:
+            service_account = self._client_ref._client().create_service_account(
+                name=validated_name,
+                full_name=full_name,
+                description=description,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to create service account {validated_name!r}: {exc}"
+            ) from exc
         return _map_auth_service_account(service_account)
 
     def get(self, name_or_id: str) -> AuthServiceAccount:
         """Get one service account by exact name or ID."""
-        service_account = self._client_ref._client().get_service_account(
-            name_id_or_prefix=_validate_non_empty_auth_value(
-                name_or_id,
-                name="name_or_id",
-            ),
-            allow_name_prefix_match=False,
-            hydrate=True,
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
         )
+        try:
+            service_account = self._client_ref._client().get_service_account(
+                name_id_or_prefix=validated_name_or_id,
+                allow_name_prefix_match=False,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to load service account {validated_name_or_id!r}: {exc}"
+            ) from exc
         return _map_auth_service_account(service_account)
 
     def list(
@@ -1824,13 +1884,16 @@ class _ServiceAccountsAPI:
             page=page,
             size=size,
         )
-        service_accounts = self._client_ref._client().list_service_accounts(
-            name=name,
-            active=active,
-            page=backend_page,
-            size=backend_size,
-            hydrate=True,
-        )
+        try:
+            service_accounts = self._client_ref._client().list_service_accounts(
+                name=name,
+                active=active,
+                page=backend_page,
+                size=backend_size,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(f"Failed to list service accounts: {exc}") from exc
         return [_map_auth_service_account(item) for item in service_accounts.items]
 
     def update(
@@ -1842,25 +1905,37 @@ class _ServiceAccountsAPI:
         active: bool | None = None,
     ) -> AuthServiceAccount:
         """Update mutable service-account metadata."""
-        service_account = self._client_ref._client().update_service_account(
-            name_id_or_prefix=_validate_non_empty_auth_value(
-                name_or_id,
-                name="name_or_id",
-            ),
-            updated_name=name,
-            description=description,
-            active=active,
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
         )
+        try:
+            service_account = self._client_ref._client().update_service_account(
+                name_id_or_prefix=validated_name_or_id,
+                updated_name=name,
+                description=description,
+                active=active,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to update service account {validated_name_or_id!r}: {exc}"
+            ) from exc
         return _map_auth_service_account(service_account)
 
     def delete(self, name_or_id: str) -> None:
         """Delete a service account."""
-        self._client_ref._client().delete_service_account(
-            name_id_or_prefix=_validate_non_empty_auth_value(
-                name_or_id,
-                name="name_or_id",
-            )
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
         )
+        try:
+            self._client_ref._client().delete_service_account(
+                name_id_or_prefix=validated_name_or_id
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to delete service account {validated_name_or_id!r}: {exc}"
+            ) from exc
 
 
 class _APIKeysAPI:
@@ -1878,31 +1953,56 @@ class _APIKeysAPI:
         set_key: bool = False,
     ) -> AuthAPIKeyWithValue:
         """Create an API key and return its one-time raw key value."""
-        api_key = self._client_ref._client().create_api_key(
-            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
-                service_account,
-                name="service_account",
-            ),
-            name=_validate_non_empty_auth_value(name, name="name"),
-            description=description,
-            set_key=set_key,
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
         )
-        return _map_auth_api_key_with_value(api_key)
+        validated_name = _validate_non_empty_auth_value(name, name="name")
+        try:
+            zenml_client = self._client_ref._client()
+            api_key = zenml_client.create_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name=validated_name,
+                description=description,
+                set_key=False,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to create API key {validated_name!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
+
+        result = _map_auth_api_key_with_value(api_key)
+        if set_key:
+            return _attempt_local_key_activation(
+                result,
+                zenml_client=zenml_client,
+                operation="create",
+            )
+        return result
 
     def get(self, service_account: str, name_or_id: str) -> AuthAPIKey:
         """Get metadata for one API key by exact name or ID."""
-        api_key = self._client_ref._client().get_api_key(
-            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
-                service_account,
-                name="service_account",
-            ),
-            name_id_or_prefix=_validate_non_empty_auth_value(
-                name_or_id,
-                name="name_or_id",
-            ),
-            allow_name_prefix_match=False,
-            hydrate=True,
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
         )
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            api_key = self._client_ref._client().get_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name_id_or_prefix=validated_name_or_id,
+                allow_name_prefix_match=False,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to load API key {validated_name_or_id!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
         return _map_auth_api_key(api_key)
 
     def list(
@@ -1921,17 +2021,24 @@ class _APIKeysAPI:
             page=page,
             size=size,
         )
-        api_keys = self._client_ref._client().list_api_keys(
-            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
-                service_account,
-                name="service_account",
-            ),
-            name=name,
-            active=active,
-            page=backend_page,
-            size=backend_size,
-            hydrate=True,
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
         )
+        try:
+            api_keys = self._client_ref._client().list_api_keys(
+                service_account_name_id_or_prefix=validated_service_account,
+                name=name,
+                active=active,
+                page=backend_page,
+                size=backend_size,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to list API keys for service account "
+                f"{validated_service_account!r}: {exc}"
+            ) from exc
         return [_map_auth_api_key(item) for item in api_keys.items]
 
     def update(
@@ -1944,19 +2051,27 @@ class _APIKeysAPI:
         active: bool | None = None,
     ) -> AuthAPIKey:
         """Update mutable API-key metadata."""
-        api_key = self._client_ref._client().update_api_key(
-            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
-                service_account,
-                name="service_account",
-            ),
-            name_id_or_prefix=_validate_non_empty_auth_value(
-                name_or_id,
-                name="name_or_id",
-            ),
-            name=name,
-            description=description,
-            active=active,
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
         )
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            api_key = self._client_ref._client().update_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name_id_or_prefix=validated_name_or_id,
+                name=name,
+                description=description,
+                active=active,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to update API key {validated_name_or_id!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
         return _map_auth_api_key(api_key)
 
     def rotate(
@@ -1970,32 +2085,57 @@ class _APIKeysAPI:
         """Rotate an API key and return its one-time replacement value."""
         if isinstance(retain_period_minutes, bool) or retain_period_minutes < 0:
             raise KitaruUsageError("`retain_period_minutes` must be >= 0.")
-        api_key = self._client_ref._client().rotate_api_key(
-            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
-                service_account,
-                name="service_account",
-            ),
-            name_id_or_prefix=_validate_non_empty_auth_value(
-                name_or_id,
-                name="name_or_id",
-            ),
-            retain_period_minutes=retain_period_minutes,
-            set_key=set_key,
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
         )
-        return _map_auth_api_key_with_value(api_key)
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            zenml_client = self._client_ref._client()
+            api_key = zenml_client.rotate_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name_id_or_prefix=validated_name_or_id,
+                retain_period_minutes=retain_period_minutes,
+                set_key=False,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to rotate API key {validated_name_or_id!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
+
+        result = _map_auth_api_key_with_value(api_key)
+        if set_key:
+            return _attempt_local_key_activation(
+                result,
+                zenml_client=zenml_client,
+                operation="rotate",
+            )
+        return result
 
     def delete(self, service_account: str, name_or_id: str) -> None:
         """Delete an API key."""
-        self._client_ref._client().delete_api_key(
-            service_account_name_id_or_prefix=_validate_non_empty_auth_value(
-                service_account,
-                name="service_account",
-            ),
-            name_id_or_prefix=_validate_non_empty_auth_value(
-                name_or_id,
-                name="name_or_id",
-            ),
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
         )
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            self._client_ref._client().delete_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name_id_or_prefix=validated_name_or_id,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to delete API key {validated_name_or_id!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
 
 
 class KitaruClient:
