@@ -891,6 +891,7 @@ class _FlowDefinition:
                 operation="deploy",
                 flow=flow_name,
             )
+            _preflight_active_stack_implementation_hydration()
             try:
                 configured_pipeline.prepare(*args, **kwargs)
             except (RuntimeError, ValueError) as exc:
@@ -1043,6 +1044,7 @@ class _FlowDefinition:
         )
 
         with _temporary_active_stack(resolved_execution.stack):
+            _preflight_active_stack_implementation_hydration()
             deployment_metadata = _deployment_metadata_for_stack(
                 resolved_execution.stack
             )
