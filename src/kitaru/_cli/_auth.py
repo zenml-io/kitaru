@@ -90,6 +90,10 @@ def _api_key_value_payload(result: AuthAPIKeyWithValue) -> dict[str, Any]:
         "local_key_activation_requested": result.local_key_activation_requested,
         "local_key_activation_succeeded": result.local_key_activation_succeeded,
         "local_key_activation_error": result.local_key_activation_error,
+        "local_key_rollback_attempted": result.local_key_rollback_attempted,
+        "local_key_rollback_succeeded": result.local_key_rollback_succeeded,
+        "local_key_rollback_error": result.local_key_rollback_error,
+        "local_key_rollback_reason": result.local_key_rollback_reason,
     }
 
 
@@ -132,6 +136,19 @@ def _api_key_value_rows(result: AuthAPIKeyWithValue) -> list[tuple[str, str]]:
             "succeeded" if result.local_key_activation_succeeded else "failed"
         )
         rows.append(("Local activation", activation_status))
+        if result.local_key_activation_succeeded is False:
+            if (
+                result.local_key_rollback_attempted
+                and result.local_key_rollback_succeeded
+            ):
+                rollback_status = "restored previous credential"
+            elif result.local_key_rollback_attempted:
+                rollback_status = "failed"
+            elif result.local_key_rollback_reason:
+                rollback_status = "not possible"
+            else:
+                rollback_status = "not attempted"
+            rows.append(("Credential rollback", rollback_status))
     return rows
 
 
@@ -140,11 +157,15 @@ def _api_key_value_warning(result: AuthAPIKeyWithValue) -> str:
     warning = "Store this key now; it cannot be retrieved later."
     if not result.local_key_activation_error:
         return warning
-    return (
-        f"{warning}\n\n"
-        f"{result.local_key_activation_error} The key is shown above; "
-        "fix the local credential issue and retry activation if needed."
-    )
+    repair_hint = ""
+    if result.local_key_rollback_succeeded is not True:
+        repair_hint = (
+            "\n\nTo repair local credentials, run "
+            "`kitaru login <server-url> --api-key <key>` or restore the "
+            "previous credential manually. Use the one-time key shown above "
+            "for `<key>` if you want this new API key to become active locally."
+        )
+    return f"{warning}\n\n{result.local_key_activation_error}{repair_hint}"
 
 
 def _service_account_table_rows(

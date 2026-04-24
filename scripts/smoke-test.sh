@@ -102,6 +102,34 @@ run_test() {
     return $rc
 }
 
+redact_sensitive_output() {
+    sed -E \
+        -e 's/("key"[[:space:]]*:[[:space:]]*")[^"]*(")/\1[redacted]\2/g' \
+        -e 's/(Key:[[:space:]]*).*/\1[redacted]/g'
+}
+
+run_sensitive_json_test() {
+    local label="$1"; shift
+    local output
+    output=$("$@" 2>&1)
+    local rc=$?
+    if [[ $rc -eq 0 ]]; then
+        printf "  ${GREEN}✓${RESET} %s\n" "$label"
+        PASSED+=("$label")
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$output" | redact_sensitive_output | sed 's/^/    /'
+        fi
+    elif [[ $rc -eq 124 ]]; then
+        printf "  ${RED}✗${RESET} %s ${RED}(TIMEOUT)${RESET}\n" "$label"
+        FAILED+=("$label (TIMEOUT)")
+    else
+        printf "  ${RED}✗${RESET} %s\n" "$label"
+        echo "$output" | redact_sensitive_output | tail -30 | sed 's/^/    /'
+        FAILED+=("$label")
+    fi
+    return $rc
+}
+
 run_expected_failure() {
     local label="$1"; local expected="$2"; shift 2
     local output
@@ -292,7 +320,7 @@ SMOKE_AUTH_KEY="smoke-key-$$"
 run_test "kitaru auth service-accounts create smoke" \
     $UV_RUN kitaru auth service-accounts create "$SMOKE_AUTH_SA" \
         --description "Kitaru smoke-test service account"
-run_test "kitaru auth api-keys create smoke" \
+run_sensitive_json_test "kitaru auth api-keys create smoke" \
     $UV_RUN kitaru auth api-keys create "$SMOKE_AUTH_SA" "$SMOKE_AUTH_KEY" -o json
 run_test "kitaru auth api-keys list smoke" \
     $UV_RUN kitaru auth api-keys list "$SMOKE_AUTH_SA"

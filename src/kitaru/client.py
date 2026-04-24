@@ -22,6 +22,7 @@ import sys
 import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from pydantic import ValidationError
@@ -29,6 +30,7 @@ from zenml.client import Client
 from zenml.config.pipeline_run_configuration import PipelineRunConfiguration
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
+from zenml.login.credentials_store import get_credentials_store
 from zenml.models import PipelineRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.utils.run_utils import stop_run
@@ -269,10 +271,80 @@ def _map_auth_api_key_with_value(api_key: Any) -> AuthAPIKeyWithValue:
     )
 
 
-def _sanitize_local_key_activation_error(exc: Exception, *, raw_key: str) -> str:
-    """Return local activation error text without leaking the raw API key."""
+@dataclass(frozen=True)
+class _LocalCredentialSnapshot:
+    """Best-effort snapshot of the previous persisted API-key credential."""
+
+    server_url: str | None
+    previous_api_key: str | None = field(default=None, repr=False)
+    reason_unavailable: str | None = None
+
+    @property
+    def previous_api_key_available(self) -> bool:
+        """Whether this snapshot contains a rollback candidate."""
+        return bool(self.previous_api_key)
+
+
+def _redact_auth_error_text(text: str, *, secrets: list[str]) -> str:
+    """Return error text without leaking known sensitive credential values."""
+    redacted = text
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, "[redacted]")
+    return redacted
+
+
+def _sanitize_local_key_activation_error(
+    exc: Exception,
+    *,
+    raw_key: str,
+    previous_key: str | None = None,
+) -> str:
+    """Return local activation error text without leaking API-key values."""
     message = str(exc) or type(exc).__name__
-    return message.replace(raw_key, "[redacted]")
+    return _redact_auth_error_text(
+        message,
+        secrets=[raw_key, previous_key or ""],
+    )
+
+
+def _capture_previous_local_api_key(zenml_client: Any) -> _LocalCredentialSnapshot:
+    """Return the previous persisted API key if it can be restored safely."""
+    server_url = getattr(getattr(zenml_client, "zen_store", None), "url", None)
+    if not isinstance(server_url, str) or not server_url:
+        return _LocalCredentialSnapshot(
+            server_url=None,
+            reason_unavailable=(
+                "Kitaru could not determine the active remote server URL, so "
+                "there was no previous persisted credential to restore."
+            ),
+        )
+
+    try:
+        credentials_store = get_credentials_store()
+        previous_api_key = credentials_store.get_api_key(server_url=server_url)
+    except Exception as exc:
+        return _LocalCredentialSnapshot(
+            server_url=server_url,
+            reason_unavailable=(
+                "Kitaru could not read the previous persisted local API key for "
+                f"{server_url!r}, so rollback was not possible: {exc}"
+            ),
+        )
+
+    if not previous_api_key:
+        return _LocalCredentialSnapshot(
+            server_url=server_url,
+            reason_unavailable=(
+                "No previous persisted local API key was available to restore. "
+                "Environment credentials, if any, were not modified."
+            ),
+        )
+
+    return _LocalCredentialSnapshot(
+        server_url=server_url,
+        previous_api_key=previous_api_key,
+    )
 
 
 def _with_local_key_activation_status(
@@ -280,6 +352,10 @@ def _with_local_key_activation_status(
     *,
     succeeded: bool,
     error: str | None = None,
+    rollback_attempted: bool = False,
+    rollback_succeeded: bool | None = None,
+    rollback_error: str | None = None,
+    rollback_reason: str | None = None,
 ) -> AuthAPIKeyWithValue:
     """Return an API-key result annotated with local activation status."""
     return AuthAPIKeyWithValue(
@@ -288,6 +364,10 @@ def _with_local_key_activation_status(
         local_key_activation_requested=True,
         local_key_activation_succeeded=succeeded,
         local_key_activation_error=error,
+        local_key_rollback_attempted=rollback_attempted,
+        local_key_rollback_succeeded=rollback_succeeded,
+        local_key_rollback_error=rollback_error,
+        local_key_rollback_reason=rollback_reason,
     )
 
 
@@ -298,6 +378,7 @@ def _attempt_local_key_activation(
     operation: Literal["create", "rotate"],
 ) -> AuthAPIKeyWithValue:
     """Best-effort local activation that never discards the one-time key."""
+    previous_credential = _capture_previous_local_api_key(zenml_client)
     try:
         zenml_client.set_api_key(key=result.key)
     except Exception as exc:
@@ -305,14 +386,58 @@ def _attempt_local_key_activation(
         sanitized_error = _sanitize_local_key_activation_error(
             exc,
             raw_key=result.key,
+            previous_key=previous_credential.previous_api_key,
         )
+        base_error = (
+            f"API key was {action}, but Kitaru could not set it as the "
+            f"active local credential: {sanitized_error}."
+        )
+        if not previous_credential.previous_api_key_available:
+            rollback_reason = previous_credential.reason_unavailable or (
+                "No previous persisted local API key was available to restore."
+            )
+            return _with_local_key_activation_status(
+                result,
+                succeeded=False,
+                error=f"{base_error} Rollback was not possible: {rollback_reason}",
+                rollback_attempted=False,
+                rollback_succeeded=None,
+                rollback_reason=rollback_reason,
+            )
+
+        assert previous_credential.previous_api_key is not None
+        try:
+            zenml_client.set_api_key(key=previous_credential.previous_api_key)
+        except Exception as rollback_exc:
+            rollback_error = _sanitize_local_key_activation_error(
+                rollback_exc,
+                raw_key=result.key,
+                previous_key=previous_credential.previous_api_key,
+            )
+            return _with_local_key_activation_status(
+                result,
+                succeeded=False,
+                error=(
+                    f"{base_error} Kitaru also tried to restore the previous "
+                    "local credential, but that rollback failed. The server-side "
+                    f"API key was still {action}; local credentials may need "
+                    "manual repair."
+                ),
+                rollback_attempted=True,
+                rollback_succeeded=False,
+                rollback_error=rollback_error,
+            )
+
         return _with_local_key_activation_status(
             result,
             succeeded=False,
             error=(
-                f"API key was {action}, but Kitaru could not set it as the "
-                f"active local credential: {sanitized_error}"
+                f"{base_error} Kitaru restored the previous local credential, "
+                "so this machine should still be using the credential that was "
+                "active before the attempted activation."
             ),
+            rollback_attempted=True,
+            rollback_succeeded=True,
         )
     return _with_local_key_activation_status(result, succeeded=True)
 

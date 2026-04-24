@@ -78,6 +78,10 @@ class AuthAPIKeyWithValue:
     local_key_activation_requested: bool = False
     local_key_activation_succeeded: bool | None = None
     local_key_activation_error: str | None = None
+    local_key_rollback_attempted: bool = False
+    local_key_rollback_succeeded: bool | None = None
+    local_key_rollback_error: str | None = None
+    local_key_rollback_reason: str | None = None
 
 
 @dataclass(frozen=True)

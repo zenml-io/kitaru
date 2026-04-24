@@ -749,6 +749,9 @@ def test_auth_api_keys_create_json_includes_one_time_key(
             "API key was created, but Kitaru could not set it as the active "
             "local credential: local store rejected [redacted]"
         ),
+        local_key_rollback_attempted=False,
+        local_key_rollback_succeeded=None,
+        local_key_rollback_reason="No previous persisted local API key was available.",
     )
     fake_client = _auth_management_client_stub(api_keys=api_keys)
 
@@ -788,6 +791,13 @@ def test_auth_api_keys_create_json_includes_one_time_key(
     assert (
         "local store rejected [redacted]"
         in (payload["item"]["local_key_activation_error"])
+    )
+    assert payload["item"]["local_key_rollback_attempted"] is False
+    assert payload["item"]["local_key_rollback_succeeded"] is None
+    assert payload["item"]["local_key_rollback_error"] is None
+    assert (
+        payload["item"]["local_key_rollback_reason"]
+        == "No previous persisted local API key was available."
     )
     assert json.dumps(payload).count("raw-api-key") == 1
 
@@ -847,8 +857,14 @@ def test_auth_api_keys_rotate_text_includes_warning_and_new_key(
         local_key_activation_succeeded=False,
         local_key_activation_error=(
             "API key was rotated, but Kitaru could not set it as the active "
-            "local credential: local store rejected [redacted]"
+            "local credential: local store rejected [redacted]. Kitaru also "
+            "tried to restore the previous local credential, but that rollback "
+            "failed. The server-side API key was still rotated; local "
+            "credentials may need manual repair."
         ),
+        local_key_rollback_attempted=True,
+        local_key_rollback_succeeded=False,
+        local_key_rollback_error="could not restore [redacted] locally",
     )
     fake_client = _auth_management_client_stub(api_keys=api_keys)
 
@@ -881,8 +897,11 @@ def test_auth_api_keys_rotate_text_includes_warning_and_new_key(
     assert "Rotated API key: default" in output
     assert "Key: rotated-raw-api-key" in output
     assert "Local activation: failed" in output
+    assert "Credential rollback: failed" in output
     assert "Store this key now; it cannot be retrieved later." in output
     assert "local store rejected [redacted]" in output
+    assert "manual repair" in output
+    assert "kitaru login <server-url> --api-key <key>" in output
     assert output.count("rotated-raw-api-key") == 1
 
 

@@ -472,6 +472,10 @@ def test_auth_api_keys_delegate_and_preserve_one_time_key_rule() -> None:
     assert created.local_key_activation_requested is True
     assert created.local_key_activation_succeeded is True
     assert created.local_key_activation_error is None
+    assert created.local_key_rollback_attempted is False
+    assert created.local_key_rollback_succeeded is None
+    assert created.local_key_rollback_error is None
+    assert created.local_key_rollback_reason is None
     assert isinstance(created.api_key, AuthAPIKey)
     assert not hasattr(created.api_key, "key")
     assert isinstance(rotated, AuthAPIKeyWithValue)
@@ -539,14 +543,17 @@ def test_auth_api_key_create_requires_one_time_key_value() -> None:
 
 def test_auth_api_key_create_set_key_failure_returns_sanitized_key_result() -> None:
     """Local activation failure must not hide the one-time created key."""
+    credentials_store = SimpleNamespace(get_api_key=Mock(return_value=None))
     with (
         patch(
             "kitaru.client.resolve_connection_config",
             return_value=_resolved_connection(),
         ),
+        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
         patch("kitaru.client.Client") as client_cls,
     ):
         zenml_client = client_cls.return_value
+        zenml_client.zen_store = SimpleNamespace(url="https://server.example.com")
         zenml_client.create_api_key.return_value = _api_key_response(
             raw_key="created-secret"
         )
@@ -566,6 +573,11 @@ def test_auth_api_key_create_set_key_failure_returns_sanitized_key_result() -> N
     assert "could not set it as the active local credential" in (
         result.local_key_activation_error
     )
+    assert result.local_key_rollback_attempted is False
+    assert result.local_key_rollback_succeeded is None
+    assert result.local_key_rollback_error is None
+    assert result.local_key_rollback_reason is not None
+    assert "No previous persisted local API key" in result.local_key_rollback_reason
     zenml_client.create_api_key.assert_called_once_with(
         service_account_name_id_or_prefix="ci-runner",
         name="default",
@@ -577,14 +589,17 @@ def test_auth_api_key_create_set_key_failure_returns_sanitized_key_result() -> N
 
 def test_auth_api_key_rotate_set_key_failure_returns_sanitized_key_result() -> None:
     """Local activation failure must not hide the one-time rotated key."""
+    credentials_store = SimpleNamespace(get_api_key=Mock(return_value=None))
     with (
         patch(
             "kitaru.client.resolve_connection_config",
             return_value=_resolved_connection(),
         ),
+        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
         patch("kitaru.client.Client") as client_cls,
     ):
         zenml_client = client_cls.return_value
+        zenml_client.zen_store = SimpleNamespace(url="https://server.example.com")
         zenml_client.rotate_api_key.return_value = _api_key_response(
             raw_key="rotated-secret"
         )
@@ -604,6 +619,11 @@ def test_auth_api_key_rotate_set_key_failure_returns_sanitized_key_result() -> N
     assert "could not set it as the active local credential" in (
         result.local_key_activation_error
     )
+    assert result.local_key_rollback_attempted is False
+    assert result.local_key_rollback_succeeded is None
+    assert result.local_key_rollback_error is None
+    assert result.local_key_rollback_reason is not None
+    assert "No previous persisted local API key" in result.local_key_rollback_reason
     zenml_client.rotate_api_key.assert_called_once_with(
         service_account_name_id_or_prefix="ci-runner",
         name_id_or_prefix="default",
@@ -611,6 +631,97 @@ def test_auth_api_key_rotate_set_key_failure_returns_sanitized_key_result() -> N
         set_key=False,
     )
     zenml_client.set_api_key.assert_called_once_with(key="rotated-secret")
+
+
+def test_auth_api_key_create_set_key_failure_rolls_back_previous_key() -> None:
+    """If new-key activation fails, Kitaru tries to restore the old local key."""
+    credentials_store = SimpleNamespace(
+        get_api_key=Mock(return_value="previous-secret")
+    )
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.zen_store = SimpleNamespace(url="https://server.example.com")
+        zenml_client.create_api_key.return_value = _api_key_response(
+            raw_key="created-secret"
+        )
+        zenml_client.set_api_key.side_effect = [
+            RuntimeError("could not store created-secret locally"),
+            None,
+        ]
+        client = KitaruClient()
+
+        result = client.auth.api_keys.create("ci-runner", "default", set_key=True)
+
+    assert result.key == "created-secret"
+    assert result.local_key_activation_requested is True
+    assert result.local_key_activation_succeeded is False
+    assert result.local_key_activation_error is not None
+    assert "created-secret" not in result.local_key_activation_error
+    assert "previous-secret" not in result.local_key_activation_error
+    assert "restored the previous local credential" in result.local_key_activation_error
+    assert result.local_key_rollback_attempted is True
+    assert result.local_key_rollback_succeeded is True
+    assert result.local_key_rollback_error is None
+    assert result.local_key_rollback_reason is None
+    credentials_store.get_api_key.assert_called_once_with(
+        server_url="https://server.example.com"
+    )
+    assert zenml_client.set_api_key.call_args_list == [
+        call(key="created-secret"),
+        call(key="previous-secret"),
+    ]
+
+
+def test_auth_api_key_create_set_key_failure_reports_rollback_failure() -> None:
+    """Rollback failure is reported without hiding the one-time created key."""
+    credentials_store = SimpleNamespace(
+        get_api_key=Mock(return_value="previous-secret")
+    )
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.zen_store = SimpleNamespace(url="https://server.example.com")
+        zenml_client.create_api_key.return_value = _api_key_response(
+            raw_key="created-secret"
+        )
+        zenml_client.set_api_key.side_effect = [
+            RuntimeError("could not store created-secret locally"),
+            RuntimeError("could not restore previous-secret locally"),
+        ]
+        client = KitaruClient()
+
+        result = client.auth.api_keys.create("ci-runner", "default", set_key=True)
+
+    assert result.key == "created-secret"
+    assert result.local_key_activation_succeeded is False
+    assert result.local_key_activation_error is not None
+    assert "created-secret" not in result.local_key_activation_error
+    assert "previous-secret" not in result.local_key_activation_error
+    assert "rollback failed" in result.local_key_activation_error
+    assert "manual repair" in result.local_key_activation_error
+    assert result.local_key_rollback_attempted is True
+    assert result.local_key_rollback_succeeded is False
+    assert result.local_key_rollback_error is not None
+    assert "created-secret" not in result.local_key_rollback_error
+    assert "previous-secret" not in result.local_key_rollback_error
+    assert "[redacted]" in result.local_key_rollback_error
+    assert zenml_client.set_api_key.call_args_list == [
+        call(key="created-secret"),
+        call(key="previous-secret"),
+    ]
 
 
 @pytest.mark.parametrize(
