@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, call, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from zenml.config.docker_settings import DockerSettings
@@ -41,9 +41,11 @@ from kitaru.errors import (
 )
 from kitaru.flow import (
     FlowHandle,
+    _build_kitaru_execution_url,
     _build_pipeline_options,
     _checkpoint_count_from_run,
     _duration_metadata_from_run,
+    _extract_run_pipeline_id,
     _inject_model_registry_env,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
@@ -91,13 +93,20 @@ class _DummyRun:
         *,
         status: ExecutionStatus,
         outputs: list[tuple[str, str, object]] | None = None,
-        run_id: UUID | None = None,
+        run_id: object | None = None,
+        pipeline_id: object | None = None,
+        pipeline: object | None = None,
+        snapshot_pipeline_id: object | None = None,
+        snapshot_pipeline: object | None = None,
+        resources: object | None = None,
         status_reason: str | None = None,
         traceback: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> None:
         self.id = run_id or uuid4()
+        self.pipeline_id = pipeline_id
+        self.pipeline = pipeline
         self.status = status
         self.start_time = start_time
         self.end_time = end_time
@@ -116,8 +125,11 @@ class _DummyRun:
             step_outputs.setdefault(step_name, {})[output_name] = _DummyArtifact(value)
 
         self.snapshot = SimpleNamespace(
-            pipeline_spec=SimpleNamespace(outputs=output_specs)
+            pipeline_spec=SimpleNamespace(outputs=output_specs),
+            pipeline_id=snapshot_pipeline_id,
+            pipeline=snapshot_pipeline,
         )
+        self.resources = resources
         self.steps = {
             step_name: SimpleNamespace(regular_outputs=regular_outputs)
             for step_name, regular_outputs in step_outputs.items()
@@ -125,6 +137,62 @@ class _DummyRun:
 
     def get_hydrated_version(self) -> _DummyRun:
         return self
+
+
+def test_extract_run_pipeline_id_prefers_direct_pipeline_id() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        pipeline_id="flow-direct",
+        pipeline=SimpleNamespace(id="flow-related"),
+    )
+
+    assert _extract_run_pipeline_id(_as_pipeline_run(run)) == "flow-direct"
+
+
+def test_extract_run_pipeline_id_falls_back_to_related_pipeline() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        pipeline=SimpleNamespace(id="flow-related"),
+    )
+
+    assert _extract_run_pipeline_id(_as_pipeline_run(run)) == "flow-related"
+
+
+def test_build_kitaru_execution_url_uses_flow_execution_route() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run/123",
+        pipeline_id="flow 456",
+    )
+
+    assert (
+        _build_kitaru_execution_url(
+            _as_pipeline_run(run),
+            server_url="http://127.0.0.1:8383/",
+        )
+        == "http://127.0.0.1:8383/flows/flow%20456/executions/run%2F123"
+    )
+
+
+def test_build_kitaru_execution_url_returns_none_when_required_data_missing() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+    )
+    run_without_pipeline = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+    )
+
+    assert _build_kitaru_execution_url(_as_pipeline_run(run), server_url=None) is None
+    assert (
+        _build_kitaru_execution_url(
+            _as_pipeline_run(run_without_pipeline),
+            server_url="http://127.0.0.1:8383",
+        )
+        is None
+    )
 
 
 def test_inject_model_registry_env_adds_registry_to_empty_image() -> None:
@@ -879,6 +947,40 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
     configured_pipeline.assert_called_once_with("payload")
 
 
+def test_run_logs_kitaru_native_execution_url() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+    )
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.logger.info") as logger_info_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    logger_info_mock.assert_any_call(
+        "Execution URL: %s",
+        "http://127.0.0.1:8383/flows/flow-456/executions/run-123",
+    )
+
+
 def test_run_resolves_config_with_decorator_stack_when_invocation_omits_it() -> None:
     """Decorator stack defaults should flow into config resolution unchanged."""
     run = _DummyRun(status=ExecutionStatus.RUNNING)
@@ -969,6 +1071,54 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
             environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
         )
     }
+
+
+def test_replay_logs_kitaru_native_execution_url() -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="replay-run-123",
+        pipeline_id="flow-456",
+    )
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+        patch("kitaru.flow.logger.info") as logger_info_mock,
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = source_run
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write")
+
+    logger_info_mock.assert_any_call(
+        "Execution URL: %s",
+        "http://127.0.0.1:8383/flows/flow-456/executions/replay-run-123",
+    )
 
 
 def test_replay_forwards_secret_environment_from_to_with_options() -> None:
