@@ -1,7 +1,13 @@
 ---
 import { Code } from 'astro:components';
 import type { ThemeRegistrationRaw } from 'shiki';
+import kitaruLight from '../../styles/kitaru-light.json';
 import kitaruDark from '../../styles/kitaru-dark.json';
+
+const codeThemes = {
+  light: kitaruLight as ThemeRegistrationRaw,
+  dark: kitaruDark as ThemeRegistrationRaw,
+};
 
 interface Props {
   title?: string;
@@ -36,7 +42,7 @@ const {
         <span class="codecompare-pill">Recommended</span>
       </header>
       <div class="codecompare-code">
-        <Code code={kitaruCode} lang={lang} theme={kitaruDark as ThemeRegistrationRaw} />
+        <Code code={kitaruCode} lang={lang} themes={codeThemes} defaultColor="light" />
       </div>
     </article>
     <article class="codecompare-pane">
@@ -45,7 +51,7 @@ const {
         <span class="codecompare-label">{competitorLabel}</span>
       </header>
       <div class="codecompare-code">
-        <Code code={competitorCode} lang={lang} theme={kitaruDark as ThemeRegistrationRaw} />
+        <Code code={competitorCode} lang={lang} themes={codeThemes} defaultColor="light" />
       </div>
     </article>
   </div>
@@ -189,6 +195,16 @@ const {
   .codecompare-code :global(code) {
     font-family: inherit;
     color: var(--code-var);
+  }
+  /* Shiki ships tokens with both themes baked in (light default + `--shiki-dark`
+     variable). CodeCompare lives inside a dark band, so force every token to
+     render its dark-theme value. */
+  .codecompare-code :global(pre span) {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg, transparent) !important;
+    font-style: var(--shiki-dark-font-style, inherit) !important;
+    font-weight: var(--shiki-dark-font-weight, inherit) !important;
+    text-decoration: var(--shiki-dark-text-decoration, inherit) !important;
   }
 
   @media (max-width: 900px) {

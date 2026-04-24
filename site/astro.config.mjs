@@ -4,6 +4,7 @@ import sitemap from '@astrojs/sitemap';
 import mdx from '@astrojs/mdx';
 import cloudflare from '@astrojs/cloudflare';
 import kitaruLight from './src/styles/kitaru-light.json';
+import kitaruDark from './src/styles/kitaru-dark.json';
 
 export default defineConfig({
   site: 'https://kitaru.ai',
@@ -17,7 +18,11 @@ export default defineConfig({
   integrations: [sitemap(), mdx()],
   markdown: {
     shikiConfig: {
-      theme: kitaruLight,
+      themes: {
+        light: kitaruLight,
+        dark: kitaruDark,
+      },
+      defaultColor: 'light',
     },
   },
   vite: {
