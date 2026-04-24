@@ -307,6 +307,75 @@ def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
     )
 
 
+def test_flow_deploy_resolves_invocation_image_and_threads_it_to_with_options() -> None:
+    """Deploy should pass image overrides into config resolution and Docker settings."""
+    source_snapshot = SimpleNamespace(id=uuid4(), name="temporary-source")
+    public_deployment = object()
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {"x": 1}
+    configured_pipeline._create_snapshot.return_value = source_snapshot
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(create=MagicMock(return_value=public_deployment))
+    client = SimpleNamespace(deployments=deployments_api)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+    )
+    resolved = _resolved_execution(
+        stack="prod",
+        image=ImageSettings(
+            base_image="python:3.12-slim",
+            secret_environment_from=["openai-creds"],
+        ),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=resolved,
+        ) as resolve_execution_config_mock,
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(
+                ImageSettings(
+                    base_image="python:3.12-slim",
+                    secret_environment_from=["openai-creds"],
+                    environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
+                ),
+                ModelRegistryConfig(),
+            ),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable"),
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.deploy(1, image="python:3.12-slim")
+
+    resolve_call = resolve_execution_config_mock.call_args.kwargs
+    assert resolve_call["invocation_overrides"].image == ImageSettings(
+        base_image="python:3.12-slim"
+    )
+
+    call_kwargs = base_pipeline.with_options.call_args.kwargs
+    assert call_kwargs["secrets"] == ["openai-creds"]
+    docker_settings = call_kwargs["settings"]["docker"]
+    assert docker_settings.parent_image == "python:3.12-slim"
+    assert docker_settings.environment == {
+        KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()
+    }
+    deployments_api.create.assert_called_once_with(
+        flow="_lambda_",
+        source_snapshot=source_snapshot,
+        tags=None,
+    )
+
+
 def test_flow_deploy_can_skip_first_deploy_default_publish() -> None:
     configured_pipeline = MagicMock()
     configured_pipeline._run_args = {}

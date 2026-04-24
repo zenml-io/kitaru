@@ -31,13 +31,20 @@ be resolved correctly.
 
 Deploying a flow creates a Kitaru-managed saved snapshot that Kitaru treats as
 an immutable deployment version. Kitaru records the public flow name, an integer
-version, representative deployment-time input values, the stack context, and
-any public routing tags.
+version, representative deployment-time input values, deploy-time image config
+(when provided), the stack context, and any public routing tags.
 
 Deployment-time inputs should be representative values. They let Kitaru prepare
 the saved deployment snapshot, especially for flows whose shape depends on
 concrete parameters. Later invocations can override those values by passing new
 inputs.
+
+Deploy-time image config follows the same shape across CLI, SDK, and MCP: a
+base image string or an object matching `kitaru.ImageSettings`.
+
+Image config is part of the saved deployment snapshot. Later `kitaru invoke`
+or `.invoke(...)` calls can override flow inputs for each execution, but they do
+not rewrite the deployment image.
 
 Each `kitaru deploy` call attaches exactly one routing tag at deploy time. If
 you want to add another tag later, or move an existing route after testing, use
@@ -45,13 +52,20 @@ you want to add another tag later, or move an existing route after testing, use
 
 ```bash
 kitaru deploy flows/research.py:research_agent \
-  --input '{"topic": "durable execution"}'
+  --input '{"topic": "durable execution"}' \
+  --image '{"requirements":["kitaru[openai]"],"secret_environment_from":["openai-creds"]}'
 ```
 
 ```python
 from flows.research import research_agent
 
-research_agent.deploy(topic="durable execution")
+research_agent.deploy(
+    topic="durable execution",
+    image={
+        "requirements": ["kitaru[openai]"],
+        "secret_environment_from": ["openai-creds"],
+    },
+)
 ```
 
 ## Auto-versioning

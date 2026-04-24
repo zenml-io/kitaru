@@ -88,6 +88,56 @@ def _parse_json_object(
     return parsed
 
 
+def _parse_image_option(
+    raw_value: str | None,
+    *,
+    option_name: str,
+    allow_file: bool = False,
+) -> str | dict[str, Any] | None:
+    """Parse an image CLI option as a string shorthand or JSON object."""
+    if raw_value is None:
+        return None
+
+    source_label = option_name
+    payload = raw_value
+    from_file = False
+    path: Path | None = None
+    if allow_file and raw_value.startswith("@"):
+        from_file = True
+        path = Path(raw_value[1:]).expanduser()
+        source_label = f"{option_name} file '{path}'"
+        try:
+            payload = path.read_text()
+        except OSError as exc:
+            raise ValueError(
+                f"Unable to read `{option_name}` file '{path}': {exc}"
+            ) from exc
+
+    try:
+        parsed = _parse_json_value(payload, option_name=source_label)
+    except ValueError:
+        fallback_value = payload.strip() if from_file else raw_value
+        if fallback_value.lstrip().startswith(("{", "[", '"')):
+            raise
+        return fallback_value
+
+    if isinstance(parsed, (dict, str)):
+        return parsed
+
+    if not from_file:
+        stripped = raw_value.lstrip()
+        if not stripped.startswith(("{", "[")):
+            return raw_value
+
+    if from_file and path is not None:
+        raise ValueError(
+            f"`{option_name}` file '{path}' must contain a JSON string or object."
+        )
+    raise ValueError(
+        f"`{option_name}` must be either a base image string or a JSON object."
+    )
+
+
 def _status_label(status: ExecutionStatus | str) -> str:
     """Return a string label for execution/checkpoint statuses."""
     if isinstance(status, ExecutionStatus):

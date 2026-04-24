@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
+from pydantic import ValidationError
 from zenml.pipelines.run_utils import validate_stack_is_runnable_from_server
 
 from kitaru._client._deployments import (
@@ -19,6 +20,7 @@ from kitaru._client._deployments import (
     validate_deployment_version,
 )
 from kitaru._client._models import Deployment as DeploymentRecord
+from kitaru.config import ImageInput, KitaruConfig
 from kitaru.errors import (
     KitaruError,
     KitaruStackNotRemoteExecutableStateError,
@@ -31,7 +33,7 @@ if TYPE_CHECKING:
     from kitaru.flow import FlowHandle
 
 DEPLOYMENT_CONTROL_INPUT_KEYS = frozenset(
-    {"cache", "image", "retries", "stack", "tags"}
+    {"cache", "image", "publish_default_on_first_deploy", "retries", "stack", "tags"}
 )
 
 _KNOWN_DEPLOYMENTS: set[tuple[str, int]] = set()
@@ -164,6 +166,55 @@ def validate_deployment_input_keys(
         )
 
 
+def _deployment_image_validation_detail(exc: ValidationError) -> str | None:
+    """Return a concise first validation detail for image-shape errors."""
+    errors = exc.errors(include_url=False)
+    if not errors:
+        detail = str(exc).strip()
+        return detail or None
+
+    first_error = errors[0]
+    ctx = first_error.get("ctx") or {}
+    ctx_error = ctx.get("error")
+    if isinstance(ctx_error, Exception):
+        detail = str(ctx_error).strip()
+    else:
+        detail = str(first_error.get("msg") or "").strip()
+        if detail.lower().startswith("value error, "):
+            detail = detail[len("Value error, ") :]
+
+    location = ".".join(
+        str(part) for part in first_error.get("loc", ()) if str(part) != "image"
+    )
+    if location and detail:
+        return f"{location}: {detail}"
+    return detail or None
+
+
+def _normalize_deployment_image(
+    image: ImageInput | None,
+    *,
+    image_label: str,
+) -> Any | None:
+    """Normalize a deploy-time image override through shared config validation."""
+    if image is None:
+        return None
+
+    try:
+        return KitaruConfig.model_validate({"image": image}).image
+    except ValidationError as exc:
+        detail = _deployment_image_validation_detail(exc)
+    except (KitaruUsageError, TypeError) as exc:
+        detail = str(exc).strip() or None
+
+    message = (
+        f"{image_label} must be either a base image string or an image settings object."
+    )
+    if detail:
+        message += f" Details: {detail}"
+    raise KitaruUsageError(message)
+
+
 def _deployment_operation_subject(
     *,
     operation: Literal["deploy", "invoke", "curl"],
@@ -267,17 +318,22 @@ def ensure_stack_is_server_runnable(
 def build_deployment_deploy_kwargs(
     *,
     stack: str | None,
+    image: ImageInput | None = None,
     cache: bool | None,
     retries: int | None,
     tags: Mapping[str, bool],
     inputs: Mapping[str, Any],
     input_label: str = "`inputs`",
+    image_label: str = "`image`",
 ) -> dict[str, Any]:
     """Build keyword arguments for ``flow.deploy(...)`` without noisy Nones."""
     validate_deployment_input_keys(inputs, input_label=input_label)
     deploy_kwargs: dict[str, Any] = {**dict(inputs), "tags": dict(tags)}
+    normalized_image = _normalize_deployment_image(image, image_label=image_label)
     if stack is not None:
         deploy_kwargs["stack"] = stack
+    if normalized_image is not None:
+        deploy_kwargs["image"] = normalized_image
     if cache is not None:
         deploy_kwargs["cache"] = cache
     if retries is not None:

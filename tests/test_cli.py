@@ -30,6 +30,7 @@ from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
+    ImageSettings,
     KitaruConfig,
     KubernetesStackSpec,
     ModelAliasConfig,
@@ -647,12 +648,24 @@ def test_build_json_output_creates_deployment_from_target(
         patch("kitaru._cli._flows.track", return_value=True) as track_mock,
         pytest.raises(SystemExit) as exc_info,
     ):
-        app(["build", "demo.py:demo_flow", "--input", '{"topic":"AI"}', "-o", "json"])
+        app(
+            [
+                "build",
+                "demo.py:demo_flow",
+                "--input",
+                '{"topic":"AI"}',
+                "--image",
+                "python:3.12-slim",
+                "-o",
+                "json",
+            ]
+        )
 
     assert exc_info.value.code == 0
     fake_flow.deploy.assert_called_once_with(
         tags={},
         topic="AI",
+        image=ImageSettings(base_image="python:3.12-slim"),
         publish_default_on_first_deploy=False,
     )
     payload = json.loads(capsys.readouterr().out)
@@ -812,6 +825,245 @@ def test_build_input_file_parses_json_object(
     assert json.loads(capsys.readouterr().out)["command"] == "build"
 
 
+def test_deploy_image_json_object_is_normalized_and_forwarded(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--image` should accept structured JSON settings and normalize them once."""
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub()
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "deploy",
+                "demo.py:demo_flow",
+                "--image",
+                '{"requirements":["kitaru[openai]"],"secret_environment_from":["openai-creds"]}',
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(
+        tags={"default": True},
+        image=ImageSettings(
+            requirements=["kitaru[openai]"],
+            secret_environment_from=["openai-creds"],
+        ),
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "deploy"
+
+
+def test_build_image_file_parses_json_object(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--image @file` should read a structured image payload from JSON."""
+    image_file = tmp_path / "image.json"
+    image_file.write_text('{"requirements":["numpy"],"base_image":"python:3.12-slim"}')
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub(tags={})
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "build",
+                "demo.py:demo_flow",
+                "--image",
+                f"@{image_file}",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        image=ImageSettings(
+            base_image="python:3.12-slim",
+            requirements=["numpy"],
+        ),
+        publish_default_on_first_deploy=False,
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "build"
+
+
+@pytest.mark.parametrize("inline_value", ["null", "true", "123"])
+def test_build_accepts_inline_json_scalar_spelling_as_base_image(
+    inline_value: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Inline scalar-looking values should be treated as base-image shorthand."""
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub(tags={})
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["build", "demo.py:demo_flow", "--image", inline_value, "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        image=ImageSettings(base_image=inline_value),
+        publish_default_on_first_deploy=False,
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "build"
+
+
+def test_build_rejects_structured_non_object_image_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--image` should reject JSON arrays even though object payloads are allowed."""
+    with (
+        patch("kitaru._cli._flows._load_deployable_flow_target") as mock_loader,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["build", "demo.py:demo_flow", "--image", "[]", "-o", "json"])
+
+    assert exc_info.value.code == 1
+    mock_loader.assert_not_called()
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "base image string or a JSON object" in payload["error"]["message"]
+
+
+def test_build_image_file_accepts_plain_base_image_string(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--image @file` should treat plain text as a base-image shorthand."""
+    image_file = tmp_path / "image.txt"
+    image_file.write_text("python:3.12-slim\n")
+    fake_flow = Mock()
+    fake_flow.deploy.return_value = _deployment_stub(tags={})
+
+    with (
+        patch(
+            "kitaru._cli._flows._load_deployable_flow_target",
+            return_value=fake_flow,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "build",
+                "demo.py:demo_flow",
+                "--image",
+                f"@{image_file}",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_flow.deploy.assert_called_once_with(
+        tags={},
+        image=ImageSettings(base_image="python:3.12-slim"),
+        publish_default_on_first_deploy=False,
+    )
+    assert json.loads(capsys.readouterr().out)["command"] == "build"
+
+
+def test_build_rejects_json_like_but_invalid_image_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--image @file` should still fail for malformed JSON-looking payloads."""
+    image_file = tmp_path / "image.json"
+    image_file.write_text('{"requirements":["numpy"]')
+
+    with (
+        patch("kitaru._cli._flows._load_deployable_flow_target") as mock_loader,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "build",
+                "demo.py:demo_flow",
+                "--image",
+                f"@{image_file}",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    mock_loader.assert_not_called()
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "Invalid JSON for `--image file" in payload["error"]["message"]
+
+
+def test_build_rejects_invalid_structured_image_before_loading_target(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid structured image settings should fail before the flow target loads."""
+    with (
+        patch("kitaru._cli._flows._load_deployable_flow_target") as mock_loader,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "build",
+                "demo.py:demo_flow",
+                "--image",
+                '{"requirements":[" "]}',
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    mock_loader.assert_not_called()
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "`--image` must be either a base image string" in payload["error"]["message"]
+
+
+def test_build_rejects_malformed_inline_image_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed inline JSON should not fall through as a fake base-image string."""
+    with (
+        patch("kitaru._cli._flows._load_deployable_flow_target") as mock_loader,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "build",
+                "demo.py:demo_flow",
+                "--image",
+                '{"requirements":["numpy"]',
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    mock_loader.assert_not_called()
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == "build"
+    assert "Invalid JSON for `--image`" in payload["error"]["message"]
+
+
 def test_build_rejects_non_object_input_json(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -825,17 +1077,22 @@ def test_build_rejects_non_object_input_json(
     assert "must be a JSON object" in payload["error"]["message"]
 
 
+@pytest.mark.parametrize(
+    "reserved_key",
+    ["tags", "image", "publish_default_on_first_deploy"],
+)
 def test_deploy_rejects_reserved_input_keys(
+    reserved_key: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Flow inputs must not override deployment-control kwargs like tags."""
+    """Flow inputs must not override deployment-control kwargs like tags/image."""
     with pytest.raises(SystemExit) as exc_info:
         app(
             [
                 "deploy",
                 "demo.py:demo_flow",
                 "--input",
-                '{"tags":{}, "topic":"AI"}',
+                json.dumps({reserved_key: {}, "topic": "AI"}),
                 "-o",
                 "json",
             ]
@@ -845,7 +1102,7 @@ def test_deploy_rejects_reserved_input_keys(
     payload = json.loads(capsys.readouterr().err)
     assert payload["command"] == "deploy"
     assert "reserved deployment option key" in payload["error"]["message"]
-    assert "tags" in payload["error"]["message"]
+    assert reserved_key in payload["error"]["message"]
 
 
 def test_invoke_defaults_to_default_deployment_tag(

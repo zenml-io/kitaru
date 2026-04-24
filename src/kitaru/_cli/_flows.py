@@ -52,6 +52,7 @@ from ._executions import (
     _emit_json_log_event,
     _emit_log_entries,
     _follow_execution_logs,
+    _parse_image_option,
     _parse_json_object,
 )
 from ._helpers import (
@@ -222,6 +223,7 @@ def _selector_kind(*, version: int | None, tag: str | None) -> str:
 def _build_deploy_kwargs(
     *,
     stack: str | None,
+    image: str | Mapping[str, Any] | None,
     cache: bool | None,
     retries: int | None,
     tags: Mapping[str, bool],
@@ -230,11 +232,13 @@ def _build_deploy_kwargs(
     """Build keyword arguments for `flow.deploy(...)` without noisy Nones."""
     return build_deployment_deploy_kwargs(
         stack=stack,
+        image=image,
         cache=cache,
         retries=retries,
         tags=tags,
         inputs=inputs,
         input_label="`--input`",
+        image_label="`--image`",
     )
 
 
@@ -409,6 +413,15 @@ def build(
             help="Deployment-time default flow inputs as JSON or `@file`.",
         ),
     ] = None,
+    image: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Deployment-time image override as a base image string, JSON "
+                "object, or `@file`."
+            )
+        ),
+    ] = None,
     stack: Annotated[str | None, Parameter(help="Optional stack override.")] = None,
     cache: Annotated[bool | None, Parameter(help="Optional cache override.")] = None,
     retries: Annotated[int | None, Parameter(help="Optional retry override.")] = None,
@@ -421,8 +434,14 @@ def build(
     def _build_deployment() -> Any:
         _ensure_deployment_project_initialized(target)
         inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
+        parsed_image = _parse_image_option(
+            image,
+            option_name="--image",
+            allow_file=True,
+        )
         deploy_kwargs = _build_deploy_kwargs(
             stack=stack,
+            image=parsed_image,
             cache=cache,
             retries=retries,
             tags={},
@@ -483,6 +502,15 @@ def deploy(
             help="Representative deployment-time flow inputs as JSON or `@file`.",
         ),
     ] = None,
+    image: Annotated[
+        str | None,
+        Parameter(
+            help=(
+                "Deployment-time image override as a base image string, JSON "
+                "object, or `@file`."
+            )
+        ),
+    ] = None,
     stack: Annotated[str | None, Parameter(help="Optional stack override.")] = None,
     cache: Annotated[bool | None, Parameter(help="Optional cache override.")] = None,
     retries: Annotated[int | None, Parameter(help="Optional retry override.")] = None,
@@ -499,6 +527,11 @@ def deploy(
     def _deploy_flow() -> Any:
         _ensure_deployment_project_initialized(target)
         inputs = _parse_json_object(input_, option_name="--input", allow_file=True)
+        parsed_image = _parse_image_option(
+            image,
+            option_name="--image",
+            allow_file=True,
+        )
         _, normalized_tag = validate_deployment_selector(
             tag=tag,
             require_one=True,
@@ -509,6 +542,7 @@ def deploy(
         }
         deploy_kwargs = _build_deploy_kwargs(
             stack=stack,
+            image=parsed_image,
             cache=cache,
             retries=retries,
             tags=resolved_tags,
