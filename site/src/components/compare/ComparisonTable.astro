@@ -186,11 +186,19 @@ const hasNotes = rows.some((r) => r.note && r.note.trim().length > 0);
   }
 
   @media (max-width: 640px) {
+    .ctable-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
     .ctable th,
     .ctable td { padding: 12px 14px; font-size: 14px; }
     .col-feature { width: 60%; }
-    .has-notes .col-feature { width: 60%; }
-    .col-note { display: none; }
-    .ctable thead .col-note { display: none; }
+    .ctable.has-notes {
+      min-width: 720px;
+    }
+    .ctable.has-notes .col-feature { width: 28%; }
+    .ctable.has-notes .col-kitaru { width: 12%; }
+    .ctable.has-notes .col-competitor { width: 14%; }
+    .ctable.has-notes .col-note { width: 46%; }
   }
 </style>

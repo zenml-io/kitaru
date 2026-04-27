@@ -50,10 +50,7 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
             ))}
             {/* Coming-soon ghost tiles */}
             {[
-              { competitor: 'LangGraph', teaser: 'Graph-based agent workflows, durably.', note: 'Coming soon' },
-              { competitor: 'Temporal', teaser: 'Workflow runtime for AI agents.', note: 'Coming soon' },
               { competitor: 'Prefect', teaser: 'Agent orchestration with Prefect semantics.', note: 'Coming soon' },
-              { competitor: 'Restate', teaser: 'Durable execution for agent loops.', note: 'Coming soon' },
             ].map((upcoming, index) => (
               <li>
                 <div class="compare-card compare-card--soon" data-reveal="scale-up" data-reveal-delay={String(3 + comparisons.length + index)}>
