@@ -26,7 +26,7 @@ const enterpriseFeatures = [
   'Custom integrations and security review',
 ];
 
-type Mark = 'yes' | 'no' | string;
+type Mark = 'yes' | 'no' | (string & {});
 type Row = { feature: string; oss: Mark; enterprise: Mark };
 type Section = { title: string; rows: Row[] };
 
@@ -110,7 +110,6 @@ const faq = [
 >
   <Nav />
   <main id="main-content" class="pricing">
-    <!-- HERO -->
     <section class="pricing-hero">
       <div class="pricing-hero-glow" aria-hidden="true"></div>
       <div class="pricing-hero-inner">
@@ -128,7 +127,6 @@ const faq = [
       </div>
     </section>
 
-    <!-- PLAN CARDS -->
     <section class="pricing-plans">
       <div class="pricing-plans-inner">
         <article class="pricing-card" data-reveal>
@@ -189,7 +187,6 @@ const faq = [
       </div>
     </section>
 
-    <!-- COMPARE PLANS TABLE -->
     <section class="pricing-compare">
       <div class="pricing-compare-inner">
         <header class="pricing-section-head" data-reveal>
@@ -245,7 +242,6 @@ const faq = [
       </div>
     </section>
 
-    <!-- STACKS UP -->
     <section class="pricing-stacks">
       <div class="pricing-stacks-inner">
         <header class="pricing-section-head" data-reveal>
@@ -280,7 +276,6 @@ const faq = [
       </div>
     </section>
 
-    <!-- FAQ -->
     <section class="pricing-faq">
       <div class="pricing-faq-inner">
         <header class="pricing-section-head" data-reveal>
@@ -291,9 +286,7 @@ const faq = [
           {faq.map((item) => (
             <details class="pricing-faq-item" open={item.open}>
               <summary>
-                <span class="pricing-faq-q">
-                  <span>{item.q}</span>
-                </span>
+                <span class="pricing-faq-q">{item.q}</span>
                 <svg class="pricing-faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
               </summary>
               <div class="pricing-faq-a">{item.a}</div>
@@ -303,7 +296,6 @@ const faq = [
       </div>
     </section>
 
-    <!-- CLOSING CTA BAND -->
     <section class="pricing-cta" id="cta">
       <div class="pricing-cta-mesh" aria-hidden="true">
         <div class="pricing-cta-blob pricing-cta-blob-1"></div>
@@ -327,7 +319,7 @@ const faq = [
             </button>
           </div>
           <div class="pricing-cta-buttons">
-            <a href="/get-started" class="btn-accent pricing-cta-primary">
+            <a href="/get-started" class="pricing-cta-primary">
               <span>Get started</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 5 7 7-7 7"/></svg>
             </a>
