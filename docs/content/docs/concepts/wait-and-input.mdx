@@ -4,8 +4,18 @@ description: Pause flows for human or agent input, then resume from where they l
 ---
 
 `kitaru.wait()` suspends a running flow until someone — a human, another agent,
-or an external system — provides input. While waiting, the compute is fully
-released. The execution can resume seconds, hours, or months later.
+or an external system — provides input. In non-interactive runs, the runner
+polls for input up to its `timeout` (default 600 seconds) and then releases
+compute; the execution can resume seconds, hours, or months later when input
+lands.
+
+## The wait/resume timeline
+
+<WaitResumeDiagram />
+
+The server holds the run's durable state while compute is idle. When input
+lands, the runner picks up at the exact point the wait left off — same
+checkpoint state, same artifacts, same memory.
 
 ## Full example
 
@@ -51,16 +61,18 @@ When execution reaches `kitaru.wait()`:
 
 1. The flow suspends and the execution moves to `waiting` status
 2. The question, schema, and metadata are recorded on the server
-3. Compute is released — no process is blocked, no pod is running
-4. The flow resumes from exactly this point once input is provided
+3. The runner polls for input up to its `timeout`. If input arrives first, the
+   flow continues in the same process. If the timeout elapses first, the runner
+   exits and compute is released; input can still land later, and
+   `kitaru executions resume` picks up from exactly this point.
 
 ## Providing input
 
 ### From the CLI
 
 ```bash
-# Provide the answer directly
-kitaru executions input <exec-id> --wait approve_summary --value true
+# Provide the answer directly (auto-detects the pending wait)
+kitaru executions input <exec-id> --value true
 
 # Interactive mode — shows the question and schema, prompts for input
 kitaru executions input <exec-id> --interactive
@@ -107,8 +119,8 @@ explicitly resume the execution:
 <Tabs items={["CLI", "Python"]}>
   <Tab value="CLI">
     ```bash
-    # Step 1: provide the input
-    kitaru executions input <exec-id> --wait approve_summary --value true
+    # Step 1: provide the input (auto-detects the pending wait)
+    kitaru executions input <exec-id> --value true
 
     # Step 2: resume the execution (starts a new runner)
     kitaru executions resume <exec-id>
@@ -139,7 +151,7 @@ explicitly resume the execution:
 |---|---|---|
 | `name` | Auto-generated | Identifier for this wait point (used when providing input) |
 | `question` | `None` | Human-readable prompt shown in the CLI, UI, and MCP |
-| `schema` | `bool` | Expected type of the input — input is validated against this |
+| `schema` | `None` | Expected type of the input. When `None`, the wait acts as a continue/abort gate returning `None`. Pass a type (e.g. `bool`, a Pydantic model) to validate input against it. |
 | `timeout` | `600` | Seconds the runner polls before exiting (not a wait expiration) |
 | `metadata` | `None` | Additional key-value data attached to the wait record |
 

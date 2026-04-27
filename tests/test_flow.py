@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, call, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from zenml.config.docker_settings import DockerSettings
@@ -17,6 +17,7 @@ from zenml.enums import ExecutionStatus
 from zenml.models import PipelineRunResponse
 
 from kitaru import memory
+from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
 from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import checkpoint
 from kitaru.config import (
@@ -31,17 +32,21 @@ from kitaru.errors import (
     KitaruBackendError,
     KitaruExecutionError,
     KitaruRuntimeError,
+    KitaruStackIntegrationDependencyError,
     KitaruStateError,
     KitaruUsageError,
     KitaruUserCodeError,
     build_recovery_command,
+    execution_error_from_failure,
     format_recovery_hint,
 )
 from kitaru.flow import (
     FlowHandle,
+    _build_kitaru_execution_url,
     _build_pipeline_options,
     _checkpoint_count_from_run,
     _duration_metadata_from_run,
+    _extract_run_pipeline_id,
     _inject_model_registry_env,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
@@ -75,6 +80,34 @@ def _empty_registry_payload() -> str:
     return ModelRegistryConfig().model_dump_json(exclude_none=True)
 
 
+class _ClientWithMissingStackDependency:
+    def __init__(self, *, old_stack_id: object, stack_name: str = "prod") -> None:
+        self.old_stack_model = SimpleNamespace(id=old_stack_id, name="old")
+        self.selected_stack_model = SimpleNamespace(id=stack_name, name=stack_name)
+        self.active_stack_model = self.old_stack_model
+        self.zen_store = object()
+        self.activate_stack = MagicMock(side_effect=self._activate_stack)
+        self.get_pipeline_run = MagicMock()
+
+    def _activate_stack(self, stack_name_or_id: object) -> None:
+        if stack_name_or_id == self.selected_stack_model.name:
+            self.active_stack_model = self.selected_stack_model
+        elif stack_name_or_id == self.old_stack_model.id:
+            self.active_stack_model = self.old_stack_model
+
+    @property
+    def active_stack(self) -> object:
+        if self.active_stack_model is not self.selected_stack_model:
+            raise AssertionError("active stack must be selected before hydration")
+        raise ImportError(
+            "Install the missing integration with "
+            "`zenml integration install s3`.\n"
+            "Export stack requirements with "
+            "`zenml stack export-requirements 'prod' "
+            "-o stack-requirements.txt`."
+        )
+
+
 class _DummyArtifact:
     def __init__(self, value: object) -> None:
         self._value = value
@@ -89,13 +122,20 @@ class _DummyRun:
         *,
         status: ExecutionStatus,
         outputs: list[tuple[str, str, object]] | None = None,
-        run_id: UUID | None = None,
+        run_id: object | None = None,
+        pipeline_id: object | None = None,
+        pipeline: object | None = None,
+        snapshot_pipeline_id: object | None = None,
+        snapshot_pipeline: object | None = None,
+        resources: object | None = None,
         status_reason: str | None = None,
         traceback: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> None:
         self.id = run_id or uuid4()
+        self.pipeline_id = pipeline_id
+        self.pipeline = pipeline
         self.status = status
         self.start_time = start_time
         self.end_time = end_time
@@ -114,8 +154,11 @@ class _DummyRun:
             step_outputs.setdefault(step_name, {})[output_name] = _DummyArtifact(value)
 
         self.snapshot = SimpleNamespace(
-            pipeline_spec=SimpleNamespace(outputs=output_specs)
+            pipeline_spec=SimpleNamespace(outputs=output_specs),
+            pipeline_id=snapshot_pipeline_id,
+            pipeline=snapshot_pipeline,
         )
+        self.resources = resources
         self.steps = {
             step_name: SimpleNamespace(regular_outputs=regular_outputs)
             for step_name, regular_outputs in step_outputs.items()
@@ -123,6 +166,62 @@ class _DummyRun:
 
     def get_hydrated_version(self) -> _DummyRun:
         return self
+
+
+def test_extract_run_pipeline_id_prefers_direct_pipeline_id() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        pipeline_id="flow-direct",
+        pipeline=SimpleNamespace(id="flow-related"),
+    )
+
+    assert _extract_run_pipeline_id(_as_pipeline_run(run)) == "flow-direct"
+
+
+def test_extract_run_pipeline_id_falls_back_to_related_pipeline() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        pipeline=SimpleNamespace(id="flow-related"),
+    )
+
+    assert _extract_run_pipeline_id(_as_pipeline_run(run)) == "flow-related"
+
+
+def test_build_kitaru_execution_url_uses_flow_execution_route() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run/123",
+        pipeline_id="flow 456",
+    )
+
+    assert (
+        _build_kitaru_execution_url(
+            _as_pipeline_run(run),
+            server_url="http://127.0.0.1:8383/",
+        )
+        == "http://127.0.0.1:8383/flows/flow%20456/executions/run%2F123"
+    )
+
+
+def test_build_kitaru_execution_url_returns_none_when_required_data_missing() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+    )
+    run_without_pipeline = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+    )
+
+    assert _build_kitaru_execution_url(_as_pipeline_run(run), server_url=None) is None
+    assert (
+        _build_kitaru_execution_url(
+            _as_pipeline_run(run_without_pipeline),
+            server_url="http://127.0.0.1:8383",
+        )
+        is None
+    )
 
 
 def test_inject_model_registry_env_adds_registry_to_empty_image() -> None:
@@ -225,7 +324,8 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
 
     pipeline_mock.assert_called_once_with(dynamic=True, name="_lambda_")
     assert hasattr(wrapped, "run")
-    assert not hasattr(wrapped, "deploy")
+    assert hasattr(wrapped, "deploy")
+    assert hasattr(wrapped, "invoke")
     assert not hasattr(wrapped, "start")
     assert isinstance(handle, FlowHandle)
     call_kwargs = base_pipeline.with_options.call_args
@@ -242,6 +342,370 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
     # ZenML's compiler treats any concrete run-level enable_cache as a per-step
     # override that overwrites @checkpoint(cache=...) settings.
     assert "enable_cache" not in call_kwargs.kwargs
+
+
+def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
+    source_snapshot = SimpleNamespace(id=uuid4(), name="temporary-source")
+    public_deployment = object()
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {"x": 1}
+    configured_pipeline._create_snapshot.return_value = source_snapshot
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(
+        create=MagicMock(return_value=public_deployment),
+    )
+    client = SimpleNamespace(deployments=deployments_api)
+
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+        active_stack=object(),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable") as validate_stack_mock,
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: x)
+        deployment = wrapped.deploy(1, tags={"canary": False})
+
+    validate_stack_mock.assert_called_once_with(
+        zen_store=stack_client.zen_store,
+        stack=stack_client.active_stack_model,
+        operation="deploy",
+        flow="_lambda_",
+    )
+
+    assert deployment is public_deployment
+    configured_pipeline.prepare.assert_called_once_with(1)
+    create_kwargs = configured_pipeline._create_snapshot.call_args.kwargs
+    assert create_kwargs["replace"] is False
+    assert create_kwargs["extra"]["kitaru_deployment"]["stack"] == "prod"
+    schema = create_kwargs["extra"]["kitaru_deployment"]["schema"]
+    assert schema["type"] == "object"
+    assert "x" not in schema.get("required", [])
+    deployments_api.create.assert_called_once_with(
+        flow="_lambda_",
+        source_snapshot=source_snapshot,
+        tags={"canary": False},
+    )
+
+
+def test_flow_deploy_resolves_invocation_image_and_threads_it_to_with_options() -> None:
+    """Deploy should pass image overrides into config resolution and Docker settings."""
+    source_snapshot = SimpleNamespace(id=uuid4(), name="temporary-source")
+    public_deployment = object()
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {"x": 1}
+    configured_pipeline._create_snapshot.return_value = source_snapshot
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(create=MagicMock(return_value=public_deployment))
+    client = SimpleNamespace(deployments=deployments_api)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+        active_stack=object(),
+    )
+    resolved = _resolved_execution(
+        stack="prod",
+        image=ImageSettings(
+            base_image="python:3.12-slim",
+            secret_environment_from=["openai-creds"],
+        ),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=resolved,
+        ) as resolve_execution_config_mock,
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(
+                ImageSettings(
+                    base_image="python:3.12-slim",
+                    secret_environment_from=["openai-creds"],
+                    environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
+                ),
+                ModelRegistryConfig(),
+            ),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable"),
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.deploy(1, image="python:3.12-slim")
+
+    resolve_call = resolve_execution_config_mock.call_args.kwargs
+    assert resolve_call["invocation_overrides"].image == ImageSettings(
+        base_image="python:3.12-slim"
+    )
+
+    call_kwargs = base_pipeline.with_options.call_args.kwargs
+    assert call_kwargs["secrets"] == ["openai-creds"]
+    docker_settings = call_kwargs["settings"]["docker"]
+    assert docker_settings.parent_image == "python:3.12-slim"
+    assert docker_settings.environment == {
+        KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()
+    }
+    deployments_api.create.assert_called_once_with(
+        flow="_lambda_",
+        source_snapshot=source_snapshot,
+        tags=None,
+    )
+
+
+def test_flow_deploy_can_skip_first_deploy_default_publish() -> None:
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    source_snapshot = object()
+    configured_pipeline._create_snapshot.return_value = source_snapshot
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(create=MagicMock(return_value=object()))
+    client = SimpleNamespace(deployments=deployments_api)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+        active_stack=object(),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable"),
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.deploy(1, publish_default_on_first_deploy=False)
+
+    deployments_api.create.assert_called_once_with(
+        flow="_lambda_",
+        source_snapshot=source_snapshot,
+        tags=None,
+        publish_default_on_first_deploy=False,
+    )
+
+
+def test_flow_deploy_rejects_non_server_runnable_stack_before_prepare() -> None:
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(create=MagicMock())
+    client = SimpleNamespace(deployments=deployments_api)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="local"),
+        zen_store=object(),
+        active_stack=object(),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="local"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable") as validate_stack_mock,
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        validate_stack_mock.side_effect = KitaruUsageError(
+            "the Kitaru server cannot run that stack"
+        )
+        wrapped = flow(lambda x: x)
+        with pytest.raises(KitaruUsageError, match="cannot run that stack"):
+            wrapped.deploy(1)
+
+    configured_pipeline.prepare.assert_not_called()
+    configured_pipeline._create_snapshot.assert_not_called()
+    deployments_api.create.assert_not_called()
+
+
+def test_deploy_translates_active_stack_hydration_import_error_before_prepare() -> None:
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    deployments_api = SimpleNamespace(create=MagicMock())
+    client = SimpleNamespace(deployments=deployments_api)
+    old_stack_id = uuid4()
+    stack_client = _ClientWithMissingStackDependency(old_stack_id=old_stack_id)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable") as validate_stack_mock,
+        patch("kitaru.client.KitaruClient", return_value=client),
+        pytest.raises(KitaruStackIntegrationDependencyError) as exc_info,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.deploy(1, stack="prod")
+
+    message = str(exc_info.value)
+    assert "Cannot submit this Kitaru flow" in message
+    assert "stack integration dependency appears to be missing" in message
+    assert "zenml integration install s3" in message
+    assert "zenml stack export-requirements" in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    configured_pipeline.prepare.assert_not_called()
+    configured_pipeline._create_snapshot.assert_not_called()
+    deployments_api.create.assert_not_called()
+    validate_stack_mock.assert_called_once_with(
+        zen_store=stack_client.zen_store,
+        stack=stack_client.selected_stack_model,
+        operation="deploy",
+        flow="_lambda_",
+    )
+    assert stack_client.activate_stack.call_args_list == [
+        call("prod"),
+        call(old_stack_id),
+    ]
+
+
+def test_flow_deploy_rewords_input_defaults_error() -> None:
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    configured_pipeline.prepare.side_effect = ValueError("missing input")
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    stack_client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="prod"),
+        zen_store=object(),
+        active_stack=object(),
+    )
+    deployments_api = SimpleNamespace(create=MagicMock())
+    client = SimpleNamespace(deployments=deployments_api)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch(
+            "kitaru.flow._prepare_model_registry_transport",
+            return_value=(None, ModelRegistryConfig()),
+        ),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow.Client", return_value=stack_client),
+        patch("kitaru.flow.ensure_stack_is_server_runnable"),
+        patch("kitaru.client.KitaruClient", return_value=client),
+    ):
+        wrapped = flow(lambda x: x)
+        with pytest.raises(KitaruUsageError) as exc_info:
+            wrapped.deploy(1)
+
+    message = str(exc_info.value)
+    assert "needs concrete input values" in message
+    assert "saved deployment snapshot" in message
+    assert "flow.deploy(...)" in message
+    assert "deployment-time input defaults" not in message
+    assert "ZenML currently" not in message
+    deployments_api.create.assert_not_called()
+
+
+def test_flow_deployment_and_deployments_delegate_to_client() -> None:
+    listed = [object()]
+    selected = object()
+    deployments_api = SimpleNamespace(
+        list=MagicMock(return_value=listed),
+        get=MagicMock(return_value=selected),
+    )
+    client = SimpleNamespace(deployments=deployments_api)
+
+    with patch("kitaru.client.KitaruClient", return_value=client):
+        wrapped = flow(lambda: None)
+        assert wrapped.deployments() == listed
+        assert wrapped.deployment() is selected
+
+    deployments_api.list.assert_called_once_with(flow="_lambda_")
+    deployments_api.get.assert_called_once_with(
+        flow="_lambda_",
+        version=None,
+        tag="default",
+    )
+
+
+def test_flow_invoke_validates_selectors_and_delegates_to_client() -> None:
+    handle = object()
+    deployments_api = SimpleNamespace(invoke=MagicMock(return_value=handle))
+    client = SimpleNamespace(deployments=deployments_api)
+
+    with patch("kitaru.client.KitaruClient", return_value=client):
+        wrapped = flow(lambda answer=0: answer)
+        with pytest.raises(KitaruUsageError, match="mutually exclusive"):
+            wrapped.invoke(version=1, tag="default")
+        assert wrapped.invoke(answer=21) is handle
+        assert wrapped.invoke(version=7, answer=42) is handle
+
+    assert deployments_api.invoke.call_args_list == [
+        call(
+            flow="_lambda_",
+            version=None,
+            tag="default",
+            selector_source="implicit_default",
+            inputs={"answer": 21},
+        ),
+        call(
+            flow="_lambda_",
+            version=7,
+            tag=None,
+            selector_source="version",
+            inputs={"answer": 42},
+        ),
+    ]
 
 
 def test_build_pipeline_options_omits_enable_cache_when_unset() -> None:
@@ -489,6 +953,100 @@ def test_run_restores_previous_stack_if_submission_fails() -> None:
     ]
 
 
+def test_run_translates_active_stack_hydration_import_error() -> None:
+    """Missing active-stack integration dependencies should fail before submit."""
+    configured_pipeline = MagicMock()
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    class _ClientWithMissingStackDependency:
+        def __init__(self) -> None:
+            self.active_stack_model = SimpleNamespace(id=old_stack_id)
+            self.activate_stack = MagicMock()
+
+        @property
+        def active_stack(self) -> object:
+            raise ImportError(
+                "Install the missing integration with "
+                "`zenml integration install s3`.\n"
+                "Export stack requirements with "
+                "`zenml stack export-requirements 'prod' "
+                "-o stack-requirements.txt`."
+            )
+
+    old_stack_id = uuid4()
+    client_mock = _ClientWithMissingStackDependency()
+    client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+    client_mock.activate_stack = MagicMock()
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        pytest.raises(KitaruStackIntegrationDependencyError) as exc_info,
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run(stack="prod")
+
+    message = str(exc_info.value)
+    assert "Cannot submit this Kitaru flow" in message
+    assert "stack integration dependency appears to be missing" in message
+    assert "zenml integration install s3" in message
+    assert "zenml stack export-requirements" in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    configured_pipeline.assert_not_called()
+    persist_mock.assert_not_called()
+    assert client_mock.activate_stack.call_args_list == [
+        call("prod"),
+        call(old_stack_id),
+    ]
+
+
+def test_run_does_not_translate_user_import_error_from_submission() -> None:
+    """User-code ImportError during ZenML submission should remain raw."""
+    configured_pipeline = MagicMock(
+        side_effect=ImportError("No module named user_dependency")
+    )
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    old_stack_id = uuid4()
+    client_mock = MagicMock()
+    client_mock.active_stack_model = SimpleNamespace(id=old_stack_id)
+    client_mock.active_stack = object()
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        pytest.raises(ImportError, match="user_dependency") as exc_info,
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run(stack="prod")
+
+    assert not isinstance(exc_info.value, KitaruStackIntegrationDependencyError)
+    configured_pipeline.assert_called_once_with()
+    assert client_mock.activate_stack.call_args_list == [
+        call("prod"),
+        call(old_stack_id),
+    ]
+
+
 def test_run_allows_submission_when_other_compilation_context_is_active() -> None:
     run = _DummyRun(status=ExecutionStatus.RUNNING)
     configured_pipeline = MagicMock(return_value=run)
@@ -569,6 +1127,40 @@ def test_run_resolves_config_and_persists_frozen_spec() -> None:
     configured_pipeline.assert_called_once_with("payload")
 
 
+def test_run_logs_kitaru_native_execution_url() -> None:
+    run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="run-123",
+        pipeline_id="flow-456",
+    )
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383/"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.logger.info") as logger_info_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    logger_info_mock.assert_any_call(
+        "Execution URL: %s",
+        "http://127.0.0.1:8383/flows/flow-456/executions/run-123",
+    )
+
+
 def test_run_resolves_config_with_decorator_stack_when_invocation_omits_it() -> None:
     """Decorator stack defaults should flow into config resolution unchanged."""
     run = _DummyRun(status=ExecutionStatus.RUNNING)
@@ -595,6 +1187,55 @@ def test_run_resolves_config_with_decorator_stack_when_invocation_omits_it() -> 
     resolve_call = resolve_execution_config_mock.call_args.kwargs
     assert resolve_call["decorator_overrides"].stack == "decorator-stack"
     assert resolve_call["invocation_overrides"].stack is None
+
+
+def test_replay_translates_active_stack_hydration_import_error_before_replay() -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    configured_pipeline = MagicMock()
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip={"fetch"},
+        input_overrides={},
+        step_input_overrides={},
+    )
+    old_stack_id = uuid4()
+    client = _ClientWithMissingStackDependency(old_stack_id=old_stack_id)
+    client.get_pipeline_run.return_value = source_run
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(stack="prod"),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec") as persist_mock,
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+        patch("kitaru.flow.track") as track_mock,
+        pytest.raises(KitaruStackIntegrationDependencyError) as exc_info,
+    ):
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write", stack="prod")
+
+    message = str(exc_info.value)
+    assert "Cannot submit this Kitaru flow" in message
+    assert "stack integration dependency appears to be missing" in message
+    assert "zenml integration install s3" in message
+    assert "zenml stack export-requirements" in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    configured_pipeline.replay.assert_not_called()
+    persist_mock.assert_not_called()
+    track_mock.assert_not_called()
+    assert client.activate_stack.call_args_list == [
+        call("prod"),
+        call(old_stack_id),
+    ]
 
 
 def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
@@ -659,6 +1300,54 @@ def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:
             environment={KITARU_MODEL_REGISTRY_ENV: _empty_registry_payload()},
         )
     }
+
+
+def test_replay_logs_kitaru_native_execution_url() -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(
+        status=ExecutionStatus.RUNNING,
+        run_id="replay-run-123",
+        pipeline_id="flow-456",
+    )
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(server_url="http://127.0.0.1:8383"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+        patch("kitaru.flow.logger.info") as logger_info_mock,
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = source_run
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write")
+
+    logger_info_mock.assert_any_call(
+        "Execution URL: %s",
+        "http://127.0.0.1:8383/flows/flow-456/executions/replay-run-123",
+    )
 
 
 def test_replay_forwards_secret_environment_from_to_with_options() -> None:
@@ -917,6 +1606,35 @@ def test_flow_handle_wait_polls_until_complete() -> None:
     sleep_mock.assert_called_once_with(1)
 
 
+def test_flow_handle_status_returns_kitaru_execution_status() -> None:
+    running = _DummyRun(status=ExecutionStatus.RUNNING)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = running
+
+    handle = FlowHandle(_as_pipeline_run(running))
+    with patch("kitaru.flow.Client", return_value=client_mock):
+        status = handle.status
+
+    assert status == KitaruExecutionStatus.RUNNING
+    assert isinstance(status, KitaruExecutionStatus)
+    assert status.is_finished is False
+    assert status.is_successful is False
+
+
+def test_execution_status_compatibility_helpers() -> None:
+    assert KitaruExecutionStatus.RUNNING.is_finished is False
+    assert KitaruExecutionStatus.WAITING.is_finished is False
+    assert KitaruExecutionStatus.COMPLETED.is_finished is True
+    assert KitaruExecutionStatus.FAILED.is_finished is True
+    assert KitaruExecutionStatus.CANCELLED.is_finished is True
+
+    assert KitaruExecutionStatus.RUNNING.is_successful is False
+    assert KitaruExecutionStatus.WAITING.is_successful is False
+    assert KitaruExecutionStatus.FAILED.is_successful is False
+    assert KitaruExecutionStatus.CANCELLED.is_successful is False
+    assert KitaruExecutionStatus.COMPLETED.is_successful is True
+
+
 def test_flow_handle_get_raises_when_still_running() -> None:
     running = _DummyRun(status=ExecutionStatus.RUNNING)
     client_mock = MagicMock()
@@ -949,7 +1667,8 @@ def test_flow_handle_get_raises_with_failure_context() -> None:
         handle.get()
 
     assert exc_info.value.exec_id == str(failed.id)
-    assert exc_info.value.status == failed.status.value
+    assert exc_info.value.status == KitaruExecutionStatus.FAILED
+    assert isinstance(exc_info.value.status, KitaruExecutionStatus)
     assert exc_info.value.failure_origin == FailureOrigin.USER_CODE
 
 
@@ -1692,6 +2411,16 @@ class TestCheckpointCountFromRun:
 
 class TestRecoveryHintHelpers:
     """Tests for the recovery hint formatting helpers in errors.py."""
+
+    def test_execution_error_status_coerces_to_kitaru_enum(self) -> None:
+        error = execution_error_from_failure(
+            "run failed",
+            exec_id="exec-123",
+            status="failed",
+            origin=FailureOrigin.UNKNOWN,
+        )
+        assert error.status == KitaruExecutionStatus.FAILED
+        assert isinstance(error.status, KitaruExecutionStatus)
 
     def test_build_recovery_command_for_failed(self) -> None:
         assert build_recovery_command("kr-abc", status="failed") == (

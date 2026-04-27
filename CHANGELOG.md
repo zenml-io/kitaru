@@ -7,12 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-24
+
 ### Added
-- Python SDK secret write helpers: `kitaru.create_secret(...)` and `kitaru.delete_secret(...)`.
-- MCP secret creation tool `kitaru_secrets_create` for metadata-only secret creation from MCP clients.
+- `kitaru build --image`, `kitaru deploy --image`, and MCP `kitaru_deployments_deploy(image=...)` now accept deploy-time image configuration (base image string or `ImageSettings`-style object), so saved deployment snapshots can carry remote-only package installs and secret-backed environment injection. (#221)
 
 ### Changed
-- `kitaru secrets set` now creates public secrets by default. Pass `--private` to create a private secret. Updating an existing secret still only updates values and leaves existing visibility unchanged.
+- **Breaking:** Replay planning now uses graph reachability from replay roots, so replaying from a branch leaf only re-executes that branch's downstream path. Checkpoint override semantics are aligned accordingly: `checkpoint.<selector>` injects into direct consumers, and replay roots include those consumers. Scripts relying on the previous ordering/index-based frontier may see different execution paths when replaying parallel branches. (#228)
+- Bumped the minimum ZenML version to `0.94.3`, picking up upstream artifact-store path validation alongside compatibility fixes to Kitaru's materializers and tests. (#232)
+- Clearer error when a stack references an integration whose dependencies are not installed — flow resolution now points users to the exact extra they need to install (e.g. `kitaru[k8s]`, `kitaru[vertex]`) instead of a low-level ZenML import error. (#227)
+
+### Fixed
+- `kitaru executions` URL logging now prints the correct dashboard URL for each execution. (#223)
+
+## [0.6.0] - 2026-04-23
+
+### Added
+- `kitaru auth token` for printing a short-lived bearer token for the active Kitaru server, suitable for shell command substitution. (#210)
+- `kitaru flow deployments curl FLOW` for generating a copy-pasteable curl command that starts a deployment execution through the active Kitaru server without inlining real tokens. (#210)
+- CLI commands for building, deploying, invoking, listing, tagging, logging, and deleting snapshot-backed flow deployments. (#210)
+- MCP deployment tools for deploying, invoking, listing, inspecting, deleting, tagging, and untagging snapshot-backed flow deployments. (#210)
+- Deployment model docs covering auto-versioning, reserved/default tag routing, serverless invocation, active Kitaru server authentication, and producer/consumer examples. (#210)
+- Python SDK secret write helpers: `kitaru.create_secret(...)` and `kitaru.delete_secret(...)`. (#206)
+- MCP secret creation tool `kitaru_secrets_create` for metadata-only secret creation from MCP clients. (#206)
+- `kitaru.adapters.pydantic_ai.wait_for_input(...)` helper for pausing a PydanticAI tool call until a human supplies input, with the wait recorded under the adapter's metadata. (#216)
+- `news_scout` example and accompanying guide: an agentic news monitor that demonstrates granular checkpoints, durable shared memory, and replay across executions. (#191)
+- `compliance_review` example: a multi-stage Claude Agents SDK workflow illustrating single-turn, multi-domain, memory-backed, and conversational patterns under Kitaru. (#161)
+
+### Changed
+- `kitaru secrets set` now creates public secrets by default. Pass `--private` to create a private secret. Updating an existing secret still only updates values and leaves existing visibility unchanged. (#206)
+- `kitaru.wait(...)` can now be called from inside `@checkpoint` bodies (previously flow-level only). The enclosing checkpoint suspends for the duration of the wait; on resume, the checkpoint re-runs from the top. (#216)
+- Reframed the concept docs around the "platform-builder" primitive: new `harness-runtime-platform` concept page, rewritten `how-it-works` / `flows` / `checkpoints` explainers, and removal of the now-redundant `execution-model` page. (#208)
 
 ## [0.5.1] - 2026-04-17
 

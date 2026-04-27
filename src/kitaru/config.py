@@ -204,9 +204,10 @@ def _read_global_connection_config() -> KitaruConfig:
     store configuration. Project is intentionally omitted here — it is
     only populated by explicit overrides (env var or runtime configure).
     """
-    return _config_core._read_global_connection_config_impl(
-        global_configuration_factory=GlobalConfiguration,
-    )
+    with _suppress_zenml_cli_messages():
+        return _config_core._read_global_connection_config_impl(
+            global_configuration_factory=GlobalConfiguration,
+        )
 
 
 def resolve_execution_config(

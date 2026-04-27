@@ -161,6 +161,16 @@ Execution settings:
   `ImageSettings` field, including `secret_environment_from` for secret
   references resolved at runtime)
 
+The same image shape is used at deploy time:
+
+- CLI: `kitaru deploy ... --image ...` / `kitaru build ... --image ...`
+- SDK: `flow.deploy(image=...)`
+- MCP: `kitaru_deployments_deploy(image=...)`
+
+All three accept either a base image string or an object matching
+`kitaru.ImageSettings`. On deployments, that image config becomes part of the
+saved deployment snapshot.
+
 ### LLM
 
 - `KITARU_DEFAULT_MODEL` sets the default model for `kitaru.llm()` when no
@@ -369,6 +379,10 @@ At flow start, Kitaru computes a fully resolved execution config and persists it
 with the execution metadata (`kitaru_execution_spec`). This keeps execution
 behavior stable even if config changes later.
 
+Deployments follow the same principle: `deploy(..., image=...)` (or CLI/MCP
+image equivalents) is resolved and saved in the deployment snapshot. If you need
+a different image later, create a new deployment version.
+
 ## Example in this repository
 
 ```bash
@@ -385,5 +399,5 @@ For the broader catalog, see [Examples](/getting-started/examples).
 - [Examples](/getting-started/examples)
 - [Secrets + Model Registration](/guides/secrets-and-model-registration)
 - [Tracked LLM Calls](/guides/llm-calls)
-- [Execution Model](/concepts/execution-model)
+- [Flows](/concepts/flows)
 - [Python configuration reference](/reference/python/config)

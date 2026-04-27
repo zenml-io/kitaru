@@ -480,14 +480,15 @@ def test_apply_env_translations_is_idempotent_after_first_overwrite(
     assert len(recorded) == 0
 
 
-def test_apply_env_translations_rejects_partial_server_only_config(
+def test_apply_env_translations_allows_partial_server_only_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A server URL without any auth token should fail fast."""
+    """Import-time env translation should not reject partial remote config."""
     monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
 
-    with pytest.raises(RuntimeError, match="KITARU_AUTH_TOKEN"):
-        apply_env_translations()
+    apply_env_translations()
+
+    assert os.environ["ZENML_STORE_URL"] == "https://server.example.com"
 
 
 def test_apply_env_translations_accepts_cross_namespace_auth_fallback(
@@ -517,14 +518,15 @@ def test_apply_env_translations_ignores_empty_kitaru_overrides(
     assert os.environ["ZENML_STORE_API_KEY"] == "zenml-token"
 
 
-def test_apply_env_translations_rejects_partial_token_only_config(
+def test_apply_env_translations_allows_partial_token_only_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A token without any server URL should also fail fast."""
+    """Import-time env translation should not reject partial remote auth."""
     monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
 
-    with pytest.raises(RuntimeError, match="KITARU_SERVER_URL"):
-        apply_env_translations()
+    apply_env_translations()
+
+    assert os.environ["ZENML_STORE_API_KEY"] == "token-123"
 
 
 def test_apply_env_translations_defaults_rich_traceback_off(
@@ -3473,21 +3475,28 @@ def test_use_stack_switches_active_stack() -> None:
     """use_stack should delegate activation and return the new active stack."""
     local_stack = SimpleNamespace(id="stack-local-id", name="local")
     prod_stack = SimpleNamespace(id="stack-prod-id", name="prod")
-    client_mock = SimpleNamespace(
-        active_stack_model=local_stack,
-        list_stacks=lambda: [local_stack, prod_stack],
-    )
 
-    def _activate_stack(_: str) -> None:
-        client_mock.active_stack_model = prod_stack
+    class _MetadataOnlyStackClient:
+        def __init__(self) -> None:
+            self.active_stack_model = local_stack
+            self.activate_stack = Mock(side_effect=self._activate_stack)
 
-    activate_stack = Mock(side_effect=_activate_stack)
-    client_mock.activate_stack = activate_stack
+        def list_stacks(self) -> list[SimpleNamespace]:
+            return [local_stack, prod_stack]
+
+        def _activate_stack(self, _: str) -> None:
+            self.active_stack_model = prod_stack
+
+        @property
+        def active_stack(self) -> object:
+            raise AssertionError("use_stack should not hydrate active_stack")
+
+    client_mock = _MetadataOnlyStackClient()
 
     with patch("kitaru.config.Client", return_value=client_mock):
         selected = use_stack("prod")
 
-    activate_stack.assert_called_once_with("stack-prod-id")
+    client_mock.activate_stack.assert_called_once_with("stack-prod-id")
     assert selected.name == "prod"
     assert selected.id == "stack-prod-id"
     assert selected.is_active is True
@@ -4321,6 +4330,26 @@ def test_connection_resolution_reads_direct_zenml_env_below_kitaru(
     assert resolved.server_url == "https://kitaru.example.com"
     assert resolved.auth_token == "zenml-token"
     assert resolved.project == "kitaru-project"
+
+
+def test_connection_validation_rejects_env_server_without_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use-time validation should reject env server URL without auth."""
+    monkeypatch.setenv(KITARU_SERVER_URL_ENV, "https://server.example.com")
+
+    with pytest.raises(KitaruUsageError, match="KITARU_AUTH_TOKEN"):
+        resolve_connection_config(validate_for_use=True)
+
+
+def test_connection_validation_rejects_env_auth_without_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use-time validation should reject env auth without a server URL."""
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    with pytest.raises(KitaruUsageError, match="KITARU_SERVER_URL"):
+        resolve_connection_config(validate_for_use=True)
 
 
 def test_connection_validation_requires_project_for_env_remote_server(

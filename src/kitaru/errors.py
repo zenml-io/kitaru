@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 
 class FailureOrigin(StrEnum):
@@ -37,11 +37,37 @@ class KitaruRuntimeError(KitaruError, RuntimeError):
     """Raised for runtime/serialization/materialization failures."""
 
 
+if TYPE_CHECKING:
+    from kitaru._client._models import ExecutionStatus
+
+
+def _coerce_execution_status(
+    status: ExecutionStatus | str | None,
+) -> ExecutionStatus | None:
+    """Normalize execution status values to the public Kitaru enum."""
+    if status is None:
+        return None
+
+    from kitaru._client._models import ExecutionStatus as PublicExecutionStatus
+
+    if isinstance(status, PublicExecutionStatus):
+        return status
+
+    normalized = status.strip().lower()
+    try:
+        return PublicExecutionStatus(normalized)
+    except ValueError as exc:
+        expected = ", ".join(item.value for item in PublicExecutionStatus)
+        raise KitaruUsageError(
+            f"Unsupported execution status {status!r}. Expected one of: {expected}."
+        ) from exc
+
+
 class KitaruExecutionError(KitaruRuntimeError):
     """Raised when a flow execution finishes unsuccessfully."""
 
     exec_id: str | None
-    status: str | None
+    status: ExecutionStatus | None
     failure_origin: FailureOrigin | None
 
     def __init__(
@@ -49,12 +75,12 @@ class KitaruExecutionError(KitaruRuntimeError):
         message: str,
         *,
         exec_id: str | None = None,
-        status: str | None = None,
+        status: ExecutionStatus | str | None = None,
         failure_origin: FailureOrigin | None = None,
     ) -> None:
         super().__init__(message)
         self.exec_id = exec_id
-        self.status = status
+        self.status = _coerce_execution_status(status)
         self.failure_origin = failure_origin
 
 
@@ -88,6 +114,35 @@ class KitaruDivergenceError(KitaruExecutionError):
 
 class KitaruWaitValidationError(KitaruUsageError):
     """Raised when wait-resume input fails schema validation."""
+
+
+class KitaruStackIntegrationDependencyError(KitaruUsageError):
+    """Raised when the active stack is missing local integration dependencies."""
+
+
+class StackNotRemoteExecutable:
+    """Marker mixin for errors caused by a stack the server cannot execute remotely.
+
+    Interface layers (CLI, MCP, SDK error boundaries) use ``isinstance(exc,
+    StackNotRemoteExecutable)`` to add stack-remediation guidance without
+    coupling to any specific user-facing wording.
+    """
+
+
+class KitaruStackNotRemoteExecutableUsageError(
+    StackNotRemoteExecutable, KitaruUsageError
+):
+    """Raised when deploy uses a stack the server cannot execute remotely."""
+
+
+class KitaruStackNotRemoteExecutableStateError(
+    StackNotRemoteExecutable, KitaruStateError
+):
+    """Raised when invoke/curl finds a deployment stack that is not remote."""
+
+
+class KitaruDeploymentInputValuesError(KitaruUsageError):
+    """Raised when deploy needs concrete input values to prepare the snapshot."""
 
 
 class KitaruFeatureNotAvailableError(KitaruError, NotImplementedError):
@@ -164,7 +219,7 @@ def execution_error_from_failure(
     message: str,
     *,
     exec_id: str,
-    status: str,
+    status: ExecutionStatus | str,
     origin: FailureOrigin,
 ) -> KitaruExecutionError:
     """Construct a typed execution error from classified failure origin."""
@@ -221,6 +276,7 @@ __all__ = [
     "FailureOrigin",
     "KitaruBackendError",
     "KitaruContextError",
+    "KitaruDeploymentInputValuesError",
     "KitaruDivergenceError",
     "KitaruError",
     "KitaruExecutionError",
@@ -228,10 +284,14 @@ __all__ = [
     "KitaruLogRetrievalError",
     "KitaruMemoryArtifactUnavailableError",
     "KitaruRuntimeError",
+    "KitaruStackIntegrationDependencyError",
+    "KitaruStackNotRemoteExecutableStateError",
+    "KitaruStackNotRemoteExecutableUsageError",
     "KitaruStateError",
     "KitaruUsageError",
     "KitaruUserCodeError",
     "KitaruWaitValidationError",
+    "StackNotRemoteExecutable",
     "build_recovery_command",
     "classify_failure_origin",
     "execution_error_from_failure",

@@ -3,15 +3,21 @@ title: Stacks
 description: Create, inspect, switch, and delete the stacks Kitaru uses for execution
 ---
 
-A **stack** is the execution environment for your flows. It bundles three things:
+A **stack** is where the runner places work and where artifacts live. It
+bundles three concerns:
 
-- **Compute** — where your flow code runs (locally, on Kubernetes, on Vertex AI, etc.)
-- **Storage** — where checkpoint outputs and saved data are persisted
-- **Container registry** — where container images are pushed for remote execution
+- **Execution placement** — the compute backend the runner uses for the run
+  itself and for any `runtime="isolated"` checkpoints (local, Kubernetes, AWS,
+  GCP, Azure)
+- **Artifact persistence** — the bucket or filesystem where checkpoint outputs
+  and saved data are written (local, S3, GCS, Azure Blob)
+- **Container registry** — where Kitaru pushes the image it builds for remote
+  execution
 
-When you run a flow, Kitaru uses the active stack to decide where to execute it
-and where to store results. Locally, everything runs on your machine with local
-file storage. For production, you point the stack at cloud infrastructure.
+The active stack is the default; per-flow and per-run overrides can bind a
+different stack for a single execution. See
+[How It Works](/concepts/how-it-works) for how execution
+placement interacts with the runner.
 
 ## The default stack
 

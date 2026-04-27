@@ -25,6 +25,14 @@ class _FlowTarget(Protocol):
     def run(self, *args: Any, **kwargs: Any) -> _FlowHandleLike: ...
 
 
+@runtime_checkable
+class _DeployableFlowTarget(_FlowTarget, Protocol):
+    """Protocol for flow objects that support deployment snapshots."""
+
+    def deploy(self, *args: Any, **kwargs: Any) -> Any: ...
+    def invoke(self, **kwargs: Any) -> _FlowHandleLike: ...
+
+
 def _load_module_from_python_path(
     module_path: str,
     *,
@@ -88,4 +96,19 @@ def _load_flow_target(
             "Expected an object created by `@flow` with `.run()` support."
         )
 
+    return flow_obj
+
+
+def _load_deployable_flow_target(
+    target: str,
+    *,
+    module_name_prefix: str,
+) -> _DeployableFlowTarget:
+    """Load `<module_or_file>:<flow_name>` into a deploy-capable flow object."""
+    flow_obj = _load_flow_target(target, module_name_prefix=module_name_prefix)
+    if not isinstance(flow_obj, _DeployableFlowTarget):
+        raise ValueError(
+            f"Target `{target}` is not a deployable Kitaru flow object. "
+            "Expected an object created by `@flow` with `.deploy()` support."
+        )
     return flow_obj

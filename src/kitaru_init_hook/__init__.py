@@ -86,24 +86,6 @@ def apply_env_translations() -> None:
 
         os.environ[zenml_var] = kitaru_value
 
-    server_url = _normalized_kitaru_env(KITARU_SERVER_URL_ENV)
-    auth_token = _normalized_kitaru_env(KITARU_AUTH_TOKEN_ENV) or os.environ.get(
-        ZENML_STORE_API_KEY_ENV
-    )
-    if server_url and not auth_token:
-        raise RuntimeError(
-            "KITARU_SERVER_URL is set but no auth token is available. "
-            "Set KITARU_AUTH_TOKEN (or ZENML_STORE_API_KEY)."
-        )
-
-    if _normalized_kitaru_env(KITARU_AUTH_TOKEN_ENV) and not (
-        server_url or os.environ.get(ZENML_STORE_URL_ENV)
-    ):
-        raise RuntimeError(
-            "KITARU_AUTH_TOKEN is set but no server URL is available. "
-            "Set KITARU_SERVER_URL (or ZENML_STORE_URL)."
-        )
-
     # Unify config directories: ZenML should store its database,
     # credentials, and local_stores alongside Kitaru's own config.
     # If KITARU_CONFIG_PATH was set, the translation loop above already

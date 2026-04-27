@@ -1200,6 +1200,50 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
     }
 
 
+def serialize_deployment(deployment: Any) -> dict[str, Any]:
+    """Serialize a deployment facade or record for CLI transport."""
+    return {
+        "deployment_id": deployment.deployment_id,
+        "flow": deployment.flow,
+        "version": deployment.version,
+        "tags": to_jsonable(deployment.tags, fallback_repr=True),
+        "commit_sha": getattr(deployment, "commit_sha", None),
+        "commit_dirty": getattr(deployment, "commit_dirty", None),
+        "image_digest": getattr(deployment, "image_digest", None),
+        "created_at": to_jsonable(
+            getattr(deployment, "created_at", None),
+            fallback_repr=True,
+        ),
+        "schema": to_jsonable(getattr(deployment, "schema", None), fallback_repr=True),
+        "stack": getattr(deployment, "stack", None),
+    }
+
+
+def serialize_flow_deployment_summary(
+    flow: str,
+    deployments: Sequence[Any],
+) -> dict[str, Any]:
+    """Serialize a summary for one deployment-backed flow."""
+    ordered = sorted(deployments, key=lambda deployment: deployment.version)
+    latest = ordered[-1] if ordered else None
+    public_tags: dict[str, list[int]] = {}
+    default_version: int | None = None
+    for deployment in ordered:
+        for tag in deployment.tags:
+            public_tags.setdefault(tag, []).append(deployment.version)
+            if tag == "default":
+                default_version = deployment.version
+
+    return {
+        "flow": flow,
+        "deployment_count": len(ordered),
+        "latest_version": latest.version if latest is not None else None,
+        "default_version": default_version,
+        "tags": public_tags,
+        "deployments": [serialize_deployment(deployment) for deployment in ordered],
+    }
+
+
 def serialize_stack(
     stack: StackInfo,
     *,

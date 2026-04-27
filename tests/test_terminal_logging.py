@@ -206,15 +206,14 @@ class TestDecidePipelineLifecycle:
         assert decision is not None
         assert decision.text == "Resuming execution `abc123`."
 
-    def test_dashboard_url_rewritten(self) -> None:
+    def test_dashboard_url_for_pipeline_run_dropped(self) -> None:
         record = _make_record(
             "zenml.pipelines.pipeline_definition",
-            "Dashboard URL for Pipeline Run: https://example.com/runs/abc",
+            "Dashboard URL for Pipeline Run: "
+            "http://127.0.0.1:8383/projects/default/runs/run-abc",
         )
         decision = terminal_logging._decide(record)
-        assert decision is not None
-        assert decision.text == "Execution URL: https://example.com/runs/abc"
-        assert decision.kind == "detail"
+        assert decision is None
 
     def test_pipeline_run_finished_with_duration(self) -> None:
         record = _make_record(

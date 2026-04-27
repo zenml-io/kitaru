@@ -154,6 +154,13 @@ just test tests/test_foo.py::test_bar # Run a single test
 just test -x                          # Stop on first failure
 just fix                              # Auto-fix formatting, lint, and yaml
 
+# Agent tip: the full suite takes ~4 minutes. When running it through a
+# pager/truncated stream that may drop the failure list, pipe through
+# grep so the failure names survive:
+#   just test 2>&1 | grep -E "FAILED|ERROR|passed|failed" | tail -20
+# That keeps the PASS/FAIL summary and every FAILED line without
+# forcing a rerun just to recover the list.
+
 # Individual checks
 just lint                             # Lint only
 just typecheck                        # Type check only
@@ -286,6 +293,7 @@ Kitaru collects anonymous usage analytics for users who have opted in (via ZenML
 - **Before opening a PR or making a large commit**, always run `/simplify` to review changed code for reuse opportunities, quality issues, and efficiency improvements. Fix any issues it finds before committing.
 - **Update the smoke test** (`scripts/smoke-test.sh`) when adding new CLI commands, MCP tools, or SDK features that can be exercised non-interactively. New commands should have at least a `--dry-run` or `--help` invocation in the smoke script so pre-release validation catches regressions. Use `--dry-run` where available to keep the smoke test non-destructive.
 - **Review analytics coverage** when expanding the CLI, MCP, or SDK surface. Check whether the new feature needs a tracking event in `AnalyticsEvent` and whether the event is wired into the appropriate surface (CLI handler, `@tracked_mcp_tool`, or SDK lifecycle point). See the [Analytics instrumentation](#analytics-instrumentation) section for patterns. If multi-word CLI commands are added, update `_MULTI_TOKEN_COMMANDS` in `cli.py` to avoid leaking positional arguments into analytics.
+- Never include a "[Codex] " or "feat: " prefix to PR titles. Also all PR descriptions should include a "Reviewer Notes" H2 or H3 section which explains what they should take care to check out during their reviews (i.e. code highlights) and ideally it also includes a code snippet they can run (you can assume they have both the ability to run flows locally as well as against a Kubernetes remote stack) to reproduce either the fix or the error etc.
 
 ## CLI
 

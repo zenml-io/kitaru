@@ -27,6 +27,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Replay from a checkpoint with overrides:** `examples/replay/replay_with_overrides.py`
 - **Track a model call inside a flow:** `examples/llm/flow_with_llm.py`
 - **Wrap an existing PydanticAI agent:** `examples/pydantic_ai_agent/pydantic_ai_adapter.py`
+- **Ask a wrapped PydanticAI agent for structured human input:** `examples/pydantic_ai_agent/pydantic_ai_hitl_input.py`
 - **Build a full coding agent with tool calling and HITL:** `examples/coding_agent/agent.py`
 - **Run a granular-checkpoint PydanticAI agent end to end:** `examples/news_scout/scout.py`
 - **Wrap a Claude Agent SDK audit with checkpoints, memory, and wait/resume:** `examples/compliance_review/`

@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">You build the agent. Kitaru runs everything around it.</h3>
+<h3 align="center">The runtime layer underneath your agent stack.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") is the open-source platform layer for AI agents in production. Wrap an existing agent or write raw Python — Kitaru gives you checkpointed execution, human-in-the-loop waits, durable memory, and deployment on any cloud. Any framework. Any model.
+  Kitaru (来る, "to arrive") is a self-hosted, framework-agnostic runtime for autonomous agents — underneath the harness your team already picked. You keep your agent SDK, your prompts, your tools, your model. Kitaru adds durable execution: checkpoints, replay, resume, <code>wait()</code>, versioned deployments, and isolated runtimes, running on your own infrastructure.
 </p>
 
 <p align="center">
@@ -31,13 +31,90 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-Your agent crashed at step 7. Kitaru replays from step 7 — not from scratch.
+## 🧩 Where Kitaru fits
 
-Add two decorators to your existing Python code and get crash recovery, human
-approval gates, durable memory, and a full dashboard. No rewrite. No graph DSL.
-No framework lock-in.
+Agent stacks break cleanly into four layers. Kitaru is exactly one of them.
 
-## Why Kitaru?
+| Layer | What it does | Examples |
+|---|---|---|
+| **Model** | The LLM itself — a compute unit over a context window | OpenAI, Anthropic, Google, open-weights, fine-tuned in-house |
+| **Harness** | The *loop around the model* — prompts, tools, model loop, framework choice | Pydantic AI / Pydantic AI Harness, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
+| **Runtime (Kitaru)** | How the agent *survives and executes over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()`, `kitaru.memory` |
+| **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
+
+Kitaru lives in the middle row. Harnesses define behavior, your stack defines
+policy, and Kitaru gives you the durable execution layer in between.
+
+If you're *buying* an agent platform, Kitaru may feel low-level. If you're
+*building* one, that's the point.
+
+Platform teams get the durable execution layer they'd otherwise build
+themselves — run lifecycle, checkpoint boundaries, replay, invocation
+routing, and self-hosted execution — without mandating which harness
+application teams use on top.
+
+## 🎯 Why Kitaru?
+
+### Durable execution and memory
+
+- **Durable execution.** A crash, pod eviction, or timeout doesn't send the run
+  back to zero. Fix the bug, replay, and the completed checkpoints return cached
+  output instead of re-burning tokens.
+- **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and
+  resumes minutes, hours, or days later when input lands from a human, another
+  agent, a webhook, or a CLI call.
+- **Versioned deployments.** `flow.deploy()` freezes a flow as an immutable
+  snapshot consumers invoke by name. Tag to roll out, re-tag to roll back.
+  Nothing that *calls* the agent redeploys when a new version ships.
+- **Artifact lineage.** Every checkpoint output is written to your object store
+  as a typed, versioned artifact. Step through any run, diff artifacts across
+  runs, and trace a bad output back to the step that produced it.
+- **Isolated execution.** `@checkpoint(runtime="isolated")` runs a specific
+  step in its own pod or job on Kubernetes, AWS, GCP, or Azure. Heavy or risky
+  steps stay isolated; orchestration stays inline.
+- **Durable memory.** Scoped, versioned state for long-running agents. Write
+  from Python, read from the CLI or MCP. Agents remember conventions, context,
+  and prior work across runs.
+
+### Python-first, no graph DSL
+
+Write normal Python. Use `if`, `for`, `try/except` — whatever your agent needs.
+Kitaru gives you two decorators (`@flow` and `@checkpoint`) and a handful of
+utility functions. That's all you need.
+
+```python
+from kitaru import checkpoint, flow
+
+@checkpoint
+def research(topic: str) -> str:
+    return do_research(topic)
+
+@checkpoint
+def write_draft(research: str) -> str:
+    return generate_draft(research)
+
+@flow
+def writing_agent(topic: str) -> str:
+    data = research(topic)
+    return write_draft(data)
+
+result = writing_agent.run("quantum computing").wait()
+```
+
+### Deploy on your cloud
+
+A single self-hosted server, your own infra. Flows run on whichever **stack**
+you pick — local, Kubernetes, GCP, AWS, or Azure — with artifacts in your own
+S3/GCS/Azure Blob bucket. No mandatory SaaS control plane.
+
+### Built-in UI
+
+Every execution is observable from day one. See your agent runs, inspect
+checkpoint outputs, and approve human-in-the-loop wait steps, all from a UI
+that ships with the Kitaru server.
+
+To start the server locally, run `kitaru login` after installing `kitaru[local]`.
+To connect to an existing remote server, run `kitaru login <server>`.
 
 ### Works with your agent SDK
 
@@ -60,57 +137,9 @@ def research_flow(topic: str) -> str:
     return researcher.run_sync(topic).output
 ```
 
-### Python-first, no graph DSL
+<a id="quick-start"></a>
 
-Write normal Python. Use `if`, `for`, `try/except` — whatever your agent needs.
-Kitaru gives you two decorators (`@flow` and `@checkpoint`) and a handful of
-utility functions. That's it.
-
-```python
-from kitaru import checkpoint, flow
-
-@checkpoint
-def research(topic: str) -> str:
-    return do_research(topic)
-
-@checkpoint
-def write_draft(research: str) -> str:
-    return generate_draft(research)
-
-@flow
-def writing_agent(topic: str) -> str:
-    data = research(topic)
-    return write_draft(data)
-
-result = writing_agent.run("quantum computing").wait()
-```
-
-### Durable execution and memory
-
-Kitaru keeps agent state on disk and in infrastructure, not just in process
-memory. Checkpoints persist intermediate outputs so you can replay from failure,
-resume waiting runs, and inspect what happened. Durable memory adds scoped,
-versioned state for long-running agents across Python, CLI, client, and MCP
-surfaces.
-
-### Deploy on your cloud
-
-No workers, no message queues, no distributed systems PhD required. Kitaru runs
-locally with zero config, and scales to production with a single server backed by
-a SQL database. Deploy your agents to Kubernetes, Vertex AI, SageMaker, or
-AzureML using Kitaru's **stack** abstraction. Your registry, your deployer, your
-infrastructure.
-
-### Built-in UI
-
-Every execution is observable from day one. See your agent runs, inspect
-checkpoint outputs, and approve human-in-the-loop wait steps, all from a visual
-dashboard that ships with the Kitaru server.
-
-To start the server locally, run `kitaru login` after installing `kitaru[local]`.
-To connect to an existing remote server, run `kitaru login <server>`.
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Install
 
@@ -196,7 +225,32 @@ kitaru executions logs <EXECUTION_ID>
 kitaru executions replay <EXECUTION_ID> --from process_data
 ```
 
-## Learn more
+### Deploy it
+
+When the flow is ready, deploy it as a versioned snapshot and invoke it by
+name — no redeploy of whatever *calls* the agent.
+
+```python
+# Freeze the current code + dependencies as a versioned snapshot.
+# Parameterized flows take representative deployment-time inputs;
+# consumers can override them at invocation time.
+my_agent.deploy(url="https://example.com")
+
+# Consumers invoke by name — from Python, CLI, MCP, or HTTP.
+from kitaru import KitaruClient
+KitaruClient().deployments.invoke(
+    flow="my_agent",
+    inputs={"url": "https://example.com"},
+)
+```
+
+```bash
+# Tag a version into a stage; re-tag to roll back.
+kitaru flow tag my_agent latest --stage=prod
+kitaru flow tag my_agent v2     --stage=prod   # rollback
+```
+
+## 📚 Learn more
 
 | Resource | Description |
 |---|---|
@@ -207,27 +261,27 @@ kitaru executions replay <EXECUTION_ID> --from process_data
 | [Examples](https://kitaru.ai/docs/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://kitaru.ai/docs/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
 
-## Origins
+## 🌱 Origins
 
 Kitaru is built by the team behind [ZenML](https://zenml.io), drawing on five
 years of production orchestration experience (JetBrains, Adeo, Brevo). The
 orchestration primitives (stacks, artifacts, lineage) are purpose-rebuilt here
 for autonomous agents.
 
-## Contributing
+## 🤝 Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for development
 setup, code style, and how to submit changes. The default branch is `develop` —
 all PRs should target it.
 
-## Community and support
+## 💬 Community and support
 
 - [Discussions](https://kitaru.ai/community) — ask questions, share ideas
 - [Issues](https://github.com/zenml-io/kitaru/issues) — report bugs, request features
 - [Roadmap](https://kitaru.ai/roadmap) — see what's coming next
 - [Docs](https://kitaru.ai/docs) — guides and reference
 
-## License
+## 📄 License
 
 [Apache 2.0](LICENSE)
 

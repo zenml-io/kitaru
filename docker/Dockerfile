@@ -13,7 +13,7 @@
 #
 # Published to: zenmldocker/kitaru
 
-ARG ZENML_SERVER_TAG=0.94.1
+ARG ZENML_SERVER_TAG=0.94.3
 
 FROM zenmldocker/zenml-server:${ZENML_SERVER_TAG} AS server
 
@@ -71,9 +71,12 @@ RUN test -f "$(python -c 'import zenml; print(zenml.__path__[0])')/zen_server/da
 # Switch back to non-root user (matches base image).
 USER zenml
 
+# Keep workload-manager support enabled so snapshot-backed deployment
+# invocation paths (`kitaru invoke` / deployment curl) run on the server.
 ENV KITARU_DEBUG=false \
     KITARU_ANALYTICS_OPT_IN=true \
     KITARU_DEFAULT_ANALYTICS_SOURCE=kitaru-api \
-    ZENML_DEFAULT_ANALYTICS_SOURCE=kitaru-api
+    ZENML_DEFAULT_ANALYTICS_SOURCE=kitaru-api \
+    ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE=zenml.zen_server.pipeline_execution.in_memory_workload_manager.InMemoryWorkloadManager
 
 EXPOSE 8080

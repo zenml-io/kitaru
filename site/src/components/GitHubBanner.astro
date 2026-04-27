@@ -1,19 +1,17 @@
 ---
-// WebinarBanner.astro — Slim top banner promoting the next webinar
-const WEBINAR_URL = 'https://luma.com/v2a6wjw3';
+// GitHubBanner.astro — Slim top banner nudging visitors to star the repo on GitHub
+const GITHUB_URL = 'https://github.com/zenml-io/kitaru';
 ---
 
-<aside class="webinar-banner" id="webinarBanner" role="region" aria-label="Upcoming webinar">
-  <a href={WEBINAR_URL} class="webinar-banner-link" target="_blank" rel="noopener">
-    <span class="webinar-banner-pill">Webinar · Thursday 6pm CET</span>
-    <span class="webinar-banner-text">
-      <strong>Architecting Autonomous Agents for the Enterprise</strong>
-      <span class="webinar-banner-sep" aria-hidden="true">·</span>
-      <span class="webinar-banner-cta">Reserve your spot</span>
-      <span class="webinar-banner-arrow" aria-hidden="true">→</span>
+<aside class="github-banner" id="githubBanner" role="region" aria-label="Star Kitaru on GitHub">
+  <a href={GITHUB_URL} class="github-banner-link" target="_blank" rel="noopener">
+    <span class="github-banner-pill">Open Source</span>
+    <span class="github-banner-text">
+      Enjoying Kitaru? Star us on GitHub
+      <span class="github-banner-arrow" aria-hidden="true">→</span>
     </span>
   </a>
-  <button class="webinar-banner-close" id="webinarBannerClose" aria-label="Dismiss banner">
+  <button class="github-banner-close" id="githubBannerClose" aria-label="Dismiss banner">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <line x1="18" y1="6" x2="6" y2="18"/>
       <line x1="6" y1="6" x2="18" y2="18"/>
@@ -22,7 +20,7 @@ const WEBINAR_URL = 'https://luma.com/v2a6wjw3';
 </aside>
 
 <style>
-  .webinar-banner {
+  .github-banner {
     position: fixed;
     top: 0;
     left: 0;
@@ -43,12 +41,12 @@ const WEBINAR_URL = 'https://luma.com/v2a6wjw3';
     transition: transform 0.3s ease;
   }
 
-  .webinar-banner.dismissed {
+  .github-banner.dismissed {
     transform: translateY(-100%);
     pointer-events: none;
   }
 
-  .webinar-banner-link {
+  .github-banner-link {
     display: inline-flex;
     align-items: center;
     gap: 12px;
@@ -58,7 +56,7 @@ const WEBINAR_URL = 'https://luma.com/v2a6wjw3';
     justify-content: center;
   }
 
-  .webinar-banner-pill {
+  .github-banner-pill {
     display: inline-flex;
     align-items: center;
     padding: 3px 10px;
@@ -73,43 +71,33 @@ const WEBINAR_URL = 'https://luma.com/v2a6wjw3';
     white-space: nowrap;
   }
 
-  .webinar-banner-text {
+  .github-banner-text {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
     justify-content: center;
-  }
-
-  .webinar-banner-text strong {
-    font-weight: 600;
-  }
-
-  .webinar-banner-sep {
-    opacity: 0.5;
-  }
-
-  .webinar-banner-cta {
     text-decoration: underline;
     text-underline-offset: 3px;
     text-decoration-color: oklch(1 0 0 / 0.45);
     transition: text-decoration-color 0.2s;
   }
 
-  .webinar-banner-link:hover .webinar-banner-cta {
+  .github-banner-link:hover .github-banner-text {
     text-decoration-color: oklch(1 0 0 / 1);
   }
 
-  .webinar-banner-arrow {
+  .github-banner-arrow {
     display: inline-block;
     transition: transform 0.2s;
+    text-decoration: none;
   }
 
-  .webinar-banner-link:hover .webinar-banner-arrow {
+  .github-banner-link:hover .github-banner-arrow {
     transform: translateX(3px);
   }
 
-  .webinar-banner-close {
+  .github-banner-close {
     position: absolute;
     right: 16px;
     top: 50%;
@@ -126,58 +114,48 @@ const WEBINAR_URL = 'https://luma.com/v2a6wjw3';
     transition: color 0.2s, background 0.2s;
   }
 
-  .webinar-banner-close:hover {
+  .github-banner-close:hover {
     color: oklch(1 0 0);
     background: oklch(1 0 0 / 0.12);
   }
 
   /* Push the nav down to accommodate the banner */
-  :global(body.has-webinar-banner #nav) {
+  :global(body.has-github-banner #nav) {
     top: 40px;
   }
 
   @media (max-width: 768px) {
-    .webinar-banner {
+    .github-banner {
       padding: 8px 40px 8px 16px;
       font-size: 12px;
       gap: 8px;
     }
 
-    .webinar-banner-pill {
+    .github-banner-pill {
       font-size: 10px;
       padding: 2px 8px;
     }
 
-    .webinar-banner-text {
+    .github-banner-text {
       gap: 6px;
     }
 
-    .webinar-banner-sep {
-      display: none;
-    }
-
-    :global(body.has-webinar-banner #nav) {
+    :global(body.has-github-banner #nav) {
       top: 56px;
     }
   }
 
   @media (max-width: 480px) {
-    .webinar-banner-link {
+    .github-banner-link {
       font-size: 11.5px;
-    }
-
-    .webinar-banner-text strong {
-      display: block;
-      width: 100%;
-      text-align: center;
     }
   }
 </style>
 
 <script>
-  const banner = document.getElementById('webinarBanner');
-  const closeBtn = document.getElementById('webinarBannerClose');
-  const STORAGE_KEY = 'kitaru_webinar_banner_dismissed_v1';
+  const banner = document.getElementById('githubBanner');
+  const closeBtn = document.getElementById('githubBannerClose');
+  const STORAGE_KEY = 'kitaru_github_banner_dismissed_v1';
 
   if (banner) {
     const dismissed = (() => {
@@ -190,14 +168,14 @@ const WEBINAR_URL = 'https://luma.com/v2a6wjw3';
 
     if (dismissed) {
       banner.classList.add('dismissed');
-      document.body.classList.remove('has-webinar-banner');
+      document.body.classList.remove('has-github-banner');
     } else {
-      document.body.classList.add('has-webinar-banner');
+      document.body.classList.add('has-github-banner');
     }
 
     closeBtn?.addEventListener('click', () => {
       banner.classList.add('dismissed');
-      document.body.classList.remove('has-webinar-banner');
+      document.body.classList.remove('has-github-banner');
       try {
         localStorage.setItem(STORAGE_KEY, '1');
       } catch {
