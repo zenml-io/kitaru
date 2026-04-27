@@ -1,0 +1,175 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">LangSmith · packaged security</span>
+      <span class="panel-sub">Isolation bundled with the runtime</span>
+    </div>
+
+    <div class="block">
+      <span class="block-title">LangSmith Sandboxes</span>
+      <span class="block-sub">ephemeral, locked-down environments</span>
+    </div>
+    <div class="block">
+      <span class="block-title">Auth proxy</span>
+      <span class="block-sub">secrets never enter the sandbox</span>
+    </div>
+    <div class="block">
+      <span class="block-title">OpenTelemetry tracing</span>
+      <span class="block-sub">native to the platform</span>
+    </div>
+
+    <div class="foot">Usable isolation story out of the box.</div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru · configurable boundary</span>
+      <span class="panel-sub">Policy at each execution boundary</span>
+    </div>
+
+    <div class="api">
+      <span class="api-call"><span class="fn">@checkpoint</span>(runtime=<span class="str">"isolated"</span>)</span>
+      <span class="api-sub">separate pod / job on your stack</span>
+    </div>
+
+    <div class="rows">
+      <div class="row">
+        <span class="rkey">Sandbox</span>
+        <span class="rval">bring your own provider</span>
+      </div>
+      <div class="row">
+        <span class="rkey">Secrets</span>
+        <span class="rval">your secret manager</span>
+      </div>
+      <div class="row">
+        <span class="rkey">Tracing</span>
+        <span class="rval">OTel, pointed at your backend</span>
+      </div>
+    </div>
+
+    <div class="foot foot--accent">Runtime exposes the boundary. Policy stays with your platform.</div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 14px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .block {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    background: var(--color-surface);
+    margin-bottom: 8px;
+  }
+  .block-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .block-sub {
+    font-size: 11px;
+    color: var(--color-secondary);
+  }
+
+  .api {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-accent);
+    border-radius: 8px;
+    background: var(--color-accent-light);
+    margin-bottom: 10px;
+  }
+  .api-call {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-primary);
+  }
+  .fn { color: var(--color-accent); font-weight: 700; }
+  .str { color: var(--color-accent-deep); }
+  .api-sub {
+    font-size: 11px;
+    color: var(--color-secondary);
+  }
+
+  .rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 12px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-surface-warm);
+  }
+  .rkey {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .rval {
+    font-size: 11px;
+    color: var(--color-secondary);
+    text-align: right;
+  }
+
+  .foot {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+  .foot--accent {
+    color: var(--color-accent-deep);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+  }
+</style>

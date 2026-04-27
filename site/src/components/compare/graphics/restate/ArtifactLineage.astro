@@ -1,0 +1,257 @@
+---
+---
+
+<figure class="fig">
+  <div class="tree tree--a">
+    <div class="head">
+      <span class="exec">exec_id 9f2a</span>
+      <span class="ts">today · 14:02</span>
+    </div>
+    <div class="step">
+      <div class="step-head">
+        <span class="cp">@checkpoint research</span>
+        <span class="meta">1,247 tok · 2.8s</span>
+      </div>
+      <div class="artifacts">
+        <span class="artifact">brief.json</span>
+        <span class="version">v3</span>
+      </div>
+    </div>
+    <svg class="conn" viewBox="0 0 6 14" aria-hidden="true"><path d="M3 0 L3 14" /></svg>
+    <div class="step">
+      <div class="step-head">
+        <span class="cp">@checkpoint draft</span>
+        <span class="meta">3,980 tok · 6.1s</span>
+      </div>
+      <div class="artifacts">
+        <span class="artifact">draft.md</span>
+        <span class="version">v3</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="diff">
+    <span class="diff-label">diff</span>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 4 L4 8 L8 12" />
+      <path d="M16 12 L20 16 L16 20" />
+      <path d="M4 8 L20 8 M20 16 L4 16" />
+    </svg>
+    <span class="diff-sub">across runs</span>
+  </div>
+
+  <div class="tree tree--b">
+    <div class="head">
+      <span class="exec">exec_id 7c1b</span>
+      <span class="ts">Mon · 11:47</span>
+    </div>
+    <div class="step">
+      <div class="step-head">
+        <span class="cp">@checkpoint research</span>
+        <span class="meta">1,112 tok · 2.4s</span>
+      </div>
+      <div class="artifacts">
+        <span class="artifact">brief.json</span>
+        <span class="version version--old">v1</span>
+      </div>
+    </div>
+    <svg class="conn" viewBox="0 0 6 14" aria-hidden="true"><path d="M3 0 L3 14" /></svg>
+    <div class="step">
+      <div class="step-head">
+        <span class="cp">@checkpoint draft</span>
+        <span class="meta">4,215 tok · 6.8s</span>
+      </div>
+      <div class="artifacts">
+        <span class="artifact">draft.md</span>
+        <span class="version version--old">v1</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="contrast">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 6 L20 6 M4 12 L20 12 M4 18 L20 18" />
+    </svg>
+    <span><strong>Restate:</strong> handler progress is journaled; Virtual Object state is keyed per entity. Not surfaced as cross-run versioned artifacts with a diff view.</span>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 96px 1fr;
+    gap: 8px;
+    align-items: start;
+    margin: 0;
+    padding: 0;
+  }
+
+  .tree {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+    padding: 14px 14px 16px;
+  }
+  .tree--b {
+    opacity: 0.88;
+    background: var(--color-surface-warm);
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--color-border-light);
+  }
+  .exec {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+  .tree--b .exec { color: var(--color-muted); }
+  .ts {
+    font-size: 10.5px;
+    color: var(--color-muted);
+  }
+
+  .step {
+    padding: 8px 10px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-surface-warm);
+  }
+  .tree--b .step { background: var(--color-surface); }
+
+  .step-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .cp {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+  .meta {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-muted);
+  }
+  .artifacts {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .artifact {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding: 3px 8px;
+    background: var(--color-accent-light);
+    color: var(--color-accent-deep);
+    border-radius: 4px;
+  }
+  .version {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--color-accent);
+    color: var(--color-surface);
+    letter-spacing: 0.03em;
+  }
+  .version--old {
+    background: var(--color-border-light);
+    color: var(--color-muted);
+  }
+  .conn {
+    display: block;
+    width: 6px;
+    height: 14px;
+    margin: 2px auto;
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 1.5;
+  }
+
+  .diff {
+    align-self: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding-top: 60px;
+  }
+  .diff-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--color-accent);
+    padding: 3px 8px;
+    background: var(--color-accent-light);
+    border-radius: 3px;
+    text-transform: uppercase;
+  }
+  .diff svg {
+    width: 28px;
+    height: 28px;
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .diff-sub {
+    font-size: 9.5px;
+    color: var(--color-muted);
+    text-align: center;
+    margin-top: 2px;
+  }
+
+  .contrast {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 6px;
+    padding: 10px 12px;
+    background: var(--color-surface-warm);
+    border-left: 2px solid var(--color-muted);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+  .contrast svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    fill: none;
+    stroke: var(--color-muted);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    opacity: 0.6;
+  }
+  .contrast strong {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  @media (max-width: 560px) {
+    .fig {
+      grid-template-columns: 1fr;
+    }
+    .diff { padding-top: 0; flex-direction: row; gap: 10px; }
+    .diff svg { transform: rotate(90deg); }
+    .contrast { grid-column: auto; }
+  }
+</style>

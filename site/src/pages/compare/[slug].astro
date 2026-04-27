@@ -7,13 +7,19 @@ import ComparisonHero from '../../components/compare/ComparisonHero.astro';
 
 export async function getStaticPaths() {
   const entries = await getCollection('comparisons', ({ data }) => !data.draft);
+  const sorted = [...entries].sort((a, b) => a.data.order - b.data.order);
+  const competitorOptions = sorted.map((e) => ({
+    slug: e.id,
+    competitor: e.data.competitor,
+    competitorLogo: e.data.competitorLogo,
+  }));
   return entries.map((entry) => ({
     params: { slug: entry.id },
-    props: { entry },
+    props: { entry, competitorOptions },
   }));
 }
 
-const { entry } = Astro.props;
+const { entry, competitorOptions } = Astro.props;
 const { Content } = await render(entry);
 ---
 
@@ -22,39 +28,79 @@ const { Content } = await render(entry);
   <main id="main-content" class="compare-page">
     <ComparisonHero
       title={entry.data.title}
+      shortTitle={entry.data.shortTitle}
       description={entry.data.description}
       competitor={entry.data.competitor}
       competitorLogo={entry.data.competitorLogo}
       competitorTagline={entry.data.competitorTagline}
+      competitorOptions={competitorOptions}
+      currentSlug={entry.id}
     />
 
-    <article class="compare-body">
-      <div class="compare-body-inner">
+    <div class="compare-body">
+      <article class="compare-body-inner">
         <Content />
-      </div>
-    </article>
-
-    <section class="compare-footer-cta">
-      <div class="compare-footer-inner">
-        <h2>{entry.data.ctaHeading}</h2>
-        <p>No cost, no commitment. Install Kitaru and run your first durable flow in an afternoon.</p>
-        <div class="compare-footer-ctas">
-          <a href="/get-started" class="btn-primary">Get started</a>
-          <a href="/docs" class="btn-secondary">Read the docs</a>
-        </div>
-      </div>
-    </section>
+      </article>
+    </div>
   </main>
+
+  <!-- Mobile sticky bottom CTA bar (≤820px) -->
+  <nav class="compare-mobile-cta" aria-label="Quick actions">
+    <a href="/get-started" class="btn-primary">Install Kitaru</a>
+    <a href="/docs" class="btn-secondary">Docs</a>
+  </nav>
+
   <Footer />
 </Base>
 
 <style>
-  .compare-page { padding-top: 0; }
-  .compare-body { padding: 40px 24px 60px; }
-  .compare-body-inner {
-    max-width: 820px;
+  .compare-page {
+    padding-top: 0;
+    /* Near-white surface for the entire comparison page — overrides the
+       warmer body --color-bg underneath. */
+    background: oklch(0.995 0.002 75);
+  }
+
+  /* ─── Body layout ─── */
+  /* Single centered column. Max width 1192px (incident.io reference). Full-cell
+     children (tables, code panes, feature graphics) use the whole column;
+     readable prose (p/ul/h*) is capped at 820px and centered inside it. */
+  .compare-body {
+    padding: 40px 24px 60px;
+    max-width: 1192px;
     margin: 0 auto;
   }
+
+  .compare-body-inner {
+    max-width: none;
+    margin: 0;
+  }
+
+  /* Add bottom padding so mobile sticky bar never covers content */
+  @media (max-width: 820px) {
+    .compare-body {
+      padding-bottom: 72px;
+    }
+  }
+
+  @media (min-width: 820px) {
+    .compare-body {
+      padding: 48px 32px 80px;
+    }
+    /* Cap readable prose at ~820px and center it; let full-cell children
+       (tables, code panes, feature graphics) use the whole 1192px column. */
+    .compare-body-inner :global(p),
+    .compare-body-inner :global(ul),
+    .compare-body-inner :global(h1),
+    .compare-body-inner :global(h2),
+    .compare-body-inner :global(h3) {
+      max-width: 820px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  }
+
+  /* ─── Article typography ─── */
   .compare-body-inner :global(h2) {
     font-size: clamp(26px, 3vw, 34px);
     font-weight: 700;
@@ -76,6 +122,25 @@ const { Content } = await render(entry);
     line-height: 1.7;
     color: var(--color-secondary);
     margin: 0 0 18px;
+  }
+  /* Lead paragraphs — the first two paragraphs after the hero sit larger to
+     set the tone. Container is centered in the page; text itself is
+     left-aligned for readability. */
+  .compare-body-inner :global(> p:nth-of-type(-n+2)) {
+    font-size: 24px;
+    line-height: 1.5;
+    text-align: left;
+    color: var(--color-primary);
+    margin-left: auto;
+    margin-right: auto;
+    margin-bottom: 24px;
+    max-width: 820px;
+  }
+  .compare-body-inner :global(> p:first-of-type) {
+    margin-top: 8px;
+  }
+  .compare-body-inner :global(> p:nth-of-type(2)) {
+    margin-bottom: 40px;
   }
   .compare-body-inner :global(ul) {
     padding-left: 22px;
@@ -100,7 +165,6 @@ const { Content } = await render(entry);
     padding: 20px 22px;
     border-radius: 10px;
     margin: 22px 0 26px;
-    border: 1px solid var(--color-border-light);
     font-size: 14px;
     line-height: 1.7;
   }
@@ -109,41 +173,15 @@ const { Content } = await render(entry);
   .compare-body-inner :global(pre code) {
     background: transparent;
   }
-  .compare-body-inner :global(a) {
+  /* Style prose links but exclude button-style anchors (.btn-primary/-secondary/-accent) */
+  .compare-body-inner :global(a:not([class*="btn-"])) {
     color: var(--color-accent);
     text-decoration: underline;
     text-decoration-thickness: 1px;
     text-underline-offset: 3px;
   }
-  .compare-body-inner :global(a:hover) {
+  .compare-body-inner :global(a:not([class*="btn-"]):hover) {
     text-decoration-thickness: 2px;
-  }
-
-  .compare-footer-cta {
-    padding: 80px 24px 100px;
-    background: var(--color-surface-warm);
-    border-top: 1px solid var(--color-border-light);
-    text-align: center;
-  }
-  .compare-footer-inner { max-width: 640px; margin: 0 auto; }
-  .compare-footer-inner h2 {
-    font-size: clamp(26px, 3vw, 34px);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    line-height: 1.2;
-    margin: 0 0 12px;
-  }
-  .compare-footer-inner p {
-    font-size: 17px;
-    line-height: 1.6;
-    color: var(--color-secondary);
-    margin: 0 0 28px;
-  }
-  .compare-footer-ctas {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-    flex-wrap: wrap;
   }
 
   .compare-body-inner :global(.compare-inline-cta) {
@@ -151,4 +189,118 @@ const { Content } = await render(entry);
     justify-content: center;
     margin: 32px 0 8px;
   }
+
+  /* ─── Markdown pipe-tables (e.g. "How the two surfaces map") ─── */
+  /* Exclude .ctable (<ComparisonTable>) — it owns its own framed wrapper
+     (.ctable-wrap) and a collapsed inner table. Applying these styles to it
+     stacks a second border inside the wrapper. */
+  .compare-body-inner :global(table:not(.ctable)) {
+    width: 100%;
+    max-width: none;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 24px 0 40px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--color-surface);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .compare-body-inner :global(table:not(.ctable) thead) {
+    background: var(--color-surface-warm);
+  }
+  .compare-body-inner :global(table:not(.ctable) th),
+  .compare-body-inner :global(table:not(.ctable) td) {
+    padding: 14px 18px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-secondary);
+  }
+  .compare-body-inner :global(table:not(.ctable) th) {
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-primary);
+  }
+  .compare-body-inner :global(table:not(.ctable) tbody tr:last-child td) {
+    border-bottom: none;
+  }
+  .compare-body-inner :global(table:not(.ctable) td:first-child) {
+    font-weight: 600;
+    color: var(--color-primary);
+    white-space: nowrap;
+  }
+  .compare-body-inner :global(table:not(.ctable) code) {
+    background: var(--color-surface-warm);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.88em;
+  }
+  @media (max-width: 820px) {
+    .compare-body-inner :global(table:not(.ctable)) {
+      font-size: 14px;
+    }
+    .compare-body-inner :global(table:not(.ctable) th),
+    .compare-body-inner :global(table:not(.ctable) td) {
+      padding: 10px 12px;
+    }
+    .compare-body-inner :global(table:not(.ctable) td:first-child) {
+      white-space: normal;
+    }
+  }
+
+  /* ─── Mobile sticky bottom CTA bar ─── */
+  .compare-mobile-cta {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    z-index: 40;
+    /* Fade in via JS after hero scrolls past, but render hidden by default */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+
+  .compare-mobile-cta.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Hidden on desktop */
+  @media (min-width: 820px) {
+    .compare-mobile-cta {
+      display: none;
+    }
+  }
 </style>
+
+<script>
+  // Show mobile sticky CTA bar after user scrolls past the hero
+  const mobileCta = document.querySelector<HTMLElement>('.compare-mobile-cta');
+  const hero = document.getElementById('chero') ?? document.querySelector('header');
+
+  if (mobileCta && hero) {
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          mobileCta.classList.remove('visible');
+        } else {
+          mobileCta.classList.add('visible');
+        }
+      },
+      { threshold: 0 }
+    );
+    obs.observe(hero);
+  }
+</script>
