@@ -13,6 +13,7 @@ import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
 import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
 import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 import PullQuote from '../../components/compare/PullQuote.astro';
 import AgentShapedRuntime from '../../components/compare/graphics/restate/AgentShapedRuntime.astro';
 import ArtifactLineage from '../../components/compare/graphics/restate/ArtifactLineage.astro';
@@ -187,16 +188,8 @@ app = restate.app([review])
 # and resolve the awakeable from wherever approvals come in.`}
 />
 
-## Ready to try Kitaru?
-
+<ComparisonCta headline={frontmatter.ctaHeading}>
 If your durability problem is shaped like a polyglot backend with keyed per-entity state, Restate is the right tool and I'd tell any team that. For Python agent work (LLM calls, memory, artifacts, human/agent approval gates), the glue code you'd write on top of a general-purpose durable runtime is the stuff we ship in the box.
 
 We've spent five years building the MLOps-ready version of this problem space at ZenML. Kitaru is that team two years into the agent version. Bet on us for agent infrastructure and you're betting on the group that's been doing this the whole time.
-
-- Read [our docs](/docs) and see how `@flow`, `@checkpoint`, `kitaru.llm()`, `kitaru.wait()`, and `kitaru.memory` compose
-- `pip install kitaru` and run your first durable agent in an afternoon
-- [Talk to our team](/get-started) if you want help mapping a Restate workflow or Virtual Object onto Kitaru primitives
-
-<div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started</a>
-</div>
+</ComparisonCta>

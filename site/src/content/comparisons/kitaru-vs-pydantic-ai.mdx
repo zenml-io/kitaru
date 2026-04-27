@@ -13,6 +13,7 @@ import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
 import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
 import PullQuote from '../../components/compare/PullQuote.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
 import CodePane from '../../components/compare/CodePane.astro';
 import DifferentQuestions from '../../components/compare/graphics/pydantic-ai/DifferentQuestions.astro';
@@ -176,14 +177,6 @@ def review_flow(case: dict) -> str:
 review_flow(case={"id": "C-001"})`}
 />
 
-## Ready to try Kitaru?
-
+<ComparisonCta headline={frontmatter.ctaHeading}>
 If the Pydantic AI agent you wrote is still a notebook script or a short-lived interactive tool, Pydantic AI on its own is the right answer. If it's becoming a production workload — long-running, crash-surviving, approved by a human hours later, deployed on your own cloud — the durability layer is the stuff Kitaru ships in the box.
-
-- Read the [Pydantic AI adapter docs](/docs/guides/pydantic-ai-adapter) and see how `@flow` and `@checkpoint` wrap an existing agent
-- `pip install kitaru` and wrap your first Pydantic AI agent in an afternoon
-- [Talk to our team](/get-started) if you want help taking a Pydantic AI prototype to a production deployment
-
-<div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started</a>
-</div>
+</ComparisonCta>

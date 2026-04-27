@@ -14,6 +14,7 @@ import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
 import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
 import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 
 Kitaru and the Claude Agent SDK solve different problems. The Agent SDK builds agents that read files, run commands, and solve coding tasks in a session you kick off yourself. Kitaru is the lifecycle layer above your SDK: durable execution, artifact lineage, durable memory, and deployment on your own infrastructure.
 
@@ -190,14 +191,6 @@ async def review_flow(topic: str) -> str:
 asyncio.run(review_flow("Durable agents"))`}
 />
 
-## Ready to try Kitaru?
-
+<ComparisonCta headline={frontmatter.ctaHeading}>
 If you are running agents locally or in short interactive sessions, stick with what you have. If you are taking an Agent SDK prototype to a long-running production service, Kitaru is the lifecycle layer underneath.
-
-- Read [our documentation](/docs) and see how `@flow` and `@checkpoint` work
-- `pip install kitaru` and run your first durable flow in an afternoon
-- [Talk to the team](/get-started) if you want help mapping an Agent SDK prototype to a production deployment
-
-<div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
-</div>
+</ComparisonCta>

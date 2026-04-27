@@ -13,6 +13,7 @@ import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
 import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
 import PullQuote from '../../components/compare/PullQuote.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
 import CodePane from '../../components/compare/CodePane.astro';
 import SelfHostVsPackaged from '../../components/compare/graphics/langgraph/SelfHostVsPackaged.astro';
@@ -204,14 +205,6 @@ app = graph.compile(checkpointer=MemorySaver())
 # routing / deployment / versioning via LangSmith.`}
 />
 
-## Ready to try Kitaru?
-
+<ComparisonCta headline={frontmatter.ctaHeading}>
 If everyone on your team has standardized on LangGraph or Deep Agents and you're moving onto LangSmith Deployment as the packaged runtime and platform, use what you have — Kitaru adds less. If multiple harnesses live across your teams, or a hosted control plane is not an option, Kitaru gives you one self-hosted durable runtime underneath all of them.
-
-- Read the [harness, runtime, platform](/docs/concepts/harness-runtime-platform) docs and see how `@flow` and `@checkpoint` wrap any harness
-- `pip install kitaru` and wrap your first agent with `@flow` and `@checkpoint` in an afternoon
-- [Talk to our team](/get-started) if you want help mapping a LangGraph or LangSmith setup onto Kitaru primitives
-
-<div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started</a>
-</div>
+</ComparisonCta>

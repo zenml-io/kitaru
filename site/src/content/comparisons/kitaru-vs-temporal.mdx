@@ -13,6 +13,7 @@ import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
 import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
 import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 import PullQuote from '../../components/compare/PullQuote.astro';
 import DurableExecution from '../../components/compare/graphics/temporal/DurableExecution.astro';
 import LLMCheckpoints from '../../components/compare/graphics/temporal/LLMCheckpoints.astro';
@@ -193,14 +194,6 @@ class ReviewFlow:
 # client.get_workflow_handle(...).signal(ReviewFlow.approve, True).`}
 />
 
-## Ready to try Kitaru?
-
+<ComparisonCta headline={frontmatter.ctaHeading}>
 If your durability problem spans Go services, Java backends, and cron-scheduled ETL, Temporal is the tool. If it's shaped like a Python agent (LLM calls, memory, tool outputs, humans in the loop), Kitaru removes the glue layer you'd otherwise write on top.
-
-- Read [our documentation](/docs) and see how `@flow`, `@checkpoint`, `kitaru.llm`, and `kitaru.memory` work together
-- `pip install kitaru` and run your first durable agent in an afternoon
-- [Talk to our team](/get-started) if you want help mapping a Temporal agent workflow onto Kitaru primitives
-
-<div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started</a>
-</div>
+</ComparisonCta>

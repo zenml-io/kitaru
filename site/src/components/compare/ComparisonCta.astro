@@ -1,42 +1,35 @@
 ---
 interface Props {
   headline: string;
-  subhead?: string;
+  eyebrow?: string;
   primaryCtaText?: string;
   primaryCtaHref?: string;
-  secondaryCtaText?: string;
-  secondaryCtaHref?: string;
-  showInstall?: boolean;
 }
 
 const {
   headline,
-  subhead,
-  primaryCtaText = 'Get started',
+  eyebrow = 'The lifecycle layer underneath',
+  primaryCtaText = 'Get started with Kitaru',
   primaryCtaHref = '/get-started',
-  secondaryCtaText = 'Read the docs',
-  secondaryCtaHref = '/docs',
-  showInstall = true,
 } = Astro.props;
 ---
 
 <section class="ccta-section" id="cta">
-  <!-- decorative mesh gradient — accent alphas on dark bg -->
-  <div class="ccta-mesh" aria-hidden="true">
-    <div class="ccta-blob ccta-blob-1"></div>
-    <div class="ccta-blob ccta-blob-2"></div>
-    <div class="ccta-blob ccta-blob-3"></div>
-  </div>
+  <div class="ccta-card" data-reveal>
+    <div class="ccta-eyebrow" aria-hidden="true">
+      <span class="ccta-eyebrow-dot"></span>
+      <span class="ccta-eyebrow-text">{eyebrow}</span>
+    </div>
 
-  <div class="ccta-inner" data-reveal>
     <h2 class="ccta-headline">{headline}</h2>
 
-    {subhead && (
-      <p class="ccta-subhead">{subhead}</p>
-    )}
+    <div class="ccta-body">
+      <slot />
+    </div>
 
-    {showInstall && (
+    <div class="ccta-shelf">
       <div class="ccta-install">
+        <span class="ccta-install-prompt" aria-hidden="true">$</span>
         <code class="ccta-install-cmd">pip install kitaru</code>
         <button
           class="ccta-copy-btn"
@@ -45,245 +38,387 @@ const {
         >
           <svg class="ccta-copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="9" y="9" width="13" height="13" rx="2"/>
-            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>
           <svg class="ccta-check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </button>
       </div>
-    )}
 
-    <div class="ccta-actions">
-      <a href={primaryCtaHref} class="btn-accent">{primaryCtaText}</a>
-      <a href={secondaryCtaHref} class="btn-secondary-dark">{secondaryCtaText}</a>
+      <a href={primaryCtaHref} class="ccta-primary">
+        <span>{primaryCtaText}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14"/>
+          <path d="m13 5 7 7-7 7"/>
+        </svg>
+      </a>
+    </div>
+
+    <div class="ccta-footer">
+      <a href="/docs" class="ccta-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        <span>Read the docs</span>
+      </a>
+      <span class="ccta-dot" aria-hidden="true"></span>
+      <a href="/get-started" class="ccta-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span>Talk to the team</span>
+      </a>
+      <span class="ccta-dot" aria-hidden="true"></span>
+      <a href="https://github.com/zenml-io/kitaru" target="_blank" rel="noopener noreferrer" class="ccta-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+        </svg>
+        <span>Star on GitHub</span>
+      </a>
     </div>
   </div>
 </section>
 
 <style>
-  /* ─── Section shell ─── */
+  /* Section wrapper sits on the page surface; the card carries the dark moment. */
   .ccta-section {
-    padding: 100px 24px;
-    text-align: center;
+    padding: 0;
+    background: transparent;
+  }
+
+  .ccta-card {
     position: relative;
-    overflow: hidden;
-    background: var(--color-primary);
-  }
-
-  /* ─── Mesh gradient ─── */
-  /* decorative mesh gradient — accent alpha blobs on dark surface */
-  .ccta-mesh {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    overflow: hidden;
-  }
-
-  .ccta-blob {
-    position: absolute;
-    border-radius: 50%;
-    will-change: transform;
-  }
-
-  .ccta-blob-1 {
-    width: 900px;
-    height: 900px;
-    top: -30%;
-    left: -5%;
-    /* decorative mesh gradient */
-    background: var(--mesh-accent-strong);
-    animation: cctaMesh1 10s ease-in-out infinite alternate;
-  }
-
-  .ccta-blob-2 {
-    width: 850px;
-    height: 850px;
-    bottom: -35%;
-    right: -5%;
-    /* decorative mesh gradient */
-    background: var(--mesh-warm);
-    animation: cctaMesh2 14s ease-in-out infinite alternate;
-  }
-
-  .ccta-blob-3 {
-    width: 750px;
-    height: 750px;
-    top: 10%;
-    right: 20%;
-    /* decorative mesh gradient */
-    background: var(--mesh-accent-soft);
-    animation: cctaMesh3 8s ease-in-out infinite alternate;
-  }
-
-  @keyframes cctaMesh1 {
-    0%   { transform: translate(0, 0) scale(1); }
-    25%  { transform: translate(20%, 15%) scale(1.2); }
-    50%  { transform: translate(-8%, 28%) scale(0.88); }
-    75%  { transform: translate(15%, -10%) scale(1.15); }
-    100% { transform: translate(-6%, 12%) scale(1.04); }
-  }
-
-  @keyframes cctaMesh2 {
-    0%   { transform: translate(0, 0) scale(1); }
-    25%  { transform: translate(-18%, -12%) scale(1.16); }
-    50%  { transform: translate(12%, -22%) scale(0.84); }
-    75%  { transform: translate(-10%, 8%) scale(1.1); }
-    100% { transform: translate(8%, -6%) scale(0.94); }
-  }
-
-  @keyframes cctaMesh3 {
-    0%   { transform: translate(0, 0) scale(1); }
-    33%  { transform: translate(-28%, 20%) scale(1.28); }
-    66%  { transform: translate(20%, -16%) scale(0.82); }
-    100% { transform: translate(-10%, 6%) scale(1.12); }
-  }
-
-  /* Radial vignette — darkens center so content pops */
-  .ccta-section::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    background: radial-gradient(ellipse 70% 80% at 50% 50%, var(--color-primary) 0%, transparent 100%);
-    pointer-events: none;
-  }
-
-  /* ─── Inner content ─── */
-  .ccta-inner {
-    position: relative;
-    z-index: 10;
-    max-width: 720px;
+    max-width: 1128px;
     margin: 0 auto;
+    background: var(--color-dark-bg);
+    border-radius: 24px;
+    padding: 88px 80px 72px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    text-align: center;
+    box-shadow: 0 40px 80px -40px color-mix(in oklab, var(--color-dark-bg) 45%, transparent);
   }
 
+  /* Eyebrow */
+  .ccta-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px 6px 12px;
+    border: 1px solid color-mix(in oklab, var(--color-dark-text) 12%, transparent);
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--color-dark-text) 4%, transparent);
+  }
+  .ccta-eyebrow-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--color-accent);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-accent) 18%, transparent);
+  }
+  .ccta-eyebrow-text {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: color-mix(in oklab, var(--color-dark-text) 72%, transparent);
+  }
+
+  /* Headline */
   .ccta-headline {
-    font-size: clamp(28px, 4vw, 42px);
+    font-family: var(--font-ui);
+    font-size: clamp(32px, 4.2vw, 52px);
     font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.15;
+    letter-spacing: -0.03em;
+    line-height: 1;
     color: var(--color-dark-text);
-    margin: 0;
+    margin: 24px 0 0;
+    max-width: 820px;
   }
 
-  .ccta-subhead {
+  /* Body — competitor-specific paragraph(s) authored in MDX */
+  .ccta-body {
+    margin-top: 24px;
+    max-width: 800px;
+    text-align: center;
+    color: color-mix(in oklab, var(--color-dark-text) 72%, transparent);
+    font-family: var(--font-ui);
     font-size: 17px;
     line-height: 1.6;
-    color: color-mix(in oklab, white 70%, transparent);
-    max-width: 560px;
-    margin: 14px 0 0;
+  }
+  .ccta-body :global(p) {
+    margin: 0 0 12px;
+  }
+  .ccta-body :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .ccta-body :global(a) {
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: text-decoration-thickness 0.2s;
+  }
+  .ccta-body :global(a:hover) {
+    text-decoration-thickness: 2px;
+  }
+  .ccta-body :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    color: var(--color-dark-text);
+    background: color-mix(in oklab, var(--color-dark-text) 8%, transparent);
+    padding: 1px 6px;
+    border-radius: 4px;
   }
 
-  /* ─── Install chip (dark-surface variant) ─── */
+  /* Affordance shelf — install chip + accent CTA on the same baseline */
+  .ccta-shelf {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 40px;
+    flex-wrap: wrap;
+  }
+
   .ccta-install {
     display: inline-flex;
     align-items: center;
-    gap: 0;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    padding: 4px 4px 4px 20px;
-    margin-top: 32px;
+    height: 54px;
+    padding: 0 6px 0 22px;
+    background: color-mix(in oklab, var(--color-dark-text) 5%, transparent);
+    border: 1px solid color-mix(in oklab, var(--color-dark-text) 14%, transparent);
+    border-radius: 999px;
     transition: border-color 0.3s, box-shadow 0.3s;
   }
-
   .ccta-install:hover {
-    border-color: oklch(0.65 0.16 45 / 0.4);
+    border-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
     box-shadow: var(--focus-ring-accent);
   }
-
+  .ccta-install-prompt {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-accent);
+    margin-right: 10px;
+  }
   .ccta-install-cmd {
     font-family: var(--font-mono);
-    font-size: 0.9rem;
+    font-size: 15px;
     font-weight: 500;
+    letter-spacing: -0.01em;
     color: var(--color-dark-text);
     user-select: all;
-    letter-spacing: -0.01em;
+    margin-right: 14px;
   }
-
   .ccta-copy-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    border: none;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.35);
-    border-radius: 6px;
+    width: 42px;
+    height: 42px;
+    border: 1px solid color-mix(in oklab, var(--color-dark-text) 8%, transparent);
+    background: color-mix(in oklab, var(--color-dark-text) 6%, transparent);
+    color: color-mix(in oklab, var(--color-dark-text) 70%, transparent);
+    border-radius: 999px;
     cursor: pointer;
     transition: color 0.2s, background 0.2s;
-    margin-left: 8px;
     flex-shrink: 0;
   }
-
   .ccta-copy-btn:hover {
-    color: rgba(255, 255, 255, 0.7);
-    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-dark-text);
+    background: color-mix(in oklab, var(--color-dark-text) 10%, transparent);
   }
-
   .ccta-copy-btn .ccta-check-icon {
     display: none;
     color: var(--color-success);
   }
-
   .ccta-copy-btn.copied .ccta-copy-icon {
     display: none;
   }
-
   .ccta-copy-btn.copied .ccta-check-icon {
     display: block;
     animation: ccta-check-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
-
   @keyframes ccta-check-pop {
     0%   { transform: scale(0); opacity: 0; }
     60%  { transform: scale(1.2); }
     100% { transform: scale(1); opacity: 1; }
   }
 
-  /* ─── CTA button row ─── */
-  .ccta-actions {
+  /* Primary CTA — orange pill */
+  .ccta-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    height: 54px;
+    padding: 0 26px 0 28px;
+    background: var(--color-accent);
+    color: var(--color-dark-bg);
+    border-radius: 999px;
+    text-decoration: none;
+    font-family: var(--font-ui);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    box-shadow: 0 8px 24px -8px color-mix(in oklab, var(--color-accent) 60%, transparent);
+    transition: transform 0.15s, box-shadow 0.2s;
+  }
+  .ccta-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 28px -8px color-mix(in oklab, var(--color-accent) 70%, transparent);
+  }
+  .ccta-primary:active {
+    transform: translateY(1px);
+  }
+
+  /* Footer links */
+  .ccta-footer {
     display: flex;
-    gap: 14px;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
+    gap: 18px;
+    margin-top: 40px;
+    padding-top: 28px;
+    border-top: 1px solid color-mix(in oklab, var(--color-dark-text) 8%, transparent);
+    width: 100%;
+    max-width: 560px;
     flex-wrap: wrap;
-    margin-top: 32px;
+  }
+  .ccta-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: var(--color-dark-text);
+    font-family: var(--font-ui);
+    font-size: 14.5px;
+    font-weight: 500;
+    transition: color 0.2s;
+  }
+  .ccta-link svg {
+    color: var(--color-accent);
+    transition: transform 0.2s;
+  }
+  .ccta-link:hover {
+    color: var(--color-accent);
+  }
+  .ccta-link:hover svg {
+    transform: translateX(1px);
+  }
+  .ccta-dot {
+    display: inline-block;
+    width: 3px;
+    height: 3px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--color-dark-text) 20%, transparent);
   }
 
-  /* ─── Responsive ─── */
-  @media (max-width: 640px) {
+  /* Responsive */
+  @media (max-width: 820px) {
     .ccta-section {
-      padding: 80px 20px;
+      padding: 56px 16px 80px;
     }
-
-    .ccta-blob-1 { width: 380px; height: 380px; }
-    .ccta-blob-2 { width: 320px; height: 320px; }
-    .ccta-blob-3 { width: 260px; height: 260px; }
-
-    .ccta-actions {
+    .ccta-card {
+      padding: 56px 28px 48px;
+      border-radius: 20px;
+    }
+    .ccta-headline {
+      letter-spacing: -0.025em;
+    }
+    .ccta-shelf {
       flex-direction: column;
-      width: 100%;
-      max-width: 320px;
+      align-items: stretch;
+      gap: 12px;
     }
-
-    .ccta-actions .btn-accent,
-    .ccta-actions .btn-secondary-dark {
+    .ccta-install,
+    .ccta-primary {
       width: 100%;
+      justify-content: space-between;
+    }
+    .ccta-primary {
       justify-content: center;
-      text-align: center;
+    }
+    .ccta-footer {
+      gap: 12px;
+    }
+    .ccta-dot {
+      display: none;
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .ccta-blob {
-      animation: none;
-    }
+  /* ─── Specificity overrides ───
+     The CTA card now renders inside <article class="compare-body-inner">
+     in the comparison page template. That template defines aggressive
+     prose rules (.compare-body-inner :global(h2), :global(p), :global(a))
+     that would otherwise paint the dark card with light-page colors.
+     The selectors below intentionally bump specificity to win the cascade. */
+  section.ccta-section .ccta-card .ccta-headline {
+    font-family: var(--font-ui);
+    font-size: clamp(32px, 4.2vw, 52px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    color: var(--color-dark-text);
+    margin: 24px 0 0;
+    max-width: 740px;
+  }
+  section.ccta-section .ccta-card .ccta-body :global(p) {
+    font-size: 17px;
+    line-height: 1.6;
+    color: color-mix(in oklab, var(--color-dark-text) 72%, transparent);
+    margin: 0 0 12px;
+    max-width: none;
+  }
+  section.ccta-section .ccta-card .ccta-body :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  section.ccta-section .ccta-card .ccta-body :global(a) {
+    color: var(--color-accent);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+  section.ccta-section .ccta-card .ccta-body :global(a:hover) {
+    text-decoration-thickness: 2px;
+  }
+  section.ccta-section .ccta-card .ccta-body :global(code) {
+    color: var(--color-dark-text);
+    background: color-mix(in oklab, var(--color-dark-text) 8%, transparent);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  section.ccta-section .ccta-card .ccta-install .ccta-install-cmd {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--color-dark-text);
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+  }
+  section.ccta-section .ccta-card .ccta-primary {
+    color: var(--color-dark-bg);
+    text-decoration: none;
+  }
+  section.ccta-section .ccta-card .ccta-primary:hover {
+    text-decoration: none;
+  }
+  section.ccta-section .ccta-card .ccta-link {
+    color: var(--color-dark-text);
+    text-decoration: none;
+  }
+  section.ccta-section .ccta-card .ccta-link:hover {
+    color: var(--color-accent);
+    text-decoration: none;
   }
 </style>
 

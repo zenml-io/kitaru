@@ -4,7 +4,6 @@ import Base from '../../layouts/Base.astro';
 import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
 import ComparisonHero from '../../components/compare/ComparisonHero.astro';
-import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 
 export async function getStaticPaths() {
   const entries = await getCollection('comparisons', ({ data }) => !data.draft);
@@ -43,8 +42,6 @@ const { Content } = await render(entry);
         <Content />
       </article>
     </div>
-
-    <ComparisonCta headline={entry.data.ctaHeading} />
   </main>
 
   <!-- Mobile sticky bottom CTA bar (≤820px) -->
