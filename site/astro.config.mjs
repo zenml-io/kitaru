@@ -14,6 +14,7 @@ export default defineConfig({
     '/onepager': { status: 302, destination: '/' },
     '/roadmap': { status: 302, destination: 'https://github.com/orgs/zenml-io/projects/5' },
     '/community': { status: 302, destination: 'https://github.com/zenml-io/kitaru/discussions' },
+    '/get-started': { status: 301, destination: '/book-a-demo' },
   },
   integrations: [sitemap(), mdx()],
   markdown: {

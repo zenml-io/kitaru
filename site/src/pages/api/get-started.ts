@@ -47,7 +47,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       company,
       email,
       timestamp: new Date().toISOString(),
-      source: 'get-started',
+      source: 'book-a-demo',
     }));
 
     // Send identify + track to Segment server-side (fire-and-forget)
@@ -62,13 +62,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
     });
     const trackCall = segmentCall('track', {
       userId: email,
-      event: 'Get Started Signup',
+      event: 'Book a Demo Signup',
       properties: {
         name,
         company,
         email,
-        source: 'get-started',
-        formType: 'get-started',
+        source: 'book-a-demo',
+        formType: 'book-a-demo',
       },
       context: segmentContext,
     });
