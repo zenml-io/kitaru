@@ -10,20 +10,22 @@ const comparisons = (await getCollection('comparisons', ({ data }) => !data.draf
 
 const openSourceFeatures = [
   'All primitives — flow, checkpoint, wait, llm, memory',
-  'Replay, retry, resume, and cancel',
+  'Framework adapters and bundled MCP server',
+  'Replay, retry, resume, and cancel (CLI, SDK, dashboard)',
   'Local execution and remote orchestrators (K8s, Vertex, SageMaker, AzureML)',
-  'PydanticAI adapter and MCP server tools',
   'Self-hosted server and dashboard',
   'Community support on GitHub and Slack',
 ];
 
 const enterpriseFeatures = [
-  'Hosted Kitaru control plane',
+  'Trigger flows from the dashboard, API, schedules, or webhooks',
+  'Distributed execution across deployments — replay, retry, and resume at scale',
+  'Managed autoscaling workers, queues, and concurrency controls',
   'SAML / OIDC SSO and SCIM provisioning',
-  'Role-based access control and org-wide audit logs',
-  'Multi-region deployment with 99.9% uptime SLA',
-  'Priority support and a dedicated solutions engineer',
-  'Custom integrations and security review',
+  'Custom RBAC roles and org-wide audit logs',
+  'Multi-region and air-gapped deployment',
+  'SOC 2 and GDPR',
+  '24/7 dedicated support and a named solutions engineer',
 ];
 
 type Mark = 'yes' | 'no' | (string & {});
@@ -35,9 +37,11 @@ const compareSections: Section[] = [
     title: 'Core SDK',
     rows: [
       { feature: 'All primitives (flow, checkpoint, wait, llm, memory)', oss: 'yes', enterprise: 'yes' },
-      { feature: 'Replay, retry, resume, cancel', oss: 'yes', enterprise: 'yes' },
-      { feature: 'PydanticAI adapter', oss: 'yes', enterprise: 'yes' },
-      { feature: 'MCP server tools', oss: 'yes', enterprise: 'yes' },
+      { feature: 'Framework adapters + bundled MCP server', oss: 'yes', enterprise: 'yes' },
+      { feature: 'Replay, retry, resume, cancel (CLI, SDK, dashboard)', oss: 'yes', enterprise: 'yes' },
+      { feature: 'Distributed execution across deployments (not single-node)', oss: 'no', enterprise: 'yes' },
+      { feature: 'High-concurrency replay / retry / resume at scale', oss: 'no', enterprise: 'yes' },
+      { feature: 'Flow executions', oss: 'Unlimited', enterprise: 'Unlimited' },
     ],
   },
   {
@@ -46,18 +50,33 @@ const compareSections: Section[] = [
       { feature: 'Local execution (in-process)', oss: 'yes', enterprise: 'yes' },
       { feature: 'Self-hosted server', oss: 'yes', enterprise: 'yes' },
       { feature: 'Remote orchestrators (K8s, Vertex, SageMaker, AzureML)', oss: 'yes', enterprise: 'yes' },
-      { feature: 'Hosted Kitaru control plane', oss: 'no', enterprise: 'yes' },
+      { feature: 'CLI + SDK trigger', oss: 'yes', enterprise: 'yes' },
+      { feature: 'Dashboard trigger', oss: 'no', enterprise: 'yes' },
+      { feature: 'REST API trigger', oss: 'no', enterprise: 'yes' },
+      { feature: 'Scheduled trigger (cron)', oss: 'no', enterprise: 'yes' },
+      { feature: 'Webhook trigger', oss: 'no', enterprise: 'yes' },
+      { feature: 'Managed autoscaling workers + queues', oss: 'no', enterprise: 'yes' },
+      { feature: 'Concurrency + rate-limit controls', oss: 'no', enterprise: 'yes' },
       { feature: 'Multi-region deployment', oss: 'no', enterprise: 'yes' },
-      { feature: 'Uptime SLA', oss: 'no', enterprise: '99.9%' },
+      { feature: 'Air-gapped / on-prem deployment', oss: 'no', enterprise: 'yes' },
     ],
   },
   {
     title: 'Governance',
     rows: [
       { feature: 'Local workspace and secrets', oss: 'yes', enterprise: 'yes' },
-      { feature: 'SAML / OIDC SSO', oss: 'no', enterprise: 'yes' },
-      { feature: 'Role-based access control', oss: 'no', enterprise: 'yes' },
+      { feature: 'SAML / OIDC SSO + SCIM', oss: 'no', enterprise: 'yes' },
+      { feature: 'Custom RBAC roles', oss: 'no', enterprise: 'yes' },
       { feature: 'Org-wide audit logs', oss: 'no', enterprise: 'yes' },
+    ],
+  },
+  {
+    title: 'Security & Compliance',
+    rows: [
+      { feature: 'Self-managed encryption keys (BYOK)', oss: 'no', enterprise: 'yes' },
+      { feature: 'SOC 2 Type II', oss: 'no', enterprise: 'yes' },
+      { feature: 'GDPR-ready DPA', oss: 'no', enterprise: 'yes' },
+      { feature: 'Annual security review', oss: 'no', enterprise: 'yes' },
     ],
   },
   {
@@ -73,22 +92,22 @@ const compareSections: Section[] = [
 const faq = [
   {
     q: 'Is Kitaru really free?',
-    a: 'Yes. The full SDK is open source under Apache 2.0. Self-host it forever, no usage limits. Enterprise adds a hosted control plane, SSO, audit logs, and an SLA.',
+    a: 'Yes. The full SDK is open source under Apache 2.0. Self-host it forever, no usage limits. Enterprise adds distributed execution at scale, dashboard / API / scheduled / webhook triggers, SSO, RBAC, and audit logs.',
     open: true,
   },
   {
     q: "What's the difference between Open Source and Enterprise?",
-    a: 'Same SDK, same primitives. Enterprise wraps it in a hosted control plane with SSO, role-based access control, org-wide audit logs, multi-region deployment, and a 99.9% uptime SLA — the things a security team usually asks for before letting agents touch production data.',
+    a: 'Same SDK, same primitives. Open source runs your flows on a single-node server you operate yourself. Enterprise adds distributed execution across deployments — so you can replay, retry, and resume at scale — plus dashboard, API, scheduled, and webhook triggers, SSO, custom RBAC roles, org-wide audit logs, multi-region and air-gapped deployment, and SOC 2 / GDPR.',
     open: false,
   },
   {
     q: 'Can I run Kitaru on my own cloud?',
-    a: 'Yes. Self-host the server in your own VPC, point it at S3, GCS, or Azure Blob, and run flows on Kubernetes, Vertex, SageMaker, or AzureML. Enterprise customers can also bring their hosted control plane to a dedicated tenant in their own region.',
+    a: 'Yes. Self-host the server in your own VPC, point it at S3, GCS, or Azure Blob, and run flows on Kubernetes, Vertex, SageMaker, or AzureML. Enterprise customers can run a dedicated control plane in their own region or fully air-gapped.',
     open: false,
   },
   {
     q: 'Do I have to share my agent data with Kitaru?',
-    a: 'No. In the open-source path, executions, artifacts, and prompts stay inside your infrastructure end-to-end. The Enterprise hosted control plane stores execution metadata and pointers — your artifact store stays under your control.',
+    a: 'No. In the open-source path, executions, artifacts, and prompts stay inside your infrastructure end-to-end. Enterprise stores execution metadata and pointers — your artifact store stays under your control.',
     open: false,
   },
   {
