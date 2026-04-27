@@ -5,8 +5,8 @@ import Footer from '../components/Footer.astro';
 ---
 
 <Base
-  title="Get Started | Kitaru"
-  description="Free white-glove onboarding: deploy Kitaru on your infra, run your first flow, migrate your code, and benchmark — in 4 weeks."
+  title="Book a Demo | Kitaru"
+  description="Book a demo with the Kitaru team. We'll deploy on your infra, migrate one of your agents, and prove durable execution works — on your data, free."
 >
   <Nav />
   <main id="main-content">
@@ -18,12 +18,12 @@ import Footer from '../components/Footer.astro';
           Free onboarding program
         </span>
         <h1 class="gs-headline">
-          From zero to production agents in <span class="accent-shimmer">4&nbsp;weeks</span> — on&nbsp;us.
+          Production agents on <span class="accent-shimmer">your&nbsp;infra</span> — see&nbsp;it&nbsp;work.
         </h1>
         <p class="gs-subtitle">
           Our engineers pair with your team to deploy Kitaru, migrate your agent code, and prove it works — on your infrastructure, with your data. No cost, no commitment.
         </p>
-        <a href="#signup" class="btn-accent gs-hero-cta">Talk to us</a>
+        <a href="#signup" class="btn-accent gs-hero-cta">Book a demo</a>
       </div>
     </section>
 
@@ -33,7 +33,7 @@ import Footer from '../components/Footer.astro';
     <section class="gs-steps">
       <div class="gs-steps-header" data-reveal>
         <span class="section-eyebrow">The program</span>
-        <h2>What you get in 4 weeks</h2>
+        <h2>What we cover</h2>
         <p class="gs-steps-subtitle">Powered by 5 years of ZenML MLOps experience, hundreds of production deployments, and a team that's shipped LLMOps and agent infrastructure for enterprise teams.</p>
       </div>
       <div class="gs-steps-grid">
@@ -42,7 +42,6 @@ import Footer from '../components/Footer.astro';
           <div class="gs-step-number">1</div>
           <h3>Deploy on your infra</h3>
           <p>We deploy Kitaru on your cloud (AWS, GCP, Azure) or on-prem. We handle Kubernetes, networking, and storage config so your team doesn't have to context-switch.</p>
-          <span class="gs-step-badge">Week 1</span>
         </div>
         <div class="gs-step-connector" aria-hidden="true"></div>
         <div class="gs-step-card" data-reveal data-reveal-delay="1">
@@ -50,7 +49,6 @@ import Footer from '../components/Footer.astro';
           <div class="gs-step-number">2</div>
           <h3>Build a durable agent</h3>
           <p>We pair-program a real agent workflow with your team — checkpoints, human-in-the-loop waits, LLM calls, and replay. Not a toy demo; something you'll actually ship.</p>
-          <span class="gs-step-badge">Week 2</span>
         </div>
         <div class="gs-step-connector" aria-hidden="true"></div>
         <div class="gs-step-card" data-reveal data-reveal-delay="2">
@@ -58,7 +56,6 @@ import Footer from '../components/Footer.astro';
           <div class="gs-step-number">3</div>
           <h3>Migrate your agents</h3>
           <p>We take one of your production agents — LangChain, CrewAI, PydanticAI, or custom — and make it durable. No rewrites; thin decorators around your existing Python.</p>
-          <span class="gs-step-badge">Week 3</span>
         </div>
         <div class="gs-step-connector" aria-hidden="true"></div>
         <div class="gs-step-card" data-reveal data-reveal-delay="3">
@@ -66,7 +63,6 @@ import Footer from '../components/Footer.astro';
           <div class="gs-step-number">4</div>
           <h3>Benchmark</h3>
           <p>Compare reliability, cost, and latency before and after. You get a written report showing exactly what durable execution changed for your agents.</p>
-          <span class="gs-step-badge">Week 4</span>
         </div>
       </div>
     </section>
@@ -77,7 +73,7 @@ import Footer from '../components/Footer.astro';
         <!-- Form card (left) -->
         <div class="gs-form-card">
           <div class="card-glow" aria-hidden="true"></div>
-          <h2>Talk to us</h2>
+          <h2>Book a demo</h2>
 
           <form id="getStartedForm" class="gs-form" novalidate>
             <div class="gs-field">
@@ -92,14 +88,14 @@ import Footer from '../components/Footer.astro';
               <label for="gs-email">Work email</label>
               <input type="email" id="gs-email" name="email" required autocomplete="email" placeholder="jane@acme.com" />
             </div>
-            <button type="submit" class="btn-accent gs-submit">Get started</button>
+            <button type="submit" class="btn-accent gs-submit">Book a demo</button>
             <p class="gs-error" id="gsError" aria-live="polite"></p>
           </form>
 
           <div id="gsSuccess" class="gs-success" hidden>
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="9 12 12 15 16 10"/></svg>
-            <h3>You're in!</h3>
-            <p>We'll be in touch within one business day to kick off your onboarding.</p>
+            <h3>Got it!</h3>
+            <p>We'll reach out within one business day to schedule your demo.</p>
           </div>
         </div>
 
@@ -161,7 +157,7 @@ import Footer from '../components/Footer.astro';
             <p>AWS, GCP, and Azure with Kubernetes. We also support on-prem Kubernetes clusters. Kitaru runs anywhere you can run a container — we just need cluster access and a storage backend (S3, GCS, or Azure Blob).</p>
           </details>
           <details class="gs-faq-item" data-reveal data-reveal-delay="2">
-            <summary>What happens after the 4 weeks?
+            <summary>What happens after onboarding?
               <svg class="gs-faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
             </summary>
             <p>You have a working production deployment, migrated agent code, and a benchmark report. Your team keeps everything — it's your infrastructure, your code, your Kitaru instance. We offer optional ongoing support and managed hosting if you want it, but you're fully self-sufficient after onboarding.</p>
@@ -186,7 +182,7 @@ import Footer from '../components/Footer.astro';
       <div class="gs-closing-inner" data-reveal>
         <h2>Ready to make your agents durable?</h2>
         <div class="gs-closing-actions">
-          <a href="#signup" class="btn-accent">Get started</a>
+          <a href="#signup" class="btn-accent">Book a demo</a>
           <a href="/docs" class="btn-secondary-dark">Read the docs</a>
         </div>
         <p class="gs-closing-note">Open source (Apache 2.0). Free onboarding program.</p>
@@ -332,23 +328,6 @@ import Footer from '../components/Footer.astro';
     flex: 1;
     position: relative;
     z-index: 2;
-  }
-
-  .gs-step-badge {
-    display: inline-block;
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--color-muted);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border-light);
-    border-radius: 100px;
-    padding: 3px 10px;
-    margin-top: 14px;
-    position: relative;
-    z-index: 2;
-    width: fit-content;
   }
 
   /* ── Form + Why (combined section) ── */
@@ -815,7 +794,7 @@ import Footer from '../components/Footer.astro';
       if (!resp.ok) {
         if (errorEl) errorEl.textContent = result.error || 'Something went wrong. Please try again.';
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Get started';
+        submitBtn.textContent = 'Book a demo';
         return;
       }
 
@@ -824,7 +803,7 @@ import Footer from '../components/Footer.astro';
     } catch {
       if (errorEl) errorEl.textContent = 'Network error. Please try again.';
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Get started';
+      submitBtn.textContent = 'Book a demo';
     }
   });
 </script>
