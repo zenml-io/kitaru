@@ -14,7 +14,7 @@ Demonstrates:
 ## Setup
 
 ```bash
-cd examples/end-to-end/coding_agent
+cd examples/end_to_end/coding_agent
 uv pip install 'kitaru[local]'   # Install Kitaru with local runtime
 kitaru init                  # Initialize a Kitaru project in this directory
 ```

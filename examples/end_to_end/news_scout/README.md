@@ -59,7 +59,7 @@ Score: 8/10 · NYT / Nature · Feb 2025
 ## Quick start
 
 ```bash
-cd examples/end-to-end/news_scout
+cd examples/end_to_end/news_scout
 kitaru init
 uv sync --extra local --extra pydantic-ai --extra llm
 ```

@@ -24,10 +24,10 @@ def stage3_module(monkeypatch, tmp_path):
     configure_fake_claude_home(monkeypatch, tmp_path)
     install_fake_claude_agent_sdk(monkeypatch)
     clear_compliance_review_modules(
-        "examples.end-to-end.compliance_review.stage_3_memory",
+        "examples.end_to_end.compliance_review.stage_3_memory",
     )
     return importlib.import_module(
-        "examples.end-to-end.compliance_review.stage_3_memory"
+        "examples.end_to_end.compliance_review.stage_3_memory"
     )
 
 

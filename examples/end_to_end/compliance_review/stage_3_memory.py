@@ -12,7 +12,6 @@ The checkpoints themselves do not call `kitaru.memory`.
 """
 
 import asyncio
-import importlib
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -25,24 +24,24 @@ from zenml.utils.source_utils import set_custom_source_root
 import kitaru
 from kitaru import checkpoint, flow, memory
 
-# Make the hyphenated package path importable when this file is run as a
-# script. `end-to-end` cannot appear in normal import syntax, so use
-# importlib for the package boundary and keep package-internal imports relative.
-_COMPLIANCE_PACKAGE = "examples.end-to-end.compliance_review"
+# Make `examples.end_to_end.compliance_review.*` importable when this file is
+# run as a script. Using the fully qualified path keeps ZenML's materializer and
+# any later package imports on the same sys.modules entry.
 _REPO_ROOT = str(Path(__file__).resolve().parents[3])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 set_custom_source_root(_REPO_ROOT)
 
-_materializers = importlib.import_module(f"{_COMPLIANCE_PACKAGE}.materializers")
-_claude_agent = importlib.import_module(f"{_COMPLIANCE_PACKAGE}.claude_agent")
-ANTHROPIC_SECRET_NAME = _claude_agent.ANTHROPIC_SECRET_NAME
-CLAUDE_AGENT_SDK_REQUIREMENT = _claude_agent.CLAUDE_AGENT_SDK_REQUIREMENT
-DEFAULT_ALLOWED_TOOLS = _claude_agent.DEFAULT_ALLOWED_TOOLS
-KITARU_REQUIREMENT = _claude_agent.KITARU_REQUIREMENT
-ClaudeAgentResult = _claude_agent.ClaudeAgentResult
-run_agent_turn = _claude_agent.run_agent_turn
-to_claude_agent_result = _claude_agent.to_claude_agent_result
+import examples.end_to_end.compliance_review.materializers as _materializers  # noqa: E402,F401
+from examples.end_to_end.compliance_review.claude_agent import (  # noqa: E402
+    ANTHROPIC_SECRET_NAME,
+    CLAUDE_AGENT_SDK_REQUIREMENT,
+    DEFAULT_ALLOWED_TOOLS,
+    KITARU_REQUIREMENT,
+    ClaudeAgentResult,
+    run_agent_turn,
+    to_claude_agent_result,
+)
 
 console = Console()
 

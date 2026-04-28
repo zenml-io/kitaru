@@ -6,7 +6,7 @@ import importlib
 
 import pytest
 
-tools = importlib.import_module("examples.end-to-end.compliance_review.tools")
+tools = importlib.import_module("examples.end_to_end.compliance_review.tools")
 
 
 def test_list_documents_returns_planned_company_documents() -> None:

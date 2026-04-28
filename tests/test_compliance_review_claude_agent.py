@@ -39,7 +39,7 @@ def claude_agent_module(monkeypatch, tmp_path):
     configure_fake_claude_home(monkeypatch, tmp_path)
     install_fake_claude_agent_sdk(monkeypatch)
     clear_compliance_review_modules()
-    return importlib.import_module("examples.end-to-end.compliance_review.claude_agent")
+    return importlib.import_module("examples.end_to_end.compliance_review.claude_agent")
 
 
 def test_run_agent_turn_surfaces_result_error_before_transport_wrapper(
@@ -250,7 +250,7 @@ def test_importing_claude_agent_does_not_lookup_secret_or_stack(
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     module = importlib.import_module(
-        "examples.end-to-end.compliance_review.claude_agent"
+        "examples.end_to_end.compliance_review.claude_agent"
     )
 
     assert hasattr(module, "run_agent_turn")
@@ -263,7 +263,7 @@ def test_claude_agent_result_materializer_restores_transcript(
 ) -> None:
     """The example materializer should bundle and restore Claude JSONL state."""
     materializers = importlib.import_module(
-        "examples.end-to-end.compliance_review.materializers"
+        "examples.end_to_end.compliance_review.materializers"
     )
     response = fake_claude_response(
         prompt="Check whether resume state survives.",
@@ -352,7 +352,7 @@ def test_materializer_recomputes_transcript_path_on_different_home(
     new host.
     """
     materializers = importlib.import_module(
-        "examples.end-to-end.compliance_review.materializers"
+        "examples.end_to_end.compliance_review.materializers"
     )
 
     pod_a_home = tmp_path / "pod_a_home"

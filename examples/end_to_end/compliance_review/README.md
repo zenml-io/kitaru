@@ -35,7 +35,7 @@ Pick a stage and run it:
 | 4 | `stage_4_conversational.py` | Wait/resume conversational loop over a single Claude session. |
 
 ```bash
-uv run examples/end-to-end/compliance_review/stage_1_single_turn.py
+uv run examples/end_to_end/compliance_review/stage_1_single_turn.py
 ```
 
 ### Re-running the examples costs real money
@@ -55,7 +55,7 @@ zenml integration install s3          # or kubernetes, vertex, gcp, azure, …
 kitaru secrets set anthropic --ANTHROPIC_API_KEY=sk-ant-...
 export KITARU_IMAGE='{"secret_environment_from":["anthropic"]}'
 
-uv run examples/end-to-end/compliance_review/stage_2_multi_domain.py
+uv run examples/end_to_end/compliance_review/stage_2_multi_domain.py
 ```
 
 This example also keeps a `kitaru.get_secret("anthropic")` fallback for known remote stacks when `ANTHROPIC_API_KEY` is still missing at runtime, so the existing local quickstart and guarded tests keep working.

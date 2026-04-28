@@ -23,12 +23,12 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 _EXAMPLE_DIR = (
-    Path(__file__).resolve().parent.parent / "examples" / "end-to-end" / "news_scout"
+    Path(__file__).resolve().parent.parent / "examples" / "end_to_end" / "news_scout"
 )
 
 
 def _load_scout_from_path() -> ModuleType:
-    """Load ``examples/end-to-end/news_scout/scout.py`` by file path.
+    """Load ``examples/end_to_end/news_scout/scout.py`` by file path.
 
     We avoid a bare ``import scout`` because the example directory isn't on
     the package search path at static-analysis time, which trips the type
@@ -45,7 +45,7 @@ def _load_scout_from_path() -> ModuleType:
 
 @pytest.fixture
 def scout_module(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Import examples/end-to-end/news_scout/scout.py with env vars pre-set.
+    """Import examples/end_to_end/news_scout/scout.py with env vars pre-set.
 
     The module constructs a PydanticAI Agent at import time, which
     requires an ANTHROPIC_API_KEY in the environment even to initialize.

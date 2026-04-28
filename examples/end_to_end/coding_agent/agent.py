@@ -9,7 +9,7 @@ waits for a follow-up instruction.
 
 Usage::
 
-    cd examples/end-to-end/coding_agent
+    cd examples/end_to_end/coding_agent
     python agent.py "Create a plotly chart"
 
 Or supply follow-up input via the CLI::
