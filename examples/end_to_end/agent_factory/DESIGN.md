@@ -65,7 +65,9 @@ These were resolved during brainstorming and are the foundation for everything b
 | I2 | HITL design | **Per-clause HITL via `@hitl_tool`-decorated agent tool** | The LLM decides when to pause for human input by calling `request_severity_decision`. The flow body never calls `kitaru.wait()` directly. Showcases kitaru ↔ pydantic-ai integration *inside* the agent loop. |
 | J2 | Memory design | **Flow-scope precedents + execution-scope findings** | Cross-execution learning: `request_severity_decision` reads precedents, suggests defaults, writes confirmed decisions back. After 2-3 runs, the agent visibly "gets smarter." |
 | K3 | Tool inventory | **Five tools: `exec`, `fetch_document`, `request_severity_decision`, `publish_review`, `skill`** | Full kami parity. The `skill` tool is the architectural distinctive that separates "main loop" from "capabilities" — the agent's procedure lives in markdown, not Python. |
-| L2 | Replay scenario | **"Policy change" replay (edit fixture file, replay from `check_clause_2`)** | The most realistic replay scenario for the compliance domain. No version metadata, no v1/v2 schema — just `overrides={"policy_path": "fixtures/policy_strict.md"}`. |
+| L2 | Replay scenario | **"Policy change" replay (edit fixture file, replay from `check_clause_2`)** | The most realistic replay scenario for the compliance domain. No version metadata, no v1/v2 schema — replay overrides the `load_policy` checkpoint output: `overrides={"checkpoint.load_policy": <new policy text>}`. |
+| L2-impl | Replay-input mechanism | **Checkpoint-output override on `load_policy`** | A `@checkpoint def load_policy(path) -> str` runs early in the flow; its output is the artifact replay swaps. Keeps `find_clauses` cached on its own input (the doc), so replay re-executes only from `check_clause_2` onward. Demos `overrides={"checkpoint.*": ...}` — a kitaru feature no other example covers. Accepted 2026-04-29. |
+| H1-tools | `allowed_tools` typing | **`set[ToolName]` with `ToolName = Literal[...]` of the five tool names** | Closed set per K3, so a Literal alias gives readers IDE autocomplete and ty/ruff errors on typos at zero cost. Set (not list) expresses membership semantics and dedupes. Accepted 2026-04-29. |
 | M3 + N2 | Location & name | **`examples/end_to_end/agent_factory/`** | New directory in the gallery; `compliance_review/` stays as the SDK flavor. Generic name signals "the canonical template," not a domain-specific demo. |
 
 ---
@@ -203,9 +205,33 @@ Each stage is one Python file that imports from the `agent_factory/` library. St
 
 ---
 
-## 6. Profile schema (TODO — section 3 of brainstorm)
+## 6. Profile schema (in progress)
 
-The Profile grows one field per stage (decision G2). Exact schema progression and Python types still to be specified. Sketch:
+The Profile grows one field per stage (decision G2). Resolved so far:
+
+```python
+ToolName = Literal[
+    "exec",
+    "fetch_document",
+    "request_severity_decision",
+    "publish_review",
+    "skill",
+]
+
+@dataclass
+class Profile:
+    name: str
+    system_prompt: str
+    model: str
+    allowed_tools: set[ToolName] = field(default_factory=set)
+    # Stage 3+:
+    # sandbox_proxy_rules: list[SandboxProxyRule] = field(default_factory=list)
+    # Stage 4+:
+    # service_configs: dict[str, ServiceConfig] = field(default_factory=dict)
+    # skill_sources: list[SkillSource] = field(default_factory=list)
+```
+
+Per-stage growth:
 
 | Stage | Profile fields |
 |---|---|
@@ -215,7 +241,7 @@ The Profile grows one field per stage (decision G2). Exact schema progression an
 | 4 | + `service_configs: dict[str, ServiceConfig]`, `skill_sources: list[SkillSource]` |
 | 5 | (no new field; replay reuses stage 4's profile) |
 
-Open: should `model` default to a kitaru model alias (`kitaru model register ...`)? Should `allowed_tools` be a `set[Literal[...]]` with type-checked tool names, or a `list[str]` like kami today? **TODO — to be answered when Section 3 of brainstorming resumes.**
+Still open: should `model` default to a kitaru model alias (`kitaru model register ...`)? Validation strategy for non-Pydantic dataclass (manual `__post_init__` checks vs accept-and-fail-late). **TODO.**
 
 ---
 
@@ -235,28 +261,38 @@ Exact tool descriptions, error handling, log redaction strategy: **TODO — to b
 
 ---
 
-## 8. Flow lifecycle (TODO — section 5 of brainstorm)
+## 8. Flow lifecycle (in progress)
+
+Resolved so far:
+
+- `policy_path` is the input to a `@checkpoint def load_policy(path) -> str`. The agent reads the policy text via the checkpoint's output, not from disk directly. L2 replay overrides `checkpoint.load_policy` (decision L2-impl).
+- `find_clauses` is a separate `@checkpoint` whose only input is the doc/prompt, so the doc-extraction stays cached when the policy alone changes during replay.
 
 Sketch:
 
 ```python
 @flow(image=ImageSettings(...))
-def kami_main_flow(profile_name: str, prompt: str, policy_path: str = "fixtures/policy_v1.md") -> dict:
+def kami_main_flow(
+    profile_name: str,
+    prompt: str,
+    policy_path: str = "fixtures/policy_v1.md",
+) -> dict:
     profile = load_profile(profile_name)
+    policy_text = load_policy(policy_path)            # @checkpoint
+    extracted = find_clauses(prompt)                  # @checkpoint
     sandbox = DockerWorker.start(execution_id=kitaru.runtime.execution_id())
     proxy = DockerProxy.start(credential_map=build_proxy_credential_map(profile))
     sandbox.attach_proxy(proxy)
     agent = build_agent(profile, permission_handler=PermissionHandler(profile), sandbox=sandbox)
-    result = agent.run_sync(prompt, deps={"policy_path": policy_path})
+    result = agent.run_sync(prompt, deps={"policy": policy_text, "clauses": extracted})
     return {"summary": result.output, "exec_id": kitaru.runtime.execution_id()}
 ```
 
-Open questions:
+Open question:
 
 - Should `sandbox` and `proxy` be created lazily (only when `exec` is first called) like kami, or eagerly at flow start? Eager keeps the example simpler; lazy demonstrates "infrastructure costs nothing if unused."
-- Should `policy_path` be a checkpoint input (so replay can override it) or part of the prompt? The L2 scenario requires it to be overridable.
 
-**TODO — to be answered when Section 5 of brainstorming resumes.**
+**TODO — answer when Section 5 of brainstorming resumes.**
 
 ---
 
@@ -334,16 +370,17 @@ Each mock host's auth is wired up in the Profile as a separate `SandboxProxyRule
 `stage_5_replay.py` (~50 lines) runs `stage_4_full_agent_factory.kami_main_flow.run(...)` to seed an exec_id (or accepts one as a CLI arg if stage 4 was already run), then:
 
 ```python
+new_policy = Path("fixtures/policy_strict.md").read_text()
 flow_handle = kami_main_flow.replay(
     exec_id=stage_4_exec_id,
     from_="check_clause_2",
-    overrides={"policy_path": "fixtures/policy_strict.md"},
+    overrides={"checkpoint.load_policy": new_policy},
 )
 result = flow_handle.wait()
 print_diff(stage_4_findings, result.findings)
 ```
 
-The earlier `find_clauses` checkpoint output is reused (the doc didn't change). From clause 2 onward the agent re-evaluates against the new policy; the precedent-memory from the prior run informs new severity suggestions; the operator only re-confirms the *changed* decisions.
+The earlier `find_clauses` and `load_policy` checkpoints are independent: `load_policy`'s output is overridden directly with the strict policy text, while `find_clauses` stays cached because its inputs (the doc) didn't change. From clause 2 onward the agent re-evaluates against the new policy; the precedent-memory from the prior run informs new severity suggestions; the operator only re-confirms the *changed* decisions.
 
 The README has a prose section explaining what gets cached vs. re-executed and links to `examples/features/replay/replay_with_overrides.py` for a deeper dive on the replay primitive.
 
@@ -401,7 +438,7 @@ Tests must be runnable in CI with no external accounts. They depend on Docker be
 
 Tracked here so they don't get lost. Several map to brainstorm sections we have not yet completed.
 
-- **Section 3 — Profile schema details.** Exact field types per stage, default model alias, validation strategy.
+- **Section 3 — Profile schema details.** Resolved: `allowed_tools: set[ToolName]` with `ToolName = Literal[...]`. Still open: default `model` alias, validation strategy for the dataclass.
 - **Section 4 — Tool details.** Exact descriptions, error handling, redaction.
 - **Section 5 — Flow lifecycle.** Lazy vs. eager sandbox; replay-input strategy for `policy_path`.
 - **Section 6 — Memory & artifacts.** Exact data shapes, access points, retention policy.
