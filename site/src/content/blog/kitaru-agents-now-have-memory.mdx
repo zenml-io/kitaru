@@ -133,7 +133,7 @@ The pattern is deliberately simple:
 3. Let checkpoints do durable, cacheable work.
 4. Write updated memory back from the flow body after the relevant checkpoint outputs exist.
 
-Distilled from `examples/memory/flow_with_memory.py`, it looks like this:
+Distilled from `examples/features/memory/flow_with_memory.py`, it looks like this:
 
 ```python
 from kitaru import checkpoint, flow, memory
@@ -337,21 +337,21 @@ From a repo checkout:
 git clone https://github.com/zenml-io/kitaru.git
 cd kitaru
 uv sync --extra local
-uv run examples/memory/flow_with_memory.py
+uv run examples/features/memory/flow_with_memory.py
 ```
 
 The example runs the memory story end to end: seeding, flow execution, inspection, provenance, and maintenance where a model is configured.
 
 ```bash
 kitaru model register default --model openai/gpt-5-nano
-uv run examples/memory/flow_with_memory.py
+uv run examples/features/memory/flow_with_memory.py
 ```
 
 You can also ask for a structured snapshot or skip the maintenance section:
 
 ```bash
-uv run examples/memory/flow_with_memory.py --output json
-uv run examples/memory/flow_with_memory.py --skip-maintenance
+uv run examples/features/memory/flow_with_memory.py --output json
+uv run examples/features/memory/flow_with_memory.py --skip-maintenance
 ```
 
 If you just want the smallest package-installed taste:

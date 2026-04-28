@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 from unittest.mock import patch
 
-from examples.memory.flow_with_memory import FLOW_SCOPE, run_workflow
+from examples.features.memory.flow_with_memory import FLOW_SCOPE, run_workflow
 
 from kitaru import KitaruClient
 from kitaru.config import ResolvedModelSelection
