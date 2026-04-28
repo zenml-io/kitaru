@@ -271,3 +271,6 @@ AGENTS.override.md
 .claude/skills/building-pydantic-ai-agents
 .claude/skills/instrumentation
 skills-lock.json
+
+# Local PR review screenshots
+.pr-screenshots/
