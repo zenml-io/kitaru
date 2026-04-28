@@ -36,9 +36,11 @@ def stage4_module(monkeypatch, tmp_path):
     configure_fake_claude_home(monkeypatch, tmp_path)
     install_fake_claude_agent_sdk(monkeypatch)
     clear_compliance_review_modules(
-        "examples.compliance_review.stage_4_conversational",
+        "examples.end_to_end.compliance_review.stage_4_conversational",
     )
-    return importlib.import_module("examples.compliance_review.stage_4_conversational")
+    return importlib.import_module(
+        "examples.end_to_end.compliance_review.stage_4_conversational"
+    )
 
 
 def _find_pending_wait(
@@ -227,13 +229,19 @@ def test_stage4_flow_loads_claude_result_from_checkout_with_unstable_repository_
     del primed_zenml
     copied_checkout = tmp_path / "copied_checkout"
     copied_examples_dir = copied_checkout / "examples"
-    copied_example_dir = copied_examples_dir / "compliance_review"
+    copied_category_dir = copied_examples_dir / "end_to_end"
+    copied_example_dir = copied_category_dir / "compliance_review"
     source_examples_dir = Path(__file__).resolve().parent.parent / "examples"
-    source_example_dir = source_examples_dir / "compliance_review"
-    copied_examples_dir.mkdir(parents=True)
+    source_category_dir = source_examples_dir / "end_to_end"
+    source_example_dir = source_category_dir / "compliance_review"
+    copied_category_dir.mkdir(parents=True)
     shutil.copy2(
         source_examples_dir / "__init__.py",
         copied_examples_dir / "__init__.py",
+    )
+    shutil.copy2(
+        source_category_dir / "__init__.py",
+        copied_category_dir / "__init__.py",
     )
     shutil.copytree(
         source_example_dir,
@@ -261,8 +269,9 @@ def test_stage4_flow_loads_claude_result_from_checkout_with_unstable_repository_
     request.addfinalizer(_restore_compliance_modules)
 
     stage4_module = importlib.import_module(
-        "examples.compliance_review.stage_4_conversational"
+        "examples.end_to_end.compliance_review.stage_4_conversational"
     )
+    assert stage4_module.__file__ is not None
     stage4_path = Path(stage4_module.__file__).resolve()
     assert copied_checkout.resolve() in stage4_path.parents
     assert get_source_root() == str(copied_checkout.resolve())
