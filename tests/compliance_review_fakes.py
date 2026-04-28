@@ -83,8 +83,9 @@ def clear_compliance_review_modules(*module_names: str) -> None:
     compliance_modules = [
         name
         for name in sys.modules
-        if name == "examples.compliance_review"
-        or name.startswith("examples.compliance_review.")
+        if name == "examples.end-to-end"
+        or name == "examples.end-to-end.compliance_review"
+        or name.startswith("examples.end-to-end.compliance_review.")
     ]
     for module_name in (*compliance_modules, *module_names):
         sys.modules.pop(module_name, None)

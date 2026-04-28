@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from examples.mcp.mcp_query_tools import collect_query_snapshot
+from examples.features.mcp.mcp_query_tools import collect_query_snapshot
 
 
 def test_phase19_mcp_query_example_collects_expected_sections() -> None:

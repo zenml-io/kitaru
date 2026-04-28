@@ -72,7 +72,7 @@ That gives you a second local stack to switch to or delete while testing.
 ### 4. Run your first flow
 
 ```bash
-uv run examples/basic_flow/first_working_flow.py
+uv run examples/features/basic_flow/first_working_flow.py
 ```
 
 This runs a simple two-checkpoint flow (`gather_sources` → `summarize`)
@@ -105,7 +105,7 @@ order of complexity. Examples are grouped into subdirectories under
 #### Structured logging (`kitaru.log()`)
 
 ```bash
-uv run examples/basic_flow/flow_with_logging.py
+uv run examples/features/basic_flow/flow_with_logging.py
 ```
 
 Logs structured metadata at both flow and checkpoint scope. After
@@ -115,7 +115,7 @@ running, you can separately inspect runtime log lines with
 #### Artifact save/load (`kitaru.save()` / `kitaru.load()`)
 
 ```bash
-uv run examples/basic_flow/flow_with_artifacts.py
+uv run examples/features/basic_flow/flow_with_artifacts.py
 ```
 
 Demonstrates persisting and loading named artifacts across executions.
@@ -125,7 +125,7 @@ first.
 #### Wait for human input (`kitaru.wait()`)
 
 ```bash
-uv run examples/execution_management/wait_and_resume.py
+uv run examples/features/execution_management/wait_and_resume.py
 ```
 
 This is the human-in-the-loop example. It starts a flow that pauses
@@ -141,7 +141,7 @@ uv run kitaru executions resume <EXEC_ID>
 #### Replay with overrides
 
 ```bash
-uv run examples/replay/replay_with_overrides.py
+uv run examples/features/replay/replay_with_overrides.py
 ```
 
 Runs a flow, then replays it from a specific checkpoint with an
@@ -155,7 +155,7 @@ capability.
 uv run kitaru model register fast --model openai/gpt-5-nano
 export OPENAI_API_KEY=sk-...
 
-uv run examples/llm/flow_with_llm.py
+uv run examples/features/llm/flow_with_llm.py
 ```
 
 Makes tracked LLM calls with token/cost metadata logged automatically.
@@ -163,7 +163,7 @@ Makes tracked LLM calls with token/cost metadata logged automatically.
 #### PydanticAI adapter — no API key needed
 
 ```bash
-uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py
+uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 ```
 
 Wraps a PydanticAI agent with Kitaru tracking. Uses `TestModel` so no
@@ -202,7 +202,7 @@ Once connected, your AI assistant can:
 - **List and inspect executions** — "show me my recent executions"
 - **Read execution logs** — "what did my last flow print?"
 - **Browse artifacts** — "load the output of the research checkpoint"
-- **Run flows** — "run examples/basic_flow/first_working_flow.py:research_agent"
+- **Run flows** — "run examples/features/basic_flow/first_working_flow.py:research_agent"
 - **Provide wait input** — "approve the pending wait"
 - **Replay executions** — "replay my last run from write_draft"
 - **Check status** — "what stack am I connected to?"

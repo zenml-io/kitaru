@@ -16,7 +16,9 @@ import time
 from contextlib import suppress
 
 import pytest
-from examples.execution_management.wait_and_resume import wait_for_approval_flow
+from examples.features.execution_management.wait_and_resume import (
+    wait_for_approval_flow,
+)
 
 from kitaru.client import KitaruClient
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruStateError

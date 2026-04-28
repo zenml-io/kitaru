@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
-from examples.compliance_review import tools
+
+tools = importlib.import_module("examples.end-to-end.compliance_review.tools")
 
 
 def test_list_documents_returns_planned_company_documents() -> None:

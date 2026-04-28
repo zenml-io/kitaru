@@ -286,4 +286,4 @@ from kitaru.adapters.pydantic_ai import (
 
 - [Kitaru docs](https://kitaru.ai/docs) — flows, checkpoints, waits, stacks
 - [Pydantic AI docs](https://ai.pydantic.dev) — agents, tools, MCP, deferred execution
-- [Example](../../../../examples/pydantic_ai_agent/pydantic_ai_adapter.py) — runnable research agent with a HITL tool
+- [Example](../../../../examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py) — runnable research agent with a HITL tool

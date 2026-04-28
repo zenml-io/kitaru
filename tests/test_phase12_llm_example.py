@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from examples.llm.flow_with_llm import run_workflow
+from examples.features.llm.flow_with_llm import run_workflow
 from zenml.client import Client
 
 from kitaru.config import register_model_alias
