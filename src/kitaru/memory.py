@@ -2214,7 +2214,7 @@ def _memory_step(*, name: str, operation: str):
     return step(
         name=name,
         enable_cache=False,
-        step_type=StepType.TOOL_CALL,
+        step_type=StepType.MEMORY_CALL,
         extra=extra,
     )
 

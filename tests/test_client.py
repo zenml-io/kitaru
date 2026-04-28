@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
-from zenml.enums import ArtifactSaveType
+from zenml.enums import ArtifactSaveType, StepType
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
 from zenml.models import PipelineRunResponse, StepRunResponse
@@ -89,6 +89,7 @@ class _DummyStep:
         run_metadata: dict[str, Any] | None = None,
         exception_traceback: str | None = None,
         spec: Any | None = None,
+        step_type: Any | None = None,
     ) -> None:
         self.id = step_id or uuid4()
         self.name = name
@@ -100,7 +101,7 @@ class _DummyStep:
         self.parent_step_ids: list[UUID] = []
         self.outputs = outputs
         self.spec = spec
-        self.type = None
+        self.type = step_type
         self.exception_info = (
             SimpleNamespace(traceback=exception_traceback)
             if exception_traceback is not None
@@ -1424,6 +1425,35 @@ def test_get_maps_execution_details() -> None:
     artifact_ref = execution.artifacts[0]
     assert artifact_ref.name == "research_context"
     assert artifact_ref.kind == "context"
+
+
+def test_get_preserves_memory_call_checkpoint_type() -> None:
+    step = _DummyStep(
+        name="kitaru_memory_get",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+        step_type=StepType.MEMORY_CALL,
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="agent_flow",
+        steps={step.name: step},
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+
+    assert len(execution.checkpoints) == 1
+    assert execution.checkpoints[0].checkpoint_type == "memory_call"
 
 
 def test_get_surfaces_checkpoint_attempt_history() -> None:

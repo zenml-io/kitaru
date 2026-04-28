@@ -10,7 +10,7 @@ from unittest.mock import ANY, MagicMock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
-from zenml.enums import ArtifactType
+from zenml.enums import ArtifactType, StepType
 
 from kitaru import memory
 from kitaru.analytics import AnalyticsEvent
@@ -37,6 +37,7 @@ from kitaru.memory import (
     _history_impl,
     _list_impl,
     _memory_artifact_name,
+    _memory_step,
     _MemoryScope,
     _parse_memory_artifact_identity,
     _purge_impl,
@@ -265,6 +266,28 @@ def test_memory_configure_cannot_infer_flowish_scope_outside_flow(
 ) -> None:
     with pytest.raises(KitaruContextError, match=r"inside a @flow"):
         memory.configure(scope_type=scope_type)  # type: ignore[arg-type]
+
+
+def test_memory_step_uses_memory_call_step_type() -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_step(**kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        captured.update(kwargs)
+
+        def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorate
+
+    with patch("kitaru.memory.step", side_effect=fake_step):
+        _memory_step(name="kitaru_memory_get", operation="get")(lambda: None)
+
+    assert captured == {
+        "name": "kitaru_memory_get",
+        "enable_cache": False,
+        "step_type": StepType.MEMORY_CALL,
+        "extra": {"kitaru": {"boundary": "memory", "operation": "get"}},
+    }
 
 
 def test_memory_set_dispatches_to_synthetic_step() -> None:
