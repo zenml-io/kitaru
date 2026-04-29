@@ -665,20 +665,26 @@ The README has a prose section explaining what gets cached vs. re-executed and l
 
 ---
 
-## 13. Blog series chapter map (TODO — section 8 of brainstorm)
+## 13. Blog series chapter map
 
-Tentative:
+Chapters and stage files are numbered independently — chapter count is set by what's *consumable in one sitting*, not by the stage file count. Stage 4 alone supports three chapters (skills+services / HITL / memory) since each focuses on a different slice of the same `stage_4_full_agent_factory.py`. Length target: tight (~1500–2000 words per chapter, one hero screenshot, runnable code).
 
-| Chapter | Title | Stage file | Concepts introduced |
-|---|---|---|---|
-| 1 | Building a durable agent on kitaru | `stage_1_basic_agent.py` | `@flow`, `KitaruAgent`, `Profile`, `PermissionHandler`, granular checkpoints |
-| 2 | Sandboxing your agent's shell | `stage_2_sandboxed_exec.py` | DockerWorker, persistent-bash, workspace volumes |
-| 3 | The two-process credential isolation pattern | `stage_3_credential_proxy.py` | DockerProxy, mitmproxy addon, `sandbox_proxy_rules`, secret templates |
-| 4 | HITL, memory, and the agent's playbook | `stage_4_full_agent_factory.py` | `@hitl_tool`, flow-scope memory, `skill` tool, discriminated-union services |
-| 5 | When durability pays off: replay with overrides | `stage_5_replay.py` | `flow.replay()`, `from_=`, `overrides=`, what gets cached |
-| (post) | Going to production: from Docker-compose to Modal | (no new stage) | C2/C3 ladder, deploying the same architecture remotely |
+| Ch | Title | Stage | Key concepts | Hero artifact |
+|---|---|---|---|---|
+| 1 | Build a durable agent on kitaru in 60 lines | `stage_1_basic_agent.py` | `@flow`, `KitaruAgent`, `Profile`, in-process `exec` tool, `PermissionHandler` | The full Python file fits on one screen; dashboard run-detail view |
+| 2 | Sandboxing your agent's shell | `stage_2_sandboxed_exec.py` | `DockerWorker`, persistent-bash + marker pattern, workspace volumes, `ExecResult` truncation, the `/workspace/.exec/<id>.out` durability trick | `docker ps` showing `worker_<exec_id>`; `docker exec` into the running worker mid-flow |
+| 3 | The two-process credential isolation pattern | `stage_3_credential_proxy.py` | `DockerProxy`, mitmproxy addon, `sandbox_proxy_rules`, `kitaru.secrets` template resolution, per-run bearer token | `docker logs proxy` tail showing `[agent-factory-proxy] injected headers for wiki.local: ['Authorization']`; side-by-side: worker can't read `AGENT_FACTORY_CREDENTIALS`, proxy can |
+| 4 | The agent's playbook: skills + typed services | `stage_4_full_agent_factory.py` (slice 1) | `skill` tool, `exec_service` typed-union dispatcher, profile-derived dynamic tool descriptions, the discriminated-`ServiceCall` pattern | The SKILL.md procedure side-by-side with the Python file that uses it; the dynamically-generated `exec_service` description shown in the dashboard |
+| 5 | Stateful HITL with `ask_question` | `stage_4_full_agent_factory.py` (slice 2) | `ask_question` typed-union HITL dispatcher, `wait_for_input`, the `freeform` kind, the kitaru/pydantic-ai integration seam (`@hitl_tool` + `wait_for_input`) | A flow that pauses; `kitaru executions list` showing `waiting`; the dashboard's wait-resume UI |
+| 6 | Cross-execution learning: precedent memory | `stage_4_full_agent_factory.py` (slice 3) | `severity_decision` kind, slug-keyed precedents, `kitaru.memory` flow scope, the read-ask-record loop co-located in the tool body | Run 1 vs run 2 side-by-side: same clause, run 2 shows "Suggested: sev-2" pre-filled from precedent memory |
+| 7 | When durability pays off: replay with overrides | `stage_5_replay.py` | `flow.replay()`, `from_=`, `overrides={"checkpoint.load_policy": ...}`, what gets cached vs re-executed, named artifacts as the diff surface | Diff between `findings_v1` and `findings_v2`; dashboard view showing `find_clauses` cached and `check_clause_2..N` re-executed |
+| post | Going to production: from Docker-compose to Modal | (no new stage) | C2/C3 ladder, lazy sandbox startup (deferred from Q5), Modal port, deploying the same architecture remotely | Same agent, same profile, swap `DockerWorker` for `ModalSandboxRuntime` |
 
-**Chapter outlines, opening hooks, code excerpts: TODO.**
+**Self-containment rule:** every chapter opens with a 1-paragraph recap of the prior chapter's setup (or "if you're starting here, run `docker compose up && bash setup.sh && python stage_<N-1>_<...>.py` to get to this point"), so a reader landing from search can run the chapter's stage without reading the others.
+
+Chapter 1 and chapter 7 form the natural framing — "build a durable agent" → "what durability earns you." Chapters 4–6 are the body and can be sequenced flexibly if a reader cares more about HITL than skills, etc.
+
+**Chapter outlines, opening hooks, code excerpts: separate writing pass after implementation lands.**
 
 ---
 
@@ -749,8 +755,8 @@ Tracked here so they don't get lost. Several map to brainstorm sections we have 
 - **Section 5 — Flow lifecycle.** Resolved: eager + context-managed sandbox/proxy startup; `policy_path` carried via `load_policy` checkpoint (decision L2-impl).
 - **Section 6 — Memory & artifacts.** Resolved: slug-keyed `ClausePattern`, exact-match `_suggest_from_precedents`, flow-scope precedents + execution-scope findings, memory access lives in the `severity_decision` tool body (not in checkpoints).
 - **Section 7 — Sandbox/proxy implementation.** Resolved: persistent-shell port (Q12); proxy port verbatim with namespace rename and readiness poll (Q13); mock services as FastAPI multiplexed by Host header with explicit fixtures and visible auth-failure logging.
-- **Section 8 — Blog series.** Chapter outlines, hooks, code excerpts.
-- **Tool descriptions in profile system prompt.** Should the system prompt enumerate available skills, or rely on the agent calling `skill list` first?
+- **Section 8 — Blog series.** Resolved: 7 main chapters + 1 post-chapter; chapter count is independent of stage-file count (stage 4 supports chapters 4, 5, 6 — different slices of the same file). Tight target (~1500–2000 words/chapter). Chapter outlines, hooks, code excerpts: separate writing pass after implementation lands.
+- **Tool descriptions in profile system prompt.** Should the system prompt enumerate available skills, or rely on the agent calling `skill list` first? *(Defer to implementation; default is "agent calls `skill list` first" — kami pattern.)*
 - **CI strategy.** Resolved (Section 14): `ubuntu-latest` runners have Docker; `agent-factory` gets its own test lane similar to `kitaru[mcp]`; `test_proxy_injection.py` + `test_full_loop.py` run against `docker compose up --wait`; `test_stage_1.py` is in-process with no Docker dependency.
 - **Naming check.** Resolved (Section 14): `example/agent-factory` branch and `examples/end_to_end/agent_factory/` directory follow existing sibling conventions.
 
