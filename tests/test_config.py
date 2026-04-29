@@ -4117,7 +4117,7 @@ def test_coerce_docker_settings_with_platform() -> None:
 
     docker = DockerSettings(
         build_config=DockerBuildConfig(
-            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # ty: ignore[unknown-argument]
         ),
     )
     result = _coerce_image_input(docker)
@@ -4155,7 +4155,7 @@ def test_platform_round_trip() -> None:
 
     original = DockerSettings(
         build_config=DockerBuildConfig(
-            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # ty: ignore[unknown-argument]
         ),
     )
     image_settings = _coerce_image_input(original)
