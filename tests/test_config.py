@@ -3475,21 +3475,28 @@ def test_use_stack_switches_active_stack() -> None:
     """use_stack should delegate activation and return the new active stack."""
     local_stack = SimpleNamespace(id="stack-local-id", name="local")
     prod_stack = SimpleNamespace(id="stack-prod-id", name="prod")
-    client_mock = SimpleNamespace(
-        active_stack_model=local_stack,
-        list_stacks=lambda: [local_stack, prod_stack],
-    )
 
-    def _activate_stack(_: str) -> None:
-        client_mock.active_stack_model = prod_stack
+    class _MetadataOnlyStackClient:
+        def __init__(self) -> None:
+            self.active_stack_model = local_stack
+            self.activate_stack = Mock(side_effect=self._activate_stack)
 
-    activate_stack = Mock(side_effect=_activate_stack)
-    client_mock.activate_stack = activate_stack
+        def list_stacks(self) -> list[SimpleNamespace]:
+            return [local_stack, prod_stack]
+
+        def _activate_stack(self, _: str) -> None:
+            self.active_stack_model = prod_stack
+
+        @property
+        def active_stack(self) -> object:
+            raise AssertionError("use_stack should not hydrate active_stack")
+
+    client_mock = _MetadataOnlyStackClient()
 
     with patch("kitaru.config.Client", return_value=client_mock):
         selected = use_stack("prod")
 
-    activate_stack.assert_called_once_with("stack-prod-id")
+    client_mock.activate_stack.assert_called_once_with("stack-prod-id")
     assert selected.name == "prod"
     assert selected.id == "stack-prod-id"
     assert selected.is_active is True
@@ -4110,7 +4117,7 @@ def test_coerce_docker_settings_with_platform() -> None:
 
     docker = DockerSettings(
         build_config=DockerBuildConfig(
-            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # ty: ignore[unknown-argument]
         ),
     )
     result = _coerce_image_input(docker)
@@ -4148,7 +4155,7 @@ def test_platform_round_trip() -> None:
 
     original = DockerSettings(
         build_config=DockerBuildConfig(
-            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # ty: ignore[unknown-argument]
         ),
     )
     image_settings = _coerce_image_input(original)

@@ -97,14 +97,19 @@ def isolated_zenml_global_config(
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr("click.get_app_dir", lambda app_name: str(config_dir))
 
+    repo_root = tmp_path / "isolated-repo"
+    repo_config_dir = repo_root / ".kitaru"
+    repo_config_dir.mkdir(parents=True)
+    (repo_config_dir / "config.yaml").write_text("{}\n", encoding="utf-8")
+
     monkeypatch.setenv(ENV_ZENML_CONFIG_PATH, str(config_dir))
+    monkeypatch.setenv(ENV_ZENML_REPOSITORY_PATH, str(repo_root))
     monkeypatch.setenv("ZENML_ANALYTICS_OPT_IN", "false")
 
     for env_name in (
         ENV_ZENML_ACTIVE_PROJECT_ID,
         ENV_ZENML_ACTIVE_STACK_ID,
         ENV_ZENML_LOCAL_STORES_PATH,
-        ENV_ZENML_REPOSITORY_PATH,
         ENV_ZENML_SERVER,
         "ZENML_REPOSITORY_DIRECTORY_NAME",
     ):

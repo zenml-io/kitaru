@@ -116,6 +116,10 @@ class KitaruWaitValidationError(KitaruUsageError):
     """Raised when wait-resume input fails schema validation."""
 
 
+class KitaruStackIntegrationDependencyError(KitaruUsageError):
+    """Raised when the active stack is missing local integration dependencies."""
+
+
 class StackNotRemoteExecutable:
     """Marker mixin for errors caused by a stack the server cannot execute remotely.
 
@@ -280,6 +284,7 @@ __all__ = [
     "KitaruLogRetrievalError",
     "KitaruMemoryArtifactUnavailableError",
     "KitaruRuntimeError",
+    "KitaruStackIntegrationDependencyError",
     "KitaruStackNotRemoteExecutableStateError",
     "KitaruStackNotRemoteExecutableUsageError",
     "KitaruStateError",

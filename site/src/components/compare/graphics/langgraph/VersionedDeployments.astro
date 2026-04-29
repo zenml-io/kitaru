@@ -1,0 +1,244 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">LangSmith · packaged endpoints</span>
+      <span class="panel-sub">Protocol surface bundled with the runtime</span>
+    </div>
+    <div class="proto-grid">
+      <span class="proto">MCP</span>
+      <span class="proto">A2A</span>
+      <span class="proto">Agent Protocol</span>
+      <span class="proto">HITL</span>
+      <span class="proto">Memory APIs</span>
+    </div>
+    <div class="foot">Endpoints as part of the packaged runtime.</div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru · immutable versioned snapshots</span>
+      <span class="panel-sub">Tag routing, not redeploys</span>
+    </div>
+
+    <div class="flow">
+      <span class="mono flow-name">research_flow</span>
+      <div class="versions">
+        <span class="ver">v1</span>
+        <span class="ver">v2</span>
+        <span class="ver ver--current">v3</span>
+        <span class="ver ver--current">v4</span>
+      </div>
+    </div>
+
+    <div class="tags">
+      <div class="tag-row">
+        <span class="tag tag--default">default</span>
+        <span class="tag-arrow">→</span>
+        <span class="mono tag-ver">v4</span>
+      </div>
+      <div class="tag-row">
+        <span class="tag tag--canary">canary</span>
+        <span class="tag-arrow">→</span>
+        <span class="mono tag-ver">v3</span>
+      </div>
+    </div>
+
+    <div class="invokes">
+      <div class="invoke-title">Invoke via</div>
+      <div class="invoke-pills">
+        <span class="ipill">CLI</span>
+        <span class="ipill">Python SDK</span>
+        <span class="ipill">MCP</span>
+        <span class="ipill">curl</span>
+      </div>
+    </div>
+
+    <div class="foot foot--accent">Promotion = tag move. Workspace-scoped auth.</div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 14px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .proto-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .proto {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 999px;
+    background: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-primary);
+  }
+
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 8px;
+    background: var(--color-surface-warm);
+    margin-bottom: 8px;
+  }
+  .flow-name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .versions {
+    display: flex;
+    gap: 6px;
+  }
+  .ver {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    padding: 3px 8px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-muted);
+  }
+  .ver--current {
+    border-color: var(--color-accent);
+    background: var(--color-accent-light);
+    color: var(--color-accent);
+    font-weight: 700;
+  }
+
+  .tags {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+  .tag-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-surface);
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+  }
+  .tag--default {
+    background: var(--color-accent);
+    color: white;
+  }
+  .tag--canary {
+    background: var(--color-accent-light);
+    color: var(--color-accent-deep);
+    border: 1px solid var(--color-accent);
+  }
+  .tag-arrow {
+    font-size: 13px;
+    color: var(--color-muted);
+  }
+  .tag-ver {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+
+  .invokes {
+    margin-bottom: 10px;
+  }
+  .invoke-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 5px;
+  }
+  .invoke-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .ipill {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 9px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 999px;
+    background: var(--color-surface-warm);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-secondary);
+  }
+
+  .foot {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+  .foot--accent {
+    color: var(--color-accent-deep);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+  }
+</style>

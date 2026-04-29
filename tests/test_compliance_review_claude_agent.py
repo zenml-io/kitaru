@@ -6,8 +6,10 @@ import asyncio
 import importlib
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 import pytest
+from zenml.client import Client
 
 from tests.compliance_review_fakes import (
     clear_compliance_review_modules,
@@ -21,13 +23,23 @@ class _FakeSecret(Protocol):
     def get(self, key: str, default: str | None = None) -> str | None: ...
 
 
+def _materializer_uri_under_active_artifact_store(test_name: str) -> str:
+    artifact_store = Client().active_stack.artifact_store
+    artifact_store_root = Path(str(artifact_store.path))
+    materializer_uri = (
+        artifact_store_root / "test-compliance-review" / test_name / uuid4().hex
+    )
+    materializer_uri.mkdir(parents=True, exist_ok=True)
+    return str(materializer_uri)
+
+
 @pytest.fixture
 def claude_agent_module(monkeypatch, tmp_path):
     """Import the example Claude wrapper with the fake SDK installed."""
     configure_fake_claude_home(monkeypatch, tmp_path)
     install_fake_claude_agent_sdk(monkeypatch)
     clear_compliance_review_modules()
-    return importlib.import_module("examples.compliance_review.claude_agent")
+    return importlib.import_module("examples.end_to_end.compliance_review.claude_agent")
 
 
 def test_run_agent_turn_surfaces_result_error_before_transport_wrapper(
@@ -237,7 +249,9 @@ def test_importing_claude_agent_does_not_lookup_secret_or_stack(
     clear_compliance_review_modules()
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    module = importlib.import_module("examples.compliance_review.claude_agent")
+    module = importlib.import_module(
+        "examples.end_to_end.compliance_review.claude_agent"
+    )
 
     assert hasattr(module, "run_agent_turn")
 
@@ -245,9 +259,12 @@ def test_importing_claude_agent_does_not_lookup_secret_or_stack(
 def test_claude_agent_result_materializer_restores_transcript(
     tmp_path,
     claude_agent_module,
+    primed_zenml,
 ) -> None:
     """The example materializer should bundle and restore Claude JSONL state."""
-    materializers = importlib.import_module("examples.compliance_review.materializers")
+    materializers = importlib.import_module(
+        "examples.end_to_end.compliance_review.materializers"
+    )
     response = fake_claude_response(
         prompt="Check whether resume state survives.",
         cwd=tmp_path,
@@ -258,9 +275,12 @@ def test_claude_agent_result_materializer_restores_transcript(
     transcript_path = Path(result.transcript_path)
     original_transcript = transcript_path.read_text()
 
-    artifact_dir = tmp_path / "artifact"
-    artifact_dir.mkdir()
-    materializer = materializers.ClaudeAgentResultMaterializer(uri=str(artifact_dir))
+    del primed_zenml
+    materializer = materializers.ClaudeAgentResultMaterializer(
+        uri=_materializer_uri_under_active_artifact_store(
+            "test_claude_agent_result_materializer_restores_transcript"
+        )
+    )
 
     materializer.save(result)
     transcript_path.unlink()
@@ -322,6 +342,7 @@ def test_materializer_recomputes_transcript_path_on_different_home(
     monkeypatch,
     tmp_path,
     claude_agent_module,
+    primed_zenml,
 ) -> None:
     """Restore should land at the current host's path, not the saved one.
 
@@ -330,7 +351,9 @@ def test_materializer_recomputes_transcript_path_on_different_home(
     Claude's ``resume=<session_id>`` lookup finds the restored JSONL on the
     new host.
     """
-    materializers = importlib.import_module("examples.compliance_review.materializers")
+    materializers = importlib.import_module(
+        "examples.end_to_end.compliance_review.materializers"
+    )
 
     pod_a_home = tmp_path / "pod_a_home"
     pod_a_home.mkdir()
@@ -350,9 +373,12 @@ def test_materializer_recomputes_transcript_path_on_different_home(
     saved_transcript_path = result.transcript_path
     assert str(pod_a_home) in saved_transcript_path
 
-    artifact_dir = tmp_path / "artifact"
-    artifact_dir.mkdir()
-    materializer = materializers.ClaudeAgentResultMaterializer(uri=str(artifact_dir))
+    del primed_zenml
+    materializer = materializers.ClaudeAgentResultMaterializer(
+        uri=_materializer_uri_under_active_artifact_store(
+            "test_materializer_recomputes_transcript_path_on_different_home"
+        )
+    )
     materializer.save(result)
 
     pod_b_home = tmp_path / "pod_b_home"

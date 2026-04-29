@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Checkpoint output handles now display Kitaru guidance to call `.load()` instead of leaking raw ZenML artifact metadata when stringified in flow bodies. (#127)
+
+## [0.7.0] - 2026-04-24
+
 ### Added
-- `kitaru build --image`, `kitaru deploy --image`, and MCP `kitaru_deployments_deploy(image=...)` now accept deploy-time image configuration (base image string or `ImageSettings`-style object), so saved deployment snapshots can carry remote-only package installs and secret-backed environment injection.
+- `kitaru build --image`, `kitaru deploy --image`, and MCP `kitaru_deployments_deploy(image=...)` now accept deploy-time image configuration (base image string or `ImageSettings`-style object), so saved deployment snapshots can carry remote-only package installs and secret-backed environment injection. (#221)
+
+### Changed
+- **Breaking:** Replay planning now uses graph reachability from replay roots, so replaying from a branch leaf only re-executes that branch's downstream path. Checkpoint override semantics are aligned accordingly: `checkpoint.<selector>` injects into direct consumers, and replay roots include those consumers. Scripts relying on the previous ordering/index-based frontier may see different execution paths when replaying parallel branches. (#228)
+- Bumped the minimum ZenML version to `0.94.3`, picking up upstream artifact-store path validation alongside compatibility fixes to Kitaru's materializers and tests. (#232)
+- Clearer error when a stack references an integration whose dependencies are not installed — flow resolution now points users to the exact extra they need to install (e.g. `kitaru[k8s]`, `kitaru[vertex]`) instead of a low-level ZenML import error. (#227)
+
+### Fixed
+- `kitaru executions` URL logging now prints the correct dashboard URL for each execution. (#223)
 
 ## [0.6.0] - 2026-04-23
 
@@ -98,7 +111,7 @@ wrapped = KitaruAgent(
 - Automatic flow-membership indexing for new execution-scoped memory writes, plus `kitaru memory reindex` / `KitaruClient.memories.reindex(apply=...)` for dry-run-first backfilling of historical memory tags in existing projects
 - Shared memory transport helpers (`kitaru._interface_memory`, `kitaru.inspection.serialize_memory_*`) so CLI, MCP, and SDK surfaces share one payload/validation layer
 - Dedicated memory docs: concept page (`/concepts/memory`) and full guide (`/guides/memory`) covering typed scopes, in-flow vs outside-flow usage, durability semantics, and maintenance workflows
-- Runnable memory example under `examples/memory/flow_with_memory.py` with narrated text output
+- Runnable memory example under `examples/features/memory/flow_with_memory.py` with narrated text output
 
 ### Changed
 - `kitaru.memory.set/get/list/history/delete()` outside flows now require a configured scope via `kitaru.memory.configure(...)` and raise `KitaruStateError` with setup guidance when no scope has been configured. Inside flows, no configuration is needed — the execution scope is inferred automatically
@@ -265,10 +278,10 @@ wrapped = KitaruAgent(
 - `.dockerignore` to keep Docker build context clean
 - Justfile recipes: `just server-image` and `just server-image-push` for local Docker builds
 - Phase 16 replay support: replay planning (`src/kitaru/replay.py`), `KitaruClient.executions.replay(...)`, flow-object replay (`my_flow.replay(...)`), `kitaru executions replay`, and fully-enabled MCP replay tool responses
-- Replay docs and examples: `/getting-started/replay-and-overrides`, updated execution/error/MCP docs, and `examples/replay_with_overrides.py`
+- Replay docs and examples: `/getting-started/replay-and-overrides`, updated execution/error/MCP docs, and `examples/features/replay/replay_with_overrides.py`
 - Agent-native MCP server surface: optional `kitaru[mcp]` extra, `kitaru-mcp` console entry point, and Phase 19 MCP tools for execution/artifact/status/stack queries
 - Claude Code authoring skill: `.claude-plugin/skills/kitaru-authoring/SKILL.md` (installable via plugin marketplace)
-- Phase 19 example workflow: `examples/mcp_query_tools.py`
+- Phase 19 example workflow: `examples/features/mcp/mcp_query_tools.py`
 - MCP-focused tests: import guard coverage (`tests/test_mcp_import_guard.py`) and tool wrapper tests (`tests/mcp/test_server.py`)
 - Agent integrations docs pages: `/agent-integrations/mcp-server` and `/agent-integrations/claude-code-skill`
 - PydanticAI framework adapter: `kitaru.adapters.pydantic_ai.wrap(agent)` for checkpoint-scoped child-event tracking of model/tool activity
@@ -277,7 +290,7 @@ wrapped = KitaruAgent(
 - Adapter stream transcript artifacts (`*_stream_transcript`) for streaming replay inspection
 - Adapter HITL tool decorator: `kitaru.adapters.pydantic_ai.hitl_tool(...)` with flow-level wait translation
 - Optional dependency extra: `pydantic-ai` (`pydantic-ai-slim`)
-- Phase 17 runnable example: `examples/pydantic_ai_adapter.py`
+- Phase 17 runnable example: `examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`
 - Phase 17 integration/unit tests for adapter tracking, runtime scope suspension, HITL behavior, capture config, stream transcripts, and synthetic flow-scope run semantics
 - Getting Started docs page for the PydanticAI adapter (`/getting-started/pydantic-ai-adapter`)
 - Typed Kitaru exception hierarchy (`KitaruError`, `KitaruContextError`, `KitaruStateError`, `KitaruExecutionError`, `KitaruUserCodeError`, `KitaruDivergenceError`, `KitaruFeatureNotAvailableError`, and related types)
@@ -287,7 +300,7 @@ wrapped = KitaruAgent(
 - `kitaru.llm()` implementation with LiteLLM backend, context-aware flow/checkpoint behavior, prompt/response artifact capture, and automatic usage/cost/latency metadata logging
 - Local model alias registry persisted in Kitaru's user config file, including default alias behavior and model-resolution helpers for `kitaru.llm()`
 - Model registry CLI surface: `kitaru model register` and `kitaru model list`
-- Phase 12 example workflow: `examples/flow_with_llm.py`
+- Phase 12 example workflow: `examples/features/llm/flow_with_llm.py`
 - Getting Started LLM docs page (`/getting-started/llm-calls`)
 - Secrets CLI surface: `kitaru secrets set/show/list/delete`
 - `kitaru secrets set` create-or-update behavior with private-by-default secret creation
@@ -295,17 +308,17 @@ wrapped = KitaruAgent(
 - `KitaruClient` execution management API with Kitaru domain models (`Execution`, `ExecutionStatus`, `CheckpointCall`, `ArtifactRef`)
 - Execution management operations: `client.executions.get/list/latest/cancel/retry`
 - Artifact browsing operations: `client.artifacts.list/get` and `artifact.load()`
-- Phase 11 example workflow: `examples/client_execution_management.py`
+- Phase 11 example workflow: `examples/features/execution_management/client_execution_management.py`
 - Getting Started execution management docs page (`/getting-started/execution-management`)
 - `kitaru.wait(...)` implementation with flow-only guardrails and checkpoint-context blocking
 - Wait-input lifecycle APIs: `client.executions.input(...)` and `client.executions.resume(...)`
 - Execution CLI wait/resume commands: `kitaru executions input` and `kitaru executions resume`
-- Phase 15 wait/resume example workflow: `examples/wait_and_resume.py`
+- Phase 15 wait/resume example workflow: `examples/features/execution_management/wait_and_resume.py`
 - Getting Started wait/resume docs page (`/getting-started/wait-and-resume`)
 - `kitaru.save()` for explicit named artifact persistence inside checkpoints
 - `kitaru.load()` for cross-execution artifact loading inside checkpoints
 - Artifact taxonomy validation for explicit `kitaru.save(..., type=...)` values (`prompt`, `response`, `context`, `input`, `output`, `blob`)
-- Phase 8 example workflow: `examples/flow_with_artifacts.py`
+- Phase 8 example workflow: `examples/features/basic_flow/flow_with_artifacts.py`
 - Global log-store configuration with `kitaru log-store set/show/reset`
 - Active stack selection in SDK via `kitaru.list_stacks()`, `kitaru.current_stack()`, and `kitaru.use_stack()`
 - Active stack CLI commands: `kitaru stack list/current/use`
@@ -313,7 +326,7 @@ wrapped = KitaruAgent(
 - Unified config models: `kitaru.KitaruConfig` and `kitaru.ImageSettings`
 - Execution config precedence resolution across invocation/decorator/runtime/env/project/global/default layers
 - Frozen execution spec persistence on each flow run (`kitaru_execution_spec` metadata)
-- Phase 10 example workflow: `examples/flow_with_configuration.py`
+- Phase 10 example workflow: `examples/features/basic_flow/flow_with_configuration.py`
 - Getting Started configuration docs page (`/getting-started/configuration`)
 - Persisted Kitaru user config (`config.yaml`) for log-store override state
 - Environment override support for runtime log-store resolution

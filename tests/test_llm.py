@@ -5,18 +5,20 @@ from __future__ import annotations
 import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from kitaru.analytics import AnalyticsEvent
-from kitaru.config import ResolvedModelSelection
+from kitaru.config import ResolvedModelSelection, register_model_alias
 from kitaru.errors import (
     KitaruContextError,
     KitaruRuntimeError,
     KitaruUsageError,
 )
+from kitaru.flow import flow
 from kitaru.llm import (
     _LLMUsage,
     _parse_provider_target,
@@ -131,6 +133,37 @@ def test_llm_dispatches_through_synthetic_checkpoint_in_flow_scope() -> None:
     assert request.call_name == "outline"
     assert request.model == "fast"
     assert mock_synthetic.call_args.kwargs["id"] == "outline"
+
+
+def test_flow_body_llm_output_handle_string_conversion_is_helpful(
+    monkeypatch: pytest.MonkeyPatch,
+    primed_zenml: None,
+) -> None:
+    """Synthetic flow-body llm handles should share checkpoint handle display."""
+    register_model_alias("fast", model="openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("KITARU_LLM_MOCK_RESPONSE", "Mocked LLM response.")
+    observed: dict[str, str] = {}
+
+    @flow
+    def issue_127_llm_handle_display_flow():
+        handle = cast(Any, llm("hello", model="fast", name="issue_127_llm"))
+        observed.update(
+            {
+                "stringified": str(handle),
+                "repr": repr(handle),
+                "loaded": handle.load(),
+            }
+        )
+
+    issue_127_llm_handle_display_flow.run(cache=False)
+
+    assert observed["loaded"] == "Mocked LLM response."
+    for rendered in (observed["stringified"], observed["repr"]):
+        assert "Kitaru checkpoint output handle" in rendered
+        assert ".load()" in rendered
+        assert "ArtifactVersionResponse" not in rendered
+        assert "ZenML" not in rendered
 
 
 def test_llm_auto_names_calls_sequentially_within_flow_scope() -> None:

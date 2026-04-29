@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.6.0"
+version = "0.7.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -42,7 +42,7 @@ dependencies = [
     "cyclopts>=3.0",
     "pydantic>=2.0",
     "rich>=12.0.0",
-    "zenml[local]>=0.94.2",
+    "zenml[local]>=0.94.3",
 ]
 
 [project.optional-dependencies]
@@ -57,10 +57,12 @@ llm = [
     "kitaru[anthropic]",
 ]
 local = [
-    "zenml[server]>=0.94.2",
+    "zenml[server]>=0.94.3",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim>=1.75.0",
+    # Capped at <1.86.0 because 1.86 added `capabilities`/`spec` kwargs to Agent.run()
+    # that the KitaruAgent adapter doesn't yet pass through. See #248.
+    "pydantic-ai-slim>=1.75.0,<1.86.0",
     "typing_extensions>=4.12",
 ]
 claude-agent-sdk = [
@@ -103,17 +105,19 @@ dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    "zenml[server]>=0.94.2",
+    "zenml[server]>=0.94.3",
     "pytest>=8.0",
     "pytest-randomly",
     "pytest-clarity",
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=1.75.0",
+    # See note on the [pydantic-ai] extra above. Capped pending #248.
+    "pydantic-ai-slim>=1.75.0,<1.86.0",
     "openai>=1.0.0,<2",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
+    "pip-audit>=2.9.0",
 ]
 
 [tool.ruff]

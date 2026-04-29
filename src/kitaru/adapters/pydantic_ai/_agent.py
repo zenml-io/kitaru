@@ -353,7 +353,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                         error=error,
                     )
 
-        _tracked_handler._kitaru_wrapped = True  # type: ignore[attr-defined]
+        _tracked_handler._kitaru_wrapped = True  # ty: ignore[unresolved-attribute]
         return _tracked_handler
 
     def _validate_model_override(self, model: models.Model | models.KnownModelName | str | None) -> None:
