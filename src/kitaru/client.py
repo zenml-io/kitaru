@@ -52,6 +52,7 @@ from kitaru._client._logs import (
     _coerce_log_lineno,
     _coerce_log_text,
     _is_empty_log_result_error,
+    _is_log_endpoint_version_skew_error,
     _is_otel_log_retrieval_error,
     _log_sort_key,
     _map_runtime_log_entry,
@@ -432,6 +433,16 @@ class _ExecutionsAPI:
                 if endpoint_hint:
                     message += f" View them in your OTEL backend at: {endpoint_hint}."
                 raise KitaruLogRetrievalError(message) from exc
+
+            if _is_log_endpoint_version_skew_error(error_message):
+                raise KitaruLogRetrievalError(
+                    "Unable to retrieve runtime logs because the server log "
+                    "endpoint is incompatible with this Kitaru client. This "
+                    "usually means the client and server are running different "
+                    "Kitaru versions. Upgrade the server runtime or align the "
+                    "client and server versions, then retry `kitaru executions "
+                    "logs`."
+                ) from exc
 
             raise KitaruLogRetrievalError(
                 f"Failed to retrieve runtime logs for source '{source}': {exc}"
