@@ -114,6 +114,7 @@ dev = [
     "openai>=1.0.0,<2",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
+    "pip-audit>=2.9.0",
 ]
 
 [tool.ruff]

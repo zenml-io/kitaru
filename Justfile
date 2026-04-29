@@ -59,6 +59,10 @@ actions-lint:
 zizmor:
     uvx zizmor --config=.github/zizmor.yml .github/workflows/ .github/dependabot.yml
 
+# Audit Python dependencies for known vulnerabilities
+audit:
+    uv run pip-audit
+
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
     lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'site/node_modules' --exclude-path 'design' './**/*.md'
