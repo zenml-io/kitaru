@@ -16,6 +16,7 @@ from zenml.enums import StepRuntime, StepType
 from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import checkpoint
 from kitaru.errors import KitaruContextError, KitaruUsageError
+from kitaru.flow import flow
 from kitaru.runtime import (
     _flow_scope,
     _get_current_checkpoint,
@@ -599,3 +600,43 @@ def test_checkpoint_runtime_scope_restores_existing_flow_scope() -> None:
     assert _get_current_flow() is None
     assert not _is_inside_checkpoint()
     assert _get_current_checkpoint() is None
+
+
+def test_flow_body_output_handle_string_conversion_is_helpful(
+    primed_zenml: None,
+) -> None:
+    """Checkpoint output handles should display Kitaru guidance, not metadata."""
+    observed: dict[str, str] = {}
+
+    @checkpoint
+    def produce_issue_127_value():
+        return "hello"
+
+    @checkpoint
+    def consume_issue_127_value(value):
+        assert isinstance(value, str)
+        return f"{value}|{type(value).__name__}"
+
+    @flow
+    def issue_127_handle_display_flow():
+        handle = produce_issue_127_value()
+        downstream = consume_issue_127_value(handle)
+        observed.update(
+            {
+                "stringified": str(handle),
+                "repr": repr(handle),
+                "loaded": handle.load(),
+                "downstream": downstream.load(),
+            }
+        )
+
+    issue_127_handle_display_flow.run(cache=False)
+
+    assert observed["loaded"] == "hello"
+    assert observed["downstream"] == "hello|str"
+
+    for rendered in (observed["stringified"], observed["repr"]):
+        assert "Kitaru checkpoint output handle" in rendered
+        assert ".load()" in rendered
+        assert "ArtifactVersionResponse" not in rendered
+        assert "ZenML" not in rendered
