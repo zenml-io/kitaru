@@ -61,7 +61,7 @@ These were resolved during brainstorming and are the foundation for everything b
 | D2/E2 | Agent task | **Compliance/policy reviewer** (document processing) | Naturally exercises proxy injection (multiple auth-gated doc sources), per-clause HITL, memory precedents. Builds on `compliance_review`'s domain heritage but with a PydanticAI + sandbox stack. |
 | F2 | Local-first strategy | **Bundled fixtures + local mock-services container** | Zero external accounts. The mock server is a teaching artifact: readers can `tail -f` it to see the proxy injecting auth headers. |
 | G2 | Profile complexity | **Lean Profile, grows one field per stage** | Each stage adds exactly one Profile field and one architectural concept. Reader's mental model expands monotonically. |
-| H1 | Profile naming | **`Profile` Python dataclass** | Faithful to kami. Ecosystem-aligned alternatives (markdown+frontmatter à la Claude Agent SDK) deferred to a future evolution. |
+| H1 | Profile representation | ~~**`Profile` Python dataclass**~~ → **`Profile` Pydantic `BaseModel`** *(reversed 2026-04-29)* | The CLAUDE.md convention is "prefer Pydantic models for data structures," and kitaru's own public models are all Pydantic. Pydantic gives us free `__init__` validation, declarative cross-field checks via `@model_validator`, JSON/YAML parsing for `load_profile(...)`, and idiomatic kitaru style. Markdown+frontmatter à la Claude Agent SDK is still deferred. |
 | I2 | HITL design | **Per-clause HITL via `@hitl_tool`-decorated agent tool** | The LLM decides when to pause for human input by calling `request_severity_decision`. The flow body never calls `kitaru.wait()` directly. Showcases kitaru ↔ pydantic-ai integration *inside* the agent loop. |
 | J2 | Memory design | **Flow-scope precedents + execution-scope findings** | Cross-execution learning: `request_severity_decision` reads precedents, suggests defaults, writes confirmed decisions back. After 2-3 runs, the agent visibly "gets smarter." |
 | K3 | Tool inventory | **Five tools: `exec`, `fetch_document`, `request_severity_decision`, `publish_review`, `skill`** | Full kami parity. The `skill` tool is the architectural distinctive that separates "main loop" from "capabilities" — the agent's procedure lives in markdown, not Python. |
@@ -218,18 +218,29 @@ ToolName = Literal[
     "skill",
 ]
 
-@dataclass
-class Profile:
+class Profile(BaseModel):
     name: str
     system_prompt: str
-    model: str
-    allowed_tools: set[ToolName] = field(default_factory=set)
+    model: str                                    # raw pydantic-ai provider string
+    allowed_tools: set[ToolName] = Field(default_factory=set)
     # Stage 3+:
-    # sandbox_proxy_rules: list[SandboxProxyRule] = field(default_factory=list)
+    sandbox_proxy_rules: list[SandboxProxyRule] = Field(default_factory=list)
     # Stage 4+:
-    # service_configs: dict[str, ServiceConfig] = field(default_factory=dict)
-    # skill_sources: list[SkillSource] = field(default_factory=list)
+    service_configs: dict[str, ServiceConfig] = Field(default_factory=dict)
+    skill_sources: list[SkillSource] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_proxy_rules_have_services(self) -> "Profile":
+        rule_hosts = {rule.host for rule in self.sandbox_proxy_rules}
+        orphan = rule_hosts - set(self.service_configs)
+        if orphan:
+            raise ValueError(
+                f"sandbox_proxy_rules reference hosts with no service_configs entry: {sorted(orphan)}"
+            )
+        return self
 ```
+
+`load_profile(name)` deserializes a YAML/JSON file under `agent_factory/profiles/<name>.yaml` via `Profile.model_validate(...)` — Pydantic does the validation, no extra plumbing.
 
 Per-stage growth:
 
@@ -249,7 +260,9 @@ Per-stage growth:
 - `"openai:gpt-4o-mini"` is the canonical pydantic-ai form; matching it makes the example read as a natural extension of pydantic-ai's own docs.
 - This example has a single model call-site (the agent itself); the alias indirection has no payoff yet. The README's "Tips for production use" section mentions `kitaru model register` as the preferred path once there are multiple model call-sites or shared credentials.
 
-Still open: validation strategy for the dataclass (manual `__post_init__` checks vs accept-and-fail-late). **TODO.**
+### Validation
+
+Handled by Pydantic per the reversed H1: built-in type checks at construction, plus `@model_validator(mode="after")` hooks for cross-field invariants (e.g. proxy rules reference declared services). `Profile.model_validate_json(...)` is the on-disk deserializer.
 
 ---
 
@@ -446,7 +459,7 @@ Tests must be runnable in CI with no external accounts. They depend on Docker be
 
 Tracked here so they don't get lost. Several map to brainstorm sections we have not yet completed.
 
-- **Section 3 — Profile schema details.** Resolved: `allowed_tools: set[ToolName]` with `ToolName = Literal[...]`. Still open: default `model` alias, validation strategy for the dataclass.
+- **Section 3 — Profile schema details.** Resolved: Pydantic `BaseModel` (H1 reversed); `allowed_tools: set[ToolName]` with `ToolName = Literal[...]`; `model` is a raw pydantic-ai provider string; cross-field validation via `@model_validator`.
 - **Section 4 — Tool details.** Exact descriptions, error handling, redaction.
 - **Section 5 — Flow lifecycle.** Lazy vs. eager sandbox; replay-input strategy for `policy_path`.
 - **Section 6 — Memory & artifacts.** Exact data shapes, access points, retention policy.
