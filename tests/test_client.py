@@ -2767,6 +2767,54 @@ def test_logs_map_otel_retrieval_errors_to_kitaru_error() -> None:
             client.executions.logs(str(run.id))
 
 
+@pytest.mark.parametrize(
+    "backend_error",
+    [
+        ModuleNotFoundError("No module named 'zenml.log_stores'"),
+        RuntimeError("ModuleNotFoundError: No module named 'zenml.log_stores'"),
+    ],
+)
+def test_logs_map_version_skew_errors_to_actionable_kitaru_error(
+    backend_error: Exception,
+) -> None:
+    step = _DummyStep(
+        name="research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={step.name: step},
+    )
+
+    fake_store = Mock()
+    fake_store.get.side_effect = backend_error
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        with pytest.raises(KitaruLogRetrievalError) as exc_info:
+            client.executions.logs(str(run.id))
+
+    message = str(exc_info.value)
+    assert "incompatible" in message
+    assert "Upgrade the server runtime" in message
+    assert "ZenML" not in message
+    assert "zenml.log_stores" not in message
+    assert "No module named" not in message
+    assert "ModuleNotFoundError" not in message
+
+
 def test_logs_return_empty_list_when_backend_reports_no_entries() -> None:
     step = _DummyStep(
         name="research",
