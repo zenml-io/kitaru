@@ -59,7 +59,7 @@ actions-lint:
 zizmor:
     uvx zizmor --config=.github/zizmor.yml .github/workflows/ .github/dependabot.yml
 
-# Audit Python dependencies for known vulnerabilities (honours .github/pip-audit-ignored.txt)
+# Audit Python dependencies for known vulnerabilities (honors .github/pip-audit-ignored.txt)
 audit:
     awk '/^CVE-|^GHSA-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
 
