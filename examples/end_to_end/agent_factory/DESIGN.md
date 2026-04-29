@@ -621,20 +621,26 @@ The same b64 + completion-marker trick kami uses (`tools.py` in kami), allowing 
 
 ---
 
-## 11. Mock services (TODO — section 7 of brainstorm)
+## 11. Mock services
 
-A FastAPI server exposing four virtual hosts on the same Docker network:
+A single FastAPI app (`mocks/server.py`) running on a single port, multiplexed by `Host:` header to virtual hosts on the `agent_factory` Docker network. The proxy sees `Host: wiki.local`, the addon matches, injects the `Authorization` header, and forwards to the mock; the mock validates the header and returns fixture data. Reader runs `docker compose logs -f mock-services` for a live tail of which auth headers arrive at which endpoints — chapter 3's central demo.
 
-| Host | Endpoints | Auth | Returns |
+| Host | Endpoint | Required Authorization header | Response |
 |---|---|---|---|
-| `wiki.local` | `GET /precedents/{topic}` | `Authorization: Bearer wiki-token` | Sample prior-review snippets |
-| `policies.local` | `GET /policy/{name}` | `Authorization: Bearer policy-token` | Markdown policy files |
-| `docstore.local` | `GET /docs/{doc_id}` | `Authorization: Bearer docstore-token` | PDFs (or text equivalents for the mock) |
-| `discord.local` | `POST /webhooks/{id}` | `Authorization: Bot discord-token` | 204 on success; logs payload to stdout for the reader to see |
+| `wiki.local` | `GET /precedents/{topic}` | `Bearer wiki-token` | `{ "topic": str, "snippets": [{ "url": str, "excerpt": str }] }` — max 5 snippets, fixtures in `mocks/fixtures.py::WIKI_PRECEDENTS` |
+| `policies.local` | `GET /policy/{name}` | `Bearer policy-token` | `text/markdown` body, served from `fixtures/policy_v1.md` (default) or `fixtures/policy_strict.md` (replay scenario) |
+| `docstore.local` | `GET /docs/{doc_id}` | `Bearer docstore-token` | `application/pdf` body served from `fixtures/docs/{doc_id}.pdf`, or `application/json` `{ "error": "not_found" }` with HTTP 404 |
+| `discord.local` | `POST /webhooks/{id}` | `Bot discord-token` | HTTP 204; payload logged to stdout in the format `[mock-discord] webhook=<id> payload=<json>` so chapter 3's screenshot can show the published review arriving |
 
-Each mock host's auth is wired up in the Profile as a separate `SandboxProxyRule`. The reader can `docker compose logs -f mock-services` to see exactly which auth headers arrive at which endpoints — concrete demo of the proxy isolation.
+**Auth model:** every endpoint reads the inbound `Authorization` header. If missing or wrong, returns HTTP 401 with `{ "error": "unauthorized", "expected_prefix": "<Bearer|Bot>" }`. The agent's first request without proxy injection (chapter 2) gets a 401 → the agent has nothing useful to do. Chapter 3 enables `sandbox_proxy_rules`, the proxy injects, the next call returns 200. That's the visible chapter 3 payoff.
 
-**TODO — exact request/response schemas, fixture data.**
+**Fixtures (`mocks/fixtures.py`):**
+
+- `WIKI_PRECEDENTS: dict[str, list[dict]]` — keyed by topic slug, ~5 entries covering the most common compliance topics (`subprocessor-non-eea-transfer`, `data-retention-period`, `liability-cap`, `breach-notification`, `audit-rights`).
+- `DOCSTORE_DOCS: dict[str, Path]` — keyed by doc_id, points at PDFs in `fixtures/docs/`.
+- One fixture PDF: `fixtures/docs/sample_dpa.pdf` — a synthetic Data Processing Agreement (~30 pages). `pdftotext` extracts ~12 clauses; the agent reviews each.
+
+**Logging:** every mock endpoint logs `[mock-<service>] <method> <path> auth=<redacted_first_8_chars> status=<status>` so the chapter 3 screenshot can show the full request flow without leaking full tokens.
 
 ---
 
@@ -694,7 +700,31 @@ Cleanup:
 docker compose down -v   # drops named volumes, including workspace_<exec_id>
 ```
 
-**The new `--extra agent-factory` adds `mitmproxy`, `cryptography`, `docker` (Python SDK), and dev-only deps. To be added to the root `pyproject.toml`. TODO.**
+### `agent-factory` extra (added to root `pyproject.toml`)
+
+```toml
+[project.optional-dependencies]
+agent-factory = [
+    "mitmproxy>=10.0",            # proxy addon runtime
+    "cryptography>=42.0",         # CA generation in certs.py
+    "fastapi>=0.110",             # mock-services container
+    "uvicorn>=0.30",              # mock-services entrypoint
+    "pypdf>=4.0",                 # for fixtures/docs/sample_dpa.pdf parsing in tests
+]
+```
+
+The `docker` Python SDK is *not* a dependency — `DockerWorker` and `DockerProxy` shell out via `subprocess.run(["docker", ...])` because (a) it matches what readers will inspect themselves with `docker ps`/`docker logs`, (b) it avoids a Python-API/CLI version drift surface, and (c) blog screenshots of the actual `docker` commands are clearer teaching artifacts than `containers.run(...)` calls.
+
+### CI strategy
+
+- The existing `ci.yml` runner is `ubuntu-latest`, which has Docker pre-installed.
+- `tests/test_proxy_injection.py` and `tests/test_full_loop.py` need `docker compose up` against the example's compose file. Add a step to the CI `pytest` matrix: `docker compose -f examples/end_to_end/agent_factory/docker-compose.yml up -d --wait` before the example's pytest invocation, `down -v` after.
+- `tests/test_stage_1.py` is a stage-1 smoke test — no Docker required. Stage 1 is in-process exec.
+- The `agent-factory` extra is opted into a dedicated CI job (similar to the existing `kitaru[mcp]` test lane mentioned in CLAUDE.md), not the default `tests` job, so the Docker dependency doesn't slow down the base lane.
+
+### Naming
+
+Branch `example/agent-factory` and directory `examples/end_to_end/agent_factory/` are the chosen names. Confirmed against the existing `coding_agent`, `news_scout`, and `compliance_review` siblings — same naming convention. No external review needed; this is a regular example PR.
 
 ---
 
@@ -718,11 +748,11 @@ Tracked here so they don't get lost. Several map to brainstorm sections we have 
 - **Section 4 — Tool details.** Exact descriptions, error handling, redaction.
 - **Section 5 — Flow lifecycle.** Resolved: eager + context-managed sandbox/proxy startup; `policy_path` carried via `load_policy` checkpoint (decision L2-impl).
 - **Section 6 — Memory & artifacts.** Resolved: slug-keyed `ClausePattern`, exact-match `_suggest_from_precedents`, flow-scope precedents + execution-scope findings, memory access lives in the `severity_decision` tool body (not in checkpoints).
-- **Section 7 — Sandbox/proxy implementation.** Code-level details, addon port, mock-services schemas.
+- **Section 7 — Sandbox/proxy implementation.** Resolved: persistent-shell port (Q12); proxy port verbatim with namespace rename and readiness poll (Q13); mock services as FastAPI multiplexed by Host header with explicit fixtures and visible auth-failure logging.
 - **Section 8 — Blog series.** Chapter outlines, hooks, code excerpts.
 - **Tool descriptions in profile system prompt.** Should the system prompt enumerate available skills, or rely on the agent calling `skill list` first?
-- **CI strategy.** Does the existing kitaru CI runner have Docker? What's the right test-extra for `agent_factory`?
-- **Naming check.** Confirm with maintainers that `example/agent-factory` and `examples/end_to_end/agent_factory/` are acceptable.
+- **CI strategy.** Resolved (Section 14): `ubuntu-latest` runners have Docker; `agent-factory` gets its own test lane similar to `kitaru[mcp]`; `test_proxy_injection.py` + `test_full_loop.py` run against `docker compose up --wait`; `test_stage_1.py` is in-process with no Docker dependency.
+- **Naming check.** Resolved (Section 14): `example/agent-factory` branch and `examples/end_to_end/agent_factory/` directory follow existing sibling conventions.
 
 ---
 
