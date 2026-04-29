@@ -464,27 +464,53 @@ Context managers also guarantee teardown on exception — a leaked `mitmdump` co
 
 ---
 
-## 9. Memory & artifacts (TODO — section 6 of brainstorm)
+## 9. Memory & artifacts (in progress)
 
 ### Flow-scope precedents
 
-- Key: `compliance-precedents`
-- Shape: `list[ClausePattern]` where `ClausePattern = {pattern: str, severity: Severity, count: int, last_seen: datetime}`
-- Read by: `request_severity_decision` (to pre-fill suggested severity)
-- Written by: `request_severity_decision` (after the operator confirms)
+- **Key:** `compliance-precedents`
+- **Scope:** flow (cross-execution; `kitaru.memory` defaults to flow scope when accessed from inside the agent loop).
+- **Shape:**
+
+  ```python
+  class ClausePattern(BaseModel):
+      pattern: str          # kebab-case topic slug picked by the LLM (e.g. "subprocessor-non-eea-transfer")
+      severity: Severity
+      count: int            # how many times this (pattern, severity) was confirmed
+      last_seen: datetime
+  ```
+
+- **Read by:** `ask_question` tool body, `severity_decision` branch — calls `_suggest_from_precedents(pattern, precedents)` which exact-matches on the slug, ties broken by `(count, last_seen)`.
+- **Written by:** same branch, after the operator confirms — calls `_record_precedent(precedents, pattern, severity)` which mutates in place if `(pattern, severity)` exists, else appends.
+- **Why slug, not embeddings or verbatim phrase:** verbatim phrase is brittle (tiny rewordings miss, demo never fires precedent suggestion); embeddings are correct but bring in a model dependency, vector storage, and a similarity threshold for chapter 4 to defend. Slug-matching is the right educational midpoint — the system prompt says "use a kebab-case topic slug, 3-5 words" and the agent on run 2 sees existing slugs in the suggestion path so it's biased toward reuse. README's "going further" section points at vector indices for production use.
+- **`_suggest_from_precedents` and `_record_precedent`** live in `agent_factory/memory.py` — pure functions, no kitaru imports, easy to unit-test.
+- **Memory access point:** the tool body, *not* a `@checkpoint`. Kitaru forbids `kitaru.memory` inside `@checkpoint` — so `load_policy`/`find_clauses` cannot touch precedents, but the agent loop's tool body can. That matches our Q9 architecture exactly.
 
 ### Execution-scope findings
 
-- Key: `findings`
-- Shape: `list[Finding]` where `Finding = {clause_id: str, text: str, severity: Severity, rationale: str}`
-- Written incrementally as the agent works through the doc
+- **Key:** `findings`
+- **Scope:** execution (per-run; `memory.configure(scope_type="execution")` for this key).
+- **Shape:**
+
+  ```python
+  class Finding(BaseModel):
+      clause_id: str
+      text: str
+      severity: Severity
+      rationale: str
+  ```
+
+- Written incrementally inside the agent loop after each `severity_decision`. Read in `stage_5_replay.py` by `print_diff(stage_4_findings, result.findings)`.
 
 ### Artifacts
 
-- `final_review` (named artifact, type=`output`) — the published Markdown report
-- `extracted_clauses` (named artifact, type=`context`) — intermediate output from `find_clauses` checkpoint, retained for replay
+- **`final_review`** — named artifact (`type="output"`), the published Markdown report. `kitaru.save("final_review", report_md, type="output")` from the flow body once the agent's `result.output` is in.
+- **`extracted_clauses`** — named artifact (`type="context"`), the `find_clauses` checkpoint's output. Retained for replay (Q1's locked decision means `find_clauses` is cached when only the policy changes).
 
-**Detailed shapes and exact memory access points: TODO.**
+### Retention
+
+- Precedents memory: kept indefinitely. Real production deployments would compact via `kitaru.memory.compact(...)` after N versions; for the example, compaction is mentioned in README's "going further."
+- Findings: per-execution, garbage-collected by kitaru's normal artifact retention.
 
 ---
 
@@ -634,7 +660,7 @@ Tracked here so they don't get lost. Several map to brainstorm sections we have 
 - **Section 3 — Profile schema details.** Resolved: Pydantic `BaseModel` (H1 reversed); `allowed_tools: set[ToolName]` with `ToolName = Literal[...]`; `model` is a raw pydantic-ai provider string; cross-field validation via `@model_validator`.
 - **Section 4 — Tool details.** Exact descriptions, error handling, redaction.
 - **Section 5 — Flow lifecycle.** Resolved: eager + context-managed sandbox/proxy startup; `policy_path` carried via `load_policy` checkpoint (decision L2-impl).
-- **Section 6 — Memory & artifacts.** Exact data shapes, access points, retention policy.
+- **Section 6 — Memory & artifacts.** Resolved: slug-keyed `ClausePattern`, exact-match `_suggest_from_precedents`, flow-scope precedents + execution-scope findings, memory access lives in the `severity_decision` tool body (not in checkpoints).
 - **Section 7 — Sandbox/proxy implementation.** Code-level details, addon port, mock-services schemas.
 - **Section 8 — Blog series.** Chapter outlines, hooks, code excerpts.
 - **Tool descriptions in profile system prompt.** Should the system prompt enumerate available skills, or rely on the agent calling `skill list` first?
