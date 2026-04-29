@@ -289,7 +289,16 @@ Resolved so far:
 - `policy_path` is the input to a `@checkpoint def load_policy(path) -> str`. The agent reads the policy text via the checkpoint's output, not from disk directly. L2 replay overrides `checkpoint.load_policy` (decision L2-impl).
 - `find_clauses` is a separate `@checkpoint` whose only input is the doc/prompt, so the doc-extraction stays cached when the policy alone changes during replay.
 
-Sketch:
+### Sandbox lifecycle: eager + context-managed
+
+Containers are started **eagerly** at flow entry, before the agent's first turn, and torn down via context managers on any exit path. Kami's lazy startup is reintroduced in the post-chapter "Going to production: Docker-compose to Modal," where Modal cold-start cost is real and billed.
+
+Reasons for eager here:
+
+- Chapter 2's job is to *show the worker booting* as a visible, sequential event — lazy hides it inside a tool call.
+- "Docker daemon not running" is the most common fresh-clone error; eager surfaces it as a top-level `KitaruRuntimeError` before any LLM token is spent.
+- Replay determinism: with eager startup the sandbox is up before `from_=...` re-executes, so "what gets reused vs. re-run" stays clear.
+- Docker cold-start is 1–3 s and free locally; the "infrastructure costs nothing if unused" pitch is a Modal pitch, not a local pitch.
 
 ```python
 @flow(image=ImageSettings(...))
@@ -301,19 +310,23 @@ def kami_main_flow(
     profile = load_profile(profile_name)
     policy_text = load_policy(policy_path)            # @checkpoint
     extracted = find_clauses(prompt)                  # @checkpoint
-    sandbox = DockerWorker.start(execution_id=kitaru.runtime.execution_id())
-    proxy = DockerProxy.start(credential_map=build_proxy_credential_map(profile))
-    sandbox.attach_proxy(proxy)
-    agent = build_agent(profile, permission_handler=PermissionHandler(profile), sandbox=sandbox)
-    result = agent.run_sync(prompt, deps={"policy": policy_text, "clauses": extracted})
+    with (
+        DockerProxy.start(credential_map=build_proxy_credential_map(profile)) as proxy,
+        DockerWorker.start(
+            execution_id=kitaru.runtime.execution_id(),
+            proxy=proxy,
+        ) as sandbox,
+    ):
+        agent = build_agent(
+            profile,
+            permission_handler=PermissionHandler(profile),
+            sandbox=sandbox,
+        )
+        result = agent.run_sync(prompt, deps={"policy": policy_text, "clauses": extracted})
     return {"summary": result.output, "exec_id": kitaru.runtime.execution_id()}
 ```
 
-Open question:
-
-- Should `sandbox` and `proxy` be created lazily (only when `exec` is first called) like kami, or eagerly at flow start? Eager keeps the example simpler; lazy demonstrates "infrastructure costs nothing if unused."
-
-**TODO — answer when Section 5 of brainstorming resumes.**
+Context managers also guarantee teardown on exception — a leaked `mitmdump` container holding a per-run bearer token on the network is the alternative footgun.
 
 ---
 
@@ -461,7 +474,7 @@ Tracked here so they don't get lost. Several map to brainstorm sections we have 
 
 - **Section 3 — Profile schema details.** Resolved: Pydantic `BaseModel` (H1 reversed); `allowed_tools: set[ToolName]` with `ToolName = Literal[...]`; `model` is a raw pydantic-ai provider string; cross-field validation via `@model_validator`.
 - **Section 4 — Tool details.** Exact descriptions, error handling, redaction.
-- **Section 5 — Flow lifecycle.** Lazy vs. eager sandbox; replay-input strategy for `policy_path`.
+- **Section 5 — Flow lifecycle.** Resolved: eager + context-managed sandbox/proxy startup; `policy_path` carried via `load_policy` checkpoint (decision L2-impl).
 - **Section 6 — Memory & artifacts.** Exact data shapes, access points, retention policy.
 - **Section 7 — Sandbox/proxy implementation.** Code-level details, addon port, mock-services schemas.
 - **Section 8 — Blog series.** Chapter outlines, hooks, code excerpts.
