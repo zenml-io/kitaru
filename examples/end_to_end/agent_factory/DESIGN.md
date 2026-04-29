@@ -312,13 +312,37 @@ The `CallDeferred` / `ApprovalRequired` / `requires_approval=True` paths exist i
 
 | Tool | Type | What it does | Stage introduced |
 |---|---|---|---|
-| `exec` | shell | Runs a bash command in the worker container; routes HTTP through proxy. | 1 (in-process), 2 (Docker worker) |
+| `exec` | shell | Runs a bash command in the worker container; routes HTTP through proxy. Returns truncated stdout/stderr + an exit code + the path to the full persisted output (see `ExecResult` below). | 1 (in-process), 2 (Docker worker) |
 | `fetch_document` | typed `exec_service` | Discriminated-union service call to read a doc from a mock store. | 4 |
 | `request_severity_decision` | `@hitl_tool` + `wait_for_input(...)` | Suspends the agent and asks the operator for a severity verdict on a clause. Schema: `Severity = Literal["sev-1", "sev-2", "sev-3", "n/a"]`. Tool body: read flow-scope precedents → suggest a default → call adapter's `wait_for_input(schema=Severity, ...)` to suspend → write the confirmed decision back to precedent memory → return it to the agent. | 4 |
 | `publish_review` | typed `exec_service` | Posts the final review report to a mock Discord-like service. | 4 |
 | `skill` | local-fs | `list` / `read` / `search` over `skills/` to load the agent's playbook. | 4 |
 
-Exact tool descriptions, error handling, log redaction strategy: **TODO — to be answered when Section 4 of brainstorming resumes.**
+### `exec` output policy
+
+Raw command output can blow the agent's context window in a single call (a `pdftotext` of a 30-page DPA, an unfiltered `curl`). The tool truncates and persists:
+
+```python
+class ExecResult(BaseModel):
+    exit_code: int
+    stdout: str            # truncated; trailing "[N more lines: cat /workspace/.exec/<id>.out]" marker when clipped
+    stderr: str            # truncated similarly
+    full_output_path: str  # always set; full stdout+stderr written here by the worker
+```
+
+Defaults (constants in `agent_factory/sandbox/worker.py`):
+
+| Constant | Default | Purpose |
+|---|---|---|
+| `MAX_STDOUT_LINES` | 200 | Lines before the "..." truncation marker. |
+| `MAX_STDERR_LINES` | 50 | Same, for stderr. |
+| `MAX_LINE_BYTES` | 2000 | Per-line cap so a binary blob in stdout doesn't explode the truncated output. |
+
+The agent drills into the full output via subsequent `exec` calls (`head`, `tail`, `grep`, `jq`) against `full_output_path`. This composes with the workspace volume's durability — paused flows resume with the same `/workspace/.exec/<id>.out` files in place.
+
+Auto-summarization via a hidden `kitaru.llm()` call was considered and rejected: a tool that silently spends LLM tokens conflicts with the "primitives first" pitch and corrupts structured output (`jq` results) the agent needs verbatim.
+
+**Per-tool error handling and redaction details: TODO — answered as we walk the remaining four tools.**
 
 ---
 
