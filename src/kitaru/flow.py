@@ -164,6 +164,11 @@ def _guard_implicit_active_stack_fallback(
         or raw_active_stack_provenance.effective_id is None
     ):
         return
+    if raw_active_stack_provenance.effective_source not in {
+        "repo-local config",
+        "global config",
+    }:
+        return
 
     client = (client_factory or Client)()
     active_stack_model = client.active_stack_model

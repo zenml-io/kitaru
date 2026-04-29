@@ -8954,6 +8954,46 @@ def test_info_all_json_includes_active_context_provenance(
     assert item["active_project_provenance"]["environment_id"] == "env-project-id"
 
 
+def test_status_json_hides_active_context_provenance_by_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru status -o json` should hide verbose provenance by default."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "status"
+    item = payload["item"]
+    assert item["active_stack_provenance"] is None
+    assert item["active_project_provenance"] is None
+
+
+def test_info_json_hides_active_context_provenance_by_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info -o json` should hide verbose provenance unless --all."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "info"
+    item = payload["item"]
+    assert item["active_stack_provenance"] is None
+    assert item["active_project_provenance"] is None
+
+
 def test_info_all_file_export_includes_active_context_provenance(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -9035,6 +9075,8 @@ def test_info_file_export_json(
     assert export_path.exists()
     data = json.loads(export_path.read_text())
     assert data["sdk_version"] == "0.3.0"
+    assert data["active_stack_provenance"] is None
+    assert data["active_project_provenance"] is None
 
 
 def test_info_file_export_json_mode(

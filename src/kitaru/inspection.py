@@ -1101,9 +1101,23 @@ def serialize_stack_details(details: StackDetails) -> dict[str, Any]:
     return payload
 
 
-def serialize_runtime_snapshot(snapshot: RuntimeSnapshot) -> dict[str, Any]:
-    """Serialize runtime status details for structured output."""
-    return to_jsonable(snapshot, fallback_repr=True)
+def serialize_runtime_snapshot(
+    snapshot: RuntimeSnapshot,
+    *,
+    include_provenance_details: bool = False,
+) -> dict[str, Any]:
+    """Serialize runtime status details for structured output.
+
+    Runtime snapshots keep active stack/project provenance internally so normal
+    status/info calls can still produce safety warnings. The detailed raw
+    provenance is diagnostic material, though, so structured outputs expose it
+    only when callers opt in (``kitaru info --all`` or MCP ``all=True``).
+    """
+    payload = to_jsonable(snapshot, fallback_repr=True)
+    if not include_provenance_details:
+        payload["active_stack_provenance"] = None
+        payload["active_project_provenance"] = None
+    return payload
 
 
 def serialize_log_entry(entry: LogEntry) -> dict[str, Any]:

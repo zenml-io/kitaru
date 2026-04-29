@@ -830,6 +830,44 @@ def test_serialize_runtime_snapshot_preserves_none_fields() -> None:
     assert payload["environment"] == []
 
 
+def test_serialize_runtime_snapshot_hides_provenance_details_by_default() -> None:
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.1.0",
+        connection="local database",
+        connection_target="local",
+        config_directory="/tmp/kitaru-config",
+        active_stack_provenance=ActiveConfigSelectionProvenance(
+            resource="active_stack",
+            effective_source="repo-local config",
+            effective_source_detail="/work/repo/.kitaru/config.yaml",
+            effective_id="repo-stack-id",
+            resolved_id="resolved-stack-id",
+        ),
+        active_project_provenance=ActiveConfigSelectionProvenance(
+            resource="active_project",
+            effective_source="environment",
+            effective_source_detail="KITARU_PROJECT -> ZENML_ACTIVE_PROJECT_ID",
+            effective_id="production",
+            resolved_id="project-uuid",
+        ),
+    )
+
+    default_payload = serialize_runtime_snapshot(snapshot)
+    detailed_payload = serialize_runtime_snapshot(
+        snapshot,
+        include_provenance_details=True,
+    )
+
+    assert default_payload["active_stack_provenance"] is None
+    assert default_payload["active_project_provenance"] is None
+    assert detailed_payload["active_stack_provenance"]["effective_id"] == (
+        "repo-stack-id"
+    )
+    assert detailed_payload["active_project_provenance"]["effective_id"] == (
+        "production"
+    )
+
+
 def _write_active_config(
     directory: Path,
     *,
@@ -1545,6 +1583,44 @@ def test_build_runtime_snapshot_surfaces_provenance_collector_failure(
         in note
         for note in project_provenance.notes
     )
+
+
+def test_build_runtime_snapshot_does_not_warn_for_env_name_to_uuid_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explicit KITARU_PROJECT names may resolve to UUIDs without fallback."""
+    _clear_active_context_env(monkeypatch)
+    monkeypatch.setenv("KITARU_PROJECT", "production")
+
+    fake_gc = _fake_global_config(tmp_path)
+    fake_client = SimpleNamespace(
+        active_user=SimpleNamespace(name="alice"),
+        active_stack_model=SimpleNamespace(name="prod", id="stack-id"),
+        active_project=SimpleNamespace(name="production", id="project-uuid"),
+        root=None,
+        zen_store=SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.42.0",
+                database_type="sqlite",
+                deployment_type="local",
+            )
+        ),
+    )
+    fake_client_cls = MagicMock(return_value=fake_client)
+    fake_client_cls.find_repository.return_value = None
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+    assert project_provenance.effective_source == "environment"
+    assert project_provenance.effective_id == "production"
+    assert project_provenance.resolved_id == "project-uuid"
+    assert snapshot.warning is None
 
 
 def test_build_runtime_snapshot_preserves_raw_when_client_sanitizes_stale_id(

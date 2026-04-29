@@ -249,8 +249,18 @@ def with_resolved_selection(
 def selection_resolved_via_fallback(
     provenance: ActiveConfigSelectionProvenance | None,
 ) -> bool:
-    """Return whether raw configured ID differs from the resolved resource ID."""
+    """Return whether a saved config ID resolved to a different resource.
+
+    Environment values are explicit overrides, and Kitaru/ZenML may accept a
+    human-readable name there before resolving it to a UUID. Treating that
+    name→UUID resolution as a saved-context fallback creates false alarms such
+    as ``KITARU_PROJECT=production`` resolving to the production project's ID.
+    The fallback warning is only for repo-local/global config values that ZenML
+    silently sanitized while loading.
+    """
     if provenance is None:
+        return False
+    if provenance.effective_source not in {"repo-local config", "global config"}:
         return False
     if provenance.effective_id is None or provenance.resolved_id is None:
         return False
