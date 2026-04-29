@@ -38,18 +38,22 @@ The example builds up one capability at a time. Each stage adds one tool or one 
 
 The kitaru wrap stays at *flow scope*, not in the library helper, so you see the integration as a deliberate seam rather than something the library hides.
 
-**The hero demo — durability via kill-and-resume:**
+**The hero demo — durability via cached checkpoints surviving a failure:**
 
 ```bash
-python stage_1_basic_agent.py &      # run in background
-kill %1                               # kill it mid-turn
-kitaru executions list                # the run is now orphaned
-kitaru executions resume <id>         # picks up exactly where it stopped
+python stage_1_basic_agent.py
 ```
 
-Kitaru persisted every checkpoint output as the run progressed; the kill left an orphaned execution; resuming re-runs from the last incomplete checkpoint. PydanticAI's agent loop didn't need to know about any of it.
+The script runs the same flow twice in one process:
 
-**Mode:** turn (default). Each `agent.run_sync()` is one aggregating checkpoint. Kill mid-turn → resume re-runs the whole turn. Granular per-call caching (one checkpoint per LLM/tool call) is introduced in a later stage where it earns its keep.
+| | What happens | Time |
+|---|---|---|
+| **Run 1** (`FORCE_FAILURE=True`) | Agent does real work — multiple LLM + tool calls. After it completes, kitaru persists the turn's checkpoint. Then the flow body raises a simulated downstream failure. The run is marked `failed`, but the agent's work is saved. | ~30s |
+| **Run 2** (`FORCE_FAILURE=False`, same prompt) | kitaru sees the cached checkpoint from run 1 and serves the entire agent turn from cache — `Kitaru: Checkpoint 'default' cached.`, zero LLM calls. The flow body re-runs past the (now-disabled) failure check and returns the output that originated in run 1. | ~3s |
+
+Without kitaru, run 1's failure would have wasted ~20s of agent work and the dollars-and-cents of LLM tokens. With kitaru, run 2 picks up the saved work for free — and the output is the *same* answer the agent computed before the failure.
+
+**Mode:** turn (default). Each `agent.run_sync()` is one aggregating checkpoint. Granular per-call caching (one checkpoint per LLM/tool call) is introduced in a later stage where it earns its keep.
 
 **Not yet here:** sandbox (stage 2), credential isolation (stage 3), playbook (stage 4), typed services (stage 5), HITL (stages 6–7), replay (stage 8).
 
