@@ -1,6 +1,10 @@
-"""Wires a Profile into a durable, pydantic-ai-backed KitaruAgent."""
+"""Wires a Profile into a vanilla pydantic-ai Agent.
 
-from kitaru.adapters.pydantic_ai import KitaruAgent
+Kitaru's KitaruAgent wrap stays at *flow scope* (in the stage file), not
+in this helper, so readers see the kitaru ↔ pydantic-ai integration as a
+visible, deliberate seam — not as something the library hides.
+"""
+
 from pydantic_ai import Agent
 
 from .permissions import PermissionHandler
@@ -8,19 +12,12 @@ from .profile import Profile
 from .tools import build_tools
 
 
-def build_agent(profile: Profile) -> KitaruAgent:
-    """Build a durable PydanticAI agent from a profile.
-
-    Turn mode (default): each agent.run_sync() is one aggregating checkpoint.
-    Kill the flow mid-turn and resume → kitaru re-runs the turn. Granular
-    per-call caching is introduced in a later chapter where it earns its
-    keep (longer agent runs, expensive model calls).
-    """
+def build_agent(profile: Profile) -> Agent:
+    """Build a pydantic-ai Agent from a profile (no kitaru wrap)."""
     permission_handler = PermissionHandler(profile)
-    agent = Agent(
+    return Agent(
         profile.model,
         name=profile.name,
         system_prompt=profile.system_prompt,
         tools=build_tools(permission_handler),
     )
-    return KitaruAgent(agent)
