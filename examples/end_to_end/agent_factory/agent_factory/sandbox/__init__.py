@@ -1,5 +1,5 @@
-"""Sandbox runtime — Docker worker + (later) Docker proxy."""
+"""Sandbox runtime — Docker sandbox + (later) Docker proxy."""
 
-from .worker import DockerWorker
+from .runtime import DockerSandbox
 
-__all__ = ["DockerWorker"]
+__all__ = ["DockerSandbox"]

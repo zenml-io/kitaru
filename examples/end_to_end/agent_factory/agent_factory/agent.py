@@ -9,13 +9,13 @@ from pydantic_ai import Agent
 
 from .permissions import PermissionHandler
 from .profile import Profile
-from .tools import _Worker, build_tools
+from .tools import _Sandbox, build_tools
 
 
-def build_agent(profile: Profile, *, worker: _Worker | None = None) -> Agent:
+def build_agent(profile: Profile, *, sandbox: _Sandbox | None = None) -> Agent:
     """Build a pydantic-ai Agent from a profile (no kitaru wrap).
 
-    Pass a `worker` to sandbox the `exec` tool (stage 2+); omit it to run
+    Pass a `sandbox` to isolate the `exec` tool (stage 2+); omit it to run
     shell commands in-process (stage 1).
     """
     permission_handler = PermissionHandler(profile)
@@ -23,5 +23,5 @@ def build_agent(profile: Profile, *, worker: _Worker | None = None) -> Agent:
         profile.model,
         name=profile.name,
         system_prompt=profile.system_prompt,
-        tools=build_tools(permission_handler, worker=worker),
+        tools=build_tools(permission_handler, sandbox=sandbox),
     )

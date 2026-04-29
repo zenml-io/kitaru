@@ -58,32 +58,32 @@ Kitaru persisted every checkpoint output as the run progressed; the kill left an
 ### Stage 2 — Your agents need a sandbox
 
 **Stage file:** `stage_2_sandboxed_exec.py`
-**The pitch:** the `exec` tool runs in your host process in stage 1. Production agents need a sandbox so they can't `rm -rf /`. Stage 2 wraps each agent run in a `DockerWorker` context manager — every shell command now runs inside an isolated container with its own filesystem and network namespace.
+**The pitch:** the `exec` tool runs in your host process in stage 1. Production agents need a sandbox so they can't `rm -rf /`. Stage 2 wraps each agent run in a `DockerSandbox` context manager — every shell command now runs inside an isolated container with its own filesystem and network namespace.
 
 **Run it:**
 
 ```bash
-docker build -t agent-factory-worker -f docker/worker.Dockerfile docker/
+docker build -t agent-factory-sandbox -f docker/sandbox.Dockerfile docker/
 python stage_2_sandboxed_exec.py
 ```
 
-The agent's `exec` tool now `docker exec`s into `agent_factory_worker_<execution_id>`. Verify it really is sandboxed by asking it about the OS — the answer comes back as Debian (the worker container's image), not your host's macOS/Linux.
+The agent's `exec` tool now `docker exec`s into `agent_factory_sandbox_<execution_id>`. Verify it really is sandboxed by asking it about the OS — the answer comes back as Debian (the sandbox container's image), not your host's macOS/Linux.
 
 **Watch it boot:**
 
 ```bash
-docker ps                                              # see agent_factory_worker_<id>
-docker exec -it agent_factory_worker_<id> bash         # peek inside the live container
+docker ps                                              # see agent_factory_sandbox_<id>
+docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live container
 ```
 
 **What's in it:**
 
-- `agent_factory/sandbox/worker.py` — `DockerWorker` context manager that does `docker run -d` on entry, `docker stop` on exit
-- `docker/worker.Dockerfile` — minimal `python:3.11-slim` + bash + curl + jq
-- `agent_factory/tools.py` — `build_tools(permission_handler, worker=...)` accepts an optional worker; the `exec` tool routes through `worker.run(command)` when one's provided, otherwise runs in-process
-- A named volume `agent_factory_workspace_<execution_id>` mounts at `/workspace` in the worker — durable filesystem state survives flow pause/resume
+- `agent_factory/sandbox/runtime.py` — `DockerSandbox` context manager that does `docker run -d` on entry, `docker stop` on exit
+- `docker/sandbox.Dockerfile` — minimal `python:3.11-slim` + bash + curl + jq
+- `agent_factory/tools.py` — `build_tools(permission_handler, sandbox=...)` accepts an optional sandbox; the `exec` tool routes through `sandbox.run(command)` when one's provided, otherwise runs in-process
+- A named volume `agent_factory_workspace_<execution_id>` mounts at `/workspace` in the sandbox — durable filesystem state survives flow pause/resume
 
-**Mode:** still turn-mode kitaru. The sandbox lifecycle is bracketed by the flow body's `with DockerWorker(...) as worker:` — guaranteed teardown on exception, no leaked containers.
+**Mode:** still turn-mode kitaru. The sandbox lifecycle is bracketed by the flow body's `with DockerSandbox(...) as sandbox:` — guaranteed teardown on exception, no leaked containers.
 
 **Not yet here:** persistent-shell + marker-completion protocol (each `exec` call currently spins up a fresh `bash -c` — fine for the demo, will be upgraded so `cd` and shell state survive across calls). Credentials still come from the host process; chapter 3 isolates them.
 

@@ -23,10 +23,10 @@ class ExecResult(BaseModel):
     stderr: str
 
 
-class _Worker(Protocol):
+class _Sandbox(Protocol):
     """Anything with a `run(command) -> ExecResult` is a valid sandbox.
 
-    Stage 2's DockerWorker satisfies this; future Modal/remote workers can
+    Stage 2's DockerSandbox satisfies this; future Modal/remote sandboxes can
     too without the tool factory caring which.
     """
 
@@ -66,23 +66,23 @@ def _run_exec_in_process(command: str) -> ExecResult:
 def build_tools(
     permission_handler: PermissionHandler,
     *,
-    worker: _Worker | None = None,
+    sandbox: _Sandbox | None = None,
 ) -> list[Tool]:
     """Build the pydantic-ai toolset for an agent based on its profile's permissions.
 
-    Pass a `worker` to route `exec` through a sandbox (stage 2+); omit it to
-    run shell commands in the host process (stage 1).
+    Pass a `sandbox` to route `exec` through it (stage 2+); omit it to run
+    shell commands in the host process (stage 1).
     """
     tools: list[Tool] = []
 
     if permission_handler.can_use_tool("exec"):
-        sandboxed = worker is not None
-        if worker is not None:
-            captured_worker = worker
+        sandboxed = sandbox is not None
+        if sandbox is not None:
+            captured_sandbox = sandbox
 
             def exec_tool(command: str) -> ExecResult:
                 permission_handler.require_tool("exec")
-                return captured_worker.run(command)
+                return captured_sandbox.run(command)
         else:
 
             def exec_tool(command: str) -> ExecResult:

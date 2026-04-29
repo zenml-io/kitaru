@@ -1,4 +1,4 @@
-"""Stage 2 — the agent's `exec` tool runs inside a Docker worker.
+"""Stage 2 — the agent's `exec` tool runs inside a Docker sandbox.
 
 Same agent as stage 1; the only difference is that shell commands now
 execute in an isolated container instead of the host process. The agent's
@@ -6,20 +6,20 @@ execute in an isolated container instead of the host process. The agent's
 
 Run it:
 
-    docker build -t agent-factory-worker -f docker/worker.Dockerfile docker/
+    docker build -t agent-factory-sandbox -f docker/sandbox.Dockerfile docker/
     python stage_2_sandboxed_exec.py
 
-Watch the worker boot in real time:
+Watch the sandbox boot in real time:
 
-    docker ps          # see agent_factory_worker_<exec_id>
-    docker exec -it agent_factory_worker_<exec_id> bash   # peek inside
+    docker ps          # see agent_factory_sandbox_<exec_id>
+    docker exec -it agent_factory_sandbox_<exec_id> bash   # peek inside
 
 The container is torn down when the flow exits.
 """
 
 from agent_factory.agent import build_agent
 from agent_factory.profile import Profile
-from agent_factory.sandbox import DockerWorker
+from agent_factory.sandbox import DockerSandbox
 
 import kitaru
 from kitaru.adapters.pydantic_ai import KitaruAgent
@@ -40,8 +40,8 @@ DEFAULT_PROFILE = Profile(
 @kitaru.flow
 def agent_factory_flow(prompt: str) -> str:
     execution_id = _get_current_execution_id() or "local"
-    with DockerWorker(execution_id=execution_id) as worker:
-        agent = build_agent(DEFAULT_PROFILE, worker=worker)
+    with DockerSandbox(execution_id=execution_id) as sandbox:
+        agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
         agent = KitaruAgent(agent)
         return agent.run_sync(prompt).output
 
