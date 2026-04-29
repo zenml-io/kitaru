@@ -241,7 +241,15 @@ Per-stage growth:
 | 4 | + `service_configs: dict[str, ServiceConfig]`, `skill_sources: list[SkillSource]` |
 | 5 | (no new field; replay reuses stage 4's profile) |
 
-Still open: should `model` default to a kitaru model alias (`kitaru model register ...`)? Validation strategy for non-Pydantic dataclass (manual `__post_init__` checks vs accept-and-fail-late). **TODO.**
+### Model field
+
+`model` is a raw pydantic-ai provider string (e.g. `"openai:gpt-4o-mini"`), not a kitaru model alias. Reasons:
+
+- The chapter-1 hook is "durable agent in 60 lines" — adding a `kitaru model register ...` step before stage 1 runs adds friction on the wrong path.
+- `"openai:gpt-4o-mini"` is the canonical pydantic-ai form; matching it makes the example read as a natural extension of pydantic-ai's own docs.
+- This example has a single model call-site (the agent itself); the alias indirection has no payoff yet. The README's "Tips for production use" section mentions `kitaru model register` as the preferred path once there are multiple model call-sites or shared credentials.
+
+Still open: validation strategy for the dataclass (manual `__post_init__` checks vs accept-and-fail-late). **TODO.**
 
 ---
 
