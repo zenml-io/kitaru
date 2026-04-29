@@ -61,7 +61,7 @@ These were resolved during brainstorming and are the foundation for everything b
 | D2/E2 | Agent task | **Compliance/policy reviewer** (document processing) | Naturally exercises proxy injection (multiple auth-gated doc sources), per-clause HITL, memory precedents. Builds on `compliance_review`'s domain heritage but with a PydanticAI + sandbox stack. |
 | F2 | Local-first strategy | **Bundled fixtures + local mock-services container** | Zero external accounts. The mock server is a teaching artifact: readers can `tail -f` it to see the proxy injecting auth headers. |
 | G2 | Profile complexity | **Lean Profile, grows one field per stage** | Each stage adds exactly one Profile field and one architectural concept. Reader's mental model expands monotonically. |
-| H1 | Profile representation | ~~**`Profile` Python dataclass**~~ → **`Profile` Pydantic `BaseModel`** *(reversed 2026-04-29)* | The CLAUDE.md convention is "prefer Pydantic models for data structures," and kitaru's own public models are all Pydantic. Pydantic gives us free `__init__` validation, declarative cross-field checks via `@model_validator`, JSON/YAML parsing for `load_profile(...)`, and idiomatic kitaru style. Markdown+frontmatter à la Claude Agent SDK is still deferred. |
+| H1 | Profile representation | **`Profile` Pydantic `BaseModel`** *(updated 2026-04-29 — kami's actual Profile, not the dataclass mentioned in older notes)* | Initial brainstorm cited a "kami uses dataclass" claim that turned out to be stale; reading `kami_agent/profiles.py:105` shows kami's `Profile` is already a Pydantic `BaseModel`. The CLAUDE.md convention is "prefer Pydantic models for data structures," kitaru's own public models are all Pydantic, and kami matches. Markdown+frontmatter à la Claude Agent SDK is still deferred. |
 | I2 | HITL design | **Per-clause HITL via the `ask_question` typed-union dispatcher; the `severity_decision` kind suspends through the adapter's `wait_for_input(...)` helper** | The LLM decides when to pause for human input by calling `ask_question(kind="severity_decision", args={...})`. The flow body never calls `kitaru.wait()` directly; the tool body does, *through* the adapter's exported `wait_for_input(...)`. `@hitl_tool` marks the tool for capture/permission/system-prompt purposes; `wait_for_input` tags the wait with adapter metadata for dashboard/OTel correlation. Memory read + write are co-located in the `severity_decision` branch so each clause is one self-contained "consult precedents → ask human → record" round-trip. The same tool also covers freeform LLM-driven HITL via `kind="freeform"` (the `ask_human` use case from kami), so the example exposes both LLM-driven and workflow-driven HITL through a single architectural seam. |
 | J2 | Memory design | **Flow-scope precedents + execution-scope findings** | Cross-execution learning: `request_severity_decision` reads precedents, suggests defaults, writes confirmed decisions back. After 2-3 runs, the agent visibly "gets smarter." |
 | K3 | Tool inventory | ~~Five tools: `exec`, `fetch_document`, `request_severity_decision`, `publish_review`, `skill`~~ → **Four tools: `exec`, `skill`, `exec_service`, `ask_question`** *(reversed 2026-04-29 — kami parity claim was inaccurate)* | Kami actually has four tools (`exec`, `skill`, `ask_human`, `exec_service`), not the five we initially listed. Services dispatch through `exec_service`'s discriminated `ServiceCall` union (cases: `fetch_document`, `publish_review`). HITL is generalized into `ask_question` — the kami `ask_human` upgraded to a typed-union dispatcher mirroring `exec_service`'s shape (kinds: `freeform`, `severity_decision`). The `skill` tool stays as the architectural distinctive that separates "main loop" from "capabilities" — the agent's procedure lives in markdown, not Python. |
@@ -209,36 +209,56 @@ Each stage is one Python file that imports from the `agent_factory/` library. St
 
 The Profile grows one field per stage (decision G2). Resolved so far:
 
+Field shapes follow kami exactly (`kami_agent/profiles.py`), with `allowed_tools` upgraded from `list[str]` to `set[ToolName]` (Q2):
+
 ```python
-ToolName = Literal[
-    "exec",
-    "fetch_document",
-    "request_severity_decision",
-    "publish_review",
-    "skill",
+ToolName = Literal["exec", "skill", "exec_service", "ask_question"]
+
+class ServiceConfig(BaseModel):
+    enabled: bool = True
+    secret_reference: str                                  # e.g. "{{ wiki-token.value }}"
+    config: dict[str, Any] = Field(default_factory=dict)
+
+class SandboxProxyRule(BaseModel):
+    name: str
+    hosts: list[str]                                       # multiple hosts per rule
+    headers: dict[str, str]                                # full headers, with secret templates
+
+class LocalSkillSource(BaseModel):
+    type: Literal["local"] = "local"
+    path: str                                              # bind-mounted; no clone
+
+class GitRepoSkillSource(BaseModel):
+    type: Literal["git_repo"] = "git_repo"
+    repo_url: str
+    authorization_header: str | None = None
+
+SkillSource = Annotated[
+    LocalSkillSource | GitRepoSkillSource,
+    Field(discriminator="type"),
 ]
 
 class Profile(BaseModel):
     name: str
     system_prompt: str
-    model: str                                    # raw pydantic-ai provider string
+    model: str                                             # raw pydantic-ai provider string
     allowed_tools: set[ToolName] = Field(default_factory=set)
-    # Stage 3+:
+    # Stage 3+
     sandbox_proxy_rules: list[SandboxProxyRule] = Field(default_factory=list)
-    # Stage 4+:
+    # Stage 4+
     service_configs: dict[str, ServiceConfig] = Field(default_factory=dict)
     skill_sources: list[SkillSource] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _check_proxy_rules_have_services(self) -> "Profile":
-        rule_hosts = {rule.host for rule in self.sandbox_proxy_rules}
-        orphan = rule_hosts - set(self.service_configs)
-        if orphan:
-            raise ValueError(
-                f"sandbox_proxy_rules reference hosts with no service_configs entry: {sorted(orphan)}"
-            )
+    def _check_proxy_rules(self) -> "Profile":
+        # Cross-field: every host pattern that uses a service-derived secret template
+        # must reference a service the profile actually configures. (Heuristic: any
+        # header value with a `{{ <service>.* }}` template.)
+        ...
         return self
 ```
+
+The chapter 1 default profile uses `LocalSkillSource(path="./skills/compliance-reviewer")` — bind-mounted, no clone. `GitRepoSkillSource` is teased for the post-chapter "remote skills" follow-up.
 
 `load_profile(name)` deserializes a YAML/JSON file under `agent_factory/profiles/<name>.yaml` via `Profile.model_validate(...)` — Pydantic does the validation, no extra plumbing.
 
