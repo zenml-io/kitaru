@@ -268,7 +268,26 @@ Handled by Pydantic per the reversed H1: built-in type checks at construction, p
 
 ## 7. The five tools (TODO — section 4 of brainstorm)
 
-All five are gated by `PermissionHandler.require_tool(name)` at execution time, even though `build_tools()` already filters by `allowed_tools`. Defense in depth — same pattern as kami.
+### Permission and failure model (applies to all five tools)
+
+Each tool has three structurally distinct failure paths. They surface to the agent differently:
+
+| Failure | What happens | Why |
+|---|---|---|
+| **Permission denied** (tool not in `Profile.allowed_tools`) | `build_tools(profile.allowed_tools)` filters the tool out at construction time — the LLM never sees it. The `PermissionHandler.require_tool(name)` runtime check in the tool body is a **bug-tripwire**: if it ever fires (Profile mutated mid-flow), it raises `KitaruRuntimeError` and terminates the flow. | Permission denial leaking to the LLM as a "soft" exit code invites retries, prompt-injection probes, and hallucinated "the tool is broken" responses. Static filtering is the right gate; the runtime check is defense-in-depth, not a graceful fallback. |
+| **Sandbox/proxy infrastructure failure** (worker container died, proxy unreachable, network partitioned) | Tool body catches the low-level error and re-raises `KitaruRuntimeError` with a clear cause. Flow terminates; operator sees it in the dashboard and can `kitaru executions retry` after fixing the infrastructure. | Asking the agent to recover from "Docker daemon went away" wastes tokens and pollutes the trace. Infrastructure problems are the operator's job. |
+| **Application-level failure** (`grep` matched nothing → exit 1; `curl` returned 404; `pdftotext` complained about a corrupt PDF; mock service returned 500) | Tool returns its normal result type (`ExecResult`, `FetchDocumentResult`, etc.) with the non-zero exit code / 4xx / 5xx surfaced verbatim. | These are signals the agent should reason about — wrapping them as exceptions fights pydantic-ai's tool semantics. |
+
+**Deviation from kami:** `kami_agent/sandbox/manager.py::execute_command` intentionally returns `"[sandbox-error] ..."` strings for both infrastructure and command failures and never raises. The example improves on this by separating the two — infrastructure problems become `KitaruRuntimeError` (operator's job, surfaces in the dashboard with a clear message and a `kitaru executions retry` path), application failures stay as structured tool results (agent's job to reason about). The "never raise from a tool body" pattern made sense for kami because everything in the early prototype was best-effort cloud sandbox work; this example uses kitaru's durable-execution semantics as the recovery layer instead.
+
+### Logging and redaction
+
+Every tool routes its argument and result logging through a shared helper (`agent_factory/tools.py::_log_tool_call` / `_log_tool_result` / `_log_tool_error`) that:
+
+- Redacts dict keys matching the case-insensitive pattern `authorization|token|secret|password|key`. The replacement value is the literal string `"<redacted>"`.
+- Truncates string values longer than 500 chars to `"<first 500 chars>… [truncated]"`.
+
+Same defaults as kami's `tools.py`. Tool authors who need to log a secret deliberately bypass the helper — there's no `force=` flag.
 
 The HITL tool integrates with PydanticAI through the kitaru adapter's two-piece seam:
 
