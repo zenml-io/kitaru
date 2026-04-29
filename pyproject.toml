@@ -47,7 +47,7 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = [
-    "openai>=1.0.0,<2",
+    "openai>=1.0.0,<3",
 ]
 anthropic = [
     "anthropic>=0.40.0,<1",
@@ -114,7 +114,7 @@ dev = [
     "griffe-typingdoc>=0.2.8,<1.0.0",
     # See note on the [pydantic-ai] extra above. Capped pending #248.
     "pydantic-ai-slim>=1.75.0,<1.86.0",
-    "openai>=1.0.0,<2",
+    "openai>=1.0.0,<3",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
     "pip-audit>=2.9.0",
