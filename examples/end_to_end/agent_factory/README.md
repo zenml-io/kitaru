@@ -1,8 +1,6 @@
 # agent_factory
 
-A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation, HITL gates, memory, and replay all wired up correctly.
-
-The architecture is pioneered by [`kami`](../../../../kami-agent/) (an internal ZenML project), simplified to be locally runnable with one `docker compose up` and zero external accounts.
+A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation, HITL gates, memory, and replay all wired up correctly. Locally runnable with one `docker compose up` and zero external accounts.
 
 ## Who this is for
 
