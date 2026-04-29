@@ -13,7 +13,7 @@ This document is the working spec for a new flagship example in `examples/end_to
 
 ### Goal
 
-Ship a **starter kit for an internal agent factory**: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated PydanticAI agents fast — with credential isolation, HITL gates, memory, observability, and replay all wired up correctly. The architecture is pioneered by `kami` (an internal ZenML project), simplified to be locally runnable with one `docker compose up` and zero external accounts.
+Ship a **starter kit for an internal agent factory**: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated PydanticAI agents (or chosen harness like OpenAI SDK, Anthropic Agents SDK) fast — with credential isolation, HITL gates, memory, observability, and replay all wired up correctly. The architecture is pioneered by `kami` (an internal ZenML project), simplified to be locally runnable with one `docker compose up` and zero external accounts.
 
 The reader is a platform engineer who will fork this and adapt it. The chapters introduce *capabilities* their platform needs (a sandbox, a credential model, a way to ask humans, a way to remember, a way to re-run), one tool at a time. The shipped agent has a deliberately generic demo prompt at each stage — the *framework* is the through-line, not a vertical domain.
 
@@ -219,6 +219,7 @@ Each stage is one Python file that imports from the `agent_factory/` library. St
 ### Notable design choices
 
 - **No `bootstrap.py`.** Kami's bootstrap mutates several module-level singletons; for an example we want to avoid teaching that pattern. Stage 4's flow body does the equivalent setup explicitly so readers can see it. Cleaner teaching, ~30 fewer lines of indirection.
+- **Single shared library; no per-stage snapshots, no git tags.** All stage files import from the same `agent_factory/` library. The library grows monotonically as stages introduce capabilities (stage 4 adds the `skill` tool to `tools.py`, stage 5 adds `exec_service`, etc.). Older stage files stay valid because the **Profile** is the per-stage gate — `stage_1_basic_agent.py` says `allowed_tools={"exec"}` and `build_tools(permission_handler)` filters out everything else; `stage_4_skills.py` adds `"skill"` to the set and gets that tool. Progressive disclosure happens through the Profile, not through versioning the library. A reader peeking at the library at chapter-1 time and seeing tools they haven't met yet is a feature for forking devs (full kit ready to extend) and a non-issue for chapter readers (the stage file's Profile is the chapter's "what's new" surface).
 - **Tests ship with the example.** Three small tests prove the architecture works — proxy injection, full loop with mocks, stage 1 smoke. Doubles as CI for the kitaru repo.
 
 ---
