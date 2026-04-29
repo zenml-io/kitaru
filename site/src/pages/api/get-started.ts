@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { FORM_TYPES } from '../../lib/formTypes';
 import { segmentCall } from '../../lib/segment';
 
 export const prerender = false;
@@ -74,7 +75,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       email,
       timestamp: new Date().toISOString(),
       source: 'book-a-demo',
-      formType: 'book-a-demo',
+      formType: FORM_TYPES.DEMO_REQUEST,
       product: 'kitaru',
       nextStep: 'cal-inline-booking',
     }));
@@ -97,7 +98,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         company,
         email,
         source: 'book-a-demo',
-        formType: 'book-a-demo',
+        formType: FORM_TYPES.DEMO_REQUEST,
         product: 'kitaru',
         nextStep: 'cal-inline-booking',
       },
