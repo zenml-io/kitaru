@@ -25,6 +25,11 @@ updates:
       timezone: Europe/Amsterdam
     reviewers: [strickvl]
     labels: [dependencies]
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
     cooldown:
       default-days: 7
       semver-major-days: 14
@@ -40,6 +45,14 @@ updates:
       timezone: Europe/Amsterdam
     reviewers: [strickvl]
     labels: [dependencies]
+    groups:
+      fumadocs:
+        patterns:
+          - "fumadocs-*"
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
     cooldown:
       default-days: 7
       semver-major-days: 14
@@ -55,6 +68,11 @@ updates:
       timezone: Europe/Amsterdam
     reviewers: [strickvl]
     labels: [dependencies]
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
     cooldown:
       default-days: 7
       semver-major-days: 14
