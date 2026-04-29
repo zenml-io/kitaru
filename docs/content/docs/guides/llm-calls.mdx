@@ -195,7 +195,7 @@ def agent_step(messages: list[dict]) -> str:
 ```
 
 For a full example of a tool-calling agent built this way, see
-[`examples/coding_agent/`](https://github.com/zenml-io/kitaru/tree/develop/examples/coding_agent).
+[`examples/end_to_end/coding_agent/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/coding_agent).
 
 <Callout type="info">
   Tool calling and structured output support for `kitaru.llm()` is on the
@@ -225,7 +225,7 @@ uv sync --extra local --extra llm
 
 # Register an alias (with or without a linked secret) before running the example.
 uv run kitaru model register fast --model openai/gpt-5-nano
-uv run examples/llm/flow_with_llm.py
+uv run examples/features/llm/flow_with_llm.py
 uv run pytest tests/test_phase12_llm_example.py
 ```
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from examples.basic_flow.flow_with_configuration import run_workflow
+from examples.features.basic_flow.flow_with_configuration import run_workflow
 from zenml.client import Client
 
 

@@ -347,15 +347,15 @@ fi
 # ---------------------------------------------------------------------------
 section_header "PydanticAI adapter"
 
-run_test "examples/pydantic_ai_agent/pydantic_ai_adapter.py" \
-    $UV_RUN python examples/pydantic_ai_agent/pydantic_ai_adapter.py
+run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
+    $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run
 run_expected_failure "kitaru build rejects local stack deployments" \
     "not one the Kitaru server can execute remotely" \
-    $UV_RUN kitaru build examples/basic_flow/first_working_flow.py:research_agent \
+    $UV_RUN kitaru build examples/features/basic_flow/first_working_flow.py:research_agent \
         --input '{"topic":"smoke"}'
 
 # ---------------------------------------------------------------------------
@@ -377,13 +377,13 @@ run_test "kitaru secrets delete smoke secret" \
 # ---------------------------------------------------------------------------
 section_header "Core SDK flows"
 
-run_test "Basic flow"              timed 60 $UV_RUN examples/basic_flow/first_working_flow.py
-run_test "Flow with logging"       timed 60 $UV_RUN examples/basic_flow/flow_with_logging.py
-run_test "Flow with artifacts"     timed 60 $UV_RUN examples/basic_flow/flow_with_artifacts.py
-run_test "Flow with configuration" timed 60 $UV_RUN examples/basic_flow/flow_with_configuration.py
-run_test "Flow with fan-out"       timed 60 $UV_RUN examples/basic_flow/flow_with_checkpoint_runtime.py
-run_test "Client execution mgmt"   timed 60 $UV_RUN examples/execution_management/client_execution_management.py
-run_test "Replay with overrides"   timed 120 $UV_RUN examples/replay/replay_with_overrides.py
+run_test "Basic flow"              timed 60 $UV_RUN examples/features/basic_flow/first_working_flow.py
+run_test "Flow with logging"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_logging.py
+run_test "Flow with artifacts"     timed 60 $UV_RUN examples/features/basic_flow/flow_with_artifacts.py
+run_test "Flow with configuration" timed 60 $UV_RUN examples/features/basic_flow/flow_with_configuration.py
+run_test "Flow with fan-out"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_checkpoint_runtime.py
+run_test "Client execution mgmt"   timed 60 $UV_RUN examples/features/execution_management/client_execution_management.py
+run_test "Replay with overrides"   timed 120 $UV_RUN examples/features/replay/replay_with_overrides.py
 
 # ---------------------------------------------------------------------------
 # CLI inspection of executions
@@ -426,7 +426,7 @@ section_header "LLM flow"
 
 if [[ "$HAS_OPENAI" == true ]]; then
     run_test "LLM flow (flow_with_llm)" \
-        timed 30 $UV_RUN examples/llm/flow_with_llm.py
+        timed 30 $UV_RUN examples/features/llm/flow_with_llm.py
 else
     skip_test "LLM flow (flow_with_llm)" "OPENAI_API_KEY not set"
 fi
@@ -453,7 +453,7 @@ run_test "MCP: kitaru_executions_list" \
         --input-json '{"limit": 3}' --json
 
 run_test "MCP query snapshot (example)" \
-    timed 30 $UV_RUN examples/mcp/mcp_query_tools.py
+    timed 30 $UV_RUN examples/features/mcp/mcp_query_tools.py
 
 fi  # LOGIN_RC == 0
 

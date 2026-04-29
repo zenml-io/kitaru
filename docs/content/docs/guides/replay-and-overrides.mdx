@@ -5,8 +5,7 @@ description: Replay executions from checkpoints with flow and checkpoint overrid
 
 Replay creates a **new execution** from a previous one.
 
-Use replay when you want to keep earlier durable work and rerun only a suffix of
-your workflow.
+Use replay when you want to keep earlier durable work and rerun only parts of your workflow.
 
 ## SDK replay
 
@@ -60,6 +59,16 @@ kitaru executions replay kr-a8f3c2 \
 
 If a selector is ambiguous, replay raises `KitaruStateError`.
 
+## What gets replayed
+
+Replay computes a set of replay roots, then re-executes those roots and their
+downstream descendants.
+
+- `from_` always contributes one replay root.
+- Each `checkpoint.<selector>` override adds replay roots at the direct
+  consumers of that checkpoint output.
+- Any checkpoint that is neither a replay root nor a downstream dependency is skipped.
+
 ## Override keys
 
 Replay override keys must start with `checkpoint.`.
@@ -70,6 +79,17 @@ Examples:
 - `checkpoint.fetch_data`
 
 Any other prefix raises `KitaruUsageError`.
+
+Override behavior:
+
+- Overrides target checkpoint outputs (`checkpoint.<selector>`).
+- The overridden checkpoint must expose a single output.
+- `checkpoint.<selector>` replaces that checkpoint output at each direct
+  consumer input; the source checkpoint itself is not forced to re-execute.
+- Replay roots include direct consumers of the overridden checkpoint output, so
+  replay re-executes from those consumers forward.
+- If an overridden checkpoint fans out to multiple direct consumers, replay
+  re-executes all those consumer branches.
 
 ## Waits during replay
 
@@ -98,7 +118,7 @@ if latest.failure:
 
 ```bash
 uv sync --extra local
-uv run examples/replay/replay_with_overrides.py
+uv run examples/features/replay/replay_with_overrides.py
 uv run pytest tests/test_phase16_replay_example.py
 ```
 

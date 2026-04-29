@@ -54,6 +54,7 @@ from kitaru._client._logs import (
     _coerce_log_lineno,
     _coerce_log_text,
     _is_empty_log_result_error,
+    _is_log_endpoint_version_skew_error,
     _is_otel_log_retrieval_error,
     _log_sort_key,
     _map_runtime_log_entry,
@@ -513,7 +514,7 @@ def _import_module_for_replay(module_name: str, run_id: str | Any) -> Any:
 
     1. Direct ``importlib.import_module`` (exact match).
     2. Search ``sys.modules`` for a suffix match (e.g. the module is loaded
-       as ``examples.replay.replay_with_overrides``).
+       as ``examples.features.replay.replay_with_overrides``).
     3. Return ``__main__`` — when invoked via ``python -m pkg.mod``, the
        module is loaded as ``__main__`` and won't appear under its dotted
        name in ``sys.modules``.
@@ -685,6 +686,16 @@ class _ExecutionsAPI:
                 if endpoint_hint:
                     message += f" View them in your OTEL backend at: {endpoint_hint}."
                 raise KitaruLogRetrievalError(message) from exc
+
+            if _is_log_endpoint_version_skew_error(error_message):
+                raise KitaruLogRetrievalError(
+                    "Unable to retrieve runtime logs because the server log "
+                    "endpoint is incompatible with this Kitaru client. This "
+                    "usually means the client and server are running different "
+                    "Kitaru versions. Upgrade the server runtime or align the "
+                    "client and server versions, then retry `kitaru executions "
+                    "logs`."
+                ) from exc
 
             raise KitaruLogRetrievalError(
                 f"Failed to retrieve runtime logs for source '{source}': {exc}"

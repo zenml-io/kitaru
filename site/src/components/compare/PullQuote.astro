@@ -2,48 +2,79 @@
 interface Props {
   quote: string;
   attribution?: string;
+  source?: string;
 }
-const { quote, attribution } = Astro.props;
+const { quote, attribution, source } = Astro.props;
 ---
 
 <figure class="pullquote" data-reveal>
-  <svg class="pullquote-mark" viewBox="0 0 32 32" aria-hidden="true">
-    <path fill="currentColor" d="M13 10c0-2.2-1.8-4-4-4H8c-2.2 0-4 1.8-4 4v3c0 5 3 8 7 9v-3c-2-.8-3-2.5-3-5V13h1c1.7 0 3-1.3 3-3zm15 0c0-2.2-1.8-4-4-4h-1c-2.2 0-4 1.8-4 4v3c0 5 3 8 7 9v-3c-2-.8-3-2.5-3-5V13h1c1.7 0 3-1.3 3-3z"/>
-  </svg>
-  <blockquote>{quote}</blockquote>
-  {attribution && <figcaption>— {attribution}</figcaption>}
+  <div class="pullquote-inner">
+    <span class="pullquote-mark" aria-hidden="true">&ldquo;</span>
+    <blockquote>{quote}</blockquote>
+    {attribution && (
+      <figcaption>
+        {source ? (
+          <a href={source}>{attribution}</a>
+        ) : (
+          attribution
+        )}
+      </figcaption>
+    )}
+  </div>
 </figure>
 
 <style>
+  /* Full-bleed band — breaks out of the centered article column to span the
+     full viewport. Canonical formula: width: 100vw + negative inline margins
+     sized so the left/right edges land at the viewport edges. No positioning
+     tricks; works because the ancestor .compare-body is centered. */
   .pullquote {
-    margin: 48px auto;
-    max-width: 760px;
-    padding: 32px 36px;
-    border-left: 3px solid var(--color-accent);
-    background: var(--color-surface-warm);
-    border-radius: 0 12px 12px 0;
-    position: relative;
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    margin-top: 80px;
+    margin-bottom: 80px;
+    padding: clamp(64px, 10vw, 112px) 24px;
+    background: var(--color-bg);
+    text-align: center;
   }
+  .pullquote-inner {
+    max-width: 880px;
+    margin: 0 auto;
+  }
+  /* Oversized quote mark as the visual anchor — replaces the old
+     left-border accent with a typographic gesture. */
   .pullquote-mark {
-    position: absolute;
-    top: 18px;
-    right: 24px;
-    width: 28px;
-    height: 28px;
+    display: block;
+    font-size: clamp(72px, 10vw, 112px);
+    line-height: 0.6;
     color: var(--color-accent);
-    opacity: 0.35;
+    margin-bottom: 16px;
+    user-select: none;
+    font-weight: 600;
   }
   blockquote {
-    font-family: 'DM Serif Display', serif;
-    font-size: clamp(20px, 2.4vw, 26px);
-    line-height: 1.4;
+    font-size: clamp(26px, 3.2vw, 40px);
+    line-height: 1.3;
     color: var(--color-primary);
     margin: 0;
-    font-style: italic;
+    letter-spacing: -0.015em;
+    font-weight: 600;
   }
   figcaption {
-    margin-top: 12px;
-    font-size: 14px;
+    margin-top: 24px;
+    font-size: 13px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     color: var(--color-muted);
+  }
+  figcaption a {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  figcaption a:hover {
+    color: var(--color-accent);
   }
 </style>

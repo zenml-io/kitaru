@@ -183,7 +183,7 @@ Check my Kitaru status and list the five latest executions. Summarize anything w
 Start and watch a flow:
 
 ```text
-Run `examples/basic_flow/first_working_flow.py:research_agent` with topic="durable execution", then watch the execution until it finishes.
+Run `examples/features/basic_flow/first_working_flow.py:research_agent` with topic="durable execution", then watch the execution until it finishes.
 ```
 
 Resolve a waiting execution safely:
@@ -236,8 +236,8 @@ The right side is the flow attribute name in that module.
 Examples:
 
 ```text
-examples/basic_flow/first_working_flow.py:research_agent
-./examples/basic_flow/first_working_flow.py:research_agent
+examples/features/basic_flow/first_working_flow.py:research_agent
+./examples/features/basic_flow/first_working_flow.py:research_agent
 ```
 
 Pass flow inputs as `args` (a JSON object) and optionally specify a `stack`:
@@ -435,8 +435,8 @@ Recommended maintenance sequence:
 4. `kitaru_memory_compaction_log(scope="repo_docs", scope_type="namespace")`
 
 For a complete memory walkthrough including seeding, flow usage, and
-cross-surface inspection, see `examples/memory/flow_with_memory.py` and
-its [demo playbook](https://github.com/zenml-io/kitaru/tree/develop/examples/memory/DEMO_PLAYBOOK.md)
+cross-surface inspection, see `examples/features/memory/flow_with_memory.py` and
+its [demo playbook](https://github.com/zenml-io/kitaru/tree/develop/examples/features/memory/DEMO_PLAYBOOK.md)
 for detailed MCP tool-call sequences.
 
 ## Authentication and context

@@ -9,7 +9,7 @@ draft: true
 
 I have a Discord channel I check too often. It's the AI news firehose: model releases, harness papers, durable execution drama, the occasional Karpathy tweet. Most of it is noise. Some of it genuinely matters. The signal-to-noise is bad enough that I avoid the channel for a few days and then drown when I open it again.
 
-So I built myself a small agent. It reads across a few sources, scores what it finds, and prints a short brief I can read in two minutes. I put it on Kitaru and PydanticAI mostly because we use Kitaru ourselves and I wanted a non-trivial example to break, replay, and poke at on a real workload. The full thing lives at [examples/news_scout](https://github.com/zenml-io/kitaru/tree/develop/examples/news_scout).
+So I built myself a small agent. It reads across a few sources, scores what it finds, and prints a short brief I can read in two minutes. I put it on Kitaru and PydanticAI mostly because we use Kitaru ourselves and I wanted a non-trivial example to break, replay, and poke at on a real workload. The full thing lives at [examples/end_to_end/news_scout](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/news_scout).
 
 ## What it actually does
 
@@ -138,8 +138,8 @@ cd kitaru
 uv sync --extra local --extra pydantic-ai --extra llm
 kitaru init
 
-# Drop your keys in examples/news_scout/.env, then:
-cd examples/news_scout
+# Drop your keys in examples/end_to_end/news_scout/.env, then:
+cd examples/end_to_end/news_scout
 python scout.py --seed-profile
 python scout.py --interests "ai agents, robotics"
 ```

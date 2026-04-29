@@ -90,6 +90,7 @@ class TestPublicExports:
             "KitaruLogRetrievalError",
             "KitaruMemoryArtifactUnavailableError",
             "KitaruRuntimeError",
+            "KitaruStackIntegrationDependencyError",
             "KitaruStateError",
             "KitaruUsageError",
             "KitaruUserCodeError",

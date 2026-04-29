@@ -16,7 +16,9 @@ import time
 from contextlib import suppress
 
 import pytest
-from examples.execution_management.wait_and_resume import wait_for_approval_flow
+from examples.features.execution_management.wait_and_resume import (
+    wait_for_approval_flow,
+)
 
 from kitaru.client import KitaruClient
 from kitaru.errors import KitaruFeatureNotAvailableError, KitaruStateError
@@ -51,7 +53,7 @@ def _wait_for_pending_wait(
         if state["error"] is not None:
             raise RuntimeError(
                 "Flow run failed before reaching a wait condition."
-            ) from state["error"]  # type: ignore[arg-type]
+            ) from state["error"]  # ty: ignore[invalid-raise]
         try:
             found = _find_pending_wait(client=client, topic=topic)
         except ValueError:

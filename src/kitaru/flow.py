@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from functools import update_wrapper, wraps
 from typing import Any, cast, overload
+from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import ConfigDict, create_model
@@ -63,6 +64,7 @@ from kitaru.errors import (
     KitaruBackendError,
     KitaruDeploymentInputValuesError,
     KitaruRuntimeError,
+    KitaruStackIntegrationDependencyError,
     KitaruStateError,
     KitaruUsageError,
     classify_failure_origin,
@@ -99,6 +101,27 @@ def _temporary_active_stack(stack_name_or_id: str | None) -> Iterator[None]:
             yield
         finally:
             client.activate_stack(old_stack_id)
+
+
+def _preflight_active_stack_implementation_hydration(
+    *,
+    client_factory: Callable[[], Any] | None = None,
+) -> None:
+    """Verify that the active stack can be loaded as implementation objects."""
+    client = (client_factory or Client)()
+    try:
+        _ = client.active_stack
+    except ImportError as exc:
+        zenml_guidance = str(exc).strip()
+        message = (
+            "Cannot submit this Kitaru flow because the active stack could not "
+            "be loaded in this Python environment.\n\n"
+            "A stack integration dependency appears to be missing. Install the "
+            "missing ZenML integration or stack requirements, then retry."
+        )
+        if zenml_guidance:
+            message = f"{message}\n\nZenML guidance:\n\n{zenml_guidance}"
+        raise KitaruStackIntegrationDependencyError(message) from None
 
 
 def _register_pipeline_source_alias(
@@ -352,6 +375,90 @@ def _deployment_extra_metadata(
     if stack:
         metadata["stack"] = stack
     return {key: value for key, value in metadata.items() if value is not None}
+
+
+def _extract_run_pipeline_id(run: PipelineRunResponse) -> str | None:
+    """Extract the Kitaru flow/pipeline ID from structured run data."""
+    candidate_paths = (
+        ("pipeline_id",),
+        ("pipeline", "id"),
+        ("snapshot", "pipeline_id"),
+        ("snapshot", "pipeline", "id"),
+        ("resources", "pipeline", "id"),
+    )
+    for path in candidate_paths:
+        try:
+            value: Any = run
+            for attr in path:
+                value = getattr(value, attr, None)
+                if value is None:
+                    break
+            if value is None:
+                continue
+            pipeline_id = str(value).strip()
+            if pipeline_id:
+                return pipeline_id
+        except Exception:
+            logger.debug(
+                "Failed to read pipeline ID from run %s via %s.",
+                getattr(run, "id", "<unknown>"),
+                ".".join(path),
+                exc_info=True,
+            )
+    return None
+
+
+def _build_kitaru_execution_url(
+    run: PipelineRunResponse,
+    *,
+    server_url: str | None,
+) -> str | None:
+    """Build the Kitaru-native execution detail URL for a run if possible."""
+    if server_url is None or not str(server_url).strip():
+        return None
+
+    execution_id_value = getattr(run, "id", None)
+    if execution_id_value is None:
+        return None
+    execution_id = str(execution_id_value).strip()
+    if not execution_id:
+        return None
+
+    flow_id = _extract_run_pipeline_id(run)
+    if flow_id is None:
+        return None
+
+    base_url = str(server_url).strip().rstrip("/")
+    flow_segment = quote(flow_id, safe="")
+    execution_segment = quote(execution_id, safe="")
+    return f"{base_url}/flows/{flow_segment}/executions/{execution_segment}"
+
+
+def _emit_kitaru_execution_url(
+    run: PipelineRunResponse,
+    *,
+    server_url: str | None,
+) -> None:
+    """Log a Kitaru-native execution URL without risking flow execution."""
+    try:
+        url = _build_kitaru_execution_url(run, server_url=server_url)
+    except Exception:
+        logger.debug(
+            "Failed to build Kitaru execution URL for run %s.",
+            getattr(run, "id", "<unknown>"),
+            exc_info=True,
+        )
+        return
+
+    if url is None:
+        logger.debug(
+            "Skipping Kitaru execution URL for run %s because structured URL "
+            "data is incomplete.",
+            getattr(run, "id", "<unknown>"),
+        )
+        return
+
+    logger.info("Execution URL: %s", url)
 
 
 def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
@@ -869,6 +976,7 @@ class _FlowDefinition:
                 operation="deploy",
                 flow=flow_name,
             )
+            _preflight_active_stack_implementation_hydration()
             try:
                 configured_pipeline.prepare(*args, **kwargs)
             except (RuntimeError, ValueError) as exc:
@@ -1021,6 +1129,7 @@ class _FlowDefinition:
         )
 
         with _temporary_active_stack(resolved_execution.stack):
+            _preflight_active_stack_implementation_hydration()
             deployment_metadata = _deployment_metadata_for_stack(
                 resolved_execution.stack
             )
@@ -1076,6 +1185,10 @@ class _FlowDefinition:
             )
             raise KitaruRuntimeError("Replay did not produce a pipeline run.")
 
+        _emit_kitaru_execution_url(
+            replayed_run,
+            server_url=getattr(resolved_connection, "server_url", None),
+        )
         persist_frozen_execution_spec(
             run_id=replayed_run.id,
             frozen_execution_spec=frozen_execution_spec,
@@ -1130,6 +1243,7 @@ class _FlowDefinition:
         )
 
         with _temporary_active_stack(resolved_execution.stack):
+            _preflight_active_stack_implementation_hydration()
             deployment_metadata = _deployment_metadata_for_stack(
                 resolved_execution.stack
             )
@@ -1139,6 +1253,10 @@ class _FlowDefinition:
         if run is None:
             raise KitaruRuntimeError("Flow execution did not produce a pipeline run.")
 
+        _emit_kitaru_execution_url(
+            run,
+            server_url=getattr(resolved_connection, "server_url", None),
+        )
         track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
         persist_frozen_execution_spec(
             run_id=run.id,
