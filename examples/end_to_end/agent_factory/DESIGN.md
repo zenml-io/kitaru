@@ -62,9 +62,9 @@ These were resolved during brainstorming and are the foundation for everything b
 | F2 | Local-first strategy | **Bundled fixtures + local mock-services container** | Zero external accounts. The mock server is a teaching artifact: readers can `tail -f` it to see the proxy injecting auth headers. |
 | G2 | Profile complexity | **Lean Profile, grows one field per stage** | Each stage adds exactly one Profile field and one architectural concept. Reader's mental model expands monotonically. |
 | H1 | Profile representation | ~~**`Profile` Python dataclass**~~ → **`Profile` Pydantic `BaseModel`** *(reversed 2026-04-29)* | The CLAUDE.md convention is "prefer Pydantic models for data structures," and kitaru's own public models are all Pydantic. Pydantic gives us free `__init__` validation, declarative cross-field checks via `@model_validator`, JSON/YAML parsing for `load_profile(...)`, and idiomatic kitaru style. Markdown+frontmatter à la Claude Agent SDK is still deferred. |
-| I2 | HITL design | **Per-clause HITL via `@hitl_tool`-decorated agent tool, suspended via the adapter's `wait_for_input(...)` helper** | The LLM decides when to pause for human input by calling `request_severity_decision`. The flow body never calls `kitaru.wait()` directly; the tool body does, *through* the adapter's exported `wait_for_input(...)`. The decorator marks the tool for capture/permission/system-prompt purposes; the helper tags the wait with adapter metadata for dashboard/OTel correlation. Memory read + write are co-located in the same tool body so each clause is one self-contained "consult precedents → ask human → record" round-trip. |
+| I2 | HITL design | **Per-clause HITL via the `ask_question` typed-union dispatcher; the `severity_decision` kind suspends through the adapter's `wait_for_input(...)` helper** | The LLM decides when to pause for human input by calling `ask_question(kind="severity_decision", args={...})`. The flow body never calls `kitaru.wait()` directly; the tool body does, *through* the adapter's exported `wait_for_input(...)`. `@hitl_tool` marks the tool for capture/permission/system-prompt purposes; `wait_for_input` tags the wait with adapter metadata for dashboard/OTel correlation. Memory read + write are co-located in the `severity_decision` branch so each clause is one self-contained "consult precedents → ask human → record" round-trip. The same tool also covers freeform LLM-driven HITL via `kind="freeform"` (the `ask_human` use case from kami), so the example exposes both LLM-driven and workflow-driven HITL through a single architectural seam. |
 | J2 | Memory design | **Flow-scope precedents + execution-scope findings** | Cross-execution learning: `request_severity_decision` reads precedents, suggests defaults, writes confirmed decisions back. After 2-3 runs, the agent visibly "gets smarter." |
-| K3 | Tool inventory | **Five tools: `exec`, `fetch_document`, `request_severity_decision`, `publish_review`, `skill`** | Full kami parity. The `skill` tool is the architectural distinctive that separates "main loop" from "capabilities" — the agent's procedure lives in markdown, not Python. |
+| K3 | Tool inventory | ~~Five tools: `exec`, `fetch_document`, `request_severity_decision`, `publish_review`, `skill`~~ → **Four tools: `exec`, `skill`, `exec_service`, `ask_question`** *(reversed 2026-04-29 — kami parity claim was inaccurate)* | Kami actually has four tools (`exec`, `skill`, `ask_human`, `exec_service`), not the five we initially listed. Services dispatch through `exec_service`'s discriminated `ServiceCall` union (cases: `fetch_document`, `publish_review`). HITL is generalized into `ask_question` — the kami `ask_human` upgraded to a typed-union dispatcher mirroring `exec_service`'s shape (kinds: `freeform`, `severity_decision`). The `skill` tool stays as the architectural distinctive that separates "main loop" from "capabilities" — the agent's procedure lives in markdown, not Python. |
 | L2 | Replay scenario | **"Policy change" replay (edit fixture file, replay from `check_clause_2`)** | The most realistic replay scenario for the compliance domain. No version metadata, no v1/v2 schema — replay overrides the `load_policy` checkpoint output: `overrides={"checkpoint.load_policy": <new policy text>}`. |
 | L2-impl | Replay-input mechanism | **Checkpoint-output override on `load_policy`** | A `@checkpoint def load_policy(path) -> str` runs early in the flow; its output is the artifact replay swaps. Keeps `find_clauses` cached on its own input (the doc), so replay re-executes only from `check_clause_2` onward. Demos `overrides={"checkpoint.*": ...}` — a kitaru feature no other example covers. Accepted 2026-04-29. |
 | H1-tools | `allowed_tools` typing | **`set[ToolName]` with `ToolName = Literal[...]` of the five tool names** | Closed set per K3, so a Literal alias gives readers IDE autocomplete and ty/ruff errors on typos at zero cost. Set (not list) expresses membership semantics and dedupes. Accepted 2026-04-29. |
@@ -291,51 +291,80 @@ Same defaults as kami's `tools.py`. Tool authors who need to log a secret delibe
 
 The HITL tool integrates with PydanticAI through the kitaru adapter's two-piece seam:
 
-- **`@hitl_tool(...)`** (marker decorator) — registration-time metadata: `name`, `schema`, static `question`. Read by `PermissionHandler`, capture policy, and the system-prompt builder so the LLM only sees the tool when it's allowed and capture/redaction rules know it's HITL.
+- **`@hitl_tool(...)`** (marker decorator) — registration-time metadata. Read by `PermissionHandler`, capture policy, and the system-prompt builder so the LLM only sees the tool when it's allowed and capture/redaction rules know it's HITL.
 - **`wait_for_input(...)`** (adapter-exported helper) — invocation-time pause. Calls `kitaru.wait()` underneath but tags the resulting wait record with `kitaru.adapter.id == "pydantic-ai"` and `source == "tool_body"` so the dashboard, OTel spans, and tool-event children correlate.
 
+The tool exposes a flat parameter shape to the LLM (a `Literal` `kind` + a generic `args: dict`), mirroring kami's `exec_service(service_name, args)` pattern. This avoids `oneOf`/`anyOf` JSON schema fragments that some LLM providers handle inconsistently. The per-kind Pydantic models live in the tool's *description* (built dynamically) and validation happens inside the body.
+
 ```python
+from typing import Annotated, Any, Literal
+from pydantic import BaseModel, Field
+from pydantic_ai import RunContext
 from kitaru.adapters.pydantic_ai import hitl_tool, wait_for_input
+import kitaru
 
-@hitl_tool(
-    name="request_severity_decision",
-    schema=Severity,
-    question="Approve or override this severity verdict.",
-)
-def request_severity_decision(
+Severity = Literal["sev-1", "sev-2", "sev-3", "n/a"]
+QuestionKind = Literal["freeform", "severity_decision"]
+
+class FreeformQuestion(BaseModel):
+    question: str
+
+class SeverityDecisionQuestion(BaseModel):
+    clause_id: str
+    clause_text: str
+    pattern: str
+
+ASK_QUESTION_KINDS: dict[str, type[BaseModel]] = {
+    "freeform": FreeformQuestion,
+    "severity_decision": SeverityDecisionQuestion,
+}
+
+@hitl_tool(name="ask_question")
+def ask_question(
     ctx: RunContext[ReviewDeps],
-    clause_id: str,
-    clause_text: str,
-    pattern: str,
-) -> Severity:
-    precedents = kitaru.memory.get("compliance-precedents", default=[])
-    suggested = _suggest_from_precedents(pattern, precedents)
+    kind: QuestionKind,
+    args: dict[str, Any],
+) -> str | Severity:
+    """Ask the human a question; routed to the right wait shape based on `kind`."""
+    if kind == "freeform":
+        payload = FreeformQuestion.model_validate(args)
+        return wait_for_input(question=payload.question, schema=str)
 
-    decision: Severity = wait_for_input(
-        schema=Severity,
-        name=f"severity_decision_{clause_id}",
-        question=(
-            f"Clause {clause_id}: {clause_text!r}\n"
-            f"Pattern: {pattern}\n"
-            f"Suggested: {suggested or 'none'}"
-        ),
-        metadata={"clause_id": clause_id, "pattern": pattern, "suggested": suggested},
-    )
+    if kind == "severity_decision":
+        payload = SeverityDecisionQuestion.model_validate(args)
+        precedents = kitaru.memory.get("compliance-precedents", default=[])
+        suggested = _suggest_from_precedents(payload.pattern, precedents)
+        decision: Severity = wait_for_input(
+            schema=Severity,
+            name=f"severity_decision_{payload.clause_id}",
+            question=(
+                f"Clause {payload.clause_id}: {payload.clause_text!r}\n"
+                f"Pattern: {payload.pattern}\n"
+                f"Suggested: {suggested or 'none'}"
+            ),
+            metadata={
+                "clause_id": payload.clause_id,
+                "pattern": payload.pattern,
+                "suggested": suggested,
+            },
+        )
+        _record_precedent(precedents, payload.pattern, decision)
+        kitaru.memory.set("compliance-precedents", precedents)
+        return decision
 
-    _record_precedent(precedents, pattern, decision)
-    kitaru.memory.set("compliance-precedents", precedents)
-    return decision
+    raise ValueError(f"unknown question kind: {kind!r}")
 ```
 
-The `CallDeferred` / `ApprovalRequired` / `requires_approval=True` paths exist in pydantic-ai and bridge to `kitaru.wait()` automatically too, but they don't fit this tool's shape: per-clause severity needs a value back from the human (not a yes/no approval) *and* the memory write-back has to be co-located with the wait so each clause is a self-contained read-ask-record cycle. Raising `CallDeferred` would split that into two tools and rely on the LLM to call the second one — an architectural step backwards.
+Adding a new HITL shape (e.g. `boolean_gate`) is the same shape as adding a new service to kami: a Pydantic model + an entry in `ASK_QUESTION_KINDS` + a branch + (optionally) a per-kind permission entry on the Profile.
+
+The `CallDeferred` / `ApprovalRequired` / `requires_approval=True` paths exist in pydantic-ai and bridge to `kitaru.wait()` automatically too, but they don't fit this tool's shape: severity decisions need a value back from the human (not a yes/no approval) *and* the memory write-back has to be co-located with the wait so each clause is a self-contained read-ask-record cycle. Raising `CallDeferred` would split that across multiple tools and rely on the LLM to call them in order — an architectural step backwards.
 
 | Tool | Type | What it does | Stage introduced |
 |---|---|---|---|
 | `exec` | shell | Runs a bash command in the worker container; routes HTTP through proxy. Returns truncated stdout/stderr + an exit code + the path to the full persisted output (see `ExecResult` below). | 1 (in-process), 2 (Docker worker) |
-| `fetch_document` | typed `exec_service` | Discriminated-union service call to read a doc from a mock store. | 4 |
-| `request_severity_decision` | `@hitl_tool` + `wait_for_input(...)` | Suspends the agent and asks the operator for a severity verdict on a clause. Schema: `Severity = Literal["sev-1", "sev-2", "sev-3", "n/a"]`. Tool body: read flow-scope precedents → suggest a default → call adapter's `wait_for_input(schema=Severity, ...)` to suspend → write the confirmed decision back to precedent memory → return it to the agent. | 4 |
-| `publish_review` | typed `exec_service` | Posts the final review report to a mock Discord-like service. | 4 |
-| `skill` | local-fs | `list` / `read` / `search` over `skills/` to load the agent's playbook. | 4 |
+| `skill` | local-fs | `list` / `read` / `search` over `skills/` to load the agent's playbook. Paths validated with `.is_relative_to(skills_root)` to prevent escape (kami pattern). | 4 |
+| `exec_service` | typed-union service dispatcher | One tool whose description is rebuilt from `profile.allowed_services_for_tooling()`. LLM sees flat parameters `service_name: Literal[...]` + `args: dict`; the body validates `{service_name, **args}` against the `ServiceCall` discriminated union (cases: `fetch_document`, `publish_review`). | 4 |
+| `ask_question` | typed-union HITL dispatcher | One tool with a dynamically built description listing each `kind` and its embedded JSON schema. LLM sees flat parameters `kind: Literal[...]` + `args: dict`; the body branches per kind, calling the adapter's `wait_for_input(schema=...)` with the right schema. Kinds: `freeform` (string answer) and `severity_decision` (typed `Severity` answer with precedent lookup + memory write-back co-located in the branch). | 4 |
 
 ### `exec` output policy
 
