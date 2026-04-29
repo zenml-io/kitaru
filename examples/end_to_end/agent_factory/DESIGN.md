@@ -181,6 +181,8 @@ examples/end_to_end/agent_factory/
 │   ├── worker.Dockerfile              # bash, curl, jq, pdftotext, CA install
 │   └── proxy.Dockerfile               # mitmdump + addon
 │
+├── setup.sh                           # One-time `kitaru secrets create` commands for stages 3+
+│
 └── tests/
     ├── test_stage_1.py                # Smoke test for stage 1
     ├── test_proxy_injection.py        # Verify header injection works
@@ -502,6 +504,28 @@ Context managers also guarantee teardown on exception — a leaked `mitmdump` co
 - Env: `KAMI_CREDENTIALS={...}`, `KAMI_PROXY_TOKEN=<random-per-run>`
 - The proxy URL embedded in worker env vars is `http://<token>:@proxy:8080` (basic-auth-as-bearer pattern, same as kami)
 
+### Credential resolution: real `kitaru.secrets` even for mocks
+
+Mock services use static tokens but the tokens still flow through the kami credential pattern: `Profile.service_configs[name].secret_reference` and `Profile.sandbox_proxy_rules[].headers` hold `{{ <secret-name>.<key> }}` templates; `build_proxy_credential_map(profile)` at flow start resolves them via `KitaruCredentialBroker → kitaru.secrets.get_secret(...)` and injects the resolved map into the proxy container's `KAMI_CREDENTIALS` env var. The worker never sees the resolved values.
+
+Reader setup (one-time, before stage 3):
+
+```bash
+# agent_factory/setup.sh
+kitaru secrets create wiki-token     --value=wiki-token
+kitaru secrets create policies-token --value=policy-token
+kitaru secrets create docstore-token --value=docstore-token
+kitaru secrets create discord-token  --value=discord-token
+```
+
+Reasons for keeping real secrets even for mocks:
+
+- **Teaches the right thing.** Chapter 3's hook is "the two-process credential isolation pattern." The secret has to *originate* somewhere the reader trusts (kitaru's secret store) and never reach the worker — putting hardcoded tokens in the profile teaches "configure tokens here," which is the wrong takeaway.
+- **Swap mocks → real services with zero structural change.** Replacing the wiki mock with a real one is `kitaru secrets create wiki-token --value=<real_token>` plus a host-pattern tweak. Profile shape is identical.
+- **Compose-seeded secrets considered and rejected** because they hide the chapter's central teaching artifact: the reader needs to see the secret-creation step explicitly so they know where to configure tokens for their own services later.
+
+Stages 1 and 2 don't reference any secrets, so they run with zero setup.
+
 ### Per-run bearer token
 
 Generated at flow start via `secrets.token_urlsafe(32)`, passed to proxy via env, embedded in proxy URL. Proxy addon validates `Proxy-Authorization` header on every request and rejects unauthenticated traffic. This prevents other processes on the host from accidentally using the proxy.
@@ -575,7 +599,10 @@ Tentative:
 cd examples/end_to_end/agent_factory
 uv sync --extra local --extra pydantic-ai --extra agent-factory   # new extra
 docker compose up -d                                              # worker, proxy, mock-services
-python stage_1_basic_agent.py                                     # Run it!
+python stage_1_basic_agent.py                                     # Stage 1 needs no secrets
+python stage_2_sandboxed_exec.py                                  # Stage 2 needs no secrets
+bash setup.sh                                                     # Stage 3+ — creates kitaru secrets for the mocks
+python stage_3_credential_proxy.py                                # Now the proxy can inject auth
 ```
 
 Cleanup:
