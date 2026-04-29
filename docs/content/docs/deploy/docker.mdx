@@ -300,6 +300,20 @@ automatically, copy/paste the printed URL.
 
 ### API key login (headless / CI)
 
+For automation, create an OSS service-account API key first from an
+already-authenticated admin/operator machine:
+
+```bash
+kitaru auth service-accounts create ci-runner
+kitaru auth api-keys create ci-runner default -o json
+```
+
+These bootstrap commands require your current Kitaru CLI session to have
+permission to manage service accounts. The headless job only needs the one-time
+`key` value from the create response.
+
+Store the one-time `key` value from the create response, then use it to connect:
+
 ```bash
 kitaru login https://kitaru.example.com --api-key kat_abc123...
 ```
@@ -316,7 +330,8 @@ export KITARU_PROJECT=my-project
 ```
 
 See [Configuration](/guides/configuration) for the full env-var reference and
-precedence rules.
+precedence rules, and [Authentication](/guides/authentication) for service
+accounts, API keys, and short-lived bearer tokens.
 
 ### Verify connection
 

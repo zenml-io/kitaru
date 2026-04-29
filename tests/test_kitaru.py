@@ -72,6 +72,9 @@ class TestPublicExports:
 
     def test_all_exports_match(self) -> None:
         expected = {
+            "AuthAPIKey",
+            "AuthAPIKeyWithValue",
+            "AuthServiceAccount",
             "Deployment",
             "FailureOrigin",
             "FlowHandle",

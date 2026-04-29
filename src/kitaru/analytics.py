@@ -32,6 +32,13 @@ class AnalyticsEvent(StrEnum):
     PROJECT_INITIALIZED = "Kitaru project initialized"
     LOGIN_COMPLETED = "Kitaru login completed"
     AUTH_TOKEN_PRINTED = "Kitaru auth token printed"
+    AUTH_SERVICE_ACCOUNT_CREATED = "Kitaru auth service account created"
+    AUTH_SERVICE_ACCOUNT_UPDATED = "Kitaru auth service account updated"
+    AUTH_SERVICE_ACCOUNT_DELETED = "Kitaru auth service account deleted"
+    AUTH_API_KEY_CREATED = "Kitaru auth API key created"
+    AUTH_API_KEY_UPDATED = "Kitaru auth API key updated"
+    AUTH_API_KEY_ROTATED = "Kitaru auth API key rotated"
+    AUTH_API_KEY_DELETED = "Kitaru auth API key deleted"
     LOCAL_SERVER_STARTED = "Kitaru local server started"
     LOCAL_SERVER_STOPPED = "Kitaru local server stopped"
 

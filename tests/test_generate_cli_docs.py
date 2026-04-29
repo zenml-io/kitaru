@@ -158,6 +158,36 @@ class TestBuildCommandTree:
             "retry",
         ]
 
+    def test_auth_tree_includes_service_accounts_and_api_keys(self) -> None:
+        from kitaru.cli import app
+
+        tree = build_command_tree(app)
+        auth = _find_command(tree, "auth")
+        assert [sub.name for sub in auth.subcommands] == [
+            "api-keys",
+            "service-accounts",
+            "token",
+        ]
+
+        service_accounts = _find_command(tree, "auth", "service-accounts")
+        assert [sub.name for sub in service_accounts.subcommands] == [
+            "create",
+            "delete",
+            "list",
+            "show",
+            "update",
+        ]
+
+        api_keys = _find_command(tree, "auth", "api-keys")
+        assert [sub.name for sub in api_keys.subcommands] == [
+            "create",
+            "delete",
+            "list",
+            "rotate",
+            "show",
+            "update",
+        ]
+
     def test_flow_tree_includes_deployment_commands(self) -> None:
         from kitaru.cli import app
 
@@ -254,8 +284,8 @@ class TestBuildCommandTree:
         assert login.usage == "kitaru login [SERVER] [OPTIONS]"
         assert login.parameters[0].names == ["SERVER"]
 
-        assert get.usage.startswith("kitaru executions get EXEC_ID")
-        assert get.parameters[0].names == ["EXEC_ID"]
+        assert get.usage.startswith("kitaru executions get EXEC-ID")
+        assert get.parameters[0].names == ["EXEC-ID"]
 
         assert secrets_set.usage.startswith("kitaru secrets set NAME ASSIGNMENTS...")
         assert [parameter.names for parameter in secrets_set.parameters[:2]] == [
@@ -563,6 +593,28 @@ class TestWriteDocsTree:
 
         assert (output_dir / "auth" / "token.mdx").exists()
         assert "auth/token.mdx" in files
+        assert (output_dir / "auth" / "api-keys" / "meta.json").exists()
+        assert (output_dir / "auth" / "service-accounts" / "meta.json").exists()
+
+        for command in ("create", "delete", "list", "show", "update"):
+            assert (
+                output_dir / "auth" / "service-accounts" / f"{command}.mdx"
+            ).exists()
+            assert f"auth/service-accounts/{command}.mdx" in files
+
+        for command in ("create", "delete", "list", "rotate", "show", "update"):
+            assert (output_dir / "auth" / "api-keys" / f"{command}.mdx").exists()
+            assert f"auth/api-keys/{command}.mdx" in files
+
+        auth_token_content = (output_dir / "auth" / "token.mdx").read_text()
+        assert "short-lived bearer token" in auth_token_content
+        api_key_create_content = (
+            output_dir / "auth" / "api-keys" / "create.mdx"
+        ).read_text()
+        assert "one-time value" in api_key_create_content
+        assert "kitaru auth api-keys create SERVICE-ACCOUNT NAME" in (
+            api_key_create_content
+        )
 
         for command in (
             "cancel",
@@ -662,8 +714,8 @@ class TestWriteDocsTree:
         write_docs_tree(tree, output_dir)
 
         get_content = (output_dir / "executions" / "get.mdx").read_text()
-        assert "kitaru executions get EXEC_ID" in get_content
-        assert "| `EXEC_ID` | `str` | Yes |  | Execution ID. |" in get_content
+        assert "kitaru executions get EXEC-ID" in get_content
+        assert "| `EXEC-ID` | `str` | Yes |  | Execution ID. |" in get_content
 
         login_content = (output_dir / "login.mdx").read_text()
         assert "kitaru login [SERVER] [OPTIONS]" in login_content
