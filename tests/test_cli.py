@@ -8839,6 +8839,61 @@ def test_status_does_not_render_active_context_provenance(
     assert "repo-stack-id" not in output
 
 
+def test_status_renders_active_context_fallback_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru status` should surface fallback warnings in normal output."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+        active_stack="default",
+        warning=(
+            "Kitaru detected that the saved active context changed while loading.\n"
+            "Configured active stack from repo-local config points to ID "
+            "'stale-stack-id', but Kitaru loaded default (default-stack-id)."
+        ),
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Warning" in output
+    assert "saved active context changed" in output
+    assert "stale-stack-id" in output
+
+
+def test_info_default_renders_active_context_fallback_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default `kitaru info` should show warnings without verbose provenance."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+        active_stack="default",
+        warning="Kitaru detected that the saved active context changed.",
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "saved active context changed" in output
+    assert "Active context provenance" not in output
+
+
 def test_info_all_renders_active_context_provenance(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

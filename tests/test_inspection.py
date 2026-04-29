@@ -875,6 +875,7 @@ def _patch_snapshot_dependencies(
             return_value=SimpleNamespace(project=None),
         ),
         patch("kitaru.inspection.Client", fake_client_cls),
+        patch("kitaru._config._active_context.Client", fake_client_cls),
         patch(
             "kitaru.inspection.resolve_log_store",
             return_value=ResolvedLogStore(
@@ -887,7 +888,7 @@ def _patch_snapshot_dependencies(
     )
 
 
-def test_build_runtime_snapshot_keeps_provenance_off_by_default(
+def test_build_runtime_snapshot_collects_provenance_by_default(
     tmp_path: Path,
 ) -> None:
     fake_gc = _fake_global_config(tmp_path)
@@ -896,16 +897,12 @@ def test_build_runtime_snapshot_keeps_provenance_off_by_default(
     with ExitStack() as stack:
         for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
             stack.enter_context(context_manager)
-        stack.enter_context(
-            patch(
-                "kitaru.inspection._collect_active_context_provenance",
-                side_effect=AssertionError("provenance should be opt-in"),
-            )
-        )
         snapshot = build_runtime_snapshot()
 
-    assert snapshot.active_stack_provenance is None
-    assert snapshot.active_project_provenance is None
+    assert isinstance(snapshot.active_stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(
+        snapshot.active_project_provenance, ActiveConfigSelectionProvenance
+    )
 
 
 def test_build_runtime_snapshot_collects_active_context_source_precedence(
@@ -1026,7 +1023,7 @@ def test_build_runtime_snapshot_preserves_raw_provenance_when_client_fails(
             stack.enter_context(context_manager)
         stack.enter_context(
             patch(
-                "kitaru.inspection.KITARU_REPOSITORY_DIRECTORY_NAME",
+                "kitaru._config._active_context.KITARU_REPOSITORY_DIRECTORY_NAME",
                 ".custom-kitaru",
             )
         )
@@ -1524,7 +1521,7 @@ def test_build_runtime_snapshot_surfaces_provenance_collector_failure(
             stack.enter_context(context_manager)
         stack.enter_context(
             patch(
-                "kitaru.inspection._collect_active_context_provenance",
+                "kitaru.inspection.collect_active_context_provenance",
                 side_effect=RuntimeError("yaml exploded"),
             )
         )
@@ -1605,6 +1602,10 @@ def test_build_runtime_snapshot_preserves_raw_when_client_sanitizes_stale_id(
     assert stack_provenance.resolved_id == "different-resolved-id"
     assert stack_provenance.resolved_name == "sanitized-stack"
     assert stack_provenance.resolved_id != stack_provenance.effective_id
+    assert snapshot.warning is not None
+    assert "saved active context changed" in snapshot.warning
+    assert "stale-repo-stack-id" in snapshot.warning
+    assert "sanitized-stack (different-resolved-id)" in snapshot.warning
 
 
 def test_build_runtime_snapshot_preserves_raw_when_yaml_is_invalid(
