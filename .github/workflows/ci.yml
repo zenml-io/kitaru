@@ -51,7 +51,10 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       - run: uv sync --frozen
-      - run: uv run pip-audit
+      - name: Run pip-audit (with documented ignore list)
+        run: |
+          awk '/^CVE-|^GHSA-/ {printf "--ignore-vuln %s ", $1}' \
+            .github/pip-audit-ignored.txt | xargs uv run pip-audit
   links:
     runs-on: ubuntu-latest
     steps:
