@@ -17,11 +17,11 @@ Watch durability work — kill it mid-run and resume:
     5. kitaru executions resume <id>    # picks up exactly where it stopped
 """
 
-import kitaru
-from kitaru.adapters.pydantic_ai import KitaruAgent
-
 from agent_factory.agent import build_agent
 from agent_factory.profile import Profile
+
+import kitaru
+from kitaru.adapters.pydantic_ai import KitaruAgent
 
 DEFAULT_PROFILE = Profile(
     name="default",
@@ -41,10 +41,10 @@ def agent_factory_flow(prompt: str) -> str:
     # build_agent() returns a vanilla pydantic-ai Agent; KitaruAgent
     # wraps it for durable execution, capture, and HITL bridging.
     agent = build_agent(DEFAULT_PROFILE)
-    
+
     # Convert into a KitaruAgent for durable execution, capture, and HITL bridging.
     agent = KitaruAgent(agent)
-    
+
     return agent.run_sync(prompt).output
 
 
