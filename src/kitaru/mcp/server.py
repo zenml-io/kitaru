@@ -814,7 +814,10 @@ def kitaru_info(
             include_environment_type=include_environment_type,
             include_provenance_details=include_provenance_details,
         )
-        return inspection.serialize_runtime_snapshot(snapshot)
+        return inspection.serialize_runtime_snapshot(
+            snapshot,
+            include_provenance_details=include_provenance_details,
+        )
 
     return run_with_mcp_error_boundary(_info)
 
