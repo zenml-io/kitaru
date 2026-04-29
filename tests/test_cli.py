@@ -14,6 +14,7 @@ import pytest
 from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
+from kitaru._client._models import AuthAPIKey, AuthAPIKeyWithValue, AuthServiceAccount
 from kitaru.analytics import AnalyticsEvent
 from kitaru.cli import (
     ActiveConfigSelectionProvenance,
@@ -186,6 +187,66 @@ def _stack_details_stub(
                 purpose=None,
             ),
         ],
+    )
+
+
+def _auth_service_account_stub(
+    *,
+    service_account_id: str = "sa-123",
+    name: str = "ci-runner",
+    full_name: str = "CI Runner",
+    description: str = "CI automation",
+    active: bool = True,
+) -> AuthServiceAccount:
+    """Build a lightweight auth service-account DTO for CLI tests."""
+    return AuthServiceAccount(
+        service_account_id=service_account_id,
+        name=name,
+        full_name=full_name,
+        description=description,
+        active=active,
+        created_at=datetime(2026, 4, 24, 8, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 4, 24, 8, 5, tzinfo=UTC),
+        avatar_url=None,
+    )
+
+
+def _auth_api_key_stub(
+    *,
+    api_key_id: str = "key-123",
+    name: str = "default",
+    service_account_id: str = "sa-123",
+    service_account_name: str = "ci-runner",
+    description: str = "Default CI key",
+    active: bool = True,
+) -> AuthAPIKey:
+    """Build a lightweight auth API-key DTO for CLI tests."""
+    return AuthAPIKey(
+        api_key_id=api_key_id,
+        name=name,
+        service_account_id=service_account_id,
+        service_account_name=service_account_name,
+        description=description,
+        active=active,
+        created_at=datetime(2026, 4, 24, 8, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 4, 24, 8, 5, tzinfo=UTC),
+        last_login=None,
+        last_rotated=datetime(2026, 4, 24, 8, 10, tzinfo=UTC),
+        retain_period_minutes=0,
+    )
+
+
+def _auth_management_client_stub(
+    *,
+    service_accounts: Mock | None = None,
+    api_keys: Mock | None = None,
+) -> SimpleNamespace:
+    """Build a KitaruClient.for_auth_management() test double."""
+    return SimpleNamespace(
+        auth=SimpleNamespace(
+            service_accounts=service_accounts or Mock(),
+            api_keys=api_keys or Mock(),
+        )
     )
 
 
@@ -465,12 +526,16 @@ def test_memory_help_lists_all_supported_subcommands(
         assert command in output
 
 
-def test_auth_help_lists_token_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
-    """`kitaru auth --help` should show the token helper."""
+def test_auth_help_lists_supported_subcommands(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru auth --help` should show token and auth-management groups."""
     with pytest.raises(SystemExit) as exc_info:
         app(["auth", "--help"])
     assert exc_info.value.code == 0
-    assert "token" in capsys.readouterr().out.lower()
+    output = capsys.readouterr().out.lower()
+    for command in ("token", "service-accounts", "api-keys"):
+        assert command in output
 
 
 def test_auth_token_text_prints_token_only(
@@ -490,7 +555,10 @@ def test_auth_token_text_prints_token_only(
         app(["auth", "token"])
 
     assert exc_info.value.code == 0
-    resolve_mock.assert_called_once_with(validate_for_use=True)
+    resolve_mock.assert_called_once_with(
+        validate_for_use=True,
+        require_project=False,
+    )
     assert capsys.readouterr().out == "server-access-token\n"
     track_mock.assert_called_once_with(
         AnalyticsEvent.AUTH_TOKEN_PRINTED,
@@ -569,6 +637,353 @@ def test_auth_token_token_only_env_reports_clean_cli_error(
     )
     assert "set KITARU_SERVER_URL or run `kitaru login`" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_auth_service_accounts_create_text_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Service-account create should call the SDK auth namespace and render text."""
+    service_accounts = Mock()
+    service_accounts.create.return_value = _auth_service_account_stub()
+    fake_client = _auth_management_client_stub(service_accounts=service_accounts)
+
+    with (
+        patch(
+            "kitaru.cli.KitaruClient.for_auth_management",
+            return_value=fake_client,
+        ) as client_factory,
+        patch("kitaru._cli._auth.track", return_value=True) as track_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "auth",
+                "service-accounts",
+                "create",
+                "ci-runner",
+                "--full-name",
+                "CI Runner",
+                "--description",
+                "CI automation",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    client_factory.assert_called_once_with()
+    service_accounts.create.assert_called_once_with(
+        "ci-runner",
+        full_name="CI Runner",
+        description="CI automation",
+    )
+    output = capsys.readouterr().out
+    assert "Created service account: ci-runner" in output
+    assert "Service account" in output
+    assert "Name: ci-runner" in output
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.AUTH_SERVICE_ACCOUNT_CREATED,
+        {"command": "auth.service-accounts.create", "has_description": True},
+    )
+
+
+def test_auth_service_accounts_list_json_contract(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Service-account list JSON should use the standard list envelope."""
+    service_accounts = Mock()
+    service_accounts.list.return_value = [_auth_service_account_stub()]
+    fake_client = _auth_management_client_stub(service_accounts=service_accounts)
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "auth",
+                "service-accounts",
+                "list",
+                "--page",
+                "2",
+                "--size",
+                "5",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    service_accounts.list.assert_called_once_with(
+        active=None,
+        name=None,
+        page=2,
+        size=5,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "auth.service-accounts.list"
+    assert payload["count"] == 1
+    assert payload["items"] == [
+        {
+            "service_account_id": "sa-123",
+            "name": "ci-runner",
+            "full_name": "CI Runner",
+            "description": "CI automation",
+            "active": True,
+            "created_at": "2026-04-24T08:00:00+00:00",
+            "updated_at": "2026-04-24T08:05:00+00:00",
+            "avatar_url": None,
+        }
+    ]
+
+
+def test_auth_api_keys_create_json_includes_one_time_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """API-key create JSON may include the raw key and activation status."""
+    api_keys = Mock()
+    api_keys.create.return_value = AuthAPIKeyWithValue(
+        api_key=_auth_api_key_stub(),
+        key="raw-api-key",
+        local_key_activation_requested=True,
+        local_key_activation_succeeded=False,
+        local_key_activation_error=(
+            "API key was created, but Kitaru could not set it as the active "
+            "local credential: local store rejected [redacted]"
+        ),
+        local_key_rollback_attempted=False,
+        local_key_rollback_succeeded=None,
+        local_key_rollback_reason="No previous persisted local API key was available.",
+    )
+    fake_client = _auth_management_client_stub(api_keys=api_keys)
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        patch("kitaru._cli._auth.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "auth",
+                "api-keys",
+                "create",
+                "ci-runner",
+                "default",
+                "--description",
+                "Default CI key",
+                "--set-key",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    api_keys.create.assert_called_once_with(
+        "ci-runner",
+        "default",
+        description="Default CI key",
+        set_key=True,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "auth.api-keys.create"
+    assert payload["item"]["key"] == "raw-api-key"
+    assert payload["item"]["api_key_id"] == "key-123"
+    assert payload["item"]["local_key_activation_requested"] is True
+    assert payload["item"]["local_key_activation_succeeded"] is False
+    assert (
+        "local store rejected [redacted]"
+        in (payload["item"]["local_key_activation_error"])
+    )
+    assert payload["item"]["local_key_rollback_attempted"] is False
+    assert payload["item"]["local_key_rollback_succeeded"] is None
+    assert payload["item"]["local_key_rollback_error"] is None
+    assert (
+        payload["item"]["local_key_rollback_reason"]
+        == "No previous persisted local API key was available."
+    )
+    assert json.dumps(payload).count("raw-api-key") == 1
+
+
+def test_auth_api_keys_list_and_show_json_do_not_leak_raw_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """API-key list/show JSON must contain metadata only, never `key`."""
+    api_keys = Mock()
+    api_keys.list.return_value = [_auth_api_key_stub()]
+    api_keys.get.return_value = _auth_api_key_stub()
+    fake_client = _auth_management_client_stub(api_keys=api_keys)
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "api-keys", "list", "ci-runner", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    list_payload = json.loads(capsys.readouterr().out)
+    assert list_payload["command"] == "auth.api-keys.list"
+    assert list_payload["count"] == 1
+    assert "key" not in list_payload["items"][0]
+    assert "raw-api-key" not in json.dumps(list_payload)
+    api_keys.list.assert_called_once_with(
+        "ci-runner",
+        active=None,
+        name=None,
+        page=1,
+        size=20,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "api-keys", "show", "ci-runner", "default", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_payload["command"] == "auth.api-keys.show"
+    assert "key" not in show_payload["item"]
+    assert "raw-api-key" not in json.dumps(show_payload)
+    api_keys.get.assert_called_once_with("ci-runner", "default")
+
+
+def test_auth_api_keys_rotate_text_includes_warning_and_new_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """API-key rotate text should show the key and activation failure warning."""
+    api_keys = Mock()
+    api_keys.rotate.return_value = AuthAPIKeyWithValue(
+        api_key=_auth_api_key_stub(),
+        key="rotated-raw-api-key",
+        local_key_activation_requested=True,
+        local_key_activation_succeeded=False,
+        local_key_activation_error=(
+            "API key was rotated, but Kitaru could not set it as the active "
+            "local credential: local store rejected [redacted]. Kitaru also "
+            "tried to restore the previous local credential, but that rollback "
+            "failed. The server-side API key was still rotated; local "
+            "credentials may need manual repair."
+        ),
+        local_key_rollback_attempted=True,
+        local_key_rollback_succeeded=False,
+        local_key_rollback_error="could not restore [redacted] locally",
+    )
+    fake_client = _auth_management_client_stub(api_keys=api_keys)
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        patch("kitaru._cli._auth.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "auth",
+                "api-keys",
+                "rotate",
+                "ci-runner",
+                "default",
+                "--retain-minutes",
+                "10",
+                "--set-key",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    api_keys.rotate.assert_called_once_with(
+        "ci-runner",
+        "default",
+        retain_period_minutes=10,
+        set_key=True,
+    )
+    output = capsys.readouterr().out
+    assert "Rotated API key: default" in output
+    assert "Key: rotated-raw-api-key" in output
+    assert "Local activation: failed" in output
+    assert "Credential rollback: failed" in output
+    assert "Store this key now; it cannot be retrieved later." in output
+    assert "local store rejected [redacted]" in output
+    assert "manual repair" in output
+    assert "kitaru login <server-url> --api-key <key>" in output
+    assert output.count("rotated-raw-api-key") == 1
+
+
+def test_auth_delete_requires_yes_in_non_interactive_mode(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delete commands should not run in CI-like contexts unless --yes is set."""
+    service_accounts = Mock()
+    fake_client = _auth_management_client_stub(service_accounts=service_accounts)
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "service-accounts", "delete", "ci-runner"])
+
+    assert exc_info.value.code == 1
+    service_accounts.delete.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --yes" in captured.err
+
+
+def test_auth_delete_with_yes_runs_and_returns_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--yes should skip confirmation and emit a deletion envelope in JSON mode."""
+    service_accounts = Mock()
+    fake_client = _auth_management_client_stub(service_accounts=service_accounts)
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        patch("kitaru._cli._auth.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["auth", "service-accounts", "delete", "ci-runner", "--yes", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    service_accounts.delete.assert_called_once_with("ci-runner")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "auth.service-accounts.delete",
+        "item": {"name_or_id": "ci-runner", "deleted": True},
+    }
+
+
+def test_auth_api_key_delete_with_yes_runs_and_returns_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """API-key delete should also honor --yes and use the API-key envelope."""
+    api_keys = Mock()
+    fake_client = _auth_management_client_stub(api_keys=api_keys)
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        patch("kitaru._cli._auth.track", return_value=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "auth",
+                "api-keys",
+                "delete",
+                "ci-runner",
+                "default",
+                "--yes",
+                "-o",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    api_keys.delete.assert_called_once_with("ci-runner", "default")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "command": "auth.api-keys.delete",
+        "item": {
+            "service_account": "ci-runner",
+            "name_or_id": "default",
+            "deleted": True,
+        },
+    }
 
 
 def test_build_requires_initialized_project_for_file_targets(
@@ -8839,6 +9254,61 @@ def test_status_does_not_render_active_context_provenance(
     assert "repo-stack-id" not in output
 
 
+def test_status_renders_active_context_fallback_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru status` should surface fallback warnings in normal output."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+        active_stack="default",
+        warning=(
+            "Kitaru detected that the saved active context changed while loading.\n"
+            "Configured active stack from repo-local config points to ID "
+            "'stale-stack-id', but Kitaru loaded default (default-stack-id)."
+        ),
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Warning" in output
+    assert "saved active context changed" in output
+    assert "stale-stack-id" in output
+
+
+def test_info_default_renders_active_context_fallback_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default `kitaru info` should show warnings without verbose provenance."""
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.3.0",
+        connection="local database",
+        connection_target="sqlite:///...",
+        config_directory="/tmp/config",
+        active_stack="default",
+        warning="Kitaru detected that the saved active context changed.",
+    )
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "saved active context changed" in output
+    assert "Active context provenance" not in output
+
+
 def test_info_all_renders_active_context_provenance(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -8897,6 +9367,46 @@ def test_info_all_json_includes_active_context_provenance(
     assert item["active_stack_provenance"]["effective_id"] == "repo-stack-id"
     assert item["active_stack_provenance"]["resolved_name"] == "prod"
     assert item["active_project_provenance"]["environment_id"] == "env-project-id"
+
+
+def test_status_json_hides_active_context_provenance_by_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru status -o json` should hide verbose provenance by default."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["status", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "status"
+    item = payload["item"]
+    assert item["active_stack_provenance"] is None
+    assert item["active_project_provenance"] is None
+
+
+def test_info_json_hides_active_context_provenance_by_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`kitaru info -o json` should hide verbose provenance unless --all."""
+    snapshot = _snapshot_with_active_context_provenance()
+
+    with (
+        patch("kitaru.cli._build_runtime_snapshot", return_value=snapshot),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["info", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "info"
+    item = payload["item"]
+    assert item["active_stack_provenance"] is None
+    assert item["active_project_provenance"] is None
 
 
 def test_info_all_file_export_includes_active_context_provenance(
@@ -8980,6 +9490,8 @@ def test_info_file_export_json(
     assert export_path.exists()
     data = json.loads(export_path.read_text())
     assert data["sdk_version"] == "0.3.0"
+    assert data["active_stack_provenance"] is None
+    assert data["active_project_provenance"] is None
 
 
 def test_info_file_export_json_mode(

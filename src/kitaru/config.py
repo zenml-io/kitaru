@@ -232,6 +232,7 @@ def resolve_connection_config(
     *,
     explicit: KitaruConfig | None = None,
     validate_for_use: bool = False,
+    require_project: bool = True,
 ) -> ResolvedConnectionConfig:
     """Resolve connection configuration with connection-specific precedence.
 
@@ -244,6 +245,7 @@ def resolve_connection_config(
     return _config_env.resolve_connection_config_impl(
         explicit=explicit,
         validate_for_use=validate_for_use,
+        require_project=require_project,
         read_global_connection_config=_read_global_connection_config,
         read_zenml_connection_env_config=_read_zenml_connection_env_config,
         read_connection_env_config=_read_connection_env_config,

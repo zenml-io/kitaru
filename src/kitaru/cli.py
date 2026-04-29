@@ -23,7 +23,9 @@ from kitaru._cleanup import (
 from kitaru._cli import (
     _UNKNOWN_VERSION,
     app,
+    auth_api_keys_app,
     auth_app,
+    auth_service_accounts_app,
     clean_app,
     executions_app,
     flow_app,
@@ -35,7 +37,20 @@ from kitaru._cli import (
     secrets_app,
     stack_app,
 )
-from kitaru._cli._auth import _active_server_access_token
+from kitaru._cli._auth import (
+    _active_server_access_token,
+    api_keys_create,
+    api_keys_delete,
+    api_keys_list,
+    api_keys_rotate,
+    api_keys_show,
+    api_keys_update,
+    service_accounts_create,
+    service_accounts_delete,
+    service_accounts_list,
+    service_accounts_show,
+    service_accounts_update,
+)
 from kitaru._cli._auth import token as auth_token
 from kitaru._cli._clean import all_, global_, project
 from kitaru._cli._executions import (
@@ -469,8 +484,16 @@ __all__ = [
     "_validate_pagination",
     "_value_style",
     "all_",
+    "api_keys_create",
+    "api_keys_delete",
+    "api_keys_list",
+    "api_keys_rotate",
+    "api_keys_show",
+    "api_keys_update",
     "app",
+    "auth_api_keys_app",
     "auth_app",
+    "auth_service_accounts_app",
     "auth_token",
     "build",
     "build_cleanup_plan",
@@ -539,6 +562,11 @@ __all__ = [
     "scopes_memory_payload",
     "secrets_app",
     "serialize_cleanup_result",
+    "service_accounts_create",
+    "service_accounts_delete",
+    "service_accounts_list",
+    "service_accounts_show",
+    "service_accounts_update",
     "set",
     "set_",
     "set_active_stack",

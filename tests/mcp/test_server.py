@@ -2795,7 +2795,10 @@ class TestKitaruInfo:
             include_environment_type=False,
             include_provenance_details=False,
         )
-        mock_serialize.assert_called_once_with(snapshot)
+        mock_serialize.assert_called_once_with(
+            snapshot,
+            include_provenance_details=False,
+        )
         assert payload == {"sdk_version": "0.2.0"}
 
     @pytest.mark.parametrize(
@@ -2864,11 +2867,17 @@ class TestKitaruInfo:
             patch(
                 "kitaru.inspection.serialize_runtime_snapshot",
                 return_value={},
-            ),
+            ) as mock_serialize,
         ):
             kitaru_info(**call_kwargs)
 
         mock_build.assert_called_once_with(**expected_build_kwargs)
+        mock_serialize.assert_called_once_with(
+            snapshot,
+            include_provenance_details=expected_build_kwargs[
+                "include_provenance_details"
+            ],
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,23 @@
+# CVEs that pip-audit reports but which we have explicitly accepted as
+# risk-managed. Each entry must include a justification and a tracking link.
+# Remove an entry once the upstream cause is resolved and a fresh
+# `uv lock --upgrade` no longer reports it.
+#
+# Format: one CVE ID per line. Lines starting with `#` and blank lines are
+# ignored. Inline `#` comments after the ID are allowed and encouraged.
+
+# --- Blocked by zenml's `pyjwt==2.7.*` pin in the [server] extra. -----------
+# Tracked upstream: https://github.com/zenml-io/zenml/issues/4782
+CVE-2026-32597  # pyjwt 2.7 -> 2.12 (auth library; zenml hard-pins 2.7.*)
+CVE-2025-66416  # mcp 1.19 -> 1.23 (transitively blocked: mcp >=1.20 needs pyjwt >=2.10.1)
+
+# --- Transitive deps in zenml's FastAPI/Starlette server stack. ------------
+# Forcing newer versions risks breaking zenml's request-handling and JSON
+# serialization paths. Will refresh when zenml widens its server-stack
+# constraints (see zenml-io/zenml#4782 for the keystone pin).
+CVE-2025-67221  # orjson 3.10 -> 3.11
+CVE-2025-54121  # starlette 0.45 -> 0.47
+CVE-2025-62727  # starlette 0.45 -> 0.49
+
+# --- pip itself: tooling, not a runtime dependency for kitaru users. -------
+CVE-2026-3219   # pip 26.0.1 (no fix-version published yet)
