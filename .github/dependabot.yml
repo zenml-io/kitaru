@@ -6,7 +6,7 @@ updates:
     schedule:
       interval: weekly
       day: tuesday
-      time: 07:00
+      time: "07:00"
       timezone: Europe/Amsterdam
     reviewers: [strickvl]
     labels: [dependencies]
@@ -24,7 +24,7 @@ updates:
     schedule:
       interval: weekly
       day: tuesday
-      time: 07:00
+      time: "07:00"
       timezone: Europe/Amsterdam
     reviewers: [strickvl]
     labels: [dependencies]
@@ -39,7 +39,7 @@ updates:
     schedule:
       interval: weekly
       day: tuesday
-      time: 07:00
+      time: "07:00"
       timezone: Europe/Amsterdam
     reviewers: [strickvl]
     labels: [dependencies]
@@ -54,7 +54,7 @@ updates:
     schedule:
       interval: weekly
       day: tuesday
-      time: 07:00
+      time: "07:00"
       timezone: Europe/Amsterdam
     reviewers: [strickvl]
     labels: [dependencies]
