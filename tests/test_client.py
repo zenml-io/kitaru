@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
-from types import SimpleNamespace
+from importlib.machinery import ModuleSpec
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, Mock, call, patch
 from uuid import UUID, uuid4
@@ -23,7 +28,13 @@ from kitaru._client._deployments import (
 )
 from kitaru._interface_deployments import Deployment
 from kitaru.analytics import AnalyticsEvent
-from kitaru.client import ExecutionStatus, KitaruClient
+from kitaru.client import (
+    ExecutionStatus,
+    KitaruClient,
+    _import_module_for_replay,
+    _is_retryable_replay_import_error,
+    _resolve_flow_for_replay,
+)
 from kitaru.config import (
     FrozenExecutionSpec,
     KitaruConfig,
@@ -41,6 +52,43 @@ from kitaru.errors import (
     KitaruWaitValidationError,
 )
 from kitaru.memory import MemoryEntry, MemoryScopeType, _MemoryScope
+
+
+def _module_spec(name: str) -> ModuleSpec:
+    return ModuleSpec(name=name, loader=None)
+
+
+def _replay_main(
+    *, spec_name: str | None = "kitaru.cli", file_path: str | None = "/tmp/kitaru.py"
+) -> ModuleType:
+    module = ModuleType("__main__")
+    module.__spec__ = _module_spec(spec_name) if spec_name else None
+    if file_path is not None:
+        module.__file__ = file_path
+    return module
+
+
+@contextmanager
+def _without_loaded_modules(*module_names: str) -> Iterator[None]:
+    def _matches(loaded_name: str) -> bool:
+        return any(
+            loaded_name == module_name or loaded_name.endswith(f".{module_name}")
+            for module_name in module_names
+        )
+
+    removed_modules = {
+        name: module for name, module in list(sys.modules.items()) if _matches(name)
+    }
+    for name in removed_modules:
+        sys.modules.pop(name, None)
+
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if _matches(name):
+                sys.modules.pop(name, None)
+        sys.modules.update(removed_modules)
 
 
 def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
@@ -2343,6 +2391,404 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
         topic="new topic",
     )
     assert execution.exec_id == str(replayed_run.id)
+
+
+def test_replay_stops_when_source_module_dependency_is_missing() -> None:
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    missing_dependency = ModuleNotFoundError("No module named 'missing_dependency'")
+    missing_dependency.name = "missing_dependency"
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._resolve_pipeline_for_replay") as resolve_pipeline,
+        patch("kitaru.client.importlib.import_module", side_effect=missing_dependency),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(source_run)
+
+        client = KitaruClient()
+        with pytest.raises(
+            KitaruRuntimeError, match="missing dependency 'missing_dependency'"
+        ) as exc_info:
+            client.executions.replay(str(source_run.id), from_="write")
+
+    assert exc_info.value.__cause__ is missing_dependency
+    resolve_pipeline.assert_not_called()
+
+
+def test_import_module_for_replay_rejects_unrelated_main_module() -> None:
+    missing_module = ModuleNotFoundError("No module named 'replay_with_overrides'")
+    missing_module.name = "replay_with_overrides"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+        pytest.raises(KitaruRuntimeError, match="temporary cwd import"),
+    ):
+        _import_module_for_replay("replay_with_overrides", "run-123")
+
+
+def test_retryable_replay_import_error_requires_package_boundaries() -> None:
+    missing_module = ModuleNotFoundError("No module named 'a.b'")
+    missing_module.name = "a.b"
+
+    assert not _is_retryable_replay_import_error(missing_module, "a.bc.d")
+
+
+def test_import_module_for_replay_accepts_matching_main_spec_name() -> None:
+    replay_main = _replay_main(
+        spec_name="examples.replay.replay_with_overrides",
+        file_path=None,
+    )
+    missing_module = ModuleNotFoundError(
+        "No module named 'examples.replay.replay_with_overrides'"
+    )
+    missing_module.name = "examples"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict(
+            "kitaru.client.sys.modules",
+            {"__main__": replay_main},
+        ),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+    ):
+        resolved = _import_module_for_replay(
+            "examples.replay.replay_with_overrides", "run-123"
+        )
+
+    assert resolved is replay_main
+
+
+def test_import_module_for_replay_accepts_matching_main_file_stem() -> None:
+    replay_main = _replay_main(
+        spec_name=None,
+        file_path="/tmp/replay_with_overrides.py",
+    )
+    missing_module = ModuleNotFoundError("No module named 'replay_with_overrides'")
+    missing_module.name = "replay_with_overrides"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict(
+            "kitaru.client.sys.modules",
+            {"__main__": replay_main},
+        ),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+    ):
+        resolved = _import_module_for_replay("replay_with_overrides", "run-123")
+
+    assert resolved is replay_main
+
+
+def test_import_module_for_replay_rejects_dotted_main_file_stem_without_spec() -> None:
+    replay_main = _replay_main(
+        spec_name=None,
+        file_path="/tmp/replay_with_overrides.py",
+    )
+    missing_module = ModuleNotFoundError(
+        "No module named 'examples.replay.replay_with_overrides'"
+    )
+    missing_module.name = "examples"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict(
+            "kitaru.client.sys.modules",
+            {"__main__": replay_main},
+        ),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+        pytest.raises(
+            KitaruRuntimeError,
+            match=r"Failed to import replay source module",
+        ),
+    ):
+        _import_module_for_replay("examples.replay.replay_with_overrides", "run-123")
+
+
+def test_import_module_for_replay_prefers_loaded_suffix_match_before_main() -> None:
+    loaded_module = ModuleType("examples.replay.replay_with_overrides")
+    missing_module = ModuleNotFoundError("No module named 'replay_with_overrides'")
+    missing_module.name = "replay_with_overrides"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict(
+            "kitaru.client.sys.modules",
+            {
+                "__main__": _replay_main(),
+                "examples.replay.replay_with_overrides": loaded_module,
+            },
+        ),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+    ):
+        resolved = _import_module_for_replay("replay_with_overrides", "run-123")
+
+    assert resolved is loaded_module
+
+
+def test_import_module_for_replay_retries_from_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_local_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text("MARKER = 'loaded-from-cwd'\n")
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules(module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+    ):
+        resolved = _import_module_for_replay(module_name, "run-123")
+
+    assert getattr(resolved, "MARKER", None) == "loaded-from-cwd"
+    assert str(tmp_path) not in sys.path
+
+
+def test_import_module_for_replay_retries_from_cwd_for_dotted_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "myproj.flows.replay_flow"
+    module_path = tmp_path / "myproj" / "flows" / "replay_flow.py"
+    module_path.parent.mkdir(parents=True)
+    (tmp_path / "myproj" / "__init__.py").write_text("")
+    (tmp_path / "myproj" / "flows" / "__init__.py").write_text("")
+    module_path.write_text("MARKER = 'loaded-from-dotted-cwd'\n")
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules("myproj", "myproj.flows", module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+    ):
+        resolved = _import_module_for_replay(module_name, "run-123")
+
+    assert getattr(resolved, "MARKER", None) == "loaded-from-dotted-cwd"
+    assert str(tmp_path) not in sys.path
+
+
+def test_import_module_for_replay_restores_sys_path_after_failed_cwd_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_broken_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text("import missing_dependency_217\n")
+
+    monkeypatch.chdir(tmp_path)
+    original_sys_path = list(sys.path)
+
+    with (
+        _without_loaded_modules(module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        pytest.raises(
+            KitaruRuntimeError, match="missing dependency 'missing_dependency_217'"
+        ) as exc_info,
+    ):
+        _import_module_for_replay(module_name, "run-123")
+
+    assert isinstance(exc_info.value.__cause__, ModuleNotFoundError)
+    assert sys.path == original_sys_path
+
+
+def test_import_module_for_replay_wraps_nested_module_not_found() -> None:
+    missing_dependency = ModuleNotFoundError("No module named 'missing_dependency'")
+    missing_dependency.name = "missing_dependency"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        patch(
+            "kitaru.client.importlib.import_module",
+            side_effect=missing_dependency,
+        ),
+        pytest.raises(
+            KitaruRuntimeError, match="missing dependency 'missing_dependency'"
+        ) as exc_info,
+    ):
+        _import_module_for_replay("replay_with_overrides", "run-123")
+
+    assert exc_info.value.__cause__ is missing_dependency
+
+
+def test_resolve_flow_for_replay_imports_standalone_module_from_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_flow_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text(
+        "class ReplayFlow:\n"
+        "    def replay(self, *args, **kwargs):\n"
+        "        return None\n\n"
+        "sample_flow = ReplayFlow()\n"
+        "__kitaru_pipeline_source_sample_flow = object()\n"
+    )
+
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module=module_name,
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules(module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+    ):
+        resolved = _resolve_flow_for_replay(_as_pipeline_run(source_run))
+
+    assert resolved.__class__.__name__ == "ReplayFlow"
+    assert str(tmp_path) not in sys.path
+
+
+def test_import_module_for_replay_retries_when_dotted_import_misses_parent_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "examples.replay.replay_with_overrides"
+    module_path = tmp_path / "examples" / "replay" / "replay_with_overrides.py"
+    module_path.parent.mkdir(parents=True)
+    (tmp_path / "examples" / "__init__.py").write_text("")
+    (tmp_path / "examples" / "replay" / "__init__.py").write_text("")
+    module_path.write_text("MARKER = 'loaded-after-parent-package-miss'\n")
+
+    parent_package_miss = ModuleNotFoundError(
+        "No module named 'examples.replay.replay_with_overrides'"
+    )
+    parent_package_miss.name = "examples.replay"
+
+    resolved_module = ModuleType(module_name)
+    import_attempts = 0
+
+    def _fake_import(name: str) -> ModuleType:
+        nonlocal import_attempts
+        assert name == module_name
+        import_attempts += 1
+        if import_attempts == 1:
+            raise parent_package_miss
+        return resolved_module
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules("replay_with_overrides", module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        patch("kitaru.client.importlib.import_module", side_effect=_fake_import),
+    ):
+        resolved = _import_module_for_replay(module_name, "run-123")
+
+    assert resolved is resolved_module
+    assert import_attempts == 2
+
+
+def test_import_module_for_replay_prepends_cwd_even_if_already_later_in_sys_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_local_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text("MARKER = 'loaded-from-cwd-front'\n")
+
+    conflicting_root = tmp_path / "conflict"
+    conflicting_root.mkdir()
+    original_sys_path = list(sys.path)
+    expected_sys_path = [str(conflicting_root), *original_sys_path, str(tmp_path)]
+    sys.path[:] = expected_sys_path
+
+    missing_module = ModuleNotFoundError(f"No module named '{module_name}'")
+    missing_module.name = module_name
+
+    resolved_module = ModuleType(module_name)
+    import_attempts = 0
+
+    def _fake_import(name: str) -> ModuleType:
+        nonlocal import_attempts
+        assert name == module_name
+        import_attempts += 1
+        if import_attempts == 1:
+            raise missing_module
+
+        assert sys.path[0] == str(tmp_path)
+        assert sys.path[1:] == expected_sys_path
+        return resolved_module
+
+    monkeypatch.chdir(tmp_path)
+
+    try:
+        with (
+            patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+            patch("kitaru.client.importlib.import_module", side_effect=_fake_import),
+        ):
+            resolved = _import_module_for_replay(module_name, "run-123")
+    finally:
+        sys.path[:] = original_sys_path
+
+    assert resolved is resolved_module
+    assert import_attempts == 2
+
+
+def test_import_module_for_replay_removes_inserted_cwd_path_after_import_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_local_module_path_mutation_217"
+    module_path = tmp_path / f"{module_name}.py"
+    extra_path = tmp_path / "extra-path-entry"
+    extra_path.mkdir()
+    module_path.write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {str(extra_path)!r})\n"
+        "MARKER = 'loaded-with-sys-path-mutation'\n"
+    )
+
+    monkeypatch.chdir(tmp_path)
+    original_sys_path = list(sys.path)
+
+    try:
+        with (
+            _without_loaded_modules(module_name),
+            patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        ):
+            resolved = _import_module_for_replay(module_name, "run-123")
+
+        assert getattr(resolved, "MARKER", None) == "loaded-with-sys-path-mutation"
+        assert str(extra_path) in sys.path
+        assert str(tmp_path) not in sys.path
+    finally:
+        sys.path[:] = original_sys_path
 
 
 def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
