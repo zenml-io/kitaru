@@ -210,6 +210,11 @@ def _validate_non_empty_auth_value(value: str, *, name: str) -> str:
     return value
 
 
+def _is_strict_int(value: Any) -> bool:
+    """Return True only for plain `int` values (rejects `bool`, `str`, `float`)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _validate_auth_pagination(
     *,
     limit: int | None,
@@ -218,15 +223,15 @@ def _validate_auth_pagination(
 ) -> tuple[int, int]:
     """Validate shared auth list pagination and return backend page/size."""
     if limit is not None:
-        if isinstance(limit, bool) or limit < 1:
-            raise KitaruUsageError("`limit` must be >= 1 when provided.")
+        if not _is_strict_int(limit) or limit < 1:
+            raise KitaruUsageError("`limit` must be an integer >= 1 when provided.")
         if page is not None or size is not None:
             raise KitaruUsageError("`limit` cannot be combined with `page` or `size`.")
         return 1, limit
-    if page is not None and (isinstance(page, bool) or page < 1):
-        raise KitaruUsageError("`page` must be >= 1 when provided.")
-    if size is not None and (isinstance(size, bool) or size < 1):
-        raise KitaruUsageError("`size` must be >= 1 when provided.")
+    if page is not None and (not _is_strict_int(page) or page < 1):
+        raise KitaruUsageError("`page` must be an integer >= 1 when provided.")
+    if size is not None and (not _is_strict_int(size) or size < 1):
+        raise KitaruUsageError("`size` must be an integer >= 1 when provided.")
     if page is not None and size is None:
         raise KitaruUsageError("`size` is required when `page` is provided.")
     if size is None:
@@ -2353,8 +2358,8 @@ class _APIKeysAPI:
         set_key: bool = False,
     ) -> AuthAPIKeyWithValue:
         """Rotate an API key and return its one-time replacement value."""
-        if isinstance(retain_period_minutes, bool) or retain_period_minutes < 0:
-            raise KitaruUsageError("`retain_period_minutes` must be >= 0.")
+        if not _is_strict_int(retain_period_minutes) or retain_period_minutes < 0:
+            raise KitaruUsageError("`retain_period_minutes` must be an integer >= 0.")
         validated_service_account = _validate_non_empty_auth_value(
             service_account,
             name="service_account",

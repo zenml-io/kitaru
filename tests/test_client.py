@@ -875,6 +875,18 @@ def test_auth_local_validation_errors_remain_usage_errors() -> None:
                 "default",
                 retain_period_minutes=-1,
             )
+        with pytest.raises(KitaruUsageError, match="must be an integer"):
+            client.auth.api_keys.rotate(
+                "ci-runner",
+                "default",
+                retain_period_minutes="10",  # ty: ignore[invalid-argument-type]
+            )
+        with pytest.raises(KitaruUsageError, match="must be an integer"):
+            client.auth.api_keys.rotate(
+                "ci-runner",
+                "default",
+                retain_period_minutes=1.5,  # ty: ignore[invalid-argument-type]
+            )
 
     client_cls.return_value.create_api_key.assert_not_called()
     client_cls.return_value.rotate_api_key.assert_not_called()
@@ -2367,6 +2379,29 @@ def test_list_rejects_conflicting_limit_and_pagination() -> None:
         client = KitaruClient()
         with pytest.raises(KitaruUsageError, match="cannot be combined"):
             client.executions.list(limit=1, page=1, size=1)
+
+
+def test_auth_pagination_rejects_non_integer_inputs() -> None:
+    """Auth list pagination must reject str/float inputs as KitaruUsageError."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client = KitaruClient()
+
+        with pytest.raises(KitaruUsageError, match="`limit` must be an integer"):
+            client.auth.service_accounts.list(limit="20")  # ty: ignore[invalid-argument-type]
+        with pytest.raises(KitaruUsageError, match="`limit` must be an integer"):
+            client.auth.service_accounts.list(limit=1.5)  # ty: ignore[invalid-argument-type]
+        with pytest.raises(KitaruUsageError, match="`page` must be an integer"):
+            client.auth.service_accounts.list(page="1", size=10)  # ty: ignore[invalid-argument-type]
+        with pytest.raises(KitaruUsageError, match="`size` must be an integer"):
+            client.auth.service_accounts.list(size=2.5)  # ty: ignore[invalid-argument-type]
+
+    client_cls.return_value.list_service_accounts.assert_not_called()
 
 
 def test_latest_raises_when_no_execution_matches() -> None:
