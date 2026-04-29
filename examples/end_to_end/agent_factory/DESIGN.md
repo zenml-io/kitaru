@@ -572,9 +572,20 @@ What the port does *not* carry over from kami:
 ### Proxy container
 
 - Base image: `mitmproxy/mitmproxy:latest`
-- Runs `mitmdump -s /opt/proxy_addon.py --listen-port 8080 --proxyauth ...`
-- Env: `KAMI_CREDENTIALS={...}`, `KAMI_PROXY_TOKEN=<random-per-run>`
-- The proxy URL embedded in worker env vars is `http://<token>:@proxy:8080` (basic-auth-as-bearer pattern, same as kami)
+- Runs `mitmdump --quiet --listen-host 0.0.0.0 --listen-port 8080 --set confdir=/mitmproxy_certs -s /opt/proxy_addon.py`
+- Env: `AGENT_FACTORY_CREDENTIALS={...}`, `AGENT_FACTORY_PROXY_TOKEN=<random-per-run>` (renamed from kami's `KAMI_*` for namespace cleanliness)
+- The proxy URL embedded in worker env vars is `http://<token>:@proxy:8080` — Docker network DNS reaches the proxy by container name; no port mapping or tunnel needed (replaces kami's Modal tunnel + `tunnels[8080].tcp_socket` lookup)
+- Startup readiness: replaces kami's `time.sleep(2)` with a poll loop (`docker exec proxy nc -z localhost 8080` retried 50× / 100 ms) — same length, faster on the happy path, robust on slow runners
+
+### Proxy port shape
+
+| File | Ported from | Changes |
+|---|---|---|
+| `agent_factory/sandbox/proxy_addon.py` | `kami_agent/sandbox/proxy_addon.py` (129 LOC) | Verbatim except env var rename `KAMI_CREDENTIALS` → `AGENT_FACTORY_CREDENTIALS`, `KAMI_PROXY_TOKEN` → `AGENT_FACTORY_PROXY_TOKEN`, log prefix `[kami-proxy]` → `[agent-factory-proxy]`. All host-matching, per-connection auth set, `Proxy-Authorization` extraction + pop-after-validation, and `print(..., flush=True)` lines preserved (chapter 3 demos `docker logs proxy` to show injection in action). |
+| `agent_factory/sandbox/certs.py` | `kami_agent/sandbox/proxy.py::ensure_certs` + `_generate_ca` (~45 LOC) | Verbatim — same `cryptography` RSA 2048 / 10-year / CN. Files relocated under `agent_factory/sandbox/proxy_certs/` |
+| `agent_factory/sandbox/proxy.py` (`DockerProxy` class) | `kami_agent/sandbox/proxy.py::ProxySandbox` | Modal-specific seams (`modal.Sandbox.create`, `modal.tunnels()`, `time.sleep(2)`) replaced with `subprocess.run(["docker", "run", "-d", ...])`, Docker network DNS, and the readiness poll loop. `build_proxy_credential_map`, `_build_authenticated_proxy_url`, `secrets.token_urlsafe(32)` — verbatim. |
+
+A header comment at the top of each ported file points at its kami origin so a reader diffing the two repos can verify parity without having to read kami first.
 
 ### Credential resolution: real `kitaru.secrets` even for mocks
 
