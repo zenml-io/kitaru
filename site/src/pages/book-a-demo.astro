@@ -925,6 +925,7 @@ const turnstileSiteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY;
 </style>
 
 <script>
+  import { FORM_TYPES } from '../lib/formTypes';
   import { setupCardGlow } from '../scripts/card-glow';
 
   type CalQueueFn = ((...args: unknown[]) => void) & {
@@ -1073,7 +1074,7 @@ const turnstileSiteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY;
         metadata: {
           product: 'kitaru',
           source: 'book-a-demo',
-          formType: 'book-a-demo',
+          formType: FORM_TYPES.DEMO_REQUEST,
           company: formData.company,
         },
       },
