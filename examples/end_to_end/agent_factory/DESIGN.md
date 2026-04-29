@@ -1,8 +1,8 @@
 # agent_factory — Design
 
-**Status:** in progress (brainstorm captured; implementation plan to follow)
+**Status:** brainstorm complete (resolved 2026-04-29); implementation plan to follow
 **Branch:** `example/agent-factory`
-**Date:** 2026-04-28
+**Date:** 2026-04-28 (initial), 2026-04-29 (resolution pass grounded in the kami codebase at `/Users/htahir1/Workspace/kami-agent`)
 **Authors:** Hamza Tahir, with Claude (brainstorming)
 
 This document is the working spec for a new flagship example in `examples/end_to_end/agent_factory/`. It captures the decisions locked during brainstorming, the architecture, and the still-open work. It is intended to be edited as the implementation progresses.
@@ -15,7 +15,7 @@ This document is the working spec for a new flagship example in `examples/end_to
 
 Ship a hero example for kitaru that demonstrates a **durable, sandboxed, profile-gated PydanticAI agent with two-process credential isolation** — the architecture pioneered by `kami` (an internal ZenML project), simplified to be locally runnable with one `docker compose up` and zero external accounts.
 
-The example is the canonical "fork this to build your own agent" template, supporting a 5-post blog series and serving as the most ambitious entry in `examples/end_to_end/`.
+The example is the canonical "fork this to build your own agent" template, supporting a 7-chapter blog series (plus a post-chapter on Modal — see Section 13) and serving as the most ambitious entry in `examples/end_to_end/`.
 
 ### Non-goals
 
@@ -36,7 +36,7 @@ The example is the canonical "fork this to build your own agent" template, suppo
 2. **Two-sandbox credential isolation.** Agent shell commands run in a Modal "worker" sandbox that has no credentials. A second Modal "proxy" sandbox runs `mitmdump` with an addon that injects `Authorization` headers based on the request host. The worker is wired to the proxy via `http_proxy` / `REQUESTS_CA_BUNDLE` env vars and a self-signed CA cert.
 3. **Discriminated-union typed services.** A `ServiceCall` Pydantic union dispatches to handlers (`PostDiscordMessage`, `ReadAttio`, etc.). The `exec_service` tool's description is built dynamically from the profile so the LLM only sees services it is allowed to call.
 
-It is orchestrated end-to-end by a kitaru `@flow`, with `KitaruAgent` wrapping the `pydantic_ai.Agent` for granular per-tool checkpoints, a `kitaru.wait()`-backed `ask_human` HITL tool, and `kitaru.secrets` for credential resolution.
+It is orchestrated end-to-end by a kitaru `@flow`, with `KitaruAgent` wrapping the `pydantic_ai.Agent` for granular per-tool checkpoints, a `kitaru.wait()`-backed `ask_human` HITL tool (which our example generalizes into the typed-union `ask_question` dispatcher — see decision K3 and Section 7), and `kitaru.secrets` for credential resolution.
 
 ### Why a hero example
 
@@ -63,11 +63,11 @@ These were resolved during brainstorming and are the foundation for everything b
 | G2 | Profile complexity | **Lean Profile, grows one field per stage** | Each stage adds exactly one Profile field and one architectural concept. Reader's mental model expands monotonically. |
 | H1 | Profile representation | **`Profile` Pydantic `BaseModel`** *(updated 2026-04-29 — kami's actual Profile, not the dataclass mentioned in older notes)* | Initial brainstorm cited a "kami uses dataclass" claim that turned out to be stale; reading `kami_agent/profiles.py:105` shows kami's `Profile` is already a Pydantic `BaseModel`. The CLAUDE.md convention is "prefer Pydantic models for data structures," kitaru's own public models are all Pydantic, and kami matches. Markdown+frontmatter à la Claude Agent SDK is still deferred. |
 | I2 | HITL design | **Per-clause HITL via the `ask_question` typed-union dispatcher; the `severity_decision` kind suspends through the adapter's `wait_for_input(...)` helper** | The LLM decides when to pause for human input by calling `ask_question(kind="severity_decision", args={...})`. The flow body never calls `kitaru.wait()` directly; the tool body does, *through* the adapter's exported `wait_for_input(...)`. `@hitl_tool` marks the tool for capture/permission/system-prompt purposes; `wait_for_input` tags the wait with adapter metadata for dashboard/OTel correlation. Memory read + write are co-located in the `severity_decision` branch so each clause is one self-contained "consult precedents → ask human → record" round-trip. The same tool also covers freeform LLM-driven HITL via `kind="freeform"` (the `ask_human` use case from kami), so the example exposes both LLM-driven and workflow-driven HITL through a single architectural seam. |
-| J2 | Memory design | **Flow-scope precedents + execution-scope findings** | Cross-execution learning: `request_severity_decision` reads precedents, suggests defaults, writes confirmed decisions back. After 2-3 runs, the agent visibly "gets smarter." |
+| J2 | Memory design | **Flow-scope precedents + execution-scope findings** | Cross-execution learning: the `severity_decision` branch of `ask_question` reads precedents, suggests defaults, writes confirmed decisions back. After 2-3 runs, the agent visibly "gets smarter." |
 | K3 | Tool inventory | ~~Five tools: `exec`, `fetch_document`, `request_severity_decision`, `publish_review`, `skill`~~ → **Four tools: `exec`, `skill`, `exec_service`, `ask_question`** *(reversed 2026-04-29 — kami parity claim was inaccurate)* | Kami actually has four tools (`exec`, `skill`, `ask_human`, `exec_service`), not the five we initially listed. Services dispatch through `exec_service`'s discriminated `ServiceCall` union (cases: `fetch_document`, `publish_review`). HITL is generalized into `ask_question` — the kami `ask_human` upgraded to a typed-union dispatcher mirroring `exec_service`'s shape (kinds: `freeform`, `severity_decision`). The `skill` tool stays as the architectural distinctive that separates "main loop" from "capabilities" — the agent's procedure lives in markdown, not Python. |
 | L2 | Replay scenario | **"Policy change" replay (edit fixture file, replay from `check_clause_2`)** | The most realistic replay scenario for the compliance domain. No version metadata, no v1/v2 schema — replay overrides the `load_policy` checkpoint output: `overrides={"checkpoint.load_policy": <new policy text>}`. |
 | L2-impl | Replay-input mechanism | **Checkpoint-output override on `load_policy`** | A `@checkpoint def load_policy(path) -> str` runs early in the flow; its output is the artifact replay swaps. Keeps `find_clauses` cached on its own input (the doc), so replay re-executes only from `check_clause_2` onward. Demos `overrides={"checkpoint.*": ...}` — a kitaru feature no other example covers. Accepted 2026-04-29. |
-| H1-tools | `allowed_tools` typing | **`set[ToolName]` with `ToolName = Literal[...]` of the five tool names** | Closed set per K3, so a Literal alias gives readers IDE autocomplete and ty/ruff errors on typos at zero cost. Set (not list) expresses membership semantics and dedupes. Accepted 2026-04-29. |
+| H1-tools | `allowed_tools` typing | **`set[ToolName]` with `ToolName = Literal["exec", "skill", "exec_service", "ask_question"]`** | Closed set per K3 (revised), so a Literal alias gives readers IDE autocomplete and ty/ruff errors on typos at zero cost. Set (not list) expresses membership semantics and dedupes. Accepted 2026-04-29. |
 | M3 + N2 | Location & name | **`examples/end_to_end/agent_factory/`** | New directory in the gallery; `compliance_review/` stays as the SDK flavor. Generic name signals "the canonical template," not a domain-specific demo. |
 
 ---
@@ -121,7 +121,7 @@ These were resolved during brainstorming and are the foundation for everything b
 | `agent_factory_certs` | Named | proxy → `/certs/private` (rw); worker → `/usr/local/share/ca-certificates/` (ro) | Persistent across runs; generated once via init script | Self-signed CA: full PEM in proxy, public cert only in worker. Worker's `update-ca-certificates` runs at container start. |
 | `./skills/` | Host bind mount | worker → `/skills` (ro) | Persistent; operator-edited | Operators edit `skills/compliance-reviewer/SKILL.md`; worker sees the changes on the next flow run. |
 
-The per-execution workspace volume is what makes "your sandbox state is durable" demonstrable: a flow can pause for hours on a `request_severity_decision`, the host can reboot, and on resume the agent's `/workspace/extracted_clauses.txt` is exactly where it was.
+The per-execution workspace volume is what makes "your sandbox state is durable" demonstrable: a flow can pause for hours on an `ask_question(kind="severity_decision", ...)` wait, the host can reboot, and on resume the agent's `/workspace/extracted_clauses.txt` is exactly where it was.
 
 ---
 
@@ -288,9 +288,11 @@ Handled by Pydantic per the reversed H1: built-in type checks at construction, p
 
 ---
 
-## 7. The five tools (TODO — section 4 of brainstorm)
+## 7. The four tools
 
-### Permission and failure model (applies to all five tools)
+All four are gated by `PermissionHandler.require_tool(name)` at execution time, even though `build_tools(permission_handler)` already filters by `allowed_tools`. Defense in depth — same pattern as kami's `kami_agent/tools.py:428`.
+
+### Permission and failure model (applies to all four tools)
 
 Each tool has three structurally distinct failure paths. They surface to the agent differently:
 
