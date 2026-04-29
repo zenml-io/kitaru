@@ -520,8 +520,54 @@ Context managers also guarantee teardown on exception — a leaked `mitmdump` co
 
 - Base image: `python:3.11-slim` + `bash`, `curl`, `jq`, `poppler-utils` (for `pdftotext`)
 - CA cert installed via `update-ca-certificates`
-- Runs `tail -f /dev/null` as PID 1 — the host opens a persistent bash via `docker exec -i worker_<id> bash` and reuses it across the flow's exec calls (matches kami's persistent-bash pattern)
-- Env vars set at container start: `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `no_proxy`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `PIP_CERT`
+- Runs `tail -f /dev/null` as PID 1 — the host opens a persistent bash via `docker exec -i worker_<id> bash --noprofile --norc` and reuses it across the flow's exec calls (matches kami's persistent-bash pattern from `modal_runtime.py`)
+- Env vars set at container start: `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `no_proxy`, `NO_PROXY`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `PIP_CERT` — all pointing at `/etc/ssl/certs/ca-certificates.crt`
+
+### `DockerWorker` — port of kami's `ModalSandboxRuntime`
+
+The persistent-shell + marker-based completion pattern from `kami_agent/sandbox/modal_runtime.py` ports near-verbatim. The Modal-specific 30 lines become subprocess calls; the 120 lines of stdout-reader-thread / queue / marker-parsing logic survive unchanged.
+
+```python
+# agent_factory/sandbox/worker.py
+class DockerWorker:
+    """Persistent-shell Docker worker; Docker port of kami's ModalSandboxRuntime."""
+
+    def __init__(self, *, execution_id: str, proxy: DockerProxy) -> None:
+        self._execution_id = execution_id
+        self._proxy = proxy
+        self._container_id: str | None = None
+        self._shell_process: subprocess.Popen[bytes] | None = None
+        self._shell_lock = threading.Lock()
+        self._shell_stdout_queue: queue.Queue[str | None] | None = None
+        self._shell_stdout_thread: threading.Thread | None = None
+
+    def __enter__(self) -> "DockerWorker":
+        self._start_container()       # docker run -d --network agent_factory + env + volumes
+        self._start_shell_process()    # docker exec -i + stdout reader + `exec 2>&1`
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._terminate_existing_shell()
+        self._stop_container()         # docker stop + docker rm
+
+    def run(self, command: str) -> ExecResult:
+        # Kami's _build_command_payload → _write_stdin → _read_stdout_until_marker,
+        # then truncation per Q7 (MAX_STDOUT_LINES / MAX_STDERR_LINES / MAX_LINE_BYTES)
+        # plus full output written to /workspace/.exec/<call_id>.out.
+        ...
+```
+
+Docker-specific seams:
+
+- Container creation: `subprocess.run(["docker", "run", "-d", "--network", "agent_factory", "-v", f"workspace_{exec_id}:/workspace", "-v", f"agent_factory_certs:/usr/local/share/ca-certificates:ro", *env_args, "agent-factory-worker", "tail", "-f", "/dev/null"])`
+- Persistent shell: `subprocess.Popen(["docker", "exec", "-i", container_id, "bash", "--noprofile", "--norc"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, bufsize=0)`
+- Cleanup: `docker stop --time=2 worker_<id>` + `docker rm worker_<id>`. Workspace volume retention is configurable (Section 4 — "cleaned up on flow completion (configurable retention)").
+
+What the port does *not* carry over from kami:
+
+- **`SandboxManager` wrapper** — kami's `manager.py` exists only to swap `ModalSandboxRuntime` for tests; the example uses `DockerWorker` directly.
+- **Modal idle-timeout (`idle_timeout_seconds=86400`)** — Modal-specific auto-cleanup. Docker lifecycle is bounded by the Q5 context manager (worker dies when the flow exits).
+- **`SandboxManager.execute_command`'s "never raise; wrap exceptions as exit_code=1"** — replaced by Q8's hybrid (raise `KitaruRuntimeError` on infrastructure failure, return structured `ExecResult` for application failures).
 
 ### Proxy container
 
