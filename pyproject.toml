@@ -60,7 +60,9 @@ local = [
     "zenml[server]>=0.94.3",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim>=1.75.0",
+    # Capped at <1.86.0 because 1.86 added `capabilities`/`spec` kwargs to Agent.run()
+    # that the KitaruAgent adapter doesn't yet pass through. See #248.
+    "pydantic-ai-slim>=1.75.0,<1.86.0",
     "typing_extensions>=4.12",
 ]
 claude-agent-sdk = [
@@ -110,7 +112,8 @@ dev = [
     "pytest-xdist[psutil]",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=1.75.0",
+    # See note on the [pydantic-ai] extra above. Capped pending #248.
+    "pydantic-ai-slim>=1.75.0,<1.86.0",
     "openai>=1.0.0,<2",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",

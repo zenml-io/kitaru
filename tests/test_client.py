@@ -261,8 +261,8 @@ def test_deployment_snapshot_names_build_and_parse() -> None:
 
     assert name == "kitaru::research_flow::v3"
     assert parse_deployment_snapshot_name(name) is not None
-    assert parse_deployment_snapshot_name(name).flow == "research_flow"  # type: ignore[union-attr]
-    assert parse_deployment_snapshot_name(name).version == 3  # type: ignore[union-attr]
+    assert parse_deployment_snapshot_name(name).flow == "research_flow"  # ty: ignore[unresolved-attribute]
+    assert parse_deployment_snapshot_name(name).version == 3  # ty: ignore[unresolved-attribute]
     assert parse_deployment_snapshot_name("research_flow-v3") is None
     assert parse_deployment_snapshot_name("kitaru::research_flow::v0") is None
 
@@ -664,7 +664,7 @@ def test_deployments_create_moves_exclusive_tags_from_previous_versions() -> Non
 
     assert deployment.version == 2
     assert deployment.tags == {"stable": True}
-    assert "stable" not in map_deployment_snapshot(v1).tags  # type: ignore[union-attr]
+    assert "stable" not in map_deployment_snapshot(v1).tags  # ty: ignore[unresolved-attribute]
     assert client_mock.update_snapshot.call_count == 2
 
 
@@ -772,7 +772,7 @@ def test_deployments_tag_default_is_exclusive_and_untag_rejects_default() -> Non
 
     assert tagged.version == 2
     assert tagged.tags["default"] is True
-    assert "default" not in map_deployment_snapshot(v1).tags  # type: ignore[union-attr]
+    assert "default" not in map_deployment_snapshot(v1).tags  # ty: ignore[unresolved-attribute]
 
 
 def test_deployments_tag_warns_but_still_updates_target_if_cleanup_fails() -> None:
@@ -827,7 +827,7 @@ def test_deployments_tag_warns_but_still_updates_target_if_cleanup_fails() -> No
 
     assert tagged.version == 2
     assert tagged.tags == {"stable": True}
-    assert map_deployment_snapshot(v1).tags == {"stable": True}  # type: ignore[union-attr]
+    assert map_deployment_snapshot(v1).tags == {"stable": True}  # ty: ignore[unresolved-attribute]
     assert client_mock.update_snapshot.call_count == 2
     logger_mock.warning.assert_called_once()
     track_mock.assert_called_once_with(
@@ -859,26 +859,26 @@ def test_deployment_facade_methods_forward_to_client_api() -> None:
         deployment = client.deployments.get(flow="research_flow", version=2)
         assert isinstance(deployment, Deployment)
 
-        client.deployments.tag = MagicMock(return_value=deployment)  # type: ignore[method-assign]
-        client.deployments.untag = MagicMock(return_value=deployment)  # type: ignore[method-assign]
-        client.deployments.delete = MagicMock()  # type: ignore[method-assign]
+        client.deployments.tag = MagicMock(return_value=deployment)  # ty: ignore[invalid-assignment]
+        client.deployments.untag = MagicMock(return_value=deployment)  # ty: ignore[invalid-assignment]
+        client.deployments.delete = MagicMock()  # ty: ignore[invalid-assignment]
 
         assert deployment.add_tag("stable", exclusive=True) is deployment
         assert deployment.remove_tag("canary") is deployment
         deployment.delete()
 
-    client.deployments.tag.assert_called_once_with(
+    client.deployments.tag.assert_called_once_with(  # ty: ignore[unresolved-attribute]
         flow="research_flow",
         version=2,
         tag="stable",
         exclusive=True,
     )
-    client.deployments.untag.assert_called_once_with(
+    client.deployments.untag.assert_called_once_with(  # ty: ignore[unresolved-attribute]
         flow="research_flow",
         version=2,
         tag="canary",
     )
-    client.deployments.delete.assert_called_once_with(
+    client.deployments.delete.assert_called_once_with(  # ty: ignore[unresolved-attribute]
         flow="research_flow",
         version=2,
     )
@@ -1322,7 +1322,7 @@ def test_memories_compact_rejects_invalid_source_mode() -> None:
             scope="repo_scope",
             scope_type="namespace",
             key="prefs",
-            source_mode="future",  # type: ignore[arg-type]
+            source_mode="future",  # ty: ignore[invalid-argument-type]
         )
 
 
@@ -1358,7 +1358,7 @@ def test_memories_methods_validate_scope_key_version_and_scope_type() -> None:
             "prefs",
             {"theme": "dark"},
             scope="repo_scope",
-            scope_type="bogus",  # type: ignore[arg-type]
+            scope_type="bogus",  # ty: ignore[invalid-argument-type]
         )
 
 
