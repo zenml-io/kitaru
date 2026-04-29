@@ -26,7 +26,8 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run yamlfix --check .github/
+      - run: find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml
+          -print0 | xargs -0 uv run yamlfix --check
   typos:
     runs-on: ubuntu-latest
     steps:

@@ -46,9 +46,9 @@ typecheck:
 typos:
     uvx typos
 
-# Check YAML formatting
+# Check YAML formatting (skips dependabot.yml — yamlfix unquotes its `time:` value, which Dependabot then rejects as an integer)
 yaml-check:
-    uv run yamlfix --check .github/
+    find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml -print0 | xargs -0 uv run yamlfix --check
 
 # Lint GitHub Actions workflows (requires actionlint: brew install actionlint)
 actions-lint:
@@ -75,7 +75,7 @@ links-external:
 fix:
     uv run ruff format .
     uv run ruff check . --fix
-    uv run yamlfix .github/
+    find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml -print0 | xargs -0 uv run yamlfix
 
 # Run tests (e.g., `just test`, `just test -x`, `just test tests/test_foo.py`)
 test *ARGS:
