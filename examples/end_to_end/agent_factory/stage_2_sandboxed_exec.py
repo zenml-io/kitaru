@@ -48,6 +48,7 @@ def agent_factory_flow(prompt: str) -> str:
 
 if __name__ == "__main__":
     handle = agent_factory_flow.run(
-        "What's the OS, kernel, and Python version on the system you're running on?"
+        "Inspect this machine: what's the OS, kernel version, and current "
+        "user? Use one shell command per question, then summarize."
     )
     print(handle.wait().output)

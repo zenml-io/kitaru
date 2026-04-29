@@ -1,20 +1,26 @@
 """Stage 1 — a durable PydanticAI agent in ~30 lines.
 
 The chapter 1 hero demo: pydantic-ai gives the agent loop, kitaru gives
-durable execution. Together: durable agents without learning a graph DSL.
+durable execution. Together: durable agents without learning a graph DSL
+or rewriting your control flow as a state machine.
 
-Run it:
+Run the happy path:
 
     python stage_1_basic_agent.py
 
-Watch durability work — kill it mid-run and resume:
+Watch durability work — kill mid-run and resume:
 
-    1. Edit the prompt to something that needs a few tool calls.
-    2. python stage_1_basic_agent.py &
-       Watch the dashboard or the terminal show the agent working.
-    3. kill that process.
-    4. kitaru executions list           # the run is now orphaned
-    5. kitaru executions resume <id>    # picks up exactly where it stopped
+    1. python stage_1_basic_agent.py &
+    2. kill %1                          # before it finishes
+    3. kitaru executions list           # the run is `running` (orphaned)
+    4. kitaru executions resume <id>    # the turn re-runs and the flow
+                                        # completes; without kitaru, the
+                                        # killed process would have lost
+                                        # the run entirely
+
+Stage 1 uses *turn mode* (the adapter's default): one aggregating checkpoint
+per `agent.run_sync()`. Per-call cache (granular mode) lands in a later
+chapter where there are explicit `@checkpoint` boundaries to amortize.
 """
 
 from agent_factory.agent import build_agent
@@ -41,15 +47,16 @@ def agent_factory_flow(prompt: str) -> str:
     # build_agent() returns a vanilla pydantic-ai Agent; KitaruAgent
     # wraps it for durable execution, capture, and HITL bridging.
     agent = build_agent(DEFAULT_PROFILE)
-
-    # Convert into a KitaruAgent for durable execution, capture, and HITL bridging.
     agent = KitaruAgent(agent)
-
     return agent.run_sync(prompt).output
 
 
 if __name__ == "__main__":
     handle = agent_factory_flow.run(
-        "Look at /etc/hosts and tell me what hostnames are configured."
+        # A multi-step prompt that needs ~3-5 tool calls — gives you a window to
+        # kill the process between calls and see resume serve cached work.
+        "Inspect this machine: what's the OS, the kernel version, the current "
+        "user, and how many processes are running? Use one shell command per "
+        "question. Summarize at the end."
     )
     print(handle.wait().output)
