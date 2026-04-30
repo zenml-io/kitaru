@@ -1,4 +1,4 @@
-# agent_factory
+# Build a production-ready agent factory
 
 A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation, HITL gates, memory, and replay all wired up correctly. Locally runnable with one `docker compose up` and zero external accounts.
 
@@ -35,8 +35,6 @@ The example builds up one capability at a time. Each stage adds one tool or one 
 - `build_tools(permission_handler)` — pydantic-ai toolset filtered by `allowed_tools`
 - `build_agent(profile)` — returns a vanilla pydantic-ai `Agent`
 - The flow body: wraps the Agent with `KitaruAgent(...)` for durable execution
-
-The kitaru wrap stays at *flow scope*, not in the library helper, so you see the integration as a deliberate seam rather than something the library hides.
 
 **The hero demo — durability via cached checkpoints surviving a failure:**
 

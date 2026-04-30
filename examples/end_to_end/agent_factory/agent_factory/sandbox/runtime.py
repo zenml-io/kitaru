@@ -106,6 +106,22 @@ class DockerSandbox:
         )
         return result
 
+    def _ensure_image(self) -> None:
+        result = subprocess.run(
+            ["docker", "image", "inspect", _SANDBOX_IMAGE],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return
+        raise KitaruRuntimeError(
+            f"Sandbox image {_SANDBOX_IMAGE!r} is not built locally. "
+            "Build it once with:\n\n"
+            f"    docker build -t {_SANDBOX_IMAGE} "
+            "-f docker/sandbox.Dockerfile docker/\n\n"
+            "Then re-run this stage."
+        )
+
     def _ensure_network(self) -> None:
         # `docker network create` errors loudly if the network exists, so check first.
         result = subprocess.run(
@@ -122,6 +138,7 @@ class DockerSandbox:
         )
 
     def _start_container(self) -> None:
+        self._ensure_image()
         completed = subprocess.run(
             [
                 "docker",
