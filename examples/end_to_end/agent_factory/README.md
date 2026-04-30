@@ -128,7 +128,9 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 
 - `DISABLE_CACHE=1` — force every checkpoint to re-execute (useful when the agent's already cached and you want to see the sandbox actually running shell commands)
 
-**Not yet here:** persistent-shell + marker-completion protocol (each `exec` call currently spins up a fresh `bash -c` — fine for the demo, will be upgraded so `cd` and shell state survive across calls). Credentials still come from the host process; chapter 3 isolates them.
+**Persistent shell:** stage 2 runs every `run(command)` through **one long-lived `bash --noprofile --norc` process** inside the container. Shell state — `cd`, `export`, file descriptors, background jobs — survives across `exec` calls, just like a normal interactive shell. The host writes commands into the shell's stdin and reads back output up to a unique completion-marker line (`<UUID> <exit_code> <cwd>`). Ported verbatim from kami's `modal_runtime.py`; the only Docker-specific bit is `subprocess.Popen(["docker", "exec", "-i", ...])` instead of `modal.Sandbox.exec`.
+
+**Not yet here:** credentials still come from the host process; chapter 3 isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
 
 ---
 
