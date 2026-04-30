@@ -91,24 +91,28 @@ docker build -t agent-factory-sandbox -f docker/sandbox.Dockerfile docker/
 DISABLE_CACHE=1 python stage_2_sandboxed_exec.py
 ```
 
-The `[sandbox] ...` lines show every step:
+The flow has two `agent.run_sync()` turns sharing one `with DockerSandbox(...)`. Turn 1 changes shell state; turn 2 reads it back. Watch the persistent shell carry state across turns:
 
 ```
-[sandbox] Started container 48a1dbd8a7de (image=agent-factory-sandbox, /workspace ← workspace_688d22c8)
+[sandbox] Started container 11828848d040 (image=agent-factory-sandbox, /workspace ← workspace_df8dd2a1)
 Kitaru: Checkpoint `default` started.
 [sandbox] $ cat /etc/os-release
+[sandbox]   → exit=0, stdout=285 chars, cwd=/workspace
 [sandbox] $ uname -r
+[sandbox]   → exit=0, stdout=16 chars, cwd=/workspace
 [sandbox] $ whoami
-[sandbox]   → exit=0, stdout=16 chars, stderr=0 chars
-[sandbox]   → exit=0, stdout=285 chars, stderr=0 chars
-[sandbox]   → exit=0, stdout=4 chars, stderr=0 chars
-- **OS:** Debian GNU/Linux 13 (trixie)
-- **Kernel version:** 6.10.14-linuxkit
-- **Current user:** root
-[sandbox] Stopping container 48a1dbd8a7de (workspace volume preserved for pause/resume durability)
+[sandbox]   → exit=0, stdout=4 chars, cwd=/workspace
+[sandbox] $ cd /tmp && export GREETING='hello from turn 1' && …
+[sandbox]   → exit=0, stdout=31 chars, cwd=/tmp                       ← cwd just changed
+Kitaru: Checkpoint `default` finished in 27.9s.
+Kitaru: Checkpoint `default_2` started.
+[sandbox] $ pwd && echo "$GREETING"
+[sandbox]   → exit=0, stdout=22 chars, cwd=/tmp                       ← still /tmp from turn 1
+Kitaru: Checkpoint `default_2` finished in 9.7s.
+[sandbox] Stopping container 11828848d040 (workspace volume preserved for pause/resume durability)
 ```
 
-The agent reports Debian / root — that's the *container*, not your macOS / Linux host. The sandbox is doing its job.
+The `cwd=/tmp` line on turn 2 proves the shell is the same shell — without the persistent-bash port, every turn would start in `/workspace` with empty env. The agent also reports Debian / root (the container's image and user), not your macOS/Linux host.
 
 **Watch it boot from another terminal:**
 

@@ -1,8 +1,10 @@
 """Stage 2 — the agent's `exec` tool runs inside a Docker sandbox.
 
-Same agent as stage 1; the only difference is that shell commands now
-execute in an isolated container instead of the host process. The agent's
-`/workspace` is a named Docker volume that survives pause/resume.
+The flow runs the agent **twice**, sharing a single `DockerSandbox` (one
+container, one persistent bash) across both turns. Turn 1 changes shell
+state (`cd /tmp`, `export GREETING=...`). Turn 2 reads it back. Reader
+sees the persistent shell carry state across turns the same way a real
+interactive bash would.
 
 The sandbox prints `[sandbox] ...` lines for every lifecycle event and
 every shell command — start, each `exec`, stop — so you can watch it
@@ -39,20 +41,38 @@ DEFAULT_PROFILE = Profile(
 )
 
 
+_TURN_1_PROMPT = (
+    "Investigate this machine: report the OS, kernel version, and current "
+    "user (one shell command per question). Then cd into /tmp and "
+    "`export GREETING='hello from turn 1'`. Confirm both worked."
+)
+
+_TURN_2_PROMPT = (
+    "Run `pwd` and `echo \"$GREETING\"`. Tell me what you see — and what "
+    "that tells you about how the shell behaves between turns."
+)
+
+
 @kitaru.flow
-def agent_factory_flow(prompt: str) -> str:
+def agent_factory_flow() -> str:
     execution_id = _get_current_execution_id() or "local"
+
     with DockerSandbox(execution_id=execution_id) as sandbox:
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
         agent = KitaruAgent(agent)
-        output = agent.run_sync(prompt).output
-        print(f"\n{output}\n")
-        return output
+
+        # Turn 1: changes shell state (cd, export).
+        turn_1 = agent.run_sync(_TURN_1_PROMPT)
+
+        # Turn 2: reads the state back. Persistent shell means turn 2's
+        # `pwd` returns /tmp and `echo $GREETING` returns the message —
+        # without it, every turn starts in /workspace with empty env.
+        turn_2 = agent.run_sync(_TURN_2_PROMPT)
+
+    final = f"# Turn 1 (set state)\n\n{turn_1.output}\n\n# Turn 2 (read state)\n\n{turn_2.output}"
+    print(f"\n{final}\n")
+    return final
 
 
 if __name__ == "__main__":
-    agent_factory_flow.run(
-        "Inspect this machine: what's the OS, kernel version, and current "
-        "user? Use one shell command per question, then summarize.",
-        cache=False if DISABLE_CACHE else None,
-    )
+    agent_factory_flow.run(cache=False if DISABLE_CACHE else None)
