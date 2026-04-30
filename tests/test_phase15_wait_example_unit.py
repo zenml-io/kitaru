@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-from examples.execution_management import wait_and_resume
+from examples.features.execution_management import wait_and_resume
 
 
 def test_run_workflow_calls_flow_run_and_wait(monkeypatch) -> None:

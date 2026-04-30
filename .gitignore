@@ -265,3 +265,12 @@ src/kitaru/_ui/bundle_manifest.json
 !.codex/skills/
 AGENTS.override.md
 .agents/skills/*
+
+# Agent Skills
+.pi/
+.claude/skills/building-pydantic-ai-agents
+.claude/skills/instrumentation
+skills-lock.json
+
+# Local PR review screenshots
+.pr-screenshots/

@@ -257,7 +257,7 @@ def test_memory_configure_namespace_scope_type_requires_explicit_scope() -> None
 
 def test_memory_configure_rejects_invalid_scope_type() -> None:
     with pytest.raises(KitaruUsageError, match="Memory scope_type"):
-        memory.configure(scope="repo_seed", scope_type="bogus")  # type: ignore[arg-type]
+        memory.configure(scope="repo_seed", scope_type="bogus")  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize("scope_type", ["flow", "execution"])
@@ -265,7 +265,7 @@ def test_memory_configure_cannot_infer_flowish_scope_outside_flow(
     scope_type: str,
 ) -> None:
     with pytest.raises(KitaruContextError, match=r"inside a @flow"):
-        memory.configure(scope_type=scope_type)  # type: ignore[arg-type]
+        memory.configure(scope_type=scope_type)  # ty: ignore[invalid-argument-type]
 
 
 def test_memory_step_uses_memory_call_step_type() -> None:

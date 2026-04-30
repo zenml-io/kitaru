@@ -3786,6 +3786,7 @@ SHARED = "project"
         )
 
     assert resolved.stack == "invocation-stack"
+    assert resolved.stack_source == "invocation"
     assert resolved.cache is True
     assert resolved.retries == 6
     assert resolved.image is not None
@@ -3823,6 +3824,36 @@ def test_resolve_execution_config_default_cache_is_unset() -> None:
         resolved = resolve_execution_config()
 
     assert resolved.cache is None
+    assert resolved.stack == "global-stack"
+    assert resolved.stack_source == "zenml_active_stack"
+
+
+def test_resolve_execution_config_marks_environment_stack_as_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KITARU_STACK is an explicit Kitaru stack choice, even for default."""
+    monkeypatch.setenv(KITARU_STACK_ENV, "default")
+
+    with patch(
+        "kitaru.config.current_stack",
+        return_value=SimpleNamespace(name="fallback-default"),
+    ):
+        resolved = resolve_execution_config()
+
+    assert resolved.stack == "default"
+    assert resolved.stack_source == "environment"
+
+
+def test_resolved_execution_stack_source_is_not_persisted() -> None:
+    """Stack source is a runtime safety hint, not part of frozen specs."""
+    resolved = ResolvedExecutionConfig(
+        stack="default",
+        stack_source="zenml_active_stack",
+        cache=None,
+        retries=0,
+    )
+
+    assert "stack_source" not in resolved.model_dump()
 
 
 def test_resolve_execution_config_supports_string_image_env(
@@ -4117,7 +4148,7 @@ def test_coerce_docker_settings_with_platform() -> None:
 
     docker = DockerSettings(
         build_config=DockerBuildConfig(
-            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # ty: ignore[unknown-argument]
         ),
     )
     result = _coerce_image_input(docker)
@@ -4155,7 +4186,7 @@ def test_platform_round_trip() -> None:
 
     original = DockerSettings(
         build_config=DockerBuildConfig(
-            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # ty: ignore[unknown-argument]
         ),
     )
     image_settings = _coerce_image_input(original)

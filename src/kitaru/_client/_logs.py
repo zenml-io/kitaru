@@ -163,11 +163,17 @@ def _is_otel_log_retrieval_error(message: str) -> bool:
     return "otel" in lowered and "not implemented" in lowered
 
 
+def _is_log_endpoint_version_skew_error(message: str) -> bool:
+    """Return whether an error message points to incompatible log endpoints."""
+    return "zenml.log_stores" in message.lower()
+
+
 __all__ = [
     "_coerce_log_level",
     "_coerce_log_lineno",
     "_coerce_log_text",
     "_is_empty_log_result_error",
+    "_is_log_endpoint_version_skew_error",
     "_is_otel_log_retrieval_error",
     "_log_sort_key",
     "_map_runtime_log_entry",

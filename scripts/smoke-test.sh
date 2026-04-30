@@ -102,6 +102,34 @@ run_test() {
     return $rc
 }
 
+redact_sensitive_output() {
+    sed -E \
+        -e 's/("key"[[:space:]]*:[[:space:]]*")[^"]*(")/\1[redacted]\2/g' \
+        -e 's/(Key:[[:space:]]*).*/\1[redacted]/g'
+}
+
+run_sensitive_json_test() {
+    local label="$1"; shift
+    local output
+    output=$("$@" 2>&1)
+    local rc=$?
+    if [[ $rc -eq 0 ]]; then
+        printf "  ${GREEN}✓${RESET} %s\n" "$label"
+        PASSED+=("$label")
+        if [[ "$VERBOSE" == true ]]; then
+            echo "$output" | redact_sensitive_output | sed 's/^/    /'
+        fi
+    elif [[ $rc -eq 124 ]]; then
+        printf "  ${RED}✗${RESET} %s ${RED}(TIMEOUT)${RESET}\n" "$label"
+        FAILED+=("$label (TIMEOUT)")
+    else
+        printf "  ${RED}✗${RESET} %s\n" "$label"
+        echo "$output" | redact_sensitive_output | tail -30 | sed 's/^/    /'
+        FAILED+=("$label")
+    fi
+    return $rc
+}
+
 run_expected_failure() {
     local label="$1"; local expected="$2"; shift 2
     local output
@@ -128,6 +156,12 @@ skip_test() {
 }
 
 cleanup() {
+    if [[ -n "${SMOKE_AUTH_SA:-}" ]]; then
+        timed 10 $UV_RUN kitaru auth api-keys delete \
+            "$SMOKE_AUTH_SA" "${SMOKE_AUTH_KEY:-smoke-key}" --yes &>/dev/null || true
+        timed 10 $UV_RUN kitaru auth service-accounts delete \
+            "$SMOKE_AUTH_SA" --yes &>/dev/null || true
+    fi
     if [[ "$KEEP_SERVER" == true ]] && [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
         printf "\n${CYAN}Server left running at %s${RESET}\n" "$DASHBOARD_URL"
     elif [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
@@ -251,7 +285,10 @@ run_test "kitaru model list"             $UV_RUN kitaru model list
 run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
 run_test "kitaru analytics opt-in --help"  $UV_RUN kitaru analytics opt-in --help
 run_test "kitaru analytics opt-out --help" $UV_RUN kitaru analytics opt-out --help
+run_test "kitaru auth --help"              $UV_RUN kitaru auth --help
 run_test "kitaru auth token --help"        $UV_RUN kitaru auth token --help
+run_test "kitaru auth service-accounts --help" $UV_RUN kitaru auth service-accounts --help
+run_test "kitaru auth api-keys --help"     $UV_RUN kitaru auth api-keys --help
 run_test "kitaru build --help"            $UV_RUN kitaru build --help
 run_test "kitaru deploy --help"           $UV_RUN kitaru deploy --help
 run_test "kitaru invoke --help"           $UV_RUN kitaru invoke --help
@@ -274,6 +311,25 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Auth management API
+# ---------------------------------------------------------------------------
+section_header "Auth management"
+
+SMOKE_AUTH_SA="kitaru-smoke-auth-$$"
+SMOKE_AUTH_KEY="smoke-key-$$"
+run_test "kitaru auth service-accounts create smoke" \
+    $UV_RUN kitaru auth service-accounts create "$SMOKE_AUTH_SA" \
+        --description "Kitaru smoke-test service account"
+run_sensitive_json_test "kitaru auth api-keys create smoke" \
+    $UV_RUN kitaru auth api-keys create "$SMOKE_AUTH_SA" "$SMOKE_AUTH_KEY" -o json
+run_test "kitaru auth api-keys list smoke" \
+    $UV_RUN kitaru auth api-keys list "$SMOKE_AUTH_SA"
+run_test "kitaru auth api-keys delete smoke" \
+    $UV_RUN kitaru auth api-keys delete "$SMOKE_AUTH_SA" "$SMOKE_AUTH_KEY" --yes
+run_test "kitaru auth service-accounts delete smoke" \
+    $UV_RUN kitaru auth service-accounts delete "$SMOKE_AUTH_SA" --yes
+
+# ---------------------------------------------------------------------------
 # Project init
 # ---------------------------------------------------------------------------
 section_header "Project init"
@@ -291,15 +347,15 @@ fi
 # ---------------------------------------------------------------------------
 section_header "PydanticAI adapter"
 
-run_test "examples/pydantic_ai_agent/pydantic_ai_adapter.py" \
-    $UV_RUN python examples/pydantic_ai_agent/pydantic_ai_adapter.py
+run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
+    $UV_RUN python examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).
 run_test "kitaru clean project --dry-run" $UV_RUN kitaru clean project --dry-run
 run_expected_failure "kitaru build rejects local stack deployments" \
     "not one the Kitaru server can execute remotely" \
-    $UV_RUN kitaru build examples/basic_flow/first_working_flow.py:research_agent \
+    $UV_RUN kitaru build examples/features/basic_flow/first_working_flow.py:research_agent \
         --input '{"topic":"smoke"}'
 
 # ---------------------------------------------------------------------------
@@ -321,13 +377,13 @@ run_test "kitaru secrets delete smoke secret" \
 # ---------------------------------------------------------------------------
 section_header "Core SDK flows"
 
-run_test "Basic flow"              timed 60 $UV_RUN examples/basic_flow/first_working_flow.py
-run_test "Flow with logging"       timed 60 $UV_RUN examples/basic_flow/flow_with_logging.py
-run_test "Flow with artifacts"     timed 60 $UV_RUN examples/basic_flow/flow_with_artifacts.py
-run_test "Flow with configuration" timed 60 $UV_RUN examples/basic_flow/flow_with_configuration.py
-run_test "Flow with fan-out"       timed 60 $UV_RUN examples/basic_flow/flow_with_checkpoint_runtime.py
-run_test "Client execution mgmt"   timed 60 $UV_RUN examples/execution_management/client_execution_management.py
-run_test "Replay with overrides"   timed 120 $UV_RUN examples/replay/replay_with_overrides.py
+run_test "Basic flow"              timed 60 $UV_RUN examples/features/basic_flow/first_working_flow.py
+run_test "Flow with logging"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_logging.py
+run_test "Flow with artifacts"     timed 60 $UV_RUN examples/features/basic_flow/flow_with_artifacts.py
+run_test "Flow with configuration" timed 60 $UV_RUN examples/features/basic_flow/flow_with_configuration.py
+run_test "Flow with fan-out"       timed 60 $UV_RUN examples/features/basic_flow/flow_with_checkpoint_runtime.py
+run_test "Client execution mgmt"   timed 60 $UV_RUN examples/features/execution_management/client_execution_management.py
+run_test "Replay with overrides"   timed 120 $UV_RUN examples/features/replay/replay_with_overrides.py
 
 # ---------------------------------------------------------------------------
 # CLI inspection of executions
@@ -370,7 +426,7 @@ section_header "LLM flow"
 
 if [[ "$HAS_OPENAI" == true ]]; then
     run_test "LLM flow (flow_with_llm)" \
-        timed 30 $UV_RUN examples/llm/flow_with_llm.py
+        timed 30 $UV_RUN examples/features/llm/flow_with_llm.py
 else
     skip_test "LLM flow (flow_with_llm)" "OPENAI_API_KEY not set"
 fi
@@ -397,7 +453,7 @@ run_test "MCP: kitaru_executions_list" \
         --input-json '{"limit": 3}' --json
 
 run_test "MCP query snapshot (example)" \
-    timed 30 $UV_RUN examples/mcp/mcp_query_tools.py
+    timed 30 $UV_RUN examples/features/mcp/mcp_query_tools.py
 
 fi  # LOGIN_RC == 0
 

@@ -39,6 +39,52 @@ class ExecutionStatus(StrEnum):
 
 
 @dataclass(frozen=True)
+class AuthServiceAccount:
+    """Public metadata view of a Kitaru service account."""
+
+    service_account_id: str
+    name: str
+    full_name: str
+    description: str
+    active: bool
+    created_at: datetime | None
+    updated_at: datetime | None
+    avatar_url: str | None = None
+
+
+@dataclass(frozen=True)
+class AuthAPIKey:
+    """Metadata-only view of a Kitaru service-account API key."""
+
+    api_key_id: str
+    name: str
+    service_account_id: str
+    service_account_name: str
+    description: str
+    active: bool
+    created_at: datetime | None
+    updated_at: datetime | None
+    last_login: datetime | None
+    last_rotated: datetime | None
+    retain_period_minutes: int
+
+
+@dataclass(frozen=True)
+class AuthAPIKeyWithValue:
+    """One-time API-key result returned only by create and rotate operations."""
+
+    api_key: AuthAPIKey
+    key: str = field(repr=False)
+    local_key_activation_requested: bool = False
+    local_key_activation_succeeded: bool | None = None
+    local_key_activation_error: str | None = None
+    local_key_rollback_attempted: bool = False
+    local_key_rollback_succeeded: bool | None = None
+    local_key_rollback_error: str | None = None
+    local_key_rollback_reason: str | None = None
+
+
+@dataclass(frozen=True)
 class Deployment:
     """Public view of a versioned Kitaru deployment snapshot."""
 
@@ -204,6 +250,9 @@ class Execution:
 
 __all__ = [
     "ArtifactRef",
+    "AuthAPIKey",
+    "AuthAPIKeyWithValue",
+    "AuthServiceAccount",
     "CheckpointAttempt",
     "CheckpointCall",
     "Deployment",

@@ -2,6 +2,11 @@
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+
+// Pair this build-time public key with the runtime TURNSTILE_SECRET_KEY.
+// If the secret is configured without this key, the API will correctly reject
+// submissions but the browser will not be able to render a challenge.
+const turnstileSiteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY;
 ---
 
 <Base
@@ -10,20 +15,84 @@ import Footer from '../components/Footer.astro';
 >
   <Nav />
   <main id="main-content">
-    <!-- ── Hero ── -->
-    <section class="gs-hero">
-      <div class="gs-hero-inner" data-reveal>
-        <span class="pill-badge">
-          <span class="pulse-dot"></span>
-          Free onboarding program
-        </span>
-        <h1 class="gs-headline">
-          Production agents on <span class="accent-shimmer">your&nbsp;infra</span> — see&nbsp;it&nbsp;work.
-        </h1>
-        <p class="gs-subtitle">
-          Our engineers pair with your team to deploy Kitaru, migrate your agent code, and prove it works — on your infrastructure, with your data. No cost, no commitment.
-        </p>
-        <a href="#signup" class="btn-accent gs-hero-cta">Book a demo</a>
+    <!-- ── Hero + conversion form ── -->
+    <section class="gs-hero" id="signup">
+      <div class="gs-hero-conversion-grid" data-reveal>
+        <div class="gs-hero-copy">
+          <span class="pill-badge">
+            <span class="pulse-dot"></span>
+            Free onboarding program
+          </span>
+          <h1 class="gs-headline">
+            Production agents on <span class="accent-shimmer">your&nbsp;infra</span> — see&nbsp;it&nbsp;work.
+          </h1>
+          <p class="gs-subtitle">
+            Our engineers pair with your team to deploy Kitaru, migrate your agent code, and prove it works — on your infrastructure, with your data. No cost, no commitment.
+          </p>
+          <ul class="gs-hero-proof" aria-label="What happens in the demo">
+            <li>30-minute product walkthrough</li>
+            <li>Concrete deployment and migration plan</li>
+            <li>Direct access to the engineers building Kitaru</li>
+          </ul>
+        </div>
+
+        <div
+          class="gs-form-card gs-demo-card"
+          data-cal-namespace="kitaru-product-demo"
+          data-cal-link="zenml/kitaru-product-demo"
+          data-cal-element-id="my-cal-inline-kitaru-product-demo"
+          data-cal-origin="https://app.cal.com"
+          data-cal-embed-script="https://app.cal.com/embed/embed.js"
+          data-cal-layout="month_view"
+          data-cal-slots-small-screen="true"
+        >
+          <div class="card-glow" aria-hidden="true"></div>
+          <div class="gs-form-heading" id="demoFormHeading">
+            <span class="section-eyebrow">Book a demo</span>
+            <h2>Pick your product demo time</h2>
+            <p>First, tell us who you are. Then choose a slot directly in the calendar.</p>
+          </div>
+
+          <form id="getStartedForm" class="gs-form" novalidate>
+            <div class="gs-field">
+              <label for="gs-name">Name</label>
+              <input type="text" id="gs-name" name="name" required autocomplete="name" placeholder="Jane Smith" />
+            </div>
+            <div class="gs-field">
+              <label for="gs-company">Company</label>
+              <input type="text" id="gs-company" name="company" required autocomplete="organization" placeholder="Acme Inc." />
+            </div>
+            <div class="gs-field">
+              <label for="gs-email">Work email</label>
+              <input type="email" id="gs-email" name="email" required autocomplete="email" placeholder="jane@acme.com" />
+            </div>
+            {turnstileSiteKey && (
+              <div
+                id="turnstileWidget"
+                class="gs-turnstile"
+                data-sitekey={turnstileSiteKey}
+                aria-label="Bot verification"
+              ></div>
+            )}
+            <button type="submit" class="btn-accent gs-submit">Continue to calendar</button>
+            <p class="gs-error" id="gsError" aria-live="polite"></p>
+          </form>
+
+          <div id="gsSuccess" class="gs-success gs-calendar-transition" hidden>
+            <div class="gs-calendar-copy">
+              <span class="section-eyebrow">Almost there</span>
+              <h3>Choose a time that works for you</h3>
+              <p>Your name and email are prefilled for the Kitaru product demo calendar.</p>
+            </div>
+            <div id="my-cal-inline-kitaru-product-demo" class="gs-calendar-embed"></div>
+            <p class="gs-calendar-fallback">
+              Can't see the calendar?
+              <a href="https://app.cal.com/zenml/kitaru-product-demo" target="_blank" rel="noopener noreferrer">
+                Open the Kitaru product demo calendar directly →
+              </a>
+            </p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -67,36 +136,15 @@ import Footer from '../components/Footer.astro';
       </div>
     </section>
 
-    <!-- ── Form + Why (combined, tinted) ── -->
-    <section class="gs-form-section" id="signup">
+    <!-- ── Why this program works ── -->
+    <section class="gs-form-section gs-proof-section">
       <div class="gs-form-why-inner" data-reveal>
-        <!-- Form card (left) -->
-        <div class="gs-form-card">
-          <div class="card-glow" aria-hidden="true"></div>
-          <h2>Book a demo</h2>
-
-          <form id="getStartedForm" class="gs-form" novalidate>
-            <div class="gs-field">
-              <label for="gs-name">Name</label>
-              <input type="text" id="gs-name" name="name" required autocomplete="name" placeholder="Jane Smith" />
-            </div>
-            <div class="gs-field">
-              <label for="gs-company">Company</label>
-              <input type="text" id="gs-company" name="company" required autocomplete="organization" placeholder="Acme Inc." />
-            </div>
-            <div class="gs-field">
-              <label for="gs-email">Work email</label>
-              <input type="email" id="gs-email" name="email" required autocomplete="email" placeholder="jane@acme.com" />
-            </div>
-            <button type="submit" class="btn-accent gs-submit">Book a demo</button>
-            <p class="gs-error" id="gsError" aria-live="polite"></p>
-          </form>
-
-          <div id="gsSuccess" class="gs-success" hidden>
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="9 12 12 15 16 10"/></svg>
-            <h3>Got it!</h3>
-            <p>We'll reach out within one business day to schedule your demo.</p>
-          </div>
+        <div class="gs-proof-copy">
+          <span class="section-eyebrow">Why teams book</span>
+          <h2>A practical session, not a sales detour.</h2>
+          <p>
+            Bring a real agent, deployment target, or reliability problem. We'll map how Kitaru would add checkpoints, replay, human waits, and cloud deployment without forcing a framework rewrite.
+          </p>
         </div>
 
         <!-- Why items (right, 2x2 grid) -->
@@ -122,6 +170,7 @@ import Footer from '../components/Footer.astro';
             <span>Open source, Apache 2.0. Everything we set up belongs to you. Zero lock-in.</span>
           </div>
         </div>
+
       </div>
     </section>
 
@@ -195,14 +244,31 @@ import Footer from '../components/Footer.astro';
 <style>
   /* ── Hero ── */
   .gs-hero {
-    padding: 160px clamp(24px, 5vw, 80px) 80px;
-    text-align: center;
+    padding: 140px clamp(24px, 5vw, 80px) 80px;
     display: flex;
     justify-content: center;
   }
 
-  .gs-hero-inner {
-    max-width: 720px;
+  .gs-hero-conversion-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    gap: clamp(40px, 6vw, 72px);
+    align-items: center;
+    max-width: 1120px;
+    width: 100%;
+  }
+
+  .gs-hero-copy {
+    text-align: left;
+  }
+
+  .gs-hero-conversion-grid.gs-cal-active {
+    grid-template-columns: 1fr;
+    max-width: 920px;
+  }
+
+  .gs-hero-copy.gs-cal-hidden {
+    display: none;
   }
 
   .gs-headline {
@@ -214,17 +280,35 @@ import Footer from '../components/Footer.astro';
     color: var(--color-primary);
   }
 
-  .gs-hero-cta {
-    margin-top: 28px;
-  }
-
   .gs-subtitle {
     font-size: clamp(1rem, 1.6vw, 1.15rem);
     font-weight: 300;
     line-height: 1.65;
     color: var(--color-secondary);
-    max-width: 560px;
-    margin: 0 auto;
+    max-width: 620px;
+    margin: 0;
+  }
+
+  .gs-hero-proof {
+    display: grid;
+    gap: 10px;
+    margin: 28px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--color-secondary);
+    font-size: 0.95rem;
+  }
+
+  .gs-hero-proof li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .gs-hero-proof li::before {
+    content: '✓';
+    color: var(--color-accent-darker);
+    font-weight: 700;
   }
 
   /* ── Steps ── */
@@ -393,6 +477,25 @@ import Footer from '../components/Footer.astro';
     color: var(--color-secondary);
   }
 
+  .gs-proof-copy {
+    align-self: center;
+  }
+
+  .gs-proof-copy h2 {
+    font-size: clamp(2rem, 4vw, 2.8rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--color-primary);
+    margin: 12px 0 16px;
+  }
+
+  .gs-proof-copy p {
+    font-size: 1rem;
+    line-height: 1.65;
+    color: var(--color-secondary);
+    margin: 0;
+  }
+
   .gs-form-card {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
@@ -402,14 +505,32 @@ import Footer from '../components/Footer.astro';
     overflow: hidden;
   }
 
+  .gs-demo-card {
+    box-shadow: 0 24px 80px oklch(0.15 0.02 50 / 0.10);
+  }
+
+  .gs-form-heading {
+    position: relative;
+    z-index: 2;
+    margin-bottom: 24px;
+  }
+
+  .gs-form-heading h2,
   .gs-form-card h2 {
     font-size: clamp(1.4rem, 3vw, 1.8rem);
     font-weight: 700;
     letter-spacing: -0.03em;
     color: var(--color-primary);
-    margin: 0 0 24px;
+    margin: 8px 0 8px;
     position: relative;
     z-index: 2;
+  }
+
+  .gs-form-heading p {
+    color: var(--color-secondary);
+    font-size: 0.95rem;
+    line-height: 1.55;
+    margin: 0;
   }
 
   .gs-form {
@@ -475,29 +596,70 @@ import Footer from '../components/Footer.astro';
     min-height: 1.2em;
   }
 
+  .gs-turnstile {
+    display: flex;
+    justify-content: center;
+    min-height: 65px;
+  }
+
   /* Success state */
   .gs-success {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 40px 0;
+    align-items: stretch;
+    gap: 16px;
+    padding: 0;
     position: relative;
     z-index: 2;
     color: var(--color-accent-darker);
+    animation: gs-calendar-slide-up 0.45s ease both;
+  }
+
+  .gs-calendar-copy {
+    text-align: left;
   }
 
   .gs-success h3 {
     font-size: 1.4rem;
     font-weight: 700;
     color: var(--color-primary);
-    margin: 0;
+    margin: 8px 0 6px;
   }
 
   .gs-success p {
     font-size: 0.95rem;
     color: var(--color-secondary);
     margin: 0;
+  }
+
+  .gs-calendar-embed {
+    min-height: 640px;
+    width: 100%;
+    overflow: auto;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-bg);
+  }
+
+  .gs-calendar-fallback {
+    text-align: center;
+    font-size: 0.85rem;
+  }
+
+  .gs-calendar-fallback a {
+    color: var(--color-accent-darker);
+    text-decoration: underline;
+  }
+
+  .gs-calendar-load-error {
+    padding: 28px;
+    color: var(--color-secondary);
+    text-align: center;
+  }
+
+  @keyframes gs-calendar-slide-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   /* ── FAQ ── */
@@ -672,6 +834,11 @@ import Footer from '../components/Footer.astro';
 
   /* ── Responsive ── */
   @media (max-width: 1024px) {
+    .gs-hero-conversion-grid {
+      grid-template-columns: 1fr;
+      max-width: 760px;
+    }
+
     .gs-steps-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -685,10 +852,14 @@ import Footer from '../components/Footer.astro';
 
   @media (max-width: 768px) {
     .gs-hero { padding: 120px 24px 60px; }
+    .gs-hero-copy { text-align: center; }
+    .gs-subtitle { margin: 0 auto; }
+    .gs-hero-proof { text-align: left; }
     .gs-form-why-inner {
       grid-template-columns: 1fr;
       gap: 40px;
     }
+    .gs-proof-copy { text-align: center; }
     .gs-why-grid {
       grid-template-columns: repeat(2, 1fr);
     }
@@ -696,6 +867,7 @@ import Footer from '../components/Footer.astro';
 
   @media (max-width: 480px) {
     .gs-hero { padding: 100px 16px 48px; }
+    .gs-hero-conversion-grid { gap: 32px; }
     .gs-headline { font-size: clamp(2rem, 7vw, 2.6rem); }
 
     .gs-steps { padding: 60px 16px; }
@@ -705,6 +877,7 @@ import Footer from '../components/Footer.astro';
 
     .gs-form-section { padding: 60px 16px; }
     .gs-form-card { padding: 28px 20px; }
+    .gs-calendar-embed { min-height: 560px; }
     .gs-why-grid {
       grid-template-columns: 1fr;
     }
@@ -740,6 +913,9 @@ import Footer from '../components/Footer.astro';
     .gs-faq-chevron {
       transition: none;
     }
+    .gs-success {
+      animation: none;
+    }
     .gs-submit:disabled::after {
       animation: none;
       border-color: oklch(1 0 0 / 0.5);
@@ -749,16 +925,188 @@ import Footer from '../components/Footer.astro';
 </style>
 
 <script>
+  import { FORM_TYPES } from '../lib/formTypes';
   import { setupCardGlow } from '../scripts/card-glow';
+
+  type CalQueueFn = ((...args: unknown[]) => void) & {
+    loaded?: boolean;
+    ns?: Record<string, CalQueueFn>;
+    q?: unknown[];
+  };
+
+  type TurnstileApi = {
+    render: (el: HTMLElement, opts: Record<string, unknown>) => string;
+    reset: (id: string) => void;
+  };
+
+  type DemoWindow = Window & {
+    Cal?: CalQueueFn;
+    turnstile?: TurnstileApi;
+    onKitaruTurnstileLoad?: () => void;
+    analytics?: { track?: (event: string, properties?: Record<string, unknown>) => void };
+    plausible?: (event: string, opts?: { props?: Record<string, string> }) => void;
+  };
+
+  const win = window as DemoWindow;
 
   // Card glow on step cards + form card
   setupCardGlow('.gs-step-card');
   setupCardGlow('.gs-form-card');
 
+  // Optional Cloudflare Turnstile. The widget appears only when
+  // PUBLIC_TURNSTILE_SITE_KEY is configured at build time.
+  const turnstileWidget = document.getElementById('turnstileWidget');
+  let turnstileWidgetId: string | null = null;
+
+  function renderTurnstile() {
+    if (!turnstileWidget || !win.turnstile || turnstileWidgetId) return;
+    const sitekey = turnstileWidget.dataset.sitekey;
+    if (!sitekey) return;
+    turnstileWidgetId = win.turnstile.render(turnstileWidget, {
+      sitekey,
+      theme: 'light',
+      size: 'flexible',
+    });
+  }
+
+  if (turnstileWidget) {
+    const scriptId = 'cf-turnstile-script';
+    win.onKitaruTurnstileLoad = renderTurnstile;
+    if (win.turnstile) {
+      renderTurnstile();
+    } else if (!document.getElementById(scriptId)) {
+      const script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onKitaruTurnstileLoad';
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+  }
+
+  function resetTurnstile() {
+    if (turnstileWidgetId) win.turnstile?.reset(turnstileWidgetId);
+  }
+
+  function ensureCal(embedScript: string) {
+    if (win.Cal) return;
+
+    const calFn: CalQueueFn = (...args: unknown[]) => {
+      const cal = win.Cal;
+      if (!cal) return;
+      if (!cal.loaded) {
+        cal.ns = {};
+        cal.q = cal.q || [];
+        const script = document.createElement('script');
+        script.src = embedScript;
+        script.async = true;
+        document.head.appendChild(script);
+        cal.loaded = true;
+      }
+      if (args[0] === 'init') {
+        const namespace = args[1];
+        const api: CalQueueFn = (...innerArgs: unknown[]) => {
+          api.q = api.q || [];
+          api.q.push(innerArgs);
+        };
+        api.q = [];
+        if (typeof namespace === 'string') {
+          cal.ns = cal.ns || {};
+          cal.ns[namespace] = cal.ns[namespace] || api;
+          cal.ns[namespace].q = cal.ns[namespace].q || [];
+          cal.ns[namespace].q?.push(args);
+          cal.q?.push(['initNamespace', namespace]);
+        }
+        return;
+      }
+      cal.q?.push(args);
+    };
+
+    calFn.loaded = false;
+    calFn.ns = {};
+    calFn.q = [];
+    win.Cal = calFn;
+  }
+
+  function showCalendar(formData: { name: string; company: string; email: string }) {
+    const formCard = document.querySelector('.gs-demo-card') as HTMLElement | null;
+    const form = document.getElementById('getStartedForm') as HTMLFormElement | null;
+    const heading = document.getElementById('demoFormHeading');
+    const successEl = document.getElementById('gsSuccess');
+    if (!formCard || !form || !successEl) return;
+
+    const namespace = formCard.dataset.calNamespace || 'kitaru-product-demo';
+    const calLink = formCard.dataset.calLink || 'zenml/kitaru-product-demo';
+    const elementId = formCard.dataset.calElementId || 'my-cal-inline-kitaru-product-demo';
+    const origin = formCard.dataset.calOrigin || 'https://app.cal.com';
+    const embedScript = formCard.dataset.calEmbedScript || 'https://app.cal.com/embed/embed.js';
+    const layout = formCard.dataset.calLayout || 'month_view';
+    const useSlotsViewOnSmallScreen = formCard.dataset.calSlotsSmallScreen === 'true';
+
+    ensureCal(embedScript);
+    const cal = win.Cal;
+    cal?.('init', namespace, { origin });
+    const calNamespace = cal?.ns?.[namespace];
+
+    form.hidden = true;
+    if (heading) heading.hidden = true;
+    formCard.classList.add('gs-cal-active');
+    document.querySelector('.gs-hero-conversion-grid')?.classList.add('gs-cal-active');
+    document.querySelector('.gs-hero-copy')?.classList.add('gs-cal-hidden');
+    successEl.hidden = false;
+
+    if (!cal || !calNamespace) {
+      const calendarEl = document.getElementById(elementId);
+      if (calendarEl) {
+        calendarEl.innerHTML = '<p class="gs-calendar-load-error">We saved your details, but the embedded calendar could not initialize in this browser. Please use the direct calendar link below.</p>';
+      }
+      win.analytics?.track?.('Cal Embed Failed', { product: 'kitaru', source: 'book-a-demo', reason: 'init-failed' });
+      return;
+    }
+
+    calNamespace('inline', {
+      elementOrSelector: `#${elementId}`,
+      config: {
+        layout,
+        useSlotsViewOnSmallScreen,
+        name: formData.name,
+        email: formData.email,
+        company: formData.company,
+        metadata: {
+          product: 'kitaru',
+          source: 'book-a-demo',
+          formType: FORM_TYPES.DEMO_REQUEST,
+          company: formData.company,
+        },
+      },
+      calLink,
+    });
+    calNamespace('ui', { hideEventTypeDetails: false, layout, useSlotsViewOnSmallScreen });
+    calNamespace('on', {
+      action: 'linkReady',
+      callback: () => {
+        win.plausible?.('Cal: Embed Loaded', { props: { product: 'kitaru' } });
+        win.analytics?.track?.('Cal Embed Loaded', { product: 'kitaru', source: 'book-a-demo' });
+      },
+    });
+    calNamespace('on', {
+      action: 'linkFailed',
+      callback: () => {
+        win.plausible?.('Cal: Embed Failed', { props: { product: 'kitaru' } });
+        win.analytics?.track?.('Cal Embed Failed', { product: 'kitaru', source: 'book-a-demo' });
+      },
+    });
+    calNamespace('on', {
+      action: 'bookingSuccessful',
+      callback: () => {
+        win.analytics?.track?.('Cal Booking Confirmed', { product: 'kitaru', source: 'book-a-demo' });
+      },
+    });
+  }
+
   // Form handling
   const form = document.getElementById('getStartedForm') as HTMLFormElement | null;
   const errorEl = document.getElementById('gsError');
-  const successEl = document.getElementById('gsSuccess');
 
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -767,6 +1115,7 @@ import Footer from '../components/Footer.astro';
     const name = (form.querySelector('#gs-name') as HTMLInputElement).value.trim();
     const company = (form.querySelector('#gs-company') as HTMLInputElement).value.trim();
     const email = (form.querySelector('#gs-email') as HTMLInputElement).value.trim();
+    const turnstileToken = String(new FormData(form).get('cf-turnstile-response') || '');
 
     if (!name || !company || !email) {
       if (errorEl) errorEl.textContent = 'All fields are required.';
@@ -786,7 +1135,7 @@ import Footer from '../components/Footer.astro';
       const resp = await fetch('/api/get-started', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, company, email }),
+        body: JSON.stringify({ name, company, email, turnstileToken }),
       });
 
       const result = await resp.json();
@@ -794,16 +1143,17 @@ import Footer from '../components/Footer.astro';
       if (!resp.ok) {
         if (errorEl) errorEl.textContent = result.error || 'Something went wrong. Please try again.';
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Book a demo';
+        submitBtn.textContent = 'Continue to calendar';
+        resetTurnstile();
         return;
       }
 
-      form.hidden = true;
-      if (successEl) successEl.hidden = false;
+      showCalendar({ name, company, email });
     } catch {
       if (errorEl) errorEl.textContent = 'Network error. Please try again.';
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Book a demo';
+      submitBtn.textContent = 'Continue to calendar';
+      resetTurnstile();
     }
   });
 </script>

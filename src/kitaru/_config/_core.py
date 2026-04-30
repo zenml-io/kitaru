@@ -7,12 +7,13 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     ValidationError,
     field_validator,
     model_validator,
@@ -34,6 +35,15 @@ FROZEN_EXECUTION_SPEC_METADATA_KEY = "kitaru_execution_spec"
 
 if TYPE_CHECKING:
     from kitaru._config._models import ModelRegistryConfig
+
+ExecutionStackSource = Literal[
+    "zenml_active_stack",
+    "project_config",
+    "environment",
+    "runtime",
+    "decorator",
+    "invocation",
+]
 
 
 class ImageSettings(BaseModel):
@@ -178,6 +188,7 @@ class ResolvedExecutionConfig(BaseModel):
     """Fully resolved execution settings for a flow run."""
 
     stack: str | None = None
+    stack_source: ExecutionStackSource | None = Field(default=None, exclude=True)
     image: ImageSettings | None = None
     cache: bool | None = None
     retries: int
@@ -459,7 +470,7 @@ def image_settings_to_docker_settings(
         docker_settings_kwargs["user"] = image_settings.user
     if image_settings.platform is not None:
         docker_settings_kwargs["build_config"] = DockerBuildConfig(
-            build_options=DockerBuildOptions(platform=image_settings.platform),  # type: ignore[call-arg]  # Pydantic extra="allow"
+            build_options=DockerBuildOptions(platform=image_settings.platform),  # ty: ignore[unknown-argument]  # Pydantic extra="allow"
         )
 
     return DockerSettings(**docker_settings_kwargs)

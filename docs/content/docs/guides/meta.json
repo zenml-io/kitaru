@@ -3,6 +3,7 @@
   "defaultOpen": false,
   "pages": [
     "configuration",
+    "authentication",
     "deployments",
     "containerization",
     "execution-management",
