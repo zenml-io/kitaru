@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
+from contextlib import asynccontextmanager, nullcontext
 from typing import Any
 from uuid import uuid4
 
@@ -12,6 +14,8 @@ from zenml.client import Client
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai import Agent
+from pydantic_ai.agent.abstract import AbstractAgent
+from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.models.test import TestModel
 
 from kitaru import flow
@@ -64,6 +68,76 @@ def _metadata_dict_from_steps(hydrated_run: Any, key: str) -> dict[str, Any]:
 
 def _event_kinds(event_map: dict[str, list[dict[str, Any]]]) -> set[str]:
     return {event["kind"] for events in event_map.values() for event in events}
+
+
+def test_phase17_capabilities_forwarded_to_pydantic_ai_run_surfaces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The adapter should mirror and forward Pydantic AI's per-run capabilities."""
+    durable_agent = _make_wrapped_agent(name_prefix="capability_agent")
+    capabilities = [Hooks()]
+    captured: dict[str, object] = {}
+    run_result = object()
+    stream_result = object()
+    iter_result = object()
+
+    async def run_async_direct(body: Any, **_: Any) -> Any:
+        return await body()
+
+    def run_sync_direct(body: Any, **_: Any) -> Any:
+        return body()
+
+    async def fake_run(self: Any, *args: Any, **kwargs: Any) -> object:
+        captured["run"] = kwargs["capabilities"]
+        return run_result
+
+    def fake_run_sync(self: Any, *args: Any, **kwargs: Any) -> object:
+        captured["run_sync"] = kwargs["capabilities"]
+        return run_result
+
+    @asynccontextmanager
+    async def fake_run_stream(self: Any, *args: Any, **kwargs: Any) -> Any:
+        captured["run_stream"] = kwargs["capabilities"]
+        yield stream_result
+
+    @asynccontextmanager
+    async def fake_iter(*args: Any, **kwargs: Any) -> Any:
+        captured["iter"] = kwargs["capabilities"]
+        yield iter_result
+
+    monkeypatch.setattr(durable_agent, "_run_async", run_async_direct)
+    monkeypatch.setattr(durable_agent, "_run_sync", run_sync_direct)
+    monkeypatch.setattr(durable_agent, "_kitaru_overrides", nullcontext)
+    monkeypatch.setattr(durable_agent, "_tracking_scope", nullcontext)
+    monkeypatch.setattr(durable_agent, "_allow_internal_iter", nullcontext)
+    monkeypatch.setattr(durable_agent, "_remember_messages", lambda _result: None)
+    monkeypatch.setattr(
+        durable_agent, "_require_explicit_checkpoint", lambda _method: None
+    )
+    monkeypatch.setattr(AbstractAgent, "run", fake_run)
+    monkeypatch.setattr(AbstractAgent, "run_sync", fake_run_sync)
+    monkeypatch.setattr(AbstractAgent, "run_stream", fake_run_stream)
+    monkeypatch.setattr(durable_agent.wrapped, "iter", fake_iter)
+
+    async def exercise_async_surfaces() -> None:
+        result = await durable_agent.run("prompt", capabilities=capabilities)
+        assert result is run_result
+        async with durable_agent.run_stream(
+            "prompt", capabilities=capabilities
+        ) as streamed_result:
+            assert streamed_result is stream_result
+        async with durable_agent.iter("prompt", capabilities=capabilities) as agent_run:
+            assert agent_run is iter_result
+
+    asyncio.run(exercise_async_surfaces())
+    assert durable_agent.run_sync("prompt", capabilities=capabilities) is run_result
+
+    assert captured == {
+        "run": capabilities,
+        "run_stream": capabilities,
+        "iter": capabilities,
+        "run_sync": capabilities,
+    }
 
 
 def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Checkpoint output handles now display Kitaru guidance to call `.load()` instead of leaking raw ZenML artifact metadata when stringified in flow bodies. (#127)
+- Pydantic AI adapter run methods now accept and forward per-run `capabilities`, restoring compatibility with `pydantic-ai-slim` 1.86+. (#248)
 
 ## [0.7.0] - 2026-04-24
 
