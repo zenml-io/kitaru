@@ -30,6 +30,14 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # griffe 2.x split the package into griffe / griffecli / griffelib.
+      # Our SDK doc generator depends on fumapy (docs/node_modules/fumadocs-python)
+      # which pins griffe<2.0.0. Until fumapy upstream supports griffe 2.x,
+      # accepting a major bump here is a phantom upgrade — the lockfile would
+      # claim 2.x but every real workflow either silently downgrades or breaks.
+      - dependency-name: griffe
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7
       semver-major-days: 14
