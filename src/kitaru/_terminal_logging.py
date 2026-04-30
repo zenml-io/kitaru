@@ -159,12 +159,6 @@ _REWRITE_RULES: list[tuple[re.Pattern[str], _TerminalKind | None, str]] = [
         "detail",
         "Caching disabled for `{0}`.",
     ),
-    # Dashboard URL
-    (
-        re.compile(r"^Dashboard URL for Pipeline Run: (.+)$"),
-        "detail",
-        "Execution URL: {0}",
-    ),
     # Pipeline run completion (local/local-docker orchestrators)
     (
         re.compile(r"^Pipeline run has finished in `(.+?)`\.$"),
@@ -174,6 +168,7 @@ _REWRITE_RULES: list[tuple[re.Pattern[str], _TerminalKind | None, str]] = [
 ]
 
 _DROP_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^Dashboard URL for Pipeline Run: "),
     re.compile(r"^You can visualize your pipeline runs in the `ZenML"),
     re.compile(r"^Using user: "),
     re.compile(r"^Using a build:$"),

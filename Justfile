@@ -2,7 +2,7 @@
 # Must match the ARG ZENML_SERVER_TAG default in docker/Dockerfile and
 # docker/Dockerfile.server-dev (those two are enforced by contract tests;
 # this Justfile value and the CI/release workflow values are not).
-ZENML_SERVER_TAG := "0.94.1"
+ZENML_SERVER_TAG := "0.94.3"
 DOCKER_REPO := "zenmldocker/kitaru"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
@@ -46,9 +46,9 @@ typecheck:
 typos:
     uvx typos
 
-# Check YAML formatting
+# Check YAML formatting (skips dependabot.yml — yamlfix unquotes its `time:` value, which Dependabot then rejects as an integer)
 yaml-check:
-    uv run yamlfix --check .github/
+    find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml -print0 | xargs -0 uv run yamlfix --check
 
 # Lint GitHub Actions workflows (requires actionlint: brew install actionlint)
 actions-lint:
@@ -58,6 +58,10 @@ actions-lint:
 #   GH_TOKEN=$(gh auth token) just zizmor
 zizmor:
     uvx zizmor --config=.github/zizmor.yml .github/workflows/ .github/dependabot.yml
+
+# Audit Python dependencies for known vulnerabilities (honors .github/pip-audit-ignored.txt)
+audit:
+    awk '/^CVE-|^GHSA-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
 
 # Check links in markdown files — offline only (requires lychee: brew install lychee)
 links:
@@ -71,7 +75,7 @@ links-external:
 fix:
     uv run ruff format .
     uv run ruff check . --fix
-    uv run yamlfix .github/
+    find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml -print0 | xargs -0 uv run yamlfix
 
 # Run tests (e.g., `just test`, `just test -x`, `just test tests/test_foo.py`)
 test *ARGS:

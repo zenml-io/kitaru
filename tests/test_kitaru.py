@@ -72,6 +72,9 @@ class TestPublicExports:
 
     def test_all_exports_match(self) -> None:
         expected = {
+            "AuthAPIKey",
+            "AuthAPIKeyWithValue",
+            "AuthServiceAccount",
             "Deployment",
             "FailureOrigin",
             "FlowHandle",
@@ -87,6 +90,7 @@ class TestPublicExports:
             "KitaruLogRetrievalError",
             "KitaruMemoryArtifactUnavailableError",
             "KitaruRuntimeError",
+            "KitaruStackIntegrationDependencyError",
             "KitaruStateError",
             "KitaruUsageError",
             "KitaruUserCodeError",

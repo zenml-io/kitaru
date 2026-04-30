@@ -55,6 +55,14 @@ auth_app = cyclopts.App(
     name="auth",
     help="Manage active Kitaru server authentication helpers.",
 )
+auth_service_accounts_app = cyclopts.App(
+    name="service-accounts",
+    help="Manage Kitaru service accounts.",
+)
+auth_api_keys_app = cyclopts.App(
+    name="api-keys",
+    help="Manage service-account API keys.",
+)
 flow_app = cyclopts.App(
     name="flow",
     help=(
@@ -78,6 +86,8 @@ app.command(memory_app)
 app.command(clean_app)
 app.command(analytics_app)
 app.command(auth_app)
+auth_app.command(auth_service_accounts_app)
+auth_app.command(auth_api_keys_app)
 app.command(flow_app)
 flow_app.command(flow_deployments_app)
 
@@ -114,7 +124,9 @@ __all__ = [
     "_UNKNOWN_VERSION",
     "analytics_app",
     "app",
+    "auth_api_keys_app",
     "auth_app",
+    "auth_service_accounts_app",
     "clean_app",
     "executions_app",
     "flow_app",

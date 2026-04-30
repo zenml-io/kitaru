@@ -1,0 +1,291 @@
+---
+---
+
+<figure class="fig">
+  <div class="panel panel--competitor">
+    <div class="panel-head">
+      <span class="panel-label">Restate · server-registered</span>
+      <span class="panel-sub">Request path flows through the server</span>
+    </div>
+
+    <div class="row row--caller">
+      <span class="node node--ghost">caller</span>
+    </div>
+
+    <svg class="conn" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M50 0 L50 24 M45 18 L50 24 L55 18" />
+    </svg>
+
+    <div class="server-box">
+      <div class="server-head">
+        <span class="mono srv-name">restate-server</span>
+        <span class="srv-tag">Rust · BSL 1.1</span>
+      </div>
+      <div class="server-body">
+        <span class="srv-row">journal</span>
+        <span class="srv-row">routing</span>
+        <span class="srv-row">replay</span>
+      </div>
+    </div>
+
+    <svg class="conn" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M30 0 L30 24 M25 18 L30 24 L35 18" />
+      <path d="M70 0 L70 24 M65 18 L70 24 L75 18" />
+    </svg>
+
+    <div class="row row--handlers">
+      <span class="node">handler</span>
+      <span class="node">handler</span>
+    </div>
+
+    <div class="foot">Handlers register with the server. Every invocation crosses the server boundary.</div>
+  </div>
+
+  <div class="panel panel--kitaru">
+    <div class="panel-head">
+      <span class="panel-label panel-label--accent">Kitaru · embedded</span>
+      <span class="panel-sub">Flow runs in your process; server holds metadata</span>
+    </div>
+
+    <div class="proc">
+      <span class="proc-label">your python process</span>
+      <div class="proc-body">
+        <div class="deco">
+          <span class="mono deco-key">@flow</span>
+        </div>
+        <div class="deco">
+          <span class="mono deco-key">@checkpoint</span>
+        </div>
+        <div class="deco deco--accent">
+          <span class="mono deco-key">kitaru.llm()</span>
+        </div>
+      </div>
+      <span class="proc-foot">pip install kitaru · no server process in the request path</span>
+    </div>
+
+    <div class="meta-group">
+      <svg class="side" viewBox="0 0 60 40" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 20 L60 20 M52 14 L60 20 L52 26" />
+      </svg>
+      <div class="meta">
+        <span class="meta-label">kitaru server</span>
+        <span class="meta-sub">metadata · UI · auth</span>
+      </div>
+    </div>
+
+    <div class="foot foot--accent">Server is for the metadata, not the request path.</div>
+  </div>
+</figure>
+
+<style>
+  .fig {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+  .panel {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px 16px 14px;
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel--competitor { background: var(--color-surface-warm); }
+  .panel--kitaru { border-color: var(--color-accent); }
+
+  .panel-head { margin-bottom: 12px; }
+  .panel-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 4px;
+  }
+  .panel-label--accent { color: var(--color-accent); }
+  .panel-sub {
+    font-size: 12px;
+    color: var(--color-secondary);
+  }
+
+  .row {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+  }
+  .row--handlers { justify-content: space-around; }
+  .node {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-primary);
+  }
+  .node--ghost {
+    border-style: dashed;
+    color: var(--color-muted);
+  }
+
+  .conn {
+    display: block;
+    width: 100%;
+    height: 18px;
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .conn path { vector-effect: non-scaling-stroke; }
+
+  .server-box {
+    border: 1px solid var(--color-muted);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--color-surface);
+    margin: 2px 0;
+  }
+  .server-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .srv-name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .srv-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    padding: 2px 6px;
+    background: var(--color-border-light);
+    border-radius: 3px;
+  }
+  .server-body {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .srv-row {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-secondary);
+    padding: 2px 8px;
+    background: var(--color-bg);
+    border-radius: 3px;
+  }
+
+  .proc {
+    padding: 14px;
+    border: 1px solid var(--color-accent);
+    border-radius: 10px;
+    background: var(--color-accent-light);
+    margin-bottom: 12px;
+  }
+  .proc-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 10px;
+  }
+  .proc-body {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+  .deco {
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 5px;
+    background: var(--color-surface);
+  }
+  .deco--accent {
+    border-color: var(--color-accent);
+  }
+  .deco-key {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--color-primary);
+  }
+  .deco--accent .deco-key {
+    color: var(--color-accent);
+  }
+  .proc-foot {
+    font-size: 10.5px;
+    color: var(--color-accent-deep);
+    font-style: italic;
+  }
+
+  .meta-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .side {
+    flex-shrink: 0;
+    width: 32px;
+    height: 20px;
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .side path { vector-effect: non-scaling-stroke; }
+  .meta {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px;
+    border: 1px dashed var(--color-border);
+    border-radius: 6px;
+    background: var(--color-surface);
+  }
+  .meta-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .meta-sub {
+    font-size: 10.5px;
+    color: var(--color-muted);
+  }
+
+  .foot {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--color-muted);
+    font-style: italic;
+  }
+  .foot--accent {
+    color: var(--color-accent-deep);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  @media (max-width: 560px) {
+    .fig { grid-template-columns: 1fr; }
+  }
+</style>

@@ -3,6 +3,7 @@ competitor: "Claude Agent SDK"
 competitorLogo: "/compare/claude-agent-sdk.svg"
 competitorTagline: "Build AI agents that autonomously read files, run commands, search the web, edit code, and more."
 title: "Kitaru vs Claude Agent SDK: The lifecycle layer for agents you build with Claude Agent SDK"
+shortTitle: "The lifecycle layer above the Agent SDK"
 description: "Kitaru and the Claude Agent SDK solve different problems. Keep the SDK, add Kitaru underneath for durable execution, artifact lineage, memory, and deployment on your own cloud."
 cardSubtitle: "Keep the SDK. Add durable execution, memory, and cloud-native deployment underneath."
 ctaHeading: "Put the runtime underneath your Agent SDK"
@@ -13,7 +14,7 @@ import WhenToUseEach from '../../components/compare/WhenToUseEach.astro';
 import ComparisonTable from '../../components/compare/ComparisonTable.astro';
 import CodeCompare from '../../components/compare/CodeCompare.astro';
 import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
-import PullQuote from '../../components/compare/PullQuote.astro';
+import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 
 Kitaru and the Claude Agent SDK solve different problems. The Agent SDK builds agents that read files, run commands, and solve coding tasks in a session you kick off yourself. Kitaru is the lifecycle layer above your SDK: durable execution, artifact lineage, durable memory, and deployment on your own infrastructure.
 
@@ -26,7 +27,7 @@ Keep your SDK, model, and sandbox; for local, one-off use, you don't need Kitaru
     items: [
       "Running agents as long-lived background services, remotely and not just locally",
       "Processing enough volume that per-run cost and token efficiency start to matter",
-      "Deploying into your own cloud (Kubernetes, AWS, GCP, Azure) for security or compliance",
+      "Deploying into your own cloud (Kubernetes, Vertex AI, SageMaker, AzureML) for security or compliance",
       "Building flows that must survive crashes, replay from failure, or wait on humans for hours or days",
       "Mixing models (Claude for some steps, Gemini Flash or OSS for others) to keep costs sane at scale",
     ],
@@ -39,10 +40,6 @@ Keep your SDK, model, and sandbox; for local, one-off use, you don't need Kitaru
       "Prototyping one-off tasks or short-lived workflows",
     ],
   }}
-/>
-
-<PullQuote
-  quote="Most production teams end up using both — an SDK to build the agent, and a runtime to operate it."
 />
 
 <FeatureWithGraphic
@@ -92,19 +89,56 @@ Kitaru captures artifacts from every `@checkpoint` automatically and links them 
 <ComparisonTable
   competitorLabel="Claude Agent SDK"
   rows={[
-    { feature: "Durable execution", kitaru: true, competitor: false },
-    { feature: "Replay from checkpoint boundary", kitaru: true, competitor: false },
-    { feature: "Durable pause/resume with compute release", kitaru: true, competitor: false },
-    { feature: "Versioned durable memory", kitaru: true, competitor: false },
-    { feature: "Artifact lineage and run tracking", kitaru: true, competitor: false },
-    { feature: "First-class deployment to Kubernetes, AWS, GCP, and Azure", kitaru: true, competitor: false },
-    { feature: "Multi-provider model runtime support", kitaru: true, competitor: false },
-    { feature: "Execution inspection, logs, and lifecycle control", kitaru: true, competitor: true },
+    {
+      feature: "Interactive coding agent UX",
+      kitaru: "partial",
+      competitor: "yes",
+      note: "Claude's Read/Edit/Bash/WebSearch toolkit is best-in-class. Kitaru wraps it rather than replacing it.",
+    },
+    {
+      feature: "Durable execution and replay",
+      kitaru: "yes",
+      competitor: "no",
+      note: "The SDK rewinds in-session edits; Kitaru persists step outputs so a crash doesn't re-run or re-bill earlier checkpoints.",
+    },
+    {
+      feature: "Pause with compute released",
+      kitaru: "yes",
+      competitor: "no",
+      note: "wait() suspends a flow for hours or days; the SDK keeps a process alive.",
+    },
+    {
+      feature: "Versioned memory across runs",
+      kitaru: "yes",
+      competitor: "partial",
+      note: "The SDK resumes per-session conversation context. Kitaru exposes scoped, versioned state from Python, CLI, and MCP.",
+    },
+    {
+      feature: "Artifact lineage per checkpoint",
+      kitaru: "yes",
+      competitor: "no",
+      note: "Every @checkpoint output is saved and linked to the execution record for diffing across runs.",
+    },
+    {
+      feature: "First-class K8s / Vertex / SageMaker / AzureML",
+      kitaru: "yes",
+      competitor: "partial",
+      note: "SDK model access paths cover Bedrock / Vertex / Foundry. Kitaru owns the deploy: same flow, local → cloud, one stack config.",
+    },
+    {
+      feature: "Observability and log inspection",
+      kitaru: "yes",
+      competitor: "yes",
+      note: "Both ship solid primitives. SDK: OTel traces + per-session logs. Kitaru: per-execution artifact graph with diffable runs.",
+    },
+    {
+      feature: "Mix models across steps",
+      kitaru: "yes",
+      competitor: "no",
+      note: "Claude for reasoning, Gemini Flash for cheap fan-out, OSS for deterministic steps — one flow, one registry.",
+    },
   ]}
 />
-
-## Code comparison
-
 <CodeCompare
   kitaruLabel="Kitaru + Agent SDK"
   competitorLabel="Claude Agent SDK alone"
@@ -157,14 +191,6 @@ async def review_flow(topic: str) -> str:
 asyncio.run(review_flow("Durable agents"))`}
 />
 
-## Ready to try Kitaru?
-
+<ComparisonCta headline={frontmatter.ctaHeading}>
 If you are running agents locally or in short interactive sessions, stick with what you have. If you are taking an Agent SDK prototype to a long-running production service, Kitaru is the lifecycle layer underneath.
-
-- Read [our documentation](/docs) and see how `@flow` and `@checkpoint` work
-- `pip install kitaru` and run your first durable flow in an afternoon
-- [Talk to the team](/get-started) if you want help mapping an Agent SDK prototype to a production deployment
-
-<div class="compare-inline-cta">
-  <a href="/get-started" class="btn-primary">Get started with Kitaru</a>
-</div>
+</ComparisonCta>

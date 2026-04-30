@@ -124,6 +124,11 @@ These are the key env vars for non-interactive setup:
 - `KITARU_AUTH_TOKEN`
 - `KITARU_PROJECT`
 
+For CI and other machine callers, `KITARU_AUTH_TOKEN` is usually a
+service-account API key created with `kitaru auth service-accounts ...` and
+`kitaru auth api-keys ...`. See [Authentication](/guides/authentication) for
+the full service-account/API-key flow.
+
 For normal interactive use:
 
 - `kitaru login` starts and connects to a local server
@@ -145,6 +150,11 @@ There are two guardrails:
 1. `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` must be set together.
 2. If a remote server is configured via env vars, `KITARU_PROJECT` is required
    at first use (`KitaruClient()`, `my_flow.run()`, replay, etc.).
+
+Auth-management commands are the exception to the project rule because service
+accounts and API keys belong to the server, not to a single project. For
+example, `kitaru auth api-keys rotate ...` can run with a server URL and auth
+token even when `KITARU_PROJECT` is not set.
 
 Internally, Kitaru translates these public env vars into the ZenML env vars the
 runtime already understands. That means you should configure `KITARU_*`, not
@@ -387,7 +397,7 @@ a different image later, create a new deployment version.
 
 ```bash
 uv sync --extra local
-uv run examples/basic_flow/flow_with_configuration.py
+uv run examples/features/basic_flow/flow_with_configuration.py
 uv run pytest tests/test_phase10_configuration_example.py
 ```
 

@@ -290,10 +290,19 @@ the active Kitaru server.
 Before you do that, make sure Kitaru knows three things:
 
 1. the Kitaru server URL,
-2. an auth token or API key that can access that server, and
+2. an auth token that can access that server, usually a service-account API key,
 3. the project to use on that server.
 
-You can provide those by logging in once:
+For CI and other automation, create a service-account API key first:
+
+```bash
+kitaru auth service-accounts create ci-runner \
+  --description "CI runner for deployment invocation"
+kitaru auth api-keys create ci-runner default -o json
+```
+
+Store the one-time `key` value from the create response in your secret manager.
+Then provide the connection by logging in once:
 
 ```bash
 kitaru login https://kitaru.example.com --api-key kat_abc123 --project production
@@ -340,7 +349,9 @@ means the generated URL is pinned to the resolved deployment version. If the
 producer later moves `stable` to another version, regenerate the command.
 
 `kitaru auth token` exchanges your active Kitaru connection for a short-lived
-server bearer token. The generated curl snippet stores it in
+server bearer token. It does not create a long-lived API key; use
+`kitaru auth api-keys create` or `kitaru auth api-keys rotate` for that. The
+generated curl snippet stores the short-lived bearer token in
 `KITARU_SERVER_ACCESS_TOKEN` for the current shell command only; the curl
 generator itself does not print or store the real token.
 

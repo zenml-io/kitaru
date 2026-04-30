@@ -136,7 +136,7 @@ def _positional_token(arg: Any, *, has_keyword_boundary: bool = False) -> str | 
     if not field_name:
         return None
 
-    token = field_name.upper()
+    token = field_name.rstrip("_").replace("_", "-").upper()
     if _is_variadic_hint(arg.hint):
         token += "..."
     return token
@@ -279,10 +279,12 @@ def _get_description(app: Any) -> tuple[str, str]:
 def build_command_tree(
     app: Any,
     parent_invocation: str = "",
+    command_name: str | tuple[str, ...] | None = None,
 ) -> CommandDoc:
     """Recursively build a normalized command tree from a cyclopts App."""
+    raw_name = app.name if command_name is None else command_name
     name_parts: tuple[str, ...] = (
-        app.name if isinstance(app.name, tuple) else (str(app.name),)
+        raw_name if isinstance(raw_name, tuple) else (str(raw_name),)
     )
     name = name_parts[-1]
     invocation = f"{parent_invocation} {name}".strip() if parent_invocation else name
@@ -297,8 +299,14 @@ def build_command_tree(
 
     # Recurse into subcommands
     subcommands: list[CommandDoc] = []
-    for _cmd_name, sub_app in sorted(registered.items()):
-        subcommands.append(build_command_tree(sub_app, parent_invocation=invocation))
+    for cmd_name, sub_app in sorted(registered.items()):
+        subcommands.append(
+            build_command_tree(
+                sub_app,
+                parent_invocation=invocation,
+                command_name=cmd_name,
+            )
+        )
 
     return CommandDoc(
         slug=slug,

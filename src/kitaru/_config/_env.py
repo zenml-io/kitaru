@@ -12,6 +12,7 @@ from typing import Any, TypeVar
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID
 
 from kitaru._config._core import (
+    ExecutionStackSource,
     KitaruConfig,
     ResolvedConnectionConfig,
     ResolvedExecutionConfig,
@@ -200,6 +201,8 @@ def _read_global_execution_config_impl(
 def _merge_execution_layer(
     resolved: ResolvedExecutionConfig,
     layer: KitaruConfig,
+    *,
+    stack_source: ExecutionStackSource | None = None,
 ) -> ResolvedExecutionConfig:
     """Apply one execution config layer onto an already-resolved result."""
     merged_image = resolved.image
@@ -210,6 +213,9 @@ def _merge_execution_layer(
 
     return ResolvedExecutionConfig(
         stack=layer.stack if layer.stack is not None else resolved.stack,
+        stack_source=(
+            stack_source if layer.stack is not None else resolved.stack_source
+        ),
         image=merged_image,
         cache=layer.cache if layer.cache is not None else resolved.cache,
         retries=layer.retries if layer.retries is not None else resolved.retries,
@@ -250,6 +256,8 @@ def _environment_has_auth_override() -> bool:
 
 def _validate_connection_config_for_use(
     resolved: ResolvedConnectionConfig,
+    *,
+    require_project: bool = True,
 ) -> None:
     """Validate connection config at first use."""
     has_remote_server = _environment_has_remote_server_override()
@@ -267,7 +275,7 @@ def _validate_connection_config_for_use(
             "set KITARU_AUTH_TOKEN or run `kitaru login`."
         )
 
-    if has_remote_server and not resolved.project:
+    if require_project and has_remote_server and not resolved.project:
         raise KitaruUsageError(
             "A remote Kitaru server is configured via environment variables, but "
             "no project is active. Set KITARU_PROJECT (preferred) or "
@@ -298,34 +306,40 @@ def resolve_execution_config_impl(
     read_runtime_execution_config: Callable[[], KitaruConfig],
 ) -> ResolvedExecutionConfig:
     """Resolve execution configuration according to Phase 10 precedence."""
-    return _apply_layers(
-        ResolvedExecutionConfig(
-            stack=None,
-            image=None,
-            cache=None,
-            retries=0,
-        ),
-        (
-            read_global_execution_config(),
-            read_project_config(start_dir),
-            read_execution_env_config(),
-            read_runtime_execution_config(),
-            decorator_overrides or KitaruConfig(),
-            invocation_overrides or KitaruConfig(),
-        ),
-        _merge_execution_layer,
+    resolved = ResolvedExecutionConfig(
+        stack=None,
+        stack_source=None,
+        image=None,
+        cache=None,
+        retries=0,
     )
+    layers: tuple[tuple[ExecutionStackSource, KitaruConfig], ...] = (
+        ("zenml_active_stack", read_global_execution_config()),
+        ("project_config", read_project_config(start_dir)),
+        ("environment", read_execution_env_config()),
+        ("runtime", read_runtime_execution_config()),
+        ("decorator", decorator_overrides or KitaruConfig()),
+        ("invocation", invocation_overrides or KitaruConfig()),
+    )
+    for source, layer in layers:
+        resolved = _merge_execution_layer(
+            resolved,
+            layer,
+            stack_source=source,
+        )
+    return resolved
 
 
 def resolve_connection_config_impl(
     *,
     explicit: KitaruConfig | None = None,
     validate_for_use: bool = False,
+    require_project: bool = True,
     read_global_connection_config: Callable[[], KitaruConfig],
     read_zenml_connection_env_config: Callable[[], KitaruConfig],
     read_connection_env_config: Callable[[], KitaruConfig],
     read_runtime_connection_config: Callable[[], KitaruConfig],
-    validate_connection_config_for_use: Callable[[ResolvedConnectionConfig], None],
+    validate_connection_config_for_use: Callable[..., None],
 ) -> ResolvedConnectionConfig:
     """Resolve connection configuration with connection-specific precedence."""
     resolved = _apply_layers(
@@ -341,6 +355,9 @@ def resolve_connection_config_impl(
     )
 
     if validate_for_use:
-        validate_connection_config_for_use(resolved)
+        validate_connection_config_for_use(
+            resolved,
+            require_project=require_project,
+        )
 
     return resolved

@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { FORM_TYPES } from '../../lib/formTypes';
 
 export const prerender = false;
 
@@ -69,7 +70,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         properties: {
           email,
           source: 'landing-page',
-          formType: 'waitlist',
+          formType: FORM_TYPES.WAITLIST,
         },
         context: segmentContext,
       });

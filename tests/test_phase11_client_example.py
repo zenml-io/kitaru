@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from examples.execution_management.client_execution_management import run_workflow
+from examples.features.execution_management.client_execution_management import (
+    run_workflow,
+)
 
 
 def test_phase11_client_example_runs_end_to_end(primed_zenml) -> None:

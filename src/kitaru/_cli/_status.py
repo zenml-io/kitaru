@@ -901,11 +901,16 @@ def status(output: OutputFormatOption = "text") -> None:
 def _write_info_file(
     snapshot: RuntimeSnapshot,
     file_path: str,
+    *,
+    include_provenance_details: bool = False,
 ) -> None:
     """Write serialized snapshot to a file, inferring format from extension."""
     path = Path(file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = serialize_runtime_snapshot(snapshot)
+    data = serialize_runtime_snapshot(
+        snapshot,
+        include_provenance_details=include_provenance_details,
+    )
     suffix = path.suffix.lower()
 
     if suffix in (".yaml", ".yml"):
@@ -996,7 +1001,11 @@ def info(
 
     if file is not None:
         run_with_cli_error_boundary(
-            lambda: _write_info_file(snapshot, file),
+            lambda: _write_info_file(
+                snapshot,
+                file,
+                include_provenance_details=include_provenance_details,
+            ),
             command=command,
             output=output_format,
             exit_with_error=_exit_with_error,
@@ -1021,7 +1030,10 @@ def info(
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
-            serialize_runtime_snapshot(snapshot),
+            serialize_runtime_snapshot(
+                snapshot,
+                include_provenance_details=include_provenance_details,
+            ),
             output=output_format,
         )
         return

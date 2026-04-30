@@ -3475,21 +3475,28 @@ def test_use_stack_switches_active_stack() -> None:
     """use_stack should delegate activation and return the new active stack."""
     local_stack = SimpleNamespace(id="stack-local-id", name="local")
     prod_stack = SimpleNamespace(id="stack-prod-id", name="prod")
-    client_mock = SimpleNamespace(
-        active_stack_model=local_stack,
-        list_stacks=lambda: [local_stack, prod_stack],
-    )
 
-    def _activate_stack(_: str) -> None:
-        client_mock.active_stack_model = prod_stack
+    class _MetadataOnlyStackClient:
+        def __init__(self) -> None:
+            self.active_stack_model = local_stack
+            self.activate_stack = Mock(side_effect=self._activate_stack)
 
-    activate_stack = Mock(side_effect=_activate_stack)
-    client_mock.activate_stack = activate_stack
+        def list_stacks(self) -> list[SimpleNamespace]:
+            return [local_stack, prod_stack]
+
+        def _activate_stack(self, _: str) -> None:
+            self.active_stack_model = prod_stack
+
+        @property
+        def active_stack(self) -> object:
+            raise AssertionError("use_stack should not hydrate active_stack")
+
+    client_mock = _MetadataOnlyStackClient()
 
     with patch("kitaru.config.Client", return_value=client_mock):
         selected = use_stack("prod")
 
-    activate_stack.assert_called_once_with("stack-prod-id")
+    client_mock.activate_stack.assert_called_once_with("stack-prod-id")
     assert selected.name == "prod"
     assert selected.id == "stack-prod-id"
     assert selected.is_active is True
@@ -3779,6 +3786,7 @@ SHARED = "project"
         )
 
     assert resolved.stack == "invocation-stack"
+    assert resolved.stack_source == "invocation"
     assert resolved.cache is True
     assert resolved.retries == 6
     assert resolved.image is not None
@@ -3816,6 +3824,36 @@ def test_resolve_execution_config_default_cache_is_unset() -> None:
         resolved = resolve_execution_config()
 
     assert resolved.cache is None
+    assert resolved.stack == "global-stack"
+    assert resolved.stack_source == "zenml_active_stack"
+
+
+def test_resolve_execution_config_marks_environment_stack_as_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KITARU_STACK is an explicit Kitaru stack choice, even for default."""
+    monkeypatch.setenv(KITARU_STACK_ENV, "default")
+
+    with patch(
+        "kitaru.config.current_stack",
+        return_value=SimpleNamespace(name="fallback-default"),
+    ):
+        resolved = resolve_execution_config()
+
+    assert resolved.stack == "default"
+    assert resolved.stack_source == "environment"
+
+
+def test_resolved_execution_stack_source_is_not_persisted() -> None:
+    """Stack source is a runtime safety hint, not part of frozen specs."""
+    resolved = ResolvedExecutionConfig(
+        stack="default",
+        stack_source="zenml_active_stack",
+        cache=None,
+        retries=0,
+    )
+
+    assert "stack_source" not in resolved.model_dump()
 
 
 def test_resolve_execution_config_supports_string_image_env(
@@ -4110,7 +4148,7 @@ def test_coerce_docker_settings_with_platform() -> None:
 
     docker = DockerSettings(
         build_config=DockerBuildConfig(
-            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # ty: ignore[unknown-argument]
         ),
     )
     result = _coerce_image_input(docker)
@@ -4148,7 +4186,7 @@ def test_platform_round_trip() -> None:
 
     original = DockerSettings(
         build_config=DockerBuildConfig(
-            build_options=DockerBuildOptions(platform="linux/amd64"),  # type: ignore[call-arg]
+            build_options=DockerBuildOptions(platform="linux/amd64"),  # ty: ignore[unknown-argument]
         ),
     )
     image_settings = _coerce_image_input(original)
