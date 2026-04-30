@@ -1,20 +1,25 @@
-"""DockerSandbox — the agent's exec sandbox with a persistent shell.
+"""DockerSandbox — the agent's exec sandbox with a within-run persistent shell.
 
 The sandbox container is brought up at flow entry and torn down at flow
 exit via the context-manager protocol. Inside the container, **one
 long-lived `bash --noprofile --norc` process** handles every `run(command)`
 call, so shell state (cwd, env vars, aliases, file descriptors,
-background jobs) survives across calls — just like a normal interactive
-shell.
+background jobs) survives across calls *within a single flow run* — just
+like a normal interactive shell.
+
+State *across* flow runs is deliberately **not** preserved. Bash
+commands have side effects (`rm`, `git push`, `curl POST`, etc.) that a
+cwd+env snapshot can't capture or undo, so replaying a snapshot would
+give the illusion of replayability while silently dropping every actual
+mutation. If the agent needs cross-run durable state, it should write to
+`/workspace` (a named Docker volume that survives container teardown) or
+use `kitaru.memory` for specific values it explicitly wants to carry.
 
 This is a Docker port of `kami_agent/sandbox/modal_runtime.py:
 ModalSandboxRuntime`. The persistent-shell + marker-completion pattern
 is verbatim from kami; only the process-creation step differs (we use
 `subprocess.Popen(["docker", "exec", "-i", ...])` instead of
 `modal.Sandbox.exec`).
-
-A named volume (one per execution) gives the agent a durable `/workspace`
-that survives pause/resume.
 
 Each lifecycle event and exec call prints a `[sandbox]` line to stdout
 and (during a kitaru flow) attaches structured metadata via `kitaru.log`
@@ -42,11 +47,6 @@ _STOP_TIMEOUT_SECONDS = 2
 _COMMAND_DISPLAY_LIMIT = 80
 _SHELL_READ_TIMEOUT_SECONDS = 1.0
 
-# Per-command snapshot of cwd + exported env vars, written by bash to a
-# tmp path inside the container. Ephemeral — the durable copy lives in
-# `kitaru.memory` and is restored into the container at sandbox start.
-_SESSION_SNAPSHOT_PATH = "/tmp/.af_session.sh"
-
 
 def _summarize_command(command: str) -> str:
     """One-line display form for a shell command in `[sandbox]` log lines."""
@@ -65,12 +65,7 @@ class DockerSandbox:
     state (cwd, env vars, aliases, etc.) survives across `run()` calls.
     """
 
-    def __init__(
-        self,
-        *,
-        execution_id: str,
-        memory_key: str | None = "shell_session",
-    ) -> None:
+    def __init__(self, *, execution_id: str) -> None:
         self._execution_id = execution_id
         self._container_name = f"{_CONTAINER_NAME_PREFIX}{execution_id}"
         self._volume_name = f"agent_factory_workspace_{execution_id}"
@@ -79,30 +74,17 @@ class DockerSandbox:
         self._shell_lock = threading.Lock()
         self._shell_stdout_queue: queue.Queue[str | None] | None = None
         self._shell_stdout_thread: threading.Thread | None = None
-        # Auto-restore + auto-persist shell state across runs via
-        # kitaru.memory. Set memory_key=None to disable.
-        self._memory_key = memory_key
-        self._restored = False
 
     def __enter__(self) -> "DockerSandbox":
         self._ensure_image()
         self._ensure_network()
         self._start_container()
-        # Auto-restore prior shell state (cwd + exported env vars) from
-        # kitaru.memory if any prior run of this flow saved one. Failures
-        # are swallowed — restoring is best-effort, the sandbox still works
-        # without a prior snapshot.
-        prior_snapshot = self._load_prior_snapshot()
-        if prior_snapshot:
-            self._write_snapshot_to_container(prior_snapshot)
-            self._restored = True
         short_id = (self._container_id or "")[:12]
         short_exec = self._execution_id[:8]
-        restored = " (shell state restored)" if self._restored else ""
         print(
             f"[sandbox] Started container {short_id} "
             f"(image={_SANDBOX_IMAGE}, "
-            f"/workspace ← workspace_{short_exec}){restored}"
+            f"/workspace ← workspace_{short_exec})"
         )
         return self
 
@@ -112,14 +94,9 @@ class DockerSandbox:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        # Auto-persist shell state to kitaru.memory before teardown so the
-        # next run of this flow can restore it. Failures swallowed —
-        # persistence is best-effort.
-        captured = self._capture_and_persist_snapshot()
         if self._container_id is not None:
             short_id = self._container_id[:12]
-            persisted = " (shell state persisted)" if captured else ""
-            print(f"[sandbox] Stopping container {short_id}{persisted}")
+            print(f"[sandbox] Stopping container {short_id}")
         self._terminate_shell()
         self._stop_container()
 
@@ -140,18 +117,10 @@ class DockerSandbox:
         # having to escape them. Then bash decodes and `eval`s the original.
         command_b64 = base64.b64encode(command.encode("utf-8")).decode("ascii")
         marker = f"__AGENT_FACTORY_DONE_{uuid4().hex}"
-        # After the user's command runs, snapshot cwd + exported env vars to
-        # /workspace (durable volume) so a fresh bash on a later flow run
-        # can restore them — turn N's `cd /foo` still applies after a
-        # crash + retry, even though the container itself was recreated.
         payload = (
             f'eval "$(printf %s {shlex.quote(command_b64)} | base64 -d)"\n'
             "__af_exit=$?\n"
             '__af_cwd="$(pwd)"\n'
-            "{ "
-            'printf "cd %q\\n" "$__af_cwd"; '
-            "declare -px; "
-            f"}} > {_SESSION_SNAPSHOT_PATH} 2>/dev/null || true\n"
             f'printf "{marker} %s %s\\n" "$__af_exit" "$__af_cwd"\n'
         )
 
@@ -269,73 +238,6 @@ class DockerSandbox:
         )
         self._container_id = None
 
-    # --- Shell-state persistence via kitaru.memory --------------------------
-
-    def _load_prior_snapshot(self) -> str | None:
-        """Load the prior run's shell snapshot from kitaru.memory.
-
-        Best-effort: returns None on any error (no prior snapshot, outside
-        a flow scope, kitaru store unreachable, materialization failure).
-        """
-        if self._memory_key is None:
-            return None
-        with contextlib.suppress(Exception):
-            artifact = kitaru.memory.get(self._memory_key)
-            if artifact is None:
-                return None
-            # Inside a flow, kitaru.memory.get returns an artifact handle
-            # we have to materialize; outside a flow it returns the value
-            # directly.
-            value = artifact.load() if hasattr(artifact, "load") else artifact
-            if isinstance(value, str) and value.strip():
-                return value
-        return None
-
-    def _capture_and_persist_snapshot(self) -> bool:
-        """Capture the current shell snapshot and write it to kitaru.memory.
-
-        Returns True if a snapshot was captured AND persisted successfully.
-        """
-        if self._memory_key is None or self._container_id is None:
-            return False
-        snapshot = self._read_snapshot_from_container()
-        if not snapshot:
-            return False
-        with contextlib.suppress(Exception):
-            kitaru.memory.set(self._memory_key, snapshot)
-            return True
-        return False
-
-    def _read_snapshot_from_container(self) -> str | None:
-        """Read the shell snapshot file from inside the container."""
-        if self._container_id is None:
-            return None
-        result = subprocess.run(
-            ["docker", "exec", self._container_name, "cat", _SESSION_SNAPSHOT_PATH],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return None
-        return result.stdout
-
-    def _write_snapshot_to_container(self, snapshot: str) -> None:
-        """Write a shell snapshot into the container so bash can source it."""
-        if self._container_id is None:
-            return
-        subprocess.run(
-            [
-                "docker",
-                "exec",
-                "-i",
-                self._container_name,
-                "tee",
-                _SESSION_SNAPSHOT_PATH,
-            ],
-            input=snapshot.encode("utf-8"),
-            capture_output=True,
-        )
-
     # --- Persistent shell ----------------------------------------------------
 
     def _ensure_shell_process(self) -> subprocess.Popen[bytes]:
@@ -362,13 +264,6 @@ class DockerSandbox:
         # Merge stderr into stdout once at shell start so marker parsing
         # only has one stream to worry about.
         self._write_stdin("exec 2>&1\n")
-        # Restore cwd + exported env vars from the prior run, if any.
-        # The snapshot lives in /workspace (durable across runs) so a
-        # crashed-and-resumed flow picks up where it left off.
-        self._write_stdin(
-            f"[ -f {_SESSION_SNAPSHOT_PATH} ] && "
-            f"source {_SESSION_SNAPSHOT_PATH} 2>/dev/null || true\n"
-        )
         return self._shell_process
 
     def _start_shell_stdout_reader(self) -> None:
