@@ -1,5 +1,6 @@
-"""Sandbox runtime — Docker sandbox + (later) Docker proxy."""
+"""Sandbox runtime — Docker sandbox + Docker proxy."""
 
+from .proxy import DockerProxy
 from .runtime import DockerSandbox
 
-__all__ = ["DockerSandbox"]
+__all__ = ["DockerProxy", "DockerSandbox"]
