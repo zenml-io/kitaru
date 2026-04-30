@@ -660,6 +660,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             deferred_tool_results=deferred_tool_results,
             instructions=instructions,
             model_settings=model_settings,
+            capabilities=capabilities,
+            spec=spec,
         )
 
         error: BaseException | None = None
@@ -735,6 +737,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             deferred_tool_results=deferred_tool_results,
             instructions=instructions,
             model_settings=model_settings,
+            capabilities=capabilities,
+            spec=spec,
         )
 
         error: BaseException | None = None
