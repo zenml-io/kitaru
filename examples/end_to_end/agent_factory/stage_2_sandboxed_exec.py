@@ -83,9 +83,8 @@ def agent_factory_flow() -> str:
                 "from cache."
             )
 
-        # Turn 2: writes summary.txt in "the current directory" — the
-        # persistent shell carries turn 1's cd, so this lands in /tmp
-        # even though turn 2's prompt never names an absolute path.
+        # Turn 2: writes summary.txt without naming a path — lands in /tmp
+        # because the persistent shell carried turn 1's `cd /tmp`.
         turn_2 = agent.run_sync(_TURN_2_PROMPT)
 
     final = (
