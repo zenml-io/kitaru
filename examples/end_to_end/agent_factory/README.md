@@ -131,6 +131,7 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 **Env-var toggles:**
 
 - `DISABLE_CACHE=1` — force every checkpoint to re-execute (useful when the agent's already cached and you want to see the sandbox actually running shell commands)
+- `FORCE_FAILURE=1` — raise between turn 1 and turn 2. Same durability story as stage 1: turn 1's checkpoint is cached across the failure, so a re-run without the flag serves it instantly. (Note: the agent's *reasoning* is cached; the bash *side effects* aren't replayed — turn 2 on re-run runs against a fresh shell.)
 
 **Persistent shell — within a run:** stage 2 runs every `run(command)` through **one long-lived `bash --noprofile --norc` process** inside the container. Shell state — `cd`, `export`, file descriptors, background jobs — survives across `exec` calls, just like a normal interactive shell. The host writes commands into the shell's stdin and reads back output up to a unique completion-marker line (`<UUID> <exit_code> <cwd>`). Ported verbatim from kami's `modal_runtime.py`; the only Docker-specific bit is `subprocess.Popen(["docker", "exec", "-i", ...])` instead of `modal.Sandbox.exec`.
 

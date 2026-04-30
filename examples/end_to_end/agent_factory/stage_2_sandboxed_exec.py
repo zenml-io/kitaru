@@ -17,6 +17,10 @@ Env-var toggles:
     DISABLE_CACHE=1    force every checkpoint to re-execute (useful when
                        the agent's already cached and you want to see the
                        sandbox actually running shell commands)
+    FORCE_FAILURE=1    raise between turn 1 and turn 2. Turn 1's
+                       checkpoint is cached across the failure (same as
+                       stage 1) — re-run without FORCE_FAILURE and turn
+                       1 is served from cache, no LLM call.
 """
 
 import os
@@ -30,6 +34,7 @@ from kitaru.adapters.pydantic_ai import KitaruAgent
 from kitaru.runtime import _get_current_execution_id
 
 DISABLE_CACHE = bool(os.environ.get("DISABLE_CACHE"))
+FORCE_FAILURE = bool(os.environ.get("FORCE_FAILURE"))
 
 DEFAULT_PROFILE = Profile(
     name="default",
@@ -65,6 +70,17 @@ def agent_factory_flow() -> str:
 
         # Turn 1: changes shell state (cd, export).
         turn_1 = agent.run_sync(_TURN_1_PROMPT)
+
+        if FORCE_FAILURE:
+            # Same toggle as stage 1: turn 1's checkpoint is cached across
+            # the failure, so a re-run skips the LLM calls. Turn 2 on
+            # re-run runs against a *fresh* shell though — kitaru caches
+            # the agent's reasoning, not the bash side effects.
+            raise RuntimeError(
+                "Simulated downstream blip between the two agent turns. "
+                "Re-run without FORCE_FAILURE — turn 1 will be served "
+                "from cache."
+            )
 
         # Turn 2: reads the state back. The persistent shell makes turn 2's
         # `pwd` return /tmp and `echo $GREETING` return the message —
