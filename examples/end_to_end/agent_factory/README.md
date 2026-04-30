@@ -81,16 +81,38 @@ Without kitaru, step 1's failure would have wasted the first turn's work and you
 **Stage file:** `stage_2_sandboxed_exec.py`
 **The pitch:** the `exec` tool runs in your host process in stage 1. Production agents need a sandbox so they can't `rm -rf /`. Stage 2 wraps each agent run in a `DockerSandbox` context manager — every shell command now runs inside an isolated container with its own filesystem and network namespace.
 
-**Run it:**
+**One-time setup (build the sandbox image):**
 
 ```bash
 docker build -t agent-factory-sandbox -f docker/sandbox.Dockerfile docker/
-python stage_2_sandboxed_exec.py
 ```
 
-The agent's `exec` tool now `docker exec`s into `agent_factory_sandbox_<execution_id>`. Verify it really is sandboxed by asking it about the OS — the answer comes back as Debian (the sandbox container's image), not your host's macOS/Linux.
+**Run it:**
 
-**Watch it boot:**
+```bash
+DISABLE_CACHE=1 python stage_2_sandboxed_exec.py
+```
+
+The `[sandbox] ...` lines show every step:
+
+```
+[sandbox] Started container 48a1dbd8a7de (image=agent-factory-sandbox, /workspace ← workspace_688d22c8)
+Kitaru: Checkpoint `default` started.
+[sandbox] $ cat /etc/os-release
+[sandbox] $ uname -r
+[sandbox] $ whoami
+[sandbox]   → exit=0, stdout=16 chars, stderr=0 chars
+[sandbox]   → exit=0, stdout=285 chars, stderr=0 chars
+[sandbox]   → exit=0, stdout=4 chars, stderr=0 chars
+- **OS:** Debian GNU/Linux 13 (trixie)
+- **Kernel version:** 6.10.14-linuxkit
+- **Current user:** root
+[sandbox] Stopping container 48a1dbd8a7de (workspace volume preserved for pause/resume durability)
+```
+
+The agent reports Debian / root — that's the *container*, not your macOS / Linux host. The sandbox is doing its job.
+
+**Watch it boot from another terminal:**
 
 ```bash
 docker ps                                              # see agent_factory_sandbox_<id>
@@ -99,12 +121,14 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 
 **What's in it:**
 
-- `agent_factory/sandbox/runtime.py` — `DockerSandbox` context manager that does `docker run -d` on entry, `docker stop` on exit
+- `agent_factory/sandbox/runtime.py` — `DockerSandbox` context manager: `docker run -d` on entry, `docker stop` on exit. Every lifecycle event prints a `[sandbox]` log line and attaches structured metadata via `kitaru.log()` for the dashboard.
 - `docker/sandbox.Dockerfile` — minimal `python:3.11-slim` + bash + curl + jq
 - `agent_factory/tools.py` — `build_tools(permission_handler, sandbox=...)` accepts an optional sandbox; the `exec` tool routes through `sandbox.run(command)` when one's provided, otherwise runs in-process
-- A named volume `agent_factory_workspace_<execution_id>` mounts at `/workspace` in the sandbox — durable filesystem state survives flow pause/resume
+- A named volume `workspace_<execution_id>` mounts at `/workspace` in the sandbox — durable filesystem state survives flow pause/resume
 
-**Mode:** still turn-mode kitaru. The sandbox lifecycle is bracketed by the flow body's `with DockerSandbox(...) as sandbox:` — guaranteed teardown on exception, no leaked containers.
+**Env-var toggles:**
+
+- `DISABLE_CACHE=1` — force every checkpoint to re-execute (useful when the agent's already cached and you want to see the sandbox actually running shell commands)
 
 **Not yet here:** persistent-shell + marker-completion protocol (each `exec` call currently spins up a fresh `bash -c` — fine for the demo, will be upgraded so `cd` and shell state survive across calls). Credentials still come from the host process; chapter 3 isolates them.
 

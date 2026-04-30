@@ -4,18 +4,18 @@ Same agent as stage 1; the only difference is that shell commands now
 execute in an isolated container instead of the host process. The agent's
 `/workspace` is a named Docker volume that survives pause/resume.
 
-Run it:
+The sandbox prints `[sandbox] ...` lines for every lifecycle event and
+every shell command — start, each `exec`, stop — so you can watch it
+working in real time. (See README for the docker image build step.)
 
-    docker build -t agent-factory-sandbox -f docker/sandbox.Dockerfile docker/
-    python stage_2_sandboxed_exec.py
+Env-var toggles:
 
-Watch the sandbox boot in real time:
-
-    docker ps          # see agent_factory_sandbox_<exec_id>
-    docker exec -it agent_factory_sandbox_<exec_id> bash   # peek inside
-
-The container is torn down when the flow exits.
+    DISABLE_CACHE=1    force every checkpoint to re-execute (useful when
+                       the agent's already cached and you want to see the
+                       sandbox actually running shell commands)
 """
+
+import os
 
 from agent_factory.agent import build_agent
 from agent_factory.profile import Profile
@@ -24,6 +24,8 @@ from agent_factory.sandbox import DockerSandbox
 import kitaru
 from kitaru.adapters.pydantic_ai import KitaruAgent
 from kitaru.runtime import _get_current_execution_id
+
+DISABLE_CACHE = bool(os.environ.get("DISABLE_CACHE"))
 
 DEFAULT_PROFILE = Profile(
     name="default",
@@ -43,12 +45,14 @@ def agent_factory_flow(prompt: str) -> str:
     with DockerSandbox(execution_id=execution_id) as sandbox:
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
         agent = KitaruAgent(agent)
-        return agent.run_sync(prompt).output
+        output = agent.run_sync(prompt).output
+        print(f"\n{output}\n")
+        return output
 
 
 if __name__ == "__main__":
-    handle = agent_factory_flow.run(
+    agent_factory_flow.run(
         "Inspect this machine: what's the OS, kernel version, and current "
-        "user? Use one shell command per question, then summarize."
+        "user? Use one shell command per question, then summarize.",
+        cache=False if DISABLE_CACHE else None,
     )
-    print(handle.wait().output)
