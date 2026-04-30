@@ -190,6 +190,8 @@ def turn_cache_key(
     deferred_tool_results: Any,
     instructions: Any,
     model_settings: Any,
+    capabilities: Any = None,
+    spec: Any = None,
 ) -> str:
     """Stable cache key for a ``KitaruAgent`` turn checkpoint.
 
@@ -197,13 +199,16 @@ def turn_cache_key(
     cache — without an explicit key, different prompts collide on the cached
     result of the previous call.
     """
-    return checkpoint_cache_key(
-        {
-            'agent_name': agent_name,
-            'user_prompt': user_prompt,
-            'message_history': message_history,
-            'deferred_tool_results': deferred_tool_results,
-            'instructions': instructions,
-            'model_settings': model_settings,
-        }
-    )
+    payload = {
+        'agent_name': agent_name,
+        'user_prompt': user_prompt,
+        'message_history': message_history,
+        'deferred_tool_results': deferred_tool_results,
+        'instructions': instructions,
+        'model_settings': model_settings,
+    }
+    if capabilities is not None:
+        payload['capabilities'] = capabilities
+    if spec is not None:
+        payload['spec'] = spec
+    return checkpoint_cache_key(payload)
