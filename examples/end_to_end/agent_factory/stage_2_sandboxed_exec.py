@@ -15,6 +15,12 @@ Env-var toggles:
     DISABLE_CACHE=1    force every checkpoint to re-execute (useful when
                        the agent's already cached and you want to see the
                        sandbox actually running shell commands)
+    FORCE_FAILURE=1    raise between turn 1 and turn 2. The container
+                       still tears down cleanly (with-block guarantees),
+                       so the sandbox auto-persists the shell snapshot
+                       to kitaru.memory before the flow exits. Re-run
+                       without FORCE_FAILURE and turn 2 picks up where
+                       turn 1 left off — same /tmp, same $GREETING.
 """
 
 import os
@@ -28,6 +34,7 @@ from kitaru.adapters.pydantic_ai import KitaruAgent
 from kitaru.runtime import _get_current_execution_id
 
 DISABLE_CACHE = bool(os.environ.get("DISABLE_CACHE"))
+FORCE_FAILURE = bool(os.environ.get("FORCE_FAILURE"))
 
 DEFAULT_PROFILE = Profile(
     name="default",
@@ -64,12 +71,24 @@ def agent_factory_flow() -> str:
         # Turn 1: changes shell state (cd, export).
         turn_1 = agent.run_sync(_TURN_1_PROMPT)
 
+        if FORCE_FAILURE:
+            # Even though we raise here, DockerSandbox.__exit__ still runs
+            # (with-block guarantees), captures the shell snapshot, and
+            # persists it to kitaru.memory. Re-run without FORCE_FAILURE
+            # and turn 2 picks up the same /tmp + $GREETING.
+            raise RuntimeError(
+                "Simulated downstream blip between the two agent turns."
+            )
+
         # Turn 2: reads the state back. Persistent shell means turn 2's
         # `pwd` returns /tmp and `echo $GREETING` returns the message —
         # without it, every turn starts in /workspace with empty env.
         turn_2 = agent.run_sync(_TURN_2_PROMPT)
 
-    final = f"# Turn 1 (set state)\n\n{turn_1.output}\n\n# Turn 2 (read state)\n\n{turn_2.output}"
+    final = (
+        f"# Turn 1 (set state)\n\n{turn_1.output}\n\n"
+        f"# Turn 2 (read state)\n\n{turn_2.output}"
+    )
     print(f"\n{final}\n")
     return final
 

@@ -131,8 +131,11 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 **Env-var toggles:**
 
 - `DISABLE_CACHE=1` — force every checkpoint to re-execute (useful when the agent's already cached and you want to see the sandbox actually running shell commands)
+- `FORCE_FAILURE=1` — raise between turn 1 and turn 2. The with-block still tears down cleanly, the sandbox auto-persists the snapshot, and a re-run picks up turn 1's shell state for turn 2.
 
-**Persistent shell:** stage 2 runs every `run(command)` through **one long-lived `bash --noprofile --norc` process** inside the container. Shell state — `cd`, `export`, file descriptors, background jobs — survives across `exec` calls, just like a normal interactive shell. The host writes commands into the shell's stdin and reads back output up to a unique completion-marker line (`<UUID> <exit_code> <cwd>`). Ported verbatim from kami's `modal_runtime.py`; the only Docker-specific bit is `subprocess.Popen(["docker", "exec", "-i", ...])` instead of `modal.Sandbox.exec`.
+**Persistent shell — within a run:** stage 2 runs every `run(command)` through **one long-lived `bash --noprofile --norc` process** inside the container. Shell state — `cd`, `export`, file descriptors, background jobs — survives across `exec` calls, just like a normal interactive shell. The host writes commands into the shell's stdin and reads back output up to a unique completion-marker line (`<UUID> <exit_code> <cwd>`). Ported verbatim from kami's `modal_runtime.py`; the only Docker-specific bit is `subprocess.Popen(["docker", "exec", "-i", ...])` instead of `modal.Sandbox.exec`.
+
+**Persistent shell — across runs:** the bash process itself dies when the container stops, so cwd / env vars wouldn't naturally survive a flow that crashes between turns. Stage 2 closes that gap via `kitaru.memory` — `DockerSandbox.__enter__` auto-restores any prior snapshot, `__exit__` auto-persists the latest one. The flow body never has to know about kitaru.memory; the sandbox owns its own durability. Because the with-block's `__exit__` runs even on exception, **a flow that raises mid-way still persists the latest shell state** before tearing the container down. Re-run picks up where the prior run stopped.
 
 **Not yet here:** credentials still come from the host process; chapter 3 isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
 
