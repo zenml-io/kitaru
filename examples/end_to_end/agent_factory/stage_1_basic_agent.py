@@ -5,18 +5,11 @@ durable execution. Together: durable agents without learning a graph DSL
 or rewriting your control flow as a state machine.
 
 The flow runs the agent **twice** with a deliberate failure point between
-the two turns — three checkpoints total, both LLM-heavy turns plus a
-join step that surfaces the final result:
+the two turns — two checkpoints, both LLM-heavy:
 
     1. `default`     — first agent turn: investigate the machine
     2. `default_2`   — second agent turn: build a follow-up summary based
                        on what the first turn found
-    3. `join_turns`  — final checkpoint; joins both turns and prints
-                       the combined result. The print lives here (not
-                       in __main__) because `agent.run_sync().output`
-                       strips kitaru's artifact link, leaving multiple
-                       terminal checkpoints that `handle.wait()` can't
-                       disambiguate.
 
 The two-step tour to feel durability:
 
@@ -51,6 +44,11 @@ from kitaru.adapters.pydantic_ai import KitaruAgent
 # database — this just stands in for any of those.
 FORCE_FAILURE = bool(os.environ.get("FORCE_FAILURE"))
 
+# Toggle: disable kitaru's checkpoint cache for this invocation. Useful
+# when developing the flow itself — set DISABLE_CACHE=1 to force every
+# checkpoint to re-execute regardless of prior cached outputs.
+DISABLE_CACHE = bool(os.environ.get("DISABLE_CACHE"))
+
 DEFAULT_PROFILE = Profile(
     name="default",
     system_prompt=(
@@ -61,21 +59,6 @@ DEFAULT_PROFILE = Profile(
     model="openai:gpt-5.4-nano",
     allowed_tools={"exec"},
 )
-
-
-@kitaru.checkpoint
-def join_turns(investigation: str, summary: str) -> str:
-    """Final checkpoint that joins both agent turns and prints the result.
-
-    The agent's `.output` strips the artifact link, so kitaru can't see
-    `default` or `default_2` as upstream of this step in its artifact
-    graph — `handle.wait()` would still call extraction ambiguous. We
-    sidestep that by printing the final result here, in a real
-    @kitaru.checkpoint, then returning it.
-    """
-    final = f"# Investigation\n\n{investigation}\n\n# Summary\n\n{summary}"
-    print(f"\n{final}\n")
-    return final
 
 
 @kitaru.flow
@@ -107,14 +90,15 @@ def agent_factory_flow() -> str:
         "this machine before. No new shell commands needed."
     ).output
 
-    # Checkpoint 3 — join both turns into the flow's terminal output.
-    return join_turns(investigation, summary)
+    final = f"# Investigation\n\n{investigation}\n\n# Summary\n\n{summary}"
+    print(f"\n{final}\n")
+    return final
 
 
 if __name__ == "__main__":
     started = time.perf_counter()
     try:
-        agent_factory_flow.run()
+        agent_factory_flow.run(cache=False if DISABLE_CACHE else None)
         print(f"[took {time.perf_counter() - started:.1f}s]")
     except Exception as exc:
         print(f"\nFlow failed after {time.perf_counter() - started:.1f}s: {exc}")

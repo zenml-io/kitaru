@@ -67,6 +67,11 @@ Without kitaru, step 1's failure would have wasted the first turn's work and you
 
 **Mode:** turn (default). Each `agent.run_sync()` is one aggregating checkpoint. Granular per-call caching (one checkpoint per LLM/tool call) is introduced in a later stage where it earns its keep.
 
+**Env-var toggles:**
+
+- `FORCE_FAILURE=1` — simulate the post-turn-1 blip described above.
+- `DISABLE_CACHE=1` — force every checkpoint to re-execute even if a prior cached output exists (useful when iterating on the flow itself).
+
 **Not yet here:** sandbox (stage 2), credential isolation (stage 3), playbook (stage 4), typed services (stage 5), HITL (stages 6–7), replay (stage 8).
 
 ---
