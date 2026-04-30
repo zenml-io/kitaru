@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@orama/orama": "^3.1.18",
-    "@takumi-rs/image-response": "^0.69.5",
+    "@takumi-rs/image-response": "^0.73.1",
     "fumadocs-core": "16.8.4",
     "fumadocs-mdx": "14.3.1",
     "fumadocs-python": "^0.0.11",
