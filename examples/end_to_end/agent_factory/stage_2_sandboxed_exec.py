@@ -67,6 +67,9 @@ def agent_factory_flow() -> str:
 
     with DockerSandbox(execution_id=execution_id) as sandbox:
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
+        # Turn mode here (not granular) so the chapter 2 FORCE_FAILURE
+        # demo's cache hit lands cleanly — see the longer note in
+        # stage_1_basic_agent.py.
         agent = KitaruAgent(agent)
 
         # Turn 1: investigates the machine and cd's into /tmp.

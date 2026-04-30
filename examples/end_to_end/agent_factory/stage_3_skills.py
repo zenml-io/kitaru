@@ -62,7 +62,7 @@ def agent_factory_flow() -> str:
 
     with DockerSandbox(execution_id=execution_id) as sandbox:
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
-        agent = KitaruAgent(agent)
+        agent = KitaruAgent(agent, granular_checkpoints=True)
         result = agent.run_sync(
             "Carry out your procedure and return the result."
         )
