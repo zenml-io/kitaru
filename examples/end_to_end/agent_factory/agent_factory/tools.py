@@ -1,12 +1,14 @@
 """Tool factory.
 
 Stage 1 ships only `exec` (in-process subprocess). Stage 2 routes `exec`
-through an optional `DockerWorker` so the same `ExecResult` shape is
-preserved while gaining filesystem and network isolation.
+through an optional `DockerSandbox` so the same `ExecResult` shape is
+preserved while gaining filesystem and network isolation. Stage 3 adds
+the host-side `skill` tool (list/read/search over a markdown directory).
 """
 
 import subprocess
-from typing import Protocol
+from pathlib import Path
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 from pydantic_ai import Tool
@@ -15,6 +17,10 @@ from .permissions import PermissionHandler
 
 _MAX_OUTPUT_LINES = 200
 _MAX_LINE_BYTES = 2000
+
+_SKILL_LIST_GLOB = "**/SKILL.md"
+_SKILL_MAX_RESULTS = 200
+_SKILL_MAX_READ_BYTES = 100_000
 
 
 class ExecResult(BaseModel):
@@ -49,6 +55,100 @@ def _truncate(text: str, max_lines: int = _MAX_OUTPUT_LINES) -> str:
     return "\n".join(lines)
 
 
+def _resolve_skill_path(skills_root: Path, relative: str) -> Path:
+    """Resolve a relative skill path under skills_root; reject escapes."""
+    resolved = (skills_root / relative).resolve()
+    if not resolved.is_relative_to(skills_root):
+        raise ValueError(
+            f"Invalid skill path {relative!r}: path must stay within "
+            f"{skills_root}. Use action='list' to discover valid paths."
+        )
+    return resolved
+
+
+def _list_skill_files(skills_root: Path) -> list[Path]:
+    return sorted(skills_root.glob(_SKILL_LIST_GLOB))
+
+
+def _run_skill(
+    skills_root: Path,
+    action: Literal["list", "read", "search"],
+    *,
+    path: str | None,
+    query: str | None,
+) -> dict[str, Any]:
+    """Host-side skill tool: list, read, or search markdown skill files.
+
+    Ported from kami_agent/tools.py:135 — same actions, same caps, same
+    `.is_relative_to(skills_root)` escape-prevention.
+    """
+    if not skills_root.exists():
+        return {"action": action, "skills_root": None, "count": 0}
+
+    if action == "list":
+        files = _list_skill_files(skills_root)[:_SKILL_MAX_RESULTS]
+        return {
+            "action": "list",
+            "skills_root": str(skills_root),
+            "count": len(files),
+            "items": [
+                {
+                    "path": f.relative_to(skills_root).as_posix(),
+                    "bytes": f.stat().st_size,
+                }
+                for f in files
+            ],
+        }
+
+    if action == "read":
+        if not path:
+            raise ValueError("`path` is required when action='read'")
+        target = _resolve_skill_path(skills_root, path)
+        if not target.is_file():
+            raise ValueError(
+                f"Skill file not found: {path}. Use action='list' first."
+            )
+        raw = target.read_bytes()
+        truncated = len(raw) > _SKILL_MAX_READ_BYTES
+        content = raw[:_SKILL_MAX_READ_BYTES].decode("utf-8", errors="replace")
+        return {
+            "action": "read",
+            "skills_root": str(skills_root),
+            "path": target.relative_to(skills_root).as_posix(),
+            "truncated": truncated,
+            "content": content,
+        }
+
+    if not query:
+        raise ValueError("`query` is required when action='search'")
+    needle = query.lower()
+    matches: list[dict[str, Any]] = []
+    for skill_file in _list_skill_files(skills_root):
+        try:
+            text = skill_file.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for index, line in enumerate(text.splitlines(), start=1):
+            if needle in line.lower():
+                matches.append(
+                    {
+                        "path": skill_file.relative_to(skills_root).as_posix(),
+                        "line_number": index,
+                        "line": line,
+                    }
+                )
+                if len(matches) >= _SKILL_MAX_RESULTS:
+                    break
+        if len(matches) >= _SKILL_MAX_RESULTS:
+            break
+    return {
+        "action": "search",
+        "skills_root": str(skills_root),
+        "count": len(matches),
+        "items": matches,
+    }
+
+
 def _run_exec_in_process(command: str) -> ExecResult:
     """Run a shell command in the host process and return its output."""
     completed = subprocess.run(
@@ -67,11 +167,13 @@ def build_tools(
     permission_handler: PermissionHandler,
     *,
     sandbox: _Sandbox | None = None,
+    skills_directory: Path | None = None,
 ) -> list[Tool]:
     """Build the pydantic-ai toolset for an agent based on its profile's permissions.
 
     Pass a `sandbox` to route `exec` through it (stage 2+); omit it to run
-    shell commands in the host process (stage 1).
+    shell commands in the host process (stage 1). Pass a `skills_directory`
+    to enable the `skill` tool (stage 3+).
     """
     tools: list[Tool] = []
 
@@ -90,7 +192,7 @@ def build_tools(
                 return _run_exec_in_process(command)
 
         location = (
-            "in an isolated Docker worker" if sandboxed else "in the host process"
+            "in an isolated Docker sandbox" if sandboxed else "in the host process"
         )
         tools.append(
             Tool(
@@ -99,6 +201,36 @@ def build_tools(
                 description=(
                     f"Run a shell command {location}. Returns exit_code, stdout, "
                     "stderr. stdout/stderr are truncated to ~200 lines."
+                ),
+            )
+        )
+
+    if permission_handler.can_use_tool("skill"):
+        if skills_directory is None:
+            raise ValueError(
+                "Profile.allowed_tools includes 'skill' but no skills_directory "
+                "was provided. Set Profile.skills_directory to a host path."
+            )
+        skills_root = skills_directory.resolve()
+
+        def skill_tool(
+            action: Literal["list", "read", "search"],
+            path: str | None = None,
+            query: str | None = None,
+        ) -> dict[str, Any]:
+            permission_handler.require_tool("skill")
+            return _run_skill(skills_root, action, path=path, query=query)
+
+        tools.append(
+            Tool(
+                skill_tool,
+                name="skill",
+                description=(
+                    "Read this agent's procedure from local markdown files. "
+                    "Use `action='list'` first to discover available skill files, "
+                    "then `action='read'` with a path returned by list to fetch one, "
+                    "or `action='search'` with a query to grep across them. "
+                    "Always read your skill before doing anything else."
                 ),
             )
         )
