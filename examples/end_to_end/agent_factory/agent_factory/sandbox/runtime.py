@@ -33,12 +33,17 @@ import shlex
 import subprocess
 import threading
 from types import TracebackType
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import kitaru
 from kitaru.errors import KitaruContextError, KitaruRuntimeError
 
 from ..tools import ExecResult, _truncate
+from .certs import public_cert_path
+
+if TYPE_CHECKING:
+    from .proxy import DockerProxy
 
 _SANDBOX_IMAGE = "agent-factory-sandbox"
 _SANDBOX_NETWORK = "agent_factory"
@@ -65,7 +70,12 @@ class DockerSandbox:
     state (cwd, env vars, aliases, etc.) survives across `run()` calls.
     """
 
-    def __init__(self, *, execution_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        execution_id: str,
+        proxy: "DockerProxy | None" = None,
+    ) -> None:
         self._execution_id = execution_id
         self._container_name = f"{_CONTAINER_NAME_PREFIX}{execution_id}"
         self._volume_name = f"agent_factory_workspace_{execution_id}"
@@ -74,6 +84,9 @@ class DockerSandbox:
         self._shell_lock = threading.Lock()
         self._shell_stdout_queue: queue.Queue[str | None] | None = None
         self._shell_stdout_thread: threading.Thread | None = None
+        # Optional proxy — when set, the worker container is wired to send
+        # all HTTP/HTTPS through it (http_proxy env vars + CA cert trust).
+        self._proxy = proxy
 
     def __enter__(self) -> "DockerSandbox":
         self._ensure_image()
@@ -81,10 +94,11 @@ class DockerSandbox:
         self._start_container()
         short_id = (self._container_id or "")[:12]
         short_exec = self._execution_id[:8]
+        proxy_note = " (proxy-wired)" if self._proxy is not None else ""
         print(
             f"[sandbox] Started container {short_id} "
             f"(image={_SANDBOX_IMAGE}, "
-            f"/workspace ← workspace_{short_exec})"
+            f"/workspace ← workspace_{short_exec}){proxy_note}"
         )
         return self
 
@@ -199,28 +213,55 @@ class DockerSandbox:
         )
 
     def _start_container(self) -> None:
-        completed = subprocess.run(
-            [
-                "docker",
-                "run",
-                "-d",
-                "--rm",
-                "--name",
-                self._container_name,
-                "--network",
-                _SANDBOX_NETWORK,
-                "-v",
-                f"{self._volume_name}:/workspace",
-                _SANDBOX_IMAGE,
-            ],
-            capture_output=True,
-            text=True,
-        )
+        args = [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            self._container_name,
+            "--network",
+            _SANDBOX_NETWORK,
+            "-v",
+            f"{self._volume_name}:/workspace",
+        ]
+        # When a proxy is wired in, the worker:
+        #   1) trusts the proxy's CA cert (mounted; update-ca-certificates
+        #      runs once below to add it to the system trust store).
+        #   2) routes HTTP/HTTPS through the proxy via env vars covering
+        #      the major HTTP clients (curl, requests, httpx, node, pip).
+        if self._proxy is not None:
+            ca_bundle = "/etc/ssl/certs/ca-certificates.crt"
+            args.extend(
+                [
+                    "-v",
+                    f"{public_cert_path()}:"
+                    "/usr/local/share/ca-certificates/agent-factory-ca.crt:ro",
+                    "-e", f"http_proxy={self._proxy.url}",
+                    "-e", f"https_proxy={self._proxy.url}",
+                    "-e", f"HTTP_PROXY={self._proxy.url}",
+                    "-e", f"HTTPS_PROXY={self._proxy.url}",
+                    "-e", "no_proxy=localhost,127.0.0.1",
+                    "-e", "NO_PROXY=localhost,127.0.0.1",
+                    "-e", f"REQUESTS_CA_BUNDLE={ca_bundle}",
+                    "-e", f"SSL_CERT_FILE={ca_bundle}",
+                    "-e", f"NODE_EXTRA_CA_CERTS={ca_bundle}",
+                    "-e", f"PIP_CERT={ca_bundle}",
+                ]
+            )
+        args.append(_SANDBOX_IMAGE)
+        completed = subprocess.run(args, capture_output=True, text=True)
         if completed.returncode != 0:
             raise KitaruRuntimeError(
                 f"failed to start sandbox container: {completed.stderr.strip()}"
             )
         self._container_id = completed.stdout.strip()
+        if self._proxy is not None:
+            # Refresh the system trust store with the just-mounted CA.
+            subprocess.run(
+                ["docker", "exec", self._container_name, "update-ca-certificates"],
+                capture_output=True,
+            )
 
     def _stop_container(self) -> None:
         if self._container_id is None:

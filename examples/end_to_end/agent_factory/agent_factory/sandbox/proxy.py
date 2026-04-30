@@ -162,7 +162,10 @@ class DockerProxy:
         self._container_id = completed.stdout.strip()
 
     def _wait_until_ready(self) -> None:
-        """Poll until mitmdump is bound to its listen port. Replaces kami's blind sleep(2)."""
+        """Poll until mitmdump is bound to its listen port.
+
+        Replaces kami's blind ``sleep(2)``.
+        """
         deadline = time.monotonic() + _READY_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             result = subprocess.run(
