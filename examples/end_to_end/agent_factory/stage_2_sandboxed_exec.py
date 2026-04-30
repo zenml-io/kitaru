@@ -1,10 +1,11 @@
 """Stage 2 — the agent's `exec` tool runs inside a Docker sandbox.
 
 The flow runs the agent **twice**, sharing a single `DockerSandbox` (one
-container, one persistent bash) across both turns. Turn 1 changes shell
-state (`cd /tmp`, `export GREETING=...`); turn 2 reads it back. The
-persistent shell makes turn 2's `pwd` return `/tmp` and `echo $GREETING`
-return the message — within a single flow run. (Across flow runs, shell
+container, one persistent bash) across both turns. Turn 1 investigates
+the machine and `cd`s into `/tmp`. Turn 2 writes a summary file in the
+current directory — and because the persistent shell carried turn 1's
+`cd` across the turn boundary, the file lands in `/tmp/summary.txt`
+without turn 2 ever stating an absolute path. (Across flow runs, shell
 state is intentionally not preserved — bash commands have side effects
 that a snapshot can't replay safely.)
 
@@ -50,13 +51,13 @@ DEFAULT_PROFILE = Profile(
 
 _TURN_1_PROMPT = (
     "Investigate this machine: report the OS, kernel version, and current "
-    "user (one shell command per question). Then cd into /tmp and "
-    "`export GREETING='hello from turn 1'`. Confirm both worked."
+    "user (one shell command per question). Then cd into /tmp."
 )
 
 _TURN_2_PROMPT = (
-    "Run `pwd` and `echo \"$GREETING\"`. Tell me what you see — and what "
-    "that tells you about how the shell behaves between turns."
+    "Write a brief 2-sentence summary of what you found to a file called "
+    "summary.txt in the current directory. Then `cat` it back to confirm "
+    "what's there."
 )
 
 
@@ -68,7 +69,7 @@ def agent_factory_flow() -> str:
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
         agent = KitaruAgent(agent)
 
-        # Turn 1: changes shell state (cd, export).
+        # Turn 1: investigates the machine and cd's into /tmp.
         turn_1 = agent.run_sync(_TURN_1_PROMPT)
 
         if FORCE_FAILURE:
@@ -82,14 +83,14 @@ def agent_factory_flow() -> str:
                 "from cache."
             )
 
-        # Turn 2: reads the state back. The persistent shell makes turn 2's
-        # `pwd` return /tmp and `echo $GREETING` return the message —
-        # without it, every turn starts in /workspace with empty env.
+        # Turn 2: writes summary.txt in "the current directory" — the
+        # persistent shell carries turn 1's cd, so this lands in /tmp
+        # even though turn 2's prompt never names an absolute path.
         turn_2 = agent.run_sync(_TURN_2_PROMPT)
 
     final = (
-        f"# Turn 1 (set state)\n\n{turn_1.output}\n\n"
-        f"# Turn 2 (read state)\n\n{turn_2.output}"
+        f"# Turn 1 (investigate + cd)\n\n{turn_1.output}\n\n"
+        f"# Turn 2 (write summary in the cwd turn 1 left)\n\n{turn_2.output}"
     )
     print(f"\n{final}\n")
     return final

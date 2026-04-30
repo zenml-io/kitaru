@@ -91,10 +91,10 @@ docker build -t agent-factory-sandbox -f docker/sandbox.Dockerfile docker/
 DISABLE_CACHE=1 python stage_2_sandboxed_exec.py
 ```
 
-The flow has two `agent.run_sync()` turns sharing one `with DockerSandbox(...)`. Turn 1 changes shell state; turn 2 reads it back. Watch the persistent shell carry state across turns:
+The flow has two `agent.run_sync()` turns sharing one `with DockerSandbox(...)`. Turn 1 investigates the machine and `cd`s into `/tmp`. Turn 2 writes `summary.txt` "in the current directory" — and because the persistent shell carried turn 1's `cd` across the turn boundary, the file lands in `/tmp/summary.txt` without turn 2 ever stating an absolute path.
 
 ```
-[sandbox] Started container 11828848d040 (image=agent-factory-sandbox, /workspace ← workspace_df8dd2a1)
+[sandbox] Started container e87af8e85ec2 (image=agent-factory-sandbox, /workspace ← workspace_…)
 Kitaru: Checkpoint `default` started.
 [sandbox] $ cat /etc/os-release
 [sandbox]   → exit=0, stdout=285 chars, cwd=/workspace
@@ -102,17 +102,19 @@ Kitaru: Checkpoint `default` started.
 [sandbox]   → exit=0, stdout=16 chars, cwd=/workspace
 [sandbox] $ whoami
 [sandbox]   → exit=0, stdout=4 chars, cwd=/workspace
-[sandbox] $ cd /tmp && export GREETING='hello from turn 1' && …
-[sandbox]   → exit=0, stdout=31 chars, cwd=/tmp                       ← cwd just changed
-Kitaru: Checkpoint `default` finished in 27.9s.
+[sandbox] $ cd /tmp
+[sandbox]   → exit=0, stdout=0 chars, cwd=/tmp                       ← cwd changed
+Kitaru: Checkpoint `default` finished in 21.0s.
 Kitaru: Checkpoint `default_2` started.
-[sandbox] $ pwd && echo "$GREETING"
-[sandbox]   → exit=0, stdout=22 chars, cwd=/tmp                       ← still /tmp from turn 1
-Kitaru: Checkpoint `default_2` finished in 9.7s.
-[sandbox] Stopping container 11828848d040 (workspace volume preserved for pause/resume durability)
+[sandbox] $ ls -la && pwd
+[sandbox]   → exit=0, stdout=99 chars, cwd=/tmp                       ← still /tmp from turn 1
+[sandbox] $ cat > summary.txt <<'EOF' …                              ← writes /tmp/summary.txt
+[sandbox]   → exit=0, stdout=237 chars, cwd=/tmp
+Kitaru: Checkpoint `default_2` finished in 13.1s.
+[sandbox] Stopping container e87af8e85ec2
 ```
 
-The `cwd=/tmp` line on turn 2 proves the shell is the same shell — without the persistent-bash port, every turn would start in `/workspace` with empty env. The agent also reports Debian / root (the container's image and user), not your macOS/Linux host.
+`summary.txt` ends up at `/tmp/summary.txt` because the bash session is the *same* bash session across turn 1 and turn 2 — the chapter's whole point. The agent also reports Debian / root (the container's image and user), not your macOS/Linux host.
 
 **Watch it boot from another terminal:**
 
