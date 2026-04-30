@@ -40,18 +40,30 @@ The kitaru wrap stays at *flow scope*, not in the library helper, so you see the
 
 **The hero demo — durability via cached checkpoints surviving a failure:**
 
+The flow has **three checkpoints**: two real LLM turns (`default` and `default_2`) plus a `join_turns` step that combines them. A `FORCE_FAILURE` env var flips a simulated downstream blip between the two turns. The two-step tour:
+
 ```bash
+# Step 1: simulate failure between turn 1 and turn 2.
+# The first turn does real LLM + tool work and is checkpointed,
+# then the flow body raises before the second turn starts.
+FORCE_FAILURE=1 python stage_1_basic_agent.py
+
+# Step 2: re-run without the flag.
+# `default` is served from cache (zero LLM calls), `default_2`
+# runs fresh against new LLM work, `join_turns` prints the result.
 python stage_1_basic_agent.py
 ```
 
-The script runs the same flow twice in one process:
+What you see in the kitaru log lines:
 
-| | What happens | Time |
+| | Step 1 | Step 2 |
 |---|---|---|
-| **Run 1** (`FORCE_FAILURE=True`) | Agent does real work — multiple LLM + tool calls. After it completes, kitaru persists the turn's checkpoint. Then the flow body raises a simulated downstream failure. The run is marked `failed`, but the agent's work is saved. | ~30s |
-| **Run 2** (`FORCE_FAILURE=False`, same prompt) | kitaru sees the cached checkpoint from run 1 and serves the entire agent turn from cache — `Kitaru: Checkpoint 'default' cached.`, zero LLM calls. The flow body re-runs past the (now-disabled) failure check and returns the output that originated in run 1. | ~3s |
+| `default` | `started` → `finished in 15s` (3 LLM calls) | **`cached`** (instant, $0) |
+| `default_2` | (never runs — flow raised first) | `started` → `finished in 8s` (1 LLM call) |
+| `join_turns` | (never runs) | `started` → `finished` |
+| Total time | ~25s ending in failure | ~12s ending in printed output |
 
-Without kitaru, run 1's failure would have wasted ~20s of agent work and the dollars-and-cents of LLM tokens. With kitaru, run 2 picks up the saved work for free — and the output is the *same* answer the agent computed before the failure.
+Without kitaru, step 1's failure would have wasted the first turn's work and you'd pay for *both* turns on the retry. With kitaru, only the part that didn't complete the first time gets re-paid for. *That's the durability story.*
 
 **Mode:** turn (default). Each `agent.run_sync()` is one aggregating checkpoint. Granular per-call caching (one checkpoint per LLM/tool call) is introduced in a later stage where it earns its keep.
 

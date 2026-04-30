@@ -4,32 +4,52 @@ The chapter 1 hero demo: pydantic-ai gives the agent loop, kitaru gives
 durable execution. Together: durable agents without learning a graph DSL
 or rewriting your control flow as a state machine.
 
-This script runs the flow twice:
+The flow runs the agent **twice** with a deliberate failure point between
+the two turns — three checkpoints total, both LLM-heavy turns plus a
+join step that surfaces the final result:
 
-    Run 1: FORCE_FAILURE=True. The agent does real work (multiple LLM +
-           tool calls, ~20s). After the agent's turn completes and its
-           checkpoint is persisted, the flow body raises a simulated
-           failure. The run is `failed`, but the agent's work is saved.
+    1. `default`     — first agent turn: investigate the machine
+    2. `default_2`   — second agent turn: build a follow-up summary based
+                       on what the first turn found
+    3. `join_turns`  — final checkpoint; joins both turns and prints
+                       the combined result. The print lives here (not
+                       in __main__) because `agent.run_sync().output`
+                       strips kitaru's artifact link, leaving multiple
+                       terminal checkpoints that `handle.wait()` can't
+                       disambiguate.
 
-    Run 2: FORCE_FAILURE=False. Same prompt. kitaru sees the cached
-           checkpoint from run 1, serves the agent's whole turn from
-           cache (~3s, zero LLM calls), runs the flow body past the
-           failure check, and returns the output.
+The two-step tour to feel durability:
 
-Without kitaru, run 1's failure would have lost ~20s of agent work and
-$0.0X of LLM cost. With kitaru, run 2 picks up the saved work for free.
+    # 1. Run with FORCE_FAILURE=1. The first agent turn completes (~15s,
+    #    real LLM + tool calls) and is checkpointed. The flow body raises
+    #    before the second turn even starts.
+    FORCE_FAILURE=1 python stage_1_basic_agent.py
+
+    # 2. Re-run without the flag. kitaru sees `default` in cache (instant,
+    #    no LLM call), runs the second turn fresh (~10s of new LLM work),
+    #    and returns the combined result.
+    python stage_1_basic_agent.py
+
+Without kitaru, step 1's failure would have wasted the first turn's work
+and you'd pay for *both* turns on the retry. With kitaru, only the work
+that didn't complete the first time gets re-paid for.
 """
 
+import os
+import time
+
 from agent_factory.agent import build_agent
-from agent_factory.profile import Profile
+from agent_factory.profile import (
+    Profile,
+)
 
 import kitaru
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
-# Demo flag — flipped by __main__ between run 1 and run 2 to simulate a
-# transient post-agent failure. Real platform engineers' failures come
-# from the network/filesystem/database; this stands in for any of those.
-FORCE_FAILURE = True
+# Toggle: simulate a transient failure between the two agent turns.
+# Real platform engineers' failures come from the network / filesystem /
+# database — this just stands in for any of those.
+FORCE_FAILURE = bool(os.environ.get("FORCE_FAILURE"))
 
 DEFAULT_PROFILE = Profile(
     name="default",
@@ -43,60 +63,58 @@ DEFAULT_PROFILE = Profile(
 )
 
 
+@kitaru.checkpoint
+def join_turns(investigation: str, summary: str) -> str:
+    """Final checkpoint that joins both agent turns and prints the result.
+
+    The agent's `.output` strips the artifact link, so kitaru can't see
+    `default` or `default_2` as upstream of this step in its artifact
+    graph — `handle.wait()` would still call extraction ambiguous. We
+    sidestep that by printing the final result here, in a real
+    @kitaru.checkpoint, then returning it.
+    """
+    final = f"# Investigation\n\n{investigation}\n\n# Summary\n\n{summary}"
+    print(f"\n{final}\n")
+    return final
+
+
 @kitaru.flow
-def agent_factory_flow(prompt: str) -> str:
-    # The kitaru ↔ pydantic-ai integration seam, in plain sight:
-    # build_agent() returns a vanilla pydantic-ai Agent; KitaruAgent
-    # wraps it for durable execution, capture, and HITL bridging.
+def agent_factory_flow() -> str:
+    # The kitaru ↔ pydantic-ai integration seam, in plain sight: build_agent()
+    # returns a vanilla pydantic-ai Agent; KitaruAgent wraps it for durable
+    # execution. Each agent.run_sync() below becomes its own kitaru checkpoint.
     agent = build_agent(DEFAULT_PROFILE)
     agent = KitaruAgent(agent)
 
-    # The agent's whole run is a single kitaru checkpoint (turn mode).
-    # If anything below this point raises, the checkpoint is already
-    # cached and a retry won't re-pay for it.
-    output = agent.run_sync(prompt).output
+    # Checkpoint 1 — first turn, expensive (multiple LLM + tool calls).
+    investigation = agent.run_sync(
+        "Investigate this machine: what's the OS, the kernel version, the "
+        "current user, and how many processes are running? Use one shell "
+        "command per question."
+    ).output
 
-    # The agent's whole turn is now persisted as a kitaru checkpoint — even
-    # if the next line raises, that work is saved and the next attempt
-    # with the same input will get it from cache.
     if FORCE_FAILURE:
         raise RuntimeError(
-            "Simulated downstream blip. The agent's turn is already cached; "
-            "the next run with the same prompt skips the LLM + tool calls."
+            "Simulated downstream blip between the two agent turns. The "
+            "first turn is cached — re-run without FORCE_FAILURE and "
+            "kitaru will skip it."
         )
-    return output
+
+    # Checkpoint 2 — second turn, also expensive.
+    summary = agent.run_sync(
+        f"Earlier you found:\n\n{investigation}\n\n"
+        "Now: write a one-paragraph summary for someone who's never seen "
+        "this machine before. No new shell commands needed."
+    ).output
+
+    # Checkpoint 3 — join both turns into the flow's terminal output.
+    return join_turns(investigation, summary)
 
 
 if __name__ == "__main__":
-    import time
-
-    # Unique-per-script-run suffix so run 1 isn't already cached from a
-    # previous session — we want to see kitaru actually checkpoint the
-    # agent's turn before run 2 picks it up.
-    PROMPT = (
-        "Inspect this machine: what's the OS, the kernel version, the current "
-        "user, and how many processes are running? Use one shell command per "
-        f"question. Summarize at the end. (id={int(time.time())})"
-    )
-
-    print("=== Run 1 (FORCE_FAILURE=True — agent runs, flow raises after) ===")
     started = time.perf_counter()
     try:
-        agent_factory_flow.run(PROMPT)
+        agent_factory_flow.run()
+        print(f"[took {time.perf_counter() - started:.1f}s]")
     except Exception as exc:
-        print(f"Flow failed (expected): {type(exc).__name__}: {exc}")
-    print(f"[Run 1 took {time.perf_counter() - started:.1f}s — agent did real work]")
-
-    # Flip the flag — same Python process, module state shared between
-    # the two runs. (The agent's checkpoint cache is in kitaru, not in
-    # this Python process.)
-    FORCE_FAILURE = False
-
-    print("\n=== Run 2 (same prompt — agent's turn served from cache) ===")
-    started = time.perf_counter()
-    handle = agent_factory_flow.run(PROMPT)
-    print(handle.wait().output)
-    print(
-        f"\n[Run 2 took {time.perf_counter() - started:.1f}s — zero LLM calls; "
-        "kitaru replayed the agent's checkpoint from run 1]"
-    )
+        print(f"\nFlow failed after {time.perf_counter() - started:.1f}s: {exc}")
