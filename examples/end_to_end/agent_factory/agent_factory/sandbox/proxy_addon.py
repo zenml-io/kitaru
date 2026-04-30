@@ -10,8 +10,6 @@ Ported near-verbatim from `kami_agent/sandbox/proxy_addon.py` — only
 the env-var names and the log prefix were renamed.
 """
 
-from __future__ import annotations
-
 import base64
 import binascii
 import json

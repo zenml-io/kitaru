@@ -17,8 +17,6 @@ Run standalone for testing:
     uvicorn mocks.server:app --host 0.0.0.0 --port 80
 """
 
-from __future__ import annotations
-
 from fastapi import FastAPI, Header, HTTPException, Request
 
 app = FastAPI()
