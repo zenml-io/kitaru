@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import uuid
+import warnings
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
@@ -194,8 +195,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         Limits of ``persist_message_history``:
 
-        - **In-memory only**: history lives on the Python instance; restarts
-          and replays of a prior flow start with no history.
+        - **In-memory only**: history lives on the Python instance. Adapter-owned
+          cached run results can refresh it, but restarts, new processes, and
+          replay paths that skip this adapter call start with no instance history.
         - **Serial use**: concurrent ``run`` / ``run_sync`` calls on the same
           instance race on the stored history. Gate concurrency externally or
           use one instance per concurrent conversation.
@@ -225,6 +227,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         )
         self._granular_checkpoints = granular_checkpoints
         self._warned_streaming_fallback = False
+        self._warned_checkpoint_history_limit = False
         has_granular_configs = any(
             value is not None
             for value in (
@@ -522,8 +525,33 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     def _remember_messages(self, result: Any) -> None:
         if not self._persist_message_history:
             return
+        all_messages = getattr(result, 'all_messages', None)
+        if not callable(all_messages):
+            raise KitaruRuntimeError(
+                'KitaruAgent could not refresh persisted message history because '
+                'the run result does not expose all_messages().'
+            )
         with self._message_history_lock:
-            self._last_messages = list(result.all_messages())
+            self._last_messages = list(all_messages())
+
+    def _warn_if_persist_history_inside_checkpoint(self) -> None:
+        if (
+            not self._persist_message_history
+            or self._warned_checkpoint_history_limit
+            or not is_inside_checkpoint()
+        ):
+            return
+        self._warned_checkpoint_history_limit = True
+        message = (
+            '`persist_message_history=True` is only in-memory. This agent call '
+            'is running inside an existing `@kitaru.checkpoint`; if that '
+            'checkpoint is served from cache during replay/resume, the adapter '
+            'will not execute and cannot restore `_last_messages`. For '
+            'resume-safe conversations, call the agent at flow scope in '
+            'granular mode, or pass `message_history=` explicitly from durable '
+            'storage such as `kitaru.memory`.'
+        )
+        warnings.warn(message, UserWarning, stacklevel=3)
 
     def _use_granular(self, force_turn_checkpoint: bool) -> bool:
         # Granular mode cannot apply to streaming turns: per-call checkpointing
@@ -663,6 +691,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         spec: dict[str, Any] | None = None,
     ) -> Any:
         self._validate_model_override(model)
+        self._warn_if_persist_history_inside_checkpoint()
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
         if wrapped_handler is not None and self._granular_checkpoints:
@@ -689,7 +718,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     event_stream_handler=wrapped_handler,
                     spec=spec,
                 )
-            self._remember_messages(result)
             return result
 
         cache_key = turn_cache_key(
@@ -707,12 +735,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         error: BaseException | None = None
         try:
-            return await self._run_async(
+            result = await self._run_async(
                 _body,
                 force_turn_checkpoint=wrapped_handler is not None,
                 cache_key=cache_key,
                 checkpoint_inputs=checkpoint_inputs,
             )
+            self._remember_messages(result)
+            return result
         except BaseException as exc:
             error = exc
             raise
@@ -741,6 +771,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     ) -> Any:
         self._ensure_run_sync_safe()
         self._validate_model_override(model)
+        self._warn_if_persist_history_inside_checkpoint()
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
         if wrapped_handler is not None and self._granular_checkpoints:
@@ -767,7 +798,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     event_stream_handler=wrapped_handler,
                     spec=spec,
                 )
-            self._remember_messages(result)
             return result
 
         cache_key = turn_cache_key(
@@ -785,12 +815,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         error: BaseException | None = None
         try:
-            return self._run_sync(
+            result = self._run_sync(
                 _body,
                 force_turn_checkpoint=wrapped_handler is not None,
                 cache_key=cache_key,
                 checkpoint_inputs=checkpoint_inputs,
             )
+            self._remember_messages(result)
+            return result
         except BaseException as exc:
             error = exc
             raise

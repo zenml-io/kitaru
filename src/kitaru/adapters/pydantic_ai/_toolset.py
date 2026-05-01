@@ -7,8 +7,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 from typing import get_type_hints
-from uuid import uuid4
-
 import kitaru
 from pydantic_core import to_jsonable_python
 
@@ -224,9 +222,11 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         hitl_config: HitlConfig | None,
         tracker: EventTracker | None,
     ) -> Any:
-        call_suffix = _wait_call_suffix(getattr(ctx, 'tool_call_id', None))
+        def _call_suffix() -> str:
+            return _wait_call_suffix(getattr(ctx, 'tool_call_id', None))
 
         if hitl_config is not None:
+            call_suffix = _call_suffix()
             request = _DeferredRequest(
                 kind='hitl',
                 wait_name=f'{hitl_config.name or name}_{call_suffix}',
@@ -242,6 +242,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         try:
             return await super().call_tool(name, tool_args, ctx, tool)
         except ApprovalRequired as error:
+            call_suffix = _call_suffix()
             request = _DeferredRequest(
                 kind='approval_required',
                 wait_name=f'approve_{name}_{call_suffix}',
@@ -251,6 +252,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                 run_after_wait=True,
             )
         except CallDeferred as error:
+            call_suffix = _call_suffix()
             request = _DeferredRequest(
                 kind='call_deferred',
                 wait_name=f'defer_{name}_{call_suffix}',
@@ -356,13 +358,19 @@ def _wait_call_suffix(tool_call_id: str | None) -> str:
 
     Uses PydanticAI's ``tool_call_id`` so two calls to the same tool in one run
     get distinct wait names, while a replayed run reuses the same ids and hits
-    the cached human inputs instead of re-prompting.
+    the cached human inputs instead of re-prompting. If PydanticAI cannot supply
+    a stable, sanitizable id, fail instead of creating a random wait name that
+    would drift across resume/replay.
     """
     if isinstance(tool_call_id, str) and tool_call_id:
         sanitized = _NON_WORD_PATTERN.sub('_', tool_call_id).strip('_')
         if sanitized:
             return sanitized
-    return uuid4().hex[:8]
+    raise KitaruUsageError(
+        'PydanticAI did not provide a stable `tool_call_id` for this '
+        'HITL/deferred tool call. Kitaru cannot create a replay-safe wait '
+        'name without it. Upgrade PydanticAI or avoid durable HITL for this tool.'
+    )
 
 
 def _elapsed_ms(started_at: float) -> float:

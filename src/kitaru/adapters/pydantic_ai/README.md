@@ -133,6 +133,8 @@ Equivalent triggers that also route through `kitaru.wait()`:
 - `@agent.tool(requires_approval=True)` — Pydantic AI's native approval flag.
 - Raising `pydantic_ai.exceptions.ApprovalRequired` or `CallDeferred` from any tool body.
 
+Durable waits need a stable Pydantic AI `tool_call_id`. The adapter uses that id to make the wait name deterministic, so a resumed run looks for the same human input instead of inventing a new wait. If Pydantic AI does not provide a stable, sanitizable `tool_call_id`, Kitaru raises rather than falling back to a random wait name.
+
 In the default granular mode, explicit `@hitl_tool` calls create a wait point directly at flow scope instead of first creating an empty `*_tool` checkpoint. Concretely, the timeline shows the human wait as the durable anchor for that call. Exception-driven approvals/deferred calls can still appear inside an adapter-created tool checkpoint, because the adapter only learns about those after the tool body has started running. In that case Kitaru temporarily steps out of the checkpoint just long enough to create the wait, then resumes normal checkpoint behavior.
 
 This also affects where event details land. Flow-scope explicit HITL calls are still logged as adapter event metadata, but checkpoint artifacts such as `event_log`, `run_summary`, and captured tool args/results are only saved when there is an actual checkpoint scope to attach them to.
@@ -240,11 +242,13 @@ durable_agent.run_sync('Hi, I am Alice.')
 durable_agent.run_sync("What's my name?")  # sees the prior turn automatically
 ```
 
-With `persist_message_history=True` the adapter remembers `result.all_messages()` on the instance after each run and auto-injects it as `message_history` on the next call when the caller doesn't pass one. **One `KitaruAgent` instance = one conversation** — create separate instances for separate conversations. An explicit `message_history=` on a single call overrides the remembered history for that call only.
+With `persist_message_history=True` the adapter remembers `result.all_messages()` on the instance after each successful `run()` / `run_sync()` and auto-injects it as `message_history` on the next call when the caller doesn't pass one. This refresh also happens when an adapter-owned checkpoint returns a cached Pydantic AI result, because the adapter can read `all_messages()` from the returned result. **One `KitaruAgent` instance = one conversation** — create separate instances for separate conversations. An explicit `message_history=` on a single call overrides the remembered history for that call only.
 
 **Limits to be aware of:**
 
-- **In-memory only.** History lives on the Python instance; a restart, new process, or replay of a prior flow starts with no history. For durable conversation state, persist `result.all_messages()` yourself (e.g. via `kitaru.memory`) and pass it explicitly.
+- **In-memory only.** History lives on the Python instance. Adapter-owned cached turns can refresh it from their returned result, but a restart, new process, or replay path that skips the adapter call still starts with no instance history.
+- **Do not hide the whole agent call inside a cached checkpoint if you rely on this.** If an outer `@kitaru.checkpoint` returns from cache, `KitaruAgent.run*()` never executes, so the adapter cannot restore `_last_messages`. The adapter warns once when `persist_message_history=True` is used inside an existing checkpoint.
+- **For fully durable conversation state, persist it yourself.** Store `result.all_messages()` somewhere durable, such as `kitaru.memory`, and pass it back with `message_history=`.
 - **Serial use.** Concurrent `run` / `run_sync` calls on the same instance race on the stored history. Gate concurrency externally, or use one instance per conversation.
 - **Unbounded.** The list grows monotonically — apply your own truncation or summarization for long-lived conversations.
 - **Success-only.** The instance only updates its history after a successful run. A partial failure leaves the last-successful history in place.

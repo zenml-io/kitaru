@@ -7,6 +7,7 @@ Full end-to-end agent runs are exercised by the example tests.
 
 from __future__ import annotations
 
+import warnings
 from types import SimpleNamespace
 from typing import Any
 
@@ -20,7 +21,12 @@ from kitaru.adapters.pydantic_ai._utils import (
     resolve_tool_checkpoint_config,
     with_default_type,
 )
-from kitaru.errors import KitaruContextError, KitaruUsageError
+from kitaru.errors import KitaruContextError, KitaruRuntimeError, KitaruUsageError
+
+
+def _with_tool_call_id(ctx: Any, tool_call_id: str = "call_123") -> Any:
+    ctx.tool_call_id = tool_call_id
+    return ctx
 
 
 def _install_checkpoint_step_recorder(
@@ -125,19 +131,23 @@ class TestWaitCallSuffix:
 
         assert _wait_call_suffix("call_abc/123.xyz") == "call_abc_123_xyz"
 
-    def test_empty_tool_call_id_falls_back_to_uuid(self) -> None:
+    def test_empty_tool_call_id_raises_usage_error(self) -> None:
         from kitaru.adapters.pydantic_ai._toolset import _wait_call_suffix
 
-        suffix = _wait_call_suffix("")
-        assert len(suffix) == 8
-        assert all(ch.isalnum() for ch in suffix)
+        with pytest.raises(KitaruUsageError, match="stable `tool_call_id`"):
+            _wait_call_suffix("")
 
-    def test_none_tool_call_id_falls_back_to_uuid(self) -> None:
+    def test_none_tool_call_id_raises_usage_error(self) -> None:
         from kitaru.adapters.pydantic_ai._toolset import _wait_call_suffix
 
-        suffix = _wait_call_suffix(None)
-        assert len(suffix) == 8
-        assert all(ch.isalnum() for ch in suffix)
+        with pytest.raises(KitaruUsageError, match="stable `tool_call_id`"):
+            _wait_call_suffix(None)
+
+    def test_unsanitizable_tool_call_id_raises_usage_error(self) -> None:
+        from kitaru.adapters.pydantic_ai._toolset import _wait_call_suffix
+
+        with pytest.raises(KitaruUsageError, match="replay-safe wait name"):
+            _wait_call_suffix("///")
 
     def test_same_tool_call_id_produces_same_suffix(self) -> None:
         """Stable across replays: identical tool_call_id => identical suffix."""
@@ -369,6 +379,146 @@ class TestPersistMessageHistory:
         agent._remember_messages(SimpleNamespace(all_messages=lambda: ["m1", "m2"]))
         assert agent._last_messages == ["m1", "m2"]
 
+    def test_cached_run_sync_result_refreshes_history(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(all_messages=lambda: ["cached-message"])
+
+        def fake_run_sync(_body, **_kwargs):
+            return cached_result
+
+        monkeypatch.setattr(agent, "_run_sync", fake_run_sync)
+
+        assert agent.run_sync("hello") is cached_result
+        assert agent._last_messages == ["cached-message"]
+
+    @pytest.mark.anyio
+    async def test_cached_run_result_refreshes_history(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(all_messages=lambda: ["cached-message"])
+
+        async def fake_run_async(_body, **_kwargs):
+            return cached_result
+
+        monkeypatch.setattr(agent, "_run_async", fake_run_async)
+
+        assert await agent.run("hello") is cached_result
+        assert agent._last_messages == ["cached-message"]
+
+    def test_event_handler_cached_turn_checkpoint_refreshes_history_sync(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kitaru.runtime import _flow_scope
+
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(
+            all_messages=lambda: ["streamed-cached-message"]
+        )
+
+        def fake_auto_checkpoint_sync(_body, **_kwargs):
+            return cached_result
+
+        async def handler(_ctx: Any, _stream: Any) -> None:
+            pass
+
+        monkeypatch.setattr(agent, "_auto_checkpoint_sync", fake_auto_checkpoint_sync)
+
+        with _flow_scope(name="demo_flow"):
+            assert (
+                agent.run_sync("hello", event_stream_handler=handler) is cached_result
+            )
+
+        assert agent._last_messages == ["streamed-cached-message"]
+
+    @pytest.mark.anyio
+    async def test_event_handler_cached_turn_checkpoint_refreshes_history_async(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kitaru.runtime import _flow_scope
+
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(
+            all_messages=lambda: ["streamed-cached-message"]
+        )
+
+        async def fake_auto_checkpoint_async(_body, **_kwargs):
+            return cached_result
+
+        async def handler(_ctx: Any, _stream: Any) -> None:
+            pass
+
+        monkeypatch.setattr(agent, "_auto_checkpoint_async", fake_auto_checkpoint_async)
+
+        with _flow_scope(name="demo_flow"):
+            assert (
+                await agent.run("hello", event_stream_handler=handler) is cached_result
+            )
+
+        assert agent._last_messages == ["streamed-cached-message"]
+
+    def test_persist_history_requires_all_messages_on_result(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        agent = self._make_agent(persist=True)
+
+        def fake_run_sync(_body, **_kwargs):
+            return object()
+
+        monkeypatch.setattr(agent, "_run_sync", fake_run_sync)
+
+        with pytest.raises(KitaruRuntimeError, match="all_messages"):
+            agent.run_sync("hello")
+
+    def test_warns_once_when_persist_history_runs_inside_checkpoint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(all_messages=lambda: ["cached-message"])
+
+        def fake_run_sync(_body, **_kwargs):
+            return cached_result
+
+        monkeypatch.setattr(agent, "_run_sync", fake_run_sync)
+
+        with (
+            _flow_scope(name="demo_flow"),
+            _checkpoint_scope(name="outer", checkpoint_type="custom"),
+        ):
+            with pytest.warns(UserWarning, match="persist_message_history"):
+                agent.run_sync("hello")
+            with warnings.catch_warnings(record=True) as records:
+                warnings.simplefilter("always")
+                agent.run_sync("hello again")
+
+        assert records == []
+
+    def test_flow_scope_does_not_warn_for_persist_history(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kitaru.runtime import _flow_scope
+
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(all_messages=lambda: ["cached-message"])
+
+        def fake_run_sync(_body, **_kwargs):
+            return cached_result
+
+        monkeypatch.setattr(agent, "_run_sync", fake_run_sync)
+
+        with (
+            _flow_scope(name="demo_flow"),
+            warnings.catch_warnings(record=True) as records,
+        ):
+            warnings.simplefilter("always")
+            agent.run_sync("hello")
+
+        assert records == []
+
 
 @pytest.mark.anyio
 async def test_iter_requires_explicit_checkpoint() -> None:
@@ -403,7 +553,7 @@ async def test_capture_off_still_routes_hitl(monkeypatch: pytest.MonkeyPatch) ->
         return "never reached"
 
     wrapped = kitaruify_toolset(toolset, capture=CapturePolicy(tool_capture=None))
-    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["approve_release"]
 
     monkeypatch.setattr(
@@ -443,7 +593,7 @@ async def test_explicit_hitl_tool_bypasses_granular_tool_checkpoint(
         capture=CapturePolicy(correlate_otel_spans=False),
         tool_checkpoint_config={},
     )
-    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["ask_human"]
 
     async def fail_checkpoint(**_kwargs: Any) -> Any:
@@ -462,6 +612,45 @@ async def test_explicit_hitl_tool_bypasses_granular_tool_checkpoint(
         result = await wrapped.call_tool("ask_human", {}, ctx, tool)
 
     assert result == "approved by human"
+
+
+@pytest.mark.anyio
+async def test_explicit_hitl_tool_without_tool_call_id_raises_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, hitl_tool
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    @hitl_tool(schema=str, question="Need human input")
+    def ask_human() -> str:
+        return "never reached"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["ask_human"]
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.wait",
+        lambda **_: pytest.fail("wait should not run without stable tool_call_id"),
+    )
+
+    with (
+        _flow_scope(name="demo_flow"),
+        pytest.raises(KitaruUsageError, match="stable `tool_call_id`"),
+    ):
+        await wrapped.call_tool("ask_human", {}, ctx, tool)
 
 
 @pytest.mark.anyio
@@ -523,7 +712,7 @@ async def test_named_hitl_tool_uses_name_as_unique_wait_base(
     wrapped = kitaruify_toolset(
         toolset, capture=CapturePolicy(correlate_otel_spans=False)
     )
-    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["collect_bug_report"]
     captured: dict[str, Any] = {}
 
@@ -586,7 +775,7 @@ async def test_approval_required_routes_through_wait_when_tool_checkpoint_disabl
         tool_checkpoint_config={},
         tool_checkpoint_config_by_name={"publish": False},
     )
-    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["publish"]
 
     captured: dict[str, Any] = {}
@@ -606,6 +795,46 @@ async def test_approval_required_routes_through_wait_when_tool_checkpoint_disabl
     assert captured.get("exception_metadata") == {"channel": "prod"}
     assert call_count["value"] == 2
     assert checkpoint_steps == []
+
+
+@pytest.mark.anyio
+async def test_approval_required_without_tool_call_id_raises_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.exceptions import ApprovalRequired
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def publish() -> str:
+        raise ApprovalRequired(metadata={"channel": "prod"})
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"publish": False},
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["publish"]
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.wait",
+        lambda **_: pytest.fail("wait should not run without stable tool_call_id"),
+    )
+
+    with (
+        _flow_scope(name="demo_flow"),
+        pytest.raises(KitaruUsageError, match="stable `tool_call_id`"),
+    ):
+        await wrapped.call_tool("publish", {}, ctx, tool)
 
 
 @pytest.mark.anyio
@@ -633,7 +862,7 @@ async def test_approval_required_inside_tool_checkpoint_fails_before_wait_record
         capture=CapturePolicy(correlate_otel_spans=False),
         tool_checkpoint_config={},
     )
-    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["publish"]
     checkpoint_steps = _install_checkpoint_step_recorder(
         monkeypatch,
@@ -686,7 +915,7 @@ async def test_call_deferred_routes_through_wait_when_tool_checkpoint_disabled(
         tool_checkpoint_config={},
         tool_checkpoint_config_by_name={"defer_release": False},
     )
-    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["defer_release"]
     checkpoint_steps = _install_checkpoint_step_recorder(monkeypatch)
     captured: dict[str, Any] = {}
@@ -728,7 +957,7 @@ async def test_call_deferred_without_schema_raises_usage_error() -> None:
         toolset,
         capture=CapturePolicy(correlate_otel_spans=False),
     )
-    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
     tool = (await wrapped.get_tools(ctx))["defer_release"]
 
     with (
