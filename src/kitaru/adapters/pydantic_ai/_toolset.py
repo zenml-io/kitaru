@@ -25,7 +25,7 @@ from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._otel import attach_tool_correlation
 from ._policy import CapturePolicy
-from ._tracking import EventTracker, artifact_name, get_current_tracker
+from ._tracking import EventTracker, get_current_tracker
 from ._utils import (
     CheckpointConfig,
     ToolCheckpointOverrides,
@@ -160,7 +160,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
 
         artifacts: dict[str, str] = {}
         if capture_mode == 'full' and is_inside_checkpoint():
-            args_key = artifact_name(event_id, 'args')
+            args_key = tracker.artifact_name(event_id, 'args')
             kitaru.save(args_key, safe_args, type='input')
             artifacts['args'] = args_key
 
@@ -192,7 +192,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
 
         duration_ms = _elapsed_ms(started_at)
         if capture_mode == 'full' and is_inside_checkpoint():
-            result_key = artifact_name(event_id, 'result')
+            result_key = tracker.artifact_name(event_id, 'result')
             kitaru.save(result_key, _json_safe(result), type='output')
             artifacts['result'] = result_key
 

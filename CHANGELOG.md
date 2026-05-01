@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Shortened PydanticAI adapter observability artifact names by dropping redundant agent/run prefixes in normal cases, while adding readable namespaces when multiple adapter trackers write into the same checkpoint.
+
 ## [0.7.0] - 2026-04-24
 
 ### Added

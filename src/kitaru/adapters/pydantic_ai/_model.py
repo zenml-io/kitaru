@@ -28,7 +28,7 @@ from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._otel import attach_model_correlation
 from ._policy import CapturePolicy
-from ._tracking import artifact_name, get_current_tracker
+from ._tracking import get_current_tracker
 from ._utils import CheckpointConfig, checkpoint_cache_key, run_async_in_checkpoint, with_default_type
 
 _MODEL_RESPONSE_ADAPTER = TypeAdapter(ModelResponse)
@@ -164,7 +164,7 @@ class KitaruModel(WrapperModel):
 
         artifacts: dict[str, str] = {}
         if self._capture.save_prompts:
-            prompt_key = artifact_name(event_id, 'prompt')
+            prompt_key = tracker.artifact_name(event_id, 'prompt')
             kitaru.save(prompt_key, _serialize_messages(messages), type='prompt')
             artifacts['prompt'] = prompt_key
 
@@ -184,7 +184,7 @@ class KitaruModel(WrapperModel):
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
         if self._capture.save_responses:
-            response_key = artifact_name(event_id, 'response')
+            response_key = tracker.artifact_name(event_id, 'response')
             kitaru.save(response_key, _serialize_model_response(response), type='response')
             artifacts['response'] = response_key
 
@@ -221,7 +221,7 @@ class KitaruModel(WrapperModel):
 
         artifacts: dict[str, str] = {}
         if self._capture.save_prompts:
-            prompt_key = artifact_name(event_id, 'prompt')
+            prompt_key = tracker.artifact_name(event_id, 'prompt')
             kitaru.save(prompt_key, _serialize_messages(messages), type='prompt')
             artifacts['prompt'] = prompt_key
 
@@ -261,11 +261,11 @@ class KitaruModel(WrapperModel):
         if save_responses or save_transcripts:
             serialized_response = _serialize_model_response(response)
         if save_responses:
-            response_key = artifact_name(event_id, 'response')
+            response_key = tracker.artifact_name(event_id, 'response')
             kitaru.save(response_key, serialized_response, type='response')
             artifacts['response'] = response_key
         if save_transcripts:
-            transcript_key = artifact_name(event_id, 'stream_transcript')
+            transcript_key = tracker.artifact_name(event_id, 'stream_transcript')
             kitaru.save(
                 transcript_key,
                 {

@@ -1,11 +1,13 @@
 import re
+import threading
 import time
 import uuid
+import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol
 
 import kitaru
 
@@ -36,8 +38,33 @@ from ._kitaru_internal import (
 from ._policy import CaptureMode
 
 _NON_WORD_PATTERN = re.compile(r'\W+')
+_EVENT_ID_DISPLAY_PATTERN = re.compile(r'_(llm_call|tool_call|event_stream|deferred)_(\d+)$')
 
 ArtifactKind = Literal['args', 'result', 'prompt', 'response', 'stream_transcript', 'context']
+
+
+CheckpointKey = tuple[str | None, str | None, str | None, int]
+
+
+class _CheckpointLike(Protocol):
+    execution_id: str | None
+    checkpoint_id: str | None
+    name: str
+
+
+@dataclass
+class _ArtifactNamespaceState:
+    checkpoint_key: CheckpointKey
+    tracker_count: int = 0
+
+
+_ARTIFACT_NAMESPACE_LOCK = threading.Lock()
+_ARTIFACT_NAMESPACE_COUNTS: dict[CheckpointKey, int] = {}
+_ARTIFACT_NAMESPACE_FINALIZERS: dict[CheckpointKey, weakref.finalize] = {}
+_CONTEXT_ARTIFACT_NAMESPACE_STATE: ContextVar[_ArtifactNamespaceState | None] = ContextVar(
+    'kitaru_pydantic_ai_context_artifact_namespace_state',
+    default=None,
+)
 
 
 def normalize_agent_name(agent_name: str | None) -> str:
@@ -45,8 +72,105 @@ def normalize_agent_name(agent_name: str | None) -> str:
     return normalized or 'agent'
 
 
+def _with_namespace(name: str, namespace: str | None) -> str:
+    if namespace is None:
+        return name
+    return f'{namespace}_{name}'
+
+
+def _event_artifact_base_name(event_id: str, kind: ArtifactKind) -> str:
+    match = _EVENT_ID_DISPLAY_PATTERN.search(event_id)
+    if match is None:
+        return f'{event_id}_{kind}'
+    event_kind, sequence_index = match.groups()
+    return f'{event_kind}_{sequence_index}_{kind}'
+
+
 def artifact_name(event_id: str, kind: ArtifactKind) -> str:
-    return f'{event_id}_{kind}'
+    return _event_artifact_base_name(event_id, kind)
+
+
+def _namespaced_artifact_name(
+    event_id: str, kind: ArtifactKind, *, namespace: str | None
+) -> str:
+    return _with_namespace(artifact_name(event_id, kind), namespace)
+
+
+def _checkpoint_key(checkpoint: _CheckpointLike) -> CheckpointKey:
+    return (
+        checkpoint.execution_id,
+        checkpoint.checkpoint_id,
+        checkpoint.name,
+        id(checkpoint),
+    )
+
+
+def _reset_artifact_namespace_state(checkpoint: _CheckpointLike | None = None) -> None:
+    checkpoint_key = _checkpoint_key(checkpoint) if checkpoint is not None else None
+    with _ARTIFACT_NAMESPACE_LOCK:
+        keys = (
+            [checkpoint_key]
+            if checkpoint_key is not None
+            else list(set(_ARTIFACT_NAMESPACE_COUNTS) | set(_ARTIFACT_NAMESPACE_FINALIZERS))
+        )
+        for key in keys:
+            if key is None:
+                continue
+            _ARTIFACT_NAMESPACE_COUNTS.pop(key, None)
+            finalizer = _ARTIFACT_NAMESPACE_FINALIZERS.pop(key, None)
+            if finalizer is not None:
+                finalizer.detach()
+    _CONTEXT_ARTIFACT_NAMESPACE_STATE.set(None)
+
+
+def _clear_artifact_namespace_count(checkpoint_key: CheckpointKey) -> None:
+    _reset_artifact_namespace_state_for_key(checkpoint_key, detach_finalizer=False)
+
+
+def _reset_artifact_namespace_state_for_key(
+    checkpoint_key: CheckpointKey, *, detach_finalizer: bool
+) -> None:
+    with _ARTIFACT_NAMESPACE_LOCK:
+        _ARTIFACT_NAMESPACE_COUNTS.pop(checkpoint_key, None)
+        finalizer = _ARTIFACT_NAMESPACE_FINALIZERS.pop(checkpoint_key, None)
+        if detach_finalizer and finalizer is not None:
+            finalizer.detach()
+
+
+def _context_artifact_namespace(agent_name: str, checkpoint_key: CheckpointKey) -> str | None:
+    state = _CONTEXT_ARTIFACT_NAMESPACE_STATE.get()
+    if state is None or state.checkpoint_key != checkpoint_key:
+        state = _ArtifactNamespaceState(checkpoint_key=checkpoint_key)
+        _CONTEXT_ARTIFACT_NAMESPACE_STATE.set(state)
+
+    state.tracker_count += 1
+    if state.tracker_count == 1:
+        return None
+    return f'{agent_name}_{state.tracker_count}'
+
+
+def _allocate_artifact_namespace(agent_name: str) -> str | None:
+    checkpoint = get_current_checkpoint()
+    if checkpoint is None:
+        return None
+    checkpoint_key = _checkpoint_key(checkpoint)
+
+    with _ARTIFACT_NAMESPACE_LOCK:
+        if checkpoint_key not in _ARTIFACT_NAMESPACE_FINALIZERS:
+            try:
+                _ARTIFACT_NAMESPACE_FINALIZERS[checkpoint_key] = weakref.finalize(
+                    checkpoint,
+                    _clear_artifact_namespace_count,
+                    checkpoint_key,
+                )
+            except TypeError:
+                return _context_artifact_namespace(agent_name, checkpoint_key)
+        tracker_count = _ARTIFACT_NAMESPACE_COUNTS.get(checkpoint_key, 0) + 1
+        _ARTIFACT_NAMESPACE_COUNTS[checkpoint_key] = tracker_count
+
+    if tracker_count == 1:
+        return None
+    return f'{agent_name}_{tracker_count}'
 
 
 @dataclass(frozen=True)
@@ -70,6 +194,7 @@ class EventTracker:
     checkpoint_name: str | None = field(default=None, init=False)
     checkpoint_id: str | None = field(default=None, init=False)
     exec_id: str | None = field(default=None, init=False)
+    artifact_namespace: str | None = field(default=None, init=False)
     _counter: int = 0
     _turn_index: int = 0
     _current_model_event_id: str | None = None
@@ -89,6 +214,7 @@ class EventTracker:
         self.checkpoint_name = get_current_checkpoint_name()
         self.checkpoint_id = checkpoint.checkpoint_id if checkpoint is not None else None
         self.exec_id = get_current_execution_id()
+        self.artifact_namespace = _allocate_artifact_namespace(self.agent_name)
 
     @property
     def events(self) -> Sequence[AgentEvent]:
@@ -96,11 +222,18 @@ class EventTracker:
 
     @property
     def event_log_artifact_name(self) -> str:
-        return f'{self.agent_name}_{self.run_label}_event_log'
+        return _with_namespace('event_log', self.artifact_namespace)
 
     @property
     def run_summary_artifact_name(self) -> str:
-        return f'{self.agent_name}_{self.run_label}_run_summary'
+        return _with_namespace('run_summary', self.artifact_namespace)
+
+    def artifact_name(self, event_id: str, kind: ArtifactKind) -> str:
+        return _namespaced_artifact_name(
+            event_id,
+            kind,
+            namespace=self.artifact_namespace,
+        )
 
     def _next_event_id(self, event_kind: str) -> tuple[str, int]:
         self._counter += 1
