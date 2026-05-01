@@ -198,11 +198,72 @@ The `SkillSource` seam is visible in `agent_factory/profile.py` so forking devs 
 
 ### Stage 4 — Your agents need credentials they can't see
 
-**Stage file:** `stage_4_credential_proxy.py` *(not yet built)*
+**Stage file:** `stage_4_credential_proxy.py`
+**The pitch:** in stages 1–3 the agent's `exec` either runs in your host process or in a container with no credentials. Once you give the agent real services to call, the credentials need to live *somewhere* — and "in the worker container alongside the agent's shell" is the wrong place. A prompt-injected agent could `cat $WIKI_TOKEN` and exfiltrate it. Stage 4 sets up the kami two-process pattern: a separate `proxy` container holds the credentials and injects `Authorization` headers on matching hosts; the worker stays credential-free.
 
-The agent has no credentials yet. When it does, you'll want them isolated from the worker so a prompt-injected agent can't exfiltrate them. Stage 4 ports kami's mitmproxy addon — the worker has no `Authorization` headers; a separate `proxy` container holds them in `AGENT_FACTORY_CREDENTIALS` env and injects them on matching hosts. Backed by `kitaru.secrets`. The skill from stage 3 will be extended to instruct curling `wiki.local` through the proxy.
+**One-time setup (builds proxy + mock images, sets the wiki-token kitaru secret):**
 
-*Section will be filled in when stage 4 lands.*
+```bash
+bash setup.sh
+```
+
+**Run it:**
+
+```bash
+DISABLE_CACHE=1 python stage_4_credential_proxy.py
+```
+
+Three containers come up — mock-services, proxy, sandbox — all on the `agent_factory` Docker network. The agent follows the (extended) skill, hits `wiki.local` through the proxy, and the proxy injects the bearer:
+
+```
+[mock-services] Started container … (image=agent-factory-mock, network aliases=['wiki.local'])
+[proxy]         Started container … (image=agent-factory-proxy, injecting for hosts=['wiki.local'])
+[sandbox]       Started container … (proxy-wired)
+Kitaru: Checkpoint `default` started.
+[sandbox] $ cat /etc/os-release
+[sandbox]   → exit=0, stdout=286 chars, cwd=/workspace
+…  (uname -r, whoami)
+[sandbox] $ cd /tmp
+[sandbox]   → exit=0, stdout=0 chars, cwd=/tmp
+[sandbox] $ curl -s http://wiki.local/snippets/durability
+[sandbox]   → exit=0, stdout=514 chars, cwd=/tmp                ← JSON came back
+…  (writes /tmp/summary.txt with a real fact pulled from the wiki snippet)
+Kitaru: Checkpoint `default` finished in 41.8s.
+[sandbox] Stopping container …
+[proxy]   Stopping container …
+[mock-services] Stopping container …
+```
+
+The proxy + mock containers print correlated logs (use `docker logs agent_factory_proxy` / `agent_factory_mock` while the flow is running):
+
+```
+[agent-factory-proxy] credentials loaded for hosts: ['wiki.local']
+[agent-factory-proxy] proxy token configured
+[agent-factory-proxy] injected headers for wiki.local: ['Authorization']
+[mock-services] GET /snippets/durability (host=wiki.local, auth=Bearer w…) → 200
+```
+
+The bearer arrived at the mock — but **the worker never had it**. The credential was resolved on the host *once* at flow start (`kitaru.get_secret("wiki-token")`), handed to the proxy container's `AGENT_FACTORY_CREDENTIALS` env, and the proxy injected it on every outbound request to `wiki.local`. A prompt-injected agent inside the worker can't `echo $WIKI_TOKEN` because there *is* no `WIKI_TOKEN` env there.
+
+**What's in it:**
+
+- `agent_factory/sandbox/proxy.py` — `DockerProxy` context manager. Per-run bearer token (`secrets.token_urlsafe(32)`) wired into the worker's `http_proxy` URL via basic-auth-as-bearer; the addon's auth gate rejects requests without the right token so other host processes can't accidentally use this proxy.
+- `agent_factory/sandbox/proxy_addon.py` — mitmproxy addon. Per-connection auth gate + per-request host-match header injection. Ported from `kami_agent/sandbox/proxy_addon.py`.
+- `agent_factory/sandbox/certs.py` — self-signed CA generation. Worker trusts the public cert via `update-ca-certificates`; the combined key+cert lives only in the proxy container.
+- `agent_factory/sandbox/runtime.py` — `DockerSandbox(proxy=…)` parameter wires `http_proxy`/`https_proxy` env vars + `REQUESTS_CA_BUNDLE` etc. + bind-mounts the public cert + runs `update-ca-certificates` on container start.
+- `agent_factory/profile.py` — `SandboxProxyRule(name, hosts, headers)`. Header values can contain `{{ secret-name.key }}` templates resolved via `kitaru.get_secret(...)`.
+- `agent_factory/secrets.py` — `build_credential_map(profile)` resolves all templates once on the host before any container sees them.
+- `mocks/server.py` + `mocks/runner.py` — FastAPI mock with `/snippets/{topic}` (auth-gated, returns sample wiki snippets) and a `DockerMockServices` context manager.
+- `skills/default-agent/SKILL.md` — extended with step 5 (curl wiki.local through the proxy). The agent now does real HTTP work as part of its procedure.
+
+**Env-var toggles:** same as earlier stages (`DISABLE_CACHE=1`).
+
+**Architectural notes:**
+
+- The credential template `{{ wiki-token.value }}` resolves at flow start, on the host, *before* the proxy container is spawned. The resolved value is passed to the proxy via Docker env. The worker never sees the resolved value, the template, or the secret name.
+- The proxy listens for HTTP/HTTPS via `mitmdump --listen-host 0.0.0.0 --listen-port 8080` and intercepts both. HTTPS works because the worker trusts the proxy's self-signed CA.
+- `--network-alias wiki.local` on the mock-services container makes Docker's embedded DNS resolve `wiki.local` to that container — so the agent's `curl http://wiki.local/...` lands at the mock without `/etc/hosts` hacks.
+- The proxy + mock images need to be built once via `bash setup.sh`; `DockerProxy.__enter__` and `DockerMockServices.__enter__` pre-flight the image and raise a clear `KitaruRuntimeError` with the build command if the image is missing.
 
 ---
 
