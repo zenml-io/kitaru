@@ -519,6 +519,35 @@ class TestPersistMessageHistory:
 
         assert records == []
 
+    @pytest.mark.anyio
+    async def test_internal_run_sync_delegation_does_not_warn_inside_checkpoint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kitaru.adapters.pydantic_ai._agent import _INTERNAL_RUN_SYNC_DELEGATION
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
+
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(all_messages=lambda: ["cached-message"])
+
+        async def fake_run_async(_body, **_kwargs):
+            return cached_result
+
+        monkeypatch.setattr(agent, "_run_async", fake_run_async)
+
+        with (
+            _flow_scope(name="demo_flow"),
+            _checkpoint_scope(name="adapter_owned", checkpoint_type="llm_call"),
+            warnings.catch_warnings(record=True) as records,
+        ):
+            warnings.simplefilter("always")
+            token = _INTERNAL_RUN_SYNC_DELEGATION.set(True)
+            try:
+                assert await agent.run("hello") is cached_result
+            finally:
+                _INTERNAL_RUN_SYNC_DELEGATION.reset(token)
+
+        assert records == []
+
 
 @pytest.mark.anyio
 async def test_iter_requires_explicit_checkpoint() -> None:

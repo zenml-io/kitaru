@@ -50,6 +50,9 @@ from ._utils import (
 
 _TRACKING_ACTIVE: ContextVar[bool] = ContextVar('kitaru_tracking_active', default=False)
 _INTERNAL_ITER_ALLOWED: ContextVar[bool] = ContextVar('kitaru_internal_iter_allowed', default=False)
+_INTERNAL_RUN_SYNC_DELEGATION: ContextVar[bool] = ContextVar(
+    'kitaru_internal_run_sync_delegation', default=False
+)
 
 # Auto-flow bodies keyed by uuid. The @kitaru.flow entrypoint must be module-
 # level for ZenML dynamic-pipeline source resolution, so it can't close over
@@ -538,6 +541,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         if (
             not self._persist_message_history
             or self._warned_checkpoint_history_limit
+            or _INTERNAL_RUN_SYNC_DELEGATION.get()
             or not is_inside_checkpoint()
         ):
             return
@@ -780,24 +784,28 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         def _body() -> Any:
             with self._kitaru_overrides(), self._tracking_scope(), self._allow_internal_iter():
-                result = super(KitaruAgent, self).run_sync(
-                    user_prompt,
-                    output_type=output_type,
-                    message_history=effective_history,
-                    deferred_tool_results=deferred_tool_results,
-                    model=None,
-                    instructions=instructions,
-                    deps=deps,
-                    model_settings=model_settings,
-                    usage_limits=usage_limits,
-                    usage=usage,
-                    metadata=metadata,
-                    infer_name=infer_name,
-                    toolsets=prepared_toolsets,
-                    builtin_tools=builtin_tools,
-                    event_stream_handler=wrapped_handler,
-                    spec=spec,
-                )
+                delegation_token = _INTERNAL_RUN_SYNC_DELEGATION.set(True)
+                try:
+                    result = super(KitaruAgent, self).run_sync(
+                        user_prompt,
+                        output_type=output_type,
+                        message_history=effective_history,
+                        deferred_tool_results=deferred_tool_results,
+                        model=None,
+                        instructions=instructions,
+                        deps=deps,
+                        model_settings=model_settings,
+                        usage_limits=usage_limits,
+                        usage=usage,
+                        metadata=metadata,
+                        infer_name=infer_name,
+                        toolsets=prepared_toolsets,
+                        builtin_tools=builtin_tools,
+                        event_stream_handler=wrapped_handler,
+                        spec=spec,
+                    )
+                finally:
+                    _INTERNAL_RUN_SYNC_DELEGATION.reset(delegation_token)
             return result
 
         cache_key = turn_cache_key(
