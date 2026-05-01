@@ -12,7 +12,8 @@ from typing import Any
 
 import kitaru
 from kitaru.analytics import AnalyticsEvent, track
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruRuntimeError, KitaruUsageError
+from kitaru.flow import _is_multiple_terminal_steps_output_error
 
 from pydantic_ai import _utils, messages as _messages, models, usage as _usage
 from pydantic_ai.agent import AbstractAgent, AgentRun, WrapperAgent
@@ -159,7 +160,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         capture: CapturePolicy | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         turn_checkpoint_config: CheckpointConfig | None = None,
-        granular_checkpoints: bool = False,
+        granular_checkpoints: bool = True,
         model_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config: CheckpointConfig | None = None,
         tool_checkpoint_config_by_name: ToolCheckpointOverrides | None = None,
@@ -170,18 +171,20 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
         Outside a flow, ``run()`` / ``run_sync()`` auto-open a ``@kitaru.flow``.
 
-        **Turn mode (default):** each run opens one ``@kitaru.checkpoint`` named
-        after the agent; model/tool/MCP calls are recorded as child events.
+        **Granular mode (default):** no turn checkpoint; each top-level
+        model/tool/MCP call per turn opens its own checkpoint, giving per-call
+        replay/retry boundaries and a less crowded artifact view. Sub-calls
+        nested inside an already-open granular checkpoint (for example tool
+        calls inside the turn's model request) fall back to inline tracking —
+        they do *not* open a second checkpoint. The ``model_/tool_/mcp_checkpoint_config``
+        kwargs (and the per-tool ``tool_checkpoint_config_by_name`` map, where
+        ``False`` opts a tool out entirely) are honored in this mode. Cross-run
+        cache behavior for adapter-created granular checkpoints is still being
+        tightened.
 
-        **Granular mode** (``granular_checkpoints=True``): no turn checkpoint;
-        each top-level model/tool/MCP call per turn opens its own checkpoint —
-        true per-call retry and cache at the cost of losing the aggregating
-        run artifact. Sub-calls nested inside an already-open granular
-        checkpoint (for example tool calls inside the turn's model request)
-        fall back to inline tracking — they do *not* open a second checkpoint.
-        The ``model_/tool_/mcp_checkpoint_config`` kwargs (and the per-tool
-        ``tool_checkpoint_config_by_name`` map, where ``False`` opts a tool
-        out entirely) are only honored in this mode.
+        **Turn mode** (``granular_checkpoints=False``): each run opens one
+        ``@kitaru.checkpoint`` named after the agent; model/tool/MCP calls are
+        recorded as child events under that checkpoint.
 
         When ``persist_message_history=True``, the adapter remembers the final
         ``result.all_messages()`` of each run on the instance and auto-injects
@@ -482,7 +485,16 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         try:
             serialized_body_path = _try_serialize_auto_flow_body(body)
             handle = _kitaru_pydantic_ai_auto_flow.run(run_id, serialized_body_path)
-            flow_result = handle.wait()
+            try:
+                flow_result = handle.wait()
+            except KitaruRuntimeError as error:
+                # Granular auto-flows can finish with multiple terminal adapter
+                # checkpoints. The auto-flow body ran in this process, so prefer
+                # the in-memory result that the module-level flow stored for us.
+                if slot.has_result and _is_multiple_terminal_steps_output_error(error):
+                    flow_result = slot.result
+                else:
+                    raise
         finally:
             with _AUTO_FLOW_LOCK:
                 _AUTO_FLOW_BODIES.pop(run_id, None)

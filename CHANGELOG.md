@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- `KitaruAgent` now defaults to `granular_checkpoints=True`, so model, tool, and MCP calls are persisted as separate adapter checkpoints by default. Pass `granular_checkpoints=False` to keep the previous one-checkpoint-per-agent-run turn mode. Cross-run cache behavior for granular adapter checkpoints is unchanged in this release.
 - Shortened PydanticAI adapter observability artifact names by dropping redundant agent/run prefixes in normal cases, while adding readable namespaces when multiple adapter trackers write into the same checkpoint.
 
 ## [0.7.0] - 2026-04-24

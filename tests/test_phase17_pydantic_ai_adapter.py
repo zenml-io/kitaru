@@ -26,9 +26,7 @@ class _FakeCheckpointScope:
     name: str
 
 
-def _make_wrapped_agent(
-    *, name_prefix: str, granular: bool = False
-) -> KitaruAgent[Any, str]:
+def _make_test_agent(*, name_prefix: str) -> Agent[Any, str]:
     agent = Agent(
         TestModel(call_tools=["add"]),
         name=f"{name_prefix}_{uuid4().hex[:8]}",
@@ -39,7 +37,16 @@ def _make_wrapped_agent(
     def add(a: int = 0, b: int = 0) -> int:
         return a + b
 
-    return KitaruAgent(agent, granular_checkpoints=granular)
+    return agent
+
+
+def _make_wrapped_agent(
+    *, name_prefix: str, granular_checkpoints: bool
+) -> KitaruAgent[Any, str]:
+    return KitaruAgent(
+        _make_test_agent(name_prefix=name_prefix),
+        granular_checkpoints=granular_checkpoints,
+    )
 
 
 def _artifact_names(hydrated_run: Any) -> list[str]:
@@ -118,7 +125,10 @@ def test_phase17_event_artifact_names_use_short_display_shape() -> None:
 
 def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     """Turn mode should persist tracker metadata and checkpoint artifacts."""
-    durable_agent = _make_wrapped_agent(name_prefix="turn_agent")
+    durable_agent = _make_wrapped_agent(
+        name_prefix="turn_agent",
+        granular_checkpoints=False,
+    )
 
     @flow
     def turn_flow(prompt: str) -> str:
@@ -152,7 +162,10 @@ def test_phase17_turn_mode_tracks_effective_history_input_for_continuations(
     primed_zenml,
 ) -> None:
     """Continuation turns should expose message_history without a fake prompt input."""
-    durable_agent = _make_wrapped_agent(name_prefix="history_agent")
+    durable_agent = _make_wrapped_agent(
+        name_prefix="history_agent",
+        granular_checkpoints=False,
+    )
 
     @flow
     def continuation_flow() -> str:
@@ -186,7 +199,7 @@ def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
         output_type=str,
         instructions="Reply successfully.",
     )
-    durable_agent = KitaruAgent(agent)
+    durable_agent = KitaruAgent(agent, granular_checkpoints=False)
 
     @flow
     def instructions_only_flow() -> str:
@@ -202,9 +215,9 @@ def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
     assert "llm_call_1_response" in artifact_names
 
 
-def test_phase17_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
-    """Granular mode should flush run metadata at flow scope."""
-    durable_agent = _make_wrapped_agent(name_prefix="granular_agent", granular=True)
+def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
+    """Default granular mode should flush run metadata at flow scope."""
+    durable_agent = KitaruAgent(_make_test_agent(name_prefix="granular_agent"))
 
     @flow
     def granular_flow(prompt: str) -> str:
@@ -228,6 +241,9 @@ def test_phase17_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
     assert "llm_call_1_prompt" in artifact_names
     assert "llm_call_1_response" in artifact_names
     _assert_event_artifacts_use_display_names(event_map, artifact_names)
+    assert "event_log" not in artifact_names
+    assert "run_summary" not in artifact_names
+    assert not any(name.endswith("_event_log") for name in artifact_names)
     assert not any(name.endswith("_run_summary") for name in artifact_names)
     assert not any(summary["run_label"] in name for name in artifact_names)
 
@@ -283,8 +299,14 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
     primed_zenml,
 ) -> None:
     """Only later trackers in the same checkpoint should get a namespace."""
-    first_agent = _make_wrapped_agent(name_prefix="first_agent")
-    second_agent = _make_wrapped_agent(name_prefix="second_agent")
+    first_agent = _make_wrapped_agent(
+        name_prefix="first_agent",
+        granular_checkpoints=False,
+    )
+    second_agent = _make_wrapped_agent(
+        name_prefix="second_agent",
+        granular_checkpoints=False,
+    )
 
     @checkpoint
     def run_both_agents(prompt: str) -> str:
@@ -343,7 +365,7 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
 def test_phase17_auto_flow_runs_end_to_end(primed_zenml) -> None:
     """`run_sync()` outside any flow auto-opens a flow and completes."""
     global _AUTO_FLOW_AGENT
-    _AUTO_FLOW_AGENT = _make_wrapped_agent(name_prefix="auto_flow_agent")
+    _AUTO_FLOW_AGENT = KitaruAgent(_make_test_agent(name_prefix="auto_flow_agent"))
     try:
         result = _invoke_shared_auto_flow_agent()
     finally:
@@ -353,7 +375,7 @@ def test_phase17_auto_flow_runs_end_to_end(primed_zenml) -> None:
 
 def test_phase17_persist_message_history_extends_across_runs(primed_zenml) -> None:
     """Two successive `run_sync` calls on the same instance accumulate history."""
-    durable_agent = _make_wrapped_agent(name_prefix="chat_agent")
+    durable_agent = KitaruAgent(_make_test_agent(name_prefix="chat_agent"))
     durable_agent._persist_message_history = True
 
     @flow

@@ -493,6 +493,15 @@ def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
     return values
 
 
+class _MultipleTerminalStepsOutputError(KitaruRuntimeError):
+    """Raised when fallback result extraction sees several terminal steps."""
+
+
+def _is_multiple_terminal_steps_output_error(error: BaseException) -> bool:
+    """Return whether ``error`` came from ambiguous terminal-step extraction."""
+    return isinstance(error, _MultipleTerminalStepsOutputError)
+
+
 def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
     """Extract return values from terminal step outputs as a fallback.
 
@@ -517,7 +526,7 @@ def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
     if not terminal_step_names:
         return []
     if len(terminal_step_names) > 1:
-        raise KitaruRuntimeError(
+        raise _MultipleTerminalStepsOutputError(
             "Execution output metadata is missing and fallback extraction is "
             "ambiguous because multiple terminal steps were found."
         )

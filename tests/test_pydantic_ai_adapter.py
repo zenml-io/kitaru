@@ -234,30 +234,37 @@ class TestResolveHitlQuestion:
 
 
 class TestUseGranular:
-    def _make_agent(self, *, granular: bool):
+    def _make_agent(self, *, granular_checkpoints: bool):
         from pydantic_ai import Agent
         from pydantic_ai.models.test import TestModel
 
         from kitaru.adapters.pydantic_ai import KitaruAgent
 
         inner = Agent(TestModel(), name="streamer")
-        return KitaruAgent(inner, granular_checkpoints=granular)
+        return KitaruAgent(inner, granular_checkpoints=granular_checkpoints)
 
     def test_granular_off_always_false(self) -> None:
-        agent = self._make_agent(granular=False)
+        agent = self._make_agent(granular_checkpoints=False)
         assert agent._use_granular(force_turn_checkpoint=False) is False
         assert agent._use_granular(force_turn_checkpoint=True) is False
 
     def test_granular_on_without_stream_handler(self) -> None:
-        agent = self._make_agent(granular=True)
+        agent = self._make_agent(granular_checkpoints=True)
         assert agent._use_granular(force_turn_checkpoint=False) is True
 
     def test_granular_on_with_stream_handler_falls_back(self) -> None:
-        agent = self._make_agent(granular=True)
+        agent = self._make_agent(granular_checkpoints=True)
         assert agent._use_granular(force_turn_checkpoint=True) is False
 
-    def test_granular_defaults_enable_per_call_checkpoint_configs(self) -> None:
-        agent = self._make_agent(granular=True)
+    def test_granular_is_default_and_enables_per_call_checkpoint_configs(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        agent = KitaruAgent(Agent(TestModel(), name="streamer"))
+        assert agent._granular_checkpoints is True
+        assert agent._use_granular(force_turn_checkpoint=False) is True
         assert agent._model_checkpoint_config == {}
         assert agent._tool_checkpoint_config == {}
         assert agent._mcp_checkpoint_config == {}
@@ -270,7 +277,11 @@ class TestUseGranular:
 
         inner = Agent(TestModel(), name="streamer")
         with pytest.raises(KitaruUsageError, match="granular_checkpoints=True"):
-            KitaruAgent(inner, model_checkpoint_config={"retries": 1})
+            KitaruAgent(
+                inner,
+                granular_checkpoints=False,
+                model_checkpoint_config={"retries": 1},
+            )
 
     def test_wrap_compatibility_shim_translates_legacy_capture_modes(self) -> None:
         from pydantic_ai import Agent

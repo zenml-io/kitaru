@@ -48,6 +48,7 @@ from kitaru.flow import (
     _duration_metadata_from_run,
     _extract_run_pipeline_id,
     _inject_model_registry_env,
+    _is_multiple_terminal_steps_output_error,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
     flow,
@@ -1735,9 +1736,13 @@ def test_flow_handle_get_raises_on_ambiguous_terminal_fallback() -> None:
     handle = FlowHandle(_as_pipeline_run(completed))
     with (
         patch("kitaru.flow.Client", return_value=client_mock),
-        pytest.raises(KitaruRuntimeError, match="fallback extraction is ambiguous"),
+        pytest.raises(
+            KitaruRuntimeError,
+            match="fallback extraction is ambiguous",
+        ) as exc_info,
     ):
         handle.get()
+    assert _is_multiple_terminal_steps_output_error(exc_info.value)
 
 
 def test_flow_handle_get_raises_when_step_metadata_is_missing() -> None:
