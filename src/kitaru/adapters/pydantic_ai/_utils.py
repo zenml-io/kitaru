@@ -258,14 +258,27 @@ def turn_cache_key(
     user_prompt: Any,
     message_history: Any,
     deferred_tool_results: Any,
+    output_type: Any,
     instructions: Any,
+    deps: Any,
     model_settings: Any,
+    usage_limits: Any,
+    usage: Any,
+    metadata: Any,
+    infer_name: bool,
+    toolsets: Any,
+    builtin_tools: Any,
+    event_stream_handler: Any,
+    spec: Any,
 ) -> str:
     """Stable cache key for a ``KitaruAgent`` turn checkpoint.
 
     Some turn inputs live in `_body`'s closure and aren't visible to ZenML's
-    step cache — without an explicit key, different prompts or settings could
-    collide on the cached result of the previous call.
+    step cache. The visible ZenML inputs stay intentionally small
+    (``user_prompt`` / ``message_history``), so the explicit key must include
+    every run argument that can change how PydanticAI behaves. Falling back to
+    ``repr`` for hard-to-serialize objects is acceptable here: a cache miss is
+    safer than returning a stale agent result for a different run shape.
     """
     return checkpoint_cache_key(
         {
@@ -273,7 +286,17 @@ def turn_cache_key(
             "user_prompt": user_prompt,
             "message_history": message_history,
             "deferred_tool_results": deferred_tool_results,
+            "output_type": output_type,
             "instructions": instructions,
+            "deps": deps,
             "model_settings": model_settings,
+            "usage_limits": usage_limits,
+            "usage": usage,
+            "metadata": metadata,
+            "infer_name": infer_name,
+            "toolsets": toolsets,
+            "builtin_tools": builtin_tools,
+            "event_stream_handler": event_stream_handler,
+            "spec": spec,
         }
     )

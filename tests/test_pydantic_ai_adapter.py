@@ -21,10 +21,11 @@ from kitaru.adapters.pydantic_ai._utils import (
     checkpoint_cache_key,
     reject_isolated_runtime,
     resolve_tool_checkpoint_config,
+    turn_cache_key,
     validate_checkpoint_config,
     with_default_type,
 )
-from kitaru.errors import KitaruContextError, KitaruRuntimeError, KitaruUsageError
+from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 
 
 def _with_tool_call_id(ctx: Any, tool_call_id: str = "call_123") -> Any:
@@ -453,6 +454,49 @@ class TestResolveHitlQuestion:
         assert resolve_hitl_question(config, {"question": "ignored"}) == "static only"
 
 
+class TestTurnCacheKey:
+    def _base_kwargs(self) -> dict[str, Any]:
+        return {
+            "agent_name": "agent",
+            "user_prompt": "prompt",
+            "message_history": [{"role": "user", "content": "hi"}],
+            "deferred_tool_results": None,
+            "output_type": str,
+            "instructions": "be helpful",
+            "deps": {"tenant": "a"},
+            "model_settings": {"temperature": 0},
+            "usage_limits": {"request_limit": 5},
+            "usage": {"requests": 1},
+            "metadata": {"trace": "one"},
+            "infer_name": True,
+            "toolsets": ["tools-a"],
+            "builtin_tools": ["builtin-a"],
+            "event_stream_handler": None,
+            "spec": {"output": "plain"},
+        }
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("output_type", int),
+            ("deps", {"tenant": "b"}),
+            ("usage_limits", {"request_limit": 9}),
+            ("usage", {"requests": 2}),
+            ("metadata", {"trace": "two"}),
+            ("infer_name", False),
+            ("toolsets", ["tools-b"]),
+            ("builtin_tools", ["builtin-b"]),
+            ("event_stream_handler", lambda *_args: None),
+            ("spec", {"output": "structured"}),
+        ],
+    )
+    def test_behavior_affecting_inputs_change_key(self, field: str, value: Any) -> None:
+        base = self._base_kwargs()
+        changed = {**base, field: value}
+
+        assert turn_cache_key(**base) != turn_cache_key(**changed)
+
+
 class TestUseGranular:
     def _make_agent(self, *, granular_checkpoints: bool):
         from pydantic_ai import Agent
@@ -618,7 +662,7 @@ class TestPersistMessageHistory:
         assert await agent.run("hello") is cached_result
         assert agent._last_messages == ["cached-message"]
 
-    def test_event_handler_cached_turn_checkpoint_refreshes_history_sync(
+    def test_event_handler_turn_checkpoint_disables_cache_sync(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from kitaru.runtime import _flow_scope
@@ -628,7 +672,8 @@ class TestPersistMessageHistory:
             all_messages=lambda: ["streamed-cached-message"]
         )
 
-        def fake_auto_checkpoint_sync(_body, **_kwargs):
+        def fake_auto_checkpoint_sync(_body, **kwargs):
+            assert kwargs["checkpoint_config"]["cache"] is False
             return cached_result
 
         async def handler(_ctx: Any, _stream: Any) -> None:
@@ -644,7 +689,7 @@ class TestPersistMessageHistory:
         assert agent._last_messages == ["streamed-cached-message"]
 
     @pytest.mark.anyio
-    async def test_event_handler_cached_turn_checkpoint_refreshes_history_async(
+    async def test_event_handler_turn_checkpoint_disables_cache_async(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from kitaru.runtime import _flow_scope
@@ -654,7 +699,8 @@ class TestPersistMessageHistory:
             all_messages=lambda: ["streamed-cached-message"]
         )
 
-        async def fake_auto_checkpoint_async(_body, **_kwargs):
+        async def fake_auto_checkpoint_async(_body, **kwargs):
+            assert kwargs["checkpoint_config"]["cache"] is False
             return cached_result
 
         async def handler(_ctx: Any, _stream: Any) -> None:
@@ -1031,9 +1077,130 @@ async def test_approval_required_routes_through_wait_when_tool_checkpoint_disabl
         result = await wrapped.call_tool("publish", {}, ctx, tool)
 
     assert result == "published"
+    assert captured.get("tool_args") == {}
     assert captured.get("exception_metadata") == {"channel": "prod"}
     assert call_count["value"] == 2
     assert checkpoint_steps == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("tool_capture", [None, "metadata"])
+async def test_wait_metadata_omits_payload_when_capture_not_full(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_capture: Any,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.exceptions import ApprovalRequired
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    approve_state = {"approved": False}
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def publish(channel: str = "prod") -> str:
+        if not approve_state["approved"]:
+            raise ApprovalRequired(metadata={"secret_ticket": "SEC-1"})
+        return f"published to {channel}"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(
+            tool_capture=tool_capture,
+            correlate_otel_spans=False,
+        ),
+        tool_checkpoint_config_by_name={"publish": False},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["publish"]
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.wait",
+        lambda **kwargs: (
+            captured.update(kwargs["metadata"])
+            or approve_state.update(approved=True)
+            or True
+        ),
+    )
+
+    with _flow_scope(name="demo_flow"):
+        await wrapped.call_tool("publish", {"channel": "prod"}, ctx, tool)
+
+    assert captured == {
+        "adapter": "pydantic_ai",
+        "tool_name": "publish",
+        "tool_call_id": "call_123",
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("tool_capture", [None, "metadata"])
+async def test_deferred_event_metadata_omits_payload_when_capture_not_full(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_capture: Any,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.exceptions import ApprovalRequired
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    recorded_deferred_events: list[dict[str, Any]] = []
+
+    class FakeTracker:
+        def start_tool_event(self) -> tuple[str, dict[str, Any]]:
+            return "event-1", {}
+
+        def record_tool_event(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def record_deferred_event(self, **kwargs: Any) -> None:
+            recorded_deferred_events.append(kwargs)
+
+    approve_state = {"approved": False}
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def publish(channel: str = "prod") -> str:
+        if not approve_state["approved"]:
+            raise ApprovalRequired(metadata={"secret_ticket": "SEC-1"})
+        return f"published to {channel}"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(
+            tool_capture=tool_capture,
+            correlate_otel_spans=False,
+        ),
+        tool_checkpoint_config_by_name={"publish": False},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["publish"]
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.get_current_tracker",
+        lambda: FakeTracker(),
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.wait",
+        lambda **_kwargs: approve_state.update(approved=True) or True,
+    )
+
+    with _flow_scope(name="demo_flow"):
+        await wrapped.call_tool("publish", {"channel": "prod"}, ctx, tool)
+
+    assert recorded_deferred_events
+    assert all(event["metadata"] is None for event in recorded_deferred_events)
 
 
 @pytest.mark.anyio
@@ -1119,13 +1286,109 @@ async def test_approval_required_inside_tool_checkpoint_fails_before_wait_record
     with (
         _flow_scope(name="demo_flow"),
         pytest.raises(
-            KitaruContextError,
-            match="cannot run inside a @checkpoint",
+            KitaruUsageError,
+            match="tool_checkpoint_config_by_name",
         ),
     ):
         await wrapped.call_tool("publish", {}, ctx, tool)
 
     assert checkpoint_steps == ["publish_tool"]
+
+
+@pytest.mark.anyio
+async def test_call_deferred_inside_tool_checkpoint_fails_before_schema_inference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.exceptions import CallDeferred
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def defer_release():
+        raise CallDeferred(metadata={"ticket": "REL-123"})
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["defer_release"]
+    checkpoint_steps = _install_checkpoint_step_recorder(
+        monkeypatch,
+        enter_checkpoint_scope=True,
+    )
+
+    with (
+        _flow_scope(name="demo_flow"),
+        pytest.raises(
+            KitaruUsageError,
+            match="tool_checkpoint_config_by_name",
+        ),
+    ):
+        await wrapped.call_tool("defer_release", {}, ctx, tool)
+
+    assert checkpoint_steps == ["defer_release_tool"]
+
+
+@pytest.mark.anyio
+async def test_wait_for_input_inside_tool_checkpoint_gets_adapter_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, wait_for_input
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def ask_user() -> str:
+        return wait_for_input(schema=str, question="What should happen?")
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = _with_tool_call_id(RunContext(deps=None, model=TestModel(), usage=RunUsage()))
+    tool = (await wrapped.get_tools(ctx))["ask_user"]
+    checkpoint_steps = _install_checkpoint_step_recorder(
+        monkeypatch,
+        enter_checkpoint_scope=True,
+    )
+
+    import importlib
+
+    wait_module = importlib.import_module("kitaru.wait")
+    monkeypatch.setattr(
+        wait_module,
+        "_resolve_zenml_wait",
+        lambda: pytest.fail("checkpoint-contained wait should fail first"),
+    )
+
+    with (
+        _flow_scope(name="demo_flow"),
+        pytest.raises(
+            KitaruUsageError,
+            match="tool_checkpoint_config_by_name",
+        ),
+    ):
+        await wrapped.call_tool("ask_user", {}, ctx, tool)
+
+    assert checkpoint_steps == ["ask_user_tool"]
 
 
 @pytest.mark.anyio

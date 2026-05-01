@@ -3786,6 +3786,7 @@ SHARED = "project"
         )
 
     assert resolved.stack == "invocation-stack"
+    assert resolved.stack_source == "invocation"
     assert resolved.cache is True
     assert resolved.retries == 6
     assert resolved.image is not None

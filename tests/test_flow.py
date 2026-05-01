@@ -18,6 +18,7 @@ from zenml.models import PipelineRunResponse
 
 from kitaru import memory
 from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
+from kitaru._config._core import ExecutionStackSource
 from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import checkpoint
 from kitaru.config import (
@@ -47,12 +48,14 @@ from kitaru.flow import (
     _checkpoint_count_from_run,
     _duration_metadata_from_run,
     _extract_run_pipeline_id,
+    _guard_implicit_active_stack_fallback,
     _inject_model_registry_env,
     _is_multiple_terminal_steps_output_error,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
     flow,
 )
+from kitaru.inspection import ActiveConfigSelectionProvenance
 from kitaru.replay import ReplayPlan
 from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
@@ -64,12 +67,14 @@ def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
 def _resolved_execution(
     *,
     stack: str | None = None,
+    stack_source: ExecutionStackSource | None = None,
     cache: bool | None = None,
     retries: int = 0,
     image: ImageSettings | None = None,
 ) -> ResolvedExecutionConfig:
     return ResolvedExecutionConfig(
         stack=stack,
+        stack_source=stack_source,
         image=image,
         cache=cache,
         retries=retries,
@@ -167,6 +172,17 @@ class _DummyRun:
 
     def get_hydrated_version(self) -> _DummyRun:
         return self
+
+
+def _stale_default_stack_provenance() -> ActiveConfigSelectionProvenance:
+    return ActiveConfigSelectionProvenance(
+        resource="active_stack",
+        effective_source="repo-local config",
+        effective_source_detail="/work/repo/.kitaru/config.yaml",
+        effective_id="stale-stack-id",
+        repository_config_path="/work/repo/.kitaru/config.yaml",
+        repository_id="stale-stack-id",
+    )
 
 
 def test_extract_run_pipeline_id_prefers_direct_pipeline_id() -> None:
@@ -343,6 +359,124 @@ def test_flow_decorator_creates_wrapper_with_run() -> None:
     # ZenML's compiler treats any concrete run-level enable_cache as a per-step
     # override that overwrites @checkpoint(cache=...) settings.
     assert "enable_cache" not in call_kwargs.kwargs
+
+
+def test_implicit_default_stack_fallback_guard_fails_closed() -> None:
+    client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="default", id="default-stack-id")
+    )
+
+    with pytest.raises(KitaruUsageError) as exc_info:
+        _guard_implicit_active_stack_fallback(
+            operation="run this flow",
+            resolved_execution=_resolved_execution(
+                stack="default",
+                stack_source="zenml_active_stack",
+            ),
+            raw_active_stack_provenance=_stale_default_stack_provenance(),
+            client_factory=MagicMock(return_value=client),
+        )
+
+    message = str(exc_info.value)
+    assert "refused to run this flow" in message
+    assert "fallback stack `default` implicitly" in message
+    assert "stale-stack-id" in message
+    assert "default-stack-id" in message
+    assert "pass `stack=...`" in message
+
+
+@pytest.mark.parametrize(
+    "stack_source",
+    ["project_config", "environment", "runtime", "decorator", "invocation"],
+)
+def test_explicit_default_stack_bypasses_fallback_guard(
+    stack_source: ExecutionStackSource,
+) -> None:
+    client_factory = MagicMock()
+
+    _guard_implicit_active_stack_fallback(
+        operation="run this flow",
+        resolved_execution=_resolved_execution(
+            stack="default",
+            stack_source=stack_source,
+        ),
+        raw_active_stack_provenance=_stale_default_stack_provenance(),
+        client_factory=client_factory,
+    )
+
+    client_factory.assert_not_called()
+
+
+def test_run_fails_closed_before_submitting_on_implicit_default_fallback() -> None:
+    configured_pipeline = MagicMock(
+        return_value=_DummyRun(status=ExecutionStatus.RUNNING)
+    )
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="default", id="default-stack-id")
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow._capture_active_stack_provenance_for_guard",
+            return_value=_stale_default_stack_provenance(),
+        ),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(
+                stack="default",
+                stack_source="zenml_active_stack",
+            ),
+        ),
+        patch("kitaru.flow.Client", return_value=client),
+        patch("kitaru.flow.resolve_connection_config") as resolve_connection_mock,
+        pytest.raises(KitaruUsageError, match="fallback stack `default` implicitly"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.run()
+
+    resolve_connection_mock.assert_not_called()
+    base_pipeline.with_options.assert_not_called()
+    configured_pipeline.assert_not_called()
+
+
+def test_deploy_fails_closed_before_submitting_on_implicit_default_fallback() -> None:
+    configured_pipeline = MagicMock()
+    configured_pipeline._run_args = {}
+    configured_pipeline._parameters = {}
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    client = SimpleNamespace(
+        active_stack_model=SimpleNamespace(name="default", id="default-stack-id")
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow._capture_active_stack_provenance_for_guard",
+            return_value=_stale_default_stack_provenance(),
+        ),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(
+                stack="default",
+                stack_source="zenml_active_stack",
+            ),
+        ),
+        patch("kitaru.flow.Client", return_value=client),
+        patch("kitaru.flow._prepare_model_registry_transport") as transport_mock,
+        pytest.raises(KitaruUsageError, match="fallback stack `default` implicitly"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped.deploy()
+
+    transport_mock.assert_not_called()
+    base_pipeline.with_options.assert_not_called()
+    configured_pipeline.prepare.assert_not_called()
 
 
 def test_flow_deploy_creates_snapshot_and_forwards_raw_tags() -> None:
@@ -1237,6 +1371,54 @@ def test_replay_translates_active_stack_hydration_import_error_before_replay() -
         call("prod"),
         call(old_stack_id),
     ]
+
+
+def test_replay_fails_closed_before_submitting_on_implicit_default_fallback() -> None:
+    """Replay should fail closed before compile/submit on implicit fallback."""
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    configured_pipeline = MagicMock()
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch(
+            "kitaru.flow._capture_active_stack_provenance_for_guard",
+            return_value=_stale_default_stack_provenance(),
+        ),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.build_replay_plan",
+            return_value=ReplayPlan(
+                original_run_id=str(source_run.id),
+                steps_to_skip=set(),
+                input_overrides={},
+                step_input_overrides={},
+            ),
+        ),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(
+                stack="default",
+                stack_source="zenml_active_stack",
+            ),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec") as build_spec_mock,
+        pytest.raises(KitaruUsageError, match="fallback stack `default` implicitly"),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = source_run
+        client_cls.return_value.active_stack_model = SimpleNamespace(
+            name="default",
+            id="default-stack-id",
+        )
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write")
+
+    build_spec_mock.assert_not_called()
+    base_pipeline.with_options.assert_not_called()
+    configured_pipeline.replay.assert_not_called()
 
 
 def test_replay_submits_pipeline_replay_and_persists_frozen_spec() -> None:

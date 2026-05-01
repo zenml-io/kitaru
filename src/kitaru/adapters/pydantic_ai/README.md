@@ -23,7 +23,7 @@ Kitaru wraps agent work in three nested primitives:
 
 - **Flow** — the top-level durable boundary for a workflow, created by `@kitaru.flow` or auto-opened by `KitaruAgent`.
 - **Checkpoint** — a persisted unit of work. Every checkpoint output is stored; if the flow crashes, is replayed, or resumes after a wait, Kitaru skips completed checkpoints and re-runs from the first incomplete one.
-- **Wait** — suspends a running flow until a human or external system provides input. The adapter bridges Pydantic AI's `ApprovalRequired`, `CallDeferred`, and `@hitl_tool` straight into `kitaru.wait()`.
+- **Wait** — suspends a running flow until a human or external system provides input. Waits must be created at flow scope. The adapter makes explicit `@hitl_tool` calls flow-scope safe in granular mode; native `ApprovalRequired`, `CallDeferred`, or `wait_for_input()` inside a regular granular tool checkpoint must opt out of that checkpoint or use turn mode.
 
 ```text
 ┌─────────────────── @kitaru.flow ────────────────────┐
@@ -33,8 +33,9 @@ Kitaru wraps agent work in three nested primitives:
 │  │   ├── model request  ─→ artifact, OTel span     │
 │  │   ├── tool call      ─→ artifact, OTel span     │
 │  │   ├── MCP tool       ─→ artifact, OTel span     │
-│  │   └── hitl / approval ─→ kitaru.wait() suspends │
+│  │   └── child events    ─→ metadata/artifacts     │
 │  └────────────────────────────────┘                 │
+│  explicit @hitl_tool ─→ kitaru.wait() suspends      │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -128,14 +129,28 @@ def publish_brief(headline: str, sources: list[str]) -> str:
     return f'published: {headline} ({len(sources)} sources)'
 ```
 
-Equivalent triggers that also route through `kitaru.wait()`:
+Other PydanticAI deferred patterns can also route through `kitaru.wait()` **when they run at flow scope**:
 
 - `@agent.tool(requires_approval=True)` — Pydantic AI's native approval flag.
-- Raising `pydantic_ai.exceptions.ApprovalRequired` or `CallDeferred` from any tool body.
+- Raising `pydantic_ai.exceptions.ApprovalRequired` or `CallDeferred` from a tool body.
+- Calling `kitaru.adapters.pydantic_ai.wait_for_input(...)` from a tool body.
 
 Durable waits need a stable Pydantic AI `tool_call_id`. The adapter uses that id to make the wait name deterministic, so a resumed run looks for the same human input instead of inventing a new wait. If Pydantic AI does not provide a stable, sanitizable `tool_call_id`, Kitaru raises rather than falling back to a random wait name.
 
-In the default granular mode, explicit `@hitl_tool` calls create a wait point directly at flow scope instead of first creating an empty `*_tool` checkpoint. Concretely, the timeline shows the human wait as the durable anchor for that call. Exception-driven approvals/deferred calls can still appear inside an adapter-created tool checkpoint, because the adapter only learns about those after the tool body has started running. In that case Kitaru temporarily steps out of the checkpoint just long enough to create the wait, then resumes normal checkpoint behavior.
+In the default granular mode, explicit `@hitl_tool` calls create a wait point directly at flow scope instead of first creating an empty `*_tool` checkpoint. Concretely, the timeline shows the human wait as the durable anchor for that call.
+
+Regular tool bodies are different. A normal tool in granular mode usually runs inside an adapter-created `*_tool` checkpoint, and `kitaru.wait()` is intentionally rejected from checkpoint scope. If a regular tool body raises `ApprovalRequired` / `CallDeferred` or calls `wait_for_input()` from inside that checkpoint, Kitaru fails early with guidance instead of creating a confusing checkpoint-contained wait.
+
+Use one of these safe patterns for regular tool-body waits:
+
+```python
+durable_agent = KitaruAgent(
+    agent,
+    tool_checkpoint_config_by_name={"ask_user": False},  # this tool waits at flow scope
+)
+```
+
+Or move the human gate outside the tool entirely — for example, call `kitaru.wait()` before or after the agent turn in your `@kitaru.flow` code.
 
 This also affects where event details land. Flow-scope explicit HITL calls are still logged as adapter event metadata, but checkpoint artifacts such as `event_log`, `run_summary`, and captured tool args/results are only saved when there is an actual checkpoint scope to attach them to.
 
@@ -195,7 +210,7 @@ The turn checkpoint is configured via `turn_checkpoint_config=` in turn mode. To
 durable_agent = KitaruAgent(agent, granular_checkpoints=False)
 ```
 
-**Streaming exception.** Granular mode cannot apply to streamed turns — per-call checkpointing around an `@asynccontextmanager` would require draining and replaying the stream inside a sync ZenML step. When an `event_stream_handler` is supplied, `KitaruAgent` transparently falls back to opening a turn checkpoint for that call so tracking and durability still work. `run_stream()` and `iter()` always require an explicit `@kitaru.checkpoint` in both modes.
+**Streaming exception.** Granular mode cannot apply to streamed turns — per-call checkpointing around an `@asynccontextmanager` would require draining and replaying the stream inside a sync ZenML step. When an `event_stream_handler` is supplied, `KitaruAgent` transparently falls back to opening a turn checkpoint for that call so tracking and durability still work. That fallback disables turn-checkpoint caching for the call, because serving the final result from cache would skip the handler's progress side effects. `run_stream()` and `iter()` always require an explicit `@kitaru.checkpoint` in both modes.
 
 ## Streaming
 
@@ -208,7 +223,7 @@ Stream transcripts are persisted as artifacts when `CapturePolicy.save_stream_tr
 
 ## Capture policy
 
-`CapturePolicy` controls what the adapter stores per run. Defaults favor full observability.
+`CapturePolicy` controls what the adapter stores per run. Defaults favor full observability. Wait records always keep minimal routing metadata (`adapter`, `tool_name`, `tool_call_id`), but tool args and exception payloads are only stored in wait metadata when `tool_capture='full'`.
 
 | Option | Default | Description |
 |---|---|---|
