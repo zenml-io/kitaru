@@ -131,11 +131,16 @@ class DockerSandbox:
         # having to escape them. Then bash decodes and `eval`s the original.
         command_b64 = base64.b64encode(command.encode("utf-8")).decode("ascii")
         marker = f"__AGENT_FACTORY_DONE_{uuid4().hex}"
+        # Leading \n on the marker line guarantees the marker starts on its
+        # own line even when the user's command's stdout doesn't end with
+        # a newline (e.g. JSON responses from FastAPI: `{"...":"..."}` with
+        # no trailing newline). Without it, the marker concatenates onto
+        # the user's last line and our prefix-based parser never matches.
         payload = (
             f'eval "$(printf %s {shlex.quote(command_b64)} | base64 -d)"\n'
             "__af_exit=$?\n"
             '__af_cwd="$(pwd)"\n'
-            f'printf "{marker} %s %s\\n" "$__af_exit" "$__af_cwd"\n'
+            f'printf "\\n{marker} %s %s\\n" "$__af_exit" "$__af_cwd"\n'
         )
 
         with self._shell_lock:

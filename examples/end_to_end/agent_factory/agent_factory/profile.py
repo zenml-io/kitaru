@@ -57,6 +57,20 @@ class LocalSkillSource(BaseModel):
 SkillSource = LocalSkillSource
 
 
+class SandboxProxyRule(BaseModel):
+    """Tell the credential proxy: when the worker requests one of `hosts`,
+    inject `headers` into the request.
+
+    Header values can contain `{{ secret-name.key }}` templates that
+    resolve at flow start via `kitaru.get_secret(...)` — the worker
+    container itself never sees the resolved value.
+    """
+
+    name: str
+    hosts: list[str]
+    headers: dict[str, str]
+
+
 class Profile(BaseModel):
     """One agent's runtime profile."""
 
@@ -66,3 +80,6 @@ class Profile(BaseModel):
     allowed_tools: set[ToolName] = Field(default_factory=set)
     # Where the `skill` tool reads procedure files from. None = no skills.
     skill_source: SkillSource | None = None
+    # Per-host header injection rules. Headers can contain
+    # `{{ secret-name.key }}` templates resolved via kitaru.secrets.
+    sandbox_proxy_rules: list[SandboxProxyRule] = Field(default_factory=list)
