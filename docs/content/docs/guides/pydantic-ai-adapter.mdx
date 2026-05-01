@@ -158,7 +158,6 @@ def collect_bug_report() -> BugReport: ...
 
 `@hitl_tool(schema=..., question_arg=...)` picks up the LLM-supplied argument at runtime (defaults to looking for `question`). Pass `question_arg=None` to force the static prompt.
 
-See [`examples/pydantic_ai_agent/pydantic_ai_hitl_input.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/pydantic_ai_agent/pydantic_ai_hitl_input.py) for both styles wired on one agent.
 
 ### Replay semantics
 
@@ -345,7 +344,7 @@ Most users only need `KitaruAgent`. For custom durable surfaces, the lower-level
 
 ```bash
 uv sync --extra local --extra pydantic-ai
-uv run examples/pydantic_ai_agent/pydantic_ai_adapter.py
+uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 ```
 
 The example prints the execution ID, final result, child-event count, and run-summary count. For the broader catalog, see [Examples](/getting-started/examples).

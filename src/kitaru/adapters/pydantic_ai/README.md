@@ -23,7 +23,7 @@ Kitaru wraps agent work in three nested primitives:
 
 - **Flow** — the top-level durable boundary for a workflow, created by `@kitaru.flow` or auto-opened by `KitaruAgent`.
 - **Checkpoint** — a persisted unit of work. Every checkpoint output is stored; if the flow crashes, is replayed, or resumes after a wait, Kitaru skips completed checkpoints and re-runs from the first incomplete one.
-- **Wait** — suspends a running flow until a human or external system provides input. Waits must be created at flow scope. The adapter makes explicit `@hitl_tool` calls flow-scope safe in granular mode; native `ApprovalRequired`, `CallDeferred`, or `wait_for_input()` inside a regular granular tool checkpoint must opt out of that checkpoint or use turn mode.
+- **Wait** — suspends a running flow until a human or external system provides input. Waits must be created at flow scope. The adapter makes explicit `@hitl_tool` calls flow-scope safe in granular mode; native `ApprovalRequired`, `CallDeferred`, or `wait_for_input()` inside a regular granular tool checkpoint must opt out of that checkpoint.
 
 ```text
 ┌─────────────────── @kitaru.flow ────────────────────┐
@@ -317,4 +317,4 @@ from kitaru.adapters.pydantic_ai import (
 
 - [Kitaru docs](https://kitaru.ai/docs) — flows, checkpoints, waits, stacks
 - [Pydantic AI docs](https://ai.pydantic.dev) — agents, tools, MCP, deferred execution
-- [Example](../../../../examples/pydantic_ai_agent/pydantic_ai_adapter.py) — runnable research agent with a HITL tool
+- [Example](../../../../examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py) — runnable research agent with a HITL tool

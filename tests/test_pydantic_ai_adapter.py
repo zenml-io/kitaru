@@ -81,6 +81,83 @@ class TestValidateCheckpointConfig:
         assert "'cache'" in str(exc_info.value)
 
 
+class TestTurnCacheKeyCallSites:
+    def _make_agent(self):
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        return KitaruAgent(Agent(TestModel(), name="cache_key_agent"))
+
+    def test_run_sync_forwards_capabilities_and_spec_to_cache_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.capabilities.hooks import Hooks
+
+        agent = self._make_agent()
+        capabilities = [Hooks()]
+        spec = {"profile": "sync"}
+        captured: dict[str, Any] = {}
+        sentinel = object()
+
+        def fake_turn_cache_key(**kwargs: Any) -> str:
+            captured.update(kwargs)
+            return "cache-sync"
+
+        def fake_run_sync(_body: Any, **kwargs: Any) -> object:
+            captured["run_sync_cache_key"] = kwargs["cache_key"]
+            return sentinel
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._agent.turn_cache_key",
+            fake_turn_cache_key,
+        )
+        monkeypatch.setattr(agent, "_run_sync", fake_run_sync)
+
+        result = agent.run_sync("hello", capabilities=capabilities, spec=spec)
+
+        assert result is sentinel
+        assert captured["capabilities"] is capabilities
+        assert captured["spec"] is spec
+        assert captured["run_sync_cache_key"] == "cache-sync"
+
+    @pytest.mark.anyio
+    async def test_run_forwards_capabilities_and_spec_to_cache_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pydantic_ai.capabilities.hooks import Hooks
+
+        agent = self._make_agent()
+        capabilities = [Hooks()]
+        spec = {"profile": "async"}
+        captured: dict[str, Any] = {}
+        sentinel = object()
+
+        def fake_turn_cache_key(**kwargs: Any) -> str:
+            captured.update(kwargs)
+            return "cache-async"
+
+        async def fake_run_async(_body: Any, **kwargs: Any) -> object:
+            captured["run_cache_key"] = kwargs["cache_key"]
+            return sentinel
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._agent.turn_cache_key",
+            fake_turn_cache_key,
+        )
+        monkeypatch.setattr(agent, "_run_async", fake_run_async)
+
+        result = await agent.run("hello", capabilities=capabilities, spec=spec)
+
+        assert result is sentinel
+        assert captured["capabilities"] is capabilities
+        assert captured["spec"] is spec
+        assert captured["run_cache_key"] == "cache-async"
+
+
 class TestRejectIsolatedRuntime:
     def test_raises_on_isolated_runtime(self) -> None:
         with pytest.raises(KitaruUsageError, match=r"runtime='isolated'"):
@@ -472,8 +549,30 @@ class TestTurnCacheKey:
             "toolsets": ["tools-a"],
             "builtin_tools": ["builtin-a"],
             "event_stream_handler": None,
+            "capabilities": ["capability-a"],
             "spec": {"output": "plain"},
         }
+
+    def test_same_inputs_produce_same_key(self) -> None:
+        kwargs = self._base_kwargs()
+
+        assert turn_cache_key(**kwargs) == turn_cache_key(**kwargs)
+
+    def test_none_capabilities_and_spec_do_not_crash(self) -> None:
+        kwargs = {**self._base_kwargs(), "capabilities": None, "spec": None}
+        key = turn_cache_key(**cast(Any, kwargs))
+
+        assert isinstance(key, str)
+        assert key
+
+    def test_real_hooks_capability_can_be_hashed(self) -> None:
+        from pydantic_ai.capabilities.hooks import Hooks
+
+        kwargs = {**self._base_kwargs(), "capabilities": [Hooks()]}
+        key = turn_cache_key(**cast(Any, kwargs))
+
+        assert isinstance(key, str)
+        assert key
 
     @pytest.mark.parametrize(
         ("field", "value"),
@@ -487,6 +586,7 @@ class TestTurnCacheKey:
             ("toolsets", ["tools-b"]),
             ("builtin_tools", ["builtin-b"]),
             ("event_stream_handler", lambda *_args: None),
+            ("capabilities", ["capability-b"]),
             ("spec", {"output": "structured"}),
         ],
     )
@@ -977,7 +1077,6 @@ async def test_non_hitl_tool_still_uses_granular_tool_checkpoint(
 async def test_named_hitl_tool_uses_name_as_unique_wait_base(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-
     from pydantic_ai import FunctionToolset
     from pydantic_ai.models.test import TestModel
     from pydantic_ai.tools import RunContext

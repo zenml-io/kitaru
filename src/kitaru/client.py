@@ -19,9 +19,12 @@ import builtins
 import importlib
 import logging
 import sys
+import threading
 import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from pydantic import ValidationError
@@ -29,6 +32,7 @@ from zenml.client import Client
 from zenml.config.pipeline_run_configuration import PipelineRunConfiguration
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
+from zenml.login.credentials_store import get_credentials_store
 from zenml.models import PipelineRunResponse
 from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.utils.run_utils import stop_run
@@ -52,6 +56,7 @@ from kitaru._client._logs import (
     _coerce_log_lineno,
     _coerce_log_text,
     _is_empty_log_result_error,
+    _is_log_endpoint_version_skew_error,
     _is_otel_log_retrieval_error,
     _log_sort_key,
     _map_runtime_log_entry,
@@ -84,6 +89,9 @@ from kitaru._client._mappers import (
 )
 from kitaru._client._models import (
     ArtifactRef,
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
     CheckpointAttempt,
     CheckpointCall,
     Execution,
@@ -160,6 +168,12 @@ logger = logging.getLogger(__name__)
 
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 _WAIT_CONDITION_RESOLUTION_ABORT = "abort"
+_REPLAY_IMPORT_LOCK = threading.RLock()
+
+
+class _ReplayImportDependencyError(KitaruRuntimeError):
+    """Replay source import failed because one of its dependencies is missing."""
+
 
 # The direct imports above preserve `kitaru.client.*` patch targets; this tuple
 # simply keeps intentionally re-exported private names alive for linting.
@@ -187,6 +201,259 @@ _CLIENT_FACADE_LINT_ANCHOR = (
     _to_plain_dict,
     _to_public_status,
 )
+
+
+def _validate_non_empty_auth_value(value: str, *, name: str) -> str:
+    """Validate a required auth-management string argument."""
+    if not isinstance(value, str) or not value.strip():
+        raise KitaruUsageError(f"`{name}` must be a non-empty string.")
+    return value
+
+
+def _is_strict_int(value: Any) -> bool:
+    """Return True only for plain `int` values (rejects `bool`, `str`, `float`)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_auth_pagination(
+    *,
+    limit: int | None,
+    page: int | None,
+    size: int | None,
+) -> tuple[int, int]:
+    """Validate shared auth list pagination and return backend page/size."""
+    if limit is not None:
+        if not _is_strict_int(limit) or limit < 1:
+            raise KitaruUsageError("`limit` must be an integer >= 1 when provided.")
+        if page is not None or size is not None:
+            raise KitaruUsageError("`limit` cannot be combined with `page` or `size`.")
+        return 1, limit
+    if page is not None and (not _is_strict_int(page) or page < 1):
+        raise KitaruUsageError("`page` must be an integer >= 1 when provided.")
+    if size is not None and (not _is_strict_int(size) or size < 1):
+        raise KitaruUsageError("`size` must be an integer >= 1 when provided.")
+    if page is not None and size is None:
+        raise KitaruUsageError("`size` is required when `page` is provided.")
+    if size is None:
+        return 1, 20
+    return page or 1, size
+
+
+def _map_auth_service_account(service_account: Any) -> AuthServiceAccount:
+    """Map a ZenML service-account response to the public Kitaru DTO."""
+    return AuthServiceAccount(
+        service_account_id=str(service_account.id),
+        name=str(service_account.name),
+        full_name=str(getattr(service_account, "full_name", "") or ""),
+        description=str(getattr(service_account, "description", "") or ""),
+        active=bool(getattr(service_account, "active", False)),
+        created_at=getattr(service_account, "created", None),
+        updated_at=getattr(service_account, "updated", None),
+        avatar_url=getattr(service_account, "avatar_url", None),
+    )
+
+
+def _map_auth_api_key(api_key: Any) -> AuthAPIKey:
+    """Map a ZenML API-key response to metadata-only public Kitaru DTO."""
+    service_account = getattr(api_key, "service_account", None)
+    return AuthAPIKey(
+        api_key_id=str(api_key.id),
+        name=str(api_key.name),
+        service_account_id=str(getattr(service_account, "id", "")),
+        service_account_name=str(getattr(service_account, "name", "")),
+        description=str(getattr(api_key, "description", "") or ""),
+        active=bool(getattr(api_key, "active", False)),
+        created_at=getattr(api_key, "created", None),
+        updated_at=getattr(api_key, "updated", None),
+        last_login=getattr(api_key, "last_login", None),
+        last_rotated=getattr(api_key, "last_rotated", None),
+        retain_period_minutes=int(getattr(api_key, "retain_period_minutes", 0) or 0),
+    )
+
+
+def _map_auth_api_key_with_value(api_key: Any) -> AuthAPIKeyWithValue:
+    """Map a create/rotate API-key response including its one-time raw value."""
+    raw_key = getattr(api_key, "key", None)
+    if not isinstance(raw_key, str) or not raw_key:
+        raise KitaruBackendError(
+            "The server did not return the one-time API key value for this "
+            "create/rotate operation."
+        )
+    return AuthAPIKeyWithValue(
+        api_key=_map_auth_api_key(api_key),
+        key=raw_key,
+    )
+
+
+@dataclass(frozen=True)
+class _LocalCredentialSnapshot:
+    """Best-effort snapshot of the previous persisted API-key credential."""
+
+    server_url: str | None
+    previous_api_key: str | None = field(default=None, repr=False)
+    reason_unavailable: str | None = None
+
+    @property
+    def previous_api_key_available(self) -> bool:
+        """Whether this snapshot contains a rollback candidate."""
+        return bool(self.previous_api_key)
+
+
+def _redact_auth_error_text(text: str, *, secrets: list[str]) -> str:
+    """Return error text without leaking known sensitive credential values."""
+    redacted = text
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, "[redacted]")
+    return redacted
+
+
+def _sanitize_local_key_activation_error(
+    exc: Exception,
+    *,
+    raw_key: str,
+    previous_key: str | None = None,
+) -> str:
+    """Return local activation error text without leaking API-key values."""
+    message = str(exc) or type(exc).__name__
+    return _redact_auth_error_text(
+        message,
+        secrets=[raw_key, previous_key or ""],
+    )
+
+
+def _capture_previous_local_api_key(zenml_client: Any) -> _LocalCredentialSnapshot:
+    """Return the previous persisted API key if it can be restored safely."""
+    server_url = getattr(getattr(zenml_client, "zen_store", None), "url", None)
+    if not isinstance(server_url, str) or not server_url:
+        return _LocalCredentialSnapshot(
+            server_url=None,
+            reason_unavailable=(
+                "Kitaru could not determine the active remote server URL, so "
+                "there was no previous persisted credential to restore."
+            ),
+        )
+
+    try:
+        credentials_store = get_credentials_store()
+        previous_api_key = credentials_store.get_api_key(server_url=server_url)
+    except Exception as exc:
+        return _LocalCredentialSnapshot(
+            server_url=server_url,
+            reason_unavailable=(
+                "Kitaru could not read the previous persisted local API key for "
+                f"{server_url!r}, so rollback was not possible: {exc}"
+            ),
+        )
+
+    if not previous_api_key:
+        return _LocalCredentialSnapshot(
+            server_url=server_url,
+            reason_unavailable=(
+                "No previous persisted local API key was available to restore. "
+                "Environment credentials, if any, were not modified."
+            ),
+        )
+
+    return _LocalCredentialSnapshot(
+        server_url=server_url,
+        previous_api_key=previous_api_key,
+    )
+
+
+def _with_local_key_activation_status(
+    result: AuthAPIKeyWithValue,
+    *,
+    succeeded: bool,
+    error: str | None = None,
+    rollback_attempted: bool = False,
+    rollback_succeeded: bool | None = None,
+    rollback_error: str | None = None,
+    rollback_reason: str | None = None,
+) -> AuthAPIKeyWithValue:
+    """Return an API-key result annotated with local activation status."""
+    return AuthAPIKeyWithValue(
+        api_key=result.api_key,
+        key=result.key,
+        local_key_activation_requested=True,
+        local_key_activation_succeeded=succeeded,
+        local_key_activation_error=error,
+        local_key_rollback_attempted=rollback_attempted,
+        local_key_rollback_succeeded=rollback_succeeded,
+        local_key_rollback_error=rollback_error,
+        local_key_rollback_reason=rollback_reason,
+    )
+
+
+def _attempt_local_key_activation(
+    result: AuthAPIKeyWithValue,
+    *,
+    zenml_client: Any,
+    operation: Literal["create", "rotate"],
+) -> AuthAPIKeyWithValue:
+    """Best-effort local activation that never discards the one-time key."""
+    previous_credential = _capture_previous_local_api_key(zenml_client)
+    try:
+        zenml_client.set_api_key(key=result.key)
+    except Exception as exc:
+        action = "created" if operation == "create" else "rotated"
+        sanitized_error = _sanitize_local_key_activation_error(
+            exc,
+            raw_key=result.key,
+            previous_key=previous_credential.previous_api_key,
+        )
+        base_error = (
+            f"API key was {action}, but Kitaru could not set it as the "
+            f"active local credential: {sanitized_error}."
+        )
+        if not previous_credential.previous_api_key_available:
+            rollback_reason = previous_credential.reason_unavailable or (
+                "No previous persisted local API key was available to restore."
+            )
+            return _with_local_key_activation_status(
+                result,
+                succeeded=False,
+                error=f"{base_error} Rollback was not possible: {rollback_reason}",
+                rollback_attempted=False,
+                rollback_succeeded=None,
+                rollback_reason=rollback_reason,
+            )
+
+        assert previous_credential.previous_api_key is not None
+        try:
+            zenml_client.set_api_key(key=previous_credential.previous_api_key)
+        except Exception as rollback_exc:
+            rollback_error = _sanitize_local_key_activation_error(
+                rollback_exc,
+                raw_key=result.key,
+                previous_key=previous_credential.previous_api_key,
+            )
+            return _with_local_key_activation_status(
+                result,
+                succeeded=False,
+                error=(
+                    f"{base_error} Kitaru also tried to restore the previous "
+                    "local credential, but that rollback failed. The server-side "
+                    f"API key was still {action}; local credentials may need "
+                    "manual repair."
+                ),
+                rollback_attempted=True,
+                rollback_succeeded=False,
+                rollback_error=rollback_error,
+            )
+
+        return _with_local_key_activation_status(
+            result,
+            succeeded=False,
+            error=(
+                f"{base_error} Kitaru restored the previous local credential, "
+                "so this machine should still be using the credential that was "
+                "active before the attempted activation."
+            ),
+            rollback_attempted=True,
+            rollback_succeeded=True,
+        )
+    return _with_local_key_activation_status(result, succeeded=True)
 
 
 @runtime_checkable
@@ -252,42 +519,166 @@ def _snapshot_source_parts(run: PipelineRunResponse) -> tuple[str, str | None]:
 
 
 def _import_module_for_replay(module_name: str, run_id: str | Any) -> Any:
-    """Import a module by name, falling back to ``sys.modules`` search.
+    """Import a module by name, falling back to local and in-memory matches.
 
     ZenML records the pipeline source module relative to the archived source
     root (e.g. ``replay_with_overrides``), but in the running process the
-    module may be loaded under a different path.  Three fallback strategies:
+    module may be loaded under a different path. Fallback order:
 
     1. Direct ``importlib.import_module`` (exact match).
     2. Search ``sys.modules`` for a suffix match (e.g. the module is loaded
-       as ``examples.replay.replay_with_overrides``).
-    3. Return ``__main__`` — when invoked via ``python -m pkg.mod``, the
-       module is loaded as ``__main__`` and won't appear under its dotted
-       name in ``sys.modules``.
+       as ``examples.features.replay.replay_with_overrides``).
+    3. Return a matching ``__main__`` module when the current process is
+       already executing the replay source via ``python -m`` or as a script.
+    4. Temporarily prepend the current working directory to ``sys.path`` and
+       retry import when a matching local module/package exists there.
     """
     try:
         return importlib.import_module(module_name)
-    except ModuleNotFoundError:
-        pass
+    except ModuleNotFoundError as exc:
+        if not _is_retryable_replay_import_error(exc, module_name):
+            raise _missing_replay_dependency_error(module_name, run_id, exc) from exc
 
-    # Search already-loaded modules for a suffix match.
-    suffix = f".{module_name}"
-    for loaded_name, loaded_module in sys.modules.items():
-        if (
-            loaded_name == module_name or loaded_name.endswith(suffix)
-        ) and loaded_module is not None:
-            return loaded_module
+    loaded_module = _find_loaded_replay_module(module_name)
+    if loaded_module is not None:
+        return loaded_module
 
-    # When run via `python -m`, the module is __main__.
-    main_module = sys.modules.get("__main__")
+    main_module = _matching_main_module(module_name)
     if main_module is not None:
         return main_module
 
+    cwd_module = _import_module_from_cwd(module_name, run_id)
+    if cwd_module is not None:
+        return cwd_module
+
+    cwd = Path.cwd()
     raise KitaruRuntimeError(
         f"Failed to import replay source module '{module_name}' for "
-        f"execution '{run_id}': no module named '{module_name}' and no "
-        "matching module found in sys.modules."
+        f"execution '{run_id}': tried direct import, loaded-module lookup, "
+        f"matching '__main__', and a temporary cwd import from '{cwd}'. "
+        "Run replay from the project directory or set PYTHONPATH when the "
+        "source module is local."
     )
+
+
+def _missing_replay_dependency_error(
+    module_name: str, run_id: str | Any, exc: ModuleNotFoundError
+) -> _ReplayImportDependencyError:
+    """Build a domain error for source modules with missing dependencies."""
+    missing_name = getattr(exc, "name", None)
+    dependency = (
+        f" '{missing_name}'" if isinstance(missing_name, str) and missing_name else ""
+    )
+    return _ReplayImportDependencyError(
+        f"Failed to import replay source module '{module_name}' for "
+        f"execution '{run_id}': the module imports missing dependency"
+        f"{dependency}. Install the dependency or run replay in an environment "
+        "that matches the original execution."
+    )
+
+
+def _is_retryable_replay_import_error(
+    exc: ModuleNotFoundError, module_name: str
+) -> bool:
+    """Return whether a replay import error is for the target module itself."""
+    missing_name = getattr(exc, "name", None)
+    if not isinstance(missing_name, str) or not missing_name:
+        return False
+
+    module_parts = module_name.split(".")
+    retryable_names = {
+        ".".join(module_parts[:index]) for index in range(1, len(module_parts) + 1)
+    }
+    return missing_name in retryable_names
+
+
+def _module_name_matches(candidate_name: str | None, module_name: str) -> bool:
+    """Return whether a candidate module identity matches the replay module."""
+    if not candidate_name:
+        return False
+    return candidate_name == module_name or candidate_name.endswith(f".{module_name}")
+
+
+def _find_loaded_replay_module(module_name: str) -> Any | None:
+    """Return an already-loaded module whose name matches the replay source."""
+    for loaded_name, loaded_module in list(sys.modules.items()):
+        if _module_name_matches(loaded_name, module_name) and loaded_module is not None:
+            return loaded_module
+    return None
+
+
+def _matching_main_module(module_name: str) -> Any | None:
+    """Return ``__main__`` only when it matches the recorded replay module."""
+    main_module = sys.modules.get("__main__")
+    if main_module is None:
+        return None
+
+    main_spec = getattr(main_module, "__spec__", None)
+    spec_name = getattr(main_spec, "name", None)
+    if isinstance(spec_name, str) and _module_name_matches(spec_name, module_name):
+        return main_module
+
+    if "." in module_name:
+        return None
+
+    main_file = getattr(main_module, "__file__", None)
+    if not isinstance(main_file, str) or not main_file:
+        return None
+
+    expected_stem = module_name.rsplit(".", 1)[-1]
+    if Path(main_file).stem == expected_stem:
+        return main_module
+
+    return None
+
+
+def _module_candidate_paths(module_name: str, cwd: Path) -> tuple[Path, Path]:
+    """Return module and package candidate paths under the current directory."""
+    module_parts = module_name.split(".")
+    module_path = cwd.joinpath(*module_parts).with_suffix(".py")
+    package_path = cwd.joinpath(*module_parts, "__init__.py")
+    return module_path, package_path
+
+
+@contextmanager
+def _temporary_sys_path_prepend(path: str) -> Iterator[None]:
+    """Temporarily prepend one entry to ``sys.path`` for a scoped import."""
+    with _REPLAY_IMPORT_LOCK:
+        original_path_count = sys.path.count(path)
+        inserted = False
+        if not sys.path or sys.path[0] != path:
+            sys.path.insert(0, path)
+            inserted = True
+
+        try:
+            yield
+        finally:
+            if inserted:
+                if sys.path and sys.path[0] == path:
+                    sys.path.pop(0)
+                elif sys.path.count(path) > original_path_count:
+                    for index, entry in enumerate(sys.path):
+                        if entry == path:
+                            del sys.path[index]
+                            break
+
+
+def _import_module_from_cwd(module_name: str, run_id: str | Any) -> Any | None:
+    """Retry replay module import from the current directory when justified."""
+    cwd = Path.cwd()
+    module_path, package_path = _module_candidate_paths(module_name, cwd)
+    if not module_path.exists() and not package_path.exists():
+        return None
+
+    with _temporary_sys_path_prepend(str(cwd)):
+        try:
+            return importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            if not _is_retryable_replay_import_error(exc, module_name):
+                raise _missing_replay_dependency_error(
+                    module_name, run_id, exc
+                ) from exc
+            return None
 
 
 def _resolve_flow_for_replay(run: PipelineRunResponse) -> _ReplayFlowLike:
@@ -432,6 +823,16 @@ class _ExecutionsAPI:
                 if endpoint_hint:
                     message += f" View them in your OTEL backend at: {endpoint_hint}."
                 raise KitaruLogRetrievalError(message) from exc
+
+            if _is_log_endpoint_version_skew_error(error_message):
+                raise KitaruLogRetrievalError(
+                    "Unable to retrieve runtime logs because the server log "
+                    "endpoint is incompatible with this Kitaru client. This "
+                    "usually means the client and server are running different "
+                    "Kitaru versions. Upgrade the server runtime or align the "
+                    "client and server versions, then retry `kitaru executions "
+                    "logs`."
+                ) from exc
 
             raise KitaruLogRetrievalError(
                 f"Failed to retrieve runtime logs for source '{source}': {exc}"
@@ -681,6 +1082,8 @@ class _ExecutionsAPI:
         replay_flow: _ReplayFlowLike | None = None
         try:
             replay_flow = _resolve_flow_for_replay(source_run)
+        except _ReplayImportDependencyError:
+            raise
         except KitaruRuntimeError:
             replay_flow = None
 
@@ -1688,8 +2091,330 @@ class _DeploymentsAPI:
         return self.get(flow=flow, version=version)
 
 
+class _AuthAPI:
+    """Namespace for server-level auth-management operations."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self.service_accounts = _ServiceAccountsAPI(client)
+        self.api_keys = _APIKeysAPI(client)
+
+
+class _ServiceAccountsAPI:
+    """Service-account management namespace."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self._client_ref = client
+
+    def create(
+        self,
+        name: str,
+        *,
+        full_name: str | None = None,
+        description: str = "",
+    ) -> AuthServiceAccount:
+        """Create a service account."""
+        validated_name = _validate_non_empty_auth_value(name, name="name")
+        try:
+            service_account = self._client_ref._client().create_service_account(
+                name=validated_name,
+                full_name=full_name,
+                description=description,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to create service account {validated_name!r}: {exc}"
+            ) from exc
+        return _map_auth_service_account(service_account)
+
+    def get(self, name_or_id: str) -> AuthServiceAccount:
+        """Get one service account by exact name or ID."""
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            service_account = self._client_ref._client().get_service_account(
+                name_id_or_prefix=validated_name_or_id,
+                allow_name_prefix_match=False,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to load service account {validated_name_or_id!r}: {exc}"
+            ) from exc
+        return _map_auth_service_account(service_account)
+
+    def list(
+        self,
+        *,
+        active: bool | None = None,
+        name: str | None = None,
+        limit: int | None = None,
+        page: int | None = None,
+        size: int | None = None,
+    ) -> builtins.list[AuthServiceAccount]:
+        """List service accounts, optionally filtered and paginated."""
+        backend_page, backend_size = _validate_auth_pagination(
+            limit=limit,
+            page=page,
+            size=size,
+        )
+        try:
+            service_accounts = self._client_ref._client().list_service_accounts(
+                name=name,
+                active=active,
+                page=backend_page,
+                size=backend_size,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(f"Failed to list service accounts: {exc}") from exc
+        return [_map_auth_service_account(item) for item in service_accounts.items]
+
+    def update(
+        self,
+        name_or_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        active: bool | None = None,
+    ) -> AuthServiceAccount:
+        """Update mutable service-account metadata."""
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            service_account = self._client_ref._client().update_service_account(
+                name_id_or_prefix=validated_name_or_id,
+                updated_name=name,
+                description=description,
+                active=active,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to update service account {validated_name_or_id!r}: {exc}"
+            ) from exc
+        return _map_auth_service_account(service_account)
+
+    def delete(self, name_or_id: str) -> None:
+        """Delete a service account."""
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            self._client_ref._client().delete_service_account(
+                name_id_or_prefix=validated_name_or_id
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to delete service account {validated_name_or_id!r}: {exc}"
+            ) from exc
+
+
+class _APIKeysAPI:
+    """Service-account API-key management namespace."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self._client_ref = client
+
+    def create(
+        self,
+        service_account: str,
+        name: str,
+        *,
+        description: str = "",
+        set_key: bool = False,
+    ) -> AuthAPIKeyWithValue:
+        """Create an API key and return its one-time raw key value."""
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
+        )
+        validated_name = _validate_non_empty_auth_value(name, name="name")
+        try:
+            zenml_client = self._client_ref._client()
+            api_key = zenml_client.create_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name=validated_name,
+                description=description,
+                set_key=False,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to create API key {validated_name!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
+
+        result = _map_auth_api_key_with_value(api_key)
+        if set_key:
+            return _attempt_local_key_activation(
+                result,
+                zenml_client=zenml_client,
+                operation="create",
+            )
+        return result
+
+    def get(self, service_account: str, name_or_id: str) -> AuthAPIKey:
+        """Get metadata for one API key by exact name or ID."""
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
+        )
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            api_key = self._client_ref._client().get_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name_id_or_prefix=validated_name_or_id,
+                allow_name_prefix_match=False,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to load API key {validated_name_or_id!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
+        return _map_auth_api_key(api_key)
+
+    def list(
+        self,
+        service_account: str,
+        *,
+        active: bool | None = None,
+        name: str | None = None,
+        limit: int | None = None,
+        page: int | None = None,
+        size: int | None = None,
+    ) -> builtins.list[AuthAPIKey]:
+        """List metadata for API keys owned by a service account."""
+        backend_page, backend_size = _validate_auth_pagination(
+            limit=limit,
+            page=page,
+            size=size,
+        )
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
+        )
+        try:
+            api_keys = self._client_ref._client().list_api_keys(
+                service_account_name_id_or_prefix=validated_service_account,
+                name=name,
+                active=active,
+                page=backend_page,
+                size=backend_size,
+                hydrate=True,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to list API keys for service account "
+                f"{validated_service_account!r}: {exc}"
+            ) from exc
+        return [_map_auth_api_key(item) for item in api_keys.items]
+
+    def update(
+        self,
+        service_account: str,
+        name_or_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        active: bool | None = None,
+    ) -> AuthAPIKey:
+        """Update mutable API-key metadata."""
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
+        )
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            api_key = self._client_ref._client().update_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name_id_or_prefix=validated_name_or_id,
+                name=name,
+                description=description,
+                active=active,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to update API key {validated_name_or_id!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
+        return _map_auth_api_key(api_key)
+
+    def rotate(
+        self,
+        service_account: str,
+        name_or_id: str,
+        *,
+        retain_period_minutes: int = 0,
+        set_key: bool = False,
+    ) -> AuthAPIKeyWithValue:
+        """Rotate an API key and return its one-time replacement value."""
+        if not _is_strict_int(retain_period_minutes) or retain_period_minutes < 0:
+            raise KitaruUsageError("`retain_period_minutes` must be an integer >= 0.")
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
+        )
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            zenml_client = self._client_ref._client()
+            api_key = zenml_client.rotate_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name_id_or_prefix=validated_name_or_id,
+                retain_period_minutes=retain_period_minutes,
+                set_key=False,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to rotate API key {validated_name_or_id!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
+
+        result = _map_auth_api_key_with_value(api_key)
+        if set_key:
+            return _attempt_local_key_activation(
+                result,
+                zenml_client=zenml_client,
+                operation="rotate",
+            )
+        return result
+
+    def delete(self, service_account: str, name_or_id: str) -> None:
+        """Delete an API key."""
+        validated_service_account = _validate_non_empty_auth_value(
+            service_account,
+            name="service_account",
+        )
+        validated_name_or_id = _validate_non_empty_auth_value(
+            name_or_id,
+            name="name_or_id",
+        )
+        try:
+            self._client_ref._client().delete_api_key(
+                service_account_name_id_or_prefix=validated_service_account,
+                name_id_or_prefix=validated_name_or_id,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to delete API key {validated_name_or_id!r} for service "
+                f"account {validated_service_account!r}: {exc}"
+            ) from exc
+
+
 class KitaruClient:
-    """Client for managing Kitaru executions, artifacts, and memories."""
+    """Client for Kitaru executions, artifacts, memory, deployments, and auth."""
 
     def __init__(
         self,
@@ -1697,6 +2422,7 @@ class KitaruClient:
         server_url: str | None = None,
         auth_token: str | None = None,
         project: str | None = None,
+        _require_project: bool = True,
     ) -> None:
         """Initialize a Kitaru client.
 
@@ -1726,13 +2452,28 @@ class KitaruClient:
                 "project settings for now."
             )
 
-        resolved_connection = resolve_connection_config(validate_for_use=True)
+        resolved_connection = resolve_connection_config(
+            validate_for_use=True,
+            require_project=_require_project,
+        )
         self._project = resolved_connection.project
 
+        self.auth = _AuthAPI(self)
         self.executions = _ExecutionsAPI(self)
         self.artifacts = _ArtifactsAPI(self)
         self.memories = _MemoriesAPI(self)
         self.deployments = _DeploymentsAPI(self)
+
+    @classmethod
+    def for_auth_management(cls) -> KitaruClient:
+        """Create a client for server-level auth management.
+
+        Normal ``KitaruClient()`` construction remains strict and requires a
+        project for env-driven remote connections. Auth management is
+        server-level, so this constructor validates server/auth pairing while
+        intentionally skipping project validation.
+        """
+        return cls(_require_project=False)
 
     def _client(self) -> Client:
         """Return a ZenML client instance."""
@@ -1797,6 +2538,9 @@ class KitaruClient:
 
 __all__ = [
     "ArtifactRef",
+    "AuthAPIKey",
+    "AuthAPIKeyWithValue",
+    "AuthServiceAccount",
     "CheckpointAttempt",
     "CheckpointCall",
     "Deployment",

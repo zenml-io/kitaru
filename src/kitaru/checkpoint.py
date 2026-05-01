@@ -14,6 +14,7 @@ from typing import Any, Literal, cast, overload
 
 from zenml.config.retry_config import StepRetryConfig
 from zenml.enums import StepRuntime, StepType
+from zenml.execution.pipeline.dynamic.outputs import OutputArtifact
 from zenml.execution.pipeline.dynamic.run_context import DynamicPipelineRunContext
 from zenml.pipelines.compilation_context import PipelineCompilationContext
 from zenml.steps.step_context import StepContext
@@ -47,6 +48,39 @@ _CHECKPOINT_NESTED_ERROR = (
 _CHECKPOINT_CONCURRENT_OUTSIDE_FLOW_ERROR = (
     "Concurrent checkpoint execution is only available inside a running @flow."
 )
+_CHECKPOINT_OUTPUT_HANDLE_MESSAGE = (
+    "This is a Kitaru checkpoint output handle for `{checkpoint}.{output}`, "
+    "not the materialized value. Call `.load()` to materialize the value."
+)
+
+
+class _KitaruOutputArtifact(OutputArtifact):
+    """ZenML output artifact with a Kitaru-facing display string."""
+
+    def __str__(self) -> str:
+        """Return a short, helpful message instead of raw artifact metadata."""
+        return _CHECKPOINT_OUTPUT_HANDLE_MESSAGE.format(
+            checkpoint=self.step_name,
+            output=self.output_name,
+        )
+
+    def __repr__(self) -> str:
+        """Mirror ``str()`` for accidental repr conversions in user code."""
+        return str(self)
+
+
+def _with_kitaru_output_display(value: Any) -> Any:
+    """Attach Kitaru-friendly display behavior to exposed output handles."""
+    if isinstance(value, _KitaruOutputArtifact):
+        return value
+    if isinstance(value, OutputArtifact):
+        return _KitaruOutputArtifact.model_construct(
+            _fields_set=value.model_fields_set,
+            **value.__dict__,
+        )
+    if isinstance(value, tuple):
+        return tuple(_with_kitaru_output_display(item) for item in value)
+    return value
 
 
 def _register_checkpoint_source_alias(
@@ -256,7 +290,7 @@ class _CheckpointDefinition:
         self._assert_call_allowed()
         result = self._step(*args, id=id, after=after, **kwargs)
         self._track_invocation(method="call")
-        return result
+        return _with_kitaru_output_display(result)
 
     def submit(
         self,

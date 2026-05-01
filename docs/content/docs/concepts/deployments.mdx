@@ -248,11 +248,13 @@ export KITARU_AUTH_TOKEN=kat_abc123
 export KITARU_PROJECT=production
 ```
 
-Those three values are the whole connection puzzle: where the Kitaru server is,
-how to authenticate to it, and which project to use once you are there. If any
-piece is missing, commands that need the server fail with a short error telling
-you what to set. `kitaru info` shows which connection values Kitaru currently
-sees.
+For automation, `KITARU_AUTH_TOKEN` should normally be a service-account API key
+created with `kitaru auth service-accounts create` and
+`kitaru auth api-keys create`. Those three values are the whole connection
+puzzle: where the Kitaru server is, how to authenticate to it, and which project
+to use once you are there. If any piece is missing, commands that need the
+server fail with a short error telling you what to set. `kitaru info` shows
+which connection values Kitaru currently sees.
 
 After that, `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, and MCP
 `kitaru_deployments_invoke(...)` all use the active Kitaru server connection.
@@ -264,6 +266,8 @@ requested tag or version first, then prints a command that starts a new
 execution for that resolved deployment version. The generated snippet calls
 `kitaru auth token` to get a short-lived server bearer token from your active
 connection, but the curl generator itself does not inline real token values.
+That bearer token is temporary; create or rotate long-lived automation
+credentials with `kitaru auth api-keys`.
 
 When you generate curl from a tag such as `default` or `stable`, the printed
 command is pinned to the deployment version that tag resolved to at generation

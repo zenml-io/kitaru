@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
-from types import SimpleNamespace
+from importlib.machinery import ModuleSpec
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, Mock, call, patch
 from uuid import UUID, uuid4
@@ -23,7 +28,16 @@ from kitaru._client._deployments import (
 )
 from kitaru._interface_deployments import Deployment
 from kitaru.analytics import AnalyticsEvent
-from kitaru.client import ExecutionStatus, KitaruClient
+from kitaru.client import (
+    AuthAPIKey,
+    AuthAPIKeyWithValue,
+    AuthServiceAccount,
+    ExecutionStatus,
+    KitaruClient,
+    _import_module_for_replay,
+    _is_retryable_replay_import_error,
+    _resolve_flow_for_replay,
+)
 from kitaru.config import (
     FrozenExecutionSpec,
     KitaruConfig,
@@ -41,6 +55,43 @@ from kitaru.errors import (
     KitaruWaitValidationError,
 )
 from kitaru.memory import MemoryEntry, MemoryScopeType, _MemoryScope
+
+
+def _module_spec(name: str) -> ModuleSpec:
+    return ModuleSpec(name=name, loader=None)
+
+
+def _replay_main(
+    *, spec_name: str | None = "kitaru.cli", file_path: str | None = "/tmp/kitaru.py"
+) -> ModuleType:
+    module = ModuleType("__main__")
+    module.__spec__ = _module_spec(spec_name) if spec_name else None
+    if file_path is not None:
+        module.__file__ = file_path
+    return module
+
+
+@contextmanager
+def _without_loaded_modules(*module_names: str) -> Iterator[None]:
+    def _matches(loaded_name: str) -> bool:
+        return any(
+            loaded_name == module_name or loaded_name.endswith(f".{module_name}")
+            for module_name in module_names
+        )
+
+    removed_modules = {
+        name: module for name, module in list(sys.modules.items()) if _matches(name)
+    }
+    for name in removed_modules:
+        sys.modules.pop(name, None)
+
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if _matches(name):
+                sys.modules.pop(name, None)
+        sys.modules.update(removed_modules)
 
 
 def _as_pipeline_run(run: _DummyRun) -> PipelineRunResponse:
@@ -186,6 +237,46 @@ def _resolved_connection(project: str | None = None) -> ResolvedConnectionConfig
     )
 
 
+def _service_account_response(
+    *,
+    name: str = "ci-runner",
+    service_account_id: str = "sa-123",
+    active: bool = True,
+) -> Any:
+    return SimpleNamespace(
+        id=service_account_id,
+        name=name,
+        full_name="CI Runner",
+        description="Automation account",
+        active=active,
+        created=datetime(2026, 4, 24, 8, 0, tzinfo=UTC),
+        updated=datetime(2026, 4, 24, 8, 5, tzinfo=UTC),
+        avatar_url=None,
+    )
+
+
+def _api_key_response(
+    *,
+    name: str = "default",
+    api_key_id: str = "key-123",
+    raw_key: str | None = None,
+    active: bool = True,
+) -> Any:
+    return SimpleNamespace(
+        id=api_key_id,
+        name=name,
+        service_account=SimpleNamespace(id="sa-123", name="ci-runner"),
+        description="Default CI key",
+        active=active,
+        created=datetime(2026, 4, 24, 8, 10, tzinfo=UTC),
+        updated=datetime(2026, 4, 24, 8, 15, tzinfo=UTC),
+        last_login=None,
+        last_rotated=datetime(2026, 4, 24, 8, 20, tzinfo=UTC),
+        retain_period_minutes=5,
+        key=raw_key,
+    )
+
+
 def _dummy_wait_condition(
     *,
     name: str,
@@ -254,6 +345,551 @@ def test_client_initializes_namespaces() -> None:
     assert hasattr(client, "artifacts")
     assert hasattr(client, "memories")
     assert hasattr(client, "deployments")
+    assert hasattr(client, "auth")
+    assert hasattr(client.auth, "service_accounts")
+    assert hasattr(client.auth, "api_keys")
+
+
+def test_client_initializes_with_strict_project_validation() -> None:
+    with patch(
+        "kitaru.client.resolve_connection_config",
+        return_value=_resolved_connection(),
+    ) as resolve_connection:
+        KitaruClient()
+
+    resolve_connection.assert_called_once_with(
+        validate_for_use=True,
+        require_project=True,
+    )
+
+
+def test_client_for_auth_management_skips_project_validation() -> None:
+    with patch(
+        "kitaru.client.resolve_connection_config",
+        return_value=_resolved_connection(),
+    ) as resolve_connection:
+        client = KitaruClient.for_auth_management()
+
+    assert hasattr(client.auth, "service_accounts")
+    assert hasattr(client.auth, "api_keys")
+    resolve_connection.assert_called_once_with(
+        validate_for_use=True,
+        require_project=False,
+    )
+
+
+def test_auth_management_client_allows_env_remote_without_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KITARU_SERVER_URL", "https://server.example.com")
+    monkeypatch.setenv("KITARU_AUTH_TOKEN", "token-123")
+
+    client = KitaruClient.for_auth_management()
+
+    assert client._project is None
+    assert hasattr(client.auth, "service_accounts")
+    assert hasattr(client.auth, "api_keys")
+
+
+def test_auth_service_accounts_delegate_to_zenml_client() -> None:
+    service_account = _service_account_response()
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.create_service_account.return_value = service_account
+        zenml_client.get_service_account.return_value = service_account
+        zenml_client.list_service_accounts.return_value = SimpleNamespace(
+            items=[service_account]
+        )
+        zenml_client.update_service_account.return_value = service_account
+
+        client = KitaruClient()
+        created = client.auth.service_accounts.create(
+            "ci-runner",
+            full_name="CI Runner",
+            description="Automation account",
+        )
+        fetched = client.auth.service_accounts.get("ci-runner")
+        listed = client.auth.service_accounts.list(
+            active=True,
+            name="ci",
+            page=2,
+            size=10,
+        )
+        updated = client.auth.service_accounts.update(
+            "ci-runner",
+            name="ci-renamed",
+            description="Updated",
+            active=False,
+        )
+        client.auth.service_accounts.delete("ci-runner")
+
+    assert isinstance(created, AuthServiceAccount)
+    assert created.service_account_id == "sa-123"
+    assert fetched == created
+    assert listed == [created]
+    assert updated == created
+    zenml_client.create_service_account.assert_called_once_with(
+        name="ci-runner",
+        full_name="CI Runner",
+        description="Automation account",
+    )
+    zenml_client.get_service_account.assert_called_once_with(
+        name_id_or_prefix="ci-runner",
+        allow_name_prefix_match=False,
+        hydrate=True,
+    )
+    zenml_client.list_service_accounts.assert_called_once_with(
+        name="ci",
+        active=True,
+        page=2,
+        size=10,
+        hydrate=True,
+    )
+    zenml_client.update_service_account.assert_called_once_with(
+        name_id_or_prefix="ci-runner",
+        updated_name="ci-renamed",
+        description="Updated",
+        active=False,
+    )
+    zenml_client.delete_service_account.assert_called_once_with(
+        name_id_or_prefix="ci-runner"
+    )
+
+
+def test_auth_api_keys_delegate_and_preserve_one_time_key_rule() -> None:
+    created_key = _api_key_response(raw_key="created-secret")
+    rotated_key = _api_key_response(raw_key="rotated-secret")
+    metadata_key = _api_key_response(raw_key=None)
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.create_api_key.return_value = created_key
+        zenml_client.rotate_api_key.return_value = rotated_key
+        zenml_client.get_api_key.return_value = metadata_key
+        zenml_client.list_api_keys.return_value = SimpleNamespace(items=[metadata_key])
+        zenml_client.update_api_key.return_value = metadata_key
+
+        client = KitaruClient()
+        created = client.auth.api_keys.create(
+            "ci-runner",
+            "default",
+            description="Default CI key",
+            set_key=True,
+        )
+        fetched = client.auth.api_keys.get("ci-runner", "default")
+        listed = client.auth.api_keys.list(
+            "ci-runner",
+            active=True,
+            name="default",
+            limit=3,
+        )
+        updated = client.auth.api_keys.update(
+            "ci-runner",
+            "default",
+            name="renamed",
+            description="Updated",
+            active=False,
+        )
+        rotated = client.auth.api_keys.rotate(
+            "ci-runner",
+            "default",
+            retain_period_minutes=5,
+            set_key=False,
+        )
+        client.auth.api_keys.delete("ci-runner", "default")
+
+    assert isinstance(created, AuthAPIKeyWithValue)
+    assert created.key == "created-secret"
+    assert "created-secret" not in repr(created)
+    assert created.local_key_activation_requested is True
+    assert created.local_key_activation_succeeded is True
+    assert created.local_key_activation_error is None
+    assert created.local_key_rollback_attempted is False
+    assert created.local_key_rollback_succeeded is None
+    assert created.local_key_rollback_error is None
+    assert created.local_key_rollback_reason is None
+    assert isinstance(created.api_key, AuthAPIKey)
+    assert not hasattr(created.api_key, "key")
+    assert isinstance(rotated, AuthAPIKeyWithValue)
+    assert rotated.key == "rotated-secret"
+    assert isinstance(fetched, AuthAPIKey)
+    assert not hasattr(fetched, "key")
+    assert listed == [fetched]
+    assert updated == fetched
+    zenml_client.create_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name="default",
+        description="Default CI key",
+        set_key=False,
+    )
+    zenml_client.set_api_key.assert_called_once_with(key="created-secret")
+    zenml_client.get_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+        allow_name_prefix_match=False,
+        hydrate=True,
+    )
+    zenml_client.list_api_keys.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name="default",
+        active=True,
+        page=1,
+        size=3,
+        hydrate=True,
+    )
+    zenml_client.update_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+        name="renamed",
+        description="Updated",
+        active=False,
+    )
+    zenml_client.rotate_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+        retain_period_minutes=5,
+        set_key=False,
+    )
+    zenml_client.delete_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+    )
+
+
+def test_auth_api_key_create_requires_one_time_key_value() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_cls.return_value.create_api_key.return_value = _api_key_response(
+            raw_key=None
+        )
+        client = KitaruClient()
+
+        with pytest.raises(KitaruBackendError, match="one-time API key value"):
+            client.auth.api_keys.create("ci-runner", "default")
+
+
+def test_auth_api_key_create_set_key_failure_returns_sanitized_key_result() -> None:
+    """Local activation failure must not hide the one-time created key."""
+    credentials_store = SimpleNamespace(get_api_key=Mock(return_value=None))
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.zen_store = SimpleNamespace(url="https://server.example.com")
+        zenml_client.create_api_key.return_value = _api_key_response(
+            raw_key="created-secret"
+        )
+        zenml_client.set_api_key.side_effect = RuntimeError(
+            "could not store created-secret locally"
+        )
+        client = KitaruClient()
+
+        result = client.auth.api_keys.create("ci-runner", "default", set_key=True)
+
+    assert result.key == "created-secret"
+    assert result.local_key_activation_requested is True
+    assert result.local_key_activation_succeeded is False
+    assert result.local_key_activation_error is not None
+    assert "created-secret" not in result.local_key_activation_error
+    assert "[redacted]" in result.local_key_activation_error
+    assert "could not set it as the active local credential" in (
+        result.local_key_activation_error
+    )
+    assert result.local_key_rollback_attempted is False
+    assert result.local_key_rollback_succeeded is None
+    assert result.local_key_rollback_error is None
+    assert result.local_key_rollback_reason is not None
+    assert "No previous persisted local API key" in result.local_key_rollback_reason
+    zenml_client.create_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name="default",
+        description="",
+        set_key=False,
+    )
+    zenml_client.set_api_key.assert_called_once_with(key="created-secret")
+
+
+def test_auth_api_key_rotate_set_key_failure_returns_sanitized_key_result() -> None:
+    """Local activation failure must not hide the one-time rotated key."""
+    credentials_store = SimpleNamespace(get_api_key=Mock(return_value=None))
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.zen_store = SimpleNamespace(url="https://server.example.com")
+        zenml_client.rotate_api_key.return_value = _api_key_response(
+            raw_key="rotated-secret"
+        )
+        zenml_client.set_api_key.side_effect = RuntimeError(
+            "could not store rotated-secret locally"
+        )
+        client = KitaruClient()
+
+        result = client.auth.api_keys.rotate("ci-runner", "default", set_key=True)
+
+    assert result.key == "rotated-secret"
+    assert result.local_key_activation_requested is True
+    assert result.local_key_activation_succeeded is False
+    assert result.local_key_activation_error is not None
+    assert "rotated-secret" not in result.local_key_activation_error
+    assert "[redacted]" in result.local_key_activation_error
+    assert "could not set it as the active local credential" in (
+        result.local_key_activation_error
+    )
+    assert result.local_key_rollback_attempted is False
+    assert result.local_key_rollback_succeeded is None
+    assert result.local_key_rollback_error is None
+    assert result.local_key_rollback_reason is not None
+    assert "No previous persisted local API key" in result.local_key_rollback_reason
+    zenml_client.rotate_api_key.assert_called_once_with(
+        service_account_name_id_or_prefix="ci-runner",
+        name_id_or_prefix="default",
+        retain_period_minutes=0,
+        set_key=False,
+    )
+    zenml_client.set_api_key.assert_called_once_with(key="rotated-secret")
+
+
+def test_auth_api_key_create_set_key_failure_rolls_back_previous_key() -> None:
+    """If new-key activation fails, Kitaru tries to restore the old local key."""
+    credentials_store = SimpleNamespace(
+        get_api_key=Mock(return_value="previous-secret")
+    )
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.zen_store = SimpleNamespace(url="https://server.example.com")
+        zenml_client.create_api_key.return_value = _api_key_response(
+            raw_key="created-secret"
+        )
+        zenml_client.set_api_key.side_effect = [
+            RuntimeError("could not store created-secret locally"),
+            None,
+        ]
+        client = KitaruClient()
+
+        result = client.auth.api_keys.create("ci-runner", "default", set_key=True)
+
+    assert result.key == "created-secret"
+    assert result.local_key_activation_requested is True
+    assert result.local_key_activation_succeeded is False
+    assert result.local_key_activation_error is not None
+    assert "created-secret" not in result.local_key_activation_error
+    assert "previous-secret" not in result.local_key_activation_error
+    assert "restored the previous local credential" in result.local_key_activation_error
+    assert result.local_key_rollback_attempted is True
+    assert result.local_key_rollback_succeeded is True
+    assert result.local_key_rollback_error is None
+    assert result.local_key_rollback_reason is None
+    credentials_store.get_api_key.assert_called_once_with(
+        server_url="https://server.example.com"
+    )
+    assert zenml_client.set_api_key.call_args_list == [
+        call(key="created-secret"),
+        call(key="previous-secret"),
+    ]
+
+
+def test_auth_api_key_create_set_key_failure_reports_rollback_failure() -> None:
+    """Rollback failure is reported without hiding the one-time created key."""
+    credentials_store = SimpleNamespace(
+        get_api_key=Mock(return_value="previous-secret")
+    )
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.get_credentials_store", return_value=credentials_store),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        zenml_client.zen_store = SimpleNamespace(url="https://server.example.com")
+        zenml_client.create_api_key.return_value = _api_key_response(
+            raw_key="created-secret"
+        )
+        zenml_client.set_api_key.side_effect = [
+            RuntimeError("could not store created-secret locally"),
+            RuntimeError("could not restore previous-secret locally"),
+        ]
+        client = KitaruClient()
+
+        result = client.auth.api_keys.create("ci-runner", "default", set_key=True)
+
+    assert result.key == "created-secret"
+    assert result.local_key_activation_succeeded is False
+    assert result.local_key_activation_error is not None
+    assert "created-secret" not in result.local_key_activation_error
+    assert "previous-secret" not in result.local_key_activation_error
+    assert "rollback failed" in result.local_key_activation_error
+    assert "manual repair" in result.local_key_activation_error
+    assert result.local_key_rollback_attempted is True
+    assert result.local_key_rollback_succeeded is False
+    assert result.local_key_rollback_error is not None
+    assert "created-secret" not in result.local_key_rollback_error
+    assert "previous-secret" not in result.local_key_rollback_error
+    assert "[redacted]" in result.local_key_rollback_error
+    assert zenml_client.set_api_key.call_args_list == [
+        call(key="created-secret"),
+        call(key="previous-secret"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("backend_method", "call_api", "expected_context"),
+    [
+        (
+            "create_service_account",
+            lambda client: client.auth.service_accounts.create("ci-runner"),
+            "Failed to create service account 'ci-runner'",
+        ),
+        (
+            "get_service_account",
+            lambda client: client.auth.service_accounts.get("ci-runner"),
+            "Failed to load service account 'ci-runner'",
+        ),
+        (
+            "list_service_accounts",
+            lambda client: client.auth.service_accounts.list(),
+            "Failed to list service accounts",
+        ),
+        (
+            "update_service_account",
+            lambda client: client.auth.service_accounts.update("ci-runner"),
+            "Failed to update service account 'ci-runner'",
+        ),
+        (
+            "delete_service_account",
+            lambda client: client.auth.service_accounts.delete("ci-runner"),
+            "Failed to delete service account 'ci-runner'",
+        ),
+        (
+            "create_api_key",
+            lambda client: client.auth.api_keys.create("ci-runner", "default"),
+            "Failed to create API key 'default' for service account 'ci-runner'",
+        ),
+        (
+            "get_api_key",
+            lambda client: client.auth.api_keys.get("ci-runner", "default"),
+            "Failed to load API key 'default' for service account 'ci-runner'",
+        ),
+        (
+            "list_api_keys",
+            lambda client: client.auth.api_keys.list("ci-runner"),
+            "Failed to list API keys for service account 'ci-runner'",
+        ),
+        (
+            "update_api_key",
+            lambda client: client.auth.api_keys.update("ci-runner", "default"),
+            "Failed to update API key 'default' for service account 'ci-runner'",
+        ),
+        (
+            "rotate_api_key",
+            lambda client: client.auth.api_keys.rotate("ci-runner", "default"),
+            "Failed to rotate API key 'default' for service account 'ci-runner'",
+        ),
+        (
+            "delete_api_key",
+            lambda client: client.auth.api_keys.delete("ci-runner", "default"),
+            "Failed to delete API key 'default' for service account 'ci-runner'",
+        ),
+    ],
+)
+def test_auth_backend_failures_are_wrapped_as_kitaru_errors(
+    backend_method: str,
+    call_api: Any,
+    expected_context: str,
+) -> None:
+    """ZenML auth-management failures should cross the SDK as Kitaru errors."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        zenml_client = client_cls.return_value
+        getattr(zenml_client, backend_method).side_effect = RuntimeError(
+            "backend offline"
+        )
+        client = KitaruClient()
+
+        with pytest.raises(KitaruBackendError) as exc_info:
+            call_api(client)
+
+    assert expected_context in str(exc_info.value)
+    assert "backend offline" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+def test_auth_local_validation_errors_remain_usage_errors() -> None:
+    """Local caller mistakes should not be wrapped as backend failures."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client = KitaruClient()
+
+        with pytest.raises(KitaruUsageError, match="non-empty string"):
+            client.auth.api_keys.create("", "default")
+        with pytest.raises(KitaruUsageError, match="retain_period_minutes"):
+            client.auth.api_keys.rotate(
+                "ci-runner",
+                "default",
+                retain_period_minutes=-1,
+            )
+        with pytest.raises(KitaruUsageError, match="must be an integer"):
+            client.auth.api_keys.rotate(
+                "ci-runner",
+                "default",
+                retain_period_minutes="10",  # ty: ignore[invalid-argument-type]
+            )
+        with pytest.raises(KitaruUsageError, match="must be an integer"):
+            client.auth.api_keys.rotate(
+                "ci-runner",
+                "default",
+                retain_period_minutes=1.5,  # ty: ignore[invalid-argument-type]
+            )
+
+    client_cls.return_value.create_api_key.assert_not_called()
+    client_cls.return_value.rotate_api_key.assert_not_called()
 
 
 def test_deployment_snapshot_names_build_and_parse() -> None:
@@ -261,8 +897,8 @@ def test_deployment_snapshot_names_build_and_parse() -> None:
 
     assert name == "kitaru::research_flow::v3"
     assert parse_deployment_snapshot_name(name) is not None
-    assert parse_deployment_snapshot_name(name).flow == "research_flow"  # type: ignore[union-attr]
-    assert parse_deployment_snapshot_name(name).version == 3  # type: ignore[union-attr]
+    assert parse_deployment_snapshot_name(name).flow == "research_flow"  # ty: ignore[unresolved-attribute]
+    assert parse_deployment_snapshot_name(name).version == 3  # ty: ignore[unresolved-attribute]
     assert parse_deployment_snapshot_name("research_flow-v3") is None
     assert parse_deployment_snapshot_name("kitaru::research_flow::v0") is None
 
@@ -664,7 +1300,7 @@ def test_deployments_create_moves_exclusive_tags_from_previous_versions() -> Non
 
     assert deployment.version == 2
     assert deployment.tags == {"stable": True}
-    assert "stable" not in map_deployment_snapshot(v1).tags  # type: ignore[union-attr]
+    assert "stable" not in map_deployment_snapshot(v1).tags  # ty: ignore[unresolved-attribute]
     assert client_mock.update_snapshot.call_count == 2
 
 
@@ -772,7 +1408,7 @@ def test_deployments_tag_default_is_exclusive_and_untag_rejects_default() -> Non
 
     assert tagged.version == 2
     assert tagged.tags["default"] is True
-    assert "default" not in map_deployment_snapshot(v1).tags  # type: ignore[union-attr]
+    assert "default" not in map_deployment_snapshot(v1).tags  # ty: ignore[unresolved-attribute]
 
 
 def test_deployments_tag_warns_but_still_updates_target_if_cleanup_fails() -> None:
@@ -827,7 +1463,7 @@ def test_deployments_tag_warns_but_still_updates_target_if_cleanup_fails() -> No
 
     assert tagged.version == 2
     assert tagged.tags == {"stable": True}
-    assert map_deployment_snapshot(v1).tags == {"stable": True}  # type: ignore[union-attr]
+    assert map_deployment_snapshot(v1).tags == {"stable": True}  # ty: ignore[unresolved-attribute]
     assert client_mock.update_snapshot.call_count == 2
     logger_mock.warning.assert_called_once()
     track_mock.assert_called_once_with(
@@ -859,9 +1495,9 @@ def test_deployment_facade_methods_forward_to_client_api() -> None:
         deployment = client.deployments.get(flow="research_flow", version=2)
         assert isinstance(deployment, Deployment)
 
-        client.deployments.tag = MagicMock(return_value=deployment)  # type: ignore[method-assign]
-        client.deployments.untag = MagicMock(return_value=deployment)  # type: ignore[method-assign]
-        client.deployments.delete = MagicMock()  # type: ignore[method-assign]
+        client.deployments.tag = MagicMock(return_value=deployment)  # ty: ignore[invalid-assignment]
+        client.deployments.untag = MagicMock(return_value=deployment)  # ty: ignore[invalid-assignment]
+        client.deployments.delete = MagicMock()  # ty: ignore[invalid-assignment]
 
         assert deployment.add_tag("stable", exclusive=True) is deployment
         assert deployment.remove_tag("canary") is deployment
@@ -1147,7 +1783,10 @@ def test_client_requires_project_for_env_driven_remote_connection() -> None:
     ):
         KitaruClient()
 
-    resolve_connection.assert_called_once_with(validate_for_use=True)
+    resolve_connection.assert_called_once_with(
+        validate_for_use=True,
+        require_project=True,
+    )
 
 
 def test_memories_get_delegates_to_entry_impl() -> None:
@@ -1322,7 +1961,7 @@ def test_memories_compact_rejects_invalid_source_mode() -> None:
             scope="repo_scope",
             scope_type="namespace",
             key="prefs",
-            source_mode="future",  # type: ignore[arg-type]
+            source_mode="future",  # ty: ignore[invalid-argument-type]
         )
 
 
@@ -1358,7 +1997,7 @@ def test_memories_methods_validate_scope_key_version_and_scope_type() -> None:
             "prefs",
             {"theme": "dark"},
             scope="repo_scope",
-            scope_type="bogus",  # type: ignore[arg-type]
+            scope_type="bogus",  # ty: ignore[invalid-argument-type]
         )
 
 
@@ -1740,6 +2379,29 @@ def test_list_rejects_conflicting_limit_and_pagination() -> None:
         client = KitaruClient()
         with pytest.raises(KitaruUsageError, match="cannot be combined"):
             client.executions.list(limit=1, page=1, size=1)
+
+
+def test_auth_pagination_rejects_non_integer_inputs() -> None:
+    """Auth list pagination must reject str/float inputs as KitaruUsageError."""
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client = KitaruClient()
+
+        with pytest.raises(KitaruUsageError, match="`limit` must be an integer"):
+            client.auth.service_accounts.list(limit="20")  # ty: ignore[invalid-argument-type]
+        with pytest.raises(KitaruUsageError, match="`limit` must be an integer"):
+            client.auth.service_accounts.list(limit=1.5)  # ty: ignore[invalid-argument-type]
+        with pytest.raises(KitaruUsageError, match="`page` must be an integer"):
+            client.auth.service_accounts.list(page="1", size=10)  # ty: ignore[invalid-argument-type]
+        with pytest.raises(KitaruUsageError, match="`size` must be an integer"):
+            client.auth.service_accounts.list(size=2.5)  # ty: ignore[invalid-argument-type]
+
+    client_cls.return_value.list_service_accounts.assert_not_called()
 
 
 def test_latest_raises_when_no_execution_matches() -> None:
@@ -2345,6 +3007,404 @@ def test_replay_delegates_to_flow_wrapper_when_available() -> None:
     assert execution.exec_id == str(replayed_run.id)
 
 
+def test_replay_stops_when_source_module_dependency_is_missing() -> None:
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module="example.flow_module",
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+    missing_dependency = ModuleNotFoundError("No module named 'missing_dependency'")
+    missing_dependency.name = "missing_dependency"
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._resolve_pipeline_for_replay") as resolve_pipeline,
+        patch("kitaru.client.importlib.import_module", side_effect=missing_dependency),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(source_run)
+
+        client = KitaruClient()
+        with pytest.raises(
+            KitaruRuntimeError, match="missing dependency 'missing_dependency'"
+        ) as exc_info:
+            client.executions.replay(str(source_run.id), from_="write")
+
+    assert exc_info.value.__cause__ is missing_dependency
+    resolve_pipeline.assert_not_called()
+
+
+def test_import_module_for_replay_rejects_unrelated_main_module() -> None:
+    missing_module = ModuleNotFoundError("No module named 'replay_with_overrides'")
+    missing_module.name = "replay_with_overrides"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+        pytest.raises(KitaruRuntimeError, match="temporary cwd import"),
+    ):
+        _import_module_for_replay("replay_with_overrides", "run-123")
+
+
+def test_retryable_replay_import_error_requires_package_boundaries() -> None:
+    missing_module = ModuleNotFoundError("No module named 'a.b'")
+    missing_module.name = "a.b"
+
+    assert not _is_retryable_replay_import_error(missing_module, "a.bc.d")
+
+
+def test_import_module_for_replay_accepts_matching_main_spec_name() -> None:
+    replay_main = _replay_main(
+        spec_name="examples.replay.replay_with_overrides",
+        file_path=None,
+    )
+    missing_module = ModuleNotFoundError(
+        "No module named 'examples.replay.replay_with_overrides'"
+    )
+    missing_module.name = "examples"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict(
+            "kitaru.client.sys.modules",
+            {"__main__": replay_main},
+        ),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+    ):
+        resolved = _import_module_for_replay(
+            "examples.replay.replay_with_overrides", "run-123"
+        )
+
+    assert resolved is replay_main
+
+
+def test_import_module_for_replay_accepts_matching_main_file_stem() -> None:
+    replay_main = _replay_main(
+        spec_name=None,
+        file_path="/tmp/replay_with_overrides.py",
+    )
+    missing_module = ModuleNotFoundError("No module named 'replay_with_overrides'")
+    missing_module.name = "replay_with_overrides"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict(
+            "kitaru.client.sys.modules",
+            {"__main__": replay_main},
+        ),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+    ):
+        resolved = _import_module_for_replay("replay_with_overrides", "run-123")
+
+    assert resolved is replay_main
+
+
+def test_import_module_for_replay_rejects_dotted_main_file_stem_without_spec() -> None:
+    replay_main = _replay_main(
+        spec_name=None,
+        file_path="/tmp/replay_with_overrides.py",
+    )
+    missing_module = ModuleNotFoundError(
+        "No module named 'examples.replay.replay_with_overrides'"
+    )
+    missing_module.name = "examples"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict(
+            "kitaru.client.sys.modules",
+            {"__main__": replay_main},
+        ),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+        pytest.raises(
+            KitaruRuntimeError,
+            match=r"Failed to import replay source module",
+        ),
+    ):
+        _import_module_for_replay("examples.replay.replay_with_overrides", "run-123")
+
+
+def test_import_module_for_replay_prefers_loaded_suffix_match_before_main() -> None:
+    loaded_module = ModuleType("examples.replay.replay_with_overrides")
+    missing_module = ModuleNotFoundError("No module named 'replay_with_overrides'")
+    missing_module.name = "replay_with_overrides"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict(
+            "kitaru.client.sys.modules",
+            {
+                "__main__": _replay_main(),
+                "examples.replay.replay_with_overrides": loaded_module,
+            },
+        ),
+        patch("kitaru.client.importlib.import_module", side_effect=missing_module),
+    ):
+        resolved = _import_module_for_replay("replay_with_overrides", "run-123")
+
+    assert resolved is loaded_module
+
+
+def test_import_module_for_replay_retries_from_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_local_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text("MARKER = 'loaded-from-cwd'\n")
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules(module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+    ):
+        resolved = _import_module_for_replay(module_name, "run-123")
+
+    assert getattr(resolved, "MARKER", None) == "loaded-from-cwd"
+    assert str(tmp_path) not in sys.path
+
+
+def test_import_module_for_replay_retries_from_cwd_for_dotted_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "myproj.flows.replay_flow"
+    module_path = tmp_path / "myproj" / "flows" / "replay_flow.py"
+    module_path.parent.mkdir(parents=True)
+    (tmp_path / "myproj" / "__init__.py").write_text("")
+    (tmp_path / "myproj" / "flows" / "__init__.py").write_text("")
+    module_path.write_text("MARKER = 'loaded-from-dotted-cwd'\n")
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules("myproj", "myproj.flows", module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+    ):
+        resolved = _import_module_for_replay(module_name, "run-123")
+
+    assert getattr(resolved, "MARKER", None) == "loaded-from-dotted-cwd"
+    assert str(tmp_path) not in sys.path
+
+
+def test_import_module_for_replay_restores_sys_path_after_failed_cwd_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_broken_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text("import missing_dependency_217\n")
+
+    monkeypatch.chdir(tmp_path)
+    original_sys_path = list(sys.path)
+
+    with (
+        _without_loaded_modules(module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        pytest.raises(
+            KitaruRuntimeError, match="missing dependency 'missing_dependency_217'"
+        ) as exc_info,
+    ):
+        _import_module_for_replay(module_name, "run-123")
+
+    assert isinstance(exc_info.value.__cause__, ModuleNotFoundError)
+    assert sys.path == original_sys_path
+
+
+def test_import_module_for_replay_wraps_nested_module_not_found() -> None:
+    missing_dependency = ModuleNotFoundError("No module named 'missing_dependency'")
+    missing_dependency.name = "missing_dependency"
+
+    with (
+        _without_loaded_modules(
+            "replay_with_overrides", "examples.replay.replay_with_overrides"
+        ),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        patch(
+            "kitaru.client.importlib.import_module",
+            side_effect=missing_dependency,
+        ),
+        pytest.raises(
+            KitaruRuntimeError, match="missing dependency 'missing_dependency'"
+        ) as exc_info,
+    ):
+        _import_module_for_replay("replay_with_overrides", "run-123")
+
+    assert exc_info.value.__cause__ is missing_dependency
+
+
+def test_resolve_flow_for_replay_imports_standalone_module_from_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_flow_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text(
+        "class ReplayFlow:\n"
+        "    def replay(self, *args, **kwargs):\n"
+        "        return None\n\n"
+        "sample_flow = ReplayFlow()\n"
+        "__kitaru_pipeline_source_sample_flow = object()\n"
+    )
+
+    source_run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="sample_flow",
+        snapshot=SimpleNamespace(
+            pipeline_spec=SimpleNamespace(
+                source=_snapshot_source(
+                    module=module_name,
+                    attribute="__kitaru_pipeline_source_sample_flow",
+                )
+            )
+        ),
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules(module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+    ):
+        resolved = _resolve_flow_for_replay(_as_pipeline_run(source_run))
+
+    assert resolved.__class__.__name__ == "ReplayFlow"
+    assert str(tmp_path) not in sys.path
+
+
+def test_import_module_for_replay_retries_when_dotted_import_misses_parent_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "examples.replay.replay_with_overrides"
+    module_path = tmp_path / "examples" / "replay" / "replay_with_overrides.py"
+    module_path.parent.mkdir(parents=True)
+    (tmp_path / "examples" / "__init__.py").write_text("")
+    (tmp_path / "examples" / "replay" / "__init__.py").write_text("")
+    module_path.write_text("MARKER = 'loaded-after-parent-package-miss'\n")
+
+    parent_package_miss = ModuleNotFoundError(
+        "No module named 'examples.replay.replay_with_overrides'"
+    )
+    parent_package_miss.name = "examples.replay"
+
+    resolved_module = ModuleType(module_name)
+    import_attempts = 0
+
+    def _fake_import(name: str) -> ModuleType:
+        nonlocal import_attempts
+        assert name == module_name
+        import_attempts += 1
+        if import_attempts == 1:
+            raise parent_package_miss
+        return resolved_module
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        _without_loaded_modules("replay_with_overrides", module_name),
+        patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        patch("kitaru.client.importlib.import_module", side_effect=_fake_import),
+    ):
+        resolved = _import_module_for_replay(module_name, "run-123")
+
+    assert resolved is resolved_module
+    assert import_attempts == 2
+
+
+def test_import_module_for_replay_prepends_cwd_even_if_already_later_in_sys_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_local_module_217"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text("MARKER = 'loaded-from-cwd-front'\n")
+
+    conflicting_root = tmp_path / "conflict"
+    conflicting_root.mkdir()
+    original_sys_path = list(sys.path)
+    expected_sys_path = [str(conflicting_root), *original_sys_path, str(tmp_path)]
+    sys.path[:] = expected_sys_path
+
+    missing_module = ModuleNotFoundError(f"No module named '{module_name}'")
+    missing_module.name = module_name
+
+    resolved_module = ModuleType(module_name)
+    import_attempts = 0
+
+    def _fake_import(name: str) -> ModuleType:
+        nonlocal import_attempts
+        assert name == module_name
+        import_attempts += 1
+        if import_attempts == 1:
+            raise missing_module
+
+        assert sys.path[0] == str(tmp_path)
+        assert sys.path[1:] == expected_sys_path
+        return resolved_module
+
+    monkeypatch.chdir(tmp_path)
+
+    try:
+        with (
+            patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+            patch("kitaru.client.importlib.import_module", side_effect=_fake_import),
+        ):
+            resolved = _import_module_for_replay(module_name, "run-123")
+    finally:
+        sys.path[:] = original_sys_path
+
+    assert resolved is resolved_module
+    assert import_attempts == 2
+
+
+def test_import_module_for_replay_removes_inserted_cwd_path_after_import_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_name = "replay_local_module_path_mutation_217"
+    module_path = tmp_path / f"{module_name}.py"
+    extra_path = tmp_path / "extra-path-entry"
+    extra_path.mkdir()
+    module_path.write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {str(extra_path)!r})\n"
+        "MARKER = 'loaded-with-sys-path-mutation'\n"
+    )
+
+    monkeypatch.chdir(tmp_path)
+    original_sys_path = list(sys.path)
+
+    try:
+        with (
+            _without_loaded_modules(module_name),
+            patch.dict("kitaru.client.sys.modules", {"__main__": _replay_main()}),
+        ):
+            resolved = _import_module_for_replay(module_name, "run-123")
+
+        assert getattr(resolved, "MARKER", None) == "loaded-with-sys-path-mutation"
+        assert str(extra_path) in sys.path
+        assert str(tmp_path) not in sys.path
+    finally:
+        sys.path[:] = original_sys_path
+
+
 def test_replay_falls_back_to_pipeline_source_when_flow_missing() -> None:
     fetch_step = _DummyStep(
         name="fetch",
@@ -2765,6 +3825,54 @@ def test_logs_map_otel_retrieval_errors_to_kitaru_error() -> None:
         client = KitaruClient()
         with pytest.raises(KitaruLogRetrievalError, match="OTEL backend"):
             client.executions.logs(str(run.id))
+
+
+@pytest.mark.parametrize(
+    "backend_error",
+    [
+        ModuleNotFoundError("No module named 'zenml.log_stores'"),
+        RuntimeError("ModuleNotFoundError: No module named 'zenml.log_stores'"),
+    ],
+)
+def test_logs_map_version_skew_errors_to_actionable_kitaru_error(
+    backend_error: Exception,
+) -> None:
+    step = _DummyStep(
+        name="research",
+        status=ZenMLExecutionStatus.COMPLETED,
+        outputs={},
+    )
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.RUNNING,
+        flow_name="flow_a",
+        steps={step.name: step},
+    )
+
+    fake_store = Mock()
+    fake_store.get.side_effect = backend_error
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client._ExecutionsAPI._rest_store", return_value=fake_store),
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        with pytest.raises(KitaruLogRetrievalError) as exc_info:
+            client.executions.logs(str(run.id))
+
+    message = str(exc_info.value)
+    assert "incompatible" in message
+    assert "Upgrade the server runtime" in message
+    assert "ZenML" not in message
+    assert "zenml.log_stores" not in message
+    assert "No module named" not in message
+    assert "ModuleNotFoundError" not in message
 
 
 def test_logs_return_empty_list_when_backend_reports_no_entries() -> None:

@@ -470,7 +470,7 @@ def image_settings_to_docker_settings(
         docker_settings_kwargs["user"] = image_settings.user
     if image_settings.platform is not None:
         docker_settings_kwargs["build_config"] = DockerBuildConfig(
-            build_options=DockerBuildOptions(platform=image_settings.platform),  # type: ignore[call-arg]  # Pydantic extra="allow"
+            build_options=DockerBuildOptions(platform=image_settings.platform),  # ty: ignore[unknown-argument]  # Pydantic extra="allow"
         )
 
     return DockerSettings(**docker_settings_kwargs)

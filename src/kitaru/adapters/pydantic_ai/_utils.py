@@ -269,6 +269,7 @@ def turn_cache_key(
     toolsets: Any,
     builtin_tools: Any,
     event_stream_handler: Any,
+    capabilities: Any,
     spec: Any,
 ) -> str:
     """Stable cache key for a ``KitaruAgent`` turn checkpoint.
@@ -297,6 +298,7 @@ def turn_cache_key(
             "toolsets": toolsets,
             "builtin_tools": builtin_tools,
             "event_stream_handler": event_stream_handler,
+            "capabilities": capabilities,
             "spec": spec,
         }
     )

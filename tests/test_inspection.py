@@ -830,6 +830,44 @@ def test_serialize_runtime_snapshot_preserves_none_fields() -> None:
     assert payload["environment"] == []
 
 
+def test_serialize_runtime_snapshot_hides_provenance_details_by_default() -> None:
+    snapshot = RuntimeSnapshot(
+        sdk_version="0.1.0",
+        connection="local database",
+        connection_target="local",
+        config_directory="/tmp/kitaru-config",
+        active_stack_provenance=ActiveConfigSelectionProvenance(
+            resource="active_stack",
+            effective_source="repo-local config",
+            effective_source_detail="/work/repo/.kitaru/config.yaml",
+            effective_id="repo-stack-id",
+            resolved_id="resolved-stack-id",
+        ),
+        active_project_provenance=ActiveConfigSelectionProvenance(
+            resource="active_project",
+            effective_source="environment",
+            effective_source_detail="KITARU_PROJECT -> ZENML_ACTIVE_PROJECT_ID",
+            effective_id="production",
+            resolved_id="project-uuid",
+        ),
+    )
+
+    default_payload = serialize_runtime_snapshot(snapshot)
+    detailed_payload = serialize_runtime_snapshot(
+        snapshot,
+        include_provenance_details=True,
+    )
+
+    assert default_payload["active_stack_provenance"] is None
+    assert default_payload["active_project_provenance"] is None
+    assert detailed_payload["active_stack_provenance"]["effective_id"] == (
+        "repo-stack-id"
+    )
+    assert detailed_payload["active_project_provenance"]["effective_id"] == (
+        "production"
+    )
+
+
 def _write_active_config(
     directory: Path,
     *,
@@ -875,6 +913,7 @@ def _patch_snapshot_dependencies(
             return_value=SimpleNamespace(project=None),
         ),
         patch("kitaru.inspection.Client", fake_client_cls),
+        patch("kitaru._config._active_context.Client", fake_client_cls),
         patch(
             "kitaru.inspection.resolve_log_store",
             return_value=ResolvedLogStore(
@@ -887,7 +926,7 @@ def _patch_snapshot_dependencies(
     )
 
 
-def test_build_runtime_snapshot_keeps_provenance_off_by_default(
+def test_build_runtime_snapshot_collects_provenance_by_default(
     tmp_path: Path,
 ) -> None:
     fake_gc = _fake_global_config(tmp_path)
@@ -896,16 +935,12 @@ def test_build_runtime_snapshot_keeps_provenance_off_by_default(
     with ExitStack() as stack:
         for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
             stack.enter_context(context_manager)
-        stack.enter_context(
-            patch(
-                "kitaru.inspection._collect_active_context_provenance",
-                side_effect=AssertionError("provenance should be opt-in"),
-            )
-        )
         snapshot = build_runtime_snapshot()
 
-    assert snapshot.active_stack_provenance is None
-    assert snapshot.active_project_provenance is None
+    assert isinstance(snapshot.active_stack_provenance, ActiveConfigSelectionProvenance)
+    assert isinstance(
+        snapshot.active_project_provenance, ActiveConfigSelectionProvenance
+    )
 
 
 def test_build_runtime_snapshot_collects_active_context_source_precedence(
@@ -1026,7 +1061,7 @@ def test_build_runtime_snapshot_preserves_raw_provenance_when_client_fails(
             stack.enter_context(context_manager)
         stack.enter_context(
             patch(
-                "kitaru.inspection.KITARU_REPOSITORY_DIRECTORY_NAME",
+                "kitaru._config._active_context.KITARU_REPOSITORY_DIRECTORY_NAME",
                 ".custom-kitaru",
             )
         )
@@ -1524,7 +1559,7 @@ def test_build_runtime_snapshot_surfaces_provenance_collector_failure(
             stack.enter_context(context_manager)
         stack.enter_context(
             patch(
-                "kitaru.inspection._collect_active_context_provenance",
+                "kitaru.inspection.collect_active_context_provenance",
                 side_effect=RuntimeError("yaml exploded"),
             )
         )
@@ -1548,6 +1583,44 @@ def test_build_runtime_snapshot_surfaces_provenance_collector_failure(
         in note
         for note in project_provenance.notes
     )
+
+
+def test_build_runtime_snapshot_does_not_warn_for_env_name_to_uuid_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explicit KITARU_PROJECT names may resolve to UUIDs without fallback."""
+    _clear_active_context_env(monkeypatch)
+    monkeypatch.setenv("KITARU_PROJECT", "production")
+
+    fake_gc = _fake_global_config(tmp_path)
+    fake_client = SimpleNamespace(
+        active_user=SimpleNamespace(name="alice"),
+        active_stack_model=SimpleNamespace(name="prod", id="stack-id"),
+        active_project=SimpleNamespace(name="production", id="project-uuid"),
+        root=None,
+        zen_store=SimpleNamespace(
+            get_store_info=lambda: SimpleNamespace(
+                version="0.42.0",
+                database_type="sqlite",
+                deployment_type="local",
+            )
+        ),
+    )
+    fake_client_cls = MagicMock(return_value=fake_client)
+    fake_client_cls.find_repository.return_value = None
+
+    with ExitStack() as stack:
+        for context_manager in _patch_snapshot_dependencies(fake_gc, fake_client_cls):
+            stack.enter_context(context_manager)
+        snapshot = build_runtime_snapshot(include_provenance_details=True)
+
+    project_provenance = snapshot.active_project_provenance
+    assert isinstance(project_provenance, ActiveConfigSelectionProvenance)
+    assert project_provenance.effective_source == "environment"
+    assert project_provenance.effective_id == "production"
+    assert project_provenance.resolved_id == "project-uuid"
+    assert snapshot.warning is None
 
 
 def test_build_runtime_snapshot_preserves_raw_when_client_sanitizes_stale_id(
@@ -1605,6 +1678,10 @@ def test_build_runtime_snapshot_preserves_raw_when_client_sanitizes_stale_id(
     assert stack_provenance.resolved_id == "different-resolved-id"
     assert stack_provenance.resolved_name == "sanitized-stack"
     assert stack_provenance.resolved_id != stack_provenance.effective_id
+    assert snapshot.warning is not None
+    assert "saved active context changed" in snapshot.warning
+    assert "stale-repo-stack-id" in snapshot.warning
+    assert "sanitized-stack (different-resolved-id)" in snapshot.warning
 
 
 def test_build_runtime_snapshot_preserves_raw_when_yaml_is_invalid(

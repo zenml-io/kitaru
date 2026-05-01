@@ -256,6 +256,8 @@ def _environment_has_auth_override() -> bool:
 
 def _validate_connection_config_for_use(
     resolved: ResolvedConnectionConfig,
+    *,
+    require_project: bool = True,
 ) -> None:
     """Validate connection config at first use."""
     has_remote_server = _environment_has_remote_server_override()
@@ -273,7 +275,7 @@ def _validate_connection_config_for_use(
             "set KITARU_AUTH_TOKEN or run `kitaru login`."
         )
 
-    if has_remote_server and not resolved.project:
+    if require_project and has_remote_server and not resolved.project:
         raise KitaruUsageError(
             "A remote Kitaru server is configured via environment variables, but "
             "no project is active. Set KITARU_PROJECT (preferred) or "
@@ -332,11 +334,12 @@ def resolve_connection_config_impl(
     *,
     explicit: KitaruConfig | None = None,
     validate_for_use: bool = False,
+    require_project: bool = True,
     read_global_connection_config: Callable[[], KitaruConfig],
     read_zenml_connection_env_config: Callable[[], KitaruConfig],
     read_connection_env_config: Callable[[], KitaruConfig],
     read_runtime_connection_config: Callable[[], KitaruConfig],
-    validate_connection_config_for_use: Callable[[ResolvedConnectionConfig], None],
+    validate_connection_config_for_use: Callable[..., None],
 ) -> ResolvedConnectionConfig:
     """Resolve connection configuration with connection-specific precedence."""
     resolved = _apply_layers(
@@ -352,6 +355,9 @@ def resolve_connection_config_impl(
     )
 
     if validate_for_use:
-        validate_connection_config_for_use(resolved)
+        validate_connection_config_for_use(
+            resolved,
+            require_project=require_project,
+        )
 
     return resolved

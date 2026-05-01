@@ -33,6 +33,12 @@ from zenml.pipelines.pipeline_definition import Pipeline
 from kitaru._client._deployments import DEFAULT_DEPLOYMENT_TAG
 from kitaru._client._mappers import _to_public_status
 from kitaru._client._models import ExecutionStatus
+from kitaru._config._active_context import (
+    ActiveConfigSelectionProvenance,
+    collect_active_context_provenance,
+    stringify_config_id,
+    with_resolved_selection,
+)
 from kitaru._interface_deployments import (
     Deployment,
     ensure_stack_is_server_runnable,
@@ -73,12 +79,6 @@ from kitaru.errors import (
     execution_error_from_failure,
     format_recovery_hint,
     traceback_last_line,
-)
-from kitaru.inspection import (
-    ActiveConfigSelectionProvenance,
-    _collect_active_context_provenance,
-    _stringify_config_id,
-    _with_resolved_selection,
 )
 from kitaru.memory import _memory_scope_session
 from kitaru.replay import build_replay_plan
@@ -137,7 +137,7 @@ def _capture_active_stack_provenance_for_guard() -> (
 ):
     """Capture raw active stack provenance before Client sanitizes it."""
     try:
-        stack_provenance, _ = _collect_active_context_provenance(GlobalConfiguration())
+        stack_provenance, _ = collect_active_context_provenance(GlobalConfiguration())
     except Exception:
         logger.debug("Could not collect active stack provenance", exc_info=True)
         return None
@@ -176,9 +176,9 @@ def _guard_implicit_active_stack_fallback(
     if resolved_name != DEFAULT_STACK_AND_COMPONENT_NAME:
         return
 
-    resolved_provenance = _with_resolved_selection(
+    resolved_provenance = with_resolved_selection(
         raw_active_stack_provenance,
-        resolved_id=_stringify_config_id(getattr(active_stack_model, "id", None)),
+        resolved_id=stringify_config_id(getattr(active_stack_model, "id", None)),
         resolved_name=resolved_name,
     )
     if (
