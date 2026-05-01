@@ -340,6 +340,9 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         question: str | None,
         metadata: dict[str, Any],
     ) -> Any:
+        # Keep the core wait guard as the single source of truth: explicit
+        # ``@hitl_tool`` calls reach this from flow scope, while native
+        # deferred/approval waits inside granular tool checkpoints raise there.
         return kitaru.wait(
             schema=schema, name=wait_name, question=question, metadata=metadata
         )

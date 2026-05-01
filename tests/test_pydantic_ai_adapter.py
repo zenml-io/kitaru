@@ -20,13 +20,17 @@ from kitaru.adapters.pydantic_ai._utils import (
     resolve_tool_checkpoint_config,
     with_default_type,
 )
-from kitaru.errors import KitaruUsageError
+from kitaru.errors import KitaruContextError, KitaruUsageError
 
 
 def _install_checkpoint_step_recorder(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    enter_checkpoint_scope: bool = False,
 ) -> list[str]:
     from collections.abc import Awaitable, Callable
+
+    from kitaru.runtime import _checkpoint_scope
 
     checkpoint_steps: list[str] = []
 
@@ -34,7 +38,10 @@ def _install_checkpoint_step_recorder(
         *, step_name: str, body: Callable[[], Awaitable[Any]], **_kwargs: Any
     ) -> Any:
         checkpoint_steps.append(step_name)
-        return await body()
+        if not enter_checkpoint_scope:
+            return await body()
+        with _checkpoint_scope(name=step_name, checkpoint_type="tool_call"):
+            return await body()
 
     monkeypatch.setattr(
         "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
@@ -549,7 +556,7 @@ async def test_run_sync_refuses_inside_running_event_loop() -> None:
 
 
 @pytest.mark.anyio
-async def test_approval_required_routes_through_wait(
+async def test_approval_required_routes_through_wait_when_tool_checkpoint_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from pydantic_ai import FunctionToolset
@@ -577,6 +584,7 @@ async def test_approval_required_routes_through_wait(
         toolset,
         capture=CapturePolicy(correlate_otel_spans=False),
         tool_checkpoint_config={},
+        tool_checkpoint_config_by_name={"publish": False},
     )
     ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
     tool = (await wrapped.get_tools(ctx))["publish"]
@@ -597,7 +605,105 @@ async def test_approval_required_routes_through_wait(
     assert result == "published"
     assert captured.get("exception_metadata") == {"channel": "prod"}
     assert call_count["value"] == 2
+    assert checkpoint_steps == []
+
+
+@pytest.mark.anyio
+async def test_approval_required_inside_tool_checkpoint_fails_before_wait_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.exceptions import ApprovalRequired
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def publish() -> str:
+        raise ApprovalRequired(metadata={"channel": "prod"})
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["publish"]
+    checkpoint_steps = _install_checkpoint_step_recorder(
+        monkeypatch,
+        enter_checkpoint_scope=True,
+    )
+
+    import importlib
+
+    wait_module = importlib.import_module("kitaru.wait")
+    monkeypatch.setattr(
+        wait_module,
+        "_resolve_zenml_wait",
+        lambda: pytest.fail("checkpoint-contained wait should fail first"),
+    )
+    with (
+        _flow_scope(name="demo_flow"),
+        pytest.raises(
+            KitaruContextError,
+            match="cannot run inside a @checkpoint",
+        ),
+    ):
+        await wrapped.call_tool("publish", {}, ctx, tool)
+
     assert checkpoint_steps == ["publish_tool"]
+
+
+@pytest.mark.anyio
+async def test_call_deferred_routes_through_wait_when_tool_checkpoint_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.exceptions import CallDeferred
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def defer_release() -> str:
+        raise CallDeferred(metadata={"ticket": "REL-123"})
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+        tool_checkpoint_config_by_name={"defer_release": False},
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["defer_release"]
+    checkpoint_steps = _install_checkpoint_step_recorder(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    def _fake_wait(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "provided later"
+
+    monkeypatch.setattr("kitaru.adapters.pydantic_ai._toolset.kitaru.wait", _fake_wait)
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("defer_release", {}, ctx, tool)
+
+    assert result == "provided later"
+    assert captured["schema"] is str
+    assert captured["metadata"]["exception_metadata"] == {"ticket": "REL-123"}
+    assert checkpoint_steps == []
 
 
 @pytest.mark.anyio

@@ -212,7 +212,12 @@ def publish_brief_hitl(headline: str, sources: list[str]) -> str:
 
 
 def demo_hitl_wiring() -> str:
-    """Wire ``@hitl_tool``, ``ApprovalRequired``, and ``CallDeferred`` on one agent."""
+    """Wire explicit and native HITL patterns on one agent.
+
+    ``@hitl_tool`` is the safest default because the adapter routes it outside
+    granular tool checkpoints. Native ``ApprovalRequired`` / ``CallDeferred``
+    tools that may wait should be opted out of tool checkpointing.
+    """
     agent = Agent(
         TestModel(call_tools=[]),
         name=f"hitl_demo_{_RUN_TAG}",
@@ -228,7 +233,13 @@ def demo_hitl_wiring() -> str:
     def deferred_side_effect() -> str:
         raise CallDeferred("Queued for async completion.")
 
-    wired = KitaruAgent(agent)
+    wired = KitaruAgent(
+        agent,
+        tool_checkpoint_config_by_name={
+            "approval_required": False,
+            "deferred_side_effect": False,
+        },
+    )
 
     @flow
     def hitl_wiring_flow() -> str:

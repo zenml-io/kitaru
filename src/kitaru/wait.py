@@ -7,9 +7,9 @@ contexts (remote orchestrators, CI, piped output, etc.), the execution moves
 to ``waiting`` status and input must be supplied later via the client API, CLI,
 or MCP.
 
-Valid anywhere inside a flow (flow body, ``@checkpoint`` body, or an adapter-
-managed tool call). Inside a checkpoint the enclosing scope is suspended for
-the duration of the wait, so on resume the checkpoint re-runs from the top.
+Waits belong at flow scope. They are rejected inside ``@checkpoint`` bodies
+because a timeout pause signal cannot pass cleanly through a checkpoint step:
+the run may pause, but the enclosing step can still be recorded as failed.
 """
 
 from __future__ import annotations
@@ -22,13 +22,13 @@ from kitaru.errors import (
     KitaruContextError,
     KitaruFeatureNotAvailableError,
 )
-from kitaru.runtime import (
-    _is_inside_checkpoint,
-    _is_inside_flow,
-    _suspend_checkpoint_scope,
-)
+from kitaru.runtime import _is_inside_checkpoint, _is_inside_flow
 
 _WAIT_OUTSIDE_FLOW_ERROR = "wait() can only run inside a @flow."
+_WAIT_INSIDE_CHECKPOINT_ERROR = (
+    "wait() cannot run inside a @checkpoint. Move the wait to flow scope, "
+    "before or after checkpoint calls."
+)
 _DEFAULT_WAIT_TIMEOUT_SECONDS = 600
 
 
@@ -93,6 +93,8 @@ def wait(
     """
     if not _is_inside_flow():
         raise KitaruContextError(_WAIT_OUTSIDE_FLOW_ERROR)
+    if _is_inside_checkpoint():
+        raise KitaruContextError(_WAIT_INSIDE_CHECKPOINT_ERROR)
 
     resolved_timeout = _DEFAULT_WAIT_TIMEOUT_SECONDS if timeout is None else timeout
 
@@ -118,9 +120,5 @@ def wait(
         "metadata": metadata,
         "name": name,
     }
-
-    if _is_inside_checkpoint():
-        with _suspend_checkpoint_scope():
-            return zenml_wait(**wait_kwargs)
 
     return zenml_wait(**wait_kwargs)
