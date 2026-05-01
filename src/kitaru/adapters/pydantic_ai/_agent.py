@@ -5,7 +5,7 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterator, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -38,6 +38,7 @@ from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
     CheckpointConfig,
     ToolCheckpointOverrides,
+    checkpoint_input_value,
     run_async_in_checkpoint,
     run_sync_in_checkpoint,
     turn_cache_key,
@@ -428,17 +429,32 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         finally:
             _INTERNAL_ITER_ALLOWED.reset(token)
 
+    @staticmethod
+    def _turn_checkpoint_inputs(
+        *,
+        user_prompt: str | Sequence[_messages.UserContent] | None,
+        message_history: Sequence[_messages.ModelMessage] | None,
+    ) -> dict[str, Any]:
+        inputs: dict[str, Any] = {}
+        if user_prompt is not None:
+            inputs['user_prompt'] = checkpoint_input_value(user_prompt)
+        if message_history is not None:
+            inputs['message_history'] = checkpoint_input_value(list(message_history))
+        return inputs
+
     async def _auto_checkpoint_async(
         self,
         body: Callable[[], Awaitable[Any]],
         *,
         cache_key: str | None = None,
+        checkpoint_inputs: Mapping[str, Any] | None = None,
     ) -> Any:
         return await run_async_in_checkpoint(
             config=self._turn_checkpoint_config,
             step_name=self._name or 'agent',
             body=body,
             cache_key=cache_key,
+            checkpoint_inputs=checkpoint_inputs,
         )
 
     def _auto_checkpoint_sync(
@@ -446,12 +462,14 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         body: Callable[[], Any],
         *,
         cache_key: str | None = None,
+        checkpoint_inputs: Mapping[str, Any] | None = None,
     ) -> Any:
         return run_sync_in_checkpoint(
             config=self._turn_checkpoint_config,
             step_name=self._name or 'agent',
             body=body,
             cache_key=cache_key,
+            checkpoint_inputs=checkpoint_inputs,
         )
 
     def _invoke_in_auto_flow(self, body: Callable[[], Any]) -> Any:
@@ -547,11 +565,16 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         *,
         force_turn_checkpoint: bool = False,
         cache_key: str | None = None,
+        checkpoint_inputs: Mapping[str, Any] | None = None,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
                 return await body()
-            return await self._auto_checkpoint_async(body, cache_key=cache_key)
+            return await self._auto_checkpoint_async(
+                body,
+                cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
+            )
 
         # Outside any flow: auto-open one. FlowHandle.wait() is sync-blocking,
         # so we dispatch the flow to a worker thread (no running loop there,
@@ -561,6 +584,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 body,
                 force_turn_checkpoint=force_turn_checkpoint,
                 cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
             )
 
         loop = asyncio.get_running_loop()
@@ -575,16 +599,22 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         *,
         force_turn_checkpoint: bool = False,
         cache_key: str | None = None,
+        checkpoint_inputs: Mapping[str, Any] | None = None,
     ) -> Any:
         if is_inside_flow():
             if is_inside_checkpoint() or self._use_granular(force_turn_checkpoint):
                 return body()
-            return self._auto_checkpoint_sync(body, cache_key=cache_key)
+            return self._auto_checkpoint_sync(
+                body,
+                cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
+            )
         return self._invoke_in_auto_flow(
             lambda: self._run_sync(
                 body,
                 force_turn_checkpoint=force_turn_checkpoint,
                 cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
             )
         )
 
@@ -658,6 +688,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             instructions=instructions,
             model_settings=model_settings,
         )
+        checkpoint_inputs = self._turn_checkpoint_inputs(
+            user_prompt=user_prompt,
+            message_history=effective_history,
+        )
 
         error: BaseException | None = None
         try:
@@ -665,6 +699,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 _body,
                 force_turn_checkpoint=wrapped_handler is not None,
                 cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
             )
         except BaseException as exc:
             error = exc
@@ -731,6 +766,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             instructions=instructions,
             model_settings=model_settings,
         )
+        checkpoint_inputs = self._turn_checkpoint_inputs(
+            user_prompt=user_prompt,
+            message_history=effective_history,
+        )
 
         error: BaseException | None = None
         try:
@@ -738,6 +777,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 _body,
                 force_turn_checkpoint=wrapped_handler is not None,
                 cache_key=cache_key,
+                checkpoint_inputs=checkpoint_inputs,
             )
         except BaseException as exc:
             error = exc

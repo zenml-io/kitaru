@@ -50,6 +50,14 @@ def _artifact_names(hydrated_run: Any) -> list[str]:
     return names
 
 
+def _input_names_by_step(hydrated_run: Any) -> list[set[str]]:
+    return [set(step.inputs) for step in hydrated_run.steps.values()]
+
+
+def _has_step_input(hydrated_run: Any, input_name: str) -> bool:
+    return any(input_name in inputs for inputs in _input_names_by_step(hydrated_run))
+
+
 def _wait_for_hydrated_run(exec_id: str) -> Any:
     client = Client()
     deadline = time.time() + 30
@@ -127,6 +135,8 @@ def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     assert summary["tool_call_count"] >= 1
     assert {"llm_call", "tool_call"} <= _event_kinds(event_map)
 
+    assert _has_step_input(hydrated_run, "user_prompt")
+
     artifact_names = _artifact_names(hydrated_run)
     assert "event_log" in artifact_names
     assert "run_summary" in artifact_names
@@ -136,6 +146,60 @@ def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     assert any(re.fullmatch(r"tool_call_\d+_result", name) for name in artifact_names)
     _assert_event_artifacts_use_display_names(event_map, artifact_names)
     assert not any(summary["run_label"] in name for name in artifact_names)
+
+
+def test_phase17_turn_mode_tracks_effective_history_input_for_continuations(
+    primed_zenml,
+) -> None:
+    """Continuation turns should expose message_history without a fake prompt input."""
+    durable_agent = _make_wrapped_agent(name_prefix="history_agent")
+
+    @flow
+    def continuation_flow() -> str:
+        first = durable_agent.run_sync("first turn")
+        second = durable_agent.run_sync(
+            user_prompt=None, message_history=first.all_messages()
+        )
+        return second.output
+
+    handle = continuation_flow.run()
+    hydrated_run = _wait_for_hydrated_run(handle.exec_id)
+
+    inputs_by_step = _input_names_by_step(hydrated_run)
+    assert any("message_history" in inputs for inputs in inputs_by_step)
+    assert any(
+        "message_history" in inputs and "user_prompt" not in inputs
+        for inputs in inputs_by_step
+    )
+    artifact_names = _artifact_names(hydrated_run)
+    assert "llm_call_1_prompt" in artifact_names
+    assert "llm_call_1_response" in artifact_names
+
+
+def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
+    primed_zenml,
+) -> None:
+    """Instructions-only turns should not create prompt/history placeholders."""
+    agent = Agent(
+        TestModel(),
+        name=f"empty_input_agent_{uuid4().hex[:8]}",
+        output_type=str,
+        instructions="Reply successfully.",
+    )
+    durable_agent = KitaruAgent(agent)
+
+    @flow
+    def instructions_only_flow() -> str:
+        return durable_agent.run_sync(user_prompt=None).output
+
+    handle = instructions_only_flow.run()
+    hydrated_run = _wait_for_hydrated_run(handle.exec_id)
+
+    assert not _has_step_input(hydrated_run, "user_prompt")
+    assert not _has_step_input(hydrated_run, "message_history")
+    artifact_names = _artifact_names(hydrated_run)
+    assert "llm_call_1_prompt" in artifact_names
+    assert "llm_call_1_response" in artifact_names
 
 
 def test_phase17_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:

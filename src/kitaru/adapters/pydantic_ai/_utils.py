@@ -65,12 +65,17 @@ def materialize_step_output(value: Any) -> Any:
     return load() if callable(load) else value
 
 
+def checkpoint_input_value(value: Any) -> Any:
+    """Return a JSON-friendly value for synthetic checkpoint input artifacts."""
+    try:
+        return to_jsonable_python(value, serialize_unknown=True)
+    except ValueError:
+        return {'repr': repr(value), 'python_type': type(value).__name__}
+
+
 def checkpoint_cache_key(payload: Any) -> str:
     """Return a stable hash for synthetic checkpoint inputs."""
-    try:
-        normalized = to_jsonable_python(payload, serialize_unknown=True)
-    except ValueError:
-        normalized = {'repr': repr(payload), 'python_type': type(payload).__name__}
+    normalized = checkpoint_input_value(payload)
     encoded = json.dumps(normalized, sort_keys=True, separators=(',', ':'), default=repr).encode()
     return hashlib.sha256(encoded).hexdigest()
 
@@ -132,18 +137,60 @@ def reject_isolated_runtime(config: CheckpointConfig | dict[str, Any]) -> None:
 
 
 def _build_checkpoint_step(
-    *, config: CheckpointConfig, step_name: str, body: Callable[[], Any]
+    *,
+    config: CheckpointConfig,
+    step_name: str,
+    body: Callable[[], Any],
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Callable[..., Any]:
     reject_isolated_runtime(config)
 
-    def _turn(_cache_key: str | None = None) -> Any:
-        return body()
+    input_names = frozenset(checkpoint_inputs or {})
+    if input_names == frozenset():
 
-    _turn.__name__ = step_name
-    checkpoint_def = kitaru.checkpoint(**config)(_turn)
+        def _turn_without_inputs(_cache_key: str | None = None) -> Any:
+            return body()
+
+        turn = _turn_without_inputs
+    elif input_names == {'user_prompt'}:
+
+        def _turn_with_user_prompt(
+            user_prompt: Any,
+            _cache_key: str | None = None,
+        ) -> Any:
+            return body()
+
+        turn = _turn_with_user_prompt
+    elif input_names == {'message_history'}:
+
+        def _turn_with_message_history(
+            message_history: Any,
+            _cache_key: str | None = None,
+        ) -> Any:
+            return body()
+
+        turn = _turn_with_message_history
+    elif input_names == {'user_prompt', 'message_history'}:
+
+        def _turn_with_prompt_and_history(
+            user_prompt: Any,
+            message_history: Any,
+            _cache_key: str | None = None,
+        ) -> Any:
+            return body()
+
+        turn = _turn_with_prompt_and_history
+    else:
+        unsupported = ', '.join(sorted(input_names))
+        raise KitaruUsageError(
+            f'Unsupported synthetic checkpoint inputs: {unsupported}.'
+        )
+
+    turn.__name__ = step_name
+    checkpoint_def = kitaru.checkpoint(**config)(turn)
     step_obj = getattr(checkpoint_def, '_step', None)
     if step_obj is not None:
-        alias = build_checkpoint_source_alias(_turn.__name__)
+        alias = build_checkpoint_source_alias(turn.__name__)
         for module_name in {__name__, f'src.{__name__}'}:
             module = sys.modules.get(module_name)
             if module is not None:
@@ -157,10 +204,18 @@ def run_sync_in_checkpoint(
     step_name: str,
     body: Callable[[], Any],
     cache_key: str | None = None,
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
     """Run a sync ``body`` inside a ``@kitaru.checkpoint(**config)`` step."""
-    checkpoint_def = _build_checkpoint_step(config=config, step_name=step_name, body=body)
-    return materialize_step_output(checkpoint_def(cache_key))
+    checkpoint_def = _build_checkpoint_step(
+        config=config,
+        step_name=step_name,
+        body=body,
+        checkpoint_inputs=checkpoint_inputs,
+    )
+    return materialize_step_output(
+        checkpoint_def(**(checkpoint_inputs or {}), _cache_key=cache_key)
+    )
 
 
 async def run_async_in_checkpoint(
@@ -169,6 +224,7 @@ async def run_async_in_checkpoint(
     step_name: str,
     body: Callable[[], Coroutine[Any, Any, Any]],
     cache_key: str | None = None,
+    checkpoint_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
     """Run an async ``body`` inside a ``@kitaru.checkpoint(**config)`` step.
 
@@ -176,9 +232,16 @@ async def run_async_in_checkpoint(
     sync ``_turn`` dispatched to a worker thread so the caller's loop stays free.
     """
     checkpoint_def = _build_checkpoint_step(
-        config=config, step_name=step_name, body=lambda: asyncio.run(body())
+        config=config,
+        step_name=step_name,
+        body=lambda: asyncio.run(body()),
+        checkpoint_inputs=checkpoint_inputs,
     )
-    step_output = await asyncio.to_thread(checkpoint_def, cache_key)
+    step_output = await asyncio.to_thread(
+        checkpoint_def,
+        **(checkpoint_inputs or {}),
+        _cache_key=cache_key,
+    )
     return materialize_step_output(step_output)
 
 
@@ -193,9 +256,9 @@ def turn_cache_key(
 ) -> str:
     """Stable cache key for a ``KitaruAgent`` turn checkpoint.
 
-    The inputs live in `_body`'s closure and aren't visible to ZenML's step
-    cache — without an explicit key, different prompts collide on the cached
-    result of the previous call.
+    Some turn inputs live in `_body`'s closure and aren't visible to ZenML's
+    step cache — without an explicit key, different prompts or settings could
+    collide on the cached result of the previous call.
     """
     return checkpoint_cache_key(
         {
