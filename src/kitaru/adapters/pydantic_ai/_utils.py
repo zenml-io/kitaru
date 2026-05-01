@@ -16,12 +16,13 @@ from kitaru._source_aliases import build_checkpoint_source_alias
 from kitaru.errors import KitaruUsageError
 from pydantic_core import to_jsonable_python
 
-CheckpointRuntime = Literal['inline', 'isolated']
+CheckpointRuntime = Literal["inline", "isolated"]
 
 
 class CheckpointConfig(TypedDict, total=False):
     """Kwargs forwarded to the adapter's synthetic ``@kitaru.checkpoint(...)``."""
 
+    cache: bool | None
     runtime: CheckpointRuntime
     retries: int
     type: str
@@ -29,17 +30,17 @@ class CheckpointConfig(TypedDict, total=False):
 
 ToolCheckpointOverride = CheckpointConfig | Literal[False]
 ToolCheckpointOverrides = Mapping[str, ToolCheckpointOverride]
-_ALLOWED_CHECKPOINT_CONFIG_KEYS = frozenset({'runtime', 'retries', 'type'})
+_ALLOWED_CHECKPOINT_CONFIG_KEYS = frozenset({"cache", "runtime", "retries", "type"})
 
-if f'src.{__name__}' not in sys.modules:
-    sys.modules[f'src.{__name__}'] = sys.modules[__name__]
+if f"src.{__name__}" not in sys.modules:
+    sys.modules[f"src.{__name__}"] = sys.modules[__name__]
 
 
 def with_default_type(config: CheckpointConfig, default_type: str) -> CheckpointConfig:
     """Return ``config`` with ``type`` defaulted to ``default_type``."""
-    if 'type' in config:
+    if "type" in config:
         return config
-    return {**config, 'type': default_type}
+    return {**config, "type": default_type}
 
 
 def resolve_tool_checkpoint_config(
@@ -61,7 +62,7 @@ def resolve_tool_checkpoint_config(
 
 def materialize_step_output(value: Any) -> Any:
     """Unwrap a ZenML ``OutputArtifact`` handle to its concrete payload."""
-    load = getattr(value, 'load', None)
+    load = getattr(value, "load", None)
     return load() if callable(load) else value
 
 
@@ -70,13 +71,15 @@ def checkpoint_input_value(value: Any) -> Any:
     try:
         return to_jsonable_python(value, serialize_unknown=True)
     except ValueError:
-        return {'repr': repr(value), 'python_type': type(value).__name__}
+        return {"repr": repr(value), "python_type": type(value).__name__}
 
 
 def checkpoint_cache_key(payload: Any) -> str:
     """Return a stable hash for synthetic checkpoint inputs."""
     normalized = checkpoint_input_value(payload)
-    encoded = json.dumps(normalized, sort_keys=True, separators=(',', ':'), default=repr).encode()
+    encoded = json.dumps(
+        normalized, sort_keys=True, separators=(",", ":"), default=repr
+    ).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -90,10 +93,12 @@ def validate_checkpoint_config(
         return None
     unknown_keys = sorted(set(config) - _ALLOWED_CHECKPOINT_CONFIG_KEYS)
     if unknown_keys:
-        unknown = ', '.join(unknown_keys)
+        unknown = ", ".join(repr(key) for key in unknown_keys)
+        allowed = ", ".join(
+            repr(key) for key in sorted(_ALLOWED_CHECKPOINT_CONFIG_KEYS)
+        )
         raise KitaruUsageError(
-            f'Unsupported keys in {context}: {unknown}. '
-            "Allowed keys are: 'runtime', 'retries', 'type'."
+            f"Unsupported keys in {context}: {unknown}. Allowed keys are: {allowed}."
         )
     validated = cast(CheckpointConfig, dict(config))
     reject_isolated_runtime(validated)
@@ -114,9 +119,11 @@ def validate_tool_checkpoint_overrides(
             normalized[tool_name] = False
             continue
         validated = validate_checkpoint_config(
-            override, context=f'{context}[{tool_name!r}]'
+            override, context=f"{context}[{tool_name!r}]"
         )
-        normalized[tool_name] = validated if validated is not None else cast(CheckpointConfig, {})
+        normalized[tool_name] = (
+            validated if validated is not None else cast(CheckpointConfig, {})
+        )
     return normalized
 
 
@@ -128,10 +135,10 @@ def reject_isolated_runtime(config: CheckpointConfig | dict[str, Any]) -> None:
     that ``runtime='isolated'`` would trigger on remote stacks. Until
     :class:`KitaruRunContext` is wired through, accept only inline runtime.
     """
-    if config.get('runtime') == 'isolated':
+    if config.get("runtime") == "isolated":
         raise KitaruUsageError(
             "The PydanticAI adapter does not yet support `runtime='isolated'` — "
-            'checkpoint closures capture live objects that cannot cross process '
+            "checkpoint closures capture live objects that cannot cross process "
             "boundaries. Use `runtime='inline'` or omit `runtime`."
         )
 
@@ -152,7 +159,7 @@ def _build_checkpoint_step(
             return body()
 
         turn = _turn_without_inputs
-    elif input_names == {'user_prompt'}:
+    elif input_names == {"user_prompt"}:
 
         def _turn_with_user_prompt(
             user_prompt: Any,
@@ -161,7 +168,7 @@ def _build_checkpoint_step(
             return body()
 
         turn = _turn_with_user_prompt
-    elif input_names == {'message_history'}:
+    elif input_names == {"message_history"}:
 
         def _turn_with_message_history(
             message_history: Any,
@@ -170,7 +177,7 @@ def _build_checkpoint_step(
             return body()
 
         turn = _turn_with_message_history
-    elif input_names == {'user_prompt', 'message_history'}:
+    elif input_names == {"user_prompt", "message_history"}:
 
         def _turn_with_prompt_and_history(
             user_prompt: Any,
@@ -181,17 +188,17 @@ def _build_checkpoint_step(
 
         turn = _turn_with_prompt_and_history
     else:
-        unsupported = ', '.join(sorted(input_names))
+        unsupported = ", ".join(sorted(input_names))
         raise KitaruUsageError(
-            f'Unsupported synthetic checkpoint inputs: {unsupported}.'
+            f"Unsupported synthetic checkpoint inputs: {unsupported}."
         )
 
     turn.__name__ = step_name
     checkpoint_def = kitaru.checkpoint(**config)(turn)
-    step_obj = getattr(checkpoint_def, '_step', None)
+    step_obj = getattr(checkpoint_def, "_step", None)
     if step_obj is not None:
         alias = build_checkpoint_source_alias(turn.__name__)
-        for module_name in {__name__, f'src.{__name__}'}:
+        for module_name in {__name__, f"src.{__name__}"}:
             module = sys.modules.get(module_name)
             if module is not None:
                 setattr(module, alias, step_obj)
@@ -262,11 +269,11 @@ def turn_cache_key(
     """
     return checkpoint_cache_key(
         {
-            'agent_name': agent_name,
-            'user_prompt': user_prompt,
-            'message_history': message_history,
-            'deferred_tool_results': deferred_tool_results,
-            'instructions': instructions,
-            'model_settings': model_settings,
+            "agent_name": agent_name,
+            "user_prompt": user_prompt,
+            "message_history": message_history,
+            "deferred_tool_results": deferred_tool_results,
+            "instructions": instructions,
+            "model_settings": model_settings,
         }
     )

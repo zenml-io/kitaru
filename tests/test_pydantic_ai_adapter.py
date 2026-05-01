@@ -8,8 +8,9 @@ Full end-to-end agent runs are exercised by the example tests.
 from __future__ import annotations
 
 import warnings
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -17,8 +18,10 @@ pytest.importorskip("pydantic_ai")
 
 from kitaru.adapters.pydantic_ai._utils import (
     CheckpointConfig,
+    checkpoint_cache_key,
     reject_isolated_runtime,
     resolve_tool_checkpoint_config,
+    validate_checkpoint_config,
     with_default_type,
 )
 from kitaru.errors import KitaruContextError, KitaruRuntimeError, KitaruUsageError
@@ -54,6 +57,27 @@ def _install_checkpoint_step_recorder(
         fake_checkpoint,
     )
     return checkpoint_steps
+
+
+class TestValidateCheckpointConfig:
+    @pytest.mark.parametrize("cache", [True, False, None])
+    def test_accepts_cache(self, cache: bool | None) -> None:
+        assert validate_checkpoint_config(
+            {"cache": cache},
+            context="model_checkpoint_config",
+        ) == {"cache": cache}
+
+    def test_unknown_key_error_lists_cache_with_allowed_keys(self) -> None:
+        with pytest.raises(KitaruUsageError) as exc_info:
+            validate_checkpoint_config(
+                cast(Any, {"surprise": True}),
+                context="model_checkpoint_config",
+            )
+
+        assert "Unsupported keys in model_checkpoint_config: 'surprise'" in str(
+            exc_info.value
+        )
+        assert "'cache'" in str(exc_info.value)
 
 
 class TestRejectIsolatedRuntime:
@@ -160,6 +184,164 @@ class TestWaitCallSuffix:
         from kitaru.adapters.pydantic_ai._toolset import _wait_call_suffix
 
         assert _wait_call_suffix("call_a") != _wait_call_suffix("call_b")
+
+
+class TestModelMessageCacheSerialization:
+    def _messages(self, *, run_id: str, second: int) -> list[Any]:
+        from pydantic_ai.messages import (
+            ModelRequest,
+            ModelResponse,
+            TextPart,
+            ToolCallPart,
+            ToolReturnPart,
+            UserPromptPart,
+        )
+
+        return [
+            ModelRequest(
+                parts=[
+                    UserPromptPart(
+                        content="same prompt",
+                        timestamp=datetime(2026, 5, 1, 12, 0, second, tzinfo=UTC),
+                    )
+                ],
+                run_id=run_id,
+            ),
+            ModelResponse(
+                parts=[
+                    TextPart(content="thinking about lookup"),
+                    ToolCallPart(
+                        tool_name="lookup",
+                        args={
+                            "timestamp": "user supplied timestamp",
+                            "nested": {"run_id": "user supplied run id"},
+                        },
+                        tool_call_id="call_lookup",
+                    ),
+                ],
+                timestamp=datetime(2026, 5, 1, 12, 1, second, tzinfo=UTC),
+                run_id=run_id,
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="lookup",
+                        content={"timestamp": "user supplied tool result"},
+                        tool_call_id="call_lookup",
+                        timestamp=datetime(2026, 5, 1, 12, 2, second, tzinfo=UTC),
+                    )
+                ],
+                run_id=run_id,
+            ),
+        ]
+
+    def test_cache_serialization_ignores_message_envelope_not_user_content(
+        self,
+    ) -> None:
+        from pydantic_ai.models import ModelRequestParameters
+
+        from kitaru.adapters.pydantic_ai._model import (
+            _serialize_messages,
+            _serialize_messages_for_cache,
+        )
+
+        messages_a = self._messages(run_id="run-a", second=1)
+        messages_b = self._messages(run_id="run-b", second=2)
+
+        serialized = _serialize_messages(messages_a)
+        assert serialized[0]["run_id"] == "run-a"
+        assert serialized[0]["parts"][0]["timestamp"] == "2026-05-01T12:00:01Z"
+
+        stable = _serialize_messages_for_cache(messages_a)
+        assert "run_id" not in stable[0]
+        assert "timestamp" not in stable[0]["parts"][0]
+        assert "run_id" not in stable[1]
+        assert "timestamp" not in stable[1]
+        assert "timestamp" not in stable[2]["parts"][0]
+        assert stable[1]["parts"][1]["args"] == {
+            "timestamp": "user supplied timestamp",
+            "nested": {"run_id": "user supplied run id"},
+        }
+        assert stable[2]["parts"][0]["content"] == {
+            "timestamp": "user supplied tool result"
+        }
+
+        cache_key_a = checkpoint_cache_key(
+            {
+                "messages": stable,
+                "model_settings": None,
+                "model_request_parameters": ModelRequestParameters(),
+            }
+        )
+        cache_key_b = checkpoint_cache_key(
+            {
+                "messages": _serialize_messages_for_cache(messages_b),
+                "model_settings": None,
+                "model_request_parameters": ModelRequestParameters(),
+            }
+        )
+        assert cache_key_a == cache_key_b
+
+    def test_granular_model_checkpoint_uses_stable_cache_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from collections.abc import Awaitable, Callable
+
+        from pydantic_ai import Agent
+        from pydantic_ai.messages import ModelResponse, TextPart
+        from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+        from kitaru.runtime import _flow_scope
+
+        calls = {"model": 0}
+        cached_responses: dict[str, Any] = {}
+
+        def model_function(_messages: list[Any], _info: AgentInfo) -> ModelResponse:
+            calls["model"] += 1
+            return ModelResponse(parts=[TextPart(content="fixed answer")])
+
+        async def fake_checkpoint(
+            *,
+            config: CheckpointConfig,
+            step_name: str,
+            body: Callable[[], Awaitable[Any]],
+            cache_key: str | None = None,
+            **_kwargs: Any,
+        ) -> Any:
+            assert step_name == "stable_cache_agent_model_request"
+            assert config["cache"] is True
+            assert cache_key is not None
+            if cache_key in cached_responses:
+                return cached_responses[cache_key]
+            result = await body()
+            cached_responses[cache_key] = result
+            return result
+
+        monkeypatch.setattr(
+            "kitaru.adapters.pydantic_ai._model.run_async_in_checkpoint",
+            fake_checkpoint,
+        )
+        agent = KitaruAgent(
+            Agent(
+                FunctionModel(model_function),
+                name="stable_cache_agent",
+                output_type=str,
+            ),
+            granular_checkpoints=True,
+            model_checkpoint_config={"cache": True},
+        )
+
+        with _flow_scope(name="test_flow"):
+            first = agent.run_sync("same prompt").output
+        with _flow_scope(name="test_flow"):
+            second = agent.run_sync("same prompt").output
+
+        assert first == "fixed answer"
+        assert second == "fixed answer"
+        assert calls == {"model": 1}
+        assert len(cached_responses) == 1
 
 
 class TestWaitForInput:
@@ -306,6 +488,34 @@ class TestUseGranular:
         assert agent._model_checkpoint_config == {}
         assert agent._tool_checkpoint_config == {}
         assert agent._mcp_checkpoint_config == {}
+
+    def test_all_checkpoint_configs_accept_cache(self) -> None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from kitaru.adapters.pydantic_ai import KitaruAgent
+
+        agent = KitaruAgent(
+            Agent(TestModel(), name="cache_config_agent"),
+            granular_checkpoints=True,
+            turn_checkpoint_config={"cache": True},
+            model_checkpoint_config={"cache": True},
+            tool_checkpoint_config={"cache": False},
+            tool_checkpoint_config_by_name={
+                "lookup": {"cache": True},
+                "send_email": False,
+            },
+            mcp_checkpoint_config={"cache": None},
+        )
+
+        assert agent._turn_checkpoint_config == {"cache": True}
+        assert agent._model_checkpoint_config == {"cache": True}
+        assert agent._tool_checkpoint_config == {"cache": False}
+        assert agent._tool_checkpoint_config_by_name == {
+            "lookup": {"cache": True},
+            "send_email": False,
+        }
+        assert agent._mcp_checkpoint_config == {"cache": None}
 
     def test_per_call_configs_require_granular_mode(self) -> None:
         from pydantic_ai import Agent

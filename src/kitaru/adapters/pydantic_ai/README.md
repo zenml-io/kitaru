@@ -162,7 +162,9 @@ The adapter offers two strategies for how agent work maps onto Kitaru checkpoint
 | **Granular** (default) | No turn checkpoint; each model/tool/MCP call becomes its own checkpoint | Per call | Expensive model calls, flaky tools, long tool-call chains where one failure shouldn't rewind everything |
 | **Turn** (`granular_checkpoints=False`) | One checkpoint per agent run; model/tool/MCP calls are child events | The full turn | Agents where one aggregated checkpoint and checkpoint artifacts like `event_log` / `run_summary` are more useful than per-call boundaries |
 
-**Replay semantics in one sentence.** If a flow crashes on the 8th LLM call of a turn, turn mode re-runs the whole turn; granular mode gives the earlier calls their own completed checkpoint boundaries. Cross-run cache behavior for adapter-created granular checkpoints is still being improved, so treat granular mode as per-call structure and retry isolation rather than a guaranteed cache-cost fix.
+**Replay semantics in one sentence.** If a flow crashes on the 8th LLM call of a turn, turn mode re-runs the whole turn; granular mode gives the earlier calls their own completed checkpoint boundaries. If you set `cache=True` on the granular model/tool/MCP configs, repeated runs can also reuse completed per-call checkpoints when the logical inputs are the same.
+
+For model checkpoints, the adapter builds the cache key from the prompt/messages, model settings, and model request parameters. Pydantic AI adds fresh per-run envelope fields such as `timestamp` and `run_id` to its internal message objects; Kitaru ignores those envelope labels for the cache key so the same prompt can hit cache on run 2. It does **not** strip user content: if your prompt text, tool args, or tool result contains words or fields named `timestamp` or `run_id`, those still count as part of the logical input. Changed prompts, message history, tool arguments, tool call IDs, model settings, or request parameters still produce a new cache key and should miss cache.
 
 Granular mode is the default. `granular_checkpoints=True` is shown here for clarity when setting per-call checkpoint configs:
 
@@ -170,10 +172,10 @@ Granular mode is the default. `granular_checkpoints=True` is shown here for clar
 durable_agent = KitaruAgent(
     agent,
     granular_checkpoints=True,
-    model_checkpoint_config={'retries': 3},
-    tool_checkpoint_config={'retries': 2},
+    model_checkpoint_config={'retries': 3, 'cache': True},
+    tool_checkpoint_config={'retries': 2, 'cache': True},
     tool_checkpoint_config_by_name={
-        'lookup_price': {'retries': 5},       # flaky external API
+        'lookup_price': {'retries': 5, 'cache': True},  # flaky external API
         'fetch_secret': False,                # never checkpoint this tool
     },
     mcp_checkpoint_config={'retries': 3},
@@ -182,6 +184,7 @@ durable_agent = KitaruAgent(
 
 Each config is a `CheckpointConfig` TypedDict accepting:
 
+- `cache: bool | None` — passed through to `@kitaru.checkpoint(cache=...)`. Use `True` to opt adapter-created checkpoints into ZenML/Kitaru step caching, `False` to disable caching for that boundary, or omit it / use `None` to inherit the stack default.
 - `runtime: 'inline'` — run in-process. `runtime='isolated'` is a planned follow-up and currently raises `KitaruUsageError`. Supporting it requires making every adapter wrapper (`KitaruModel`, `KitaruToolset`, `KitaruMCPServer`) reconstructible from serializable construction args on the far side of the process boundary and wiring `KitaruRunContext` through the granular dispatcher — the pydantic payloads already serialize via `TypeAdapter`, so most of the work is on the wrapper-identity side.
 - `retries: int` — auto-retry the step on failure.
 - `type: str` — dashboard grouping. Defaults to `'llm_call'`, `'tool_call'`, or `'mcp_call'` so adapter checkpoints group with native `kitaru.llm()` / `@kitaru.checkpoint(type='tool_call')` calls.
