@@ -309,6 +309,27 @@ class TestPlaceholderBehavior:
             name="approve_deploy",
         )
 
+    def test_wait_at_flow_scope_does_not_suspend_checkpoint_scope(self) -> None:
+        from kitaru.runtime import _flow_scope
+
+        mock_zenml_wait = Mock(return_value="resolved")
+
+        def fail_if_entered() -> None:
+            raise AssertionError("flow-scope wait should not suspend checkpoint scope")
+
+        with (
+            _flow_scope(name="flow_a"),
+            patch(
+                "kitaru.wait._resolve_zenml_wait",
+                return_value=mock_zenml_wait,
+            ),
+            patch("kitaru.wait._suspend_checkpoint_scope", fail_if_entered),
+        ):
+            resolved = kitaru.wait(name="approve_deploy")
+
+        assert resolved == "resolved"
+        mock_zenml_wait.assert_called_once()
+
     def test_llm_requires_flow_context(self) -> None:
         with pytest.raises(kitaru.KitaruContextError, match=r"inside a @flow"):
             kitaru.llm("hello")

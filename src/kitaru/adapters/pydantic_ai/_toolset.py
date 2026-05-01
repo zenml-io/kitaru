@@ -103,6 +103,10 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         ctx: RunContext[AgentDepsT],
         tool: ToolsetTool[AgentDepsT],
     ) -> Any:
+        hitl_config = hitl_config_from_tool_metadata(tool.tool_def.metadata)
+        if hitl_config is not None:
+            return await self._call_tool_tracked(name, tool_args, ctx, tool, hitl_config)
+
         checkpoint_config = resolve_tool_checkpoint_config(
             name,
             default=self.tool_checkpoint_config,
@@ -114,7 +118,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
             and not is_inside_checkpoint()
         ):
             async def _in_checkpoint() -> Any:
-                return await self._call_tool_tracked(name, tool_args, ctx, tool)
+                return await self._call_tool_tracked(name, tool_args, ctx, tool, hitl_config)
 
             return await run_async_in_checkpoint(
                 config=with_default_type(checkpoint_config, self._default_checkpoint_type),
@@ -129,7 +133,7 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                     }
                 ),
             )
-        return await self._call_tool_tracked(name, tool_args, ctx, tool)
+        return await self._call_tool_tracked(name, tool_args, ctx, tool, hitl_config)
 
     async def _call_tool_tracked(
         self,
@@ -137,10 +141,10 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
         tool_args: dict[str, Any],
         ctx: RunContext[AgentDepsT],
         tool: ToolsetTool[AgentDepsT],
+        hitl_config: HitlConfig | None,
     ) -> Any:
         capture_mode = self.capture.capture_mode_for_tool(name)
         tracker = get_current_tracker()
-        hitl_config = hitl_config_from_tool_metadata(tool.tool_def.metadata)
         if tracker is None or capture_mode is None:
             return await self._call_with_hitl(
                 name=name,

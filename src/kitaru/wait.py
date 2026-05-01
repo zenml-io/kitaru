@@ -22,7 +22,11 @@ from kitaru.errors import (
     KitaruContextError,
     KitaruFeatureNotAvailableError,
 )
-from kitaru.runtime import _is_inside_flow, _suspend_checkpoint_scope
+from kitaru.runtime import (
+    _is_inside_checkpoint,
+    _is_inside_flow,
+    _suspend_checkpoint_scope,
+)
 
 _WAIT_OUTSIDE_FLOW_ERROR = "wait() can only run inside a @flow."
 _DEFAULT_WAIT_TIMEOUT_SECONDS = 600
@@ -107,11 +111,16 @@ def wait(
         },
     )
 
-    with _suspend_checkpoint_scope():
-        return zenml_wait(
-            schema=schema,
-            question=question,
-            timeout=resolved_timeout,
-            metadata=metadata,
-            name=name,
-        )
+    wait_kwargs = {
+        "schema": schema,
+        "question": question,
+        "timeout": resolved_timeout,
+        "metadata": metadata,
+        "name": name,
+    }
+
+    if _is_inside_checkpoint():
+        with _suspend_checkpoint_scope():
+            return zenml_wait(**wait_kwargs)
+
+    return zenml_wait(**wait_kwargs)

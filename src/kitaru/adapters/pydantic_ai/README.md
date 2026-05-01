@@ -133,6 +133,10 @@ Equivalent triggers that also route through `kitaru.wait()`:
 - `@agent.tool(requires_approval=True)` — Pydantic AI's native approval flag.
 - Raising `pydantic_ai.exceptions.ApprovalRequired` or `CallDeferred` from any tool body.
 
+In the default granular mode, explicit `@hitl_tool` calls create a wait point directly at flow scope instead of first creating an empty `*_tool` checkpoint. Concretely, the timeline shows the human wait as the durable anchor for that call. Exception-driven approvals/deferred calls can still appear inside an adapter-created tool checkpoint, because the adapter only learns about those after the tool body has started running. In that case Kitaru temporarily steps out of the checkpoint just long enough to create the wait, then resumes normal checkpoint behavior.
+
+This also affects where event details land. Flow-scope explicit HITL calls are still logged as adapter event metadata, but checkpoint artifacts such as `event_log`, `run_summary`, and captured tool args/results are only saved when there is an actual checkpoint scope to attach them to.
+
 ### 4. MCP servers
 
 MCP servers attached to the agent are wrapped automatically. Their tool calls appear as `ToolEvent`s with `toolset_kind='mcp'` alongside native tools; in the default granular mode, each top-level MCP call gets its own adapter checkpoint. `MCPServer.cache_tools=True` is honored to skip redundant `tools/list` round-trips on replay.

@@ -8,6 +8,7 @@ Full end-to-end agent runs are exercised by the example tests.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -20,6 +21,26 @@ from kitaru.adapters.pydantic_ai._utils import (
     with_default_type,
 )
 from kitaru.errors import KitaruUsageError
+
+
+def _install_checkpoint_step_recorder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[str]:
+    from collections.abc import Awaitable, Callable
+
+    checkpoint_steps: list[str] = []
+
+    async def fake_checkpoint(
+        *, step_name: str, body: Callable[[], Awaitable[Any]], **_kwargs: Any
+    ) -> Any:
+        checkpoint_steps.append(step_name)
+        return await body()
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
+        fake_checkpoint,
+    )
+    return checkpoint_steps
 
 
 class TestRejectIsolatedRuntime:
@@ -390,10 +411,91 @@ async def test_capture_off_still_routes_hitl(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.anyio
+async def test_explicit_hitl_tool_bypasses_granular_tool_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy, hitl_tool
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    @hitl_tool(schema=str, question="Need human input")
+    def ask_human() -> str:
+        return "never reached"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["ask_human"]
+
+    async def fail_checkpoint(**_kwargs: Any) -> Any:
+        raise AssertionError("explicit HITL should not open a granular tool checkpoint")
+
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.run_async_in_checkpoint",
+        fail_checkpoint,
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.kitaru.wait",
+        lambda **_: "approved by human",
+    )
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("ask_human", {}, ctx, tool)
+
+    assert result == "approved by human"
+
+
+@pytest.mark.anyio
+async def test_non_hitl_tool_still_uses_granular_tool_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+    from kitaru.runtime import _flow_scope
+
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def ordinary_tool() -> str:
+        return "ordinary result"
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
+    )
+    ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+    tool = (await wrapped.get_tools(ctx))["ordinary_tool"]
+    checkpoint_steps = _install_checkpoint_step_recorder(monkeypatch)
+
+    with _flow_scope(name="demo_flow"):
+        result = await wrapped.call_tool("ordinary_tool", {}, ctx, tool)
+
+    assert result == "ordinary result"
+    assert checkpoint_steps == ["ordinary_tool_tool"]
+
+
+@pytest.mark.anyio
 async def test_named_hitl_tool_uses_name_as_unique_wait_base(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from typing import Any
 
     from pydantic_ai import FunctionToolset
     from pydantic_ai.models.test import TestModel
@@ -450,8 +552,6 @@ async def test_run_sync_refuses_inside_running_event_loop() -> None:
 async def test_approval_required_routes_through_wait(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from typing import Any
-
     from pydantic_ai import FunctionToolset
     from pydantic_ai.exceptions import ApprovalRequired
     from pydantic_ai.models.test import TestModel
@@ -474,12 +574,15 @@ async def test_approval_required_routes_through_wait(
         return "published"
 
     wrapped = kitaruify_toolset(
-        toolset, capture=CapturePolicy(correlate_otel_spans=False)
+        toolset,
+        capture=CapturePolicy(correlate_otel_spans=False),
+        tool_checkpoint_config={},
     )
     ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
     tool = (await wrapped.get_tools(ctx))["publish"]
 
     captured: dict[str, Any] = {}
+    checkpoint_steps = _install_checkpoint_step_recorder(monkeypatch)
 
     def _fake_wait(**kwargs: Any) -> bool:
         captured.update(kwargs.get("metadata") or {})
@@ -494,6 +597,7 @@ async def test_approval_required_routes_through_wait(
     assert result == "published"
     assert captured.get("exception_metadata") == {"channel": "prod"}
     assert call_count["value"] == 2
+    assert checkpoint_steps == ["publish_tool"]
 
 
 @pytest.mark.anyio
