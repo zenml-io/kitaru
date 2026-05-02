@@ -32,6 +32,7 @@ from kitaru.inspection import (
 )
 
 from . import stack_app
+from ._dependencies import cli_dependencies
 from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
@@ -43,7 +44,6 @@ from ._helpers import (
     _emit_pagination_note,
     _emit_snapshot,
     _exit_with_error,
-    _facade_module,
     _paginate_items,
     _print_success,
     _resolve_output_format,
@@ -382,14 +382,14 @@ def list_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
 
     def _list_stacks() -> tuple[list[StackInfo], list[Any] | None]:
         if output_format == CLIOutputFormat.JSON:
-            stack_entries = facade._list_stack_entries()
+            stack_entries = deps.list_stack_entries()
             stacks = [entry.stack for entry in stack_entries]
         else:
-            stacks = facade.get_available_stacks()
+            stacks = deps.get_available_stacks()
             stack_entries = None
         return stacks, stack_entries
 
@@ -434,7 +434,7 @@ def current(output: OutputFormatOption = "text") -> None:
     command = "stack.current"
     output_format = _resolve_output_format(output)
     stack = run_with_cli_error_boundary(
-        _facade_module().get_current_stack,
+        cli_dependencies().get_current_stack,
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -459,7 +459,7 @@ def show(
     command = "stack.show"
     output_format = _resolve_output_format(output)
     details = run_with_cli_error_boundary(
-        lambda: _facade_module()._show_stack_operation(name_or_id),
+        lambda: cli_dependencies().show_stack_operation(name_or_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -488,7 +488,7 @@ def use(
     command = "stack.use"
     output_format = _resolve_output_format(output)
     selected_stack = run_with_cli_error_boundary(
-        lambda: _facade_module().set_active_stack(stack),
+        lambda: cli_dependencies().set_active_stack(stack),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -689,7 +689,7 @@ def create(
         }
         if not request.component_overrides.is_empty():
             create_kwargs["component_overrides"] = request.component_overrides
-        return _facade_module()._create_stack_operation(request.name, **create_kwargs)
+        return cli_dependencies().create_stack_operation(request.name, **create_kwargs)
 
     result = run_with_cli_error_boundary(
         _create_stack,
@@ -741,7 +741,7 @@ def delete(
     command = "stack.delete"
     output_format = _resolve_output_format(output)
     result = run_with_cli_error_boundary(
-        lambda: _facade_module()._delete_stack_operation(
+        lambda: cli_dependencies().delete_stack_operation(
             stack,
             recursive=recursive,
             force=force,

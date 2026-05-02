@@ -6,6 +6,12 @@ import sys
 import time
 from collections.abc import Sequence
 
+# Legacy CLI facade exports.
+#
+# Command modules now resolve runtime dependencies through
+# ``kitaru._cli._dependencies``.  These imports remain here so existing tests
+# and external integrations that patch/import ``kitaru.cli.<name>`` continue to
+# work while the old facade is being migrated away.
 from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.exceptions import EntityExistsError, ZenKeyError
@@ -162,7 +168,6 @@ from kitaru._cli._secrets import (
     _SECRET_KEY_PATTERN,
     _list_accessible_secrets,
     _parse_secret_assignments,
-    _resolve_secret_exact,
     _secret_list_rows,
     _secret_show_rows,
     delete_,
@@ -233,6 +238,7 @@ from kitaru._interface_memory import (
     scopes_memory_payload,
     set_memory_payload,
 )
+from kitaru._interface_secrets import resolve_secret_exact as _resolve_secret_exact
 from kitaru._local_server import (
     LocalServerConnectionResult,
     LocalServerStopResult,
@@ -264,6 +270,7 @@ from kitaru.inspection import (
 )
 from kitaru.inspection import log_store_mismatch_details as _log_store_mismatch_details
 
+# Console entrypoint and startup/bootstrap behavior.
 app.version = _UNKNOWN_VERSION
 
 # Commands that manage their own connection lifecycle or never need a live

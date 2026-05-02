@@ -47,6 +47,7 @@ from kitaru.inspection import (
 )
 
 from . import app, flow_app, flow_deployments_app
+from ._dependencies import cli_dependencies
 from ._executions import (
     _emit_control_message,
     _emit_json_log_event,
@@ -67,7 +68,6 @@ from ._helpers import (
     _emit_snapshot,
     _emit_table,
     _exit_with_error,
-    _facade_module,
     _format_table_timestamp,
     _format_timestamp,
     _paginate_items,
@@ -610,7 +610,7 @@ def invoke(
             tag=tag,
             default_tag=DEFAULT_DEPLOYMENT_TAG,
         )
-        client = _facade_module().KitaruClient()
+        client = cli_dependencies().kitaru_client()
         handle = client.deployments.invoke(
             flow=flow,
             version=selector.version,
@@ -669,7 +669,7 @@ def list_(output: OutputFormatOption = "text") -> None:
     command = "flow.list"
     output_format = _resolve_output_format(output)
     deployments = run_with_cli_error_boundary(
-        lambda: _facade_module().KitaruClient().deployments.list(),
+        lambda: cli_dependencies().kitaru_client().deployments.list(),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -700,7 +700,7 @@ def show(
     output_format = _resolve_output_format(output)
 
     def _show_flow() -> dict[str, Any]:
-        deployments = _facade_module().KitaruClient().deployments.list(flow=flow)
+        deployments = cli_dependencies().kitaru_client().deployments.list(flow=flow)
         if not deployments:
             raise LookupError(f"No deployments found for flow {flow!r}.")
         return serialize_flow_deployment_summary(flow, deployments)
@@ -749,7 +749,7 @@ def list__(
         output=output_format,
     )
     deployments = run_with_cli_error_boundary(
-        lambda: _facade_module().KitaruClient().deployments.list(flow=flow),
+        lambda: cli_dependencies().kitaru_client().deployments.list(flow=flow),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -797,8 +797,8 @@ def show__(
             default_tag=DEFAULT_DEPLOYMENT_TAG,
         )
         return (
-            _facade_module()
-            .KitaruClient()
+            cli_dependencies()
+            .kitaru_client()
             .deployments.get(
                 flow=flow,
                 version=resolved_version,
@@ -844,7 +844,7 @@ def curl(
             default_tag=DEFAULT_DEPLOYMENT_TAG,
         )
         server_url = _active_kitaru_server_url()
-        client = _facade_module().KitaruClient()
+        client = cli_dependencies().kitaru_client()
         deployment = client.deployments.get(
             flow=flow,
             version=resolved_version,
@@ -938,7 +938,7 @@ def logs(
         _exit_with_error(command, "`--interval` must be > 0.", output=output_format)
 
     def _resolve_logs_target() -> tuple[Any, str]:
-        client = _facade_module().KitaruClient()
+        client = cli_dependencies().kitaru_client()
         if exec_id:
             return client, exec_id
 
@@ -1043,7 +1043,9 @@ def delete(
     output_format = _resolve_output_format(output)
 
     def _delete_deployment() -> dict[str, Any]:
-        _facade_module().KitaruClient().deployments.delete(flow=flow, version=version)
+        cli_dependencies().kitaru_client().deployments.delete(
+            flow=flow, version=version
+        )
         track(
             AnalyticsEvent.DEPLOYMENT_DELETED,
             {"command": command, "selector": "version"},
@@ -1088,8 +1090,8 @@ def tag(
 
     def _tag_deployment() -> Any:
         deployment = (
-            _facade_module()
-            .KitaruClient()
+            cli_dependencies()
+            .kitaru_client()
             .deployments.tag(
                 flow=flow,
                 version=version,
@@ -1131,8 +1133,8 @@ def untag(
 
     def _untag_deployment() -> Any:
         deployment = (
-            _facade_module()
-            .KitaruClient()
+            cli_dependencies()
+            .kitaru_client()
             .deployments.untag(
                 flow=flow,
                 version=version,
