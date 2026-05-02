@@ -3772,7 +3772,7 @@ def test_logout_treats_localhost_docker_server_as_remote() -> None:
             return_value=fake_credentials_store,
         ),
         patch(
-            "kitaru.inspection.get_local_server",
+            "kitaru._inspection_runtime.get_local_server",
             return_value=SimpleNamespace(
                 status=SimpleNamespace(url="http://127.0.0.1:8383"),
                 config=SimpleNamespace(url="http://127.0.0.1:8383"),
@@ -3835,7 +3835,7 @@ def test_logout_clears_remote_store_when_local_fallback_is_missing() -> None:
             return_value=fake_credentials_store,
         ),
         patch(
-            "kitaru.inspection.get_local_server",
+            "kitaru._inspection_runtime.get_local_server",
             return_value=SimpleNamespace(
                 status=SimpleNamespace(url=None),
                 config=SimpleNamespace(url=None, port=8237, ip_address="127.0.0.1"),
@@ -8289,10 +8289,16 @@ def test_build_runtime_snapshot_handles_missing_local_store() -> None:
     """Status/info should degrade gracefully if local mode support is missing."""
     with (
         patch(
-            "kitaru.inspection.GlobalConfiguration", return_value=_BrokenGlobalConfig()
+            "kitaru._inspection_runtime.GlobalConfiguration",
+            return_value=_BrokenGlobalConfig(),
         ),
-        patch("kitaru.inspection.get_local_server", side_effect=ImportError("missing")),
-        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch(
+            "kitaru._inspection_runtime.get_local_server",
+            side_effect=ImportError("missing"),
+        ),
+        patch(
+            "kitaru._inspection_runtime.resolve_installed_version", return_value="1.2.3"
+        ),
     ):
         snapshot = _build_runtime_snapshot()
 
@@ -8326,11 +8332,16 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
     )
 
     with (
-        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
-        patch("kitaru.inspection.connected_to_local_server", return_value=False),
-        patch("kitaru.inspection.get_local_server", return_value=fake_local_server),
+        patch("kitaru._inspection_runtime.GlobalConfiguration", return_value=fake_gc),
         patch(
-            "kitaru.inspection.Client",
+            "kitaru._inspection_runtime.connected_to_local_server", return_value=False
+        ),
+        patch(
+            "kitaru._inspection_runtime.get_local_server",
+            return_value=fake_local_server,
+        ),
+        patch(
+            "kitaru._inspection_runtime.Client",
             side_effect=AssertionError("Client should not be queried"),
         ),
     ):
@@ -8343,7 +8354,8 @@ def test_build_runtime_snapshot_short_circuits_stale_local_server() -> None:
 def test_describe_local_server_handles_missing_local_backend() -> None:
     """Local server rendering should not crash when local server extras are missing."""
     with patch(
-        "kitaru.inspection.get_local_server", side_effect=ImportError("missing")
+        "kitaru._inspection_runtime.get_local_server",
+        side_effect=ImportError("missing"),
     ):
         status = _describe_local_server()
 
