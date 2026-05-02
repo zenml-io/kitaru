@@ -176,19 +176,11 @@ from kitaru._cli._secrets import (
     show_,
 )
 from kitaru._cli._stacks import (
-    _STACK_CREATE_FILE_BOOLEAN_KEYS,
-    _STACK_CREATE_FILE_KEY_ALIASES,
-    _STACK_CREATE_FILE_STRING_KEYS,
-    _STACK_CREATE_FILE_SUPPORTED_KEYS,
     _current_stack_rows,
     _format_stack_component_summary,
-    _load_stack_create_file,
-    _merge_stack_create_inputs,
-    _normalize_stack_create_file_mapping,
     _stack_create_detail_rows,
     _stack_list_rows,
     _stack_show_rows,
-    _StackCreateInputs,
     create,
     current,
     delete,
@@ -239,6 +231,16 @@ from kitaru._interface_memory import (
     set_memory_payload,
 )
 from kitaru._interface_secrets import resolve_secret_exact as _resolve_secret_exact
+from kitaru._interface_stacks import (
+    _STACK_CREATE_FILE_BOOLEAN_KEYS,
+    _STACK_CREATE_FILE_KEY_ALIASES,
+    _STACK_CREATE_FILE_STRING_KEYS,
+    _STACK_CREATE_FILE_SUPPORTED_KEYS,
+    _load_stack_create_file,
+    _merge_stack_create_inputs,
+    _normalize_stack_create_file_mapping,
+    _StackCreateInputs,
+)
 from kitaru._local_server import (
     LocalServerConnectionResult,
     LocalServerStopResult,
