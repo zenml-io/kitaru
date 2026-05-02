@@ -769,22 +769,11 @@ def manage_stack(
         )
 
         if isinstance(request, stack_interface.ManageStackCreateRequest):
-            create_kwargs: dict[str, Any] = {
-                "activate": request.activate,
-                "stack_type": request.stack_type,
-                "remote_spec": request.remote_spec,
-            }
-            if not request.component_overrides.is_empty():
-                create_kwargs["component_overrides"] = request.component_overrides
-            result = stack_ops._create_stack_operation(request.name, **create_kwargs)
+            result = stack_interface.execute_stack_create_request(request)
             return inspection.serialize_stack_create_result(result)
 
         assert isinstance(request, stack_interface.ManageStackDeleteRequest)
-        result = stack_ops._delete_stack_operation(
-            request.name,
-            recursive=request.recursive,
-            force=request.force,
-        )
+        result = stack_interface.execute_stack_delete_request(request)
         return inspection.serialize_stack_delete_result(result)
 
     return run_with_mcp_error_boundary(_manage_stack)
