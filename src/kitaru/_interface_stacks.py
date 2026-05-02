@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from pathlib import Path
+from typing import Any, Literal, Protocol
 
 import yaml
+from zenml.utils import yaml_utils
 
+from kitaru._config import _stacks as stack_ops
 from kitaru._config._stacks import (
     AzureMLStackSpec,
     CloudProvider,
@@ -178,6 +182,110 @@ class ManageStackDeleteRequest:
     name: str
     recursive: bool
     force: bool
+
+
+@dataclass(frozen=True)
+class _StackCreateInputs:
+    """Normalized stack-create inputs before backend validation."""
+
+    name: str | None = None
+    type: str | None = None
+    activate: bool | None = None
+    artifact_store: str | None = None
+    container_registry: str | None = None
+    cluster: str | None = None
+    region: str | None = None
+    subscription_id: str | None = None
+    resource_group: str | None = None
+    workspace: str | None = None
+    execution_role: str | None = None
+    namespace: str | None = None
+    credentials: str | None = None
+    verify: bool | None = None
+    component_overrides: StackComponentConfigOverrides | None = None
+    async_mode: bool | None = None
+
+
+_STACK_CREATE_INPUT_FIELDS = dataclasses.fields(_StackCreateInputs)
+
+
+class _CreateStackOperation(Protocol):
+    """Callable contract for stack-create backend operations."""
+
+    def __call__(
+        self,
+        name: str,
+        *,
+        stack_type: StackType,
+        activate: bool,
+        remote_spec: RemoteStackSpec | None,
+        component_overrides: StackComponentConfigOverrides | None = None,
+    ) -> stack_ops._StackCreateResult: ...
+
+
+class _DeleteStackOperation(Protocol):
+    """Callable contract for stack-delete backend operations."""
+
+    def __call__(
+        self,
+        name_or_id: str,
+        *,
+        recursive: bool,
+        force: bool,
+    ) -> stack_ops._StackDeleteResult: ...
+
+
+_STACK_CREATE_FILE_KEY_ALIASES = {
+    "artifact-store": "artifact_store",
+    "container-registry": "container_registry",
+    "subscription-id": "subscription_id",
+    "resource-group": "resource_group",
+    "execution-role": "execution_role",
+    "extra": "component_overrides",
+    "async": "async_mode",
+}
+_STACK_CREATE_FILE_SUPPORTED_KEYS = {
+    "name",
+    "type",
+    "activate",
+    "artifact_store",
+    "artifact-store",
+    "container_registry",
+    "container-registry",
+    "cluster",
+    "region",
+    "subscription_id",
+    "subscription-id",
+    "resource_group",
+    "resource-group",
+    "workspace",
+    "execution_role",
+    "execution-role",
+    "namespace",
+    "credentials",
+    "verify",
+    "extra",
+    "async",
+}
+_STACK_CREATE_FILE_STRING_KEYS = {
+    "name",
+    "type",
+    "artifact_store",
+    "container_registry",
+    "cluster",
+    "region",
+    "subscription_id",
+    "resource_group",
+    "workspace",
+    "execution_role",
+    "namespace",
+    "credentials",
+}
+_STACK_CREATE_FILE_BOOLEAN_KEYS = {
+    "activate",
+    "verify",
+    "async_mode",
+}
 
 
 def normalize_optional_stack_string(value: str | None) -> str | None:
@@ -513,6 +621,112 @@ def parse_cli_component_overrides(
     return merged
 
 
+def _normalize_stack_create_file_mapping(
+    raw: dict[str, Any],
+    *,
+    source: Path,
+) -> _StackCreateInputs:
+    """Validate and normalize a stack-create YAML mapping."""
+    non_string_keys = [repr(key) for key in raw if not isinstance(key, str)]
+    if non_string_keys:
+        raise ValueError(
+            f"Stack config file '{source}' can only use string keys: "
+            + ", ".join(sorted(non_string_keys))
+        )
+
+    unknown_keys = sorted(
+        key for key in raw if key not in _STACK_CREATE_FILE_SUPPORTED_KEYS
+    )
+    if unknown_keys:
+        raise ValueError(
+            f"Unsupported stack config keys in '{source}': " + ", ".join(unknown_keys)
+        )
+
+    normalized_values: dict[str, Any] = {}
+    canonical_sources: dict[str, str] = {}
+    for raw_key, value in raw.items():
+        canonical_key = _STACK_CREATE_FILE_KEY_ALIASES.get(raw_key, raw_key)
+        existing_source = canonical_sources.get(canonical_key)
+        if existing_source is not None:
+            raise ValueError(
+                f"Stack config file '{source}' cannot define both "
+                f"'{existing_source}' and '{raw_key}'."
+            )
+
+        if canonical_key in _STACK_CREATE_FILE_STRING_KEYS:
+            if value is not None and not isinstance(value, str):
+                raise ValueError(
+                    f"Stack config key '{raw_key}' in '{source}' must be a string."
+                )
+        elif canonical_key == "component_overrides":
+            if value is not None and not isinstance(value, dict):
+                raise ValueError(
+                    f"Stack config key '{raw_key}' in '{source}' must be an object."
+                )
+            if value is not None:
+                value = normalize_component_overrides_mapping(
+                    value,
+                    labels=CLI_STACK_OPTION_LABELS,
+                )
+        elif (
+            canonical_key in _STACK_CREATE_FILE_BOOLEAN_KEYS
+            and value is not None
+            and not isinstance(value, bool)
+        ):
+            raise ValueError(
+                f"Stack config key '{raw_key}' in '{source}' must be a boolean."
+            )
+
+        canonical_sources[canonical_key] = raw_key
+        normalized_values[canonical_key] = value
+
+    return _StackCreateInputs(**normalized_values)
+
+
+def _load_stack_create_file(path: Path) -> _StackCreateInputs:
+    """Load stack-create inputs from a YAML file."""
+    try:
+        raw = yaml_utils.read_yaml(str(path))
+    except FileNotFoundError:
+        raise ValueError(f"Stack config file not found: {path}") from None
+    except Exception as exc:
+        raise ValueError(f"Invalid YAML in stack config file '{path}': {exc}") from exc
+
+    if raw is None:
+        return _StackCreateInputs()
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Stack config file '{path}' must contain a top-level mapping."
+        )
+
+    return _normalize_stack_create_file_mapping(raw, source=path)
+
+
+def _merge_stack_create_inputs(
+    *,
+    cli_inputs: _StackCreateInputs,
+    file_inputs: _StackCreateInputs | None,
+) -> _StackCreateInputs:
+    """Merge CLI and YAML stack-create inputs with CLI precedence."""
+    file_inputs = file_inputs or _StackCreateInputs()
+    merged: dict[str, Any] = {}
+    for dataclass_field in _STACK_CREATE_INPUT_FIELDS:
+        if dataclass_field.name == "component_overrides":
+            merged[dataclass_field.name] = merge_component_overrides(
+                file_inputs.component_overrides,
+                cli_inputs.component_overrides,
+            )
+            continue
+
+        cli_value = getattr(cli_inputs, dataclass_field.name)
+        merged[dataclass_field.name] = (
+            cli_value
+            if cli_value is not None
+            else getattr(file_inputs, dataclass_field.name)
+        )
+    return _StackCreateInputs(**merged)
+
+
 def apply_async_override(
     overrides: StackComponentConfigOverrides | None,
     *,
@@ -770,6 +984,42 @@ def build_stack_create_request(
     )
 
 
+def build_stack_create_request_from_inputs(
+    *,
+    inputs: _StackCreateInputs,
+    labels: StackOptionLabels,
+    default_stack_type: str = StackType.LOCAL.value,
+    default_activate: bool = True,
+    default_verify: bool = True,
+    allowed_stack_types: tuple[StackType, ...] = _DEFAULT_INTERFACE_STACK_TYPES,
+) -> ManageStackCreateRequest:
+    """Build a validated stack-create request from normalized interface inputs."""
+    normalized_name = normalize_optional_stack_string(inputs.name)
+    if normalized_name is None:
+        raise ValueError("Stack name or ID cannot be empty.")
+
+    return build_stack_create_request(
+        name=normalized_name,
+        activate=inputs.activate if inputs.activate is not None else default_activate,
+        stack_type=inputs.type if inputs.type is not None else default_stack_type,
+        artifact_store=inputs.artifact_store,
+        container_registry=inputs.container_registry,
+        cluster=inputs.cluster,
+        region=inputs.region,
+        subscription_id=inputs.subscription_id,
+        resource_group=inputs.resource_group,
+        workspace=inputs.workspace,
+        execution_role=inputs.execution_role,
+        namespace=inputs.namespace,
+        credentials=inputs.credentials,
+        verify=inputs.verify if inputs.verify is not None else default_verify,
+        component_overrides=inputs.component_overrides,
+        async_enabled=inputs.async_mode is True,
+        labels=labels,
+        allowed_stack_types=allowed_stack_types,
+    )
+
+
 def build_manage_stack_request(
     *,
     action: Literal["create", "delete"] | str,
@@ -870,3 +1120,53 @@ def build_manage_stack_request(
         )
 
     raise ValueError('`action` must be "create" or "delete".')
+
+
+def execute_stack_create_request(
+    request: ManageStackCreateRequest,
+    *,
+    create_stack_operation: _CreateStackOperation | None = None,
+) -> stack_ops._StackCreateResult:
+    """Execute a validated stack-create request with the configured backend."""
+    operation = create_stack_operation or stack_ops._create_stack_operation
+    create_kwargs: dict[str, Any] = {
+        "stack_type": request.stack_type,
+        "activate": request.activate,
+        "remote_spec": request.remote_spec,
+    }
+    if not request.component_overrides.is_empty():
+        create_kwargs["component_overrides"] = request.component_overrides
+    return operation(request.name, **create_kwargs)
+
+
+def execute_stack_delete_request(
+    request: ManageStackDeleteRequest,
+    *,
+    delete_stack_operation: _DeleteStackOperation | None = None,
+) -> stack_ops._StackDeleteResult:
+    """Execute a validated stack-delete request with the configured backend."""
+    operation = delete_stack_operation or stack_ops._delete_stack_operation
+    return operation(
+        request.name,
+        recursive=request.recursive,
+        force=request.force,
+    )
+
+
+def execute_manage_stack_request(
+    request: ManageStackCreateRequest | ManageStackDeleteRequest,
+    *,
+    create_stack_operation: _CreateStackOperation | None = None,
+    delete_stack_operation: _DeleteStackOperation | None = None,
+) -> stack_ops._StackCreateResult | stack_ops._StackDeleteResult:
+    """Execute a validated manage-stack request."""
+    if isinstance(request, ManageStackCreateRequest):
+        return execute_stack_create_request(
+            request,
+            create_stack_operation=create_stack_operation,
+        )
+
+    return execute_stack_delete_request(
+        request,
+        delete_stack_operation=delete_stack_operation,
+    )
