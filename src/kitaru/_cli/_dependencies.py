@@ -1,9 +1,9 @@
 """Internal dependency seam for CLI command modules.
 
 Command modules should ask this module for runtime dependencies instead of
-reaching through ``kitaru.cli``.  During the migration, this seam still honors
-legacy ``kitaru.cli.<name>`` patches so existing tests and external patch-based
-callers keep working.
+reaching through ``kitaru.cli``. The seam preserves legacy
+``kitaru.cli.<name>`` patch points for compatibility, but new code should patch
+or inject dependencies through this module directly.
 """
 
 from __future__ import annotations
@@ -103,8 +103,8 @@ class CLIDependencies:
         """Return a patched ``kitaru.cli`` attr when one exists.
 
         Unpatched legacy re-exports should not beat the seam-local default.
-        That keeps old ``kitaru.cli.*`` patches working while allowing future
-        tests to patch this dependency module directly.
+        That keeps old ``kitaru.cli.*`` patches working without preventing
+        tests from patching this dependency module directly.
         """
         module = sys.modules.get("kitaru.cli")
         if module is None:

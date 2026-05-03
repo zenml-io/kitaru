@@ -9,9 +9,9 @@ from collections.abc import Sequence
 # Legacy CLI facade exports.
 #
 # Command modules now resolve runtime dependencies through
-# ``kitaru._cli._dependencies``.  These imports remain here so existing tests
-# and external integrations that patch/import ``kitaru.cli.<name>`` continue to
-# work while the old facade is being migrated away.
+# ``kitaru._cli._dependencies``. These imports remain as compatibility patch
+# points for existing tests and external integrations that patch or import
+# ``kitaru.cli.<name>``.
 from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.exceptions import EntityExistsError, ZenKeyError
