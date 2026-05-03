@@ -21,6 +21,7 @@ from kitaru.inspection import (
 )
 
 from . import executions_app
+from ._dependencies import cli_dependencies
 from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
@@ -31,7 +32,6 @@ from ._helpers import (
     _emit_snapshot,
     _emit_table,
     _exit_with_error,
-    _facade_module,
     _format_table_timestamp,
     _format_timestamp,
     _is_input_interactive,
@@ -437,7 +437,7 @@ def _follow_execution_logs(
                     )
                 last_wait_name = wait_name
 
-        _facade_module().time.sleep(interval)
+        cli_dependencies().sleep(interval)
 
 
 @executions_app.command
@@ -452,7 +452,7 @@ def get_(
     command = "executions.get"
     output_format = _resolve_output_format(output)
     execution = run_with_cli_error_boundary(
-        lambda: _facade_module().KitaruClient().executions.get(exec_id),
+        lambda: cli_dependencies().kitaru_client().executions.get(exec_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -525,7 +525,7 @@ def list____(
     )
 
     def _list_executions() -> list[Execution]:
-        client = _facade_module().KitaruClient()
+        client = cli_dependencies().kitaru_client()
         if limit is not None:
             return client.executions.list(status=status, flow=flow, limit=limit)
         return client.executions.list(
@@ -635,7 +635,7 @@ def logs_(
         )
 
     verbosity = min(verbosity, 2)
-    client = _facade_module().KitaruClient()
+    client = cli_dependencies().kitaru_client()
 
     if follow:
         try:
@@ -937,7 +937,7 @@ def input_(
                 output=output_format,
             )
 
-        client = _facade_module().KitaruClient()
+        client = cli_dependencies().kitaru_client()
         try:
             exit_code = _run_interactive_input_flow(client, exec_id)
         except KeyboardInterrupt:
@@ -962,7 +962,7 @@ def input_(
             )
 
         def _abort_wait() -> Execution:
-            client = _facade_module().KitaruClient()
+            client = cli_dependencies().kitaru_client()
             wait = _auto_detect_single_pending_wait(client, exec_id)
             return client.executions.abort_wait(exec_id, wait=wait.wait_id)
 
@@ -994,7 +994,7 @@ def input_(
 
     def _resolve_input() -> Execution:
         parsed_value = _parse_json_value(value, option_name="--value")
-        client = _facade_module().KitaruClient()
+        client = cli_dependencies().kitaru_client()
         wait = _auto_detect_single_pending_wait(client, exec_id)
         return client.executions.input(exec_id, wait=wait.wait_id, value=parsed_value)
 
@@ -1052,8 +1052,8 @@ def replay_(
         flow_inputs = _parse_json_object(args, option_name="--args")
         parsed_overrides = _parse_json_object(overrides, option_name="--overrides")
         return (
-            _facade_module()
-            .KitaruClient()
+            cli_dependencies()
+            .kitaru_client()
             .executions.replay(
                 exec_id,
                 from_=from_,
@@ -1091,7 +1091,7 @@ def retry_(
     command = "executions.retry"
     output_format = _resolve_output_format(output)
     execution = run_with_cli_error_boundary(
-        lambda: _facade_module().KitaruClient().executions.retry(exec_id),
+        lambda: cli_dependencies().kitaru_client().executions.retry(exec_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -1119,7 +1119,7 @@ def resume_(
     command = "executions.resume"
     output_format = _resolve_output_format(output)
     execution = run_with_cli_error_boundary(
-        lambda: _facade_module().KitaruClient().executions.resume(exec_id),
+        lambda: cli_dependencies().kitaru_client().executions.resume(exec_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -1147,7 +1147,7 @@ def cancel_(
     command = "executions.cancel"
     output_format = _resolve_output_format(output)
     execution = run_with_cli_error_boundary(
-        lambda: _facade_module().KitaruClient().executions.cancel(exec_id),
+        lambda: cli_dependencies().kitaru_client().executions.cancel(exec_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
