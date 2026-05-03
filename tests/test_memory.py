@@ -129,6 +129,61 @@ def test_memory_private_compat_aliases_resolve() -> None:
     assert missing == []
 
 
+def test_memory_private_step_alias_preserves_submit_shape(monkeypatch) -> None:
+    """Private step aliases should still expose ZenML step helpers like ``submit``."""
+
+    class FakeMemorySetStep:
+        def __call__(self, *args: object, **kwargs: object) -> tuple[object, ...]:
+            del kwargs
+            return args
+
+        def submit(self, *args: object, **kwargs: object) -> tuple[object, object]:
+            return args, kwargs
+
+    monkeypatch.setattr(memory._steps, "_memory_set_step", FakeMemorySetStep())
+
+    assert memory._memory_set_step("scope", "flow", "key", "value") == (
+        "scope",
+        "flow",
+        "key",
+        "value",
+    )
+    assert memory._memory_set_step.submit("scope", after=["report"]) == (
+        ("scope",),
+        {"after": ["report"]},
+    )
+
+
+def test_memory_private_runtime_scope_default_assignment_updates_scope_module() -> None:
+    """Facade assignment should mutate owner state without creating a stale shadow."""
+    original = memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+    overridden = _MemoryScope(scope="compat_scope", scope_type="namespace")
+    owner_changed = _MemoryScope(scope="owner_changed", scope_type="namespace")
+
+    try:
+        memory._RUNTIME_MEMORY_SCOPE_DEFAULT = overridden
+        assert overridden == memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+        assert overridden == memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+
+        memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT = owner_changed
+        assert owner_changed == memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+    finally:
+        memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT = original
+
+
+def test_memory_private_runtime_scope_default_patch_restores_owner_scope() -> None:
+    """Patching the facade alias should cleanly restore owner-module state on exit."""
+    original = memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+    patched = _MemoryScope(scope="patched", scope_type="namespace")
+
+    with patch("kitaru.memory._RUNTIME_MEMORY_SCOPE_DEFAULT", patched):
+        assert patched == memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+        assert patched == memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+
+    assert original == memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+    assert original == memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+
+
 def _memory_entry(
     *,
     key: str = "prefs",
@@ -300,6 +355,76 @@ def test_memory_set_dispatches_to_synthetic_step() -> None:
         "user_preferences",
         payload,
     )
+
+
+def test_memory_set_dispatches_through_facade_patch_seam() -> None:
+    payload = {"language": "en", "theme": "dark"}
+    flow_id = _runtime_flow_id("research_agent")
+
+    with (
+        _flow_scope(name="research_agent", flow_id=flow_id),
+        patch("kitaru.memory._memory_set_step") as facade_memory_set_step,
+        patch("kitaru.memory._steps._memory_set_step") as owner_memory_set_step,
+    ):
+        result = memory.set("user_preferences", payload)
+
+    assert result is None
+    facade_memory_set_step.assert_called_once_with(
+        flow_id,
+        "flow",
+        "user_preferences",
+        payload,
+    )
+    owner_memory_set_step.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("facade_step", "owner_step", "call", "expected"),
+    [
+        (
+            "_memory_get_step",
+            "kitaru.memory._steps._memory_get_step",
+            lambda: memory.get("prefs", version=2),
+            {"theme": "dark"},
+        ),
+        (
+            "_memory_list_step",
+            "kitaru.memory._steps._memory_list_step",
+            lambda: memory.list(),
+            [_memory_entry(version=2)],
+        ),
+        (
+            "_memory_history_step",
+            "kitaru.memory._steps._memory_history_step",
+            lambda: memory.history("prefs"),
+            [_memory_entry(version=3, is_deleted=True)],
+        ),
+        (
+            "_memory_delete_step",
+            "kitaru.memory._steps._memory_delete_step",
+            lambda: memory.delete("prefs"),
+            _memory_entry(version=3, is_deleted=True),
+        ),
+    ],
+)
+def test_memory_read_delete_dispatches_through_facade_patch_seams(
+    facade_step: str,
+    owner_step: str,
+    call: Callable[[], object],
+    expected: object,
+) -> None:
+    flow_id = _runtime_flow_id("demo_flow")
+
+    with (
+        _flow_scope(name="demo_flow", flow_id=flow_id),
+        patch(f"kitaru.memory.{facade_step}", return_value=expected) as facade_mock,
+        patch(owner_step) as owner_mock,
+    ):
+        result = call()
+
+    assert result == expected
+    facade_mock.assert_called_once()
+    owner_mock.assert_not_called()
 
 
 def test_memory_set_outside_flow_dispatches_to_direct_impl() -> None:

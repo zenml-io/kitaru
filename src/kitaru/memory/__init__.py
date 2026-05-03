@@ -17,7 +17,12 @@ Current status:
 - outside-flow reads/writes supported after ``memory.configure(scope=...)``
 """
 
-from kitaru.memory import _scope
+import sys
+from contextlib import suppress
+from types import ModuleType
+from typing import Any, cast
+
+from kitaru.memory import _scope, _steps
 from kitaru.memory._api import delete, get, history, list, set
 from kitaru.memory._artifacts import (
     Client,
@@ -128,16 +133,58 @@ from kitaru.memory._scope import (
     _validate_memory_version,
     configure,
 )
-from kitaru.memory._steps import (
-    _memory_delete_step,
-    _memory_get_step,
-    _memory_history_step,
-    _memory_list_step,
-    _memory_set_step,
-    _memory_step,
-)
+from kitaru.memory._steps import _memory_step
 
 _CURRENT_MEMORY_SCOPE = _scope._CURRENT_MEMORY_SCOPE
+
+
+class _MemoryFacadeModule(ModuleType):
+    """Module shim that keeps private facade mutation aliases backwards compatible."""
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name == "_RUNTIME_MEMORY_SCOPE_DEFAULT":
+            _scope._RUNTIME_MEMORY_SCOPE_DEFAULT = cast(_MemoryScope | None, value)
+            return
+        super().__setattr__(name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name == "_RUNTIME_MEMORY_SCOPE_DEFAULT":
+            with suppress(AttributeError):
+                delattr(_scope, "_RUNTIME_MEMORY_SCOPE_DEFAULT")
+            return
+        super().__delattr__(name)
+
+
+class _MemoryStepFacade:
+    """Proxy a private memory step alias to its owner module.
+
+    The old single-file ``kitaru.memory`` module exposed ZenML step objects
+    directly. Some private callers used them as callables, while others used
+    their ``.submit(...)`` helper to add explicit DAG edges. Keep both shapes
+    working without making the facade the owner of the step implementation.
+    """
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def _target(self) -> Any:
+        return getattr(_steps, self._name)
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._target()(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._target(), name)
+
+
+sys.modules[__name__].__class__ = _MemoryFacadeModule
+
+
+_memory_set_step = _MemoryStepFacade("_memory_set_step")
+_memory_get_step = _MemoryStepFacade("_memory_get_step")
+_memory_list_step = _MemoryStepFacade("_memory_list_step")
+_memory_history_step = _MemoryStepFacade("_memory_history_step")
+_memory_delete_step = _MemoryStepFacade("_memory_delete_step")
 
 
 def __getattr__(name: str) -> object:

@@ -1,5 +1,6 @@
 """Public runtime API wrappers for Kitaru memory."""
 
+import sys
 from typing import Any
 
 from kitaru import runtime
@@ -8,6 +9,14 @@ from kitaru.memory import _scope as scope_mod
 from kitaru.memory import _steps as steps
 from kitaru.memory._constants import _list
 from kitaru.memory._models import MemoryEntry
+
+
+def _resolve_facade_step(name: str, fallback: Any) -> Any:
+    """Prefer facade compatibility aliases when present (for legacy patch seams)."""
+    facade_module = sys.modules.get("kitaru.memory")
+    if facade_module is None:
+        return fallback
+    return getattr(facade_module, name, fallback)
 
 
 def set(key: str, value: Any) -> None:
@@ -20,7 +29,10 @@ def set(key: str, value: Any) -> None:
     scope = scope_mod._resolve_memory_scope_for_operation("set")
     normalized_key = scope_mod._validate_memory_identifier(key, kind="key")
     if runtime._is_inside_flow():
-        steps._memory_set_step(scope.scope, scope.scope_type, normalized_key, value)
+        memory_set_step = _resolve_facade_step(
+            "_memory_set_step", steps._memory_set_step
+        )
+        memory_set_step(scope.scope, scope.scope_type, normalized_key, value)
     else:
         operations._set_impl(scope, normalized_key, value)
     return None
@@ -43,7 +55,10 @@ def get(key: str, *, version: int | None = None, strict: bool = False) -> Any | 
     normalized_key = scope_mod._validate_memory_identifier(key, kind="key")
     normalized_version = scope_mod._validate_memory_version(version)
     if runtime._is_inside_flow():
-        return steps._memory_get_step(
+        memory_get_step = _resolve_facade_step(
+            "_memory_get_step", steps._memory_get_step
+        )
+        return memory_get_step(
             scope.scope,
             scope.scope_type,
             normalized_key,
@@ -59,7 +74,10 @@ def list() -> _list[MemoryEntry]:
     """List the latest active memory entries for the active scope."""
     scope = scope_mod._resolve_memory_scope_for_operation("list")
     if runtime._is_inside_flow():
-        return steps._memory_list_step(scope.scope, scope.scope_type)
+        memory_list_step = _resolve_facade_step(
+            "_memory_list_step", steps._memory_list_step
+        )
+        return memory_list_step(scope.scope, scope.scope_type)
     return operations._list_impl(scope)
 
 
@@ -68,7 +86,10 @@ def history(key: str) -> _list[MemoryEntry]:
     scope = scope_mod._resolve_memory_scope_for_operation("history")
     normalized_key = scope_mod._validate_memory_identifier(key, kind="key")
     if runtime._is_inside_flow():
-        return steps._memory_history_step(scope.scope, scope.scope_type, normalized_key)
+        memory_history_step = _resolve_facade_step(
+            "_memory_history_step", steps._memory_history_step
+        )
+        return memory_history_step(scope.scope, scope.scope_type, normalized_key)
     return operations._history_impl(scope, normalized_key)
 
 
@@ -77,5 +98,8 @@ def delete(key: str) -> MemoryEntry | None:
     scope = scope_mod._resolve_memory_scope_for_operation("delete")
     normalized_key = scope_mod._validate_memory_identifier(key, kind="key")
     if runtime._is_inside_flow():
-        return steps._memory_delete_step(scope.scope, scope.scope_type, normalized_key)
+        memory_delete_step = _resolve_facade_step(
+            "_memory_delete_step", steps._memory_delete_step
+        )
+        return memory_delete_step(scope.scope, scope.scope_type, normalized_key)
     return operations._delete_impl(scope, normalized_key)
