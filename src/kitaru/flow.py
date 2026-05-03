@@ -80,7 +80,7 @@ from kitaru.errors import (
     format_recovery_hint,
     traceback_last_line,
 )
-from kitaru.memory import _memory_scope_session
+from kitaru.memory._scope import _memory_scope_session
 from kitaru.replay import build_replay_plan
 from kitaru.runtime import _flow_scope
 
