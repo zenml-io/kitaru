@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-04-28T16:15:02.672008Z"
+exclude-newer = "2026-04-30T13:39:29.810449Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -1221,7 +1221,7 @@ requires-dist = [
     { name = "kitaru", extras = ["anthropic"], marker = "extra == 'llm'" },
     { name = "kitaru", extras = ["openai"], marker = "extra == 'llm'" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.19.0,<1.20.0" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0.0,<2" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=2.29.0,<3" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.86.0,<2" },
     { name = "rich", specifier = ">=12.0.0" },
@@ -1237,7 +1237,7 @@ dev = [
     { name = "claude-agent-sdk", specifier = ">=0.1.58,<0.2" },
     { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
     { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
-    { name = "openai", specifier = ">=1.0.0,<2" },
+    { name = "openai", specifier = ">=2.29.0,<3" },
     { name = "pip-audit", specifier = ">=2.9.0" },
     { name = "pydantic-ai-slim", specifier = ">=1.86.0,<2" },
     { name = "pytest", specifier = ">=8.0" },
@@ -1600,7 +1600,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "1.109.1"
+version = "2.33.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1612,9 +1612,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c6/a1/a303104dc55fc546a3f6914c842d3da471c64eec92043aef8f652eb6c524/openai-1.109.1.tar.gz", hash = "sha256:d173ed8dbca665892a6db099b4a2dfac624f94d20a93f46eb0b56aae940ed869", size = 564133, upload-time = "2025-09-24T13:00:53.075Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/ee/d056c82f63c05f06baac0cffb4a90952d8274f90c49dfe244f20497b9bbd/openai-2.33.0.tar.gz", hash = "sha256:f850c435e2a4685bba3295bd54912dd26315d9c1b7733068186134d6e0599f9a", size = 693254, upload-time = "2026-04-28T14:04:42.428Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/2a/7dd3d207ec669cacc1f186fd856a0f61dbc255d24f6fdc1a6715d6051b0f/openai-1.109.1-py3-none-any.whl", hash = "sha256:6bcaf57086cf59159b8e27447e4e7dd019db5d29a438072fbd49c290c7e65315", size = 948627, upload-time = "2025-09-24T13:00:50.754Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/32/37734d769bc8b42e4938785313cc05aade6cb0fa72479d3220a0d61a4e78/openai-2.33.0-py3-none-any.whl", hash = "sha256:03ac37d70e8c9e3a8124214e3afa785e2cbc12e627fbd98177a086ef2fd87ad5", size = 1162695, upload-time = "2026-04-28T14:04:40.482Z" },
 ]
 
 [[package]]
