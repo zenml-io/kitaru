@@ -136,27 +136,33 @@ from kitaru.errors import (
     classify_failure_origin,
     execution_error_from_failure,
 )
-from kitaru.memory import (
+from kitaru.memory._maintenance import (
+    _compact_impl,
+    _compaction_log_impl,
+    _purge_impl,
+    _purge_scope_impl,
+    _reindex_impl,
+)
+from kitaru.memory._models import (
     CompactionRecord,
     CompactResult,
     MemoryEntry,
     MemoryReindexResult,
     MemoryScopeInfo,
     PurgeResult,
-    _compact_impl,
-    _compaction_log_impl,
+    _MemoryCompactionSourceMode,
+    _MemoryScope,
+    _MemoryScopeType,
+)
+from kitaru.memory._operations import (
     _delete_impl,
     _get_entry_impl,
     _history_impl,
     _list_impl,
     _list_scopes_impl,
-    _MemoryCompactionSourceMode,
-    _MemoryScope,
-    _MemoryScopeType,
-    _purge_impl,
-    _purge_scope_impl,
-    _reindex_impl,
     _set_entry_impl,
+)
+from kitaru.memory._scope import (
     _validate_memory_compaction_source_mode,
     _validate_memory_identifier,
     _validate_memory_scope_type,
