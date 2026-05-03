@@ -158,6 +158,43 @@ class TestTurnCacheKeyCallSites:
         assert captured["run_cache_key"] == "cache-async"
 
 
+class TestStreamingHookCapabilities:
+    def test_detects_configured_streaming_hooks(self) -> None:
+        from pydantic_ai.capabilities.hooks import Hooks
+
+        from kitaru.adapters.pydantic_ai._agent import (
+            _capabilities_imply_streaming_hooks,
+        )
+
+        def hook(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        assert _capabilities_imply_streaming_hooks(None) is False
+        assert _capabilities_imply_streaming_hooks([]) is False
+        assert _capabilities_imply_streaming_hooks([Hooks()]) is False
+        assert (
+            _capabilities_imply_streaming_hooks([Hooks(event=cast(Any, hook))]) is True
+        )
+        assert (
+            _capabilities_imply_streaming_hooks(
+                [Hooks(run_event_stream=cast(Any, hook))]
+            )
+            is True
+        )
+        assert (
+            _capabilities_imply_streaming_hooks(
+                cast(Any, [SimpleNamespace(on_event=hook)])
+            )
+            is True
+        )
+        assert (
+            _capabilities_imply_streaming_hooks(
+                cast(Any, [SimpleNamespace(on_run_event_stream=hook)])
+            )
+            is True
+        )
+
+
 class TestRejectIsolatedRuntime:
     def test_raises_on_isolated_runtime(self) -> None:
         with pytest.raises(KitaruUsageError, match=r"runtime='isolated'"):
@@ -788,6 +825,35 @@ class TestPersistMessageHistory:
 
         assert agent._last_messages == ["streamed-cached-message"]
 
+    def test_streaming_hook_capability_turn_checkpoint_disables_cache_sync(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai.capabilities.hooks import Hooks
+
+        from kitaru.runtime import _flow_scope
+
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(
+            all_messages=lambda: ["hook-streamed-cached-message"]
+        )
+
+        def fake_auto_checkpoint_sync(_body, **kwargs):
+            assert kwargs["checkpoint_config"]["cache"] is False
+            return cached_result
+
+        def hook(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        monkeypatch.setattr(agent, "_auto_checkpoint_sync", fake_auto_checkpoint_sync)
+
+        with _flow_scope(name="demo_flow"):
+            assert (
+                agent.run_sync("hello", capabilities=[Hooks(event=cast(Any, hook))])
+                is cached_result
+            )
+
+        assert agent._last_messages == ["hook-streamed-cached-message"]
+
     @pytest.mark.anyio
     async def test_event_handler_turn_checkpoint_disables_cache_async(
         self, monkeypatch: pytest.MonkeyPatch
@@ -814,6 +880,36 @@ class TestPersistMessageHistory:
             )
 
         assert agent._last_messages == ["streamed-cached-message"]
+
+    @pytest.mark.anyio
+    async def test_streaming_hook_capability_turn_checkpoint_disables_cache_async(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai.capabilities.hooks import Hooks
+
+        from kitaru.runtime import _flow_scope
+
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(
+            all_messages=lambda: ["hook-streamed-cached-message"]
+        )
+
+        async def fake_auto_checkpoint_async(_body, **kwargs):
+            assert kwargs["checkpoint_config"]["cache"] is False
+            return cached_result
+
+        def hook(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        monkeypatch.setattr(agent, "_auto_checkpoint_async", fake_auto_checkpoint_async)
+
+        with _flow_scope(name="demo_flow"):
+            assert (
+                await agent.run("hello", capabilities=[Hooks(event=cast(Any, hook))])
+                is cached_result
+            )
+
+        assert agent._last_messages == ["hook-streamed-cached-message"]
 
     def test_persist_history_requires_all_messages_on_result(
         self, monkeypatch: pytest.MonkeyPatch

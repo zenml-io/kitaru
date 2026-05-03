@@ -137,19 +137,23 @@ def _reset_artifact_namespace_state_for_key(
             finalizer.detach()
 
 
-def _context_artifact_namespace(agent_name: str, checkpoint_key: CheckpointKey) -> str | None:
+def _tracker_artifact_namespace(agent_name: str, run_label: str, tracker_count: int) -> str:
+    return f'{agent_name}_{run_label}_tracker_{tracker_count}'
+
+
+def _context_artifact_namespace(
+    agent_name: str, run_label: str, checkpoint_key: CheckpointKey
+) -> str:
     state = _CONTEXT_ARTIFACT_NAMESPACE_STATE.get()
     if state is None or state.checkpoint_key != checkpoint_key:
         state = _ArtifactNamespaceState(checkpoint_key=checkpoint_key)
         _CONTEXT_ARTIFACT_NAMESPACE_STATE.set(state)
 
     state.tracker_count += 1
-    if state.tracker_count == 1:
-        return None
-    return f'{agent_name}_{state.tracker_count}'
+    return _tracker_artifact_namespace(agent_name, run_label, state.tracker_count)
 
 
-def _allocate_artifact_namespace(agent_name: str) -> str | None:
+def _allocate_artifact_namespace(agent_name: str, run_label: str) -> str | None:
     checkpoint = get_current_checkpoint()
     if checkpoint is None:
         return None
@@ -164,13 +168,11 @@ def _allocate_artifact_namespace(agent_name: str) -> str | None:
                     checkpoint_key,
                 )
             except TypeError:
-                return _context_artifact_namespace(agent_name, checkpoint_key)
+                return _context_artifact_namespace(agent_name, run_label, checkpoint_key)
         tracker_count = _ARTIFACT_NAMESPACE_COUNTS.get(checkpoint_key, 0) + 1
         _ARTIFACT_NAMESPACE_COUNTS[checkpoint_key] = tracker_count
 
-    if tracker_count == 1:
-        return None
-    return f'{agent_name}_{tracker_count}'
+    return _tracker_artifact_namespace(agent_name, run_label, tracker_count)
 
 
 @dataclass(frozen=True)
@@ -214,7 +216,10 @@ class EventTracker:
         self.checkpoint_name = get_current_checkpoint_name()
         self.checkpoint_id = checkpoint.checkpoint_id if checkpoint is not None else None
         self.exec_id = get_current_execution_id()
-        self.artifact_namespace = _allocate_artifact_namespace(self.agent_name)
+        self.artifact_namespace = _allocate_artifact_namespace(
+            self.agent_name,
+            self.run_label,
+        )
 
     @property
     def events(self) -> Sequence[AgentEvent]:

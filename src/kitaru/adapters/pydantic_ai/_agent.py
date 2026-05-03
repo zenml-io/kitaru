@@ -152,6 +152,36 @@ def _is_wrapped_handler(handler: Any) -> bool:
     return bool(inner is not None and getattr(inner, '_kitaru_wrapped', False))
 
 
+_STREAMING_HOOK_ATTRS = (
+    'on_event',
+    'on_run_event_stream',
+    'event',
+    'run_event_stream',
+)
+_STREAMING_HOOK_REGISTRY_KEYS = ('_on_event', 'wrap_run_event_stream')
+
+
+def _capabilities_imply_streaming_hooks(
+    capabilities: Sequence[AbstractCapability[Any]] | None,
+) -> bool:
+    if capabilities is None:
+        return False
+
+    for capability in capabilities:
+        registry = getattr(capability, '_registry', None)
+        if isinstance(registry, Mapping) and any(
+            registry.get(key) for key in _STREAMING_HOOK_REGISTRY_KEYS
+        ):
+            return True
+
+        for attr in _STREAMING_HOOK_ATTRS:
+            value = getattr(capability, attr, None)
+            if value is not None and value is not _utils.UNSET:
+                return True
+
+    return False
+
+
 def _track_run_completed(method: str, error: BaseException | None) -> None:
     if error is None:
         status = 'completed'
@@ -490,7 +520,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         capabilities: Sequence[AbstractCapability[AgentDepsT]] | None,
         spec: dict[str, Any] | None,
     ) -> _TurnCheckpointCallConfig:
-        force_turn_checkpoint = event_stream_handler is not None
+        force_turn_checkpoint = event_stream_handler is not None or _capabilities_imply_streaming_hooks(
+            capabilities
+        )
         return _TurnCheckpointCallConfig(
             cache_key=turn_cache_key(
                 agent_name=self._name,
@@ -777,8 +809,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._warn_if_persist_history_inside_checkpoint()
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
-        if wrapped_handler is not None and self._granular_checkpoints:
-            self._log_streaming_fallback()
         effective_history = self._effective_message_history(message_history)
 
         async def _body() -> Any:
@@ -822,6 +852,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             capabilities=capabilities,
             spec=spec,
         )
+        if turn_call_config.force_turn_checkpoint and self._granular_checkpoints:
+            self._log_streaming_fallback()
 
         error: BaseException | None = None
         try:
@@ -866,8 +898,6 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._warn_if_persist_history_inside_checkpoint()
         prepared_toolsets = self._prepare_toolsets(toolsets) if toolsets is not None else None
         wrapped_handler = self._prepare_event_stream_handler(event_stream_handler)
-        if wrapped_handler is not None and self._granular_checkpoints:
-            self._log_streaming_fallback()
         effective_history = self._effective_message_history(message_history)
 
         def _body() -> Any:
@@ -915,6 +945,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             capabilities=capabilities,
             spec=spec,
         )
+        if turn_call_config.force_turn_checkpoint and self._granular_checkpoints:
+            self._log_streaming_fallback()
 
         error: BaseException | None = None
         try:

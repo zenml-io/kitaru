@@ -121,9 +121,9 @@ def test_phase17_event_artifact_names_use_short_display_shape() -> None:
         _tracking._namespaced_artifact_name(
             event_id,
             "stream_transcript",
-            namespace="agent_2",
+            namespace="agent_ab12cd34_tracker_2",
         )
-        == "agent_2_llm_call_1_stream_transcript"
+        == "agent_ab12cd34_tracker_2_llm_call_1_stream_transcript"
     )
 
 
@@ -224,14 +224,28 @@ def test_phase17_turn_mode_tracks_events_and_artifacts(primed_zenml) -> None:
     assert _has_step_input(hydrated_run, "user_prompt")
 
     artifact_names = _artifact_names(hydrated_run)
-    assert "event_log" in artifact_names
-    assert "run_summary" in artifact_names
-    assert "llm_call_1_prompt" in artifact_names
-    assert "llm_call_1_response" in artifact_names
-    assert any(re.fullmatch(r"tool_call_\d+_args", name) for name in artifact_names)
-    assert any(re.fullmatch(r"tool_call_\d+_result", name) for name in artifact_names)
+    run_label = summary["run_label"]
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_event_log", name)
+        for name in artifact_names
+    )
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_run_summary", name)
+        for name in artifact_names
+    )
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_prompt", name)
+        for name in artifact_names
+    )
+    assert any(
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
+        for name in artifact_names
+    )
+    assert any(re.fullmatch(r".*_tool_call_\d+_args", name) for name in artifact_names)
+    assert any(
+        re.fullmatch(r".*_tool_call_\d+_result", name) for name in artifact_names
+    )
     _assert_event_artifacts_use_display_names(event_map, artifact_names)
-    assert not any(summary["run_label"] in name for name in artifact_names)
 
 
 def test_phase17_turn_mode_tracks_effective_history_input_for_continuations(
@@ -261,8 +275,8 @@ def test_phase17_turn_mode_tracks_effective_history_input_for_continuations(
         for inputs in inputs_by_step
     )
     artifact_names = _artifact_names(hydrated_run)
-    assert "llm_call_1_prompt" in artifact_names
-    assert "llm_call_1_response" in artifact_names
+    assert any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
+    assert any(name.endswith("_llm_call_1_response") for name in artifact_names)
 
 
 def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
@@ -287,8 +301,8 @@ def test_phase17_turn_mode_omits_absent_prompt_and_history_inputs(
     assert not _has_step_input(hydrated_run, "user_prompt")
     assert not _has_step_input(hydrated_run, "message_history")
     artifact_names = _artifact_names(hydrated_run)
-    assert "llm_call_1_prompt" in artifact_names
-    assert "llm_call_1_response" in artifact_names
+    assert any(name.endswith("_llm_call_1_prompt") for name in artifact_names)
+    assert any(name.endswith("_llm_call_1_response") for name in artifact_names)
 
 
 def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> None:
@@ -360,13 +374,15 @@ def test_phase17_tracker_namespace_allocation_is_checkpoint_shared(monkeypatch) 
                 )
             )
 
+        assert None not in namespaces
+        assert len(namespaces) == len(set(namespaces))
+        assert all("_tracker_" in namespace for namespace in namespaces if namespace)
         suffixes = sorted(
-            int(namespace.rsplit("_", 1)[1])
+            int(match.group(1))
             for namespace in namespaces
-            if namespace is not None
+            if (match := re.search(r"_tracker_(\d+)$", namespace or ""))
         )
-        assert namespaces.count(None) == 1
-        assert suffixes == [2, 3, 4]
+        assert suffixes == [1, 2, 3, 4]
     finally:
         _tracking._reset_artifact_namespace_state(checkpoint_scope)
 
@@ -374,7 +390,7 @@ def test_phase17_tracker_namespace_allocation_is_checkpoint_shared(monkeypatch) 
 def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
     primed_zenml,
 ) -> None:
-    """Only later trackers in the same checkpoint should get a namespace."""
+    """All trackers in the same checkpoint should get unique namespaces."""
     first_agent = _make_wrapped_agent(
         name_prefix="first_agent",
         granular_checkpoints=False,
@@ -399,23 +415,34 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
     event_map = _metadata_dict_from_steps(hydrated_run, "pydantic_ai_events")
     artifact_names = _artifact_names(hydrated_run)
 
-    assert "event_log" in artifact_names
-    assert "run_summary" in artifact_names
-    assert "llm_call_1_prompt" in artifact_names
-    assert "llm_call_1_response" in artifact_names
-    assert any(
-        re.fullmatch(r"[a-zA-Z0-9_]+_2_event_log", name) for name in artifact_names
+    summaries = list(
+        _metadata_dict_from_steps(hydrated_run, "pydantic_ai_run_summaries").values()
     )
-    assert any(
-        re.fullmatch(r"[a-zA-Z0-9_]+_2_run_summary", name) for name in artifact_names
-    )
-    assert any(
-        re.fullmatch(r"[a-zA-Z0-9_]+_2_llm_call_1_prompt", name)
-        for name in artifact_names
-    )
-    assert any(
-        re.fullmatch(r"[a-zA-Z0-9_]+_2_llm_call_1_response", name)
-        for name in artifact_names
+    run_labels = {summary["run_label"] for summary in summaries}
+    assert len(run_labels) == 2
+    for tracker_index in (1, 2):
+        assert any(
+            re.fullmatch(rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_event_log", name)
+            for name in artifact_names
+        )
+        assert any(
+            re.fullmatch(rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_run_summary", name)
+            for name in artifact_names
+        )
+        assert any(
+            re.fullmatch(
+                rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_llm_call_1_prompt", name
+            )
+            for name in artifact_names
+        )
+        assert any(
+            re.fullmatch(
+                rf"[a-zA-Z0-9_]+_tracker_{tracker_index}_llm_call_1_response", name
+            )
+            for name in artifact_names
+        )
+    assert all(
+        any(run_label in name for name in artifact_names) for run_label in run_labels
     )
     _assert_event_artifacts_use_display_names(event_map, artifact_names)
     event_artifact_names = [
@@ -424,7 +451,7 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
         for stored_name in event.get("artifacts", {}).values()
     ]
     assert any(
-        re.fullmatch(r"[a-zA-Z0-9_]+_2_llm_call_1_prompt", name)
+        re.fullmatch(r"[a-zA-Z0-9_]+_tracker_2_llm_call_1_prompt", name)
         for name in event_artifact_names
     )
 
