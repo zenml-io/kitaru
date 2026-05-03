@@ -168,6 +168,9 @@ def _capabilities_imply_streaming_hooks(
         return False
 
     for capability in capabilities:
+        if getattr(capability, 'has_wrap_run_event_stream', False):
+            return True
+
         registry = getattr(capability, '_registry', None)
         if isinstance(registry, Mapping) and any(
             registry.get(key) for key in _STREAMING_HOOK_REGISTRY_KEYS

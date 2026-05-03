@@ -8,6 +8,7 @@ Full end-to-end agent runs are exercised by the example tests.
 from __future__ import annotations
 
 import warnings
+from collections.abc import AsyncIterable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -193,6 +194,29 @@ class TestStreamingHookCapabilities:
             )
             is True
         )
+
+    def test_detects_overridden_stream_wrapper(self) -> None:
+        from pydantic_ai.capabilities import AbstractCapability
+
+        from kitaru.adapters.pydantic_ai._agent import (
+            _capabilities_imply_streaming_hooks,
+        )
+
+        class PlainCapability(AbstractCapability[Any]):
+            pass
+
+        class StreamingCapability(AbstractCapability[Any]):
+            async def wrap_run_event_stream(
+                self,
+                _ctx: Any,
+                *,
+                stream: AsyncIterable[Any],
+            ) -> AsyncIterable[Any]:
+                async for event in stream:
+                    yield event
+
+        assert _capabilities_imply_streaming_hooks([PlainCapability()]) is False
+        assert _capabilities_imply_streaming_hooks([StreamingCapability()]) is True
 
 
 class TestRejectIsolatedRuntime:
@@ -853,6 +877,42 @@ class TestPersistMessageHistory:
             )
 
         assert agent._last_messages == ["hook-streamed-cached-message"]
+
+    def test_stream_wrapper_capability_turn_checkpoint_disables_cache_sync(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic_ai.capabilities import AbstractCapability
+
+        from kitaru.runtime import _flow_scope
+
+        class StreamingCapability(AbstractCapability[Any]):
+            async def wrap_run_event_stream(
+                self,
+                _ctx: Any,
+                *,
+                stream: AsyncIterable[Any],
+            ) -> AsyncIterable[Any]:
+                async for event in stream:
+                    yield event
+
+        agent = self._make_agent(persist=True)
+        cached_result = SimpleNamespace(
+            all_messages=lambda: ["wrapper-streamed-cached-message"]
+        )
+
+        def fake_auto_checkpoint_sync(_body, **kwargs):
+            assert kwargs["checkpoint_config"]["cache"] is False
+            return cached_result
+
+        monkeypatch.setattr(agent, "_auto_checkpoint_sync", fake_auto_checkpoint_sync)
+
+        with _flow_scope(name="demo_flow"):
+            assert (
+                agent.run_sync("hello", capabilities=[StreamingCapability()])
+                is cached_result
+            )
+
+        assert agent._last_messages == ["wrapper-streamed-cached-message"]
 
     @pytest.mark.anyio
     async def test_event_handler_turn_checkpoint_disables_cache_async(
