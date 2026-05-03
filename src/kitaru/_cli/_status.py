@@ -33,6 +33,7 @@ from kitaru.inspection import (
 from kitaru.inspection import combine_warnings as _combine_warnings
 
 from . import app, log_store_app
+from ._dependencies import cli_dependencies
 from ._helpers import (
     OutputFormatOption,
     SnapshotSection,
@@ -41,7 +42,6 @@ from ._helpers import (
     _emit_snapshot_sections,
     _emit_warning,
     _exit_with_error,
-    _facade_module,
     _print_success,
     _resolve_output_format,
 )
@@ -241,9 +241,9 @@ def _clear_persisted_store_configuration(gc: Any) -> None:
 
 def _get_connected_server_url() -> str | None:
     """Read the currently configured remote server URL, if available."""
-    facade = _facade_module()
+    deps = cli_dependencies()
     try:
-        store_configuration = facade.GlobalConfiguration().store_configuration
+        store_configuration = deps.global_configuration().store_configuration
     except Exception:
         return None
 
@@ -496,11 +496,11 @@ def _environment_rows(
 
 def _logout_current_connection() -> LogoutResult:
     """Reset the active connection and clear current stored credentials."""
-    facade = _facade_module()
-    gc = facade.GlobalConfiguration()
-    connected_server_url = facade._get_connected_server_url()
-    was_connected_to_local_server = facade._connected_to_local_server()
-    stop_result = facade.stop_registered_local_server()
+    deps = cli_dependencies()
+    gc = deps.global_configuration()
+    connected_server_url = deps.get_connected_server_url()
+    was_connected_to_local_server = deps.connected_to_local_server()
+    stop_result = deps.stop_registered_local_server()
 
     if was_connected_to_local_server:
         return LogoutResult(
@@ -540,7 +540,7 @@ def _logout_current_connection() -> LogoutResult:
         )
 
     if server_url.startswith(("http://", "https://")):
-        facade.get_credentials_store().clear_credentials(server_url)
+        deps.get_credentials_store().clear_credentials(server_url)
         return LogoutResult(
             mode="remote_server",
             target=server_url,
@@ -606,8 +606,8 @@ def _logout_result_message(result: LogoutResult) -> str:
 
 def _log_store_payload(snapshot: ResolvedLogStore) -> dict[str, Any]:
     """Serialize effective log-store state for JSON output."""
-    facade = _facade_module()
-    _, mismatch_warning = facade._log_store_mismatch_details(snapshot)
+    deps = cli_dependencies()
+    _, mismatch_warning = deps.log_store_mismatch_details(snapshot)
     return serialize_resolved_log_store(
         snapshot,
         active_store=active_stack_log_store(),
@@ -660,7 +660,7 @@ def login(
     """Connect to a remote server, or start and connect to a local server."""
     command = "login"
     output_format = _resolve_output_format(output)
-    facade = _facade_module()
+    deps = cli_dependencies()
     if server is None:
         _validate_local_login_flags(
             api_key=api_key,
@@ -673,11 +673,11 @@ def login(
         )
         _warn_for_auth_environment_overrides(output=output_format)
 
-        connected_server_url = facade._get_connected_server_url()
+        connected_server_url = deps.get_connected_server_url()
         if (
             connected_server_url
             and not connected_server_url.startswith("sqlite:")
-            and not facade._connected_to_local_server()
+            and not deps.connected_to_local_server()
             and not _is_localhost_url(connected_server_url)
         ):
             _emit_warning(
@@ -686,7 +686,7 @@ def login(
             )
 
         result = run_with_cli_error_boundary(
-            lambda: facade.start_or_connect_local_server(
+            lambda: deps.start_or_connect_local_server(
                 port=port,
                 timeout=timeout,
             ),
@@ -722,7 +722,7 @@ def login(
     _ensure_no_auth_environment_overrides(command=command, output=output_format)
 
     run_with_cli_error_boundary(
-        lambda: facade.login_to_server(
+        lambda: deps.login_to_server(
             server,
             api_key=api_key,
             refresh=refresh,
@@ -744,7 +744,7 @@ def login(
         {"mode": "remote", "project_provided": project is not None},
     )
 
-    connected_server_url = facade._get_connected_server_url() or server.rstrip("/")
+    connected_server_url = deps.get_connected_server_url() or server.rstrip("/")
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(
             command,
@@ -800,7 +800,7 @@ def set(
     command = "log-store.set"
     output_format = _resolve_output_format(output)
     snapshot = run_with_cli_error_boundary(
-        lambda: _facade_module().set_global_log_store(
+        lambda: cli_dependencies().set_global_log_store(
             backend,
             endpoint=endpoint,
             api_key=api_key,
@@ -826,16 +826,16 @@ def show__(output: OutputFormatOption = "text") -> None:
     """Show the effective global runtime log-store configuration."""
     command = "log-store.show"
     output_format = _resolve_output_format(output)
-    facade = _facade_module()
+    deps = cli_dependencies()
     snapshot = run_with_cli_error_boundary(
-        facade.resolve_log_store,
+        deps.resolve_log_store,
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
         handled_exceptions=(ValueError,),
     )
 
-    _, mismatch_warning = facade._log_store_mismatch_details(snapshot)
+    _, mismatch_warning = deps.log_store_mismatch_details(snapshot)
     if output_format == CLIOutputFormat.JSON:
         _emit_json_item(command, _log_store_payload(snapshot), output=output_format)
         return
@@ -848,7 +848,7 @@ def reset(output: OutputFormatOption = "text") -> None:
     command = "log-store.reset"
     output_format = _resolve_output_format(output)
     snapshot = run_with_cli_error_boundary(
-        _facade_module().reset_global_log_store,
+        cli_dependencies().reset_global_log_store,
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -869,7 +869,7 @@ def reset(output: OutputFormatOption = "text") -> None:
 def status(output: OutputFormatOption = "text") -> None:
     """Show the current connection state and active stack context."""
     output_format = _resolve_output_format(output)
-    snapshot = _facade_module()._build_runtime_snapshot()
+    snapshot = cli_dependencies().build_runtime_snapshot()
 
     from kitaru.analytics import AnalyticsEvent, track
 
@@ -982,7 +982,7 @@ def info(
     include_environment_type = all
     include_provenance_details = all
 
-    snapshot = _facade_module()._build_runtime_snapshot(
+    snapshot = cli_dependencies().build_runtime_snapshot(
         include_packages=include_packages,
         package_names=package_names,
         include_environment_type=include_environment_type,

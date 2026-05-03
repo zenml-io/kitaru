@@ -11,6 +11,7 @@ from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 
 from . import memory_app
+from ._dependencies import cli_dependencies
 from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
@@ -25,7 +26,6 @@ from ._helpers import (
     _emit_table,
     _emit_warning,
     _exit_with_error,
-    _facade_module,
     _format_table_timestamp,
     _paginate_items,
     _print_success,
@@ -306,10 +306,10 @@ def scopes_(
     """List all discovered memory scopes."""
     command = "memory.scopes"
     output_format = _resolve_output_format(output)
-    facade = _facade_module()
+    deps = cli_dependencies()
     scopes = run_with_cli_error_boundary(
-        lambda: facade.scopes_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.scopes_memory_payload(
+            deps.kitaru_client(),
         ),
         command=command,
         output=output_format,
@@ -358,10 +358,10 @@ def list_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
     entries = run_with_cli_error_boundary(
-        lambda: facade.list_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.list_memory_payload(
+            deps.kitaru_client(),
             scope=scope,
             scope_type=scope_type,
         ),
@@ -440,10 +440,10 @@ def get_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
     payload = run_with_cli_error_boundary(
-        lambda: facade.get_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.get_memory_payload(
+            deps.kitaru_client(),
             key=key,
             scope=scope,
             scope_type=scope_type,
@@ -535,10 +535,10 @@ def set_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
     payload = run_with_cli_error_boundary(
-        lambda: facade.set_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.set_memory_payload(
+            deps.kitaru_client(),
             key=key,
             value=_parse_memory_cli_value(value),
             scope=scope,
@@ -593,10 +593,10 @@ def delete_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
     payload = run_with_cli_error_boundary(
-        lambda: facade.delete_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.delete_memory_payload(
+            deps.kitaru_client(),
             key=key,
             scope=scope,
             scope_type=scope_type,
@@ -669,10 +669,10 @@ def purge_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
     payload = run_with_cli_error_boundary(
-        lambda: facade.purge_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.purge_memory_payload(
+            deps.kitaru_client(),
             key=key,
             scope=scope,
             scope_type=scope_type,
@@ -740,10 +740,10 @@ def purge_scope_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
     payload = run_with_cli_error_boundary(
-        lambda: facade.purge_scope_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.purge_scope_memory_payload(
+            deps.kitaru_client(),
             scope=scope,
             scope_type=scope_type,
             keep=keep,
@@ -792,10 +792,10 @@ def reindex_(
     """
     command = "memory.reindex"
     output_format = _resolve_output_format(output)
-    facade = _facade_module()
+    deps = cli_dependencies()
     payload = run_with_cli_error_boundary(
-        lambda: facade.reindex_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.reindex_memory_payload(
+            deps.kitaru_client(),
             apply=apply,
         ),
         command=command,
@@ -934,10 +934,10 @@ def compact_(
         output=output_format,
     )
     keys_list = list(keys) if keys else None
-    facade = _facade_module()
+    deps = cli_dependencies()
     payload = run_with_cli_error_boundary(
-        lambda: facade.compact_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.compact_memory_payload(
+            deps.kitaru_client(),
             scope=scope,
             scope_type=scope_type,
             key=key,
@@ -996,10 +996,10 @@ def compaction_log_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
     entries = run_with_cli_error_boundary(
-        lambda: facade.compaction_log_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.compaction_log_memory_payload(
+            deps.kitaru_client(),
             scope=scope,
             scope_type=scope_type,
         ),
@@ -1071,10 +1071,10 @@ def history_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
     entries = run_with_cli_error_boundary(
-        lambda: facade.history_memory_payload(
-            facade.KitaruClient(),
+        lambda: deps.history_memory_payload(
+            deps.kitaru_client(),
             key=key,
             scope=scope,
             scope_type=scope_type,

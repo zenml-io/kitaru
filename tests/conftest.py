@@ -60,7 +60,6 @@ _SRC_PATH = str(Path(__file__).resolve().parent.parent / "src")
 if _SRC_PATH not in sys.path:
     sys.path.insert(0, _SRC_PATH)
 
-from kitaru import memory as _memory_module
 from kitaru._env import _reset_applied as _reset_env_applied
 from kitaru.config import (
     KITARU_ANALYTICS_OPT_IN_ENV,
@@ -80,6 +79,7 @@ from kitaru.config import (
     KITARU_STACK_ENV,
     _reset_runtime_configuration,
 )
+from kitaru.memory import _scope as _memory_scope_module
 
 
 @pytest.fixture(autouse=True)
@@ -165,14 +165,14 @@ def isolated_zenml_global_config(
 @pytest.fixture(autouse=True)
 def _reset_memory_scope_configuration() -> Generator[None]:
     """Reset process-local and flow-local memory scope state between tests."""
-    original_default = _memory_module._RUNTIME_MEMORY_SCOPE_DEFAULT
-    token = _memory_module._CURRENT_MEMORY_SCOPE.set(None)
-    _memory_module._RUNTIME_MEMORY_SCOPE_DEFAULT = None
+    original_default = _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT
+    token = _memory_scope_module._CURRENT_MEMORY_SCOPE.set(None)
+    _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT = None
     try:
         yield
     finally:
-        _memory_module._RUNTIME_MEMORY_SCOPE_DEFAULT = original_default
-        _memory_module._CURRENT_MEMORY_SCOPE.reset(token)
+        _memory_scope_module._RUNTIME_MEMORY_SCOPE_DEFAULT = original_default
+        _memory_scope_module._CURRENT_MEMORY_SCOPE.reset(token)
 
 
 @pytest.fixture()

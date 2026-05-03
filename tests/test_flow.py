@@ -2041,7 +2041,9 @@ def test_wrapped_flow_resets_memory_scope_between_invocations() -> None:
                 pipeline=SimpleNamespace(id=None, name=None),
             ),
         ),
-        patch("kitaru.memory._memory_list_step", return_value=[]) as memory_list_step,
+        patch(
+            "kitaru.memory._steps._memory_list_step", return_value=[]
+        ) as memory_list_step,
     ):
         wrapped_first()
         wrapped_second()
@@ -2062,7 +2064,9 @@ def test_wrapped_flow_uses_outside_flow_seeded_memory_scope() -> None:
     with (
         patch("kitaru.runtime.StepContext.get", return_value=None),
         patch("kitaru.runtime.DynamicPipelineRunContext.get", return_value=None),
-        patch("kitaru.memory._memory_list_step", return_value=[]) as memory_list_step,
+        patch(
+            "kitaru.memory._steps._memory_list_step", return_value=[]
+        ) as memory_list_step,
     ):
         wrapped()
 
