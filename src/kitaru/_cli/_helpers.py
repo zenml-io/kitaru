@@ -27,7 +27,11 @@ from kitaru.cli_output import exit_with_error as _structured_exit_with_error
 
 
 def _facade_module() -> ModuleType:
-    """Return the compatibility facade module used by tests and callers."""
+    """Return the legacy compatibility facade module.
+
+    Command modules should use ``kitaru._cli._dependencies`` instead. This
+    helper stays for older private imports and compatibility-only tests.
+    """
     module = sys.modules.get("kitaru.cli")
     if module is None:
         module = importlib.import_module("kitaru.cli")

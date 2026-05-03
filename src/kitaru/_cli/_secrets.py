@@ -10,11 +10,11 @@ from zenml.models import SecretResponse
 
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
-from kitaru.errors import KitaruRuntimeError, KitaruUsageError
 from kitaru.inspection import serialize_secret_detail, serialize_secret_summary
-from kitaru.secrets import _SECRET_KEY_PATTERN, _get_secret_response_exact
+from kitaru.secrets import _SECRET_KEY_PATTERN
 
 from . import secrets_app
+from ._dependencies import cli_dependencies
 from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
@@ -26,7 +26,6 @@ from ._helpers import (
     _emit_pagination_note,
     _emit_snapshot,
     _exit_with_error,
-    _facade_module,
     _paginate_items,
     _print_success,
     _resolve_output_format,
@@ -98,14 +97,6 @@ def _parse_secret_assignments(raw_assignments: list[str]) -> dict[str, str]:
         )
 
     return parsed
-
-
-def _resolve_secret_exact(client: Any, name_or_id: str) -> SecretResponse:
-    """Fetch one secret by exact name or exact ID."""
-    try:
-        return _get_secret_response_exact(name_or_id, client=client)
-    except (KitaruRuntimeError, KitaruUsageError) as exc:
-        raise ValueError(str(exc)) from exc
 
 
 def _list_accessible_secrets(client: Any) -> list[SecretResponse]:
@@ -184,11 +175,11 @@ def set_(
     """Set a public secret by default, or create it privately with --private."""
     command = "secrets.set"
     output_format = _resolve_output_format(output)
-    facade = _facade_module()
+    deps = cli_dependencies()
 
     def _set_secret() -> tuple[SecretResponse, str, int]:
         parsed_assignments = _parse_secret_assignments(assignments)
-        client = facade.Client()
+        client = deps.zenml_client()
 
         try:
             secret = client.create_secret(
@@ -198,7 +189,7 @@ def set_(
             )
             action = "Created"
         except EntityExistsError:
-            existing_secret = facade._resolve_secret_exact(client, name)
+            existing_secret = deps.resolve_secret_exact(client, name)
             secret = client.update_secret(
                 name_id_or_prefix=existing_secret.id,
                 add_or_update_values=parsed_assignments,
@@ -250,9 +241,9 @@ def show_(
     """Show a secret with metadata and optional raw values."""
     command = "secrets.show"
     output_format = _resolve_output_format(output)
-    facade = _facade_module()
+    deps = cli_dependencies()
     secret = run_with_cli_error_boundary(
-        lambda: facade._resolve_secret_exact(facade.Client(), name_or_id),
+        lambda: deps.resolve_secret_exact(deps.zenml_client(), name_or_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -289,7 +280,7 @@ def list__(
         output=output_format,
     )
     secrets = run_with_cli_error_boundary(
-        lambda: _list_accessible_secrets(_facade_module().Client()),
+        lambda: _list_accessible_secrets(cli_dependencies().zenml_client()),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -331,11 +322,11 @@ def delete_(
     """Delete a secret by exact name or exact ID."""
     command = "secrets.delete"
     output_format = _resolve_output_format(output)
-    facade = _facade_module()
+    deps = cli_dependencies()
 
     def _delete_secret() -> SecretResponse:
-        client = facade.Client()
-        secret = facade._resolve_secret_exact(client, name_or_id)
+        client = deps.zenml_client()
+        secret = deps.resolve_secret_exact(client, name_or_id)
         client.delete_secret(name_id_or_prefix=str(secret.id))
         return secret
 

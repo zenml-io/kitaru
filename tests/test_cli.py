@@ -118,6 +118,18 @@ def _execution_stub(
     )
 
 
+def test_cli_command_modules_use_dependency_seam_not_legacy_facade() -> None:
+    """Command modules should not reach through the legacy ``kitaru.cli`` facade."""
+    command_modules = sorted(Path("src/kitaru/_cli").glob("_*.py"))
+    offenders = [
+        path.name
+        for path in command_modules
+        if path.name != "_helpers.py" and "_facade_module" in path.read_text()
+    ]
+
+    assert offenders == []
+
+
 def _stack_create_result_stub(
     *,
     name: str = "dev",
