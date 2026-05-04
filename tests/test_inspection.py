@@ -54,10 +54,6 @@ from kitaru.inspection import (
     serialize_execution_summary,
     serialize_failure,
     serialize_log_entry,
-    serialize_memory_entry,
-    serialize_memory_history,
-    serialize_memory_reindex_result,
-    serialize_memory_value,
     serialize_model_alias,
     serialize_pending_wait,
     serialize_resolved_log_store,
@@ -70,12 +66,6 @@ from kitaru.inspection import (
     serialize_stack_details,
     to_jsonable,
     uses_stale_local_server_url,
-)
-from kitaru.memory import (
-    MemoryEntry,
-    MemoryReindexIssue,
-    MemoryReindexResult,
-    MemoryScopeType,
 )
 
 
@@ -145,37 +135,6 @@ def _sample_artifact(name: str = "research_context") -> ArtifactRef:
         producing_call="research",
         metadata={"source": "notes"},
         _client=cast(Any, SimpleNamespace()),
-    )
-
-
-def _sample_memory_entry(
-    *,
-    key: str = "prefs",
-    value_type: str = "dict",
-    version: int = 2,
-    scope: str = "repo_scope",
-    scope_type: MemoryScopeType = "namespace",
-    is_deleted: bool = False,
-    execution_id: str | None = None,
-    flow_id: str | None = None,
-    flow_name: str | None = None,
-) -> MemoryEntry:
-    return MemoryEntry(
-        key=key,
-        value_type=value_type,
-        version=version,
-        scope=scope,
-        scope_type=scope_type,
-        created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
-        is_deleted=is_deleted,
-        artifact_id="artifact-123",
-        execution_id=(
-            execution_id
-            if execution_id is not None
-            else ("exec-123" if scope_type != "namespace" else None)
-        ),
-        flow_id=flow_id,
-        flow_name=flow_name,
     )
 
 
@@ -353,124 +312,6 @@ def test_serialize_artifact_value_repr_fallback_contract() -> None:
     payload = serialize_artifact_value(_Unjsonable())
 
     assert payload == {
-        "value": "<unjsonable>",
-        "value_format": "repr",
-        "value_type": "tests.test_inspection._Unjsonable",
-    }
-
-
-def test_serialize_memory_entry_contract() -> None:
-    assert serialize_memory_entry(_sample_memory_entry(scope_type="flow")) == {
-        "key": "prefs",
-        "value_type": "dict",
-        "version": 2,
-        "scope": "repo_scope",
-        "scope_type": "flow",
-        "created_at": "2026-04-01T12:00:00+00:00",
-        "is_deleted": False,
-        "artifact_id": "artifact-123",
-        "execution_id": "exec-123",
-        "flow_id": None,
-        "flow_name": None,
-    }
-
-
-def test_serialize_memory_entry_includes_flow_context_when_present() -> None:
-    payload = serialize_memory_entry(
-        MemoryEntry(
-            key="prefs",
-            value_type="dict",
-            version=2,
-            scope="exec-123",
-            scope_type="execution",
-            created_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
-            is_deleted=False,
-            artifact_id="artifact-123",
-            execution_id=None,
-            flow_id="flow-456",
-            flow_name="repo_memory_demo",
-        )
-    )
-
-    assert payload["scope"] == "exec-123"
-    assert payload["scope_type"] == "execution"
-    assert payload["execution_id"] is None
-    assert payload["flow_id"] == "flow-456"
-    assert payload["flow_name"] == "repo_memory_demo"
-
-
-def test_serialize_memory_history_contract() -> None:
-    payload = serialize_memory_history(
-        [
-            _sample_memory_entry(version=2, is_deleted=True),
-            _sample_memory_entry(version=1),
-        ]
-    )
-
-    assert [entry["version"] for entry in payload] == [2, 1]
-    assert [entry["is_deleted"] for entry in payload] == [True, False]
-
-
-def test_serialize_memory_reindex_result_contract() -> None:
-    payload = serialize_memory_reindex_result(
-        MemoryReindexResult(
-            dry_run=True,
-            versions_scanned=4,
-            execution_scope_versions_scanned=2,
-            already_indexed=1,
-            versions_needing_updates=3,
-            versions_updated=0,
-            scope_type_tags_identified=3,
-            flow_tags_identified=2,
-            scope_type_tags_added=0,
-            flow_tags_added=0,
-            issues_count=1,
-            issue_samples=[
-                MemoryReindexIssue(
-                    artifact_id="artifact-1",
-                    artifact_name="kitaru_mem:exec-123:scratch",
-                    scope="exec-123",
-                    key="scratch",
-                    reason="execution scope 'exec-123': lookup failed",
-                )
-            ],
-        )
-    )
-
-    assert payload == {
-        "dry_run": True,
-        "versions_scanned": 4,
-        "execution_scope_versions_scanned": 2,
-        "already_indexed": 1,
-        "versions_needing_updates": 3,
-        "versions_updated": 0,
-        "scope_type_tags_identified": 3,
-        "flow_tags_identified": 2,
-        "scope_type_tags_added": 0,
-        "flow_tags_added": 0,
-        "issues_count": 1,
-        "issue_samples": [
-            {
-                "artifact_id": "artifact-1",
-                "artifact_name": "kitaru_mem:exec-123:scratch",
-                "scope": "exec-123",
-                "key": "scratch",
-                "reason": "execution scope 'exec-123': lookup failed",
-            }
-        ],
-    }
-
-
-def test_serialize_memory_value_reuses_artifact_value_rules() -> None:
-    json_payload = serialize_memory_value({"tags": {"beta", "alpha"}})
-    repr_payload = serialize_memory_value(_Unjsonable())
-
-    assert json_payload == {
-        "value": {"tags": ["alpha", "beta"]},
-        "value_format": "json",
-        "value_type": "builtins.dict",
-    }
-    assert repr_payload == {
         "value": "<unjsonable>",
         "value_format": "repr",
         "value_type": "tests.test_inspection._Unjsonable",

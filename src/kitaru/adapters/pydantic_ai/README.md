@@ -236,7 +236,7 @@ With `persist_message_history=True` the adapter remembers `result.all_messages()
 
 **Limits to be aware of:**
 
-- **In-memory only.** History lives on the Python instance; a restart, new process, or replay of a prior flow starts with no history. For durable conversation state, persist `result.all_messages()` yourself (e.g. via `kitaru.memory`) and pass it explicitly.
+- **In-memory only.** History lives on the Python instance; a restart, new process, or replay of a prior flow starts with no history. For durable conversation state, persist `result.all_messages()` in your own storage and pass it explicitly.
 - **Serial use.** Concurrent `run` / `run_sync` calls on the same instance race on the stored history. Gate concurrency externally, or use one instance per conversation.
 - **Unbounded.** The list grows monotonically — apply your own truncation or summarization for long-lived conversations.
 - **Success-only.** The instance only updates its history after a successful run. A partial failure leaves the last-successful history in place.

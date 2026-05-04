@@ -26,7 +26,6 @@ def mock_kitaru_client() -> MagicMock:
     client = MagicMock()
     client.executions = MagicMock()
     client.artifacts = MagicMock()
-    client.memories = MagicMock()
     client.deployments = MagicMock()
     return client
 

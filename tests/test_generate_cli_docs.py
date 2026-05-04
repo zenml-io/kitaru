@@ -135,7 +135,6 @@ class TestBuildCommandTree:
             "log-store",
             "login",
             "logout",
-            "memory",
             "model",
             "secrets",
             "stack",
@@ -361,21 +360,21 @@ class TestRenderCommandPage:
 
     def test_body_renders_below_frontmatter(self) -> None:
         cmd = CommandDoc(
-            slug="compact",
-            name="compact",
-            invocation="kitaru memory compact",
-            summary="Summarize memory values.",
-            body="Use --key for single-key mode or --keys for multi-key mode.",
-            usage="kitaru memory compact [OPTIONS]",
+            slug="retry",
+            name="retry",
+            invocation="kitaru executions retry",
+            summary="Retry a failed execution.",
+            body="Use --from-step to resume from a specific checkpoint.",
+            usage="kitaru executions retry EXECUTION_ID [OPTIONS]",
         )
         page = render_command_page(cmd, is_root=False)
-        assert 'description: "Summarize memory values."' in page
-        assert "Use --key for single-key mode" in page
+        assert 'description: "Retry a failed execution."' in page
+        assert "Use --from-step to resume" in page
         # Guard against duplication in both directions:
         # - summary must stay in frontmatter only (not copied to body)
         # - body must stay in body only (not promoted to frontmatter)
-        assert page.count("Summarize memory values.") == 1
-        assert page.count("Use --key for single-key mode") == 1
+        assert page.count("Retry a failed execution.") == 1
+        assert page.count("Use --from-step to resume") == 1
 
     def test_renders_parameters_table(self) -> None:
         cmd = CommandDoc(
@@ -428,25 +427,25 @@ class TestRenderCommandPage:
         # body must NEVER appear in the parent's subcommand table — only
         # its summary. The body stays on the child's own page.
         child = CommandDoc(
-            slug="compact",
-            name="compact",
-            invocation="kitaru memory compact",
-            summary="Summarize memory values.",
-            body="Use --key for single-key mode.",
-            usage="kitaru memory compact [OPTIONS]",
+            slug="retry",
+            name="retry",
+            invocation="kitaru executions retry",
+            summary="Retry a failed execution.",
+            body="Use --from-step to resume from a specific checkpoint.",
+            usage="kitaru executions retry EXECUTION_ID [OPTIONS]",
         )
         parent = CommandDoc(
-            slug="memory",
-            name="memory",
-            invocation="kitaru memory",
-            summary="Manage memory.",
+            slug="executions",
+            name="executions",
+            invocation="kitaru executions",
+            summary="Manage executions.",
             body="",
-            usage="kitaru memory COMMAND",
+            usage="kitaru executions COMMAND",
             subcommands=[child],
         )
         page = render_command_page(parent, is_root=False)
-        assert "Summarize memory values." in page
-        assert "Use --key for single-key mode" not in page
+        assert "Retry a failed execution." in page
+        assert "Use --from-step to resume" not in page
 
     def test_escapes_mdx_special_chars(self) -> None:
         cmd = CommandDoc(
@@ -498,7 +497,6 @@ class TestWriteDocsTree:
             "log-store",
             "login",
             "logout",
-            "memory",
             "model",
             "secrets",
             "stack",
@@ -576,14 +574,13 @@ class TestWriteDocsTree:
         status_page = (output_dir / "status.mdx").read_text()
         assert "`--output`, `-o`" in status_page
 
-        # auth, executions, flow, log-store, memory, model, secrets, and stack all
+        # auth, executions, flow, log-store, model, secrets, and stack all
         # have nested subcommands.
         for command in (
             "auth",
             "executions",
             "flow",
             "log-store",
-            "memory",
             "model",
             "secrets",
             "stack",
@@ -640,21 +637,6 @@ class TestWriteDocsTree:
             assert (output_dir / "log-store" / f"{command}.mdx").exists()
             assert f"log-store/{command}.mdx" in files
 
-        for command in (
-            "compact",
-            "compaction-log",
-            "delete",
-            "get",
-            "history",
-            "list",
-            "purge",
-            "purge-scope",
-            "scopes",
-            "set",
-        ):
-            assert (output_dir / "memory" / f"{command}.mdx").exists()
-            assert f"memory/{command}.mdx" in files
-
         for command in ("list", "register"):
             assert (output_dir / "model" / f"{command}.mdx").exists()
             assert f"model/{command}.mdx" in files
@@ -663,36 +645,12 @@ class TestWriteDocsTree:
             assert (output_dir / "secrets" / f"{command}.mdx").exists()
             assert f"secrets/{command}.mdx" in files
 
-        memory_get_content = (output_dir / "memory" / "get.mdx").read_text()
-        assert "kitaru memory get KEY [OPTIONS]" in memory_get_content
-        assert "| `KEY` | `str` | Yes |  | Memory key to read. |" in memory_get_content
-
-        compact_content = (output_dir / "memory" / "compact.mdx").read_text()
-        assert "`--key`" in compact_content
-        assert "`--keys`" in compact_content
-        assert "`--source-mode`" in compact_content
-        assert "`--target-key`" in compact_content
-        assert "`--model`" in compact_content
-
-        purge_content = (output_dir / "memory" / "purge.mdx").read_text()
-        assert "`KEY`" in purge_content
-        assert "`--keep`" in purge_content
-
-        purge_scope_content = (output_dir / "memory" / "purge-scope.mdx").read_text()
-        assert "`--include-deleted`" in purge_scope_content
-
-        compaction_log_content = (
-            output_dir / "memory" / "compaction-log.mdx"
-        ).read_text()
-        assert "`--scope`" in compaction_log_content
-
         secrets_set_content = (output_dir / "secrets" / "set.mdx").read_text()
         assert "--KEY=value" in secrets_set_content
         assert "`--private`" in secrets_set_content
 
         for list_page in (
             output_dir / "executions" / "list.mdx",
-            output_dir / "memory" / "list.mdx",
             output_dir / "model" / "list.mdx",
             output_dir / "secrets" / "list.mdx",
             output_dir / "stack" / "list.mdx",
