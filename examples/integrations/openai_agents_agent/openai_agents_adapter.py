@@ -1,20 +1,24 @@
-"""Small OpenAI Agents SDK adapter example for Kitaru.
+"""Real OpenAI Agents SDK + Kitaru adapter example.
+
+Story:
+- A customer asks about order ORD-1007.
+- The agent must call local tools to look up order status and shipping policy.
+- Kitaru records durable checkpoints for model + tool calls.
 
 Run:
     uv sync --extra local --extra openai-agents
+    uv run kitaru init
+    export OPENAI_API_KEY=sk-...
     uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
 """
 
 import ast
+import os
 import re
 from typing import Any
-from uuid import uuid4
 
-from agents import Agent, RunConfig
+from agents import Agent, RunConfig, function_tool
 from agents.items import ModelResponse
-from agents.models.interface import Model
-from agents.usage import Usage
-from openai.types.responses import ResponseOutputMessage, ResponseOutputText
 
 from kitaru import flow
 from kitaru.adapters.openai_agents import (
@@ -23,44 +27,86 @@ from kitaru.adapters.openai_agents import (
     OpenAIRunResult,
 )
 
+ORDERS: dict[str, dict[str, str]] = {
+    "ORD-1007": {
+        "status": "delayed_weather_hub",
+        "eta": "2026-05-08",
+        "last_scan": "Rotterdam Sort Center",
+        "carrier": "PostNL",
+    },
+    "ORD-1042": {
+        "status": "delivered",
+        "eta": "2026-05-02",
+        "last_scan": "Customer mailbox",
+        "carrier": "PostNL",
+    },
+}
 
-class StaticTextModel(Model):
-    """Minimal model stub so the example works without provider credentials."""
 
-    def __init__(self, label: str) -> None:
-        self._label = label
-        self.call_count = 0
-
-    async def get_response(self, *_args: Any, **_kwargs: Any) -> ModelResponse:
-        self.call_count += 1
-        return _text_response(
-            text=f"{self._label}: durable response #{self.call_count}",
-            response_id=f"resp_{self._label}_{self.call_count}",
+@function_tool
+def lookup_order(order_id: str) -> str:
+    """Return order status details for a known order id."""
+    order = ORDERS.get(order_id)
+    if order is None:
+        return (
+            f"Order {order_id} was not found. "
+            "Ask for a valid order id in ORD-xxxx format."
         )
+    return (
+        f"Order {order_id}: status={order['status']}, eta={order['eta']}, "
+        f"last_scan={order['last_scan']}, carrier={order['carrier']}"
+    )
 
-    def stream_response(self, *_args: Any, **_kwargs: Any) -> Any:
-        raise NotImplementedError("Streaming is not used in this example.")
+
+@function_tool
+def shipping_policy(status_or_issue: str) -> str:
+    """Return support policy guidance for shipment statuses/issues."""
+    topic = status_or_issue.strip().lower()
+
+    policies = {
+        "delayed_weather_hub": (
+            "Weather delay policy: wait 48 hours after ETA before replacement. "
+            "If still not delivered, offer free replacement or full refund."
+        ),
+        "lost": (
+            "Lost parcel policy: if no scan for 7 days, open claim and offer immediate "
+            "replacement or refund."
+        ),
+        "delivered": (
+            "Delivered policy: confirm address and drop-off photo; if customer reports "
+            "non-receipt, open theft/misdelivery claim."
+        ),
+    }
+    return policies.get(
+        topic,
+        "General shipping policy: verify status, share ETA, and escalate to a human "
+        "agent for account-specific exceptions.",
+    )
 
 
-def _text_response(text: str, *, response_id: str) -> ModelResponse:
-    return ModelResponse(
-        output=[
-            ResponseOutputMessage(
-                id=f"msg_{response_id}",
-                content=[
-                    ResponseOutputText(
-                        annotations=[],
-                        text=text,
-                        type="output_text",
-                    )
-                ],
-                role="assistant",
-                status="completed",
-                type="message",
-            )
-        ],
-        usage=Usage(requests=1, input_tokens=4, output_tokens=6, total_tokens=10),
-        response_id=response_id,
+def _require_openai_api_key() -> None:
+    if os.getenv("OPENAI_API_KEY"):
+        return
+    raise SystemExit(
+        "Missing OPENAI_API_KEY.\n"
+        "Set it first, then rerun:\n"
+        "  export OPENAI_API_KEY='sk-...'"
+    )
+
+
+def _build_agent() -> Agent:
+    model = os.getenv("OPENAI_AGENTS_MODEL", "gpt-5-nano")
+    return Agent(
+        name="customer_support_agent",
+        instructions=(
+            "You are a careful customer support assistant. "
+            "Always call lookup_order first when an order id is present. "
+            "Then call shipping_policy using the order status before giving an answer. "
+            "In the final response, include: order status, ETA, "
+            "policy summary, and next step."
+        ),
+        model=model,
+        tools=[lookup_order, shipping_policy],
     )
 
 
@@ -91,9 +137,7 @@ def _extract_final_output_from_envelope_text(text: str) -> str:
 def _normalize_wait_output(value: Any) -> str:
     if isinstance(value, OpenAIRunResult):
         if value.status != "completed":
-            raise RuntimeError(
-                f"Expected a completed OpenAI run, got status={value.status!r}."
-            )
+            raise RuntimeError(f"Expected completed run, got status={value.status!r}.")
         return str(value.final_output)
     if isinstance(value, ModelResponse):
         return _extract_model_response_text(value)
@@ -101,38 +145,47 @@ def _normalize_wait_output(value: Any) -> str:
     return _extract_final_output_from_envelope_text(text)
 
 
-def _run_flow(strategy: str) -> tuple[str, int]:
-    model = StaticTextModel(label=strategy)
-    agent = Agent(
-        name=f"openai_agents_example_{strategy}_{uuid4().hex[:8]}",
-        model=model,
-    )
+def _run_once(checkpoint_strategy: str) -> str:
+    agent = _build_agent()
     runner = KitaruRunner(
         agent,
-        checkpoint_strategy=strategy,
+        checkpoint_strategy=checkpoint_strategy,
         run_config_factory=lambda: RunConfig(tracing_disabled=True),
     )
 
     @flow
-    def example_flow(prompt: str) -> str:
-        result = runner.run_sync(OpenAIRunRequest.start(prompt))
-        assert result.status == "completed"
+    def support_flow(customer_message: str) -> str:
+        result = runner.run_sync(OpenAIRunRequest.start(customer_message))
+        if result.status != "completed":
+            raise RuntimeError(f"Expected completed run, got status={result.status!r}.")
         return str(result.final_output)
 
-    raw_output = example_flow.run(
-        "Summarize why durable checkpoints are useful."
+    raw_output = support_flow.run(
+        "Hi, where is order ORD-1007? I need this for a birthday gift. "
+        "Please check the actual order status and your shipping delay policy "
+        "before answering, then tell me what happens next."
     ).wait()
-    return _normalize_wait_output(raw_output), model.call_count
+    return _normalize_wait_output(raw_output)
 
 
 def main() -> None:
-    calls_output, calls_count = _run_flow("calls")
-    print("calls strategy output:", calls_output)
-    print("calls strategy model calls:", calls_count)
+    _require_openai_api_key()
 
-    runner_call_output, runner_call_count = _run_flow("runner_call")
-    print("runner_call strategy output:", runner_call_output)
-    print("runner_call strategy model calls:", runner_call_count)
+    model_label = os.getenv("OPENAI_AGENTS_MODEL", "gpt-5-nano")
+    print(f"Using model: {model_label}")
+
+    calls_output = _run_once("calls")
+    print("\n=== calls strategy output ===")
+    print(calls_output)
+
+    if os.getenv("OPENAI_AGENTS_COMPARE_RUNNER_CALL", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        runner_call_output = _run_once("runner_call")
+        print("\n=== runner_call strategy output ===")
+        print(runner_call_output)
 
 
 if __name__ == "__main__":

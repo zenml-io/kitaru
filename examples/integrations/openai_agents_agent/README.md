@@ -1,33 +1,66 @@
-# OpenAI Agents adapter example
+# OpenAI Agents adapter example (real API)
 
-This directory shows how to run an OpenAI Agents SDK `Agent` inside a Kitaru
-flow using `KitaruRunner`.
+This example shows a real OpenAI Agents SDK customer-support flow inside Kitaru.
 
-## Getting started
+Story in one line: a customer asks about `ORD-1007`, the agent calls
+`lookup_order`, then calls `shipping_policy`, and Kitaru records those calls as
+checkpoints.
+
+## Setup
 
 ```bash
 cd examples/integrations/openai_agents_agent
 uv sync --extra local --extra openai-agents
 uv run kitaru init
+export OPENAI_API_KEY='sk-...'
 ```
 
-Then run the example:
+Default model is `gpt-5-nano`.
+
+Optional model override (any OpenAI model you have access to):
+
+```bash
+export OPENAI_AGENTS_MODEL='<another-openai-model>'
+```
+
+## Run
 
 ```bash
 uv run python openai_agents_adapter.py
 ```
 
-The example uses a tiny in-memory model implementation, so it runs without API
-keys.
+If `OPENAI_API_KEY` is missing, the script exits early with a friendly message.
 
-## `openai_agents_adapter.py` — Two checkpoint strategies
+## What to look for in Kitaru UI
 
-The script runs the same prompt twice with two `KitaruRunner` configurations:
+In `checkpoint_strategy="calls"` mode (default in this example), you should see
+multiple checkpoints for one request, typically in a pattern like:
 
-- `checkpoint_strategy="calls"`: Kitaru catches supported model/tool calls
-  individually.
-- `checkpoint_strategy="runner_call"`: Kitaru places one checkpoint around the
-  outer `Runner.run(...)` call.
+- model decides to call tool
+- `lookup_order(...)`
+- model decides to call tool
+- `shipping_policy(...)`
+- model writes final customer answer
 
-For the concept walkthrough, see
-[OpenAI Agents Adapter](https://kitaru.ai/docs/guides/openai-agents-adapter).
+That gives you a clear model/tool/model/tool/model durability story.
+
+## `calls` vs `runner_call` (plain-language version)
+
+- `calls`: Kitaru places smaller checkpoints around each supported model/tool
+  call.
+- `runner_call`: Kitaru places one bigger checkpoint around the entire
+  `Runner.run(...)` call.
+
+This example focuses on `calls` so the UI clearly shows each step.
+
+If you want a side-by-side comparison, run with:
+
+```bash
+OPENAI_AGENTS_COMPARE_RUNNER_CALL=1 uv run python openai_agents_adapter.py
+```
+
+## Why this example uses the real API
+
+Our automated tests for the adapter use stubs to stay fast and deterministic.
+This example is intentionally real API usage, so users can see authentic OpenAI
+Agents SDK behavior plus Kitaru durability in practice.

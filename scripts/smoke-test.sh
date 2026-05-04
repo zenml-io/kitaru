@@ -352,8 +352,12 @@ run_test "examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py" \
 
 section_header "OpenAI Agents adapter"
 
-run_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" \
-    $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+if [[ "$HAS_OPENAI" == true ]]; then
+    run_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" \
+        $UV_RUN python examples/integrations/openai_agents_agent/openai_agents_adapter.py
+else
+    skip_test "examples/integrations/openai_agents_agent/openai_agents_adapter.py" "OPENAI_API_KEY not set"
+fi
 
 # Run after init so .kitaru/ exists (clean project --dry-run exits non-zero
 # when no project is found).
