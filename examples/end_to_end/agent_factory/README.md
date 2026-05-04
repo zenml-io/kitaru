@@ -1,5 +1,7 @@
 # Build a production-ready agent factory
 
+> **Reading on the docs site is recommended:** the same tour as a chapter-by-chapter walk lives at [kitaru.ai/docs/agent-factory](https://kitaru.ai/docs/agent-factory/). This README is the on-GitHub mirror — same content, slightly different formatting, useful when you've cloned the repo and want a single file to scroll while you run the stages.
+
 A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation, HITL gates, memory, and replay all wired up correctly. Locally runnable with one `docker compose up` and zero external accounts.
 
 ## Who this is for
