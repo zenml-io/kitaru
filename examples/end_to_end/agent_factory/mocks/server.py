@@ -89,7 +89,7 @@ def _check_token(
         )
     if not authorization.startswith(expected_prefix):
         raise HTTPException(status_code=401, detail={"error": "bad_scheme"})
-    token = authorization[len(expected_prefix):]
+    token = authorization[len(expected_prefix) :]
     if token != expected_token:
         raise HTTPException(status_code=401, detail={"error": "bad_token"})
 
@@ -142,7 +142,7 @@ def get_snippets(
 @app.post("/webhooks/{webhook_id}")
 def post_webhook(
     webhook_id: str,
-    payload: dict = Body(...),
+    payload: dict = Body(...),  # noqa: B008  -- canonical FastAPI dependency-injection form
     authorization: str | None = Header(None),
 ) -> dict[str, object]:
     """Discord-shaped webhook publish endpoint.

@@ -6,7 +6,6 @@ The discriminated union over the args models lives in `registry.py`.
 
 from pydantic import BaseModel, Field
 
-
 # === lookup_wiki =============================================================
 
 

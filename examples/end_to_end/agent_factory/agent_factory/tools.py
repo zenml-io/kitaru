@@ -109,9 +109,7 @@ def _run_skill(
             raise ValueError("`path` is required when action='read'")
         target = _resolve_skill_path(skills_root, path)
         if not target.is_file():
-            raise ValueError(
-                f"Skill file not found: {path}. Use action='list' first."
-            )
+            raise ValueError(f"Skill file not found: {path}. Use action='list' first.")
         raw = target.read_bytes()
         truncated = len(raw) > _SKILL_MAX_READ_BYTES
         content = raw[:_SKILL_MAX_READ_BYTES].decode("utf-8", errors="replace")

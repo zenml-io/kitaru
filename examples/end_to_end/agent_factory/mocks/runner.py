@@ -81,9 +81,7 @@ class DockerMockServices:
         tb: TracebackType | None,
     ) -> None:
         if self._container_id is not None:
-            print(
-                f"[mock-services] Stopping container {self._container_id[:12]}"
-            )
+            print(f"[mock-services] Stopping container {self._container_id[:12]}")
         self._stop_container()
         # Restore the base-URL env to whatever it was before we set it.
         if self._previous_base_url_env is None:
@@ -202,8 +200,7 @@ class DockerMockServices:
                 return
             time.sleep(_READY_POLL_INTERVAL)
         raise KitaruRuntimeError(
-            f"mock-services did not become ready within "
-            f"{_READY_TIMEOUT_SECONDS}s"
+            f"mock-services did not become ready within {_READY_TIMEOUT_SECONDS}s"
         )
 
     def _stop_container(self) -> None:

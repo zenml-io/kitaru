@@ -34,8 +34,7 @@ def resolve_secret_templates(value: str, *, cache: dict[str, dict[str, str]]) ->
             cache[name] = kitaru.get_secret(name).values
         if key not in cache[name]:
             raise KeyError(
-                f"Secret {name!r} has no key {key!r}. "
-                f"Known keys: {sorted(cache[name])}"
+                f"Secret {name!r} has no key {key!r}. Known keys: {sorted(cache[name])}"
             )
         return cache[name][key]
 

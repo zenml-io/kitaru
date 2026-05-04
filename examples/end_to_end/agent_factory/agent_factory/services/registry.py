@@ -45,8 +45,7 @@ ALL_SERVICES: dict[str, ServiceCall] = {
         args_model=PublishSummaryArgs,
         handler=publish_summary,
         summary=(
-            "Post a summary message to a webhook. Returns "
-            "`{message_id, posted_at}`."
+            "Post a summary message to a webhook. Returns `{message_id, posted_at}`."
         ),
     ),
 }
@@ -92,10 +91,13 @@ def build_service_description(allowed: set[str]) -> str:
     for name in sorted(allowed):
         call = ALL_SERVICES[name]
         fields = call.args_model.model_fields
-        arg_lines = [
-            f"      - {field_name}: {_render_annotation(field.annotation)} — {field.description or ''}".rstrip()
-            for field_name, field in fields.items()
-        ]
+        arg_lines: list[str] = []
+        for field_name, field in fields.items():
+            type_repr = _render_annotation(field.annotation)
+            description = field.description or ""
+            arg_lines.append(
+                f"      - {field_name}: {type_repr} — {description}".rstrip()
+            )
         lines.append(f"  - **{name}** — {call.summary}")
         if arg_lines:
             lines.append("    args:")

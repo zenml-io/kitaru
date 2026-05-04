@@ -30,6 +30,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -213,11 +214,10 @@ def test_build_agent_constructs_pydantic_ai_agent(stage_filename: str) -> None:
     try:
         import pydantic_ai.models.openai  # noqa: F401
     except ImportError:
-        pytest.skip("pydantic_ai's OpenAI backend isn't loadable here (needs openai>=2)")
-
-    from pydantic_ai import Agent
+        pytest.skip("pydantic_ai's OpenAI backend isn't loadable (needs openai>=2)")
 
     from agent_factory.agent import build_agent
+    from pydantic_ai import Agent
 
     module = _load_stage(stage_filename)
     agent = build_agent(module.DEFAULT_PROFILE, sandbox=None)
@@ -227,10 +227,10 @@ def test_build_agent_constructs_pydantic_ai_agent(stage_filename: str) -> None:
 # === Tool building unit tests ================================================
 
 
-def _profile(allowed: set[str], **extra: object) -> "object":
+def _profile(allowed: set[str], **extra: Any) -> Any:
     """Build a minimal Profile for tool-factory unit tests.
 
-    Returns ``object`` because importing ``Profile`` at module scope
+    Returns ``Any`` because importing ``Profile`` at module scope
     would force evaluation of the example tree before the autouse
     syspath fixture has run.
     """
@@ -245,9 +245,7 @@ def _profile(allowed: set[str], **extra: object) -> "object":
     )
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="`printf` is not a Windows builtin"
-)
+@pytest.mark.skipif(sys.platform == "win32", reason="`printf` is not a Windows builtin")
 def test_exec_tool_runs_subprocess_in_host_process() -> None:
     """``exec`` (no sandbox) routes through subprocess + returns ``ExecResult``."""
     from agent_factory.permissions import PermissionHandler

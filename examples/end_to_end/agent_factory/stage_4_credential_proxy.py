@@ -87,9 +87,7 @@ def agent_factory_flow() -> str:
 
     with (
         DockerMockServices(execution_id=execution_id) as _mock,
-        DockerProxy(
-            credential_map=credential_map, execution_id=execution_id
-        ) as proxy,
+        DockerProxy(credential_map=credential_map, execution_id=execution_id) as proxy,
         DockerSandbox(execution_id=execution_id, proxy=proxy) as sandbox,
     ):
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
@@ -98,9 +96,7 @@ def agent_factory_flow() -> str:
         # that per-call granularity isn't earning its keep, and turn mode
         # caches cross-run cleanly (see stage 1's note on granular caching).
         agent = KitaruAgent(agent)
-        result = agent.run_sync(
-            "Carry out your procedure and return the result."
-        )
+        result = agent.run_sync("Carry out your procedure and return the result.")
 
     print(f"\n{result.output}\n")
     return result.output

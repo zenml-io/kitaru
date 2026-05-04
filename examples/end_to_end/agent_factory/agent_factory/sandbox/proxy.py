@@ -65,7 +65,9 @@ class DockerProxy:
     @property
     def url(self) -> str:
         """The authenticated proxy URL the worker should use as `http_proxy`."""
-        return f"http://{self._proxy_token}:@{self._container_name}:{_PROXY_LISTEN_PORT}"
+        return (
+            f"http://{self._proxy_token}:@{self._container_name}:{_PROXY_LISTEN_PORT}"
+        )
 
     @property
     def public_cert_path(self) -> Path:
@@ -191,8 +193,7 @@ class DockerProxy:
                 return
             time.sleep(_READY_POLL_INTERVAL)
         raise KitaruRuntimeError(
-            f"proxy container did not become ready within "
-            f"{_READY_TIMEOUT_SECONDS}s"
+            f"proxy container did not become ready within {_READY_TIMEOUT_SECONDS}s"
         )
 
     def _stop_container(self) -> None:
