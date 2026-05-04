@@ -183,6 +183,14 @@ include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
 unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
+# Smoke-test imports `agent_factory` / `mocks` from the example tree at runtime
+# via a `sys.path` insert; static analysis can't see those packages.
+include = ["tests/test_agent_factory_example.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[[tool.ty.overrides]]
 # The wrapper entrypoints still rely on a few pyright-specific patterns upstream.
 include = [
     "src/kitaru/adapters/pydantic_ai/_agent.py",
