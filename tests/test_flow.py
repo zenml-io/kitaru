@@ -2096,7 +2096,7 @@ def test_submit_emits_flow_submitted_event() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
         patch("kitaru.flow.track") as track_mock,
     ):
         wrapped = flow(lambda x: x)
@@ -2131,7 +2131,7 @@ def test_submit_emits_terminal_event_when_run_already_completed() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
         patch("kitaru.flow.track") as track_mock,
     ):
         wrapped = flow(lambda x: x)
@@ -2170,7 +2170,7 @@ def test_submit_emits_terminal_event_with_failure_origin_when_run_already_failed
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
         patch("kitaru.flow.track") as track_mock,
     ):
         wrapped = flow(lambda x: x)
@@ -2207,7 +2207,7 @@ def test_submit_time_terminal_event_is_not_reemitted_by_wait_or_get() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
         patch("kitaru.flow.Client", return_value=client_mock),
         patch("kitaru.flow.track") as track_mock,
     ):
@@ -2238,7 +2238,7 @@ def test_submit_defers_terminal_event_when_run_still_running() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
         patch("kitaru.flow.track") as track_mock,
     ):
         wrapped = flow(lambda x: x)
@@ -2267,7 +2267,7 @@ def test_submit_classification_failure_does_not_break_flow_execution() -> None:
         patch("kitaru.flow.persist_frozen_execution_spec"),
         patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
         patch(
-            "kitaru.flow.classify_stack_deployment_type",
+            "kitaru._telemetry.classify_stack_deployment_type",
             side_effect=RuntimeError("backend unavailable"),
         ),
         patch("kitaru.flow.track") as track_mock,
@@ -2303,7 +2303,7 @@ def test_submit_does_not_emit_when_run_is_none() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru._telemetry.classify_stack_deployment_type", return_value="local"),
         patch("kitaru.flow.track") as track_mock,
         pytest.raises(KitaruRuntimeError, match="did not produce"),
     ):
@@ -2333,7 +2333,10 @@ def test_replay_success_emits_requested_and_replayed_events() -> None:
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
         patch("kitaru.flow.persist_frozen_execution_spec"),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="kubernetes"),
+        patch(
+            "kitaru._telemetry.classify_stack_deployment_type",
+            return_value="kubernetes",
+        ),
         patch(
             "kitaru.flow.build_replay_plan",
             return_value=ReplayPlan(
@@ -2364,6 +2367,117 @@ def test_replay_success_emits_requested_and_replayed_events() -> None:
     assert replayed_call.args[1]["deployment_type_source"] == "kitaru_stack_inference"
 
 
+def test_replay_emits_immediate_terminal_event_when_replayed_run_completed() -> None:
+    """Already-completed replayed runs should emit FLOW_TERMINAL immediately."""
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("step", "output", 42)],
+    )
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.side_effect = [source_run, replayed_run]
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch(
+            "kitaru._telemetry.classify_stack_deployment_type",
+            return_value="kubernetes",
+        ),
+        patch(
+            "kitaru.flow.build_replay_plan",
+            return_value=ReplayPlan(
+                original_run_id=str(source_run.id),
+                steps_to_skip=set(),
+                input_overrides={},
+                step_input_overrides={},
+            ),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        wrapped = flow(lambda topic: topic)
+        handle = wrapped.replay(str(source_run.id), from_="write")
+        handle.get()
+
+    events = [call_args.args[0] for call_args in track_mock.call_args_list]
+    assert events == [
+        AnalyticsEvent.REPLAY_REQUESTED,
+        AnalyticsEvent.FLOW_REPLAYED,
+        AnalyticsEvent.FLOW_TERMINAL,
+    ]
+    terminal_metadata = track_mock.call_args_list[2].args[1]
+    assert terminal_metadata["status"] == ExecutionStatus.COMPLETED.value
+    assert terminal_metadata["kitaru_deployment_type"] == "kubernetes"
+    assert terminal_metadata["deployment_type_source"] == "kitaru_stack_inference"
+
+
+def test_replay_emits_immediate_terminal_event_when_replayed_run_failed() -> None:
+    """Already-failed replayed runs should emit FLOW_TERMINAL with origin."""
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        status_reason="user error",
+        traceback="Traceback\nValueError: boom",
+    )
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch(
+            "kitaru._telemetry.classify_stack_deployment_type",
+            return_value="kubernetes",
+        ),
+        patch(
+            "kitaru.flow.build_replay_plan",
+            return_value=ReplayPlan(
+                original_run_id=str(source_run.id),
+                steps_to_skip=set(),
+                input_overrides={},
+                step_input_overrides={},
+            ),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = source_run
+        wrapped = flow(lambda topic: topic)
+        wrapped.replay(str(source_run.id), from_="write")
+
+    events = [call_args.args[0] for call_args in track_mock.call_args_list]
+    assert events == [
+        AnalyticsEvent.REPLAY_REQUESTED,
+        AnalyticsEvent.FLOW_REPLAYED,
+        AnalyticsEvent.FLOW_TERMINAL,
+    ]
+    terminal_metadata = track_mock.call_args_list[2].args[1]
+    assert terminal_metadata["status"] == ExecutionStatus.FAILED.value
+    assert terminal_metadata["failure_origin"] == FailureOrigin.USER_CODE.value
+    assert terminal_metadata["kitaru_deployment_type"] == "kubernetes"
+
+
 def test_replay_failure_emits_requested_then_failed_events() -> None:
     """Failed replay should emit REPLAY_REQUESTED then REPLAY_FAILED."""
     source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
@@ -2382,7 +2496,10 @@ def test_replay_failure_emits_requested_then_failed_events() -> None:
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="kubernetes"),
+        patch(
+            "kitaru._telemetry.classify_stack_deployment_type",
+            return_value="kubernetes",
+        ),
         patch(
             "kitaru.flow.build_replay_plan",
             return_value=ReplayPlan(
@@ -2431,7 +2548,10 @@ def test_replay_none_run_emits_replay_failed_with_runtime_origin() -> None:
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
-        patch("kitaru.flow.classify_stack_deployment_type", return_value="kubernetes"),
+        patch(
+            "kitaru._telemetry.classify_stack_deployment_type",
+            return_value="kubernetes",
+        ),
         patch(
             "kitaru.flow.build_replay_plan",
             return_value=ReplayPlan(
@@ -2635,6 +2755,34 @@ def test_flow_handle_wait_still_raises_when_classify_fails() -> None:
     assert "duration_seconds" not in metadata
     assert "checkpoint_count" not in metadata
     assert "checkpoint_count_source" not in metadata
+
+
+def test_flow_handle_constructor_terminal_failure_classification_falls_back() -> None:
+    """Constructor-time terminal telemetry should not raise if classification fails."""
+    failed = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        status_reason="user error",
+        traceback="Traceback\nValueError: boom",
+    )
+
+    with (
+        patch(
+            "kitaru.flow._classify_run_failure",
+            side_effect=RuntimeError("unexpected shape"),
+        ),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        handle = FlowHandle(
+            _as_pipeline_run(failed),
+            track_terminal_if_finished=True,
+        )
+
+    assert handle.exec_id == str(failed.id)
+    track_mock.assert_called_once()
+    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    metadata = track_mock.call_args.args[1]
+    assert metadata["status"] == ExecutionStatus.FAILED.value
+    assert metadata["failure_origin"] == FailureOrigin.UNKNOWN.value
 
 
 # ---------------------------------------------------------------------------

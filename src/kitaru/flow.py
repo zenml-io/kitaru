@@ -50,6 +50,9 @@ from kitaru._source_aliases import (
     build_pipeline_source_alias,
     callable_name,
 )
+from kitaru._telemetry import (
+    deployment_metadata_for_stack as _deployment_metadata_for_stack,
+)
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
@@ -61,7 +64,6 @@ from kitaru.config import (
     _read_env_model_registry,
     _read_model_registry_config,
     build_frozen_execution_spec,
-    classify_stack_deployment_type,
     image_settings_to_docker_settings,
     persist_frozen_execution_spec,
     resolve_connection_config,
@@ -692,32 +694,6 @@ def _safe_classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
         return FailureOrigin.UNKNOWN
 
 
-def _deployment_metadata_for_stack(stack_name_or_id: str | None) -> dict[str, str]:
-    """Return privacy-safe flow analytics deployment metadata.
-
-    The metadata deliberately contains only the coarse Kitaru-owned deployment
-    class and a diagnostic source. It never includes stack names, stack IDs,
-    project names, server URLs, or other user-controlled selectors.
-    """
-    try:
-        deployment_type = classify_stack_deployment_type(stack_name_or_id)
-    except Exception:
-        logger.debug(
-            "Failed to classify stack deployment type for analytics (selector=%r).",
-            stack_name_or_id,
-            exc_info=True,
-        )
-        return {
-            "kitaru_deployment_type": "unknown",
-            "deployment_type_source": "kitaru_stack_inference_failed",
-        }
-
-    return {
-        "kitaru_deployment_type": deployment_type,
-        "deployment_type_source": "kitaru_stack_inference",
-    }
-
-
 def _duration_metadata_from_run(
     run: PipelineRunResponse,
     *,
@@ -1311,6 +1287,7 @@ class _FlowDefinition:
             replayed_run,
             observed_started_at=observed_started_at,
             analytics_metadata=deployment_metadata,
+            track_terminal_if_finished=True,
         )
 
     def _submit(

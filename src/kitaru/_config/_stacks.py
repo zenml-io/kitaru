@@ -1949,6 +1949,23 @@ def _infer_stack_details_type(
     return "custom"
 
 
+def classify_stack_model_deployment_type(
+    stack_model: Any,
+    *,
+    selector: str = "<resolved stack>",
+) -> _StackShowType:
+    """Classify an already-hydrated stack model without resolving it again."""
+    component_details = _stack_component_details_from_stack_model(
+        stack_model,
+        selector=selector,
+    )
+    if not component_details or all(
+        component.backend is None for component in component_details
+    ):
+        raise KitaruStateError("Stack components did not include backend metadata.")
+    return _infer_stack_details_type(component_details)
+
+
 def classify_stack_deployment_type(
     name_or_id: str | None = None,
     *,
@@ -1983,15 +2000,7 @@ def classify_stack_deployment_type(
             f"Unable to classify stack deployment type for '{selector}'."
         ) from exc
 
-    component_details = _stack_component_details_from_stack_model(
-        hydrated_stack,
-        selector=selector,
-    )
-    if not component_details or all(
-        component.backend is None for component in component_details
-    ):
-        raise KitaruStateError("Stack components did not include backend metadata.")
-    return _infer_stack_details_type(component_details)
+    return classify_stack_model_deployment_type(hydrated_stack, selector=selector)
 
 
 def _show_stack_operation(
