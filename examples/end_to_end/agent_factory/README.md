@@ -173,7 +173,7 @@ Kitaru: HTTP Request: POST https://api.openai.com/v1/chat/completions  ← agent
 [sandbox]   → exit=0, stdout=211 chars, cwd=/tmp
 ```
 
-The system prompt only says "find your skill and follow it." The actual procedure (which commands to run, what to summarize, how to return) lives in `skills/default-agent/SKILL.md`. Edit the markdown, re-run, watch the agent's behavior change without touching Python.
+The system prompt only says "find your skill and follow it." The actual procedure (which commands to run, what to summarize, how to return) lives in `skills/basic/default-agent/SKILL.md`. Edit the markdown, re-run, watch the agent's behavior change without touching Python. **When iterating on a SKILL.md, run with `DISABLE_CACHE=1` — otherwise the prior run's turn output is cached and your edits won't visibly change anything until the cache is invalidated.**
 
 **What's in it:**
 
@@ -263,6 +263,8 @@ The bearer arrived at the mock — but **the worker never had it**. The credenti
 - The proxy listens for HTTP/HTTPS via `mitmdump --listen-host 0.0.0.0 --listen-port 8080` and intercepts both. HTTPS works because the worker trusts the proxy's self-signed CA.
 - `--network-alias wiki.local` on the mock-services container makes Docker's embedded DNS resolve `wiki.local` to that container — so the agent's `curl http://wiki.local/...` lands at the mock without `/etc/hosts` hacks.
 - The proxy + mock images need to be built once via `bash setup.sh`; `DockerProxy.__enter__` and `DockerMockServices.__enter__` pre-flight the image and raise a clear `KitaruRuntimeError` with the build command if the image is missing.
+- **Network reachability is not the same as authentication.** The worker, proxy, and mock containers all share the `agent_factory` Docker network, so an in-worker process could `curl http://wiki.local/...` directly *without* going through the proxy. That request would fail with `401 unauthorized` because the mock checks `Authorization` and only the proxy holds the bearer — but the network path itself isn't blocked. If your real services rely on network ACLs as well as bearer auth, mirror that in your fork (separate networks per role, or egress policies on the worker).
+- **The per-run proxy bearer is visible to the worker.** The worker has to authenticate to its own proxy, so the per-run token (`secrets.token_urlsafe(32)`) is embedded in the worker's `http_proxy` env as basic-auth-as-bearer. A prompt-injected agent inside the worker could read `$http_proxy` and use the proxy directly. That's fine — the proxy bearer only authorizes requests *through the proxy*, which is exactly what the worker is allowed to do; the secrets that matter (`wiki-token`, etc.) still live only on the proxy side and only get injected on host-matched outbound requests.
 
 ---
 
