@@ -367,6 +367,66 @@ class TestResolveHitlQuestion:
         assert resolve_hitl_question(config, {"question": "ignored"}) == "static only"
 
 
+class TestHitlConfigJsonSerialization:
+    """``HitlConfig`` round-trips through Pydantic JSON dumps without leaking
+    class objects.
+
+    Regression for an end-to-end break under pydantic-ai-slim 1.86+: that
+    release surfaces per-tool ``metadata`` through
+    ``AgentRunResult._state.last_model_request_parameters``, which means
+    Kitaru's auto-checkpoint output (an ``AgentRunResult``) is fully
+    JSON-serialized by ZenML's ``DataclassMaterializer``. The walked tree
+    includes every tool's ``metadata['kitaru_hitl_config']``, and a raw class
+    object in ``HitlConfig.schema`` (e.g. ``schema=bool``) crashes the dump
+    with ``PydanticSerializationError: Unable to serialize unknown type:
+    <class 'type'>``.
+    """
+
+    def test_dump_python_json_mode_stringifies_class_schema(self) -> None:
+        from pydantic import TypeAdapter
+
+        from kitaru.adapters.pydantic_ai._hitl import HitlConfig
+
+        config = HitlConfig(question="Approve?", schema=bool)
+        dumped = TypeAdapter(HitlConfig).dump_python(config, mode="json")
+
+        assert dumped["schema"] == "builtins.bool"
+        assert dumped["question"] == "Approve?"
+
+    def test_runtime_schema_is_unchanged_after_dump(self) -> None:
+        from pydantic import TypeAdapter
+
+        from kitaru.adapters.pydantic_ai._hitl import HitlConfig
+
+        config = HitlConfig(schema=bool)
+        TypeAdapter(HitlConfig).dump_python(config, mode="json")
+        # Runtime field still holds the live class so downstream identity
+        # checks (e.g. ``request.schema is bool``) and ``kitaru.wait(schema=...)``
+        # validation continue to work.
+        assert config.schema is bool
+
+    def test_nested_in_tool_metadata_dict_serializes(self) -> None:
+        """Mirror the failing path: HitlConfig nested inside a ``dict[str, Any]``."""
+        from pydantic import TypeAdapter
+
+        from kitaru.adapters.pydantic_ai._hitl import HitlConfig
+
+        config = HitlConfig(schema=bool)
+        metadata = {"kitaru_hitl_config": config, "other": "ok"}
+        dumped = TypeAdapter(dict).dump_python(metadata, mode="json")
+
+        assert dumped["kitaru_hitl_config"]["schema"] == "builtins.bool"
+        assert dumped["other"] == "ok"
+
+    def test_none_schema_passes_through(self) -> None:
+        from pydantic import TypeAdapter
+
+        from kitaru.adapters.pydantic_ai._hitl import HitlConfig
+
+        dumped = TypeAdapter(HitlConfig).dump_python(HitlConfig(), mode="json")
+        assert dumped["schema"] is None
+
+
 class TestUseGranular:
     def _make_agent(self, *, granular: bool):
         from pydantic_ai import Agent
