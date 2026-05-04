@@ -50,6 +50,9 @@ from kitaru._source_aliases import (
     build_pipeline_source_alias,
     callable_name,
 )
+from kitaru._telemetry import (
+    deployment_metadata_for_stack as _deployment_metadata_for_stack,
+)
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
@@ -61,7 +64,6 @@ from kitaru.config import (
     _read_env_model_registry,
     _read_model_registry_config,
     build_frozen_execution_spec,
-    classify_stack_deployment_type,
     image_settings_to_docker_settings,
     persist_frozen_execution_spec,
     resolve_connection_config,
@@ -692,32 +694,6 @@ def _safe_classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
         return FailureOrigin.UNKNOWN
 
 
-def _deployment_metadata_for_stack(stack_name_or_id: str | None) -> dict[str, str]:
-    """Return privacy-safe flow analytics deployment metadata.
-
-    The metadata deliberately contains only the coarse Kitaru-owned deployment
-    class and a diagnostic source. It never includes stack names, stack IDs,
-    project names, server URLs, or other user-controlled selectors.
-    """
-    try:
-        deployment_type = classify_stack_deployment_type(stack_name_or_id)
-    except Exception:
-        logger.debug(
-            "Failed to classify stack deployment type for analytics (selector=%r).",
-            stack_name_or_id,
-            exc_info=True,
-        )
-        return {
-            "kitaru_deployment_type": "unknown",
-            "deployment_type_source": "kitaru_stack_inference_failed",
-        }
-
-    return {
-        "kitaru_deployment_type": deployment_type,
-        "deployment_type_source": "kitaru_stack_inference",
-    }
-
-
 def _duration_metadata_from_run(
     run: PipelineRunResponse,
     *,
@@ -799,6 +775,7 @@ class FlowHandle:
         *,
         observed_started_at: float | None = None,
         analytics_metadata: dict[str, Any] | None = None,
+        track_terminal_if_finished: bool = False,
     ) -> None:
         """Initialize a flow handle.
 
@@ -806,6 +783,8 @@ class FlowHandle:
             run: Initial pipeline run response.
             observed_started_at: SDK-observed start time from ``time.perf_counter``.
             analytics_metadata: Privacy-safe metadata captured at submission time.
+            track_terminal_if_finished: Emit terminal analytics immediately when
+                the initial run is already terminal.
         """
         self._run = run
         self._run_id = run.id
@@ -816,6 +795,13 @@ class FlowHandle:
             else time.perf_counter()
         )
         self._analytics_metadata = dict(analytics_metadata or {})
+
+        if track_terminal_if_finished and run.status.is_finished:
+            if not run.status.is_successful:
+                origin = _safe_classify_run_failure(run)
+                self._track_terminal_once(run, failure_origin=origin)
+            else:
+                self._track_terminal_once(run)
 
     @property
     def exec_id(self) -> str:
@@ -1301,6 +1287,7 @@ class _FlowDefinition:
             replayed_run,
             observed_started_at=observed_started_at,
             analytics_metadata=deployment_metadata,
+            track_terminal_if_finished=True,
         )
 
     def _submit(
@@ -1371,6 +1358,7 @@ class _FlowDefinition:
             run,
             observed_started_at=observed_started_at,
             analytics_metadata=deployment_metadata,
+            track_terminal_if_finished=True,
         )
 
 

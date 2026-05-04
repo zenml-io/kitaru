@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
-from zenml.enums import ArtifactSaveType
+from zenml.enums import ArtifactSaveType, StackComponentType
 from zenml.enums import ExecutionStatus as ZenMLExecutionStatus
 from zenml.exceptions import EntityExistsError
 from zenml.models import PipelineRunResponse, StepRunResponse
@@ -199,6 +199,30 @@ class _DummyRun:
 
     def get_resources(self) -> Any:
         return SimpleNamespace(active_wait_condition=self._active_wait_condition)
+
+    def get_hydrated_version(self) -> _DummyRun:
+        return self
+
+
+def _server_stack_model(
+    *,
+    name: str = "prod-stack",
+    stack_id: str = "stack-secret-id",
+    orchestrator_flavor: str = "kubernetes",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=stack_id,
+        name=name,
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                SimpleNamespace(
+                    name="orchestrator",
+                    flavor=SimpleNamespace(name=orchestrator_flavor),
+                    configuration={},
+                )
+            ]
+        },
+    )
 
 
 class _DummySnapshot:
@@ -1584,6 +1608,109 @@ def test_deployment_facade_invoke_returns_flow_handle_with_parameters() -> None:
     assert invoke_kwargs["snapshot_name_or_id"] == deployment.deployment_id
     assert invoke_kwargs["project"] == "proj"
     assert invoke_kwargs["run_configuration"].parameters == {"question": "hello"}
+
+
+def test_deployments_invoke_completed_run_emits_immediate_terminal_event() -> None:
+    """Already-completed deployment invokes should emit FLOW_TERMINAL once."""
+    run = _as_pipeline_run(
+        _DummyRun(status=ZenMLExecutionStatus.COMPLETED, flow_name="research_flow")
+    )
+    stack = _server_stack_model()
+    snapshot = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("default", exclusive=True)],
+        stack=stack,
+    )
+    refresh_client = MagicMock()
+    refresh_client.get_pipeline_run.return_value = run
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(project="proj"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.ensure_stack_is_server_runnable"),
+        patch("kitaru.flow.Client", return_value=refresh_client),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
+        client_mock.trigger_pipeline.return_value = run
+
+        client = KitaruClient()
+        client.deployments.get(flow="research_flow", version=1)
+        handle = client.deployments.invoke(
+            flow="research_flow",
+            version=1,
+            inputs={"question": "please do not track this"},
+        )
+        handle.get()
+
+    client_mock.get_stack.assert_not_called()
+    track_mock.assert_called_once()
+    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    terminal_metadata = track_mock.call_args.args[1]
+    assert terminal_metadata["status"] == ZenMLExecutionStatus.COMPLETED.value
+    assert terminal_metadata["kitaru_deployment_type"] == "kubernetes"
+    assert terminal_metadata["deployment_type_source"] == "kitaru_stack_inference"
+    assert "prod-stack" not in terminal_metadata.values()
+    assert "stack-secret-id" not in terminal_metadata.values()
+    assert "please do not track this" not in terminal_metadata.values()
+
+
+def test_deployments_invoke_failed_run_emits_immediate_terminal_event() -> None:
+    """Already-failed deployment invokes should emit FLOW_TERMINAL with origin."""
+    run = _as_pipeline_run(
+        _DummyRun(
+            status=ZenMLExecutionStatus.FAILED,
+            flow_name="research_flow",
+            status_reason="user error",
+            exception_traceback="Traceback\nValueError: boom",
+        )
+    )
+    stack = _server_stack_model()
+    snapshot = _DummySnapshot(
+        name="kitaru::research_flow::v1",
+        tags=[deployment_public_tag("default", exclusive=True)],
+        stack=stack,
+    )
+    metadata = {
+        "kitaru_deployment_type": "kubernetes",
+        "deployment_type_source": "kitaru_stack_inference",
+    }
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(project="proj"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.ensure_stack_is_server_runnable"),
+        patch(
+            "kitaru.client.deployment_metadata_for_stack_model",
+            return_value=metadata,
+        ) as metadata_mock,
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.list_snapshots.return_value = SimpleNamespace(items=[snapshot])
+        client_mock.get_snapshot.return_value = snapshot
+        client_mock.trigger_pipeline.return_value = run
+
+        client = KitaruClient()
+        client.deployments.get(flow="research_flow", version=1)
+        handle = client.deployments.invoke(flow="research_flow", version=1)
+
+    assert handle.exec_id == str(run.id)
+    metadata_mock.assert_called_once_with(stack)
+    track_mock.assert_called_once()
+    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    terminal_metadata = track_mock.call_args.args[1]
+    assert terminal_metadata["status"] == ZenMLExecutionStatus.FAILED.value
+    assert terminal_metadata["failure_origin"] == FailureOrigin.USER_CODE.value
+    assert terminal_metadata["kitaru_deployment_type"] == "kubernetes"
 
 
 def test_deployments_invoke_warns_for_unknown_explicit_version() -> None:
