@@ -1,0 +1,78 @@
+---
+title: OpenAI Agents Adapter
+description: Wrap an OpenAI Agents SDK Agent with KitaruRunner so calls are durable and replayable inside Kitaru flows
+---
+
+Kitaru's OpenAI Agents adapter lets you keep your existing OpenAI Agents SDK
+agent logic while adding Kitaru durability around it.
+
+```python
+from agents import Agent
+from kitaru.adapters.openai_agents import KitaruRunner
+
+agent = Agent(name="researcher", model=your_model)
+runner = KitaruRunner(agent)
+```
+
+You run the agent through `runner.run(...)` or `runner.run_sync(...)` with an
+`OpenAIRunRequest`.
+
+## Install
+
+```bash
+uv add "kitaru[openai-agents,local]"
+```
+
+Then initialize/login as usual:
+
+```bash
+kitaru init
+kitaru login
+kitaru status
+```
+
+## Minimal flow
+
+```python
+from kitaru import flow
+from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
+
+runner = KitaruRunner(agent, checkpoint_strategy="calls")
+
+@flow
+def research(prompt: str) -> str:
+    result = runner.run_sync(OpenAIRunRequest.start(prompt))
+    return str(result.final_output)
+```
+
+## Checkpoint strategy choices
+
+You choose how Kitaru places checkpoints with `checkpoint_strategy=`.
+
+### `checkpoint_strategy="calls"` (default)
+
+Kitaru catches supported model/tool calls individually.
+
+Use this when you want finer replay units (for example: if call 6 fails, calls
+1–5 can come from cache).
+
+### `checkpoint_strategy="runner_call"`
+
+Kitaru places one checkpoint around the outer `Runner.run(...)` call.
+
+Use this when you want one coarse replay boundary for the whole agent run.
+
+## Important guardrail
+
+`checkpoint_strategy="calls"` must run from flow scope (not from inside another
+`@checkpoint`), because the adapter needs room to open inner checkpoints for
+model/tool calls.
+
+## Runnable example
+
+```bash
+uv sync --extra local --extra openai-agents
+uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
+```
+
+See also: [Replay and overrides](/guides/replay-and-overrides).

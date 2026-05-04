@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - OSS-first auth management for service accounts and API keys via `KitaruClient.auth`, `kitaru auth service-accounts`, and `kitaru auth api-keys`. Raw API-key values are only returned on create/rotate so they can be stored immediately; list/show/update responses stay metadata-only.
+- OpenAI Agents SDK adapter user-facing packaging: a runnable integration example (`examples/integrations/openai_agents_agent/openai_agents_adapter.py`), a guide page (`/guides/openai-agents-adapter`) that explains `checkpoint_strategy="calls"` vs `checkpoint_strategy="runner_call"`, and smoke-test coverage for the example.
 
 ### Fixed
 - Checkpoint output handles now display Kitaru guidance to call `.load()` instead of leaking raw ZenML artifact metadata when stringified in flow bodies. (#127)
