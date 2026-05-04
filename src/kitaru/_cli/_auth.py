@@ -16,6 +16,7 @@ from kitaru.config import resolve_connection_config
 from kitaru.errors import KitaruBackendError, KitaruUsageError
 
 from . import auth_api_keys_app, auth_app, auth_service_accounts_app
+from ._dependencies import cli_dependencies
 from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
@@ -28,7 +29,6 @@ from ._helpers import (
     _emit_snapshot,
     _emit_table,
     _exit_with_error,
-    _facade_module,
     _format_table_timestamp,
     _format_timestamp,
     _is_input_interactive,
@@ -198,7 +198,7 @@ def _api_key_table_rows(api_keys: list[AuthAPIKey]) -> list[list[str]]:
 
 def _auth_management_client() -> Any:
     """Return the public SDK client configured for server-level auth management."""
-    return _facade_module().KitaruClient.for_auth_management()
+    return cli_dependencies().auth_management_client()
 
 
 def _confirm_delete(
@@ -234,7 +234,7 @@ def _active_server_access_token() -> str:
     """Return a short-lived bearer token for the active Kitaru server."""
     resolve_connection_config(validate_for_use=True, require_project=False)
     try:
-        client = _facade_module().Client()
+        client = cli_dependencies().zenml_client()
         store = client.zen_store
     except Exception as exc:
         raise KitaruUsageError(

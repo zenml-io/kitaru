@@ -113,6 +113,77 @@ def _created_artifact_response(artifact_id: UUID | None = None) -> SimpleNamespa
     return SimpleNamespace(id=artifact_id or uuid4())
 
 
+def test_memory_private_compat_aliases_resolve() -> None:
+    """The package facade should keep promised private aliases resolvable."""
+    expected_aliases = {
+        "_CURRENT_MEMORY_SCOPE",
+        "_RUNTIME_MEMORY_SCOPE_DEFAULT",
+        "_MemoryScope",
+        "_resolve_memory_scope_for_operation",
+        "_set_entry_impl",
+        "_compact_impl",
+        "_memory_set_step",
+    }
+
+    missing = [name for name in expected_aliases if not hasattr(memory, name)]
+    assert missing == []
+
+
+def test_memory_private_step_alias_preserves_submit_shape(monkeypatch) -> None:
+    """Private step aliases should still expose ZenML step helpers like ``submit``."""
+
+    class FakeMemorySetStep:
+        def __call__(self, *args: object, **kwargs: object) -> tuple[object, ...]:
+            del kwargs
+            return args
+
+        def submit(self, *args: object, **kwargs: object) -> tuple[object, object]:
+            return args, kwargs
+
+    monkeypatch.setattr(memory._steps, "_memory_set_step", FakeMemorySetStep())
+
+    assert memory._memory_set_step("scope", "flow", "key", "value") == (
+        "scope",
+        "flow",
+        "key",
+        "value",
+    )
+    assert memory._memory_set_step.submit("scope", after=["report"]) == (
+        ("scope",),
+        {"after": ["report"]},
+    )
+
+
+def test_memory_private_runtime_scope_default_assignment_updates_scope_module() -> None:
+    """Facade assignment should mutate owner state without creating a stale shadow."""
+    original = memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+    overridden = _MemoryScope(scope="compat_scope", scope_type="namespace")
+    owner_changed = _MemoryScope(scope="owner_changed", scope_type="namespace")
+
+    try:
+        memory._RUNTIME_MEMORY_SCOPE_DEFAULT = overridden
+        assert overridden == memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+        assert overridden == memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+
+        memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT = owner_changed
+        assert owner_changed == memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+    finally:
+        memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT = original
+
+
+def test_memory_private_runtime_scope_default_patch_restores_owner_scope() -> None:
+    """Patching the facade alias should cleanly restore owner-module state on exit."""
+    original = memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+    patched = _MemoryScope(scope="patched", scope_type="namespace")
+
+    with patch("kitaru.memory._RUNTIME_MEMORY_SCOPE_DEFAULT", patched):
+        assert patched == memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+        assert patched == memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+
+    assert original == memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT
+    assert original == memory._RUNTIME_MEMORY_SCOPE_DEFAULT
+
+
 def _memory_entry(
     *,
     key: str = "prefs",
@@ -185,9 +256,9 @@ def test_memory_apis_reject_checkpoint_context(call: Callable[[], object]) -> No
 def test_memory_configure_outside_flow_sets_process_default() -> None:
     memory.configure(scope="repo_seed")
 
-    assert memory._RUNTIME_MEMORY_SCOPE_DEFAULT is not None
-    assert memory._RUNTIME_MEMORY_SCOPE_DEFAULT.scope == "repo_seed"
-    assert memory._RUNTIME_MEMORY_SCOPE_DEFAULT.scope_type == "namespace"
+    assert memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT is not None
+    assert memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT.scope == "repo_seed"
+    assert memory._scope._RUNTIME_MEMORY_SCOPE_DEFAULT.scope_type == "namespace"
 
 
 def test_memory_configure_rejects_checkpoint_context() -> None:
@@ -203,7 +274,7 @@ def test_memory_configure_rejects_checkpoint_context() -> None:
 def test_memory_set_rejects_invalid_keys_before_dispatch(bad_key: str) -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=_runtime_flow_id("demo_flow")),
-        patch("kitaru.memory._memory_set_step") as memory_set_step,
+        patch("kitaru.memory._steps._memory_set_step") as memory_set_step,
         pytest.raises(KitaruUsageError, match="Memory key"),
     ):
         memory.set(bad_key, {"theme": "dark"})
@@ -223,7 +294,7 @@ def test_memory_raises_when_flow_active_but_flow_id_missing() -> None:
     """Flow scope without a resolvable flow ID should raise a diagnostic error."""
     with (
         _flow_scope(name="demo_flow"),
-        patch("kitaru.memory._get_current_flow_id", return_value=None),
+        patch("kitaru.memory._scope._get_current_flow_id", return_value=None),
         pytest.raises(KitaruStateError, match="could not resolve a durable flow ID"),
     ):
         memory.list()
@@ -232,7 +303,7 @@ def test_memory_raises_when_flow_active_but_flow_id_missing() -> None:
 def test_memory_configure_rejects_invalid_scope_before_dispatch() -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=_runtime_flow_id("demo_flow")),
-        patch("kitaru.memory._memory_list_step") as memory_list_step,
+        patch("kitaru.memory._steps._memory_list_step") as memory_list_step,
         pytest.raises(KitaruUsageError, match="Memory scope"),
     ):
         memory.configure(scope="bad:scope")
@@ -273,7 +344,7 @@ def test_memory_set_dispatches_to_synthetic_step() -> None:
 
     with (
         _flow_scope(name="research_agent", flow_id=flow_id),
-        patch("kitaru.memory._memory_set_step") as memory_set_step,
+        patch("kitaru.memory._steps._memory_set_step") as memory_set_step,
     ):
         result = memory.set("user_preferences", payload)
 
@@ -286,13 +357,83 @@ def test_memory_set_dispatches_to_synthetic_step() -> None:
     )
 
 
+def test_memory_set_dispatches_through_facade_patch_seam() -> None:
+    payload = {"language": "en", "theme": "dark"}
+    flow_id = _runtime_flow_id("research_agent")
+
+    with (
+        _flow_scope(name="research_agent", flow_id=flow_id),
+        patch("kitaru.memory._memory_set_step") as facade_memory_set_step,
+        patch("kitaru.memory._steps._memory_set_step") as owner_memory_set_step,
+    ):
+        result = memory.set("user_preferences", payload)
+
+    assert result is None
+    facade_memory_set_step.assert_called_once_with(
+        flow_id,
+        "flow",
+        "user_preferences",
+        payload,
+    )
+    owner_memory_set_step.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("facade_step", "owner_step", "call", "expected"),
+    [
+        (
+            "_memory_get_step",
+            "kitaru.memory._steps._memory_get_step",
+            lambda: memory.get("prefs", version=2),
+            {"theme": "dark"},
+        ),
+        (
+            "_memory_list_step",
+            "kitaru.memory._steps._memory_list_step",
+            lambda: memory.list(),
+            [_memory_entry(version=2)],
+        ),
+        (
+            "_memory_history_step",
+            "kitaru.memory._steps._memory_history_step",
+            lambda: memory.history("prefs"),
+            [_memory_entry(version=3, is_deleted=True)],
+        ),
+        (
+            "_memory_delete_step",
+            "kitaru.memory._steps._memory_delete_step",
+            lambda: memory.delete("prefs"),
+            _memory_entry(version=3, is_deleted=True),
+        ),
+    ],
+)
+def test_memory_read_delete_dispatches_through_facade_patch_seams(
+    facade_step: str,
+    owner_step: str,
+    call: Callable[[], object],
+    expected: object,
+) -> None:
+    flow_id = _runtime_flow_id("demo_flow")
+
+    with (
+        _flow_scope(name="demo_flow", flow_id=flow_id),
+        patch(f"kitaru.memory.{facade_step}", return_value=expected) as facade_mock,
+        patch(owner_step) as owner_mock,
+    ):
+        result = call()
+
+    assert result == expected
+    facade_mock.assert_called_once()
+    owner_mock.assert_not_called()
+
+
 def test_memory_set_outside_flow_dispatches_to_direct_impl() -> None:
     payload = {"language": "en", "theme": "dark"}
     memory.configure(scope="repo_seed")
 
     with (
-        patch("kitaru.memory._set_impl") as set_impl,
-        patch("kitaru.memory._memory_set_step") as memory_set_step,
+        patch("kitaru.memory._operations._set_impl") as set_impl,
+        patch("kitaru.memory._steps._memory_set_step") as memory_set_step,
     ):
         result = memory.set("user_preferences", payload)
 
@@ -311,7 +452,7 @@ def test_memory_get_dispatches_to_synthetic_step() -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=flow_id),
         patch(
-            "kitaru.memory._memory_get_step",
+            "kitaru.memory._steps._memory_get_step",
             return_value={"theme": "dark"},
         ) as memory_get_step,
     ):
@@ -327,7 +468,7 @@ def test_memory_get_forwards_strict_flag_to_synthetic_step() -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=flow_id),
         patch(
-            "kitaru.memory._memory_get_step",
+            "kitaru.memory._steps._memory_get_step",
             return_value={"theme": "dark"},
         ) as memory_get_step,
     ):
@@ -341,10 +482,10 @@ def test_memory_get_outside_flow_dispatches_to_direct_impl() -> None:
 
     with (
         patch(
-            "kitaru.memory._get_impl",
+            "kitaru.memory._operations._get_impl",
             return_value={"theme": "dark"},
         ) as get_impl,
-        patch("kitaru.memory._memory_get_step") as memory_get_step,
+        patch("kitaru.memory._steps._memory_get_step") as memory_get_step,
     ):
         result = memory.get("prefs", version=2)
 
@@ -363,7 +504,7 @@ def test_memory_get_outside_flow_forwards_strict_flag() -> None:
 
     with (
         patch(
-            "kitaru.memory._get_impl",
+            "kitaru.memory._operations._get_impl",
             return_value={"theme": "dark"},
         ) as get_impl,
     ):
@@ -384,7 +525,7 @@ def test_memory_list_dispatches_to_synthetic_step() -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=flow_id),
         patch(
-            "kitaru.memory._memory_list_step",
+            "kitaru.memory._steps._memory_list_step",
             return_value=fake_entries,
         ) as memory_list_step,
     ):
@@ -400,10 +541,10 @@ def test_memory_list_outside_flow_dispatches_to_direct_impl() -> None:
 
     with (
         patch(
-            "kitaru.memory._list_impl",
+            "kitaru.memory._operations._list_impl",
             return_value=fake_entries,
         ) as list_impl,
-        patch("kitaru.memory._memory_list_step") as memory_list_step,
+        patch("kitaru.memory._steps._memory_list_step") as memory_list_step,
     ):
         result = memory.list()
 
@@ -421,7 +562,7 @@ def test_memory_history_dispatches_to_synthetic_step() -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=flow_id),
         patch(
-            "kitaru.memory._memory_history_step",
+            "kitaru.memory._steps._memory_history_step",
             return_value=fake_entries,
         ) as memory_history_step,
     ):
@@ -437,10 +578,10 @@ def test_memory_history_outside_flow_dispatches_to_direct_impl() -> None:
 
     with (
         patch(
-            "kitaru.memory._history_impl",
+            "kitaru.memory._operations._history_impl",
             return_value=fake_entries,
         ) as history_impl,
-        patch("kitaru.memory._memory_history_step") as memory_history_step,
+        patch("kitaru.memory._steps._memory_history_step") as memory_history_step,
     ):
         result = memory.history("prefs")
 
@@ -459,7 +600,7 @@ def test_memory_delete_dispatches_to_synthetic_step() -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=flow_id),
         patch(
-            "kitaru.memory._memory_delete_step",
+            "kitaru.memory._steps._memory_delete_step",
             return_value=fake_entry,
         ) as memory_delete_step,
     ):
@@ -480,10 +621,10 @@ def test_memory_delete_outside_flow_dispatches_to_direct_impl() -> None:
 
     with (
         patch(
-            "kitaru.memory._delete_impl",
+            "kitaru.memory._operations._delete_impl",
             return_value=fake_entry,
         ) as delete_impl,
-        patch("kitaru.memory._memory_delete_step") as memory_delete_step,
+        patch("kitaru.memory._steps._memory_delete_step") as memory_delete_step,
     ):
         result = memory.delete("prefs")
 
@@ -500,21 +641,21 @@ def test_memory_configure_sets_namespace_scope_for_subsequent_calls() -> None:
 
     with (
         _flow_scope(name="demo_flow", flow_id=_runtime_flow_id("demo_flow")),
-        patch("kitaru.memory._memory_set_step") as memory_set_step,
+        patch("kitaru.memory._steps._memory_set_step") as memory_set_step,
         patch(
-            "kitaru.memory._memory_get_step",
+            "kitaru.memory._steps._memory_get_step",
             return_value={"theme": "dark"},
         ) as memory_get_step,
         patch(
-            "kitaru.memory._memory_list_step",
+            "kitaru.memory._steps._memory_list_step",
             return_value=fake_entries,
         ) as memory_list_step,
         patch(
-            "kitaru.memory._memory_history_step",
+            "kitaru.memory._steps._memory_history_step",
             return_value=fake_entries,
         ) as memory_history_step,
         patch(
-            "kitaru.memory._memory_delete_step",
+            "kitaru.memory._steps._memory_delete_step",
             return_value=fake_entries[0],
         ) as memory_delete_step,
     ):
@@ -546,7 +687,7 @@ def test_memory_configure_scope_type_flow_uses_current_flow_id() -> None:
     with (
         _flow_scope(name="demo_flow", flow_id=flow_id),
         patch(
-            "kitaru.memory._memory_list_step",
+            "kitaru.memory._steps._memory_list_step",
             return_value=fake_entries,
         ) as memory_list_step,
     ):
@@ -562,7 +703,7 @@ def test_memory_flow_scope_distinguishes_same_name_flows_by_id() -> None:
     first_flow_id = "flow-alpha-123"
     second_flow_id = "flow-beta-456"
 
-    with patch("kitaru.memory._memory_set_step") as memory_set_step:
+    with patch("kitaru.memory._steps._memory_set_step") as memory_set_step:
         with _flow_scope(name="shared_flow_name", flow_id=first_flow_id):
             memory.set("prefs", {"theme": "dark"})
 
@@ -585,7 +726,7 @@ def test_memory_configure_scope_type_execution_uses_execution_id() -> None:
             execution_id="exec-123",
         ),
         patch(
-            "kitaru.memory._memory_list_step",
+            "kitaru.memory._steps._memory_list_step",
             return_value=fake_entries,
         ) as memory_list_step,
     ):
@@ -612,7 +753,7 @@ def test_memory_configure_outside_flow_seeds_later_flow_session() -> None:
         _flow_scope(name="demo_flow", flow_id=_runtime_flow_id("demo_flow")),
         memory._memory_scope_session(),
         patch(
-            "kitaru.memory._memory_list_step",
+            "kitaru.memory._steps._memory_list_step",
             return_value=fake_entries,
         ) as memory_list_step,
     ):
@@ -630,7 +771,9 @@ def test_memory_configure_inside_flow_overrides_process_default_without_mutation
     with (
         _flow_scope(name="first_flow", flow_id=_runtime_flow_id("first_flow")),
         memory._memory_scope_session(),
-        patch("kitaru.memory._memory_list_step", return_value=[]) as memory_list_step,
+        patch(
+            "kitaru.memory._steps._memory_list_step", return_value=[]
+        ) as memory_list_step,
     ):
         memory.configure(scope="repo_override")
         memory.list()
@@ -638,7 +781,9 @@ def test_memory_configure_inside_flow_overrides_process_default_without_mutation
     with (
         _flow_scope(name="second_flow", flow_id=_runtime_flow_id("second_flow")),
         memory._memory_scope_session(),
-        patch("kitaru.memory._memory_list_step", return_value=[]) as memory_list_step_2,
+        patch(
+            "kitaru.memory._steps._memory_list_step", return_value=[]
+        ) as memory_list_step_2,
     ):
         memory.list()
 
@@ -700,9 +845,9 @@ def test_set_impl_persists_expected_artifact_contract() -> None:
     client_mock.get_artifact_version.return_value = created
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(created.id),
         ) as save_artifact_mock,
     ):
@@ -743,9 +888,9 @@ def test_set_entry_impl_returns_created_memory_entry() -> None:
     client_mock.get_artifact_version.return_value = created
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(created.id),
         ),
     ):
@@ -781,9 +926,9 @@ def test_set_entry_impl_flow_scope_persists_flow_metadata_without_flow_tag() -> 
 
     with (
         _flow_scope(name="repo_memory_demo", flow_id=flow_id),
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(created.id),
         ) as save_artifact_mock,
     ):
@@ -837,9 +982,9 @@ def test_set_entry_impl_execution_scope_indexes_detached_flow_context() -> None:
     )
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(created.id),
         ) as save_artifact_mock,
     ):
@@ -893,12 +1038,12 @@ def test_execution_scope_write_stays_non_breaking_when_flow_lookup_fails() -> No
     client_mock.get_pipeline_run.side_effect = RuntimeError("run lookup failed")
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(created.id),
         ) as save_artifact_mock,
-        patch("kitaru.memory.logger.warning") as warning_mock,
+        patch("kitaru.memory._artifacts.logger.warning") as warning_mock,
     ):
         entry = _set_entry_impl(
             _MemoryScope(scope="exec-123", scope_type="execution"),
@@ -951,13 +1096,16 @@ def test_execution_scope_prefers_active_step_context_for_current_execution() -> 
     )
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(created.id),
         ) as save_artifact_mock,
-        patch("kitaru.memory._get_current_execution_id", return_value="exec-123"),
-        patch("kitaru.memory.StepContext.get", return_value=step_context),
+        patch(
+            "kitaru.memory._artifacts._get_current_execution_id",
+            return_value="exec-123",
+        ),
+        patch("kitaru.memory._artifacts.StepContext.get", return_value=step_context),
     ):
         entry = _set_entry_impl(
             _MemoryScope(scope="exec-123", scope_type="execution"),
@@ -1025,7 +1173,7 @@ def test_reindex_impl_dry_run_identifies_missing_tags_without_mutating() -> None
         )
     )
 
-    with patch("kitaru.memory.track") as track_mock:
+    with patch("kitaru.memory._maintenance.track") as track_mock:
         result = _reindex_impl(client_factory=lambda: client_mock)
 
     assert result == MemoryReindexResult(
@@ -1197,9 +1345,9 @@ def test_set_entry_impl_temporarily_switches_project_for_write() -> None:
     client_mock.get_artifact_version.return_value = created
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(created.id),
         ),
     ):
@@ -1228,8 +1376,8 @@ def test_set_entry_impl_rejects_scope_type_mismatch_with_existing_history() -> N
     client_mock.list_artifact_versions.return_value = _page(existing)
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
-        patch("kitaru.memory.save_artifact") as save_artifact_mock,
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.save_artifact") as save_artifact_mock,
         pytest.raises(KitaruUsageError, match="scope_type mismatch"),
     ):
         _set_entry_impl(
@@ -1245,7 +1393,7 @@ def test_get_impl_returns_none_when_key_does_not_exist() -> None:
     client_mock = MagicMock()
     client_mock.list_artifact_versions.return_value = _page()
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         assert _get_impl(_flow_memory_scope(), "prefs") is None
 
 
@@ -1260,7 +1408,7 @@ def test_get_impl_returns_latest_value() -> None:
     client_mock = MagicMock()
     client_mock.list_artifact_versions.return_value = _page(latest)
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         result = _get_impl(_flow_memory_scope(), "prefs")
 
     assert result == {"theme": "dark"}
@@ -1284,7 +1432,7 @@ def test_get_entry_impl_returns_latest_memory_entry() -> None:
     client_mock = MagicMock()
     client_mock.list_artifact_versions.return_value = _page(latest)
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         entry = _get_entry_impl(_flow_memory_scope(), "prefs")
 
     assert entry is not None
@@ -1303,7 +1451,7 @@ def test_get_impl_returns_requested_version() -> None:
     client_mock = MagicMock()
     client_mock.list_artifact_versions.return_value = _page(historical)
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         result = _get_impl(_flow_memory_scope(), "prefs", version=1)
 
     assert result == {"theme": "light"}
@@ -1323,7 +1471,7 @@ def test_get_impl_returns_none_when_latest_version_is_tombstone() -> None:
     client_mock = MagicMock()
     client_mock.list_artifact_versions.return_value = _page(tombstone)
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         result = _get_impl(_flow_memory_scope(), "prefs")
 
     assert result is None
@@ -1341,7 +1489,7 @@ def test_get_impl_returns_none_for_tombstone_history_version() -> None:
     client_mock = MagicMock()
     client_mock.list_artifact_versions.return_value = _page(tombstone)
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         result = _get_impl(_flow_memory_scope(), "prefs", version=2)
 
     assert result is None
@@ -1362,7 +1510,7 @@ def test_get_impl_warns_and_returns_none_when_artifact_value_unreachable() -> No
     client_mock.list_artifact_versions.return_value = _page(unreachable)
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         pytest.warns(
             RuntimeWarning,
             match=r"artifact value could not be loaded from this environment",
@@ -1387,7 +1535,7 @@ def test_get_impl_strict_raises_typed_error_when_artifact_value_unreachable() ->
     client_mock.list_artifact_versions.return_value = _page(unreachable)
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         pytest.raises(
             KitaruMemoryArtifactUnavailableError,
             match=r"prefs.*demo_flow.*could not be loaded",
@@ -1452,7 +1600,7 @@ def test_list_impl_dedupes_versions_and_excludes_deleted_latest_keys() -> None:
         notes_v2,
     )
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         entries = _list_impl(_flow_memory_scope())
 
     assert [entry.key for entry in entries] == ["alpha", "prefs"]
@@ -1470,7 +1618,7 @@ def test_list_impl_filters_by_prefix_after_deduping() -> None:
         _memory_artifact(scope="demo_flow", key="notes", version=3, value="x"),
     )
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         entries = _list_impl(_flow_memory_scope(), prefix="repo_")
 
     assert [entry.key for entry in entries] == ["repo_alpha", "repo_beta"]
@@ -1506,7 +1654,7 @@ def test_history_impl_returns_all_versions_newest_first_across_pages() -> None:
         _page(version_1, index=2, total_pages=2),
     ]
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         entries = _history_impl(_flow_memory_scope(), "prefs")
 
     assert [entry.version for entry in entries] == [3, 2, 1]
@@ -1519,8 +1667,8 @@ def test_delete_impl_returns_none_when_key_does_not_exist() -> None:
     client_mock.list_artifact_versions.return_value = _page()
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
-        patch("kitaru.memory.save_artifact") as save_artifact_mock,
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.save_artifact") as save_artifact_mock,
     ):
         result = _delete_impl(_flow_memory_scope(), "prefs")
 
@@ -1548,9 +1696,9 @@ def test_delete_impl_writes_tombstone_and_returns_entry() -> None:
     client_mock.get_artifact_version.return_value = tombstone
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(tombstone.id),
         ) as save_artifact_mock,
     ):
@@ -1607,9 +1755,9 @@ def test_delete_impl_temporarily_switches_project_for_tombstone_write() -> None:
     client_mock.get_artifact_version.return_value = tombstone
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
         patch(
-            "kitaru.memory.save_artifact",
+            "kitaru.memory._artifacts.save_artifact",
             return_value=_created_artifact_response(tombstone.id),
         ),
     ):
@@ -1637,9 +1785,9 @@ def test_delete_impl_returns_existing_tombstone_when_key_already_deleted() -> No
     client_mock.list_artifact_versions.return_value = _page(tombstone)
 
     with (
-        patch("kitaru.memory.Client", return_value=client_mock),
-        patch("kitaru.memory.save_artifact") as save_artifact_mock,
-        patch("kitaru.memory.track") as track_mock,
+        patch("kitaru.memory._artifacts.Client", return_value=client_mock),
+        patch("kitaru.memory._artifacts.save_artifact") as save_artifact_mock,
+        patch("kitaru.memory._operations.track") as track_mock,
     ):
         result = _delete_impl(_flow_memory_scope(), "prefs")
 
@@ -1682,18 +1830,20 @@ class TestCompactImpl:
 
         with (
             patch(
-                "kitaru.memory._fetch_memory_artifact",
+                "kitaru.memory._artifacts._fetch_memory_artifact",
                 return_value=latest,
             ) as fetch_artifact,
             patch(
-                "kitaru.memory._paginate_artifact_versions",
+                "kitaru.memory._artifacts._paginate_artifact_versions",
                 side_effect=AssertionError("history path should not run"),
             ),
             patch(
-                "kitaru.memory._set_entry_impl",
+                "kitaru.memory._operations._set_entry_impl",
                 return_value=new_entry,
             ) as set_entry_impl,
-            patch("kitaru.memory._write_compaction_record") as write_record,
+            patch(
+                "kitaru.memory._maintenance._write_compaction_record"
+            ) as write_record,
             patch(
                 "kitaru.llm.resolve_model_selection",
                 return_value=SimpleNamespace(resolved_model="resolved-model"),
@@ -1711,7 +1861,7 @@ class TestCompactImpl:
                 return_value=SimpleNamespace(response_text="Compacted latest value"),
             ),
             patch("kitaru.llm._track_llm_call_analytics") as llm_track_mock,
-            patch("kitaru.memory.track") as track_mock,
+            patch("kitaru.memory._operations.track") as track_mock,
         ):
             result = _compact_impl(
                 _MemoryScope(scope="s", scope_type="namespace"),
@@ -1780,18 +1930,20 @@ class TestCompactImpl:
 
         with (
             patch(
-                "kitaru.memory._fetch_memory_artifact",
+                "kitaru.memory._artifacts._fetch_memory_artifact",
                 side_effect=AssertionError("current-value path should not run"),
             ),
             patch(
-                "kitaru.memory._paginate_artifact_versions",
+                "kitaru.memory._artifacts._paginate_artifact_versions",
                 return_value=[newest, middle, deleted],
             ),
             patch(
-                "kitaru.memory._set_entry_impl",
+                "kitaru.memory._operations._set_entry_impl",
                 return_value=new_entry,
             ),
-            patch("kitaru.memory._write_compaction_record") as write_record,
+            patch(
+                "kitaru.memory._maintenance._write_compaction_record"
+            ) as write_record,
             patch(
                 "kitaru.llm.resolve_model_selection",
                 return_value=SimpleNamespace(resolved_model="resolved-model"),
@@ -1855,18 +2007,20 @@ class TestCompactImpl:
 
         with (
             patch(
-                "kitaru.memory._fetch_memory_artifact",
+                "kitaru.memory._artifacts._fetch_memory_artifact",
                 side_effect=fetch_side_effect,
             ) as fetch_artifact,
             patch(
-                "kitaru.memory._paginate_artifact_versions",
+                "kitaru.memory._artifacts._paginate_artifact_versions",
                 side_effect=AssertionError("history path should not run"),
             ),
             patch(
-                "kitaru.memory._set_entry_impl",
+                "kitaru.memory._operations._set_entry_impl",
                 return_value=new_entry,
             ),
-            patch("kitaru.memory._write_compaction_record") as write_record,
+            patch(
+                "kitaru.memory._maintenance._write_compaction_record"
+            ) as write_record,
             patch(
                 "kitaru.llm.resolve_model_selection",
                 return_value=SimpleNamespace(resolved_model="resolved-model"),
@@ -1914,7 +2068,7 @@ class TestCompactImpl:
 
     def test_single_key_current_mode_rejects_missing_key(self) -> None:
         with (
-            patch("kitaru.memory._fetch_memory_artifact", return_value=None),
+            patch("kitaru.memory._artifacts._fetch_memory_artifact", return_value=None),
             pytest.raises(KitaruUsageError, match="found no current value"),
         ):
             _compact_impl(
@@ -1933,7 +2087,10 @@ class TestCompactImpl:
             deleted=True,
         )
         with (
-            patch("kitaru.memory._fetch_memory_artifact", return_value=tombstone),
+            patch(
+                "kitaru.memory._artifacts._fetch_memory_artifact",
+                return_value=tombstone,
+            ),
             pytest.raises(KitaruUsageError, match="current value is deleted"),
         ):
             _compact_impl(
@@ -1995,9 +2152,10 @@ class TestPurgeImpl:
         ]
 
         with (
-            patch("kitaru.memory.Client", return_value=client_mock),
+            patch("kitaru.memory._artifacts.Client", return_value=client_mock),
             patch(
-                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+                "kitaru.memory._artifacts.save_artifact",
+                return_value=_created_artifact_response(),
             ),
         ):
             client_mock.get_artifact_version.return_value = _memory_artifact(
@@ -2060,9 +2218,10 @@ class TestPurgeImpl:
         ]
 
         with (
-            patch("kitaru.memory.Client", return_value=client_mock),
+            patch("kitaru.memory._artifacts.Client", return_value=client_mock),
             patch(
-                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+                "kitaru.memory._artifacts.save_artifact",
+                return_value=_created_artifact_response(),
             ),
         ):
             client_mock.get_artifact_version.return_value = _memory_artifact(
@@ -2090,7 +2249,7 @@ class TestPurgeImpl:
         client_mock = MagicMock()
         client_mock.list_artifact_versions.return_value = _page()
 
-        with patch("kitaru.memory.Client", return_value=client_mock):
+        with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
             result = _purge_impl(
                 _MemoryScope(scope="s", scope_type="namespace"),
                 "k",
@@ -2117,8 +2276,8 @@ class TestPurgeImpl:
         ]
 
         with (
-            patch("kitaru.memory.Client", return_value=client_mock),
-            patch("kitaru.memory.save_artifact") as save_artifact_mock,
+            patch("kitaru.memory._artifacts.Client", return_value=client_mock),
+            patch("kitaru.memory._artifacts.save_artifact") as save_artifact_mock,
             pytest.raises(KitaruBackendError, match="not unused"),
         ):
             _purge_impl(
@@ -2145,9 +2304,10 @@ class TestPurgeImpl:
         ]
 
         with (
-            patch("kitaru.memory.Client", return_value=client_mock),
+            patch("kitaru.memory._artifacts.Client", return_value=client_mock),
             patch(
-                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+                "kitaru.memory._artifacts.save_artifact",
+                return_value=_created_artifact_response(),
             ),
         ):
             client_mock.get_artifact_version.return_value = _memory_artifact(
@@ -2191,15 +2351,17 @@ class TestPurgeImpl:
 
         with (
             patch(
-                "kitaru.memory._paginate_artifact_versions",
+                "kitaru.memory._artifacts._paginate_artifact_versions",
                 return_value=artifacts,
             ),
             patch(
-                "kitaru.memory._delete_preflighted_memory_versions",
+                "kitaru.memory._maintenance._delete_preflighted_memory_versions",
                 return_value=1,
             ),
-            patch("kitaru.memory._write_compaction_record") as write_record,
-            patch("kitaru.memory.track") as track_mock,
+            patch(
+                "kitaru.memory._maintenance._write_compaction_record"
+            ) as write_record,
+            patch("kitaru.memory._operations.track") as track_mock,
         ):
             _purge_impl(
                 _MemoryScope(scope="s", scope_type="namespace"),
@@ -2243,9 +2405,10 @@ class TestPurgeScopeImpl:
         ]
 
         with (
-            patch("kitaru.memory.Client", return_value=client_mock),
+            patch("kitaru.memory._artifacts.Client", return_value=client_mock),
             patch(
-                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+                "kitaru.memory._artifacts.save_artifact",
+                return_value=_created_artifact_response(),
             ),
         ):
             client_mock.get_artifact_version.return_value = _memory_artifact(
@@ -2303,9 +2466,10 @@ class TestPurgeScopeImpl:
         client_mock.list_artifact_versions.side_effect = _list_side_effect
 
         with (
-            patch("kitaru.memory.Client", return_value=client_mock),
+            patch("kitaru.memory._artifacts.Client", return_value=client_mock),
             patch(
-                "kitaru.memory.save_artifact", return_value=_created_artifact_response()
+                "kitaru.memory._artifacts.save_artifact",
+                return_value=_created_artifact_response(),
             ),
         ):
             client_mock.get_artifact_version.return_value = _memory_artifact(
@@ -2361,7 +2525,7 @@ class TestCompactionLog:
         client_mock = MagicMock()
         client_mock.list_artifact_versions.return_value = _page(artifact)
 
-        with patch("kitaru.memory.Client", return_value=client_mock):
+        with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
             records = _compaction_log_impl(
                 _MemoryScope(scope="s", scope_type="namespace"),
             )
@@ -2376,7 +2540,7 @@ class TestCompactionLog:
         client_mock = MagicMock()
         client_mock.list_artifact_versions.return_value = _page()
 
-        with patch("kitaru.memory.Client", return_value=client_mock):
+        with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
             records = _compaction_log_impl(
                 _MemoryScope(scope="s", scope_type="namespace"),
             )
@@ -2479,7 +2643,7 @@ def test_scope_collision_isolation_between_scope_types() -> None:
     client_mock = MagicMock()
     client_mock.list_artifact_versions.return_value = _page(*all_artifacts)
 
-    with patch("kitaru.memory.Client", return_value=client_mock):
+    with patch("kitaru.memory._artifacts.Client", return_value=client_mock):
         ns_entries = _list_impl(ns_scope)
         flow_entries = _list_impl(flow_scope)
 

@@ -30,6 +30,14 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # griffe 2.x split the package into griffe / griffecli / griffelib.
+      # Our SDK doc generator depends on fumapy (docs/node_modules/fumadocs-python)
+      # which pins griffe<2.0.0. Until fumapy upstream supports griffe 2.x,
+      # accepting a major bump here is a phantom upgrade — the lockfile would
+      # claim 2.x but every real workflow either silently downgrades or breaks.
+      - dependency-name: griffe
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7
       semver-major-days: 14
@@ -53,6 +61,17 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # @takumi-rs/image-response 1.x is stricter about CSS shorthand parsing
+      # and rejects `borderBottom: "8px dashed ..."`. fumadocs-ui 16.8.4's
+      # default OG image template (used via fumadocs-ui/og/takumi) emits
+      # exactly this shorthand, so the combo of fumadocs-ui 16.8+ and
+      # takumi-rs 1.x crashes static OG image generation. Hold the takumi-rs
+      # major bump until fumadocs-ui ships an OG template that uses longhand
+      # styles (or until we replace fumadocs-ui's DefaultImage with a custom
+      # template).
+      - dependency-name: "@takumi-rs/image-response"
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7
       semver-major-days: 14

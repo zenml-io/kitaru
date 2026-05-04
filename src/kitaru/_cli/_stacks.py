@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
-import dataclasses
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
 from cyclopts import Parameter
-from zenml.utils import yaml_utils
 
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru._interface_stacks import (
     CLI_STACK_OPTION_LABELS,
-    StackComponentConfigOverrides,
-    merge_component_overrides,
-    normalize_component_overrides_mapping,
-    normalize_optional_stack_string,
+    _load_stack_create_file,
+    _merge_stack_create_inputs,
+    _StackCreateInputs,
+    build_stack_create_request_from_inputs,
+    execute_stack_create_request,
     parse_cli_component_overrides,
-)
-from kitaru._interface_stacks import (
-    build_stack_create_request as _build_shared_stack_create_request,
 )
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.config import StackInfo, StackType
@@ -32,6 +27,7 @@ from kitaru.inspection import (
 )
 
 from . import stack_app
+from ._dependencies import cli_dependencies
 from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
@@ -43,191 +39,11 @@ from ._helpers import (
     _emit_pagination_note,
     _emit_snapshot,
     _exit_with_error,
-    _facade_module,
     _paginate_items,
     _print_success,
     _resolve_output_format,
     _validate_pagination,
 )
-
-
-@dataclass(frozen=True)
-class _StackCreateInputs:
-    """Normalized stack-create inputs before backend validation."""
-
-    name: str | None = None
-    type: str | None = None
-    activate: bool | None = None
-    artifact_store: str | None = None
-    container_registry: str | None = None
-    cluster: str | None = None
-    region: str | None = None
-    subscription_id: str | None = None
-    resource_group: str | None = None
-    workspace: str | None = None
-    execution_role: str | None = None
-    namespace: str | None = None
-    credentials: str | None = None
-    verify: bool | None = None
-    component_overrides: StackComponentConfigOverrides | None = None
-    async_mode: bool | None = None
-
-
-_STACK_CREATE_FILE_KEY_ALIASES = {
-    "artifact-store": "artifact_store",
-    "container-registry": "container_registry",
-    "subscription-id": "subscription_id",
-    "resource-group": "resource_group",
-    "execution-role": "execution_role",
-    "extra": "component_overrides",
-    "async": "async_mode",
-}
-_STACK_CREATE_FILE_SUPPORTED_KEYS = {
-    "name",
-    "type",
-    "activate",
-    "artifact_store",
-    "artifact-store",
-    "container_registry",
-    "container-registry",
-    "cluster",
-    "region",
-    "subscription_id",
-    "subscription-id",
-    "resource_group",
-    "resource-group",
-    "workspace",
-    "execution_role",
-    "execution-role",
-    "namespace",
-    "credentials",
-    "verify",
-    "extra",
-    "async",
-}
-_STACK_CREATE_FILE_STRING_KEYS = {
-    "name",
-    "type",
-    "artifact_store",
-    "container_registry",
-    "cluster",
-    "region",
-    "subscription_id",
-    "resource_group",
-    "workspace",
-    "execution_role",
-    "namespace",
-    "credentials",
-}
-_STACK_CREATE_FILE_BOOLEAN_KEYS = {
-    "activate",
-    "verify",
-    "async_mode",
-}
-
-
-def _normalize_stack_create_file_mapping(
-    raw: dict[str, Any],
-    *,
-    source: Path,
-) -> _StackCreateInputs:
-    """Validate and normalize a stack-create YAML mapping."""
-    non_string_keys = [repr(key) for key in raw if not isinstance(key, str)]
-    if non_string_keys:
-        raise ValueError(
-            f"Stack config file '{source}' can only use string keys: "
-            + ", ".join(sorted(non_string_keys))
-        )
-
-    unknown_keys = sorted(
-        key for key in raw if key not in _STACK_CREATE_FILE_SUPPORTED_KEYS
-    )
-    if unknown_keys:
-        raise ValueError(
-            f"Unsupported stack config keys in '{source}': " + ", ".join(unknown_keys)
-        )
-
-    normalized_values: dict[str, Any] = {}
-    canonical_sources: dict[str, str] = {}
-    for raw_key, value in raw.items():
-        canonical_key = _STACK_CREATE_FILE_KEY_ALIASES.get(raw_key, raw_key)
-        existing_source = canonical_sources.get(canonical_key)
-        if existing_source is not None:
-            raise ValueError(
-                f"Stack config file '{source}' cannot define both "
-                f"'{existing_source}' and '{raw_key}'."
-            )
-
-        if canonical_key in _STACK_CREATE_FILE_STRING_KEYS:
-            if value is not None and not isinstance(value, str):
-                raise ValueError(
-                    f"Stack config key '{raw_key}' in '{source}' must be a string."
-                )
-        elif canonical_key == "component_overrides":
-            if value is not None and not isinstance(value, dict):
-                raise ValueError(
-                    f"Stack config key '{raw_key}' in '{source}' must be an object."
-                )
-            if value is not None:
-                value = normalize_component_overrides_mapping(
-                    value,
-                    labels=CLI_STACK_OPTION_LABELS,
-                )
-        elif (
-            canonical_key in _STACK_CREATE_FILE_BOOLEAN_KEYS
-            and value is not None
-            and not isinstance(value, bool)
-        ):
-            raise ValueError(
-                f"Stack config key '{raw_key}' in '{source}' must be a boolean."
-            )
-
-        canonical_sources[canonical_key] = raw_key
-        normalized_values[canonical_key] = value
-
-    return _StackCreateInputs(**normalized_values)
-
-
-def _load_stack_create_file(path: Path) -> _StackCreateInputs:
-    """Load stack-create inputs from a YAML file."""
-    try:
-        raw = yaml_utils.read_yaml(str(path))
-    except FileNotFoundError:
-        raise ValueError(f"Stack config file not found: {path}") from None
-    except Exception as exc:
-        raise ValueError(f"Invalid YAML in stack config file '{path}': {exc}") from exc
-
-    if raw is None:
-        return _StackCreateInputs()
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"Stack config file '{path}' must contain a top-level mapping."
-        )
-
-    return _normalize_stack_create_file_mapping(raw, source=path)
-
-
-def _merge_stack_create_inputs(
-    *,
-    cli_inputs: _StackCreateInputs,
-    file_inputs: _StackCreateInputs | None,
-) -> _StackCreateInputs:
-    """Merge CLI and YAML stack-create inputs with CLI precedence."""
-    file_inputs = file_inputs or _StackCreateInputs()
-    merged: dict[str, Any] = {}
-    for field in dataclasses.fields(_StackCreateInputs):
-        if field.name == "component_overrides":
-            merged[field.name] = merge_component_overrides(
-                file_inputs.component_overrides,
-                cli_inputs.component_overrides,
-            )
-            continue
-
-        cli_value = getattr(cli_inputs, field.name)
-        merged[field.name] = (
-            cli_value if cli_value is not None else getattr(file_inputs, field.name)
-        )
-    return _StackCreateInputs(**merged)
 
 
 def _stack_list_rows(stacks: list[StackInfo]) -> list[tuple[str, str]]:
@@ -382,14 +198,14 @@ def list_(
         command=command,
         output=output_format,
     )
-    facade = _facade_module()
+    deps = cli_dependencies()
 
     def _list_stacks() -> tuple[list[StackInfo], list[Any] | None]:
         if output_format == CLIOutputFormat.JSON:
-            stack_entries = facade._list_stack_entries()
+            stack_entries = deps.list_stack_entries()
             stacks = [entry.stack for entry in stack_entries]
         else:
-            stacks = facade.get_available_stacks()
+            stacks = deps.get_available_stacks()
             stack_entries = None
         return stacks, stack_entries
 
@@ -434,7 +250,7 @@ def current(output: OutputFormatOption = "text") -> None:
     command = "stack.current"
     output_format = _resolve_output_format(output)
     stack = run_with_cli_error_boundary(
-        _facade_module().get_current_stack,
+        cli_dependencies().get_current_stack,
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -459,7 +275,7 @@ def show(
     command = "stack.show"
     output_format = _resolve_output_format(output)
     details = run_with_cli_error_boundary(
-        lambda: _facade_module()._show_stack_operation(name_or_id),
+        lambda: cli_dependencies().show_stack_operation(name_or_id),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -488,7 +304,7 @@ def use(
     command = "stack.use"
     output_format = _resolve_output_format(output)
     selected_stack = run_with_cli_error_boundary(
-        lambda: _facade_module().set_active_stack(stack),
+        lambda: cli_dependencies().set_active_stack(stack),
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,
@@ -653,43 +469,14 @@ def create(
             ),
             file_inputs=file_inputs,
         )
-        normalized_name = normalize_optional_stack_string(merged_inputs.name)
-        if normalized_name is None:
-            raise ValueError("Stack name or ID cannot be empty.")
-
-        request = _build_shared_stack_create_request(
-            name=normalized_name,
-            activate=merged_inputs.activate
-            if merged_inputs.activate is not None
-            else True,
-            stack_type=(
-                merged_inputs.type
-                if merged_inputs.type is not None
-                else StackType.LOCAL.value
-            ),
-            artifact_store=merged_inputs.artifact_store,
-            container_registry=merged_inputs.container_registry,
-            cluster=merged_inputs.cluster,
-            region=merged_inputs.region,
-            subscription_id=merged_inputs.subscription_id,
-            resource_group=merged_inputs.resource_group,
-            workspace=merged_inputs.workspace,
-            execution_role=merged_inputs.execution_role,
-            namespace=merged_inputs.namespace,
-            credentials=merged_inputs.credentials,
-            verify=merged_inputs.verify if merged_inputs.verify is not None else True,
-            component_overrides=merged_inputs.component_overrides,
-            async_enabled=merged_inputs.async_mode is True,
+        request = build_stack_create_request_from_inputs(
+            inputs=merged_inputs,
             labels=CLI_STACK_OPTION_LABELS,
         )
-        create_kwargs: dict[str, Any] = {
-            "stack_type": request.stack_type,
-            "activate": request.activate,
-            "remote_spec": request.remote_spec,
-        }
-        if not request.component_overrides.is_empty():
-            create_kwargs["component_overrides"] = request.component_overrides
-        return _facade_module()._create_stack_operation(request.name, **create_kwargs)
+        return execute_stack_create_request(
+            request,
+            create_stack_operation=cli_dependencies().create_stack_operation,
+        )
 
     result = run_with_cli_error_boundary(
         _create_stack,
@@ -741,7 +528,7 @@ def delete(
     command = "stack.delete"
     output_format = _resolve_output_format(output)
     result = run_with_cli_error_boundary(
-        lambda: _facade_module()._delete_stack_operation(
+        lambda: cli_dependencies().delete_stack_operation(
             stack,
             recursive=recursive,
             force=force,

@@ -6,6 +6,12 @@ import sys
 import time
 from collections.abc import Sequence
 
+# Legacy CLI facade exports.
+#
+# Command modules now resolve runtime dependencies through
+# ``kitaru._cli._dependencies``. These imports remain as compatibility patch
+# points for existing tests and external integrations that patch or import
+# ``kitaru.cli.<name>``.
 from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 from zenml.exceptions import EntityExistsError, ZenKeyError
@@ -162,7 +168,6 @@ from kitaru._cli._secrets import (
     _SECRET_KEY_PATTERN,
     _list_accessible_secrets,
     _parse_secret_assignments,
-    _resolve_secret_exact,
     _secret_list_rows,
     _secret_show_rows,
     delete_,
@@ -171,19 +176,11 @@ from kitaru._cli._secrets import (
     show_,
 )
 from kitaru._cli._stacks import (
-    _STACK_CREATE_FILE_BOOLEAN_KEYS,
-    _STACK_CREATE_FILE_KEY_ALIASES,
-    _STACK_CREATE_FILE_STRING_KEYS,
-    _STACK_CREATE_FILE_SUPPORTED_KEYS,
     _current_stack_rows,
     _format_stack_component_summary,
-    _load_stack_create_file,
-    _merge_stack_create_inputs,
-    _normalize_stack_create_file_mapping,
     _stack_create_detail_rows,
     _stack_list_rows,
     _stack_show_rows,
-    _StackCreateInputs,
     create,
     current,
     delete,
@@ -233,6 +230,17 @@ from kitaru._interface_memory import (
     scopes_memory_payload,
     set_memory_payload,
 )
+from kitaru._interface_secrets import resolve_secret_exact as _resolve_secret_exact
+from kitaru._interface_stacks import (
+    _STACK_CREATE_FILE_BOOLEAN_KEYS,
+    _STACK_CREATE_FILE_KEY_ALIASES,
+    _STACK_CREATE_FILE_STRING_KEYS,
+    _STACK_CREATE_FILE_SUPPORTED_KEYS,
+    _load_stack_create_file,
+    _merge_stack_create_inputs,
+    _normalize_stack_create_file_mapping,
+    _StackCreateInputs,
+)
 from kitaru._local_server import (
     LocalServerConnectionResult,
     LocalServerStopResult,
@@ -264,6 +272,7 @@ from kitaru.inspection import (
 )
 from kitaru.inspection import log_store_mismatch_details as _log_store_mismatch_details
 
+# Console entrypoint and startup/bootstrap behavior.
 app.version = _UNKNOWN_VERSION
 
 # Commands that manage their own connection lifecycle or never need a live

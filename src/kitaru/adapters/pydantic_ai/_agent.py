@@ -23,6 +23,7 @@ from pydantic_ai.agent.abstract import (
     AgentModelSettings,
     EventStreamHandler,
 )
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import Model
 from pydantic_ai.output import OutputDataT, OutputSpec
@@ -618,6 +619,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
+        capabilities: Sequence[AbstractCapability[AgentDepsT]] | None = None,
         spec: dict[str, Any] | None = None,
     ) -> Any:
         self._validate_model_override(model)
@@ -645,6 +647,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     toolsets=prepared_toolsets,
                     builtin_tools=builtin_tools,
                     event_stream_handler=wrapped_handler,
+                    capabilities=capabilities,
                     spec=spec,
                 )
             self._remember_messages(result)
@@ -657,6 +660,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             deferred_tool_results=deferred_tool_results,
             instructions=instructions,
             model_settings=model_settings,
+            capabilities=capabilities,
+            spec=spec,
         )
 
         error: BaseException | None = None
@@ -690,6 +695,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
+        capabilities: Sequence[AbstractCapability[AgentDepsT]] | None = None,
         spec: dict[str, Any] | None = None,
     ) -> Any:
         self._ensure_run_sync_safe()
@@ -718,6 +724,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     toolsets=prepared_toolsets,
                     builtin_tools=builtin_tools,
                     event_stream_handler=wrapped_handler,
+                    capabilities=capabilities,
                     spec=spec,
                 )
             self._remember_messages(result)
@@ -730,6 +737,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             deferred_tool_results=deferred_tool_results,
             instructions=instructions,
             model_settings=model_settings,
+            capabilities=capabilities,
+            spec=spec,
         )
 
         error: BaseException | None = None
@@ -764,6 +773,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
+        capabilities: Sequence[AbstractCapability[AgentDepsT]] | None = None,
         spec: dict[str, Any] | None = None,
     ) -> AsyncIterator[Any]:
         self._validate_model_override(model)
@@ -788,6 +798,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 toolsets=prepared_toolsets,
                 builtin_tools=builtin_tools,
                 event_stream_handler=wrapped_handler,
+                capabilities=capabilities,
                 spec=spec,
             ) as streamed_result:
                 yield streamed_result
@@ -810,6 +821,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None = None,
+        capabilities: Sequence[AbstractCapability[AgentDepsT]] | None = None,
         spec: dict[str, Any] | None = None,
     ) -> AsyncIterator[AgentRun[AgentDepsT, Any]]:
         # iter() yields a run handle inside an `async with` body; auto-checkpointing it
@@ -834,6 +846,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 infer_name=infer_name,
                 toolsets=prepared_toolsets,
                 builtin_tools=builtin_tools,
+                capabilities=capabilities,
                 spec=spec,
             ) as run:
                 yield run
