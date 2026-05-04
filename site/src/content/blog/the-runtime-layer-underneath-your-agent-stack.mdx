@@ -19,7 +19,7 @@ This post pulls the layers apart. The runtime layer is where most of the durabil
 
 **Model.** The LLM itself — a compute unit over a context window. OpenAI, Anthropic, Google, open-weights, fine-tuned in-house. Picked for capability and cost; everything upstream wraps this.
 
-**Harness.** The loop around the model. Prompts, tool loops, model calls, structured output, context management, in-turn memory. Pydantic AI / Pydantic AI Harness, LangGraph, the Claude Agent SDK, the OpenAI Agents SDK, hand-rolled loops. Harness design is a very active area — it's how much you get out of whatever model you picked.
+**Harness.** The loop around the model. Prompts, tool loops, model calls, structured output, context management, temporary in-turn context. Pydantic AI / Pydantic AI Harness, LangGraph, the Claude Agent SDK, the OpenAI Agents SDK, hand-rolled loops. Harness design is a very active area — it's how much you get out of whatever model you picked.
 
 **Runtime.** How the agent survives and executes over time. Checkpoints, replay, resume, wait states, versioned deployments, invocation routing, artifact and state persistence, execution placement. The part that doesn't change when the harness changes. The part nobody ships by default.
 
