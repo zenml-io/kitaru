@@ -26,7 +26,7 @@ from kitaru.config import (
     StackType,
     VertexStackSpec,
 )
-from kitaru.errors import KitaruStateError, KitaruUsageError
+from kitaru.errors import KitaruRuntimeError, KitaruStateError, KitaruUsageError
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
     get_execution_logs,
@@ -49,6 +49,7 @@ from kitaru.mcp.server import (
     kitaru_executions_retry,
     kitaru_executions_run,
     kitaru_info,
+    kitaru_secrets_create,
     kitaru_stacks_list,
     kitaru_start_local_server,
     kitaru_status,
@@ -56,6 +57,7 @@ from kitaru.mcp.server import (
     manage_stack,
     tracked_mcp_tool,
 )
+from kitaru.secrets import SecretSummary
 
 
 def _write_flow_target_module(path: Path, *, marker: str) -> None:
@@ -996,6 +998,85 @@ def test_artifact_get_delegates_value_serialization_to_inspection(
     mock_serialize.assert_called_once_with(loaded_value)
     assert payload["value"] == "delegated"
     assert payload["value_type"] == "custom.Type"
+
+
+def test_secrets_create_returns_metadata_without_values() -> None:
+    """MCP secret creation should delegate to SDK creation safely."""
+    summary = SecretSummary(
+        name="openai-creds",
+        id="secret-id",
+        private=False,
+        keys=["OPENAI_API_KEY"],
+    )
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.create_secret",
+        return_value=summary,
+    ) as mock_create:
+        payload = kitaru_secrets_create(
+            "openai-creds",
+            {"OPENAI_API_KEY": "sk-123"},
+        )
+
+    mock_create.assert_called_once_with(
+        "openai-creds",
+        {"OPENAI_API_KEY": "sk-123"},
+        private=False,
+    )
+    assert payload == {
+        "id": "secret-id",
+        "name": "openai-creds",
+        "visibility": "public",
+        "keys": ["OPENAI_API_KEY"],
+        "has_missing_values": False,
+    }
+    assert "values" not in payload
+
+
+def test_secrets_create_forwards_private_flag() -> None:
+    """MCP callers can opt into private secret creation."""
+    summary = SecretSummary(
+        name="openai-creds",
+        id="secret-id",
+        private=True,
+        keys=["OPENAI_API_KEY"],
+    )
+
+    with patch(
+        "kitaru.mcp.server.secrets_api.create_secret",
+        return_value=summary,
+    ) as mock_create:
+        payload = kitaru_secrets_create(
+            "openai-creds",
+            {"OPENAI_API_KEY": "sk-123"},
+            private=True,
+        )
+
+    mock_create.assert_called_once_with(
+        "openai-creds",
+        {"OPENAI_API_KEY": "sk-123"},
+        private=True,
+    )
+    assert payload["visibility"] == "private"
+
+
+def test_secrets_create_propagates_sdk_errors() -> None:
+    """SDK errors should pass through the MCP boundary for clients to inspect."""
+    with (
+        patch(
+            "kitaru.mcp.server.secrets_api.create_secret",
+            side_effect=KitaruRuntimeError("already exists"),
+        ),
+        pytest.raises(KitaruRuntimeError, match="already exists"),
+    ):
+        kitaru_secrets_create("openai-creds", {"OPENAI_API_KEY": "sk-123"})
+
+
+def test_mcp_does_not_expose_secret_delete_tool() -> None:
+    """MCP intentionally supports secret creation, not deletion."""
+    import kitaru.mcp.server as server
+
+    assert not hasattr(server, "kitaru_secrets_delete")
 
 
 def test_start_local_server_returns_structured_payload() -> None:
