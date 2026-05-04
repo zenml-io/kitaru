@@ -32,8 +32,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return jsonResponse({ error: 'KV not configured' }, 500);
     }
 
-    // Duplicate detection: a hit on the same email returns alreadySubscribed
-    // without re-firing the Segment event so signup counts stay clean.
+    // Skip Segment re-fire on duplicate so signup counts stay clean.
     const existing = await kv.get(email);
     if (existing) {
       return jsonResponse({ ok: true, alreadySubscribed: true });

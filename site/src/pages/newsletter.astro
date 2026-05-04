@@ -24,7 +24,7 @@ import Footer from '../components/Footer.astro';
         </p>
 
         <form id="newsletterForm" class="nl-form" novalidate>
-          <label for="nl-email" class="visually-hidden">Email</label>
+          <label for="nl-email" class="sr-only">Email</label>
           <div class="nl-field-row">
             <input
               type="email"
@@ -39,7 +39,7 @@ import Footer from '../components/Footer.astro';
           <p class="nl-error" id="newsletterError" aria-live="polite"></p>
         </form>
 
-        <div id="newsletterSuccess" class="nl-success" hidden>
+        <div id="newsletterSuccess" class="nl-success" role="status" aria-live="polite" hidden>
           <h2 id="newsletterSuccessHeadline">You&rsquo;re on the list.</h2>
           <p id="newsletterSuccessBody">We&rsquo;ll be in touch.</p>
         </div>
@@ -154,18 +154,6 @@ import Footer from '../components/Footer.astro';
     margin: 0;
   }
 
-  .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-  }
-
   @keyframes nl-fade-up {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
@@ -231,10 +219,9 @@ import Footer from '../components/Footer.astro';
       form.hidden = true;
       if (successEl) successEl.hidden = false;
 
-      const win = window as Window & { analytics?: { track?: (event: string, props?: Record<string, unknown>) => void }; plausible?: (event: string, opts?: { props?: Record<string, string> }) => void };
       const eventName = result.alreadySubscribed ? 'Newsletter Already Subscribed' : 'Newsletter Signup Confirmed';
-      win.analytics?.track?.(eventName, { source: 'newsletter' });
-      win.plausible?.(eventName, { props: { source: 'newsletter' } });
+      window.analytics?.track?.(eventName, { source: 'newsletter' });
+      window.plausible?.(eventName, { props: { source: 'newsletter' } });
     } catch {
       if (errorEl) errorEl.textContent = 'Network error. Please try again.';
       submitBtn.disabled = false;
