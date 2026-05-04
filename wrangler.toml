@@ -14,3 +14,11 @@ id = "7a952406df5543418f0cb8c4552ee65f"
 [[kv_namespaces]]
 binding = "GET_STARTED_KV"
 id = "a6a7c01a20c841b092649453ef2e0365"
+
+# Run `npx wrangler kv namespace create NEWSLETTER_KV` to mint a real id and
+# replace the placeholder below before deploying. The Worker tolerates the
+# binding being absent (the API route returns 500 with a clear error), so a
+# missing id only breaks production submits, not the build.
+[[kv_namespaces]]
+binding = "NEWSLETTER_KV"
+id = "REPLACE_WITH_REAL_NEWSLETTER_KV_ID"
