@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-04
+
 ### Added
 - OSS-first auth management for service accounts and API keys via `KitaruClient.auth`, `kitaru auth service-accounts`, and `kitaru auth api-keys`. Raw API-key values are only returned on create/rotate so they can be stored immediately; list/show/update responses stay metadata-only. (#230)
 - Synthetic memory operations now register as `StepType.MEMORY_CALL` checkpoints (instead of generic `tool_call`), so memory reads/writes surface distinctly in execution graphs and `@checkpoint(type="memory_call")` is supported. (#239)
