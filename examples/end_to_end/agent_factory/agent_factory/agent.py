@@ -17,7 +17,10 @@ def build_agent(profile: Profile, *, sandbox: _Sandbox | None = None) -> Agent:
 
     Pass a `sandbox` to isolate the `exec` tool (stage 2+); omit it to run
     shell commands in-process (stage 1). The `skill` tool (stage 3+) is
-    enabled when `profile.skill_source` is set.
+    enabled when `profile.skill_source` is set. The `exec_service` tool
+    (stage 5+) is enabled when `profile.allowed_tools` includes
+    `exec_service`; the agent can dispatch to any service named in
+    `profile.allowed_services`.
     """
     permission_handler = PermissionHandler(profile)
     skills_directory = (
@@ -31,5 +34,6 @@ def build_agent(profile: Profile, *, sandbox: _Sandbox | None = None) -> Agent:
             permission_handler,
             sandbox=sandbox,
             skills_directory=skills_directory,
+            allowed_services=profile.allowed_services,
         ),
     )

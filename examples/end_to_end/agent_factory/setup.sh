@@ -18,4 +18,7 @@ docker build -t agent-factory-mock -f docker/mock.Dockerfile .
 echo ">> Setting kitaru secret 'wiki-token' (idempotent — set creates or updates)"
 kitaru secrets set wiki-token --value=wiki-token
 
+echo ">> Setting kitaru secret 'webhook-token' (used by stage 5+)"
+kitaru secrets set webhook-token --value=webhook-token
+
 echo ">> Setup complete. Run: python stage_4_credential_proxy.py"

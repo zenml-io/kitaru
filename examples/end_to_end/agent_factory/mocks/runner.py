@@ -15,6 +15,13 @@ from kitaru.errors import KitaruRuntimeError
 _MOCK_IMAGE = "agent-factory-mock"
 _NETWORK = "agent_factory"
 _CONTAINER_NAME_PREFIX = "agent_factory_mock_"
+# Host-bound port. Stage 5's host-side `exec_service` handlers reach the
+# mock via `http://localhost:<HOST_PORT>` because Docker network aliases
+# (`wiki.local`, `webhook.local`) only resolve from inside the
+# `agent_factory` network. Concurrent flow runs would collide on this
+# fixed port — fine for a single-developer demo, swap for `0` (random
+# host port) + readback if you need parallel runs.
+HOST_PORT = 8765
 _STOP_TIMEOUT_SECONDS = 2
 _READY_POLL_INTERVAL = 0.1
 _READY_TIMEOUT_SECONDS = 10.0
@@ -27,7 +34,7 @@ class DockerMockServices:
         self,
         *,
         execution_id: str,
-        host_aliases: tuple[str, ...] = ("wiki.local",),
+        host_aliases: tuple[str, ...] = ("wiki.local", "webhook.local"),
     ) -> None:
         self._host_aliases = host_aliases
         self._container_name = f"{_CONTAINER_NAME_PREFIX}{execution_id}"
@@ -86,6 +93,8 @@ class DockerMockServices:
             self._container_name,
             "--network",
             _NETWORK,
+            "-p",
+            f"{HOST_PORT}:80",
         ]
         for alias in self._host_aliases:
             args.extend(["--network-alias", alias])

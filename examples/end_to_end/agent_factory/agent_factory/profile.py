@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ToolName = Literal["exec", "skill", "ask_question"]
+ToolName = Literal["exec", "skill", "exec_service", "ask_question"]
 
 
 # === Skill sources ===========================================================
@@ -82,3 +82,8 @@ class Profile(BaseModel):
     # Per-host header injection rules. Headers can contain
     # `{{ secret-name.key }}` templates resolved via kitaru.secrets.
     sandbox_proxy_rules: list[SandboxProxyRule] = Field(default_factory=list)
+    # Names of services (keys of `agent_factory.services.ALL_SERVICES`)
+    # the agent is allowed to call via `exec_service`. Empty = `exec_service`
+    # is enabled but the agent has no services to dispatch to (mostly
+    # useful for tests).
+    allowed_services: set[str] = Field(default_factory=set)

@@ -270,11 +270,77 @@ The bearer arrived at the mock — but **the worker never had it**. The credenti
 
 ### Stage 5 — Your agents need typed services
 
-**Stage file:** `stage_5_typed_services.py` *(not yet built)*
+**Stage file:** `stage_5_typed_services.py`
+**The pitch:** not every agent call deserves a shell. When the agent needs *structured* input AND a *structured* response — posting a webhook, looking up records, hitting an internal control plane — give it a typed service instead of asking it to drive `curl` and parse JSON. Stage 5 introduces `exec_service`: one tool that dispatches to a discriminated union of typed services. Tool description is built dynamically from the profile's `allowed_services`, so the LLM only sees what this agent can actually call.
 
-Some agent calls deserve a typed schema and a typed response — posting a webhook, looking up structured records. Stage 5 introduces `exec_service`, a single tool that dispatches to a `ServiceCall` discriminated union. Two cases: `lookup_wiki` and `publish_summary`. Tool description is built dynamically from the profile's allowed services. This is also where the **two credential paths** distinction lands: sandboxed `exec` (proxy-injected) vs. host-side `exec_service` (resolves creds directly).
+This is also where the **two credential paths** distinction lands:
 
-*Section will be filled in when stage 5 lands.*
+| Path | Where it runs | Creds resolved | Stage |
+|---|---|---|---|
+| `exec` (sandboxed) | inside the worker container | proxy injects matching `Authorization` headers | 4 |
+| `exec_service` (typed) | in the host process | host resolves `kitaru.get_secret(...)` directly | 5 |
+
+The proxy is **not** involved for `exec_service`. Each path is right for different shapes of work — `exec` for shell-shaped operations the agent reasons about as command output, `exec_service` for typed operations where the structured result matters more than the bytes.
+
+**One-time setup (same `setup.sh` as stage 4 — adds the `webhook-token` secret):**
+
+```bash
+bash setup.sh
+```
+
+If you ran `setup.sh` before stage 5 landed, re-run it once to add `webhook-token`.
+
+**Run it:**
+
+```bash
+DISABLE_CACHE=1 python stage_5_typed_services.py
+```
+
+The agent now follows a 6-step skill mixing both paths:
+
+```
+[mock-services]  Started container … (network aliases=['wiki.local', 'webhook.local'])
+[proxy]          Started container … (injecting for hosts=['wiki.local'])
+[sandbox]        Started container … (proxy-wired)
+Kitaru: Checkpoint `default` started.
+[sandbox] $ cat /etc/os-release                                       ← `exec` (sandbox)
+[sandbox]   → exit=0, stdout=286 chars, cwd=/workspace
+[sandbox] $ uname -r                                                  ← `exec` (sandbox)
+[sandbox]   → exit=0, stdout=17 chars, cwd=/workspace
+…  (no [sandbox] line — exec_service ran host-side)
+[mock-services]  GET /snippets/durability (host=localhost:8765, auth=Bearer w…) → 200
+[mock-services]  POST /webhooks/team-summaries (host=localhost:8765, auth=Bot we…) → 200
+Kitaru: Checkpoint `default` finished in 26.5s.
+[sandbox] Stopping container …
+[proxy]   Stopping container …
+[mock-services] Stopping container …
+
+Published 72f5f72ad544 at 1777887594: Durable execution persists every
+checkpoint output so flows can pause for hours, survive host reboot,
+and resume from the last completed checkpoint.
+```
+
+The `lookup_wiki` and `publish_summary` calls don't show up in `[sandbox]` log lines because they don't run inside the sandbox — they're host-side handlers calling `urllib.request.urlopen(...)` directly. The proxy stays idle for those. Only the two `exec` shell commands show up sandbox-side.
+
+**What's in it:**
+
+- `agent_factory/services/schemas.py` — Pydantic models for each service's args + result (`LookupWikiArgs`, `LookupWikiResult`, `PublishSummaryArgs`, `PublishSummaryResult`, `WikiSnippet`).
+- `agent_factory/services/registry.py` — `ALL_SERVICES: dict[str, ServiceCall]` mapping service name → `(args_model, handler, summary)`. `build_service_description(allowed)` renders the dynamic tool description from a set of allowed services.
+- `agent_factory/services/lookup_wiki.py` + `publish_summary.py` — the host-side handlers. Each one resolves its credential via `kitaru.get_secret(...)` and makes an HTTP call to the mock.
+- `agent_factory/tools.py` — `exec_service` tool factory. Validates `args` against the right Pydantic model on every call (`call.args_model.model_validate(args)`), so a malformed arg dict surfaces a Pydantic `ValidationError` to the agent rather than blowing up inside the handler.
+- `agent_factory/profile.py` — adds `allowed_services: set[str]` field. The `exec_service` tool's description is built from this set, so the LLM sees only the services this agent can dispatch to.
+- `mocks/server.py` — adds `POST /webhooks/{webhook_id}` (Discord-shaped, returns `{message_id, posted_at}`). Auth via `Authorization: Bot webhook-token`.
+- `mocks/runner.py` — publishes the mock on `localhost:8765` so host-side handlers can reach it. (Docker network aliases like `wiki.local` only resolve inside the `agent_factory` network.)
+- `skills/with-services/default-agent/SKILL.md` — stage 5's skill. Uses `exec` for the OS-info steps and `exec_service` for the lookup + publish.
+
+**Architectural notes:**
+
+- **Why a flat `(service_name, args)` shape, not a typed union directly?** Some LLM providers handle JSON-Schema `oneOf`/`anyOf` inconsistently. A flat `service_name: str` + `args: dict` parameter shape is reliable across providers; the body re-validates by constructing `<ArgsModel>(**args)` based on the chosen `service_name`. The dynamic tool description embeds each service's args schema as plain text so the LLM sees what it needs to emit.
+- **Why host-side, not in the sandbox?** Two reasons. (1) The result is structured — the agent doesn't need to parse `curl` output, it just gets `WikiSnippet` objects back. (2) Some services (publishing webhooks, hitting internal control planes) shouldn't run from the worker container at all; their credentials never touch the sandbox network. The host-side path keeps that separation explicit.
+- **Both paths can coexist in one skill.** Stage 5's `SKILL.md` mixes `exec("cat /etc/os-release")` (sandboxed) with `exec_service("lookup_wiki", ...)` (host-side). A real platform engineer's skill might `exec` to grep a logfile inside the worker, then `exec_service` to file a typed record in their internal ticketing system — different shapes, different credential paths, one agent.
+- **Adding a new service is three files.** A new `<name>.py` handler, a new args + result Pydantic pair in `schemas.py`, a new entry in `ALL_SERVICES`. The tool surface — and its dynamic description — updates automatically.
+
+**Env-var toggles:** same as earlier stages (`DISABLE_CACHE=1`).
 
 ---
 

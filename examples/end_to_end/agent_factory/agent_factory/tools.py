@@ -4,6 +4,8 @@ Stage 1 ships only `exec` (in-process subprocess). Stage 2 routes `exec`
 through an optional `DockerSandbox` so the same `ExecResult` shape is
 preserved while gaining filesystem and network isolation. Stage 3 adds
 the host-side `skill` tool (list/read/search over a markdown directory).
+Stage 5 adds the host-side `exec_service` tool (typed-union dispatcher
+over the services package).
 """
 
 import subprocess
@@ -11,10 +13,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from pydantic_ai import Tool
 
 from .permissions import PermissionHandler
+from .services import ALL_SERVICES, build_service_description
 
 _MAX_OUTPUT_LINES = 200
 _MAX_LINE_BYTES = 2000
@@ -165,12 +168,16 @@ def build_tools(
     *,
     sandbox: _Sandbox | None = None,
     skills_directory: Path | None = None,
+    allowed_services: set[str] | None = None,
 ) -> list[Tool]:
     """Build the pydantic-ai toolset for an agent based on its profile's permissions.
 
     Pass a `sandbox` to route `exec` through it (stage 2+); omit it to run
     shell commands in the host process (stage 1). Pass a `skills_directory`
-    to enable the `skill` tool (stage 3+).
+    to enable the `skill` tool (stage 3+). Pass `allowed_services` to
+    enable `exec_service` (stage 5+) — the tool description is built
+    dynamically from this set so the LLM only sees the services this
+    agent can actually dispatch to.
     """
     tools: list[Tool] = []
 
@@ -195,6 +202,39 @@ def build_tools(
                     f"Run a shell command {location}. Returns exit_code, stdout, "
                     "stderr. stdout/stderr are truncated to ~200 lines."
                 ),
+            )
+        )
+
+    if permission_handler.can_use_tool("exec_service"):
+        services = allowed_services or set()
+        unknown = services - ALL_SERVICES.keys()
+        if unknown:
+            raise ValueError(
+                f"Profile.allowed_services contains unknown service names: "
+                f"{sorted(unknown)}. Known services: {sorted(ALL_SERVICES)}."
+            )
+
+        def exec_service(service_name: str, args: dict[str, Any]) -> Any:
+            permission_handler.require_tool("exec_service")
+            if service_name not in services:
+                raise ValueError(
+                    f"Service {service_name!r} is not in this agent's "
+                    f"allowed_services. Allowed: {sorted(services)}."
+                )
+            call = ALL_SERVICES[service_name]
+            try:
+                validated = call.args_model.model_validate(args)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"Invalid args for {service_name!r}: {exc.errors()}"
+                ) from exc
+            return call.handler(validated).model_dump()
+
+        tools.append(
+            Tool(
+                exec_service,
+                name="exec_service",
+                description=build_service_description(services),
             )
         )
 
