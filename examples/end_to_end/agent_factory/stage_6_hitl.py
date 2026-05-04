@@ -2,9 +2,8 @@
 
 The chapter 6 hero demo: some questions only the operator can answer.
 Stage 6 introduces `ask_question`, a freeform HITL tool. The agent
-calls it like any other tool; under the hood the kitaru pydantic-ai
-adapter notices the `@hitl_tool` marker and routes the call through
-`kitaru.wait()`:
+calls it like any other tool; the tool body calls `wait_for_input(...)`
+from the kitaru pydantic-ai adapter, which routes through `kitaru.wait()`:
 
 - The agent's turn suspends mid-execution.
 - The flow's status becomes `waiting`.

@@ -5,9 +5,11 @@ through an optional `DockerSandbox` so the same `ExecResult` shape is
 preserved while gaining filesystem and network isolation. Stage 3 adds
 the host-side `skill` tool (list/read/search over a markdown directory).
 Stage 5 adds the host-side `exec_service` tool (typed-union dispatcher
-over the services package).
+over the services package). Stage 6 adds `ask_question`, the freeform
+HITL tool that bridges to `kitaru.wait()`.
 """
 
+import hashlib
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -208,7 +210,10 @@ def build_tools(
         )
 
     if permission_handler.can_use_tool("exec_service"):
-        services = allowed_services or set()
+        # Frozenset so a downstream mutation of the profile's set can't
+        # silently drift the closure's permission check from the rendered
+        # description (built once below).
+        services = frozenset(allowed_services or ())
         unknown = services - ALL_SERVICES.keys()
         if unknown:
             raise ValueError(
@@ -241,18 +246,28 @@ def build_tools(
         )
 
     if permission_handler.can_use_tool("ask_question"):
+        # Per-instance call counter. The wait `name` combines the call
+        # index with a hash of the full question so that:
+        #   - Two same-text questions in one turn don't collide on the
+        #     same `name` (the runtime DB has a UniqueConstraint on
+        #     (run_id, name) — collisions raise IntegrityError).
+        #   - The same question asked at the same call-index across
+        #     replays produces the same `name`, so the operator's prior
+        #     answer is served from cache rather than re-prompted.
+        ask_call_index = [0]
+
         def ask_question(question: str) -> str:
             permission_handler.require_tool("ask_question")
+            ask_call_index[0] += 1
+            qhash = hashlib.sha1(question.encode("utf-8")).hexdigest()[:8]
+            wait_name = f"ask_question:{ask_call_index[0]}:{qhash}"
             # `wait_for_input` is the kitaru pydantic-ai adapter's bridge
             # to `kitaru.wait()`. The flow suspends here, the dashboard
             # shows `waiting`, the operator answers (CLI/UI/API), and the
             # operator's reply is what `wait_for_input` returns. `schema`
             # is left None so the operator can supply any JSON value;
             # we coerce to str for the agent's tool-result contract.
-            answer = wait_for_input(
-                question=question,
-                name=f"ask_question:{question[:40]}",
-            )
+            answer = wait_for_input(question=question, name=wait_name)
             return str(answer) if answer is not None else ""
 
         tools.append(

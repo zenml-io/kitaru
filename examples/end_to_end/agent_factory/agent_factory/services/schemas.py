@@ -40,9 +40,11 @@ class PublishSummaryArgs(BaseModel):
 
     webhook_id: str = Field(
         description=(
-            "ID of the webhook to publish to. The mock accepts any "
-            "non-empty string and returns a fresh `message_id`."
-        )
+            "ID of the webhook to publish to. Letters, digits, dot, "
+            "dash, underscore only (1-64 chars). The mock returns a "
+            "fresh `message_id`."
+        ),
+        pattern=r"^[A-Za-z0-9._-]{1,64}$",
     )
     content: str = Field(description="The summary text to post.")
 

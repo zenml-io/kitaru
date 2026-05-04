@@ -14,7 +14,7 @@ constructing `<ArgsModel>(**args)` based on the chosen `service_name`.
 """
 
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from pydantic import BaseModel
 
@@ -25,7 +25,10 @@ from .schemas import LookupWikiArgs, PublishSummaryArgs
 
 class ServiceCall(NamedTuple):
     args_model: type[BaseModel]
-    handler: Callable[..., Any]
+    # Handlers must accept a validated args model and return a Pydantic
+    # model — `exec_service` calls `.model_dump()` on the result, so a
+    # handler that returns a raw dict would AttributeError at LLM time.
+    handler: Callable[[BaseModel], BaseModel]
     summary: str
 
 
@@ -49,12 +52,33 @@ ALL_SERVICES: dict[str, ServiceCall] = {
 }
 
 
+def _render_annotation(annotation: object) -> str:
+    """Render a type annotation for the LLM-facing description.
+
+    Plain `type` objects (e.g. `str`, `int`, custom classes) render via
+    `__name__` — `str(str)` would yield ugly `"<class 'str'>"`. Generic
+    aliases (`list[str]`, `dict[str, int]`), unions (`str | None`), and
+    `Literal[...]` render via `str()` because that preserves type
+    parameters that `__name__` would drop. Strip `typing.` and
+    `__main__.` prefixes for readability.
+    """
+    if isinstance(annotation, type):
+        return annotation.__name__
+    rendered = str(annotation)
+    for prefix in ("typing.", "__main__."):
+        rendered = rendered.replace(prefix, "")
+    return rendered
+
+
 def build_service_description(allowed: set[str]) -> str:
     """Render the `exec_service` tool description from the allowed services.
 
     The result is a single string the LLM sees as the tool's description.
     Listing each service's args makes the LLM far more reliable at
     emitting the right `args` payload.
+
+    Caller (`build_tools` in `tools.py`) is expected to have already
+    rejected unknown service names; this function trusts `allowed`.
     """
     if not allowed:
         return "No services are currently enabled for this agent."
@@ -66,12 +90,10 @@ def build_service_description(allowed: set[str]) -> str:
         "Available services:",
     ]
     for name in sorted(allowed):
-        if name not in ALL_SERVICES:
-            continue
         call = ALL_SERVICES[name]
         fields = call.args_model.model_fields
         arg_lines = [
-            f"      - {field_name}: {field.annotation.__name__ if hasattr(field.annotation, '__name__') else field.annotation} — {field.description or ''}".rstrip()
+            f"      - {field_name}: {_render_annotation(field.annotation)} — {field.description or ''}".rstrip()
             for field_name, field in fields.items()
         ]
         lines.append(f"  - **{name}** — {call.summary}")

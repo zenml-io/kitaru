@@ -4,41 +4,15 @@ The chapter 5 hero demo: not every agent call deserves a shell. When
 the agent needs structured input AND a structured response — looking
 up records, publishing webhooks — give it a typed service instead.
 
-The framework:
+See `agent_factory/services/__init__.py` for the architecture overview
+and the README's stage 5 section for the credential-paths framing.
 
-- A `ServiceCall` discriminated union (in `agent_factory/services/`)
-  declares each service's args + result schema.
-- The `exec_service` tool description is built dynamically from the
-  profile's `allowed_services`, so the LLM sees only the services this
-  agent can call and gets the schema embedded in the tool description.
-- Service handlers run **host-side** — they resolve credentials directly
-  via `kitaru.get_secret(...)` and make HTTP calls from the host process.
-  The proxy is NOT involved.
-
-The two credential paths, side by side:
-
-- Stage 4's sandboxed `exec("curl http://wiki.local/...")` — worker-side,
-  proxy-injected. Good for shell-shaped operations.
-- Stage 5's `exec_service("lookup_wiki", {...})` — host-side, direct
-  credential resolution. Good for typed operations the agent shouldn't
-  need to parse out of curl output.
-
-Setup once (`bash setup.sh`) creates BOTH `wiki-token` and
-`webhook-token` secrets. Re-run setup if you skipped stage 4.
+Setup: `bash setup.sh` (idempotent — re-run after pulling new stages
+to pick up the `webhook-token` secret).
 
 Run:
 
     DISABLE_CACHE=1 python stage_5_typed_services.py
-
-You'll see three log streams interleave:
-
-    [mock-services]  GET /snippets/durability ... → 200    (host-side via exec_service)
-    [mock-services]  POST /webhooks/team-summaries ... → 200
-    [proxy]          (idle — exec_service bypasses the proxy entirely)
-
-The agent's `exec_service("lookup_wiki", ...)` resolved `wiki-token` on
-the host and hit `wiki.local` directly. The matching `exec("curl ...")`
-in stage 4 went through the proxy. Same hostname, two paths.
 
 Env-var toggles:
 

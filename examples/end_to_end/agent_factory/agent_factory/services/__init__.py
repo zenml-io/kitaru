@@ -22,13 +22,12 @@ The two credential paths come together here:
   call, returns typed data to the agent. Host-side, direct.
 """
 
-from .registry import ALL_SERVICES, ServiceCall, build_service_description
+from .registry import ALL_SERVICES, build_service_description
 from .schemas import LookupWikiArgs, PublishSummaryArgs
 
 __all__ = [
     "ALL_SERVICES",
     "LookupWikiArgs",
     "PublishSummaryArgs",
-    "ServiceCall",
     "build_service_description",
 ]
