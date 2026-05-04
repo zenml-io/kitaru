@@ -447,5 +447,5 @@ When this example is mature, the fork-this-for-your-team guide lands here. For n
 
 ## Tips for production use
 
-- **Model aliases.** This example hardcodes a provider string (`"openai:gpt-5.4-nano"`) in the Profile so chapter 1 has the smallest possible setup. In production, prefer `kitaru model register <alias> --provider openai --model <id> --api-key ...` and reference the alias in your Profile so credentials are managed centrally.
+- **Model aliases.** This example hardcodes a provider string (`"openai:gpt-5-nano"`) in the Profile so chapter 1 has the smallest possible setup. In production, prefer `kitaru model register <alias> --provider openai --model <id> --api-key ...` and reference the alias in your Profile so credentials are managed centrally.
 - **Compaction.** `kitaru.memory` keeps every version. After your agents have been running for a while, schedule `kitaru memory compact ...` to summarize old preferences and reduce storage cost.

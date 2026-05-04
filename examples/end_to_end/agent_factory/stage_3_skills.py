@@ -46,7 +46,7 @@ DEFAULT_PROFILE = Profile(
         "to fetch the procedure, then follow it exactly using the `exec` "
         "tool.** One tool call per step."
     ),
-    model="openai:gpt-5.4-nano",
+    model="openai:gpt-5-nano",
     allowed_tools={"exec", "skill"},
     # LocalSkillSource = "edit markdown in your IDE, agent picks it up next call".
     # See agent_factory/profile.py for production-shaped alternatives

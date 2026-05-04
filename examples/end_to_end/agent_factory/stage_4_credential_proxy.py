@@ -62,7 +62,7 @@ DEFAULT_PROFILE = Profile(
         "then follow the procedure exactly using the `exec` tool. "
         "One tool call per step."
     ),
-    model="openai:gpt-5.4-nano",
+    model="openai:gpt-5-nano",
     allowed_tools={"exec", "skill"},
     skill_source=LocalSkillSource(path=str(_SKILLS_DIR)),
     # The credential proxy injects `Authorization: Bearer <wiki-token-value>`

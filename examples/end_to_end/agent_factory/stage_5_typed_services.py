@@ -44,7 +44,7 @@ DEFAULT_PROFILE = Profile(
         "then follow the procedure exactly. "
         "One tool call per step."
     ),
-    model="openai:gpt-5.4-nano",
+    model="openai:gpt-5-nano",
     # Stage 5's profile gates ALL THREE non-skill tools — exec (sandboxed),
     # exec_service (host-side typed), and skill (host-side markdown reader).
     allowed_tools={"exec", "skill", "exec_service"},

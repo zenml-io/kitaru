@@ -44,7 +44,7 @@ DEFAULT_PROFILE = Profile(
         "shell commands in an isolated container. Use it to investigate "
         "questions the user asks. Explain what you find concisely."
     ),
-    model="openai:gpt-5.4-nano",
+    model="openai:gpt-5-nano",
     allowed_tools={"exec"},
 )
 

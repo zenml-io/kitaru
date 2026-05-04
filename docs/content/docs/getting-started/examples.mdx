@@ -41,13 +41,14 @@ kitaru status
 
 ## Start here — Agent Factory
 
-A platform engineer's starter kit for building their org's internal agent factory on top of Kitaru + PydanticAI. The example builds up one capability at a time across multiple stages — durable agent loop, sandboxed `exec`, skills as markdown, credential proxy, typed services, human-in-the-loop, memory, replay. Each stage adds one tool or one architectural primitive; the library grows monotonically; the per-stage `Profile` gates which capabilities each agent actually exercises.
+A platform engineer's starter kit for building their org's internal agent factory on top of Kitaru + PydanticAI. **One `docker compose up`, no external accounts.** Stages build progressively from a 30-line durable agent to a sandboxed, credential-isolated agent with HITL and replay — each stage adds exactly one tool or one architectural primitive, the library grows monotonically, and the per-stage `Profile` gates which capabilities each agent actually exercises.
 
 Use it as the first thing you read end-to-end, and as the thing you fork for your team.
 
 → [Agent Factory on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory) — full README, runnable stage files, and the library code
 
 ```bash
+git clone https://github.com/zenml-io/kitaru.git
 cd kitaru/examples/end_to_end/agent_factory
 uv sync
 export OPENAI_API_KEY=sk-...
@@ -56,13 +57,13 @@ python stage_1_basic_agent.py
 
 ## Other end-to-end examples
 
-Production-shaped examples that exercise multiple primitives in one runnable scenario. Each is self-contained — pick the one closest to your domain.
+Production-shaped examples that exercise multiple primitives in one runnable scenario. Each is self-contained and focused on one harness or scenario — no progressive tour, no required reading order. Pick the one closest to your domain.
 
 | Example | Demonstrates | Path |
 |---|---|---|
 | Compliance review | Multi-stage Claude audit using the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python). Each agent turn is a checkpoint; later stages add domain decomposition, memory of prior findings, and conversational `kitaru.wait()` resume across crashes. | [`examples/end_to_end/compliance_review/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/compliance_review) |
-| Coding agent | Interactive coding agent built on **raw provider SDKs** (no PydanticAI, no LangChain). Demos parallel tool execution, durable HITL via `kitaru.wait()`, custom materializers, and LLM-named checkpoints. | [`examples/end_to_end/coding_agent/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/coding_agent) |
-| News scout | Small PydanticAI agent that reads across sources, scores findings, and prints a brief. Uses granular per-call checkpoints and namespace-scope memory. Good "smaller end-to-end" if Agent Factory's Docker setup is overkill for what you want to try first. | [`examples/end_to_end/news_scout/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/news_scout) |
+| Coding agent | Interactive coding agent built directly on provider SDKs (no PydanticAI, no LangChain). Demos parallel tool execution, durable HITL via `kitaru.wait()`, custom materializers, and descriptive checkpoint names supplied by the LLM. | [`examples/end_to_end/coding_agent/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/coding_agent) |
+| News scout | PydanticAI agent that scores news across your interest list — granular per-call checkpoints make every search/fetch/score replayable, and namespace memory carries your interests across runs. No Docker required. | [`examples/end_to_end/news_scout/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/news_scout) |
 
 ## Feature-focused examples
 
@@ -103,9 +104,9 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
   The LLM and PydanticAI examples require additional dependencies — check each example's README for setup instructions.
 </Callout>
 
-## Recommended reading order
+## If you'd rather build up primitive-by-primitive first
 
-If you are learning Kitaru from scratch:
+Agent Factory is the recommended starting point for most readers — it's structured as a tour and each stage's commit message points at the docs page that explains the primitive being introduced. If you'd rather see each primitive in isolation before reading them woven together, follow this path:
 
 1. [Quickstart](/getting-started/quickstart) — `@flow` + `@checkpoint` in 6 lines.
 2. `features/basic_flow/first_working_flow.py` — the same idea as a runnable file.
@@ -114,4 +115,4 @@ If you are learning Kitaru from scratch:
 5. `features/memory/flow_with_memory.py` — [Use Memory](/guides/memory).
 6. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume).
 7. `features/replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides).
-8. **[Agent Factory](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory)** — chapter-by-chapter tour that ties all of the above into one runnable agent platform.
+8. **[Agent Factory](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory)** — the same primitives, woven into one runnable agent platform.

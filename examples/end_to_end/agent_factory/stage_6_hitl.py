@@ -64,7 +64,7 @@ DEFAULT_PROFILE = Profile(
         "then follow the procedure exactly. "
         "One tool call per step."
     ),
-    model="openai:gpt-5.4-nano",
+    model="openai:gpt-5-nano",
     # Stage 6 turns on `ask_question` alongside the stage 5 toolkit. The
     # adapter handles the wait() bridge automatically when the agent calls it.
     allowed_tools={"exec", "skill", "exec_service", "ask_question"},

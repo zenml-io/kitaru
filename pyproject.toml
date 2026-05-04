@@ -184,7 +184,9 @@ unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
 # Smoke-test imports `agent_factory` / `mocks` from the example tree at runtime
-# via a `sys.path` insert; static analysis can't see those packages.
+# via the `_example_on_syspath` autouse fixture (in the test file); static
+# analysis can't see those packages because `examples/**` is excluded from
+# ty's first-party search root.
 include = ["tests/test_agent_factory_example.py"]
 
 [tool.ty.overrides.rules]
