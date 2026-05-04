@@ -2111,6 +2111,143 @@ def test_submit_emits_flow_submitted_event() -> None:
     )
 
 
+def test_submit_emits_terminal_event_when_run_already_completed() -> None:
+    """_submit should emit FLOW_TERMINAL immediately for already terminal runs."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("step", "output", 42)],
+    )
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    assert track_mock.call_count == 2
+    submitted_call, terminal_call = track_mock.call_args_list
+    assert submitted_call.args[0] == AnalyticsEvent.FLOW_SUBMITTED
+    assert terminal_call.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    terminal_metadata = terminal_call.args[1]
+    assert terminal_metadata["status"] == ExecutionStatus.COMPLETED.value
+    assert terminal_metadata["kitaru_deployment_type"] == "local"
+    assert terminal_metadata["deployment_type_source"] == "kitaru_stack_inference"
+
+
+def test_submit_emits_terminal_event_with_failure_origin_when_run_already_failed() -> (
+    None
+):
+    """_submit terminal telemetry should include failure origin for failed runs."""
+    run = _DummyRun(
+        status=ExecutionStatus.FAILED,
+        status_reason="user error",
+        traceback="Traceback\nValueError: boom",
+    )
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    assert track_mock.call_count == 2
+    submitted_call, terminal_call = track_mock.call_args_list
+    assert submitted_call.args[0] == AnalyticsEvent.FLOW_SUBMITTED
+    assert terminal_call.args[0] == AnalyticsEvent.FLOW_TERMINAL
+    terminal_metadata = terminal_call.args[1]
+    assert terminal_metadata["status"] == ExecutionStatus.FAILED.value
+    assert terminal_metadata["failure_origin"] == FailureOrigin.USER_CODE.value
+
+
+def test_submit_time_terminal_event_is_not_reemitted_by_wait_or_get() -> None:
+    """Submit-time FLOW_TERMINAL should not be duplicated by wait()/get()."""
+    run = _DummyRun(
+        status=ExecutionStatus.COMPLETED,
+        outputs=[("step", "output", 42)],
+    )
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    client_mock = MagicMock()
+    client_mock.get_pipeline_run.return_value = run
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru.flow.Client", return_value=client_mock),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        handle = wrapped.run(123)
+        handle.wait()
+        handle.get()
+
+    events = [call_args.args[0] for call_args in track_mock.call_args_list]
+    assert events.count(AnalyticsEvent.FLOW_SUBMITTED) == 1
+    assert events.count(AnalyticsEvent.FLOW_TERMINAL) == 1
+
+
+def test_submit_defers_terminal_event_when_run_still_running() -> None:
+    """_submit should only emit FLOW_SUBMITTED for non-terminal runs."""
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.classify_stack_deployment_type", return_value="local"),
+        patch("kitaru.flow.track") as track_mock,
+    ):
+        wrapped = flow(lambda x: x)
+        wrapped.run(123)
+
+    assert track_mock.call_count == 1
+    assert track_mock.call_args.args[0] == AnalyticsEvent.FLOW_SUBMITTED
+
+
 def test_submit_classification_failure_does_not_break_flow_execution() -> None:
     """Deployment classification failures should become unknown metadata only."""
     run = _DummyRun(status=ExecutionStatus.RUNNING)

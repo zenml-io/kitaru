@@ -799,6 +799,7 @@ class FlowHandle:
         *,
         observed_started_at: float | None = None,
         analytics_metadata: dict[str, Any] | None = None,
+        track_terminal_if_finished: bool = False,
     ) -> None:
         """Initialize a flow handle.
 
@@ -806,6 +807,8 @@ class FlowHandle:
             run: Initial pipeline run response.
             observed_started_at: SDK-observed start time from ``time.perf_counter``.
             analytics_metadata: Privacy-safe metadata captured at submission time.
+            track_terminal_if_finished: Emit terminal analytics immediately when
+                the initial run is already terminal.
         """
         self._run = run
         self._run_id = run.id
@@ -816,6 +819,13 @@ class FlowHandle:
             else time.perf_counter()
         )
         self._analytics_metadata = dict(analytics_metadata or {})
+
+        if track_terminal_if_finished and run.status.is_finished:
+            if not run.status.is_successful:
+                origin = _safe_classify_run_failure(run)
+                self._track_terminal_once(run, failure_origin=origin)
+            else:
+                self._track_terminal_once(run)
 
     @property
     def exec_id(self) -> str:
@@ -1371,6 +1381,7 @@ class _FlowDefinition:
             run,
             observed_started_at=observed_started_at,
             analytics_metadata=deployment_metadata,
+            track_terminal_if_finished=True,
         )
 
 
