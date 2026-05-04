@@ -1,0 +1,71 @@
+---
+title: Agent Factory
+description: A chapter-by-chapter starter kit for building your team's internal agent factory on Kitaru + PydanticAI
+---
+
+A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation, HITL gates, and replay all wired up correctly. Locally runnable with one `docker compose up` and zero external accounts.
+
+## Who this is for
+
+Platform engineers building their org's internal agent platform on top of [Kitaru](/) and [PydanticAI](https://ai.pydantic.dev). The example is intentionally generic — every stage's demo prompt is a throwaway exercising the new tool that stage introduces. The *framework* is the through-line, not a vertical domain. Forking this for your team means swapping the prompt + fixtures + skill markdown; the framework stays the same.
+
+If you'd rather add durable execution to a single function, start with the [Quickstart](/getting-started/quickstart) — that's the smallest possible Kitaru flow. Come back here when you want to see how the same primitives compose into a real agent platform.
+
+## How the tour is organized
+
+The example builds up one capability at a time. Each chapter adds **one tool** or **one architectural primitive**; the library at `agent_factory/` grows monotonically; the per-stage `Profile` gates which capabilities each stage's agent actually exercises. Older stage files stay valid as the library expands.
+
+<Cards>
+  <Card
+    title="Chapter 1 — A durable PydanticAI agent"
+    description="Profile + KitaruAgent. The minimum durable agent — turn 1 caches, turn 2 retries cheap."
+    href="/agent-factory/01-durable-agent"
+  />
+  <Card
+    title="Chapter 2 — Your agents need a sandbox"
+    description="DockerSandbox — every shell command runs inside an isolated container with its own filesystem and network namespace."
+    href="/agent-factory/02-sandbox"
+  />
+  <Card
+    title="Chapter 3 — Your agents need a procedure"
+    description="The `skill` tool. Move the agent's procedure out of the system prompt and into operator-edited markdown files."
+    href="/agent-factory/03-skills"
+  />
+  <Card
+    title="Chapter 4 — Your agents need credentials they can't see"
+    description="A separate proxy container holds the secrets and injects auth headers; the worker stays credential-free."
+    href="/agent-factory/04-credential-proxy"
+  />
+  <Card
+    title="Chapter 5 — Your agents need typed services"
+    description="`exec_service`: a typed-union dispatcher for structured calls. The two credential paths land here."
+    href="/agent-factory/05-typed-services"
+  />
+  <Card
+    title="Chapter 6 — Your agents need to ask humans things"
+    description="`ask_question` + `kitaru.wait()`: durable HITL. The flow pauses, the operator answers, the flow resumes."
+    href="/agent-factory/06-hitl"
+  />
+</Cards>
+
+## Get the code
+
+```bash
+git clone https://github.com/zenml-io/kitaru.git
+cd kitaru/examples/end_to_end/agent_factory
+uv sync
+export OPENAI_API_KEY=sk-...
+python stage_1_basic_agent.py
+```
+
+The full source — runnable stage files, the `agent_factory/` library, mocks, skills, Dockerfiles — lives in [`examples/end_to_end/agent_factory/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory) on GitHub. The chapters that follow are tight summaries; the example's `README.md` has the full reproduction steps.
+
+## What you'll have at the end
+
+- One `Profile` per agent (Pydantic model: name, system prompt, model string, allowed tools, allowed services, skill source, sandbox-proxy rules).
+- A reusable `agent_factory/` library that takes a Profile and produces a durable PydanticAI agent.
+- A two-process credential isolation pattern (proxy + worker) wired correctly.
+- Typed service handlers for the host-side path; sandboxed `exec` for the shell path.
+- Durable human-in-the-loop via `kitaru.wait()` — your flow can pause for hours, the host can reboot, the operator answers, the flow resumes from the same point.
+
+The repo's example README also covers forking guidance ("swap the mock for your real wiki / webhook / skill markdown") and tips for production use (model aliases, memory compaction).
