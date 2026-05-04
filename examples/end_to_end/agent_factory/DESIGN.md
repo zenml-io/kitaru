@@ -140,9 +140,9 @@ examples/end_to_end/agent_factory/
 ├── docker-compose.yml                 # worker, proxy, mock-services, network, volumes
 │
 ├── stage_1_basic_agent.py             # Profile + KitaruAgent + 1 in-process exec tool. Demo: durability via `kitaru executions resume`
-├── stage_2_sandboxed_exec.py          # Same agent, exec runs in Docker worker
-├── stage_3_credential_proxy.py        # Adds sandbox_proxy_rules + AGENT_FACTORY_CREDENTIALS
-├── stage_4_skills.py                  # Adds the `skill` tool — agent procedure lives in markdown
+├── stage_2_sandboxed_exec.py          # Same agent, exec runs in Docker sandbox
+├── stage_3_skills.py                  # Adds the `skill` tool — agent procedure lives in markdown
+├── stage_4_credential_proxy.py        # Adds sandbox_proxy_rules + AGENT_FACTORY_CREDENTIALS
 ├── stage_5_typed_services.py          # Adds `exec_service` with two cases (lookup_wiki, publish_summary)
 ├── stage_6_hitl.py                    # Adds `ask_question` (freeform kind) — agent pauses for human input
 ├── stage_7_memory.py                  # Adds `ask_question` (remembered_choice kind) + flow-scope memory
@@ -156,10 +156,10 @@ examples/end_to_end/agent_factory/
 │   ├── tools.py                       # All 4 tool factories, gated by PermissionHandler
 │   ├── sandbox/
 │   │   ├── __init__.py
-│   │   ├── worker.py                  # DockerWorker — port of kami's ModalSandboxRuntime
-│   │   ├── proxy.py                   # DockerProxy — port of kami's ProxySandbox
-│   │   ├── proxy_addon.py             # mitmproxy addon — host-pattern header injection (verbatim port)
-│   │   └── certs.py                   # ensure_certs() — local CA generation (verbatim port)
+│   │   ├── runtime.py                 # DockerSandbox — long-lived bash + marker completion in a Docker container
+│   │   ├── proxy.py                   # DockerProxy — mitmdump in a container, host-pattern header injection
+│   │   ├── proxy_addon.py             # mitmproxy addon — host-pattern header injection
+│   │   └── certs.py                   # ensure_certs() — local CA generation
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── schemas.py                 # ServiceCall discriminated union
@@ -206,9 +206,9 @@ Three mock hosts replace the four compliance-flavored ones: `wiki.local` (knowle
 
 1. `README.md` — tour + "fork this for your team" guide
 2. `stage_1_basic_agent.py` — bare flow + the durability hook (`kitaru executions resume`)
-3. `stage_2_sandboxed_exec.py` — Docker worker isolating `exec`
-4. `stage_3_credential_proxy.py` — proxy injecting headers; `docker logs proxy` demo
-5. `stage_4_skills.py` — the agent's procedure lives in markdown
+3. `stage_2_sandboxed_exec.py` — Docker sandbox isolating `exec`
+4. `stage_3_skills.py` — the agent's procedure lives in markdown
+5. `stage_4_credential_proxy.py` — proxy injecting headers; `docker logs proxy` demo
 6. `stage_5_typed_services.py` — typed-union `exec_service` with profile-derived dynamic descriptions; the two-credential-paths distinction (sandboxed `exec` vs host-side `exec_service`)
 7. `stage_6_hitl.py` — pause-for-human via `ask_question(kind="freeform", ...)`
 8. `stage_7_memory.py` — stateful HITL via `ask_question(kind="remembered_choice", ...)` + flow-scope memory; "agent gets smarter on run 2"
@@ -219,7 +219,7 @@ Each stage is one Python file that imports from the `agent_factory/` library. St
 ### Notable design choices
 
 - **No `bootstrap.py`.** Kami's bootstrap mutates several module-level singletons; for an example we want to avoid teaching that pattern. Stage 4's flow body does the equivalent setup explicitly so readers can see it. Cleaner teaching, ~30 fewer lines of indirection.
-- **Single shared library; no per-stage snapshots, no git tags.** All stage files import from the same `agent_factory/` library. The library grows monotonically as stages introduce capabilities (stage 4 adds the `skill` tool to `tools.py`, stage 5 adds `exec_service`, etc.). Older stage files stay valid because the **Profile** is the per-stage gate — `stage_1_basic_agent.py` says `allowed_tools={"exec"}` and `build_tools(permission_handler)` filters out everything else; `stage_4_skills.py` adds `"skill"` to the set and gets that tool. Progressive disclosure happens through the Profile, not through versioning the library. A reader peeking at the library at chapter-1 time and seeing tools they haven't met yet is a feature for forking devs (full kit ready to extend) and a non-issue for chapter readers (the stage file's Profile is the chapter's "what's new" surface).
+- **Single shared library; no per-stage snapshots, no git tags.** All stage files import from the same `agent_factory/` library. The library grows monotonically as stages introduce capabilities (stage 3 adds the `skill` tool to `tools.py`, stage 5 adds `exec_service`, etc.). Older stage files stay valid because the **Profile** is the per-stage gate — `stage_1_basic_agent.py` says `allowed_tools={"exec"}` and `build_tools(permission_handler)` filters out everything else; `stage_3_skills.py` adds `"skill"` to the set and gets that tool. Progressive disclosure happens through the Profile, not through versioning the library. A reader peeking at the library at chapter-1 time and seeing tools they haven't met yet is a feature for forking devs (full kit ready to extend) and a non-issue for chapter readers (the stage file's Profile is the chapter's "what's new" surface).
 - **Tests ship with the example.** Three small tests prove the architecture works — proxy injection, full loop with mocks, stage 1 smoke. Doubles as CI for the kitaru repo.
 
 ---
@@ -263,10 +263,11 @@ class Profile(BaseModel):
     model: str                                             # raw pydantic-ai provider string
     allowed_tools: set[ToolName] = Field(default_factory=set)
     # Stage 3+
-    sandbox_proxy_rules: list[SandboxProxyRule] = Field(default_factory=list)
+    skill_source: SkillSource | None = None
     # Stage 4+
+    sandbox_proxy_rules: list[SandboxProxyRule] = Field(default_factory=list)
+    # Stage 5+
     service_configs: dict[str, ServiceConfig] = Field(default_factory=dict)
-    skill_sources: list[SkillSource] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_proxy_rules(self) -> "Profile":
@@ -287,9 +288,10 @@ Per-stage growth:
 |---|---|
 | 1 | `name`, `system_prompt`, `model`, `allowed_tools` |
 | 2 | + (no new field; `allowed_tools` includes `exec`, sandbox runtime injected via flow setup) |
-| 3 | + `sandbox_proxy_rules: list[SandboxProxyRule]` |
-| 4 | + `service_configs: dict[str, ServiceConfig]`, `skill_sources: list[SkillSource]` |
-| 5 | (no new field; replay reuses stage 4's profile) |
+| 3 | + `skill_source: SkillSource \| None` |
+| 4 | + `sandbox_proxy_rules: list[SandboxProxyRule]` |
+| 5 | + `service_configs: dict[str, ServiceConfig]` |
+| 6+ | (no new field) |
 
 ### Model field
 
@@ -458,7 +460,7 @@ def agent_factory_flow(
     wiki_context = fetch_wiki(wiki_topic) if wiki_topic else ""   # @checkpoint — overridable on replay
     with (
         DockerProxy.start(credential_map=build_proxy_credential_map(profile)) as proxy,
-        DockerWorker.start(
+        DockerSandbox.start(
             execution_id=kitaru.runtime.execution_id(),
             proxy=proxy,
         ) as sandbox,
@@ -515,13 +517,13 @@ The agent's `result.output` (a string from pydantic-ai) is saved as a named arti
 - Runs `tail -f /dev/null` as PID 1 — the host opens a persistent bash via `docker exec -i worker_<id> bash --noprofile --norc` and reuses it across the flow's exec calls (matches kami's persistent-bash pattern from `modal_runtime.py`)
 - Env vars set at container start: `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `no_proxy`, `NO_PROXY`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `PIP_CERT` — all pointing at `/etc/ssl/certs/ca-certificates.crt`
 
-### `DockerWorker` — port of kami's `ModalSandboxRuntime`
+### `DockerSandbox` — port of kami's `ModalSandboxRuntime`
 
 The persistent-shell + marker-based completion pattern from `kami_agent/sandbox/modal_runtime.py` ports near-verbatim. The Modal-specific 30 lines become subprocess calls; the 120 lines of stdout-reader-thread / queue / marker-parsing logic survive unchanged.
 
 ```python
 # agent_factory/sandbox/worker.py
-class DockerWorker:
+class DockerSandbox:
     """Persistent-shell Docker worker; Docker port of kami's ModalSandboxRuntime."""
 
     def __init__(self, *, execution_id: str, proxy: DockerProxy) -> None:
@@ -533,7 +535,7 @@ class DockerWorker:
         self._shell_stdout_queue: queue.Queue[str | None] | None = None
         self._shell_stdout_thread: threading.Thread | None = None
 
-    def __enter__(self) -> "DockerWorker":
+    def __enter__(self) -> "DockerSandbox":
         self._start_container()       # docker run -d --network agent_factory + env + volumes
         self._start_shell_process()    # docker exec -i + stdout reader + `exec 2>&1`
         return self
@@ -557,7 +559,7 @@ Docker-specific seams:
 
 What the port does *not* carry over from kami:
 
-- **`SandboxManager` wrapper** — kami's `manager.py` exists only to swap `ModalSandboxRuntime` for tests; the example uses `DockerWorker` directly.
+- **`SandboxManager` wrapper** — kami's `manager.py` exists only to swap `ModalSandboxRuntime` for tests; the example uses `DockerSandbox` directly.
 - **Modal idle-timeout (`idle_timeout_seconds=86400`)** — Modal-specific auto-cleanup. Docker lifecycle is bounded by the Q5 context manager (worker dies when the flow exits).
 - **`SandboxManager.execute_command`'s "never raise; wrap exceptions as exit_code=1"** — replaced by Q8's hybrid (raise `KitaruRuntimeError` on infrastructure failure, return structured `ExecResult` for application failures).
 
@@ -669,14 +671,14 @@ Stages and chapters now line up one-to-one (one tool per stage, one chapter per 
 | Ch | Title | Stage | Key concepts | Hero artifact |
 |---|---|---|---|---|
 | 1 | Building blocks for your internal agent factory | `stage_1_basic_agent.py` | The kitaru + pydantic-ai integration thesis — pydantic-ai gives the agent loop, kitaru gives durable execution, together you get durable agents *without* a graph DSL. `@flow`, `KitaruAgent`, `Profile`, in-process `exec` tool, `PermissionHandler`. | A 30-line agent → kill the process mid-turn → `kitaru executions resume <id>` finishes from where it stopped. The integration earns its keep on page one. |
-| 2 | Your agents need a sandbox | `stage_2_sandboxed_exec.py` | `DockerWorker`, persistent-bash + marker pattern, workspace volumes, `ExecResult` truncation, the `/workspace/.exec/<id>.out` durability trick | `docker ps` showing `worker_<exec_id>`; `docker exec` into the running worker mid-flow to see the agent's `/workspace` |
-| 3 | Your agents need credentials they can't see | `stage_3_credential_proxy.py` | `DockerProxy`, mitmproxy addon, `sandbox_proxy_rules`, `kitaru.secrets` template resolution, per-run bearer token | `docker logs proxy` tail showing `[agent-factory-proxy] injected headers for wiki.local: ['Authorization']`; worker can't read `AGENT_FACTORY_CREDENTIALS`, proxy can |
-| 4 | Your agents need a procedure | `stage_4_skills.py` | `skill` tool, `LocalSkillSource`, the playbook-in-markdown pattern, why "the agent's procedure lives outside Python" matters for a platform | The SKILL.md side-by-side with the agent's behavior; operator edits SKILL.md mid-development and the next run picks up the new procedure |
+| 2 | Your agents need a sandbox | `stage_2_sandboxed_exec.py` | `DockerSandbox`, persistent-bash + marker pattern, workspace volumes, `ExecResult` truncation | `docker ps` showing `agent_factory_sandbox_<exec_id>`; `docker exec` into the running container mid-flow to see the agent's `/workspace` |
+| 3 | Your agents need a procedure | `stage_3_skills.py` | `skill` tool, `LocalSkillSource`, the playbook-in-markdown pattern, why "the agent's procedure lives outside Python" matters for a platform | The SKILL.md side-by-side with the agent's behavior; operator edits SKILL.md mid-development and the next run picks up the new procedure |
+| 4 | Your agents need credentials they can't see | `stage_4_credential_proxy.py` | `DockerProxy`, mitmproxy addon, `sandbox_proxy_rules`, `kitaru.secrets` template resolution, per-run bearer token | `docker logs proxy` tail showing `[agent-factory-proxy] injected headers for wiki.local: ['Authorization']`; worker can't read `AGENT_FACTORY_CREDENTIALS`, proxy can |
 | 5 | Your agents need typed services | `stage_5_typed_services.py` | `exec_service` typed-union dispatcher (cases: `lookup_wiki`, `publish_summary`), profile-derived dynamic tool descriptions, the discriminated-`ServiceCall` pattern, the *two credential paths* distinction (sandboxed `exec` vs host-side `exec_service`) | The dynamically-generated `exec_service` description shown in the dashboard; `[mock-webhook] payload=...` log line showing the published summary arrive host-side; side-by-side with `[agent-factory-proxy] injected ...` from chapter 3 — two paths, two demos |
 | 6 | Your agents need to ask humans things | `stage_6_hitl.py` | `ask_question` typed-union HITL dispatcher, `wait_for_input`, the `freeform` kind, the kitaru/pydantic-ai integration seam (`@hitl_tool` + `wait_for_input`) | A flow that pauses; `kitaru executions list` showing `waiting`; resolving via dashboard / `kitaru executions input` / direct terminal |
 | 7 | Your agents need to remember | `stage_7_memory.py` | `ask_question(kind="remembered_choice", ...)`, flow-scope `kitaru.memory`, the read-ask-record loop co-located in the tool body, "agent gets smarter on run 2" | Run 1 asks a clarifying question; run 2 returns the cached answer; dashboard shows the wait point on run 1 and a normal completion on run 2 |
 | 8 | Your agents need to be re-runnable | `stage_8_replay.py` | `flow.replay()`, `from_=`, `overrides={"checkpoint.fetch_wiki": ...}`, what gets cached vs re-executed, the platform-engineer pain point: "knowledge base updated, don't re-bother users" | Diff: stage 7's output vs stage 8's output, with the wiki content swapped but the cached HITL answer preserved; dashboard view showing `fetch_wiki` overridden and downstream re-executed |
-| post | Going to production: from Docker-compose to Modal | (no new stage) | C2/C3 ladder, lazy sandbox startup (deferred from Q5), Modal port, deploying the same architecture remotely | Same agent, same profile, swap `DockerWorker` for `ModalSandboxRuntime` |
+| post | Going to production: from Docker-compose to Modal | (no new stage) | C2/C3 ladder, lazy sandbox startup (deferred from Q5), Modal port, deploying the same architecture remotely | Same agent, same profile, swap `DockerSandbox` for `ModalSandboxRuntime` |
 
 **Self-containment rule:** every chapter opens with a 1-paragraph recap of the prior chapter's setup (or "if you're starting here, run `docker compose up && bash setup.sh && python stage_<N-1>_<...>.py` to get to this point"), so a reader landing from search can run the chapter's stage without reading the others.
 
@@ -695,8 +697,8 @@ docker compose up -d                                              # worker, prox
 python stage_1_basic_agent.py                                     # Stage 1 — no secrets needed; demos `kitaru executions resume`
 python stage_2_sandboxed_exec.py                                  # Stage 2 — Docker worker
 bash setup.sh                                                     # Stage 3+ — creates kitaru secrets for the mocks
-python stage_3_credential_proxy.py                                # Stage 3 — proxy injects auth
-python stage_4_skills.py                                          # Stage 4 — agent's procedure lives in markdown
+python stage_3_skills.py                                          # Stage 3 — agent's procedure lives in markdown
+python stage_4_credential_proxy.py                                # Stage 4 — proxy injects auth
 python stage_5_typed_services.py                                  # Stage 5 — typed exec_service
 python stage_6_hitl.py                                            # Stage 6 — agent pauses for human input
 python stage_7_memory.py                                          # Stage 7 — stateful HITL with memory
@@ -722,7 +724,7 @@ agent-factory = [
 ]
 ```
 
-The `docker` Python SDK is *not* a dependency — `DockerWorker` and `DockerProxy` shell out via `subprocess.run(["docker", ...])` because (a) it matches what readers will inspect themselves with `docker ps`/`docker logs`, (b) it avoids a Python-API/CLI version drift surface, and (c) blog screenshots of the actual `docker` commands are clearer teaching artifacts than `containers.run(...)` calls.
+The `docker` Python SDK is *not* a dependency — `DockerSandbox` and `DockerProxy` shell out via `subprocess.run(["docker", ...])` because (a) it matches what readers will inspect themselves with `docker ps`/`docker logs`, (b) it avoids a Python-API/CLI version drift surface, and (c) blog screenshots of the actual `docker` commands are clearer teaching artifacts than `containers.run(...)` calls.
 
 ### CI strategy
 
@@ -771,9 +773,9 @@ When we transition to implementation, the natural phases are:
 
 1. **Skeleton.** `agent_factory/` library scaffolding (Profile, PermissionHandler, empty tool factories), `pyproject.toml`, `docker-compose.yml`, README stub.
 2. **Stage 1 + the durability hook.** `stage_1_basic_agent.py` runs end-to-end with one in-process exec tool. `kitaru executions resume` works after a forced kill — the chapter 1 hero demo.
-3. **Sandbox layer.** DockerWorker, worker Dockerfile, persistent-bash mechanism. `stage_2_sandboxed_exec.py` runs.
-4. **Proxy layer.** DockerProxy, proxy addon, certs module, credential broker. `stage_3_credential_proxy.py` runs and the proxy injection test passes.
-5. **Skills.** `skill` tool, `LocalSkillSource`, `SKILL.md`. `stage_4_skills.py` runs.
+3. **Sandbox layer.** DockerSandbox, sandbox Dockerfile, persistent-bash mechanism. `stage_2_sandboxed_exec.py` runs.
+4. **Skills.** `skill` tool, `LocalSkillSource`, `SKILL.md`. `stage_3_skills.py` runs.
+5. **Proxy layer.** DockerProxy, proxy addon, certs module, credential broker. `stage_4_credential_proxy.py` runs and the proxy injection test passes.
 6. **Typed services.** `exec_service` dispatcher, `lookup_wiki`, `publish_summary`, dynamic-description builder. `stage_5_typed_services.py` runs.
 7. **HITL.** `ask_question` dispatcher, `freeform` kind. `stage_6_hitl.py` runs.
 8. **Memory.** `remembered_choice` kind, `agent-preferences` memory loop. `stage_7_memory.py` runs.

@@ -6,15 +6,14 @@ procedure (what shell commands to run, what to summarize, how to
 return) lives in `skills/default-agent/SKILL.md` — a host-side
 markdown file the operator edits in their IDE.
 
-This is the kami architectural distinctive: **main loop in Python,
-capabilities in markdown**. Edit `skills/default-agent/SKILL.md`,
-re-run the flow, watch the agent's behavior change without touching
-any Python.
+The architectural distinctive: **main loop in Python, capabilities in
+markdown**. Edit `skills/basic/default-agent/SKILL.md`, re-run the
+flow, watch the agent's behavior change without touching any Python.
 
-The `skill` tool runs *host-side* (not inside the sandbox) — same
-pattern as kami. The agent calls `skill(action="list")` to discover
-available skill files, then `skill(action="read", path=...)` to fetch
-one. Path validation prevents directory escape.
+The `skill` tool runs *host-side* (not inside the sandbox). The agent
+calls `skill(action="list")` to discover available skill files, then
+`skill(action="read", path=...)` to fetch one. Path validation
+prevents directory escape.
 
 Env-var toggles:
 
@@ -36,7 +35,7 @@ from kitaru.runtime import _get_current_execution_id
 
 DISABLE_CACHE = bool(os.environ.get("DISABLE_CACHE"))
 
-_SKILLS_DIR = Path(__file__).parent / "skills"
+_SKILLS_DIR = Path(__file__).parent / "skills" / "basic"
 
 DEFAULT_PROFILE = Profile(
     name="default",

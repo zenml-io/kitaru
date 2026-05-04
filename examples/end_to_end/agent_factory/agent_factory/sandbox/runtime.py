@@ -15,12 +15,6 @@ mutation. If the agent needs cross-run durable state, it should write to
 `/workspace` (a named Docker volume that survives container teardown) or
 use `kitaru.memory` for specific values it explicitly wants to carry.
 
-This is a Docker port of `kami_agent/sandbox/modal_runtime.py:
-ModalSandboxRuntime`. The persistent-shell + marker-completion pattern
-is verbatim from kami; only the process-creation step differs (we use
-`subprocess.Popen(["docker", "exec", "-i", ...])` instead of
-`modal.Sandbox.exec`).
-
 Each lifecycle event and exec call prints a `[sandbox]` line to stdout
 and (during a kitaru flow) attaches structured metadata via `kitaru.log`
 so the dashboard shows the same picture the terminal does.
@@ -81,6 +75,11 @@ class DockerSandbox:
         self._volume_name = f"agent_factory_workspace_{execution_id}"
         self._container_id: str | None = None
         self._shell_process: subprocess.Popen[bytes] | None = None
+        # Serializes `run()` calls from multiple OS threads. This does NOT
+        # guard against concurrent asyncio coroutines on the same event
+        # loop — if a future stage awaits `run()` from many tasks, wrap
+        # it with an `asyncio.Lock` (or run via `asyncio.to_thread`) at
+        # the call site so only one command is in-flight at a time.
         self._shell_lock = threading.Lock()
         self._shell_stdout_queue: queue.Queue[str | None] | None = None
         self._shell_stdout_thread: threading.Thread | None = None
@@ -211,11 +210,22 @@ class DockerSandbox:
         )
         if result.returncode == 0:
             return
+        # Concurrent flow runs may race here; both inspect, neither finds
+        # the network, both attempt create. Don't fail on the loser — re-
+        # check inspect after create to confirm the network is now up.
         subprocess.run(
             ["docker", "network", "create", _SANDBOX_NETWORK],
-            check=True,
             capture_output=True,
         )
+        confirm = subprocess.run(
+            ["docker", "network", "inspect", _SANDBOX_NETWORK],
+            capture_output=True,
+            text=True,
+        )
+        if confirm.returncode != 0:
+            raise KitaruRuntimeError(
+                f"failed to create or find docker network {_SANDBOX_NETWORK!r}"
+            )
 
     def _start_container(self) -> None:
         args = [

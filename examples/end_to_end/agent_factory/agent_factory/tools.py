@@ -7,6 +7,7 @@ the host-side `skill` tool (list/read/search over a markdown directory).
 """
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -77,11 +78,7 @@ def _run_skill(
     path: str | None,
     query: str | None,
 ) -> dict[str, Any]:
-    """Host-side skill tool: list, read, or search markdown skill files.
-
-    Ported from kami_agent/tools.py:135 — same actions, same caps, same
-    `.is_relative_to(skills_root)` escape-prevention.
-    """
+    """Host-side skill tool: list, read, or search markdown skill files."""
     if not skills_root.exists():
         return {"action": action, "skills_root": None, "count": 0}
 
@@ -179,17 +176,13 @@ def build_tools(
 
     if permission_handler.can_use_tool("exec"):
         sandboxed = sandbox is not None
-        if sandbox is not None:
-            captured_sandbox = sandbox
+        runner: Callable[[str], ExecResult] = (
+            sandbox.run if sandbox is not None else _run_exec_in_process
+        )
 
-            def exec_tool(command: str) -> ExecResult:
-                permission_handler.require_tool("exec")
-                return captured_sandbox.run(command)
-        else:
-
-            def exec_tool(command: str) -> ExecResult:
-                permission_handler.require_tool("exec")
-                return _run_exec_in_process(command)
+        def exec_tool(command: str) -> ExecResult:
+            permission_handler.require_tool("exec")
+            return runner(command)
 
         location = (
             "in an isolated Docker sandbox" if sandboxed else "in the host process"
@@ -208,8 +201,9 @@ def build_tools(
     if permission_handler.can_use_tool("skill"):
         if skills_directory is None:
             raise ValueError(
-                "Profile.allowed_tools includes 'skill' but no skills_directory "
-                "was provided. Set Profile.skills_directory to a host path."
+                "Profile.allowed_tools includes 'skill' but no skill_source "
+                "was configured. Set Profile.skill_source to a SkillSource "
+                "(e.g. LocalSkillSource(path=...))."
             )
         skills_root = skills_directory.resolve()
 

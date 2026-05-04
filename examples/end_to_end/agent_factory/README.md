@@ -15,7 +15,7 @@ export OPENAI_API_KEY=sk-...            # stage 1 needs an OpenAI key
 python stage_1_basic_agent.py
 ```
 
-You should see the agent investigate `/etc/hosts` and return the hostnames configured there. That's the foundation — durable PydanticAI in ~30 lines.
+You should see the agent investigate the host (OS, kernel, current user, process count) and return a one-paragraph summary. That's the foundation — durable PydanticAI in ~30 lines.
 
 ## The 8-stage tour
 
@@ -38,7 +38,7 @@ The example builds up one capability at a time. Each stage adds one tool or one 
 
 **The hero demo — durability via cached checkpoints surviving a failure:**
 
-The flow has **three checkpoints**: two real LLM turns (`default` and `default_2`) plus a `join_turns` step that combines them. A `FORCE_FAILURE` env var flips a simulated downstream blip between the two turns. The two-step tour:
+The flow has **two checkpoints**, both real LLM turns (`default` and `default_2`). A `FORCE_FAILURE` env var raises a simulated downstream blip between them. The two-step tour:
 
 ```bash
 # Step 1: simulate failure between turn 1 and turn 2.
@@ -48,7 +48,7 @@ FORCE_FAILURE=1 python stage_1_basic_agent.py
 
 # Step 2: re-run without the flag.
 # `default` is served from cache (zero LLM calls), `default_2`
-# runs fresh against new LLM work, `join_turns` prints the result.
+# runs fresh against new LLM work, then the flow prints + returns.
 python stage_1_basic_agent.py
 ```
 
@@ -58,7 +58,6 @@ What you see in the kitaru log lines:
 |---|---|---|
 | `default` | `started` → `finished in 15s` (3 LLM calls) | **`cached`** (instant, $0) |
 | `default_2` | (never runs — flow raised first) | `started` → `finished in 8s` (1 LLM call) |
-| `join_turns` | (never runs) | `started` → `finished` |
 | Total time | ~25s ending in failure | ~12s ending in printed output |
 
 Without kitaru, step 1's failure would have wasted the first turn's work and you'd pay for *both* turns on the retry. With kitaru, only the part that didn't complete the first time gets re-paid for. *That's the durability story.*
@@ -135,7 +134,7 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 - `DISABLE_CACHE=1` — force every checkpoint to re-execute (useful when the agent's already cached and you want to see the sandbox actually running shell commands)
 - `FORCE_FAILURE=1` — raise between turn 1 and turn 2. Same durability story as stage 1: turn 1's checkpoint is cached across the failure, so a re-run without the flag serves it instantly. (Note: the agent's *reasoning* is cached; the bash *side effects* aren't replayed — turn 2 on re-run runs against a fresh shell.)
 
-**Persistent shell — within a run:** stage 2 runs every `run(command)` through **one long-lived `bash --noprofile --norc` process** inside the container. Shell state — `cd`, `export`, file descriptors, background jobs — survives across `exec` calls, just like a normal interactive shell. The host writes commands into the shell's stdin and reads back output up to a unique completion-marker line (`<UUID> <exit_code> <cwd>`). Ported verbatim from kami's `modal_runtime.py`; the only Docker-specific bit is `subprocess.Popen(["docker", "exec", "-i", ...])` instead of `modal.Sandbox.exec`.
+**Persistent shell — within a run:** stage 2 runs every `run(command)` through **one long-lived `bash --noprofile --norc` process** inside the container. Shell state — `cd`, `export`, file descriptors, background jobs — survives across `exec` calls, just like a normal interactive shell. The host writes commands into the shell's stdin and reads back output up to a unique completion-marker line (`<UUID> <exit_code> <cwd>`).
 
 **Across runs (deliberately *not* preserved):** the bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or use `kitaru.memory` deliberately at flow scope for specific values it explicitly wants to carry forward. Chapter 7 introduces the latter pattern.
 
@@ -178,15 +177,15 @@ The system prompt only says "find your skill and follow it." The actual procedur
 
 **What's in it:**
 
-- `agent_factory/tools.py` — `skill` tool factory with `list`/`read`/`search` actions, `.is_relative_to(skills_root)` escape prevention, `MAX_READ_BYTES=100_000`, default glob `**/SKILL.md`. Ported from `kami_agent/tools.py:135`.
+- `agent_factory/tools.py` — `skill` tool factory with `list`/`read`/`search` actions, `.is_relative_to(skills_root)` escape prevention, `MAX_READ_BYTES=100_000`, default glob `**/SKILL.md`.
 - `agent_factory/profile.py` — `LocalSkillSource(path=...)` Pydantic model + `SkillSource` alias. Forks add their own variants (see below).
-- `skills/default-agent/SKILL.md` — the agent's playbook. Operator edits this in their IDE.
+- `skills/basic/default-agent/SKILL.md` — the agent's playbook for stage 3 (basic procedure with no external services). Operator edits this in their IDE.
 
 **Where the skill tool runs:** *host-side*, not inside the sandbox. The agent calls the tool from inside its turn checkpoint; the tool reads files from the host's filesystem directly. This means operators can edit `skills/...` without touching containers, and the path validation is a single boundary on the host.
 
 **Where skills live in production:** stage 3 ships **one** `SkillSource` variant — `LocalSkillSource(path=...)` — for local development. Real deployments will want one of:
 
-- **`GitRepoSkillSource(repo_url=..., ref=...)`** — clone a versioned skill repo at flow start. The prod path: skills are code-reviewed via PRs, shared across teammates and running agents. Kami's prod profile uses this.
+- **`GitRepoSkillSource(repo_url=..., ref=...)`** — clone a versioned skill repo at flow start. The prod path: skills are code-reviewed via PRs, shared across teammates and running agents.
 - **`InlineMarkdownSkillSource(name=..., markdown=...)`** — bake the markdown directly into the Profile. Useful for one-off agents, tests, or skills generated by another flow.
 - **Object storage / kitaru artifacts / container-image bake** — for stricter deployment shapes.
 
@@ -199,7 +198,7 @@ The `SkillSource` seam is visible in `agent_factory/profile.py` so forking devs 
 ### Stage 4 — Your agents need credentials they can't see
 
 **Stage file:** `stage_4_credential_proxy.py`
-**The pitch:** in stages 1–3 the agent's `exec` either runs in your host process or in a container with no credentials. Once you give the agent real services to call, the credentials need to live *somewhere* — and "in the worker container alongside the agent's shell" is the wrong place. A prompt-injected agent could `cat $WIKI_TOKEN` and exfiltrate it. Stage 4 sets up the kami two-process pattern: a separate `proxy` container holds the credentials and injects `Authorization` headers on matching hosts; the worker stays credential-free.
+**The pitch:** in stages 1–3 the agent's `exec` either runs in your host process or in a container with no credentials. Once you give the agent real services to call, the credentials need to live *somewhere* — and "in the worker container alongside the agent's shell" is the wrong place. A prompt-injected agent could `cat $WIKI_TOKEN` and exfiltrate it. Stage 4 sets up a two-process pattern: a separate `proxy` container holds the credentials and injects `Authorization` headers on matching hosts; the worker stays credential-free.
 
 **One-time setup (builds proxy + mock images, sets the wiki-token kitaru secret):**
 
@@ -248,13 +247,13 @@ The bearer arrived at the mock — but **the worker never had it**. The credenti
 **What's in it:**
 
 - `agent_factory/sandbox/proxy.py` — `DockerProxy` context manager. Per-run bearer token (`secrets.token_urlsafe(32)`) wired into the worker's `http_proxy` URL via basic-auth-as-bearer; the addon's auth gate rejects requests without the right token so other host processes can't accidentally use this proxy.
-- `agent_factory/sandbox/proxy_addon.py` — mitmproxy addon. Per-connection auth gate + per-request host-match header injection. Ported from `kami_agent/sandbox/proxy_addon.py`.
+- `agent_factory/sandbox/proxy_addon.py` — mitmproxy addon. Per-connection auth gate + per-request host-match header injection.
 - `agent_factory/sandbox/certs.py` — self-signed CA generation. Worker trusts the public cert via `update-ca-certificates`; the combined key+cert lives only in the proxy container.
 - `agent_factory/sandbox/runtime.py` — `DockerSandbox(proxy=…)` parameter wires `http_proxy`/`https_proxy` env vars + `REQUESTS_CA_BUNDLE` etc. + bind-mounts the public cert + runs `update-ca-certificates` on container start.
 - `agent_factory/profile.py` — `SandboxProxyRule(name, hosts, headers)`. Header values can contain `{{ secret-name.key }}` templates resolved via `kitaru.get_secret(...)`.
 - `agent_factory/secrets.py` — `build_credential_map(profile)` resolves all templates once on the host before any container sees them.
 - `mocks/server.py` + `mocks/runner.py` — FastAPI mock with `/snippets/{topic}` (auth-gated, returns sample wiki snippets) and a `DockerMockServices` context manager.
-- `skills/default-agent/SKILL.md` — extended with step 5 (curl wiki.local through the proxy). The agent now does real HTTP work as part of its procedure.
+- `skills/with-wiki/default-agent/SKILL.md` — stage 4's skill, extending stage 3's procedure with step 5 (curl wiki.local through the proxy). The agent now does real HTTP work as part of its procedure. Stage 3's `skills/basic/...` stays untouched, so re-running stage 3 still works without the proxy + mock containers.
 
 **Env-var toggles:** same as earlier stages (`DISABLE_CACHE=1`).
 

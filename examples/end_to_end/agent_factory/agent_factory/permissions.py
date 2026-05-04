@@ -1,4 +1,4 @@
-"""Profile-backed permission evaluator (port of kami_agent/permissions.py)."""
+"""Profile-backed permission evaluator."""
 
 from kitaru.errors import KitaruRuntimeError
 

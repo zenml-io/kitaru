@@ -14,7 +14,7 @@ from kitaru.errors import KitaruRuntimeError
 
 _MOCK_IMAGE = "agent-factory-mock"
 _NETWORK = "agent_factory"
-_CONTAINER_NAME = "agent_factory_mock"
+_CONTAINER_NAME_PREFIX = "agent_factory_mock_"
 _STOP_TIMEOUT_SECONDS = 2
 _READY_POLL_INTERVAL = 0.1
 _READY_TIMEOUT_SECONDS = 10.0
@@ -23,8 +23,14 @@ _READY_TIMEOUT_SECONDS = 10.0
 class DockerMockServices:
     """Run the example's mock services container for the duration of a flow."""
 
-    def __init__(self, *, host_aliases: tuple[str, ...] = ("wiki.local",)) -> None:
+    def __init__(
+        self,
+        *,
+        execution_id: str,
+        host_aliases: tuple[str, ...] = ("wiki.local",),
+    ) -> None:
         self._host_aliases = host_aliases
+        self._container_name = f"{_CONTAINER_NAME_PREFIX}{execution_id}"
         self._container_id: str | None = None
 
     def __enter__(self) -> "DockerMockServices":
@@ -68,18 +74,16 @@ class DockerMockServices:
         )
 
     def _start_container(self) -> None:
-        # Replace any stale container with the same name.
-        subprocess.run(
-            ["docker", "rm", "-f", _CONTAINER_NAME],
-            capture_output=True,
-        )
+        # Container name is per-execution (suffixed with execution_id), so
+        # concurrent flow runs don't collide. --rm cleans up our container
+        # on stop.
         args = [
             "docker",
             "run",
             "-d",
             "--rm",
             "--name",
-            _CONTAINER_NAME,
+            self._container_name,
             "--network",
             _NETWORK,
         ]
@@ -100,7 +104,7 @@ class DockerMockServices:
                 [
                     "docker",
                     "exec",
-                    _CONTAINER_NAME,
+                    self._container_name,
                     "python",
                     "-c",
                     "import urllib.request,sys;"
@@ -126,7 +130,7 @@ class DockerMockServices:
                 "stop",
                 "--time",
                 str(_STOP_TIMEOUT_SECONDS),
-                _CONTAINER_NAME,
+                self._container_name,
             ],
             capture_output=True,
             text=True,

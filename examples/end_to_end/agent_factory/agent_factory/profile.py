@@ -21,8 +21,7 @@ ToolName = Literal["exec", "skill", "ask_question"]
 #   GitRepoSkillSource(repo_url=..., ref=..., authorization_header=...)
 #       Clone a versioned skill repo into a tempdir at flow start. The
 #       prod path: skills are code-reviewed via PRs, shared across
-#       teammates and running agents. This is what kami's prod profile
-#       uses (see kami_agent/profiles.py).
+#       teammates and running agents.
 #
 #   InlineMarkdownSkillSource(name=..., markdown=...)
 #       Bake the markdown text directly into the Profile. Useful for

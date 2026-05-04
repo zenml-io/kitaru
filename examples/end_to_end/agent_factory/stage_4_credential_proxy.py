@@ -52,7 +52,7 @@ from kitaru.runtime import _get_current_execution_id
 
 DISABLE_CACHE = bool(os.environ.get("DISABLE_CACHE"))
 
-_SKILLS_DIR = Path(__file__).parent / "skills"
+_SKILLS_DIR = Path(__file__).parent / "skills" / "with-wiki"
 
 DEFAULT_PROFILE = Profile(
     name="default",
@@ -86,8 +86,10 @@ def agent_factory_flow() -> str:
     credential_map = build_credential_map(DEFAULT_PROFILE)
 
     with (
-        DockerMockServices() as _mock,
-        DockerProxy(credential_map=credential_map) as proxy,
+        DockerMockServices(execution_id=execution_id) as _mock,
+        DockerProxy(
+            credential_map=credential_map, execution_id=execution_id
+        ) as proxy,
         DockerSandbox(execution_id=execution_id, proxy=proxy) as sandbox,
     ):
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)

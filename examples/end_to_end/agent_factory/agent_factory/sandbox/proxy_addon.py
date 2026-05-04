@@ -4,10 +4,7 @@ Loaded by mitmdump running inside the proxy container. Never imported
 by the host process. Credentials reach this script via the
 `AGENT_FACTORY_CREDENTIALS` env var (JSON: `{host: {header: value}}`),
 authentication of incoming proxy requests goes through the
-`AGENT_FACTORY_PROXY_TOKEN` (basic-auth-as-bearer pattern, same as kami).
-
-Ported near-verbatim from `kami_agent/sandbox/proxy_addon.py` — only
-the env-var names and the log prefix were renamed.
+`AGENT_FACTORY_PROXY_TOKEN` (basic-auth-as-bearer pattern).
 """
 
 import base64

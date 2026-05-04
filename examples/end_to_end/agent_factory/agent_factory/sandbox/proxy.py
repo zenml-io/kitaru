@@ -1,6 +1,6 @@
 """DockerProxy — mitmproxy in a container, injects auth headers per host.
 
-The credential injection model (kami's two-process pattern):
+The credential injection model (two-process pattern):
 
 - Worker container runs the agent's shell commands and has NO secrets.
 - Proxy container runs mitmdump, holds the credential map in
@@ -9,12 +9,8 @@ The credential injection model (kami's two-process pattern):
 - Worker is wired to the proxy via `http_proxy` / `https_proxy` env
   vars + a self-signed CA cert it trusts.
 - Authentication between worker and proxy uses a per-run bearer token
-  (basic-auth-as-bearer pattern, ported from kami) so other processes
-  on the host can't accidentally use the proxy.
-
-Ported from `kami_agent/sandbox/proxy.py:ProxySandbox`. Modal-specific
-30 lines (`modal.Sandbox.create`, tunnels, blind sleep) become
-subprocess.run(`docker run`) + Docker network DNS + a readiness poll.
+  (basic-auth-as-bearer pattern) so other processes on the host can't
+  accidentally use the proxy.
 """
 
 import json
@@ -34,7 +30,7 @@ from .certs import (
 
 _PROXY_IMAGE = "agent-factory-proxy"
 _PROXY_NETWORK = "agent_factory"
-_PROXY_CONTAINER_NAME = "agent_factory_proxy"
+_PROXY_CONTAINER_NAME_PREFIX = "agent_factory_proxy_"
 _PROXY_LISTEN_PORT = 8080
 _STOP_TIMEOUT_SECONDS = 2
 _READY_POLL_INTERVAL = 0.1
@@ -44,15 +40,23 @@ _READY_TIMEOUT_SECONDS = 10.0
 class DockerProxy:
     """A mitmproxy container that injects auth headers based on host patterns."""
 
-    def __init__(self, *, credential_map: dict[str, dict[str, str]]) -> None:
+    def __init__(
+        self,
+        *,
+        credential_map: dict[str, dict[str, str]],
+        execution_id: str,
+    ) -> None:
         """Initialize.
 
         Args:
             credential_map: ``{host_pattern: {header_name: header_value}}``.
                 Resolved (no `{{ secret }}` templates) — the caller is
                 responsible for resolving via `kitaru.secrets`.
+            execution_id: Suffixed onto the container name so concurrent
+                flow runs don't collide on a fixed name.
         """
         self._credential_map = credential_map
+        self._container_name = f"{_PROXY_CONTAINER_NAME_PREFIX}{execution_id}"
         self._container_id: str | None = None
         # New per-run token; the worker embeds this as basic-auth-as-bearer
         # in its proxy URL so unrelated host processes can't use this proxy.
@@ -61,7 +65,7 @@ class DockerProxy:
     @property
     def url(self) -> str:
         """The authenticated proxy URL the worker should use as `http_proxy`."""
-        return f"http://{self._proxy_token}:@{_PROXY_CONTAINER_NAME}:{_PROXY_LISTEN_PORT}"
+        return f"http://{self._proxy_token}:@{self._container_name}:{_PROXY_LISTEN_PORT}"
 
     @property
     def public_cert_path(self) -> Path:
@@ -117,19 +121,26 @@ class DockerProxy:
         )
         if result.returncode == 0:
             return
+        # Concurrent flow runs may race here; don't fail on the loser —
+        # re-check inspect to confirm the network is now up either way.
         subprocess.run(
             ["docker", "network", "create", _PROXY_NETWORK],
-            check=True,
             capture_output=True,
         )
+        confirm = subprocess.run(
+            ["docker", "network", "inspect", _PROXY_NETWORK],
+            capture_output=True,
+            text=True,
+        )
+        if confirm.returncode != 0:
+            raise KitaruRuntimeError(
+                f"failed to create or find docker network {_PROXY_NETWORK!r}"
+            )
 
     def _start_container(self) -> None:
-        # Replace any stale container with the same name (e.g. from a prior
-        # crashed run). --rm doesn't catch the stale-container case.
-        subprocess.run(
-            ["docker", "rm", "-f", _PROXY_CONTAINER_NAME],
-            capture_output=True,
-        )
+        # Container name is per-execution (suffixed with execution_id), so
+        # we don't risk killing another concurrent run's proxy. --rm cleans
+        # up our own container on stop.
         completed = subprocess.run(
             [
                 "docker",
@@ -137,7 +148,7 @@ class DockerProxy:
                 "-d",
                 "--rm",
                 "--name",
-                _PROXY_CONTAINER_NAME,
+                self._container_name,
                 "--network",
                 _PROXY_NETWORK,
                 "-e",
@@ -162,17 +173,14 @@ class DockerProxy:
         self._container_id = completed.stdout.strip()
 
     def _wait_until_ready(self) -> None:
-        """Poll until mitmdump is bound to its listen port.
-
-        Replaces kami's blind ``sleep(2)``.
-        """
+        """Poll until mitmdump is bound to its listen port."""
         deadline = time.monotonic() + _READY_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             result = subprocess.run(
                 [
                     "docker",
                     "exec",
-                    _PROXY_CONTAINER_NAME,
+                    self._container_name,
                     "sh",
                     "-c",
                     f"nc -z localhost {_PROXY_LISTEN_PORT}",
@@ -196,7 +204,7 @@ class DockerProxy:
                 "stop",
                 "--time",
                 str(_STOP_TIMEOUT_SECONDS),
-                _PROXY_CONTAINER_NAME,
+                self._container_name,
             ],
             capture_output=True,
             text=True,

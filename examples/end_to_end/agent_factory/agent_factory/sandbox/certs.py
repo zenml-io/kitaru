@@ -7,8 +7,6 @@ Two files live in `_CERT_DIR`:
 - `ca.pem` — combined key + cert. Used only by the proxy container
   (mitmproxy expects this concatenated format). The private key in here
   is local-development only; it's gitignored and regenerated per host.
-
-This is a port of `kami_agent/sandbox/proxy.py::ensure_certs / _generate_ca`.
 """
 
 import datetime
