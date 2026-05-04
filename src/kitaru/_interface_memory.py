@@ -7,10 +7,9 @@ from typing import Any
 import kitaru.inspection as inspection
 from kitaru.client import KitaruClient
 from kitaru.errors import KitaruMemoryArtifactUnavailableError
-from kitaru.memory import (
-    _memory_artifact_unavailable_message,
-    _MemoryCompactionSourceMode,
-    _MemoryScopeType,
+from kitaru.memory._models import _MemoryCompactionSourceMode, _MemoryScopeType
+from kitaru.memory._operations import _memory_artifact_unavailable_message
+from kitaru.memory._scope import (
     _validate_memory_compaction_source_mode,
     _validate_memory_identifier,
     _validate_memory_scope_type,

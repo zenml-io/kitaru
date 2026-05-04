@@ -899,23 +899,33 @@ def _patch_snapshot_dependencies(
     fake_client_cls: Any,
 ) -> tuple[Any, ...]:
     return (
-        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
-        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
-        patch("kitaru.inspection.describe_local_server", return_value="not started"),
-        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch("kitaru._inspection_runtime.GlobalConfiguration", return_value=fake_gc),
         patch(
-            "kitaru.inspection.list_active_kitaru_environment_variables",
+            "kitaru._inspection_runtime.connected_to_local_server_safe",
+            return_value=False,
+        ),
+        patch(
+            "kitaru._inspection_runtime.describe_local_server",
+            return_value="not started",
+        ),
+        patch(
+            "kitaru._inspection_runtime.resolve_installed_version", return_value="1.2.3"
+        ),
+        patch(
+            "kitaru._inspection_runtime.list_active_kitaru_environment_variables",
             return_value=[],
         ),
-        patch("kitaru.inspection._collect_connection_sources", return_value={}),
         patch(
-            "kitaru.inspection._read_runtime_connection_config",
+            "kitaru._inspection_runtime._collect_connection_sources", return_value={}
+        ),
+        patch(
+            "kitaru._inspection_runtime._read_runtime_connection_config",
             return_value=SimpleNamespace(project=None),
         ),
-        patch("kitaru.inspection.Client", fake_client_cls),
+        patch("kitaru._inspection_runtime.Client", fake_client_cls),
         patch("kitaru._config._active_context.Client", fake_client_cls),
         patch(
-            "kitaru.inspection.resolve_log_store",
+            "kitaru._inspection_runtime.resolve_log_store",
             return_value=ResolvedLogStore(
                 backend="artifact-store",
                 endpoint=None,
@@ -1113,13 +1123,18 @@ def test_build_runtime_snapshot_appends_legacy_warning_when_local_store_missing(
 
     with (
         patch(
-            "kitaru.inspection.GlobalConfiguration",
+            "kitaru._inspection_runtime.GlobalConfiguration",
             return_value=_BrokenGlobalConfig(),
         ),
-        patch("kitaru.inspection.get_local_server", side_effect=ImportError("missing")),
-        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
         patch(
-            "kitaru.inspection.list_active_kitaru_environment_variables",
+            "kitaru._inspection_runtime.get_local_server",
+            side_effect=ImportError("missing"),
+        ),
+        patch(
+            "kitaru._inspection_runtime.resolve_installed_version", return_value="1.2.3"
+        ),
+        patch(
+            "kitaru._inspection_runtime.list_active_kitaru_environment_variables",
             return_value=[],
         ),
     ):
@@ -1142,26 +1157,31 @@ def test_build_runtime_snapshot_appends_legacy_warning_for_stale_local_server(
     )
 
     with (
-        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
-        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
+        patch("kitaru._inspection_runtime.GlobalConfiguration", return_value=fake_gc),
         patch(
-            "kitaru.inspection.describe_local_server",
+            "kitaru._inspection_runtime.connected_to_local_server_safe",
+            return_value=False,
+        ),
+        patch(
+            "kitaru._inspection_runtime.describe_local_server",
             return_value="registered but unavailable (daemon: stopped)",
         ),
         patch(
-            "kitaru.inspection.get_local_server",
+            "kitaru._inspection_runtime.get_local_server",
             return_value=SimpleNamespace(
                 status=SimpleNamespace(url=None),
                 config=SimpleNamespace(url=None, port=8237, ip_address="127.0.0.1"),
             ),
         ),
-        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
         patch(
-            "kitaru.inspection.list_active_kitaru_environment_variables",
+            "kitaru._inspection_runtime.resolve_installed_version", return_value="1.2.3"
+        ),
+        patch(
+            "kitaru._inspection_runtime.list_active_kitaru_environment_variables",
             return_value=[],
         ),
         patch(
-            "kitaru.inspection.Client",
+            "kitaru._inspection_runtime.Client",
             side_effect=AssertionError("Client should not be queried"),
         ),
     ):
@@ -1178,7 +1198,9 @@ def test_registered_local_server_url_matches_localhost_aliases() -> None:
         config=SimpleNamespace(url="http://127.0.0.1:8383"),
     )
 
-    with patch("kitaru.inspection.get_local_server", return_value=local_server):
+    with patch(
+        "kitaru._inspection_runtime.get_local_server", return_value=local_server
+    ):
         assert is_registered_local_server_url("http://localhost:8383") is True
         assert is_registered_local_server_url("http://127.0.0.1:8383") is True
         assert is_registered_local_server_url("http://localhost:8080") is False
@@ -1190,7 +1212,9 @@ def test_uses_stale_local_server_url_ignores_non_local_daemon_port() -> None:
         config=SimpleNamespace(url="http://127.0.0.1:8383"),
     )
 
-    with patch("kitaru.inspection.get_local_server", return_value=local_server):
+    with patch(
+        "kitaru._inspection_runtime.get_local_server", return_value=local_server
+    ):
         assert (
             uses_stale_local_server_url(
                 "http://localhost:8080",
@@ -1227,21 +1251,29 @@ def test_build_runtime_snapshot_populates_log_store_mismatch_details() -> None:
     )
 
     with (
-        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
-        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
-        patch("kitaru.inspection.describe_local_server", return_value="not started"),
-        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch("kitaru._inspection_runtime.GlobalConfiguration", return_value=fake_gc),
         patch(
-            "kitaru.inspection.list_active_kitaru_environment_variables",
+            "kitaru._inspection_runtime.connected_to_local_server_safe",
+            return_value=False,
+        ),
+        patch(
+            "kitaru._inspection_runtime.describe_local_server",
+            return_value="not started",
+        ),
+        patch(
+            "kitaru._inspection_runtime.resolve_installed_version", return_value="1.2.3"
+        ),
+        patch(
+            "kitaru._inspection_runtime.list_active_kitaru_environment_variables",
             return_value=[],
         ),
         patch(
-            "kitaru.inspection._read_runtime_connection_config",
+            "kitaru._inspection_runtime._read_runtime_connection_config",
             return_value=SimpleNamespace(project=None),
         ),
-        patch("kitaru.inspection.Client", return_value=fake_client),
+        patch("kitaru._inspection_runtime.Client", return_value=fake_client),
         patch(
-            "kitaru.inspection.resolve_log_store",
+            "kitaru._inspection_runtime.resolve_log_store",
             return_value=ResolvedLogStore(
                 backend="datadog",
                 endpoint="https://logs.example.com",
@@ -1250,7 +1282,7 @@ def test_build_runtime_snapshot_populates_log_store_mismatch_details() -> None:
             ),
         ),
         patch(
-            "kitaru.inspection.active_stack_log_store",
+            "kitaru._inspection_runtime.active_stack_log_store",
             return_value=ActiveStackLogStore(
                 backend="artifact-store",
                 endpoint=None,
@@ -1281,24 +1313,32 @@ def test_build_runtime_snapshot_returns_early_when_log_store_resolution_fails(
     )
 
     with (
-        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
-        patch("kitaru.inspection.connected_to_local_server_safe", return_value=False),
-        patch("kitaru.inspection.describe_local_server", return_value="not started"),
-        patch("kitaru.inspection.resolve_installed_version", return_value="1.2.3"),
+        patch("kitaru._inspection_runtime.GlobalConfiguration", return_value=fake_gc),
         patch(
-            "kitaru.inspection.list_active_kitaru_environment_variables",
+            "kitaru._inspection_runtime.connected_to_local_server_safe",
+            return_value=False,
+        ),
+        patch(
+            "kitaru._inspection_runtime.describe_local_server",
+            return_value="not started",
+        ),
+        patch(
+            "kitaru._inspection_runtime.resolve_installed_version", return_value="1.2.3"
+        ),
+        patch(
+            "kitaru._inspection_runtime.list_active_kitaru_environment_variables",
             return_value=[],
         ),
         patch(
-            "kitaru.inspection._read_runtime_connection_config",
+            "kitaru._inspection_runtime._read_runtime_connection_config",
             return_value=SimpleNamespace(project=None),
         ),
         patch(
-            "kitaru.inspection.Client",
+            "kitaru._inspection_runtime.Client",
             side_effect=RuntimeError("store offline"),
         ),
         patch(
-            "kitaru.inspection.resolve_log_store",
+            "kitaru._inspection_runtime.resolve_log_store",
             side_effect=ValueError("bad config"),
         ),
     ):
@@ -1422,12 +1462,14 @@ def test_build_runtime_snapshot_degrades_on_corrupt_global_config() -> None:
     """Corrupt GlobalConfiguration should produce a degraded snapshot."""
     with (
         patch(
-            "kitaru.inspection.GlobalConfiguration",
+            "kitaru._inspection_runtime.GlobalConfiguration",
             side_effect=RuntimeError("corrupt config"),
         ),
-        patch("kitaru.inspection.resolve_installed_version", return_value="0.5.0"),
         patch(
-            "kitaru.inspection.list_active_kitaru_environment_variables",
+            "kitaru._inspection_runtime.resolve_installed_version", return_value="0.5.0"
+        ),
+        patch(
+            "kitaru._inspection_runtime.list_active_kitaru_environment_variables",
             return_value=[],
         ),
     ):
@@ -1450,14 +1492,16 @@ def test_build_runtime_snapshot_degrades_on_store_config_error() -> None:
     )
 
     with (
-        patch("kitaru.inspection.GlobalConfiguration", return_value=fake_gc),
-        patch("kitaru.inspection.resolve_installed_version", return_value="0.5.0"),
+        patch("kitaru._inspection_runtime.GlobalConfiguration", return_value=fake_gc),
         patch(
-            "kitaru.inspection.list_active_kitaru_environment_variables",
+            "kitaru._inspection_runtime.resolve_installed_version", return_value="0.5.0"
+        ),
+        patch(
+            "kitaru._inspection_runtime.list_active_kitaru_environment_variables",
             return_value=[],
         ),
         patch(
-            "kitaru.inspection.describe_local_server",
+            "kitaru._inspection_runtime.describe_local_server",
             return_value="not started",
         ),
     ):
@@ -1472,7 +1516,7 @@ def test_describe_local_server_handles_non_import_error() -> None:
     from kitaru.inspection import describe_local_server
 
     with patch(
-        "kitaru.inspection.get_local_server",
+        "kitaru._inspection_runtime.get_local_server",
         side_effect=RuntimeError("corrupt server metadata"),
     ):
         result = describe_local_server()
@@ -1559,7 +1603,7 @@ def test_build_runtime_snapshot_surfaces_provenance_collector_failure(
             stack.enter_context(context_manager)
         stack.enter_context(
             patch(
-                "kitaru.inspection.collect_active_context_provenance",
+                "kitaru._inspection_runtime.collect_active_context_provenance",
                 side_effect=RuntimeError("yaml exploded"),
             )
         )

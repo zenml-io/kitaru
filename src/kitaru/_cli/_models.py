@@ -12,6 +12,7 @@ from kitaru.config import ModelAliasEntry
 from kitaru.inspection import serialize_model_alias
 
 from . import model_app
+from ._dependencies import cli_dependencies
 from ._helpers import (
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
@@ -23,7 +24,6 @@ from ._helpers import (
     _emit_pagination_note,
     _emit_snapshot,
     _exit_with_error,
-    _facade_module,
     _paginate_items,
     _print_success,
     _resolve_output_format,
@@ -74,12 +74,12 @@ def register(
     """
     command = "model.register"
     output_format = _resolve_output_format(output)
-    facade = _facade_module()
+    deps = cli_dependencies()
 
     def _register_alias() -> ModelAliasEntry:
         if secret is not None:
-            facade._resolve_secret_exact(facade.Client(), secret)
-        return facade.register_model_alias(alias, model=model, secret=secret)
+            deps.resolve_secret_exact(deps.zenml_client(), secret)
+        return deps.register_model_alias(alias, model=model, secret=secret)
 
     alias_entry = run_with_cli_error_boundary(
         _register_alias,
@@ -125,7 +125,7 @@ def list___(
         output=output_format,
     )
     aliases = run_with_cli_error_boundary(
-        _facade_module().list_model_aliases,
+        cli_dependencies().list_model_aliases,
         command=command,
         output=output_format,
         exit_with_error=_exit_with_error,

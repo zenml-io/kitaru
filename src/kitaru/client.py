@@ -118,6 +118,7 @@ from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
 )
 from kitaru._source_aliases import normalize_flow_name as _normalize_flow_name
+from kitaru._telemetry import deployment_metadata_for_stack_model
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     active_stack_log_store,
@@ -136,27 +137,33 @@ from kitaru.errors import (
     classify_failure_origin,
     execution_error_from_failure,
 )
-from kitaru.memory import (
+from kitaru.memory._maintenance import (
+    _compact_impl,
+    _compaction_log_impl,
+    _purge_impl,
+    _purge_scope_impl,
+    _reindex_impl,
+)
+from kitaru.memory._models import (
     CompactionRecord,
     CompactResult,
     MemoryEntry,
     MemoryReindexResult,
     MemoryScopeInfo,
     PurgeResult,
-    _compact_impl,
-    _compaction_log_impl,
+    _MemoryCompactionSourceMode,
+    _MemoryScope,
+    _MemoryScopeType,
+)
+from kitaru.memory._operations import (
     _delete_impl,
     _get_entry_impl,
     _history_impl,
     _list_impl,
     _list_scopes_impl,
-    _MemoryCompactionSourceMode,
-    _MemoryScope,
-    _MemoryScopeType,
-    _purge_impl,
-    _purge_scope_impl,
-    _reindex_impl,
     _set_entry_impl,
+)
+from kitaru.memory._scope import (
     _validate_memory_compaction_source_mode,
     _validate_memory_identifier,
     _validate_memory_scope_type,
@@ -169,6 +176,14 @@ logger = logging.getLogger(__name__)
 _WAIT_CONDITION_RESOLUTION_CONTINUE = "continue"
 _WAIT_CONDITION_RESOLUTION_ABORT = "abort"
 _REPLAY_IMPORT_LOCK = threading.RLock()
+
+
+class _DeploymentStackModel(Protocol):
+    """Hydrated stack model shape needed by deployment validation/telemetry."""
+
+    id: object
+    name: str
+    components: Mapping[Any, Any]
 
 
 class _ReplayImportDependencyError(KitaruRuntimeError):
@@ -1718,7 +1733,7 @@ class _DeploymentsAPI:
     def _resolve_deployment_stack(
         self,
         deployment: DeploymentRecord | Deployment,
-    ) -> Any:
+    ) -> _DeploymentStackModel:
         """Load the stored stack model for a deployment snapshot."""
         deployment_record = self._unwrap_deployment_record(deployment)
         snapshot = self._client_ref._get_snapshot(
@@ -1756,6 +1771,24 @@ class _DeploymentsAPI:
                 "Rebuild the deployment using a stack the Kitaru server can execute "
                 "remotely and try again."
             )
+        return cast(_DeploymentStackModel, stack)
+
+    def _resolve_server_runnable_deployment_stack(
+        self,
+        deployment: DeploymentRecord | Deployment,
+        *,
+        operation: Literal["invoke", "curl"],
+    ) -> _DeploymentStackModel:
+        """Resolve and validate the stack that will execute a deployment."""
+        deployment_record = self._unwrap_deployment_record(deployment)
+        stack = self._resolve_deployment_stack(deployment_record)
+        ensure_stack_is_server_runnable(
+            zen_store=self._client_ref._client().zen_store,
+            stack=stack,
+            operation=operation,
+            flow=deployment_record.flow,
+            version=deployment_record.version,
+        )
         return stack
 
     def _ensure_deployment_server_runnable(
@@ -1765,14 +1798,9 @@ class _DeploymentsAPI:
         operation: Literal["invoke", "curl"],
     ) -> None:
         """Fail early if a stored deployment cannot run from the server."""
-        deployment_record = self._unwrap_deployment_record(deployment)
-        stack = self._resolve_deployment_stack(deployment_record)
-        ensure_stack_is_server_runnable(
-            zen_store=self._client_ref._client().zen_store,
-            stack=stack,
+        self._resolve_server_runnable_deployment_stack(
+            deployment,
             operation=operation,
-            flow=deployment_record.flow,
-            version=deployment_record.version,
         )
 
     def get(
@@ -1815,7 +1843,11 @@ class _DeploymentsAPI:
             deployment,
             known_before_resolution=known_before,
         )
-        self._ensure_deployment_server_runnable(deployment, operation="invoke")
+        deployment_stack = self._resolve_server_runnable_deployment_stack(
+            deployment,
+            operation="invoke",
+        )
+        deployment_metadata = deployment_metadata_for_stack_model(deployment_stack)
 
         zenml_client = self._client_ref._client()
         trigger_pipeline = getattr(zenml_client, "trigger_pipeline", None)
@@ -1847,7 +1879,11 @@ class _DeploymentsAPI:
             raise KitaruBackendError(
                 "Deployment invocation did not produce a pipeline run."
             )
-        return FlowHandle(run)
+        return FlowHandle(
+            run,
+            analytics_metadata=deployment_metadata,
+            track_terminal_if_finished=True,
+        )
 
     def _enforce_create_exclusive_tags(
         self,
