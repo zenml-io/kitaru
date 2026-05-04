@@ -16,6 +16,8 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import Tool
 
+from kitaru.adapters.pydantic_ai import wait_for_input
+
 from .permissions import PermissionHandler
 from .services import ALL_SERVICES, build_service_description
 
@@ -235,6 +237,38 @@ def build_tools(
                 exec_service,
                 name="exec_service",
                 description=build_service_description(services),
+            )
+        )
+
+    if permission_handler.can_use_tool("ask_question"):
+        def ask_question(question: str) -> str:
+            permission_handler.require_tool("ask_question")
+            # `wait_for_input` is the kitaru pydantic-ai adapter's bridge
+            # to `kitaru.wait()`. The flow suspends here, the dashboard
+            # shows `waiting`, the operator answers (CLI/UI/API), and the
+            # operator's reply is what `wait_for_input` returns. `schema`
+            # is left None so the operator can supply any JSON value;
+            # we coerce to str for the agent's tool-result contract.
+            answer = wait_for_input(
+                question=question,
+                name=f"ask_question:{question[:40]}",
+            )
+            return str(answer) if answer is not None else ""
+
+        tools.append(
+            Tool(
+                ask_question,
+                name="ask_question",
+                description=(
+                    "Ask the operator a freeform question and get back a "
+                    "string answer. The flow pauses at this call until "
+                    "the operator answers via the dashboard or "
+                    "`kitaru executions input`. Use this when only a "
+                    "human can answer (subjective preferences, "
+                    "ambiguous next-steps, sign-off on irreversible "
+                    "actions). Pass the literal question as the `question` "
+                    "argument; the response replaces the tool's return value."
+                ),
             )
         )
 

@@ -346,11 +346,67 @@ The `lookup_wiki` and `publish_summary` calls don't show up in `[sandbox]` log l
 
 ### Stage 6 — Your agents need to ask humans things
 
-**Stage file:** `stage_6_hitl.py` *(not yet built)*
+**Stage file:** `stage_6_hitl.py`
+**The pitch:** some questions only the operator can answer — sign-off on irreversible actions, subjective preferences, ambiguous next-steps. Stage 6 introduces `ask_question`, a freeform HITL tool that pauses the flow until a human responds. The agent calls it like any other tool; the kitaru pydantic-ai adapter routes the call through `kitaru.wait()`. From the agent's perspective: `ask_question("...")` returns a string after a brief pause. From kitaru's perspective: the flow paused, durably, until input arrived.
 
-Some questions only the operator can answer. Stage 6 introduces `ask_question`, a typed-union HITL dispatcher with a `freeform` kind. Marked with `@hitl_tool`; suspends via the kitaru pydantic-ai adapter's exported `wait_for_input(...)` helper. Flow pauses, dashboard shows `waiting`, operator answers, flow resumes.
+Two ways to drive the demo — pick one:
 
-*Section will be filled in when stage 6 lands.*
+**Interactive (recommended for first run):**
+
+```bash
+DISABLE_CACHE=1 python stage_6_hitl.py
+```
+
+When the agent calls `ask_question`, kitaru's local runtime prompts on the same terminal. Type your answer, hit enter, the flow resumes.
+
+**Non-interactive (production-shaped):**
+
+```bash
+DISABLE_CACHE=1 python stage_6_hitl.py </dev/null &
+# in another terminal, after `Waiting on ask_question:...` shows up:
+kitaru executions list                                          # find the waiting execution
+kitaru executions input <execution_id> --value '"Verified by ops on call"'
+```
+
+That's exactly how it works in production: the flow runs on a server, the operator answers via the dashboard / CLI / REST API. The flow resumes from the same point and continues.
+
+The agent's skill (`skills/with-hitl/default-agent/SKILL.md`) does this:
+
+1. Look up `lookup_wiki(topic="durability")` (host-side typed service from stage 5).
+2. Draft a 1-2 sentence summary from the first snippet.
+3. Call `ask_question("What suffix should I add before publishing?")` — **the flow pauses here.**
+4. Append the operator's answer to the summary.
+5. Publish via `publish_summary`. Returns `{message_id, posted_at}`.
+
+So the agent goes: typed-service lookup → human pause → publish, all in one durable flow.
+
+```
+Kitaru: Checkpoint `default` started.
+…  (skill list/read, exec_service lookup_wiki)
+Kitaru: Waiting on `ask_question:What suffix should I add to the summary…` (type=external_input, timeout=600s, poll=5s)
+                                                                            ↑ flow paused here
+…  (operator runs `kitaru executions input … --value '"Verified by ops on call"'`)
+Kitaru: HTTP Request: POST https://api.openai.com/v1/chat/completions   ← agent resumes with the answer
+…  (exec_service publish_summary)
+Kitaru: Checkpoint `default` finished in 1m12s.
+
+Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoint output. Verified by ops on call.
+```
+
+**What's in it:**
+
+- `agent_factory/tools.py` — adds the `ask_question` tool factory. Body calls `wait_for_input(question=question, name=...)` from the kitaru pydantic-ai adapter. The wait returns whatever the operator supplies; the tool coerces to `str` for the agent's tool-result contract.
+- `agent_factory/profile.py` — `ToolName` already includes `ask_question` (since stage 1's literal-typed `allowed_tools` field was forward-looking). Stage 6 just turns it on in `allowed_tools={...}`.
+- `skills/with-hitl/default-agent/SKILL.md` — stage 6's procedure. Same shape as stage 5 but with a human pause between draft and publish.
+
+**Architectural notes:**
+
+- **No checkpoint plumbing on the example side.** The `wait_for_input` call inside the tool body is the only HITL-specific code in this stage. The adapter handles the suspend/resume mechanics under the hood; the tool body looks like a normal function call that happens to take a while.
+- **Idempotent on replay.** A wait is identified by its `name` (we use `ask_question:<first 40 chars>`). On replay of a completed flow, the cached operator answer is served from the artifact store — the operator isn't re-prompted. Stage 8 demos this end-to-end.
+- **Why no `@hitl_tool` decorator?** The shipped `@hitl_tool(schema=...)` form persists the schema (a Python `type`) into the wait's metadata — that runs into a serialization snag on the local stack today (kitaru issue, not example-specific). Calling `wait_for_input(...)` from the body skirts it, with the same external behavior.
+- **Schema is `None` (any-JSON), not `str`.** The operator can supply any JSON value (a string, a structured object, etc.). The tool body coerces to `str` for the freeform shape; stage 7 introduces a typed-schema variant for `remembered_choice` answers.
+
+**Env-var toggles:** same as earlier stages (`DISABLE_CACHE=1`).
 
 ---
 
