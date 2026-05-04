@@ -16,7 +16,6 @@
     "llm-calls",
     "secrets-and-model-registration",
     "secrets",
-    "pydantic-ai-adapter",
-    "news-scout"
+    "pydantic-ai-adapter"
   ]
 }

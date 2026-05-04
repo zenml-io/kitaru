@@ -1,11 +1,15 @@
 ---
 title: Examples
-description: Runnable Kitaru examples and what each one demonstrates
+description: Runnable Kitaru examples — start with the Agent Factory tour, or jump to a feature-focused example
 ---
 
-The Kitaru repo includes runnable examples that demonstrate each primitive.
-Each example is a standalone project — clone the repo, `cd` into the example
-you want, and run it directly.
+The Kitaru repo includes a set of runnable examples grouped by purpose:
+
+- **Agent Factory** — a chapter-by-chapter tour through building a durable agent platform on Kitaru + PydanticAI. Read this first if you're new.
+- **Other end-to-end examples** — production-shaped, self-contained scenarios that exercise multiple primitives at once. No required reading order.
+- **Feature-focused examples** — small examples that demo one Kitaru primitive in isolation.
+
+Every example is a standalone project — clone the repo, `cd` into the example you want, and run it directly.
 
 ## Get the examples
 
@@ -21,46 +25,50 @@ python first_working_flow.py
   execution environment.
 </Callout>
 
-Every example uses imports relative to its own directory, so always `cd` into
-the example folder before running.
+Every example uses imports relative to its own directory, so always `cd` into the example folder before running.
 
 ## Connection context
 
 Examples use whatever Kitaru connection context is already active.
 
 - If you are just trying Kitaru locally, run them as-is.
-- If you already have a deployed Kitaru server and want the examples to use it,
-  connect first and verify the active context before running the example.
+- If you already have a deployed Kitaru server and want the examples to use it, connect first and verify the active context before running the example.
 
 ```bash
 kitaru login https://my-server.example.com
 kitaru status
 ```
 
-## Browse by goal
+## Start here — Agent Factory
 
-| I want to... | Example | Run |
-|---|---|---|
-| Start with the smallest runnable flow | `features/basic_flow/` | `python first_working_flow.py` |
-| See structured metadata logging | `features/basic_flow/` | `python flow_with_logging.py` |
-| Persist and reload data across executions | `features/basic_flow/` | `python flow_with_artifacts.py` |
-| Seed, inspect, compact, and purge durable memory | `features/memory/` | `python flow_with_memory.py` |
-| Set runtime configuration defaults | `features/basic_flow/` | `python flow_with_configuration.py` |
-| Inspect and manage past executions | `features/execution_management/` | `python client_execution_management.py` |
-| Pause for human input and resume later | `features/execution_management/` | `python wait_and_resume.py` |
-| Replay from a checkpoint with overrides | `features/replay/` | `python replay_with_overrides.py` |
-| Track a model call inside a flow | `features/llm/` | `python flow_with_llm.py` |
-| Wrap a PydanticAI agent | `integrations/pydantic_ai_agent/` | `python pydantic_ai_adapter.py` |
-| Query executions from an MCP client | `features/mcp/` | `python mcp_query_tools.py` |
+A platform engineer's starter kit for building their org's internal agent factory on top of Kitaru + PydanticAI. The example builds up one capability at a time across multiple stages — durable agent loop, sandboxed `exec`, skills as markdown, credential proxy, typed services, human-in-the-loop, memory, replay. Each stage adds one tool or one architectural primitive; the library grows monotonically; the per-stage `Profile` gates which capabilities each agent actually exercises.
 
-For example:
+Use it as the first thing you read end-to-end, and as the thing you fork for your team.
+
+→ [Agent Factory on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory) — full README, runnable stage files, and the library code
 
 ```bash
-cd examples/features/basic_flow
-python first_working_flow.py
+cd kitaru/examples/end_to_end/agent_factory
+uv sync
+export OPENAI_API_KEY=sk-...
+python stage_1_basic_agent.py
 ```
 
-## Core workflow basics
+## Other end-to-end examples
+
+Production-shaped examples that exercise multiple primitives in one runnable scenario. Each is self-contained — pick the one closest to your domain.
+
+| Example | Demonstrates | Path |
+|---|---|---|
+| Compliance review | Multi-stage Claude audit using the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python). Each agent turn is a checkpoint; later stages add domain decomposition, memory of prior findings, and conversational `kitaru.wait()` resume across crashes. | [`examples/end_to_end/compliance_review/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/compliance_review) |
+| Coding agent | Interactive coding agent built on **raw provider SDKs** (no PydanticAI, no LangChain). Demos parallel tool execution, durable HITL via `kitaru.wait()`, custom materializers, and LLM-named checkpoints. | [`examples/end_to_end/coding_agent/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/coding_agent) |
+| News scout | Small PydanticAI agent that reads across sources, scores findings, and prints a brief. Uses granular per-call checkpoints and namespace-scope memory. Good "smaller end-to-end" if Agent Factory's Docker setup is overkill for what you want to try first. | [`examples/end_to_end/news_scout/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/news_scout) |
+
+## Feature-focused examples
+
+Small examples that demo one primitive in isolation. Pick by the thing you want to see.
+
+### Core workflow basics
 
 | Example | Demonstrates | Related docs |
 |---|---|---|
@@ -69,13 +77,13 @@ python first_working_flow.py
 | `features/basic_flow/flow_with_artifacts.py` | `kitaru.save()` and `kitaru.load()` across executions | [Artifacts](/guides/artifacts) |
 | `features/basic_flow/flow_with_configuration.py` | `kitaru.configure()` defaults, overrides, and frozen specs | [Configuration](/guides/configuration) |
 
-## Durable shared state
+### Durable shared state
 
 | Example | Demonstrates | Related docs |
 |---|---|---|
 | `features/memory/flow_with_memory.py` | Outside-flow seeding, in-flow `kitaru.memory`, detached post-run execution-scope writes, explicit-scope inspection, and post-run maintenance (compact, purge, audit log) via `KitaruClient.memories` | [Use Memory](/guides/memory) |
 
-## Execution lifecycle and recovery
+### Execution lifecycle and recovery
 
 | Example | Demonstrates | Related docs |
 |---|---|---|
@@ -83,7 +91,7 @@ python first_working_flow.py
 | `features/execution_management/wait_and_resume.py` | `kitaru.wait()` with inline prompt or CLI input/resume | [Wait, Input, and Resume](/guides/wait-and-resume) |
 | `features/replay/replay_with_overrides.py` | Replay from a checkpoint with overridden inputs | [Replay and Overrides](/guides/replay-and-overrides) |
 
-## LLMs and agent integrations
+### LLMs and agent integrations
 
 | Example | Demonstrates | Related docs |
 |---|---|---|
@@ -92,21 +100,18 @@ python first_working_flow.py
 | `features/mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
 
 <Callout type="info">
-  The LLM and PydanticAI examples require additional dependencies — check each
-  example's README for setup instructions.
+  The LLM and PydanticAI examples require additional dependencies — check each example's README for setup instructions.
 </Callout>
 
-## Recommended path
+## Recommended reading order
 
 If you are learning Kitaru from scratch:
 
-1. `features/basic_flow/first_working_flow.py` — [Quickstart](/getting-started/quickstart)
-2. `features/basic_flow/flow_with_logging.py` — [Logging](/concepts/logging)
-3. `features/basic_flow/flow_with_artifacts.py` — [Artifacts](/guides/artifacts)
-4. `features/memory/flow_with_memory.py` — [Use Memory](/guides/memory)
-5. `features/execution_management/client_execution_management.py` — [Execution Management](/guides/execution-management)
-6. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume)
-7. `features/replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides)
-8. `features/llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
-9. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
-10. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)
+1. [Quickstart](/getting-started/quickstart) — `@flow` + `@checkpoint` in 6 lines.
+2. `features/basic_flow/first_working_flow.py` — the same idea as a runnable file.
+3. `features/basic_flow/flow_with_logging.py` — [Logging](/concepts/logging).
+4. `features/basic_flow/flow_with_artifacts.py` — [Artifacts](/guides/artifacts).
+5. `features/memory/flow_with_memory.py` — [Use Memory](/guides/memory).
+6. `features/execution_management/wait_and_resume.py` — [Wait, Input, and Resume](/guides/wait-and-resume).
+7. `features/replay/replay_with_overrides.py` — [Replay and Overrides](/guides/replay-and-overrides).
+8. **[Agent Factory](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory)** — chapter-by-chapter tour that ties all of the above into one runnable agent platform.
