@@ -291,8 +291,9 @@ With `persist_message_history=True` the adapter remembers `result.all_messages()
   replay of a prior flow starts with no history. The list grows unbounded — apply
   your own truncation or summarization for long-lived conversations. Concurrent
   `run` / `run_sync` calls on the same instance race on the stored history; use
-  one instance per conversation. For durable conversation state, persist
-  `result.all_messages()` yourself via [`kitaru.memory`](/guides/memory).
+  one instance per conversation. If you need durable conversation state, persist
+  `result.all_messages()` in your own storage and pass it back as explicit
+  `message_history` on the next call.
 </Callout>
 
 ## Constraints
@@ -333,5 +334,4 @@ The example prints the execution ID, final result, child-event count, and run-su
   <Card title="Replay and overrides" href="/guides/replay-and-overrides" description="Re-run a flow with cached outputs for completed checkpoints" />
   <Card title="Wait, Input, and Resume" href="/guides/wait-and-resume" description="How paused flows are resolved from Python, CLI, and MCP" />
   <Card title="Tracked LLM calls" href="/guides/llm-calls" description="Use kitaru.llm() with model aliases and transported registry" />
-  <Card title="Memory" href="/guides/memory" description="Persist durable conversation state across runs" />
 </Cards>

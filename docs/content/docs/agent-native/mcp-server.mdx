@@ -1,10 +1,10 @@
 ---
 title: MCP Server
-description: Query and manage Kitaru executions, deployments, artifacts, memory, and secret creation through Model Context Protocol tools
+description: Query and manage Kitaru executions, deployments, artifacts, stacks, and secret creation through Model Context Protocol tools
 ---
 
 Kitaru ships an MCP server so assistants can query and manage executions,
-deployments, memory, artifacts, and project context with structured tool calls
+deployments, artifacts, stacks, and project context with structured tool calls
 instead of parsing CLI text output.
 
 ## Install MCP support
@@ -141,18 +141,6 @@ Artifact tools:
 - `kitaru_artifacts_list`
 - `kitaru_artifacts_get`
 
-Memory tools:
-
-- `kitaru_memory_list`
-- `kitaru_memory_get`
-- `kitaru_memory_set`
-- `kitaru_memory_delete`
-- `kitaru_memory_history`
-- `kitaru_memory_compact`
-- `kitaru_memory_purge`
-- `kitaru_memory_purge_scope`
-- `kitaru_memory_compaction_log`
-
 Secret tools:
 
 - `kitaru_secrets_create`
@@ -202,12 +190,6 @@ Inspect results from a completed execution:
 
 ```text
 Get the latest completed execution and show me its response artifacts.
-```
-
-Read durable memory safely:
-
-```text
-Read `style/release_notes` from Kitaru memory in scope `repo_docs`. If the value is unavailable, explain the diagnostics instead of overwriting it.
 ```
 
 Manage a local stack:
@@ -353,91 +335,6 @@ serverless routing, and auth context, see [Deployments](/concepts/deployments).
 
 To provision or clean up a local stack, use `manage_stack(action="create", name="local-dev")`
 or `manage_stack(action="delete", name="local-dev", force=True)`.
-
-## Memory tools
-
-The memory tools give assistants direct structured access to Kitaru's durable
-key-value memory store.
-
-- `scope` and `scope_type` are required on every scoped memory tool
-- `version` and `strict` are available only on `kitaru_memory_get`
-
-Typical memory query/update flow:
-
-1. `kitaru_memory_list(scope="repo_docs", scope_type="namespace")`
-2. `kitaru_memory_get(key="style/release_notes", scope="repo_docs", scope_type="namespace")`
-3. `kitaru_memory_set(key="style/release_notes", value={"tone": "concise"}, scope="repo_docs", scope_type="namespace")`
-4. `kitaru_memory_history(key="style/release_notes", scope="repo_docs", scope_type="namespace")`
-
-Use `strict=True` when the assistant should fail the tool call if the memory
-entry exists but its value artifact cannot be loaded from the MCP server's
-environment:
-
-`kitaru_memory_get(key="style/release_notes", scope="repo_docs", scope_type="namespace", strict=True)`
-
-Use these tools when an assistant needs durable shared state without parsing CLI
-output or inventing its own scratchpad format.
-
-### Missing entries vs unavailable values
-
-`kitaru_memory_get` can return three useful shapes:
-
-- `None` means no active entry exists for that key and scope.
-- A payload with `value_available: true` includes the loaded `value`.
-- A payload with `value_available: false` means metadata exists, but the value
-  artifact cannot be loaded from the MCP server's environment.
-
-For an unavailable value, the payload includes diagnostics alongside the memory
-metadata:
-
-```json
-{
-  "key": "style/release_notes",
-  "scope": "repo_docs",
-  "scope_type": "namespace",
-  "version": 3,
-  "artifact_id": "...",
-  "value_available": false,
-  "value_unavailable": {
-    "error_type": "KitaruMemoryArtifactUnavailableError",
-    "cause_type": "FileNotFoundError",
-    "message": "..."
-  }
-}
-```
-
-This is different from a missing key: the assistant still has enough metadata to
-tell the user which memory entry exists and why the value cannot be read here.
-Set `strict=True` to raise the typed error instead of returning the unavailable
-payload.
-
-### Memory maintenance tools
-
-The maintenance tools let assistants manage memory growth:
-
-- `kitaru_memory_compact` — summarize memory values with an LLM and write
-  the result. Use `key` for the default single-key current-value workflow,
-  `key` plus `source_mode="history"` to summarize one key's full non-deleted
-  history, or `keys` (a list) with `target_key` for multi-key merging. Source
-  entries are not deleted.
-- `kitaru_memory_purge` — physically delete old versions of one key. Set
-  `keep` to retain the newest N versions, or omit it to delete everything.
-- `kitaru_memory_purge_scope` — purge old versions across all keys in a
-  scope. Set `include_deleted` to also remove tombstoned keys entirely.
-- `kitaru_memory_compaction_log` — read the audit trail of all compact and
-  purge operations for one scope (newest first).
-
-Recommended maintenance sequence:
-
-1. `kitaru_memory_compact(scope="repo_docs", scope_type="namespace", key="notes/preferences")`
-2. Inspect the new summary if needed.
-3. `kitaru_memory_purge(key="notes/preferences", scope="repo_docs", scope_type="namespace", keep=1)`
-4. `kitaru_memory_compaction_log(scope="repo_docs", scope_type="namespace")`
-
-For a complete memory walkthrough including seeding, flow usage, and
-cross-surface inspection, see `examples/features/memory/flow_with_memory.py` and
-its [demo playbook](https://github.com/zenml-io/kitaru/tree/develop/examples/features/memory/DEMO_PLAYBOOK.md)
-for detailed MCP tool-call sequences.
 
 ## Authentication and context
 

@@ -1,5 +1,13 @@
 {
   "title": "Core Concepts",
   "defaultOpen": false,
-  "pages": ["harness-runtime-platform", "how-it-works", "flows", "deployments", "checkpoints", "memory", "wait-and-input", "logging"]
+  "pages": [
+    "harness-runtime-platform",
+    "how-it-works",
+    "flows",
+    "deployments",
+    "checkpoints",
+    "wait-and-input",
+    "logging"
+  ]
 }
