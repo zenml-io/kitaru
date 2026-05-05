@@ -18,7 +18,7 @@ Kitaru is ZenML's **durable execution layer for AI agents**. It provides primiti
 src/kitaru/           # Python SDK package (src layout)
   cli.py              # CLI facade / console entrypoint (cyclopts)
   _cli/               # Internal command modules + shared CLI helpers
-  adapters/           # Framework adapters (includes PydanticAI)
+  adapters/           # Framework adapters (includes PydanticAI and OpenAI Agents)
   mcp/                # MCP server tools (optional `kitaru[mcp]` extra)
 tests/                # pytest tests
 tests/mcp/            # MCP-specific unit tests (runs in `[mcp]` CI path)
@@ -121,7 +121,7 @@ Copy `.env.example` to `.env` and fill in R2 credentials. The site build does NO
 3. Run the smoke test: `./scripts/smoke-test.sh` (or `./scripts/smoke-test.sh -s` to skip reinstall). This exercises CLI, SDK flows, MCP tools, and LLM integration against a local server. Set `OPENAI_API_KEY` to include LLM tests. Use `-k` to keep the server running and inspect the dashboard afterward.
 4. Go to Actions > Release > Run workflow (or push a `vX.Y.Z` tag).
 5. Enter the version (e.g. `0.2.0`); optionally enable dry-run.
-6. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to ECR, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes.
+6. The workflow bumps version, runs CI, publishes to PyPI, builds and pushes the Docker image (`zenmldocker/kitaru:<version>` + `latest`), builds and pushes the Helm chart to Amazon ECR Public as an OCI chart, creates `release/X.Y.Z`, updates `main`, tags, and creates a GitHub Release with auto-generated notes.
 7. After the workflow completes, edit the GitHub Release notes (`gh release edit vX.Y.Z --notes ...`) to replace the auto-generated PR list with a structured changelog: a **Highlights** section for the most notable changes, then **Added/Changed/Fixed/Infrastructure** categories mirroring the changelog.
 
 ## Development commands
@@ -144,10 +144,10 @@ This project uses [just](https://github.com/casey/just) as a command stack. Run 
 # Setup
 uv sync                              # Install dependencies
 uv sync --extra local                # Include local ZenML runtime components
-kitaru init                          # Required in a fresh git worktree — see note below
+uv run kitaru init                   # Required in a fresh git worktree — see note below
 
 # Common Python workflows
-just check                            # Run all checks (format, lint, typecheck, typos, yaml, actions, links)
+just check                            # Run all checks (format, lint, typecheck, typos, yaml, actions lint, links)
 just test                             # Run all tests
 just test tests/test_foo.py           # Run a single test file
 just test tests/test_foo.py::test_bar # Run a single test
@@ -168,6 +168,8 @@ just typos                            # Typo check only
 just format-check                     # Check formatting without modifying
 just yaml-check                       # Check YAML formatting
 just actions-lint                     # Lint GitHub Actions workflows (requires actionlint)
+just zizmor                           # Audit GitHub Actions workflow security
+just audit                            # Audit Python dependencies with pip-audit
 just links                            # Check markdown links offline (requires lychee)
 just build                            # Build wheel + sdist locally
 
@@ -195,11 +197,12 @@ just site-build && npx wrangler deploy   # Build + deploy
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, links, typecheck, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes |
-| `site.yml` | Push to `main`; PRs touching docs/site/scripts | Build + deploy unified site; PR preview Workers |
-| `release.yml` | Workflow dispatch or `v*` tag | Version bump, PyPI publish, Docker image publish, GitHub Release |
-| `spellcheck.yml` | Push/PR to `develop` | Separate typo/spell checking |
-| `image-optimiser.yml` | PRs only | Image compression for docs assets |
+| `ci.yml` | Push/PR to `develop` | Python checks: lint, format, yaml, typos, typecheck, dependency audit, links, Docker server smoke, wheel packaging, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes |
+| `site.yml` | Manual dispatch; push to `main`; selected docs/site/script PR paths | Build + deploy unified site; PR preview Workers for same-repo PRs; preview cleanup on PR close |
+| `release.yml` | Workflow dispatch or `v*` tag | Version/changelog/lock handling for dispatch releases, PyPI publish, Docker image publish, Helm OCI chart publish, release branch/main update, GitHub Release |
+| `spellcheck.yml` | Manual/reusable runs, push to `develop`, non-draft PRs | Separate typo/spell checking |
+| `image-optimiser.yml` | PRs changing JPG/JPEG/PNG/WebP files | Image compression for same-repo non-draft PRs, with `site/public/dashboard.png` ignored |
+| `zizmor.yml` | Workflow/dependabot changes, weekly schedule, manual runs | GitHub Actions security analysis |
 
 When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ruff to ensure best practices are followed.
 
@@ -240,9 +243,9 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ### Framework adapters
 
-The first framework adapter is implemented: `kitaru.adapters.pydantic_ai.KitaruAgent(agent, ...)`.
+Implemented framework adapters include `kitaru.adapters.pydantic_ai.KitaruAgent(agent, ...)` and the OpenAI Agents adapter under `kitaru.adapters.openai_agents`. The OpenAI Agents adapter is behind the `openai-agents` optional extra (`uv sync --extra openai-agents` or `kitaru[openai-agents]`) and exposes `KitaruRunner` for durable OpenAI Agents runs.
 
-It keeps the enclosing checkpoint as the replay boundary while tracking PydanticAI model requests and tool calls as child events/artifacts under that checkpoint. At flow scope, `run()` / `run_sync()` automatically open a synthetic checkpoint per turn so tracking still works without an explicit outer checkpoint; outside any flow they auto-open a local flow (remote stacks require an explicit `@kitaru.flow`). Capture is controlled via a `CapturePolicy` (`tool_capture="full"|"metadata"|None` plus per-tool overrides). HITL is auto-bridged: PydanticAI's native `requires_approval=True`, `ApprovalRequired`, and `CallDeferred` all route through `kitaru.wait(...)` with no decorator. For explicit HITL markers, use `kitaru.adapters.pydantic_ai.hitl_tool(...)`. Per-turn checkpoint behavior (runtime, retries, type) is configurable via `KitaruAgent(..., turn_checkpoint_config={"runtime": "inline"})`; adapter-managed checkpoints do not yet support `runtime="isolated"`.
+The PydanticAI adapter keeps the enclosing checkpoint as the replay boundary while tracking PydanticAI model requests and tool calls as child events/artifacts under that checkpoint. At flow scope, `run()` / `run_sync()` automatically open a synthetic checkpoint per turn so tracking still works without an explicit outer checkpoint; outside any flow they auto-open a local flow (remote stacks require an explicit `@kitaru.flow`). Capture is controlled via a `CapturePolicy` (`tool_capture="full"|"metadata"|None` plus per-tool overrides). HITL is auto-bridged: PydanticAI's native `requires_approval=True`, `ApprovalRequired`, and `CallDeferred` all route through `kitaru.wait(...)` with no decorator. For explicit HITL markers, use `kitaru.adapters.pydantic_ai.hitl_tool(...)`. Per-turn checkpoint behavior (runtime, retries, type) is configurable via `KitaruAgent(..., turn_checkpoint_config={"runtime": "inline"})`; adapter-managed checkpoints do not yet support `runtime="isolated"`.
 
 ### Observability (current MVP + planned)
 
