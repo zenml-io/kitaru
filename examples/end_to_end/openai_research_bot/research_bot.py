@@ -264,8 +264,10 @@ def durability_drill_gate(
     if _env_flag_enabled(FAIL_AFTER_SEARCHES_ENV):
         raise RuntimeError(
             "Intentional durability drill failure after the search checkpoints. "
-            f"Unset {FAIL_AFTER_SEARCHES_ENV} and retry this failed execution; "
-            "Kitaru should reuse the completed planner/search checkpoints."
+            f"Unset {FAIL_AFTER_SEARCHES_ENV} and replay this execution with "
+            "`kitaru executions replay <EXECUTION_ID> --from "
+            "durability_drill_gate`; Kitaru should reuse the completed "
+            "planner/search checkpoints."
         )
     return {
         "enabled": False,

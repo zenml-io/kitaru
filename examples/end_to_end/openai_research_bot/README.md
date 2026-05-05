@@ -95,14 +95,16 @@ uv run python research_bot.py "What should a small AI startup know about durable
 
 The run should fail at `durability_drill_gate`, after `research_plan`, both `search_XX_...` checkpoints, and `search_summaries` have already completed.
 
-Copy the failed execution ID from the terminal or UI, then unset the flag and retry the same execution:
+Copy the failed execution ID from the terminal or UI, then unset the flag and replay from the failure checkpoint:
 
 ```bash
 unset KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES
-uv run kitaru executions retry <EXECUTION_ID>
+uv run kitaru executions replay <EXECUTION_ID> --from durability_drill_gate
 ```
 
-`retry` is the right command for failed executions. `resume` is for paused executions that are waiting for input. On retry, Kitaru should reuse the completed planner/search checkpoints and continue from the failure gate into the writer and final report.
+`replay` creates a new execution from the failed one and asks Kitaru to reuse completed upstream checkpoints. `retry` tries to restart the same failed execution, which is not always available on server-backed stacks after a run has concluded. `resume` is for paused executions that are waiting for input.
+
+On replay, Kitaru should reuse the completed planner/search checkpoints and continue from `durability_drill_gate` into the writer and final report.
 
 ## `calls` vs `runner_call`
 
