@@ -7,7 +7,6 @@ visible, deliberate seam — not as something the library hides.
 
 from pydantic_ai import Agent
 
-from .permissions import PermissionHandler
 from .profile import Profile
 from .tools import _Sandbox, build_tools
 
@@ -22,7 +21,6 @@ def build_agent(profile: Profile, *, sandbox: _Sandbox | None = None) -> Agent:
     `exec_service`; the agent can dispatch to any service named in
     `profile.allowed_services`.
     """
-    permission_handler = PermissionHandler(profile)
     skills_directory = (
         profile.skill_source.resolve() if profile.skill_source is not None else None
     )
@@ -31,7 +29,7 @@ def build_agent(profile: Profile, *, sandbox: _Sandbox | None = None) -> Agent:
         name=profile.name,
         system_prompt=profile.system_prompt,
         tools=build_tools(
-            permission_handler,
+            profile.allowed_tools,
             sandbox=sandbox,
             skills_directory=skills_directory,
             allowed_services=profile.allowed_services,

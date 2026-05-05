@@ -22,6 +22,7 @@ from types import TracebackType
 
 from kitaru.errors import KitaruRuntimeError
 
+from .._docker import ensure_image, ensure_network, stop_container
 from .certs import (
     cert_dir,
     ensure_certs,
@@ -75,8 +76,14 @@ class DockerProxy:
         return public_cert_path()
 
     def __enter__(self) -> "DockerProxy":
-        self._ensure_image()
-        self._ensure_network()
+        ensure_image(
+            _PROXY_IMAGE,
+            "Build it once (run from the example root) with:\n\n"
+            f"    docker build -t {_PROXY_IMAGE} "
+            "-f docker/proxy.Dockerfile .\n\n"
+            "Then re-run this stage.",
+        )
+        ensure_network(_PROXY_NETWORK)
         ensure_certs()
         self._start_container()
         self._wait_until_ready()
@@ -95,49 +102,10 @@ class DockerProxy:
     ) -> None:
         if self._container_id is not None:
             print(f"[proxy] Stopping container {self._container_id[:12]}")
-        self._stop_container()
+            stop_container(self._container_name, timeout_seconds=_STOP_TIMEOUT_SECONDS)
+            self._container_id = None
 
     # --- Lifecycle internals -------------------------------------------------
-
-    def _ensure_image(self) -> None:
-        result = subprocess.run(
-            ["docker", "image", "inspect", _PROXY_IMAGE],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return
-        raise KitaruRuntimeError(
-            f"Proxy image {_PROXY_IMAGE!r} is not built locally. "
-            "Build it once (run from the example root) with:\n\n"
-            f"    docker build -t {_PROXY_IMAGE} "
-            "-f docker/proxy.Dockerfile .\n\n"
-            "Then re-run this stage."
-        )
-
-    def _ensure_network(self) -> None:
-        result = subprocess.run(
-            ["docker", "network", "inspect", _PROXY_NETWORK],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return
-        # Concurrent flow runs may race here; don't fail on the loser —
-        # re-check inspect to confirm the network is now up either way.
-        subprocess.run(
-            ["docker", "network", "create", _PROXY_NETWORK],
-            capture_output=True,
-        )
-        confirm = subprocess.run(
-            ["docker", "network", "inspect", _PROXY_NETWORK],
-            capture_output=True,
-            text=True,
-        )
-        if confirm.returncode != 0:
-            raise KitaruRuntimeError(
-                f"failed to create or find docker network {_PROXY_NETWORK!r}"
-            )
 
     def _start_container(self) -> None:
         # Container name is per-execution (suffixed with execution_id), so
@@ -195,19 +163,3 @@ class DockerProxy:
         raise KitaruRuntimeError(
             f"proxy container did not become ready within {_READY_TIMEOUT_SECONDS}s"
         )
-
-    def _stop_container(self) -> None:
-        if self._container_id is None:
-            return
-        subprocess.run(
-            [
-                "docker",
-                "stop",
-                "--time",
-                str(_STOP_TIMEOUT_SECONDS),
-                self._container_name,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        self._container_id = None

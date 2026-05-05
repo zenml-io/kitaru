@@ -77,7 +77,7 @@ Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoin
 ## Architectural notes
 
 - **No checkpoint plumbing on the example side.** The `wait_for_input` call inside the tool body is the only HITL-specific code in this stage. The adapter handles the suspend/resume mechanics under the hood; the tool body looks like a normal function call that happens to take a while.
-- **Idempotent on replay.** Each wait is identified by a `name` of the form `ask_question:<call_index>:<sha1(question)[:8]>`. The call index makes two same-text questions in one turn distinguishable (the runtime DB enforces a unique constraint on `(run_id, name)`); the question hash makes the name stable across replays as long as the agent emits the same question at the same call index. On replay of a completed flow, the cached operator answer is served from the artifact store — the operator isn't re-prompted.
+- **Wait-name design is replay-safe.** Each wait is identified by a `name` of the form `ask_question:<call_index>:<sha1(question)[:8]>`. The call index makes two same-text questions in one turn distinguishable (the runtime DB enforces a unique constraint on `(run_id, name)`); the question hash makes the name stable across replays as long as the agent emits the same question at the same call index. For an end-to-end replay tour against a flow with cached waits, see [`/guides/replay-and-overrides`](/guides/replay-and-overrides).
 - **Why `wait_for_input(...)` from the body, not `@hitl_tool(...)` on the function?** The shipped `@hitl_tool(schema=...)` form persists the `schema` value (a Python `type`) into the wait's metadata, which doesn't round-trip cleanly on the local stack today. Calling `wait_for_input(...)` from inside the tool body has the same external behavior without that snag.
 - **Schema is `None` (any-JSON), not `str`.** The operator can supply any JSON value (a string, a structured object, etc.). The tool body coerces to `str` for the freeform shape.
 - **Operator input flows downstream verbatim.** Whatever the operator answers becomes the tool's return value, then is appended to the summary, then is POSTed to the webhook. No escaping, no re-prompting. Forks should escape it themselves before handing it to anything that interprets the bytes (HTML renderer, shell, SQL).
@@ -85,6 +85,19 @@ Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoin
 ## Env-var toggles
 
 - `DISABLE_CACHE=1` — same as earlier chapters.
+
+## Inspecting and replaying the run
+
+Once a stage has completed, the operator surface that makes durability *observable* lives behind the CLI and dashboard. From the same shell that ran the stage:
+
+```bash
+kitaru executions list                                  # find the execution_id
+kitaru executions get <execution_id>                    # full status: turn outputs, wait history, artifacts
+kitaru executions logs <execution_id>                   # streaming runtime logs
+kitaru executions replay <execution_id> --from default  # re-run from the agent turn (cached HITL answer reused)
+```
+
+`replay --from default` re-executes the agent turn with everything upstream served from cache; if the operator already answered the wait in the original run, the cached answer is reused (the wait `name` is stable across replays — see the architectural note above). For replay with output overrides — swap a checkpoint's input artifact while preserving downstream caches — see [Replay and Overrides](/guides/replay-and-overrides).
 
 ## Source
 

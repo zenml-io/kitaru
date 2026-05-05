@@ -20,7 +20,7 @@ from pydantic_ai import Tool
 
 from kitaru.adapters.pydantic_ai import wait_for_input
 
-from .permissions import PermissionHandler
+from .profile import ToolName
 from .services import ALL_SERVICES, build_service_description
 
 _MAX_OUTPUT_LINES = 200
@@ -34,6 +34,10 @@ _SKILL_MAX_READ_BYTES = 100_000
 class ExecResult(BaseModel):
     exit_code: int
     stdout: str
+    # Always empty when run through `DockerSandbox` — the persistent
+    # shell merges stderr into stdout via `exec 2>&1` for marker
+    # parsing. Only the in-process `_run_exec_in_process` path
+    # populates this field.
     stderr: str
 
 
@@ -166,13 +170,13 @@ def _run_exec_in_process(command: str) -> ExecResult:
 
 
 def build_tools(
-    permission_handler: PermissionHandler,
+    allowed_tools: set[ToolName],
     *,
     sandbox: _Sandbox | None = None,
     skills_directory: Path | None = None,
     allowed_services: set[str] | None = None,
 ) -> list[Tool]:
-    """Build the pydantic-ai toolset for an agent based on its profile's permissions.
+    """Build the pydantic-ai toolset for an agent based on its allowed tools.
 
     Pass a `sandbox` to route `exec` through it (stage 2+); omit it to run
     shell commands in the host process (stage 1). Pass a `skills_directory`
@@ -183,14 +187,13 @@ def build_tools(
     """
     tools: list[Tool] = []
 
-    if permission_handler.can_use_tool("exec"):
+    if "exec" in allowed_tools:
         sandboxed = sandbox is not None
         runner: Callable[[str], ExecResult] = (
             sandbox.run if sandbox is not None else _run_exec_in_process
         )
 
         def exec_tool(command: str) -> ExecResult:
-            permission_handler.require_tool("exec")
             return runner(command)
 
         location = (
@@ -207,7 +210,7 @@ def build_tools(
             )
         )
 
-    if permission_handler.can_use_tool("exec_service"):
+    if "exec_service" in allowed_tools:
         # Frozenset so a downstream mutation of the profile's set can't
         # silently drift the closure's permission check from the rendered
         # description (built once below).
@@ -220,7 +223,6 @@ def build_tools(
             )
 
         def exec_service(service_name: str, args: dict[str, Any]) -> Any:
-            permission_handler.require_tool("exec_service")
             if service_name not in services:
                 raise ValueError(
                     f"Service {service_name!r} is not in this agent's "
@@ -233,7 +235,20 @@ def build_tools(
                 raise ValueError(
                     f"Invalid args for {service_name!r}: {exc.errors()}"
                 ) from exc
-            return call.handler(validated).model_dump()
+            # Runtime guard: registry handlers are typed as
+            # `Callable[[BaseModel], BaseModel]` but Python doesn't
+            # enforce that at registration time. A future contributor
+            # registering a dict-returning handler would crash here on
+            # `.model_dump()` mid-LLM-turn with an unhelpful
+            # `AttributeError`. Catch it with a clear message instead so
+            # the LLM sees a typed dispatch error.
+            result = call.handler(validated)
+            if not isinstance(result, BaseModel):
+                raise TypeError(
+                    f"Service {service_name!r} handler returned "
+                    f"{type(result).__name__}; expected a Pydantic model"
+                )
+            return result.model_dump()
 
         tools.append(
             Tool(
@@ -243,7 +258,7 @@ def build_tools(
             )
         )
 
-    if permission_handler.can_use_tool("ask_question"):
+    if "ask_question" in allowed_tools:
         # Per-instance call counter. The wait `name` combines the call
         # index with a hash of the full question so that:
         #   - Two same-text questions in one turn don't collide on the
@@ -255,7 +270,6 @@ def build_tools(
         ask_call_index = [0]
 
         def ask_question(question: str) -> str:
-            permission_handler.require_tool("ask_question")
             ask_call_index[0] += 1
             qhash = hashlib.sha1(question.encode("utf-8")).hexdigest()[:8]
             wait_name = f"ask_question:{ask_call_index[0]}:{qhash}"
@@ -285,7 +299,7 @@ def build_tools(
             )
         )
 
-    if permission_handler.can_use_tool("skill"):
+    if "skill" in allowed_tools:
         if skills_directory is None:
             raise ValueError(
                 "Profile.allowed_tools includes 'skill' but no skill_source "
@@ -299,7 +313,6 @@ def build_tools(
             path: str | None = None,
             query: str | None = None,
         ) -> dict[str, Any]:
-            permission_handler.require_tool("skill")
             return _run_skill(skills_root, action, path=path, query=query)
 
         tools.append(

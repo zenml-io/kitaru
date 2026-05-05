@@ -8,9 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Agent Factory** — a chapter-by-chapter flagship example at [`examples/end_to_end/agent_factory/`](examples/end_to_end/agent_factory/) and a dedicated docs section at [`/docs/agent-factory/`](https://kitaru.ai/docs/agent-factory/). A platform-engineer's starter kit for building internal agent platforms on Kitaru + PydanticAI: six runnable stages take a 30-line durable agent → `DockerSandbox` → skills as markdown → credential proxy with mitmproxy + auth injection → typed-union `exec_service` dispatcher → HITL via `kitaru.wait()`. Includes a per-stage `Profile` gating model, an `agent_factory/` library, mocks + Dockerfiles, and layer-A smoke tests in `tests/test_agent_factory_example.py`. (#288)
 - OpenAI Agents SDK adapter (`kitaru.adapters.openai_agents`) — wrap an `Agent`/`Runner` with `KitaruAgent` to make OpenAI Agents SDK runs durable, replayable, and observable under a Kitaru flow. Supports two tracking strategies via `checkpoint_strategy="calls"` (per-tool/per-model checkpoints) or `checkpoint_strategy="runner_call"` (one checkpoint per `Runner.run`), plus a guide page at `/guides/openai-agents-adapter` that walks through the trade-offs. (#295)
 - OpenAI Agents integration example (`examples/integrations/openai_agents_agent/`) and an end-to-end `openai_research_bot` example (planner + parallel search checkpoints + writer report generation, with remote secret guidance and Kitaru UI artifacts). Both are exercised by the smoke test. (#295)
 - Markdown exports for every docs page at `kitaru.ai/docs/<slug>.md`, plus a substantially expanded `/llms.txt` index — making the docs friendlier for LLMs and agents that consume them programmatically. (#303)
+
+### Changed
+- `docs/content/docs/getting-started/examples.mdx` reorganized into three categories — Agent Factory tour / Other end-to-end / Feature-focused. The previous goal-keyed table is replaced. (#288)
+- `docs/content/docs/guides/news-scout.mdx` removed; the `news_scout` example itself stays runnable in the repo and is now listed under "Other end-to-end examples" on the docs site. The guides section is reserved for Kitaru-feature how-tos. (#288)
 
 ## [0.8.0] - 2026-05-04
 

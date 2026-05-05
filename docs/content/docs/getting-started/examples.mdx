@@ -41,7 +41,7 @@ kitaru status
 
 ## Start here — Agent Factory
 
-A platform engineer's starter kit for building their org's internal agent factory on top of Kitaru + PydanticAI. **One `docker compose up`, no external accounts.** Stages build progressively from a 30-line durable agent to a sandboxed, credential-isolated agent with HITL and replay — each stage adds exactly one tool or one architectural primitive, the library grows monotonically, and the per-stage `Profile` gates which capabilities each agent actually exercises.
+A platform engineer's starter kit for building their org's internal agent factory on top of Kitaru + PydanticAI. **`bash setup.sh && python stage_N_*.py`, no external accounts.** Stages build progressively from a 30-line durable agent to a sandboxed, credential-isolated agent with HITL — each stage adds exactly one tool or one architectural primitive, the library grows monotonically, and the per-stage `Profile` gates which capabilities each agent actually exercises.
 
 Use it as the first thing you read end-to-end, and as the thing you fork for your team.
 

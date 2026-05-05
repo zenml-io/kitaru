@@ -274,3 +274,9 @@ skills-lock.json
 
 # Local PR review screenshots
 .pr-screenshots/
+
+# Local scratch — single-developer scratch flow files at repo root
+/my_flow.py
+
+# Local site screenshots that aren't part of the deployed bundle
+/site/public/screenshots/

@@ -33,6 +33,7 @@ from uuid import uuid4
 import kitaru
 from kitaru.errors import KitaruContextError, KitaruRuntimeError
 
+from .._docker import ensure_image, ensure_network, stop_container
 from ..tools import ExecResult, _truncate
 from .certs import public_cert_path
 
@@ -88,8 +89,14 @@ class DockerSandbox:
         self._proxy = proxy
 
     def __enter__(self) -> "DockerSandbox":
-        self._ensure_image()
-        self._ensure_network()
+        ensure_image(
+            _SANDBOX_IMAGE,
+            "Build it once with:\n\n"
+            f"    docker build -t {_SANDBOX_IMAGE} "
+            "-f docker/sandbox.Dockerfile docker/\n\n"
+            "Then re-run this stage.",
+        )
+        ensure_network(_SANDBOX_NETWORK)
         self._start_container()
         short_id = (self._container_id or "")[:12]
         short_exec = self._execution_id[:8]
@@ -111,7 +118,9 @@ class DockerSandbox:
             short_id = self._container_id[:12]
             print(f"[sandbox] Stopping container {short_id}")
         self._terminate_shell()
-        self._stop_container()
+        if self._container_id is not None:
+            stop_container(self._container_name, timeout_seconds=_STOP_TIMEOUT_SECONDS)
+            self._container_id = None
 
     def run(self, command: str) -> ExecResult:
         """Execute a shell command in the sandbox container's persistent bash.
@@ -186,47 +195,6 @@ class DockerSandbox:
 
     # --- Image / network / container lifecycle -------------------------------
 
-    def _ensure_image(self) -> None:
-        result = subprocess.run(
-            ["docker", "image", "inspect", _SANDBOX_IMAGE],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return
-        raise KitaruRuntimeError(
-            f"Sandbox image {_SANDBOX_IMAGE!r} is not built locally. "
-            "Build it once with:\n\n"
-            f"    docker build -t {_SANDBOX_IMAGE} "
-            "-f docker/sandbox.Dockerfile docker/\n\n"
-            "Then re-run this stage."
-        )
-
-    def _ensure_network(self) -> None:
-        result = subprocess.run(
-            ["docker", "network", "inspect", _SANDBOX_NETWORK],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return
-        # Concurrent flow runs may race here; both inspect, neither finds
-        # the network, both attempt create. Don't fail on the loser — re-
-        # check inspect after create to confirm the network is now up.
-        subprocess.run(
-            ["docker", "network", "create", _SANDBOX_NETWORK],
-            capture_output=True,
-        )
-        confirm = subprocess.run(
-            ["docker", "network", "inspect", _SANDBOX_NETWORK],
-            capture_output=True,
-            text=True,
-        )
-        if confirm.returncode != 0:
-            raise KitaruRuntimeError(
-                f"failed to create or find docker network {_SANDBOX_NETWORK!r}"
-            )
-
     def _start_container(self) -> None:
         args = [
             "docker",
@@ -287,22 +255,6 @@ class DockerSandbox:
                 ["docker", "exec", self._container_name, "update-ca-certificates"],
                 capture_output=True,
             )
-
-    def _stop_container(self) -> None:
-        if self._container_id is None:
-            return
-        subprocess.run(
-            [
-                "docker",
-                "stop",
-                "--time",
-                str(_STOP_TIMEOUT_SECONDS),
-                self._container_name,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        self._container_id = None
 
     # --- Persistent shell ----------------------------------------------------
 

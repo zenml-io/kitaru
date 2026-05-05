@@ -45,11 +45,11 @@ python stage_1_basic_agent.py
 
 What you see in the kitaru log lines:
 
-| | Step 1 | Step 2 |
+| | First run (with `FORCE_FAILURE`) | Second run (no flag) |
 |---|---|---|
-| `default` | started → finished in 15s (3 LLM calls) | **cached** (instant, $0) |
-| `default_2` | (never runs — flow raised first) | started → finished in 8s (1 LLM call) |
-| Total time | ~25s ending in failure | ~12s ending in printed output |
+| `default` | started → finished (multiple LLM calls) | **cached** (instant, $0) |
+| `default_2` | (never runs — flow raised first) | started → finished (one LLM call) |
+| Outcome | failure | printed output, only second turn re-paid for |
 
 Without kitaru, step 1's failure would have wasted the first turn's work and you'd pay for *both* turns on the retry. With kitaru, only the part that didn't complete the first time gets re-paid for. **That's the durability story.**
 

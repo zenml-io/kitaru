@@ -56,4 +56,11 @@ def build_credential_map(profile: Profile) -> dict[str, dict[str, str]]:
         }
         for host in rule.hosts:
             result.setdefault(host, {}).update(resolved)
+        # Surface the rule's name so operators can correlate the
+        # `[proxy]` log lines back to the Profile-level rule that
+        # produced them (no secret values, just structure).
+        print(
+            f"[secrets] Resolved proxy rule {rule.name!r} "
+            f"(hosts={rule.hosts}, headers={sorted(rule.headers)})"
+        )
     return result

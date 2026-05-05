@@ -54,6 +54,8 @@ Every `run(command)` call goes through **one long-lived `bash --noprofile --norc
 
 The bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or use [`kitaru.memory`](/guides/memory) deliberately at flow scope for specific values it explicitly wants to carry forward.
 
+> **One subtlety on the durability story from Chapter 1.** Kitaru caches the agent's *reasoning* (the LLM responses, the tool-call decisions, the turn output as a whole) — it does **not** replay the bash side effects of a cached turn. If turn 1 ran `cd /tmp && touch summary.txt` and got cached, a re-run that serves turn 1 from cache won't actually re-execute the `cd` or re-create the file. The next turn that's still live will run against a *fresh* shell. Plan accordingly: side-effecting commands should generally not straddle the same turn boundary as the LLM calls that decided to issue them.
+
 ## What's in it
 
 - [`agent_factory/sandbox/runtime.py`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/agent_factory/agent_factory/sandbox/runtime.py) — `DockerSandbox` context manager: `docker run -d` on entry, `docker stop` on exit. Every lifecycle event prints a `[sandbox]` log line and attaches structured metadata via `kitaru.log()` for the dashboard.

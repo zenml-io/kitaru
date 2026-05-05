@@ -2,7 +2,7 @@
 
 > **Reading on the docs site is recommended:** the same tour as a chapter-by-chapter walk lives at [kitaru.ai/docs/agent-factory](https://kitaru.ai/docs/agent-factory/). This README is the on-GitHub mirror — same content, slightly different formatting, useful when you've cloned the repo and want a single file to scroll while you run the stages.
 
-A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation, HITL gates, memory, and replay all wired up correctly. Locally runnable with one `docker compose up` and zero external accounts.
+A starter kit for an internal agent factory: the runnable foundation a platform engineer can fork to give their team's developers a way to spin up durable, sandboxed, profile-gated agents fast — with credential isolation and HITL gates wired up correctly. Locally runnable with `bash setup.sh && python stage_N_*.py` and zero external accounts.
 
 ## Who this is for
 
@@ -138,7 +138,7 @@ docker exec -it agent_factory_sandbox_<id> bash        # peek inside the live co
 
 **Persistent shell — within a run:** stage 2 runs every `run(command)` through **one long-lived `bash --noprofile --norc` process** inside the container. Shell state — `cd`, `export`, file descriptors, background jobs — survives across `exec` calls, just like a normal interactive shell. The host writes commands into the shell's stdin and reads back output up to a unique completion-marker line (`<UUID> <exit_code> <cwd>`).
 
-**Across runs (deliberately *not* preserved):** the bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or use `kitaru.memory` deliberately at flow scope for specific values it explicitly wants to carry forward. Chapter 7 introduces the latter pattern.
+**Across runs (deliberately *not* preserved):** the bash process dies when the container stops, and we don't try to replay shell state across runs. Bash commands have side effects (`rm`, `git push`, `curl POST`, `psql -c "INSERT…"`) that a `cd + declare -px` snapshot can't capture or undo, so "restoring" a snapshot would silently drop every actual mutation. If the agent needs cross-run durable state, it should write to `/workspace` (a Docker named volume that survives container teardown) or use [`kitaru.memory`](https://kitaru.ai/docs/guides/memory) deliberately at flow scope for specific values it explicitly wants to carry forward.
 
 **Not yet here:** credentials still come from the host process; chapter 3 isolates them via a separate proxy container that injects `Authorization` headers based on host patterns.
 
@@ -235,7 +235,7 @@ Kitaru: Checkpoint `default` finished in 41.8s.
 [mock-services] Stopping container …
 ```
 
-The proxy + mock containers print correlated logs (use `docker logs agent_factory_proxy` / `agent_factory_mock` while the flow is running):
+The proxy + mock containers print correlated logs. Container names are suffixed with the execution ID — `docker ps` shows them as `agent_factory_proxy_<id>` and `agent_factory_mock_<id>`. Tail one with `docker logs <name>` while the flow is running:
 
 ```
 [agent-factory-proxy] credentials loaded for hosts: ['wiki.local']
@@ -405,7 +405,7 @@ Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoin
 **Architectural notes:**
 
 - **No checkpoint plumbing on the example side.** The `wait_for_input` call inside the tool body is the only HITL-specific code in this stage. The adapter handles the suspend/resume mechanics under the hood; the tool body looks like a normal function call that happens to take a while.
-- **Idempotent on replay.** Each wait is identified by a `name` of the form `ask_question:<call_index>:<sha1(question)[:8]>`. The call index makes two same-text questions in one turn distinguishable (the runtime DB enforces a unique constraint on `(run_id, name)`); the question hash makes the name stable across replays as long as the agent emits the same question at the same call index. On replay of a completed flow, the cached operator answer is served from the artifact store — the operator isn't re-prompted. Stage 8 demos this end-to-end.
+- **Idempotent on replay.** Each wait is identified by a `name` of the form `ask_question:<call_index>:<sha1(question)[:8]>`. The call index makes two same-text questions in one turn distinguishable (the runtime DB enforces a unique constraint on `(run_id, name)`); the question hash makes the name stable across replays as long as the agent emits the same question at the same call index. The wait-name design is intentionally replay-safe; for an end-to-end replay tour see [`/guides/replay-and-overrides`](https://kitaru.ai/docs/guides/replay-and-overrides).
 - **Why `wait_for_input(...)` from the body, not `@hitl_tool(...)` on the function?** The shipped `@hitl_tool(schema=...)` form persists the `schema` value (a Python `type`) into the wait's metadata, which doesn't round-trip cleanly on the local stack today. Calling `wait_for_input(...)` from inside the tool body has the same external behavior without that snag.
 - **Schema is `None` (any-JSON), not `str`.** The operator can supply any JSON value (a string, a structured object, etc.). The tool body coerces to `str` for the freeform shape. If you want typed answers (e.g. an enum of approval choices), pass a Pydantic model as `schema=` to `wait_for_input(...)` and the wait will validate the operator's input against it.
 - **Operator input flows downstream verbatim.** Whatever the operator answers becomes the tool's return value, then is appended to the summary, then is POSTed to the webhook. No escaping, no re-prompting. Forks should escape it themselves before handing it to anything that interprets the bytes (HTML renderer, shell, SQL).
@@ -425,7 +425,7 @@ The full architectural rationale lives in [`DESIGN.md`](./DESIGN.md). Highlights
 - **Single shared library; no per-stage code copies.** The `agent_factory/` library grows monotonically; per-stage progressive disclosure happens through the Profile, not through versioning the library.
 - **Two credential paths.** `exec` (sandboxed shell, proxy-injected creds) vs. `exec_service` (host-side typed call, direct `kitaru.secrets` resolution). Both demoed.
 - **Profile is the central factory artifact.** Adding a new agent = creating a new Profile.
-- **Tests ship with the example.** Smoke (stage 1), proxy injection, full-loop happy path. Doubles as kitaru CI.
+- **Layer-A smoke tests in `tests/test_agent_factory_example.py`.** Hermetic (no Docker, no real OpenAI), import-surface drift + schema validation, ~4s under xdist. Layer-B integration tests (full Docker spin-up + real OpenAI calls) deferred as a follow-up — the smoke layer is the cheap proxy that gates every PR.
 
 ## Forking for your team
 
@@ -434,4 +434,3 @@ When this example is mature, the fork-this-for-your-team guide lands here. For n
 ## Tips for production use
 
 - **Model aliases.** This example hardcodes a provider string (`"openai:gpt-5-nano"`) in the Profile so chapter 1 has the smallest possible setup. In production, prefer `kitaru model register <alias> --provider openai --model <id> --api-key ...` and reference the alias in your Profile so credentials are managed centrally.
-- **Compaction.** `kitaru.memory` keeps every version. After your agents have been running for a while, schedule `kitaru memory compact ...` to summarize old preferences and reduce storage cost.

@@ -18,14 +18,16 @@ Watch the agent fetch its skill, then follow it:
 ```text
 [sandbox] Started container 14f809c4f370 (image=agent-factory-sandbox, /workspace ← workspace_…)
 Kitaru: Checkpoint `default` started.
-Kitaru: HTTP Request: POST …  ← agent calls skill(action="list")
-Kitaru: HTTP Request: POST …  ← agent calls skill(action="read", path="default-agent/SKILL.md")
-Kitaru: HTTP Request: POST …  ← agent's first decision after reading the skill
+Kitaru: HTTP Request: POST https://api.openai.com/v1/chat/completions   ← LLM turn that decides to call skill(action="list")
+Kitaru: HTTP Request: POST https://api.openai.com/v1/chat/completions   ← LLM turn that decides to call skill(action="read", path=...)
+Kitaru: HTTP Request: POST https://api.openai.com/v1/chat/completions   ← LLM turn after reading the skill, decides to call exec
 [sandbox] $ cat /etc/os-release
 [sandbox]   → exit=0, stdout=285 chars, cwd=/workspace
 [sandbox] $ uname -r
 …
 ```
+
+(`skill` is a host-side Python function, not an HTTP call — the `Kitaru: HTTP Request: POST ...` lines you see are the LLM turns that *decide* to call it.)
 
 The system prompt only says "find your skill and follow it." The actual procedure (which commands to run, what to summarize, how to return) lives in `skills/basic/default-agent/SKILL.md`. Edit the markdown, re-run, watch the agent's behavior change without touching Python.
 
