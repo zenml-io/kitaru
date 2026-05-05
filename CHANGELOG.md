@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- OpenAI Agents SDK adapter (`kitaru.adapters.openai_agents`) — wrap an `Agent`/`Runner` with `KitaruAgent` to make OpenAI Agents SDK runs durable, replayable, and observable under a Kitaru flow. Supports two tracking strategies via `checkpoint_strategy="calls"` (per-tool/per-model checkpoints) or `checkpoint_strategy="runner_call"` (one checkpoint per `Runner.run`), plus a guide page at `/guides/openai-agents-adapter` that walks through the trade-offs. (#295)
+- OpenAI Agents SDK adapter (`kitaru.adapters.openai_agents`) — wrap an `Agent`/`Runner` with `KitaruRunner` to make OpenAI Agents SDK runs durable, replayable, and observable under a Kitaru flow. Supports two tracking strategies via `checkpoint_strategy="runner_call"` (one checkpoint per `Runner.run`, recommended when you want a clean `.wait()` return value) or `checkpoint_strategy="calls"` (per-tool/per-model checkpoints for finer replay units, with per-checkpoint artifacts visible in the Kitaru UI / `KitaruClient`). The guide at `/guides/openai-agents-adapter` walks through the trade-offs. (#295)
 - OpenAI Agents integration example (`examples/integrations/openai_agents_agent/`) and an end-to-end `openai_research_bot` example (planner + parallel search checkpoints + writer report generation, with remote secret guidance and Kitaru UI artifacts). Both are exercised by the smoke test. (#295)
 - Markdown exports for every docs page at `kitaru.ai/docs/<slug>.md`, plus a substantially expanded `/llms.txt` index — making the docs friendlier for LLMs and agents that consume them programmatically. (#303)
+
+### Changed
+- `flow.run(...).wait()` now raises a new dedicated `KitaruAmbiguousFlowResultError` (subclass of `KitaruRuntimeError`) when the flow has multiple terminal checkpoints with no single sink (common with the OpenAI Agents adapter's `checkpoint_strategy="calls"`). The error names the terminal checkpoints, points at the execution's artifacts in the Kitaru UI, and suggests `KitaruClient` retrieval and the `runner_call` strategy as alternatives. Catching this specific subclass lets callers handle the ambiguity case without accidentally swallowing real execution failures.
 
 ## [0.8.0] - 2026-05-04
 

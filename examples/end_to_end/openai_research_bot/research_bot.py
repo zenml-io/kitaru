@@ -23,6 +23,7 @@ import kitaru
 from kitaru import ImageSettings, checkpoint, flow
 from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
 from kitaru.config import classify_stack_deployment_type
+from kitaru.errors import KitaruAmbiguousFlowResultError
 
 try:  # Package import path used by tests.
     from .bot_agents import (
@@ -546,8 +547,24 @@ def _run_once(
     if image_override is not None:
         run_kwargs["image"] = image_override
 
-    result = openai_research_bot.run(**run_kwargs).wait()
-    return str(result)
+    handle = openai_research_bot.run(**run_kwargs)
+    try:
+        return str(handle.wait())
+    except KitaruAmbiguousFlowResultError as error:
+        # `--strategy calls` produces per-call peer checkpoints with no single
+        # sink, so `.wait()` cannot pick a single return value. The artifacts
+        # ARE persisted under the execution and visible in the Kitaru UI; the
+        # error message names them and points users at `KitaruClient`. Surface
+        # that here as a friendly summary instead of a stack trace, since
+        # this is the documented characteristic of the `calls` strategy
+        # rather than a real failure.
+        return (
+            f"(strategy={strategy!r}: per-checkpoint artifacts only; "
+            f"`.wait()` raised because there is no single terminal sink. "
+            f"View artifacts at the Kitaru UI URL above, or via "
+            f"`KitaruClient().executions.get('{handle.exec_id}')`.)\n\n"
+            f"Full error message:\n{error}"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

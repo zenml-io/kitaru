@@ -80,6 +80,7 @@ from kitaru.config import (
 )
 from kitaru.errors import (
     FailureOrigin,
+    KitaruAmbiguousFlowResultError,
     KitaruBackendError,
     KitaruContextError,
     KitaruDivergenceError,
@@ -115,6 +116,7 @@ __all__ = [
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",
+    "KitaruAmbiguousFlowResultError",
     "KitaruBackendError",
     "KitaruClient",
     "KitaruConfig",
