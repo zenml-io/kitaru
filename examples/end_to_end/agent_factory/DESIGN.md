@@ -1,11 +1,15 @@
 # agent_factory — Design
 
-**Status:** brainstorm complete (resolved 2026-04-29); implementation plan to follow
+**Status:** stages 1–6 implemented and shipping; stages 7 (memory) and 8 (replay) **dropped** from the original plan — see note below.
 **Branch:** `example/agent-factory`
-**Date:** 2026-04-28 (initial), 2026-04-29 (resolution pass grounded in the kami codebase at `/Users/htahir1/Workspace/kami-agent`)
+**Date:** 2026-04-28 (initial), 2026-04-29 (resolution pass)
 **Authors:** Hamza Tahir, with Claude (brainstorming)
 
-This document is the working spec for a new flagship example in `examples/end_to_end/agent_factory/`. It captures the decisions locked during brainstorming, the architecture, and the still-open work. It is intended to be edited as the implementation progresses.
+This document is the working spec for the agent_factory example in `examples/end_to_end/agent_factory/`. It captures the decisions locked during brainstorming, the architecture, and the still-open work.
+
+> **Stages 7 and 8 dropped.** The original plan included a stage 7 (`ask_question` with `remembered_choice` + flow-scope memory) and a stage 8 (`flow.replay()` with output overrides). Both were dropped during implementation: memory and replay are general kitaru primitives that apply uniformly to any flow, not platform-engineering capabilities specific to agent factories. They're documented in `/guides/memory` and `/guides/replay-and-overrides` and demoed in `examples/features/memory/` and `examples/features/replay/`.
+>
+> Sections referencing stages 7/8 below — including the I2/J2/L2 design decisions, the `remembered_choice` / `agent-preferences` / `fetch_wiki` architecture, and the §12 replay scenario — are kept as historical context for the planning rationale, but **the code does not implement them.** Treat those sections as "this is what we considered and chose not to ship."
 
 ---
 
@@ -17,7 +21,7 @@ Ship a **starter kit for an internal agent factory**: the runnable foundation a 
 
 The reader is a platform engineer who will fork this and adapt it. The chapters introduce *capabilities* their platform needs (a sandbox, a credential model, a way to ask humans, a way to remember, a way to re-run), one tool at a time. The shipped agent has a deliberately generic demo prompt at each stage — the *framework* is the through-line, not a vertical domain.
 
-The example supports an 8-chapter blog series (plus a post-chapter on Modal — see Section 13) and serves as the most ambitious entry in `examples/end_to_end/`.
+The example serves as the most ambitious entry in `examples/end_to_end/` and the canonical chapter-by-chapter tour at [`/agent-factory/`](https://kitaru.ai/docs/agent-factory/) on the docs site.
 
 ### Non-goals
 
