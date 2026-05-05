@@ -81,4 +81,54 @@ export OPENAI_API_KEY='sk-...'
 uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
 ```
 
+## End-to-end research bot example
+
+For a larger example, run the OpenAI research bot:
+
+```bash
+cd examples/end_to_end/openai_research_bot
+uv sync --extra local --extra openai-agents
+uv run kitaru init
+export OPENAI_API_KEY='sk-...'
+uv run python research_bot.py "AI agent durability" --max-searches 2
+```
+
+The workflow keeps the original research-bot shape:
+
+```text
+planner → parallel searches → writer report
+```
+
+The planner and writer run from flow scope, so their default strategy is
+`checkpoint_strategy="calls"`. That gives Kitaru room to show supported inner
+OpenAI model/tool calls as child checkpoints.
+
+Each planned search is submitted as its own Kitaru checkpoint. Inside those
+search checkpoints, the example intentionally uses
+`checkpoint_strategy="runner_call"`, because call-level checkpoints cannot be
+nested inside an existing Kitaru checkpoint. In concrete terms: the search
+checkpoint is already the sealed replay unit, so the OpenAI runner inside it is
+saved as one runner call.
+
+The example also uses a local OpenAI Agents SDK `@function_tool` named
+`search_web` instead of the hosted `WebSearchTool`. The local tool calls the
+OpenAI Responses API with `web_search`, which makes the checkpoint trace clearer
+with the adapter's current public behavior.
+
+Look for these artifacts in the Kitaru UI:
+
+- `research_plan`
+- `search_summaries`
+- `durability_drill`
+- `final_report`
+- `research_report_metadata`
+
+To test the durable-retry story directly, set
+`KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES=1` before running the example. It will
+fail after the parallel searches complete. Unset the flag and run
+`kitaru executions replay <EXECUTION_ID> --from durability_drill_gate`; the
+replay should reuse the completed planner/search checkpoints and continue into
+the writer. `retry` tries to restart the same failed execution and may be
+unavailable on server-backed stacks after a run has concluded.
+
 See also: [Replay and overrides](/guides/replay-and-overrides).

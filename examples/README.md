@@ -28,6 +28,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Track a model call inside a flow:** `examples/features/llm/flow_with_llm.py`
 - **Wrap an existing PydanticAI agent:** `examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`
 - **Wrap an OpenAI Agents SDK agent:** `examples/integrations/openai_agents_agent/openai_agents_adapter.py`
+- **Run a multi-agent OpenAI research bot:** `examples/end_to_end/openai_research_bot/research_bot.py`
 - **Build a full coding agent with tool calling and HITL:** `examples/end_to_end/coding_agent/agent.py`
 - **Run a granular-checkpoint PydanticAI agent end to end:** `examples/end_to_end/news_scout/scout.py`
 - **Wrap a Claude Agent SDK audit with checkpoints, memory, and wait/resume:** `examples/end_to_end/compliance_review/`
@@ -44,7 +45,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | Core workflow, execution, replay, and configuration examples | `uv sync --extra local` |
 | LLM examples (tracked `kitaru.llm()` calls) | `uv sync --extra local --extra llm` |
 | PydanticAI adapter example | `uv sync --extra local --extra pydantic-ai` |
-| OpenAI Agents adapter example | `uv sync --extra local --extra openai-agents` |
+| OpenAI Agents adapter and research bot examples | `uv sync --extra local --extra openai-agents` |
 | Coding agent example | `uv sync --extra local` + model alias / provider credentials |
 | Compliance review example | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or remote `anthropic` secret |
 | MCP query tools example | `uv sync --extra local --extra mcp` |
@@ -58,6 +59,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 - [features/llm/README.md](features/llm/README.md) — tracked `kitaru.llm()` calls inside flows
 - [integrations/pydantic_ai_agent/README.md](integrations/pydantic_ai_agent/README.md) — wrap a PydanticAI agent with Kitaru observability
 - [integrations/openai_agents_agent/README.md](integrations/openai_agents_agent/README.md) — real OpenAI API customer-support example with order lookup + shipping policy tools and Kitaru durability
+- [end_to_end/openai_research_bot/README.md](end_to_end/openai_research_bot/README.md) — multi-agent OpenAI research bot with planner, parallel search checkpoints, writer report, and remote secret guidance
 - [end_to_end/coding_agent/README.md](end_to_end/coding_agent/README.md) — full coding agent with provider SDK tool calling, HITL, and custom materializers
 - [end_to_end/news_scout/README.md](end_to_end/news_scout/README.md) — agentic news monitor with granular per-tool checkpoints, memory-seeded interests, and `secret_environment_from` for remote API keys
 - [end_to_end/compliance_review/README.md](end_to_end/compliance_review/README.md) — Claude Agent SDK document audit in four progressive stages: crash-resilient turns, sequential domain checkpoints with partial replay, flow-scoped memory, and durable wait/resume conversation
@@ -94,6 +96,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | [Tracked LLM calls](features/llm/flow_with_llm.py) | `uv run examples/features/llm/flow_with_llm.py` | `uv sync --extra local` + model alias / provider credentials | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | [tests/test_phase12_llm_example.py](../tests/test_phase12_llm_example.py) |
 | [PydanticAI adapter](integrations/pydantic_ai_agent/pydantic_ai_adapter.py) | `uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | `uv sync --extra local --extra pydantic-ai` | Wrap an existing PydanticAI agent while keeping a Kitaru replay boundary | [PydanticAI Adapter](https://kitaru.ai/docs/getting-started/pydantic-ai-adapter) | — |
 | [OpenAI Agents adapter](integrations/openai_agents_agent/openai_agents_adapter.py) | `uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py` | `uv sync --extra local --extra openai-agents` + `OPENAI_API_KEY` | Real OpenAI API customer-support flow with tool calls, showing call-level vs runner-call durability | [OpenAI Agents Adapter](https://kitaru.ai/docs/guides/openai-agents-adapter) | — |
+| [OpenAI research bot](end_to_end/openai_research_bot/research_bot.py) | `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` | `uv sync --extra local --extra openai-agents` + local `OPENAI_API_KEY` or remote `openai-research-bot-keys` secret | Planner → parallel search checkpoints → writer report using `kitaru.adapters.openai_agents`; publishes `research_plan`, `search_summaries`, and `final_report` artifacts | [OpenAI Agents Adapter](https://kitaru.ai/docs/guides/openai-agents-adapter) | [tests/test_openai_research_bot_example.py](../tests/test_openai_research_bot_example.py) |
 | [Coding agent](end_to_end/coding_agent/agent.py) | `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` | `uv sync --extra local` + model alias / provider credentials | Full agent loop with provider SDK tool calling, `kitaru.wait()` HITL, custom materializers, and artifact persistence | [Tracked LLM Calls](https://kitaru.ai/docs/getting-started/llm-calls) | — |
 | [News scout](end_to_end/news_scout/scout.py) | `cd examples/end_to_end/news_scout && python scout.py` | `uv sync --extra local --extra pydantic-ai --extra llm` + `ANTHROPIC_API_KEY` locally (or a `news-scout-keys` secret for remote stacks) | PydanticAI agent with `granular_checkpoints=True` — every model/tool call is its own Kitaru checkpoint; `publish_report` promotes the agent output to a named `final_report` artifact; `ImageSettings.secret_environment_from` attaches the provider-keys secret automatically when the active stack is remote | [News Scout](https://kitaru.ai/docs/guides/news-scout) | [tests/test_news_scout_example.py](../tests/test_news_scout_example.py) |
 | [Compliance review](end_to_end/compliance_review/README.md) | `uv run examples/end_to_end/compliance_review/stage_1_single_turn.py` | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or remote `anthropic` secret | Four-stage Claude Agent SDK audit: checkpointed turns, sequential domain checkpoints with partial replay, flow-scoped memory across runs, and durable wait/resume conversation | [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) | [tests/test_phase4_compliance_review_stage4.py](../tests/test_phase4_compliance_review_stage4.py) |
@@ -113,10 +116,11 @@ If you are new to Kitaru, this is the smoothest path:
 8. `uv run examples/features/llm/flow_with_llm.py`
 9. `uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py`
 10. `uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py`
-11. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
-12. `cd examples/end_to_end/news_scout && python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
-13. `uv run examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through stages 1–4 to see replay, memory, and wait/resume in turn)*
-14. `uv run examples/features/mcp/mcp_query_tools.py`
+11. `cd examples/end_to_end/openai_research_bot && uv run python research_bot.py "Your query" --max-searches 2` *(OpenAI planner → parallel searches → writer report)*
+12. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
+13. `cd examples/end_to_end/news_scout && python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
+14. `uv run examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through stages 1–4 to see replay, memory, and wait/resume in turn)*
+15. `uv run examples/features/mcp/mcp_query_tools.py`
 
 If you prefer the hosted docs view, start with the
 [Examples page](https://kitaru.ai/docs/getting-started/examples).
