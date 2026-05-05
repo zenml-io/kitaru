@@ -65,6 +65,8 @@ _NON_SECRET_ENV_VARS = (
     "OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY",
     SEARCH_TOOL_MODEL_ENV,
 )
+FAIL_AFTER_SEARCHES_ENV = "KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES"
+_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
 
 RESEARCH_BOT_IMAGE = ImageSettings(
     requirements=[
@@ -131,6 +133,11 @@ def missing_api_key_message(secret_name: str = SECRET_NAME) -> str:
         "The example passes only the secret name to remote runs; it does not put "
         "the key in flow parameters, logs, or artifacts."
     )
+
+
+def _env_flag_enabled(name: str) -> bool:
+    """Return whether an environment flag is explicitly enabled."""
+    return os.getenv(name, "").strip().lower() in _TRUTHY_ENV_VALUES
 
 
 def _coerce_model(value: Any, model_type: type[T]) -> T:
@@ -248,12 +255,38 @@ def publish_search_summaries(
     return [summary.model_dump(mode="json") for summary in summaries]
 
 
+@checkpoint(type="context")
+def durability_drill_gate(
+    search_summaries_artifact: list[dict[str, Any]],
+) -> Annotated[dict[str, Any], "durability_drill"]:
+    """Optionally fail after searches so users can retry from saved checkpoints."""
+    search_count = len(search_summaries_artifact)
+    if _env_flag_enabled(FAIL_AFTER_SEARCHES_ENV):
+        raise RuntimeError(
+            "Intentional durability drill failure after the search checkpoints. "
+            f"Unset {FAIL_AFTER_SEARCHES_ENV} and retry this failed execution; "
+            "Kitaru should reuse the completed planner/search checkpoints."
+        )
+    return {
+        "enabled": False,
+        "fail_after_searches_env": FAIL_AFTER_SEARCHES_ENV,
+        "search_count": search_count,
+    }
+
+
 @checkpoint(type="output")
 def publish_report(
     report: ReportData,
     metadata: dict[str, Any],
+    research_plan_artifact: dict[str, Any],
+    search_summaries_artifact: list[dict[str, Any]],
+    durability_drill_artifact: dict[str, Any],
 ) -> Annotated[str, "final_report"]:
     """Save the final Markdown report and related metadata artifacts."""
+    # These values are already saved as named artifacts by earlier checkpoints.
+    # Keeping them as inputs makes `publish_report` depend on those publishing
+    # checkpoints, so Kitaru has one unambiguous terminal output to return.
+    _ = research_plan_artifact, search_summaries_artifact, durability_drill_artifact
     kitaru.save("research_report_metadata", metadata, type="context")
     kitaru.save("follow_up_questions", report.follow_up_questions, type="context")
     return report.markdown_report
@@ -304,7 +337,12 @@ def openai_research_bot(
         original_query=query,
         max_searches=max_searches,
     )
-    publish_research_plan(query, max_searches, planner_model, plan)
+    research_plan_artifact = publish_research_plan(
+        query,
+        max_searches,
+        planner_model,
+        plan,
+    )
 
     futures = [
         run_search_item.submit(
@@ -316,8 +354,10 @@ def openai_research_bot(
         )
         for index, item in enumerate(plan.searches)
     ]
+    summary_artifacts = [future.result() for future in futures]
+    search_summaries_artifact = publish_search_summaries(summary_artifacts)
     summaries = [future.load() for future in futures]
-    publish_search_summaries(summaries)
+    durability_drill_artifact = durability_drill_gate(search_summaries_artifact)
 
     failed = [item for item in summaries if item.status == "failed"]
     if fail_on_search_error and failed:
@@ -357,7 +397,13 @@ def openai_research_bot(
         "short_summary": report.short_summary,
         "follow_up_questions": report.follow_up_questions,
     }
-    return publish_report(report, metadata)
+    return publish_report(
+        report,
+        metadata,
+        research_plan_artifact,
+        search_summaries_artifact,
+        durability_drill_artifact,
+    )
 
 
 def _collect_non_secret_env() -> dict[str, str]:

@@ -119,7 +119,14 @@ Look for these artifacts in the Kitaru UI:
 
 - `research_plan`
 - `search_summaries`
+- `durability_drill`
 - `final_report`
 - `research_report_metadata`
+
+To test the durable-retry story directly, set
+`KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES=1` before running the example. It will
+fail after the parallel searches complete. Unset the flag and run
+`kitaru executions retry <EXECUTION_ID>`; the retry should reuse the completed
+planner/search checkpoints and continue into the writer.
 
 See also: [Replay and overrides](/guides/replay-and-overrides).

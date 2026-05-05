@@ -56,6 +56,7 @@ Picture the flow like this:
   ├── search_01_<query_slug>             ← one durable checkpoint per search
   ├── search_02_<query_slug>             ← runs in parallel with the other searches
   ├── publish_search_summaries           ← produces search_summaries artifact
+  ├── durability_drill_gate              ← optional intentional failure point
   ├── writer OpenAI run                  ← call-level checkpoints when --strategy=calls
   └── publish_report                     ← produces final_report + metadata artifacts
 ```
@@ -69,6 +70,7 @@ Open the Kitaru UI and inspect the execution trace:
 - `research_plan` shows the planner's exact list of searches.
 - Each `search_XX_...` checkpoint shows one search task and its result.
 - `search_summaries` shows the complete list passed to the writer, including any failed searches.
+- `durability_drill` records the optional retry drill gate.
 - `final_report` is the Markdown report you probably want to read first.
 - `research_report_metadata` records the query, models, checkpoint strategy, and search counts.
 
@@ -81,6 +83,26 @@ Imagine the run like a three-act play:
 3. The writer turns the evidence into the final report.
 
 If the writer crashes after the searches finish, Kitaru does not have to pay for the planner and searches again. On replay, it can reuse those completed checkpoints and continue from the broken part. That is the concrete benefit: fewer duplicate model calls, less wasted money, and a clearer place to debug.
+
+## Try the durability drill
+
+You can ask the example to fail after the parallel searches finish:
+
+```bash
+export KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES=1
+uv run python research_bot.py "What should a small AI startup know about durable agents?" --max-searches 2
+```
+
+The run should fail at `durability_drill_gate`, after `research_plan`, both `search_XX_...` checkpoints, and `search_summaries` have already completed.
+
+Copy the failed execution ID from the terminal or UI, then unset the flag and retry the same execution:
+
+```bash
+unset KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES
+uv run kitaru executions retry <EXECUTION_ID>
+```
+
+`retry` is the right command for failed executions. `resume` is for paused executions that are waiting for input. On retry, Kitaru should reuse the completed planner/search checkpoints and continue from the failure gate into the writer and final report.
 
 ## `calls` vs `runner_call`
 
