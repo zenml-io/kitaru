@@ -11,8 +11,12 @@ from agents import Agent
 from kitaru.adapters.openai_agents import KitaruRunner
 
 agent = Agent(name="researcher", model=your_model)
-runner = KitaruRunner(agent)
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
 ```
+
+The runtime default is `checkpoint_strategy="calls"` (per-call checkpoints —
+see below); pass `"runner_call"` whenever you want a single terminal
+checkpoint so `flow.run(...).wait()` returns the run result directly.
 
 You run the agent through `runner.run(...)` or `runner.run_sync(...)` with an
 `OpenAIRunRequest`.
@@ -37,7 +41,7 @@ kitaru status
 from kitaru import flow
 from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
 
-runner = KitaruRunner(agent, checkpoint_strategy="calls")
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
 
 @flow
 def research(prompt: str) -> str:
@@ -49,18 +53,32 @@ def research(prompt: str) -> str:
 
 You choose how Kitaru places checkpoints with `checkpoint_strategy=`.
 
+### `checkpoint_strategy="runner_call"` (recommended for `.wait()`)
+
+Kitaru places one checkpoint around the outer `Runner.run(...)` call. That
+single checkpoint becomes the flow's terminal artifact, so
+`flow.run(...).wait()` returns the run result cleanly.
+
+Use this when you want one coarse replay boundary for the whole agent run, or
+whenever you want a clean Python value back from `.wait()`.
+
 ### `checkpoint_strategy="calls"` (default)
 
-Kitaru catches supported model/tool calls individually.
+Kitaru catches supported model/tool calls individually as separate peer
+checkpoints under the flow.
 
 Use this when you want finer replay units (for example: if call 6 fails, calls
 1–5 can come from cache).
 
-### `checkpoint_strategy="runner_call"`
-
-Kitaru places one checkpoint around the outer `Runner.run(...)` call.
-
-Use this when you want one coarse replay boundary for the whole agent run.
+Because the per-call checkpoints are siblings under the flow with no single
+sink, `flow.run(...).wait()` cannot pick one as "the" return value and raises
+`KitaruAmbiguousFlowResultError`. The per-checkpoint artifacts are still
+fully visible in the Kitaru UI and retrievable via `KitaruClient` — the
+error message points at them. If you need a clean `.wait()` return value,
+switch to `checkpoint_strategy="runner_call"`. Wrapping the `runner.run_sync()`
+call in your own `@checkpoint` is **not** a workaround here — the adapter
+guards against it and will raise, because per-call checkpoints cannot be
+nested inside another Kitaru checkpoint.
 
 ## Important guardrail
 

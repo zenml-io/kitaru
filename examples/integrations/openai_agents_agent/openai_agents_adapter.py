@@ -26,6 +26,7 @@ from kitaru.adapters.openai_agents import (
     OpenAIRunRequest,
     OpenAIRunResult,
 )
+from kitaru.errors import KitaruAmbiguousFlowResultError
 
 ORDERS: dict[str, dict[str, str]] = {
     "ORD-1007": {
@@ -174,18 +175,30 @@ def main() -> None:
     model_label = os.getenv("OPENAI_AGENTS_MODEL", "gpt-5-nano")
     print(f"Using model: {model_label}")
 
-    calls_output = _run_once("calls")
-    print("\n=== calls strategy output ===")
-    print(calls_output)
+    runner_call_output = _run_once("runner_call")
+    print("\n=== runner_call strategy output ===")
+    print(runner_call_output)
 
-    if os.getenv("OPENAI_AGENTS_COMPARE_RUNNER_CALL", "").lower() in {
+    if os.getenv("OPENAI_AGENTS_COMPARE_CALLS", "").lower() in {
         "1",
         "true",
         "yes",
     }:
-        runner_call_output = _run_once("runner_call")
-        print("\n=== runner_call strategy output ===")
-        print(runner_call_output)
+        # `calls` strategy creates per-tool/per-model peer checkpoints with no
+        # single sink, so `.wait()` raises `KitaruAmbiguousFlowResultError`
+        # when it can't pick a single terminal artifact. The raised message
+        # points at the per-checkpoint artifacts in the Kitaru UI /
+        # `KitaruClient`, which is the right surface for `calls` flows.
+        # Real execution failures (model error, tool failure, etc.) will not
+        # match this specific subclass and will propagate normally.
+        try:
+            calls_output = _run_once("calls")
+        except KitaruAmbiguousFlowResultError as error:
+            print("\n=== calls strategy output ===")
+            print(f"(per-checkpoint artifacts only; .wait() raised: {error})")
+        else:
+            print("\n=== calls strategy output ===")
+            print(calls_output)
 
 
 if __name__ == "__main__":
