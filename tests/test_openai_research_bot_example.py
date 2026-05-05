@@ -15,6 +15,7 @@ from examples.end_to_end.openai_research_bot.models import (
 )
 from examples.end_to_end.openai_research_bot.prompts import build_writer_input
 from examples.end_to_end.openai_research_bot.research_bot import (
+    CHECKPOINT_STRATEGIES,
     DEFAULT_MODEL,
     FAIL_AFTER_SEARCHES_ENV,
     SEARCH_CHECKPOINT_STRATEGY,
@@ -137,10 +138,33 @@ def test_parse_args_defaults_to_gpt_5_nano() -> None:
     assert args.fail_on_search_error is False
 
 
+def test_parse_args_accepts_valid_strategy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY", "runner_call")
+
+    args = parse_args(["Research durable agents"])
+
+    assert args.strategy == "runner_call"
+
+
+def test_parse_args_rejects_invalid_strategy_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY", "bogus")
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args(["Research durable agents"])
+
+    assert exc_info.value.code == 2
+
+
 def test_parse_args_supports_fail_on_search_error() -> None:
     args = parse_args(["Research durable agents", "--fail-on-search-error"])
 
     assert args.fail_on_search_error is True
+
+
+def test_research_bot_flow_disables_ordinary_cache() -> None:
+    assert research_bot.openai_research_bot._decorator_config.cache is False
 
 
 def test_durability_drill_env_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -192,7 +216,7 @@ def test_flow_has_one_terminal_output_after_side_effect_artifacts(
         search_model="gpt-5-nano",
         writer_model="gpt-5-nano",
         search_tool_model="gpt-5-nano",
-        checkpoint_strategy="runner_call",
+        checkpoint_strategy=CHECKPOINT_STRATEGIES[1],
         fail_on_search_error=True,
     )
 

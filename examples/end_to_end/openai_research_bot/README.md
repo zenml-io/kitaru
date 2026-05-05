@@ -21,6 +21,8 @@ uv run python research_bot.py "What should a small AI startup know about durable
 
 For a fuller run, omit `--max-searches 2`; the default is 5 searches. The CLI clamps the search budget to 1-10 so an accidental prompt cannot fan out into a very expensive example run.
 
+The flow disables Kitaru's ordinary same-input cache on purpose. A fresh run of this example should perform fresh web searches, because web results are date-sensitive. Replay still reuses completed checkpoints from the source execution; that is the durability behavior demonstrated in the drill below.
+
 ## Useful flags
 
 ```bash

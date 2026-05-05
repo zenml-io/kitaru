@@ -14,7 +14,7 @@ import json
 import os
 import re
 import sys
-from typing import Annotated, Any, Literal, TypeVar
+from typing import Annotated, Any, Literal, TypeVar, cast
 
 from agents import RunConfig
 from pydantic import BaseModel, ValidationError
@@ -48,6 +48,7 @@ except ImportError:  # Direct script path used by README commands.
     from tools import SEARCH_TOOL_MODEL_ENV
 
 CheckpointStrategy = Literal["calls", "runner_call"]
+CHECKPOINT_STRATEGIES: tuple[CheckpointStrategy, ...] = ("calls", "runner_call")
 SEARCH_CHECKPOINT_STRATEGY: CheckpointStrategy = "runner_call"
 DEFAULT_MAX_SEARCHES = 5
 MAX_SEARCHES_LIMIT = 10
@@ -294,7 +295,7 @@ def publish_report(
     return report.markdown_report
 
 
-@flow(image=RESEARCH_BOT_IMAGE)
+@flow(image=RESEARCH_BOT_IMAGE, cache=False)
 def openai_research_bot(
     query: str,
     max_searches: int,
@@ -442,6 +443,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _checkpoint_strategy_default(parser: argparse.ArgumentParser) -> CheckpointStrategy:
+    raw = os.getenv("OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY", "calls")
+    if raw not in CHECKPOINT_STRATEGIES:
+        parser.error(
+            "OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY must be one of: "
+            f"{', '.join(CHECKPOINT_STRATEGIES)}."
+        )
+    return cast(CheckpointStrategy, raw)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for the research bot example."""
     default_model = os.getenv("OPENAI_RESEARCH_BOT_MODEL", DEFAULT_MODEL)
@@ -488,8 +499,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--strategy",
-        choices=("calls", "runner_call"),
-        default=os.getenv("OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY", "calls"),
+        choices=CHECKPOINT_STRATEGIES,
+        default=_checkpoint_strategy_default(parser),
         help="OpenAI adapter checkpoint strategy for planner/writer (default: calls).",
     )
     parser.add_argument(
