@@ -192,7 +192,9 @@ def test_stage_profile_allowed_tools_match_built_toolset(stage_filename: str) ->
 
 
 @pytest.mark.parametrize("stage_filename", _STAGE_FILES)
-def test_build_agent_constructs_pydantic_ai_agent(stage_filename: str) -> None:
+def test_build_agent_constructs_pydantic_ai_agent(
+    stage_filename: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``build_agent`` wires the profile into a vanilla pydantic-ai ``Agent``.
 
     Catches regressions in the Profile → tool-factory → Agent path that
@@ -218,6 +220,14 @@ def test_build_agent_constructs_pydantic_ai_agent(stage_filename: str) -> None:
 
     from agent_factory.agent import build_agent
     from pydantic_ai import Agent
+
+    # openai>=2 eagerly validates that an API key is configured at client-
+    # construction time (openai<2 deferred it to the first request). The
+    # autouse `isolated_zenml_global_config` fixture strips all OPENAI_*
+    # env vars to keep tests hermetic, so set a dummy here. We never make
+    # a real request — the test only verifies the build path returns an
+    # `Agent` instance.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-used")
 
     module = _load_stage(stage_filename)
     agent = build_agent(module.DEFAULT_PROFILE, sandbox=None)

@@ -16,6 +16,7 @@
     "llm-calls",
     "secrets-and-model-registration",
     "secrets",
-    "pydantic-ai-adapter"
+    "pydantic-ai-adapter",
+    "openai-agents-adapter"
   ]
 }

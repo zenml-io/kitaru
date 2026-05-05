@@ -17,6 +17,12 @@ export function getPageImage(page: InferPageType<typeof source>) {
   };
 }
 
+export function getMarkdownUrl(page: InferPageType<typeof source>) {
+  const pagePath = page.slugs.length === 0 ? 'index' : page.slugs.join('/');
+
+  return `/docs/${pagePath}.md`;
+}
+
 export async function getLLMText(page: InferPageType<typeof source>) {
   const processed = await page.data.getText('processed');
 

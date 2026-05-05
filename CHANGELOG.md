@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- OpenAI Agents SDK adapter (`kitaru.adapters.openai_agents`) — wrap an `Agent`/`Runner` with `KitaruAgent` to make OpenAI Agents SDK runs durable, replayable, and observable under a Kitaru flow. Supports two tracking strategies via `checkpoint_strategy="calls"` (per-tool/per-model checkpoints) or `checkpoint_strategy="runner_call"` (one checkpoint per `Runner.run`), plus a guide page at `/guides/openai-agents-adapter` that walks through the trade-offs. (#295)
+- OpenAI Agents integration example (`examples/integrations/openai_agents_agent/`) and an end-to-end `openai_research_bot` example (planner + parallel search checkpoints + writer report generation, with remote secret guidance and Kitaru UI artifacts). Both are exercised by the smoke test. (#295)
+- Markdown exports for every docs page at `kitaru.ai/docs/<slug>.md`, plus a substantially expanded `/llms.txt` index — making the docs friendlier for LLMs and agents that consume them programmatically. (#303)
+
 ## [0.8.0] - 2026-05-04
 
 ### Added
