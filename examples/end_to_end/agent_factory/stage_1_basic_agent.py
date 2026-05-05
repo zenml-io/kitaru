@@ -67,12 +67,12 @@ def agent_factory_flow() -> str:
     # returns a vanilla pydantic-ai Agent; KitaruAgent wraps it for durable
     # execution. Each agent.run_sync() below becomes its own kitaru checkpoint.
     agent = build_agent(DEFAULT_PROFILE)
-    # Turn mode here (not granular): the chapter 1 hero demo is the
-    # cross-run cache hit, and the kitaru pydantic-ai adapter's granular
-    # checkpoints don't cache cross-run today (they're dynamically
-    # created per flow run, so ZenML's cache keys never match). Stage 3+
-    # uses granular_checkpoints=True for richer dashboard tracking;
-    # those chapters don't depend on the cross-run cache.
+    # KitaruAgent's default mode (granular after pydantic-ai adapter PR
+    # zenml-io/kitaru#280; turn before it) controls whether every model
+    # request and tool call gets its own checkpoint or whether the whole
+    # `agent.run_sync()` aggregates into one. Either way the FORCE_FAILURE
+    # demo below works — granular mode just gives you per-call cache hits
+    # on re-run and per-call dashboard rows.
     agent = KitaruAgent(agent)
 
     # Checkpoint 1 — first turn, expensive (multiple LLM + tool calls).

@@ -55,7 +55,9 @@ Without kitaru, step 1's failure would have wasted the first turn's work and you
 
 ## How it composes
 
-Each `agent.run_sync()` is one aggregating checkpoint (turn mode — the default). Granular per-call caching (one checkpoint per LLM/tool call) is introduced in [Chapter 3](/agent-factory/03-skills) where it earns its keep on dashboard observability.
+Each `agent.run_sync()` produces checkpoints at the model-request + tool-call granularity by default — every LLM call and every `exec` becomes its own durable checkpoint with its own cache key. The cache-hit story above isn't only at the turn boundary; it's at every individual model/tool call. A flow that crashed after the third model request resumes by replaying only the calls after the third, with everything before served from cache.
+
+(The adapter also offers a turn-mode aggregating checkpoint for cases where a single per-run artifact is more useful than per-call granularity — pass `KitaruAgent(agent, granular_checkpoints=False)` to opt in.)
 
 The `Profile` is the per-stage gate: stage 1 says `allowed_tools={"exec"}` and `build_tools(...)` filters out everything else. Later chapters add tools to the set and gain those capabilities; older stage files stay valid because the library grows monotonically.
 

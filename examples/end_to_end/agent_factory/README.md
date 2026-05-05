@@ -64,7 +64,7 @@ What you see in the kitaru log lines:
 
 Without kitaru, step 1's failure would have wasted the first turn's work and you'd pay for *both* turns on the retry. With kitaru, only the part that didn't complete the first time gets re-paid for. *That's the durability story.*
 
-**Mode:** turn (default). Each `agent.run_sync()` is one aggregating checkpoint. Granular per-call caching (one checkpoint per LLM/tool call) is introduced in a later stage where it earns its keep.
+**Mode:** granular (default — every model request and every tool call gets its own checkpoint and its own cache key). The FORCE_FAILURE demo above works at this granularity: a flow that crashed after the third model request resumes by replaying only the calls after the third, everything before served from cache. Pass `KitaruAgent(agent, granular_checkpoints=False)` to opt in to the aggregating turn-mode artifact instead.
 
 **Env-var toggles:**
 
