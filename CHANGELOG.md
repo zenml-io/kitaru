@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- OpenAI Agents SDK adapter user-facing packaging: a runnable integration example (`examples/integrations/openai_agents_agent/openai_agents_adapter.py`), a guide page (`/guides/openai-agents-adapter`) that explains `checkpoint_strategy="calls"` vs `checkpoint_strategy="runner_call"`, and smoke-test coverage for the example.
+- OpenAI research bot end-to-end example showing planner, parallel search checkpoints, writer report generation, remote secret guidance, and Kitaru UI artifacts for OpenAI Agents SDK workflows.
+
 ## [0.8.0] - 2026-05-04
 
 ### Added
