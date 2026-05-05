@@ -145,8 +145,6 @@ examples/end_to_end/agent_factory/
 ├── stage_4_credential_proxy.py        # Adds sandbox_proxy_rules + AGENT_FACTORY_CREDENTIALS
 ├── stage_5_typed_services.py          # Adds `exec_service` with two cases (lookup_wiki, publish_summary)
 ├── stage_6_hitl.py                    # Adds `ask_question` (freeform kind) — agent pauses for human input
-├── stage_7_memory.py                  # Adds `ask_question` (remembered_choice kind) + flow-scope memory
-├── stage_8_replay.py                  # Replays stage 7 with `overrides={"checkpoint.fetch_wiki": <new content>}`
 │
 ├── agent_factory/                     # The reusable library code (the actual factory)
 │   ├── __init__.py
@@ -211,8 +209,11 @@ Three mock hosts replace the four compliance-flavored ones: `wiki.local` (knowle
 5. `stage_4_credential_proxy.py` — proxy injecting headers; `docker logs proxy` demo
 6. `stage_5_typed_services.py` — typed-union `exec_service` with profile-derived dynamic descriptions; the two-credential-paths distinction (sandboxed `exec` vs host-side `exec_service`)
 7. `stage_6_hitl.py` — pause-for-human via `ask_question(kind="freeform", ...)`
-8. `stage_7_memory.py` — stateful HITL via `ask_question(kind="remembered_choice", ...)` + flow-scope memory; "agent gets smarter on run 2"
-9. `stage_8_replay.py` — wiki-content-update replay scenario; what gets cached vs re-executed
+<!-- Stages 7 (memory) and 8 (replay) were dropped from the original plan: -->
+<!-- they're general kitaru primitives, not platform-engineering capabilities -->
+<!-- specific to an agent factory. Documented in /guides/memory and -->
+<!-- /guides/replay-and-overrides, applicable uniformly to any flow. -->
+
 
 Each stage is one Python file that imports from the `agent_factory/` library. Stages don't duplicate logic — they progressively expose more of the library. The library is written once; stages compose it.
 
@@ -643,24 +644,9 @@ Two credential paths reach the mocks (matching kami's two-path architecture):
 
 ---
 
-## 12. Replay scenario (L2)
+## 12. Replay scenario (L2) — dropped
 
-`stage_8_replay.py` (~50 lines) runs `stage_7_memory.agent_factory_flow.run(...)` to seed an exec_id (or accepts one as a CLI arg if stage 7 was already run), then:
-
-```python
-updated_wiki_content = Path("fixtures/wiki_snippets_updated.json").read_text()
-flow_handle = agent_factory_flow.replay(
-    exec_id=stage_7_exec_id,
-    from_="agent_run",
-    overrides={"checkpoint.fetch_wiki": updated_wiki_content},
-)
-result = flow_handle.wait()
-print_diff(stage_7_summary, result.summary)
-```
-
-`fetch_wiki`'s output is overridden directly with the updated content; the agent re-reasons against the new wiki context. The cached `agent-preferences` memory survives — the operator's prior `remembered_choice` answers still apply, so the second run does *not* re-ask. That's the platform-engineer pain point this scenario exists to demonstrate: knowledge-base updates ripple through the agent's reasoning without re-bothering users.
-
-The README has a prose section explaining what gets cached vs. re-executed and links to `examples/features/replay/replay_with_overrides.py` for a deeper dive on the replay primitive.
+The original plan included a stage 8 (`stage_8_replay.py`) that replayed a prior run with `overrides={"checkpoint.fetch_wiki": ...}`. Dropped: replay isn't a platform-engineering capability specific to agent factories — it's a general kitaru primitive applicable uniformly to any flow. Documented in `/guides/replay-and-overrides`; the runnable demo lives in `examples/features/replay/replay_with_overrides.py`.
 
 ---
 
@@ -676,13 +662,15 @@ Stages and chapters now line up one-to-one (one tool per stage, one chapter per 
 | 4 | Your agents need credentials they can't see | `stage_4_credential_proxy.py` | `DockerProxy`, mitmproxy addon, `sandbox_proxy_rules`, `kitaru.secrets` template resolution, per-run bearer token | `docker logs proxy` tail showing `[agent-factory-proxy] injected headers for wiki.local: ['Authorization']`; worker can't read `AGENT_FACTORY_CREDENTIALS`, proxy can |
 | 5 | Your agents need typed services | `stage_5_typed_services.py` | `exec_service` typed-union dispatcher (cases: `lookup_wiki`, `publish_summary`), profile-derived dynamic tool descriptions, the discriminated-`ServiceCall` pattern, the *two credential paths* distinction (sandboxed `exec` vs host-side `exec_service`) | The dynamically-generated `exec_service` description shown in the dashboard; `[mock-webhook] payload=...` log line showing the published summary arrive host-side; side-by-side with `[agent-factory-proxy] injected ...` from chapter 3 — two paths, two demos |
 | 6 | Your agents need to ask humans things | `stage_6_hitl.py` | `ask_question` typed-union HITL dispatcher, `wait_for_input`, the `freeform` kind, the kitaru/pydantic-ai integration seam (`@hitl_tool` + `wait_for_input`) | A flow that pauses; `kitaru executions list` showing `waiting`; resolving via dashboard / `kitaru executions input` / direct terminal |
-| 7 | Your agents need to remember | `stage_7_memory.py` | `ask_question(kind="remembered_choice", ...)`, flow-scope `kitaru.memory`, the read-ask-record loop co-located in the tool body, "agent gets smarter on run 2" | Run 1 asks a clarifying question; run 2 returns the cached answer; dashboard shows the wait point on run 1 and a normal completion on run 2 |
-| 8 | Your agents need to be re-runnable | `stage_8_replay.py` | `flow.replay()`, `from_=`, `overrides={"checkpoint.fetch_wiki": ...}`, what gets cached vs re-executed, the platform-engineer pain point: "knowledge base updated, don't re-bother users" | Diff: stage 7's output vs stage 8's output, with the wiki content swapped but the cached HITL answer preserved; dashboard view showing `fetch_wiki` overridden and downstream re-executed |
+<!-- Stages 7 (memory) and 8 (replay) dropped from the plan — see note above -->
+<!-- in §13. Memory and replay are documented in /guides/memory and -->
+<!-- /guides/replay-and-overrides as general kitaru primitives. -->
+
 | post | Going to production: from Docker-compose to Modal | (no new stage) | C2/C3 ladder, lazy sandbox startup (deferred from Q5), Modal port, deploying the same architecture remotely | Same agent, same profile, swap `DockerSandbox` for `ModalSandboxRuntime` |
 
 **Self-containment rule:** every chapter opens with a 1-paragraph recap of the prior chapter's setup (or "if you're starting here, run `docker compose up && bash setup.sh && python stage_<N-1>_<...>.py` to get to this point"), so a reader landing from search can run the chapter's stage without reading the others.
 
-Chapter 1 and chapter 7 form the natural framing — "build a durable agent" → "what durability earns you." Chapters 4–6 are the body and can be sequenced flexibly if a reader cares more about HITL than skills, etc.
+Chapter 1 ("build a durable agent") and chapter 6 ("durably pause for a human") frame the tour. Chapters 2–5 are the body and can be sequenced flexibly if a reader cares more about HITL than skills, etc.
 
 **Chapter outlines, opening hooks, code excerpts: separate writing pass after implementation lands.**
 
@@ -699,10 +687,8 @@ python stage_2_sandboxed_exec.py                                  # Stage 2 — 
 bash setup.sh                                                     # Stage 3+ — creates kitaru secrets for the mocks
 python stage_3_skills.py                                          # Stage 3 — agent's procedure lives in markdown
 python stage_4_credential_proxy.py                                # Stage 4 — proxy injects auth
-python stage_5_typed_services.py                                  # Stage 5 — typed exec_service
-python stage_6_hitl.py                                            # Stage 6 — agent pauses for human input
-python stage_7_memory.py                                          # Stage 7 — stateful HITL with memory
-python stage_8_replay.py <stage_7_exec_id>                        # Stage 8 — replay against updated wiki content
+python stage_5_typed_services.py                                  # Stage 5 — typed-union exec_service
+python stage_6_hitl.py                                            # Stage 6 — ask_question + kitaru.wait()
 ```
 
 Cleanup:
@@ -778,8 +764,8 @@ When we transition to implementation, the natural phases are:
 5. **Proxy layer.** DockerProxy, proxy addon, certs module, credential broker. `stage_4_credential_proxy.py` runs and the proxy injection test passes.
 6. **Typed services.** `exec_service` dispatcher, `lookup_wiki`, `publish_summary`, dynamic-description builder. `stage_5_typed_services.py` runs.
 7. **HITL.** `ask_question` dispatcher, `freeform` kind. `stage_6_hitl.py` runs.
-8. **Memory.** `remembered_choice` kind, `agent-preferences` memory loop. `stage_7_memory.py` runs.
-9. **Replay.** `stage_8_replay.py` runs against a stage-7 exec_id.
+<!-- Stages 7 (memory) and 8 (replay) dropped — see §12 + §13 above. -->
+
 10. **Tests + docs.** Three tests pass, README is complete, blog chapter 1 drafted.
 
 Each phase is a candidate for its own implementation plan via `superpowers:writing-plans`.

@@ -19,7 +19,7 @@ python stage_1_basic_agent.py
 
 You should see the agent investigate the host (OS, kernel, current user, process count) and return a one-paragraph summary. That's the foundation — durable PydanticAI in ~30 lines.
 
-## The 8-stage tour
+## The 6-stage tour
 
 The example builds up one capability at a time. Each stage adds one tool or one architectural primitive; the library at `agent_factory/` grows monotonically; the **Profile** is the per-stage gate (`allowed_tools={...}`) that controls which capabilities each stage's agent actually exercises. Older stage files stay valid as the library expands.
 
@@ -71,7 +71,7 @@ Without kitaru, step 1's failure would have wasted the first turn's work and you
 - `FORCE_FAILURE=1` — simulate the post-turn-1 blip described above.
 - `DISABLE_CACHE=1` — force every checkpoint to re-execute even if a prior cached output exists (useful when iterating on the flow itself).
 
-**Not yet here:** sandbox (stage 2), credential isolation (stage 3), playbook (stage 4), typed services (stage 5), HITL (stages 6–7), replay (stage 8).
+**Not yet here:** sandbox (stage 2), playbook (stage 3), credential isolation (stage 4), typed services (stage 5), HITL (stage 6).
 
 ---
 
@@ -407,30 +407,14 @@ Published 4f12a87bc394 at 1777892841: Durable execution persists every checkpoin
 - **No checkpoint plumbing on the example side.** The `wait_for_input` call inside the tool body is the only HITL-specific code in this stage. The adapter handles the suspend/resume mechanics under the hood; the tool body looks like a normal function call that happens to take a while.
 - **Idempotent on replay.** Each wait is identified by a `name` of the form `ask_question:<call_index>:<sha1(question)[:8]>`. The call index makes two same-text questions in one turn distinguishable (the runtime DB enforces a unique constraint on `(run_id, name)`); the question hash makes the name stable across replays as long as the agent emits the same question at the same call index. On replay of a completed flow, the cached operator answer is served from the artifact store — the operator isn't re-prompted. Stage 8 demos this end-to-end.
 - **Why `wait_for_input(...)` from the body, not `@hitl_tool(...)` on the function?** The shipped `@hitl_tool(schema=...)` form persists the `schema` value (a Python `type`) into the wait's metadata, which doesn't round-trip cleanly on the local stack today. Calling `wait_for_input(...)` from inside the tool body has the same external behavior without that snag.
-- **Schema is `None` (any-JSON), not `str`.** The operator can supply any JSON value (a string, a structured object, etc.). The tool body coerces to `str` for the freeform shape; stage 7 introduces a typed-schema variant for `remembered_choice` answers.
+- **Schema is `None` (any-JSON), not `str`.** The operator can supply any JSON value (a string, a structured object, etc.). The tool body coerces to `str` for the freeform shape. If you want typed answers (e.g. an enum of approval choices), pass a Pydantic model as `schema=` to `wait_for_input(...)` and the wait will validate the operator's input against it.
 - **Operator input flows downstream verbatim.** Whatever the operator answers becomes the tool's return value, then is appended to the summary, then is POSTed to the webhook. No escaping, no re-prompting. Forks should escape it themselves before handing it to anything that interprets the bytes (HTML renderer, shell, SQL).
 
 **Env-var toggles:** same as earlier stages (`DISABLE_CACHE=1`).
 
 ---
 
-### Stage 7 — Your agents need to remember
-
-**Stage file:** `stage_7_memory.py` *(not yet built)*
-
-Some preferences shouldn't be re-asked every run. Stage 7 adds the `remembered_choice` kind to `ask_question`, paired with flow-scope `kitaru.memory`. First run asks; second run returns the cached answer. Read-ask-record loop co-located in the tool body.
-
-*Section will be filled in when stage 7 lands.*
-
----
-
-### Stage 8 — Your agents need to be re-runnable
-
-**Stage file:** `stage_8_replay.py` *(not yet built)*
-
-Knowledge bases change. Without re-running every checkpoint and re-asking every HITL question, you want to swap one input and let the agent re-reason against the new context. Stage 8 demos `flow.replay()` with `overrides={"checkpoint.fetch_wiki": <new content>}`: cached HITL answers stay intact, only the downstream re-executes.
-
-*Section will be filled in when stage 8 lands.*
+That's the full tour. Memory and replay aren't covered as separate chapters — they're general Kitaru primitives that apply uniformly to any flow, not platform-engineering capabilities specific to agent factories. See [Memory](https://kitaru.ai/docs/guides/memory) and [Replay and Overrides](https://kitaru.ai/docs/guides/replay-and-overrides) when you want those.
 
 ---
 

@@ -32,8 +32,7 @@ _STAGE_FILES = (
     "stage_6_hitl.py",
 )
 
-# Tool sets each stage's profile is supposed to enable. When stages 7 / 8 land,
-# add their entries here AND append the new filename to `_STAGE_FILES` above.
+# Tool sets each stage's profile is supposed to enable.
 _EXPECTED_TOOLS_PER_STAGE: dict[str, set[str]] = {
     "stage_1_basic_agent.py": {"exec"},
     "stage_2_sandboxed_exec.py": {"exec"},
