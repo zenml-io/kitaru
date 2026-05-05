@@ -15,18 +15,17 @@ from examples.end_to_end.openai_research_bot.models import (
 )
 from examples.end_to_end.openai_research_bot.prompts import build_writer_input
 from examples.end_to_end.openai_research_bot.research_bot import (
-    CHECKPOINT_STRATEGIES,
     DEFAULT_MODEL,
     FAIL_AFTER_SEARCHES_ENV,
-    SEARCH_CHECKPOINT_STRATEGY,
     _env_flag_enabled,
+    _normalize_search_plan,
     clamp_max_searches,
     missing_api_key_message,
-    normalize_search_plan,
     parse_args,
 )
 from examples.end_to_end.openai_research_bot.tools import _safe_error_message
-from zenml.client import Client
+
+from kitaru.client import KitaruClient
 
 
 def test_example_imports_without_openai_api_key(monkeypatch) -> None:
@@ -53,10 +52,10 @@ def test_normalize_search_plan_trims_deduplicates_and_clamps() -> None:
         ]
     )
 
-    normalized = normalize_search_plan(
+    normalized = _normalize_search_plan(
         plan,
-        original_query="durable agents",
-        max_searches=2,
+        "durable agents",
+        2,
     )
 
     assert [item.query for item in normalized.searches] == [
@@ -68,10 +67,10 @@ def test_normalize_search_plan_trims_deduplicates_and_clamps() -> None:
 
 
 def test_normalize_search_plan_adds_fallback_for_empty_plan() -> None:
-    normalized = normalize_search_plan(
+    normalized = _normalize_search_plan(
         WebSearchPlan(searches=[]),
-        original_query="Why does replay help agents?",
-        max_searches=5,
+        "Why does replay help agents?",
+        5,
     )
 
     assert len(normalized.searches) == 1
@@ -107,10 +106,6 @@ def test_writer_input_includes_completed_and_failed_summaries() -> None:
     assert "TimeoutError: search timed out" in text
 
 
-def test_search_checkpoint_uses_runner_call_strategy() -> None:
-    assert SEARCH_CHECKPOINT_STRATEGY == "runner_call"
-
-
 def test_safe_error_message_does_not_mangle_unset_api_key(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -134,27 +129,8 @@ def test_parse_args_defaults_to_gpt_5_nano() -> None:
 
     assert args.model == DEFAULT_MODEL == "gpt-5-nano"
     assert args.max_searches == 2
-    assert args.strategy == "calls"
+    assert not hasattr(args, "strategy")
     assert args.fail_on_search_error is False
-
-
-def test_parse_args_accepts_valid_strategy_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY", "runner_call")
-
-    args = parse_args(["Research durable agents"])
-
-    assert args.strategy == "runner_call"
-
-
-def test_parse_args_rejects_invalid_strategy_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY", "bogus")
-
-    with pytest.raises(SystemExit) as exc_info:
-        parse_args(["Research durable agents"])
-
-    assert exc_info.value.code == 2
 
 
 def test_parse_args_supports_fail_on_search_error() -> None:
@@ -175,11 +151,11 @@ def test_durability_drill_env_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _env_flag_enabled(FAIL_AFTER_SEARCHES_ENV) is True
 
 
-def test_flow_has_one_terminal_output_after_side_effect_artifacts(
+def test_cli_run_loads_final_report_when_runner_checkpoints_are_terminal(
     monkeypatch: pytest.MonkeyPatch,
     primed_zenml: None,
 ) -> None:
-    """Side-effect artifact checkpoints should feed into the final report step."""
+    """The script should print final_report even with terminal runner checkpoints."""
 
     del primed_zenml
 
@@ -209,37 +185,67 @@ def test_flow_has_one_terminal_output_after_side_effect_artifacts(
         lambda *_args, **_kwargs: FakeRunner(),
     )
 
-    handle = research_bot.openai_research_bot.run(
+    args = SimpleNamespace(
         query=f"durable agents {uuid4().hex}",
         max_searches=2,
+        model="gpt-5-nano",
+        planner_model=None,
+        search_model=None,
+        writer_model=None,
+        search_tool_model=None,
+        fail_on_search_error=True,
+    )
+
+    report = research_bot._run_once(args, image_override=None)
+
+    assert report == "# Durable agents\n\nReplay saves completed work."
+
+
+def test_flow_keeps_final_report_artifact_available(
+    monkeypatch: pytest.MonkeyPatch,
+    primed_zenml: None,
+) -> None:
+    """The final report should remain a named artifact despite runner checkpoints."""
+
+    del primed_zenml
+
+    class FakeRunner:
+        def run_sync(self, request: Any) -> SimpleNamespace:
+            stage = request.metadata["stage"]
+            if stage == "planner":
+                output = WebSearchPlan(
+                    searches=[WebSearchItem(query="durable agents", reason="baseline")]
+                )
+            elif stage == "writer":
+                output = ReportData(
+                    short_summary="Durability avoids repeated work.",
+                    markdown_report="# Durable agents\n\nReplay saves completed work.",
+                    follow_up_questions=["How should tools be checkpointed?"],
+                )
+            else:
+                output = "Search summary"
+            return SimpleNamespace(status="completed", final_output=output)
+
+    monkeypatch.setattr(
+        research_bot,
+        "_new_runner",
+        lambda *_args, **_kwargs: FakeRunner(),
+    )
+
+    handle = research_bot.openai_research_bot.run(
+        query=f"durable agents {uuid4().hex}",
+        max_searches=1,
         planner_model="gpt-5-nano",
         search_model="gpt-5-nano",
         writer_model="gpt-5-nano",
         search_tool_model="gpt-5-nano",
-        checkpoint_strategy=CHECKPOINT_STRATEGIES[1],
         fail_on_search_error=True,
     )
 
-    assert handle.wait() == "# Durable agents\n\nReplay saves completed work."
-
-    hydrated = (
-        Client()
-        .get_pipeline_run(
-            handle.exec_id,
-            allow_name_prefix_match=False,
-        )
-        .get_hydrated_version()
+    artifacts = KitaruClient().artifacts.list(
+        handle.exec_id,
+        name="final_report",
+        limit=1,
     )
-    upstream_step_names: set[str] = set()
-    for step_run in hydrated.steps.values():
-        step_spec = getattr(step_run, "spec", None)
-        if step_spec is not None:
-            upstream_step_names.update(getattr(step_spec, "upstream_steps", []) or [])
-
-    terminal_step_names = sorted(
-        step_name
-        for step_name in hydrated.steps
-        if step_name not in upstream_step_names
-    )
-
-    assert terminal_step_names == ["publish_report"]
+    assert len(artifacts) == 1
+    assert artifacts[0].load() == "# Durable agents\n\nReplay saves completed work."

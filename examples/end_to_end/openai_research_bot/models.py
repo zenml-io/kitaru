@@ -25,7 +25,7 @@ class WebSearchPlan(BaseModel):
 
 
 class SearchSummary(BaseModel):
-    """Durable output from one parallel search checkpoint."""
+    """Structured output from one search agent run."""
 
     model_config = ConfigDict(extra="forbid")
 
