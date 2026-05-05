@@ -14,3 +14,7 @@ id = "7a952406df5543418f0cb8c4552ee65f"
 [[kv_namespaces]]
 binding = "GET_STARTED_KV"
 id = "a6a7c01a20c841b092649453ef2e0365"
+
+[[kv_namespaces]]
+binding = "NEWSLETTER_KV"
+id = "d2717e825cc84afd973fe5d3e11dc3f4"
