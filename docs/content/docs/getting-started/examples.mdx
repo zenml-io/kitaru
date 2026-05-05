@@ -52,6 +52,7 @@ kitaru status
 | Track a model call inside a flow | `features/llm/` | `python flow_with_llm.py` |
 | Wrap a PydanticAI agent | `integrations/pydantic_ai_agent/` | `python pydantic_ai_adapter.py` |
 | Wrap an OpenAI Agents SDK agent | `integrations/openai_agents_agent/` | `python openai_agents_adapter.py` |
+| Run a multi-agent OpenAI research bot | `end_to_end/openai_research_bot/` | `python research_bot.py "Your query" --max-searches 2` |
 | Query executions from an MCP client | `features/mcp/` | `python mcp_query_tools.py` |
 
 For example:
@@ -91,6 +92,7 @@ python first_working_flow.py
 | `features/llm/flow_with_llm.py` | `kitaru.llm()` prompt-response tracking with usage metadata | [Tracked LLM Calls](/guides/llm-calls) |
 | `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with Kitaru replay boundaries | [PydanticAI Adapter](/guides/pydantic-ai-adapter) |
 | `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with Kitaru call-level or runner-call durability in a real API-backed support flow (`OPENAI_API_KEY` required, default model `gpt-5-nano`) | [OpenAI Agents Adapter](/guides/openai-agents-adapter) |
+| `end_to_end/openai_research_bot/research_bot.py` | Run a multi-agent OpenAI research bot with planner, parallel search checkpoints, and a writer report (`OPENAI_API_KEY` required, default model `gpt-5-nano`) | [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example) |
 | `features/mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](/agent-native/mcp-server) |
 
 <Callout type="info">
@@ -112,4 +114,5 @@ If you are learning Kitaru from scratch:
 8. `features/llm/flow_with_llm.py` — [Tracked LLM Calls](/guides/llm-calls)
 9. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](/guides/pydantic-ai-adapter)
 10. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](/guides/openai-agents-adapter)
-11. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)
+11. `end_to_end/openai_research_bot/research_bot.py` — [Research bot section](/guides/openai-agents-adapter#end-to-end-research-bot-example)
+12. `features/mcp/mcp_query_tools.py` — [MCP Server](/agent-native/mcp-server)
