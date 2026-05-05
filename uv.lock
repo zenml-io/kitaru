@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-05-01T14:55:32.689418Z"
+exclude-newer = "2026-05-02T07:40:46.207977Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -1182,7 +1182,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
@@ -1647,7 +1647,7 @@ wheels = [
 
 [[package]]
 name = "openai-agents"
-version = "0.15.0"
+version = "0.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "griffelib" },
@@ -1659,9 +1659,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/21/0669d917831e15f0f3c3767be021aa1b95b5a5259954358d9d2b924baa4f/openai_agents-0.15.0.tar.gz", hash = "sha256:45f78c5d399cabdeaa5047c083a66c3b7bc3721bd39d0dbb5790c933356a8f11", size = 5315598, upload-time = "2026-05-01T06:45:08.162Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/52/125891e56b67ec78bef08d91dc0a8d39457088cd0f59bf8e74a37e5e591c/openai_agents-0.15.1.tar.gz", hash = "sha256:78c3f1226e1d6d34dd7566e211c8345e996629d1704335153d1728995a3a7775", size = 5319915, upload-time = "2026-05-02T02:20:53.631Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/c0/7dbe95a150293dbfe2bfac466ed4b7975d7b0f0404ca47a2079b0e8c27c3/openai_agents-0.15.0-py3-none-any.whl", hash = "sha256:d5200d70cd87c211a4207fca2a1936ad8f4b416f05470ffebaaf679028d2f67c", size = 817869, upload-time = "2026-05-01T06:45:03.682Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/7b/69a33975b3610300219e1d25185c46280814cdb87e69a779acf0c9b9166a/openai_agents-0.15.1-py3-none-any.whl", hash = "sha256:2d304a5dcb919bc4fa1de5c7c9c93a4353a8a79d87d582d6170929390b7b3cef", size = 818627, upload-time = "2026-05-02T02:20:50.932Z" },
 ]
 
 [[package]]

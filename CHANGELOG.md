@@ -8,13 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- OSS-first auth management for service accounts and API keys via `KitaruClient.auth`, `kitaru auth service-accounts`, and `kitaru auth api-keys`. Raw API-key values are only returned on create/rotate so they can be stored immediately; list/show/update responses stay metadata-only.
 - OpenAI Agents SDK adapter user-facing packaging: a runnable integration example (`examples/integrations/openai_agents_agent/openai_agents_adapter.py`), a guide page (`/guides/openai-agents-adapter`) that explains `checkpoint_strategy="calls"` vs `checkpoint_strategy="runner_call"`, and smoke-test coverage for the example.
 - OpenAI research bot end-to-end example showing planner, parallel search checkpoints, writer report generation, remote secret guidance, and Kitaru UI artifacts for OpenAI Agents SDK workflows.
 
+## [0.8.0] - 2026-05-04
+
+### Added
+- OSS-first auth management for service accounts and API keys via `KitaruClient.auth`, `kitaru auth service-accounts`, and `kitaru auth api-keys`. Raw API-key values are only returned on create/rotate so they can be stored immediately; list/show/update responses stay metadata-only. (#230)
+- Synthetic memory operations now register as `StepType.MEMORY_CALL` checkpoints (instead of generic `tool_call`), so memory reads/writes surface distinctly in execution graphs and `@checkpoint(type="memory_call")` is supported. (#239)
+
+### Changed
+- Pydantic AI adapter now supports `pydantic-ai-slim>=1.86.0,<2`: per-run `capabilities` and `spec` are forwarded to Pydantic AI and included in turn-checkpoint cache keys to avoid stale cached turns. (#270)
+- `examples/` is reorganized into `features/`, `integrations/`, and `end_to_end/` subdirectories. Existing example paths (e.g. `examples/basic_flow/...`) move under one of these categories — update any pinned references. (#242)
+
 ### Fixed
-- Checkpoint output handles now display Kitaru guidance to call `.load()` instead of leaking raw ZenML artifact metadata when stringified in flow bodies. (#127)
-- Pydantic AI adapter now supports `pydantic-ai-slim>=1.86.0,<2`: per-run `capabilities` and `spec` are forwarded to Pydantic AI and included in turn-checkpoint cache keys to avoid stale cached turns. (#248)
+- Checkpoint output handles now display Kitaru guidance to call `.load()` instead of leaking raw ZenML artifact metadata when stringified in flow bodies. (#252)
+- `kitaru executions replay` now resolves project-local modules correctly when invoked from a project directory, instead of falling back to the CLI bootstrap module via `__main__` and producing a misleading replay. (#218)
+- Runtime log retrieval (`KitaruClient.executions.logs(...)`, `kitaru executions logs`) now tolerates server/client version skew on log payload schemas instead of erroring out. (#251)
+- Active-stack resolution no longer silently falls back to a deleted or unavailable stack — flow submission, MCP, and `kitaru status` now surface a clear error when the configured active stack is gone. (#263)
+- `KitaruAgent` auto-checkpointing of agents that use `@hitl_tool(schema=...)` no longer crashes with `PydanticSerializationError: Unable to serialize unknown type: <class 'type'>` under `pydantic-ai-slim>=1.86`, which now surfaces per-tool metadata through the `AgentRunResult` tree. (#292)
 
 ## [0.7.0] - 2026-04-24
 

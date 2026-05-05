@@ -1,19 +1,33 @@
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ConfigDict, field_serializer
+from pydantic.dataclasses import dataclass
 from pydantic_ai import Tool
 
 _HITL_MARKER = '_kitaru_hitl_config'
 _HITL_METADATA_KEY = 'kitaru_hitl_config'
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ConfigDict(arbitrary_types_allowed=True))
 class HitlConfig:
     question: str | None = None
     name: str | None = None
+    # ``schema`` carries the *runtime* class for human-input validation (e.g.
+    # ``bool``). It must remain the live class so ``kitaru.wait(schema=...)``
+    # and ``request.schema is bool`` checks downstream still work. Pydantic AI
+    # 1.86+ exposes per-tool ``metadata`` through ``AgentRunResult._state``,
+    # so the surrounding agent result is now JSON-serialized end-to-end. The
+    # serializer below converts unserializable type objects to a stable string
+    # name only on the dump path; the in-memory value is unchanged.
     schema: Any = None
     question_arg: str | None = 'question'
+
+    @field_serializer('schema')
+    def _serialize_schema(self, value: Any, _info: Any) -> Any:
+        if isinstance(value, type):
+            return f'{value.__module__}.{value.__qualname__}'
+        return value
 
 
 def _config_from_target(target: object) -> HitlConfig | None:
