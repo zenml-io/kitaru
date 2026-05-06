@@ -1,10 +1,11 @@
 """Model/provider checkpoint wrappers for OpenAI Agents SDK calls."""
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 from agents.models.interface import Model, ModelProvider
+from agents.tool import FunctionTool
 
 import kitaru
 
@@ -82,7 +83,7 @@ class KitaruOpenAIModel(Model):
                     prompt=prompt,
                 )
 
-            return await run_async_in_checkpoint(
+            response = await run_async_in_checkpoint(
                 config=with_default_type(self._checkpoint_config, "llm_call"),
                 step_name=safe_step_name(f"{self._agent_name}_openai_model_call"),
                 body=_in_checkpoint,
@@ -101,7 +102,9 @@ class KitaruOpenAIModel(Model):
                     }
                 ),
             )
-        return await self._tracked_get_response(
+            self._reserve_tool_call_order(response, tools)
+            return response
+        response = await self._tracked_get_response(
             system_instructions,
             input,
             model_settings,
@@ -113,6 +116,8 @@ class KitaruOpenAIModel(Model):
             conversation_id=conversation_id,
             prompt=prompt,
         )
+        self._reserve_tool_call_order(response, tools)
+        return response
 
     async def _tracked_get_response(
         self,
@@ -220,6 +225,12 @@ class KitaruOpenAIModel(Model):
             metadata=metadata,
         )
         return response
+
+    def _reserve_tool_call_order(self, response: Any, tools: list[Any]) -> None:
+        tracker = get_current_tracker()
+        if tracker is None or not self._capture.emit_child_events:
+            return
+        tracker.reserve_tool_call_order(_trackable_tool_call_ids(response, tools))
 
     def _model_cache_identity(self) -> dict[str, Any]:
         wrapped_type = type(self._wrapped)
@@ -334,3 +345,41 @@ def _tool_cache_identity(tool: Any) -> dict[str, Any]:
         "description": getattr(tool, "description", None),
         "tool_namespace": getattr(tool, "_tool_namespace", None),
     }
+
+
+def _trackable_tool_call_ids(response: Any, tools: list[Any]) -> list[str]:
+    """Return local function-tool call IDs in assistant-emitted order."""
+    function_tool_names = {
+        tool.name
+        for tool in tools
+        if isinstance(tool, FunctionTool) and isinstance(tool.name, str)
+    }
+    if not function_tool_names:
+        return []
+
+    tool_call_ids: list[str] = []
+    for item in getattr(response, "output", []) or []:
+        tool_name = _tool_name_from_response_item(item)
+        tool_call_id = _tool_call_id_from_response_item(item)
+        if tool_name in function_tool_names and tool_call_id is not None:
+            tool_call_ids.append(tool_call_id)
+    return tool_call_ids
+
+
+def _tool_name_from_response_item(item: Any) -> str | None:
+    value = _response_item_value(item, "name")
+    return value if isinstance(value, str) and value else None
+
+
+def _tool_call_id_from_response_item(item: Any) -> str | None:
+    for key in ("call_id", "tool_call_id"):
+        value = _response_item_value(item, key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _response_item_value(item: Any, key: str) -> Any:
+    if isinstance(item, Mapping):
+        return item.get(key)
+    return getattr(item, key, None)

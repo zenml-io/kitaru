@@ -326,6 +326,217 @@ class TestWaitCallSuffix:
         assert _wait_call_suffix("call_a") != _wait_call_suffix("call_b")
 
 
+class TestModelToolCallReservations:
+    def test_trackable_tool_call_ids_follow_model_response_order(self) -> None:
+        from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+        from pydantic_ai.models import ModelRequestParameters
+        from pydantic_ai.tools import ToolDefinition
+
+        from kitaru.adapters.pydantic_ai._model import _trackable_tool_call_ids
+        from kitaru.adapters.pydantic_ai._policy import CapturePolicy
+
+        response = ModelResponse(
+            parts=[
+                TextPart(content="I will call tools."),
+                ToolCallPart(
+                    tool_name="alpha",
+                    args={},
+                    tool_call_id="call_alpha_1",
+                ),
+                ToolCallPart(
+                    tool_name="output_tool",
+                    args={},
+                    tool_call_id="call_output",
+                ),
+                ToolCallPart(
+                    tool_name="skip",
+                    args={},
+                    tool_call_id="call_skip",
+                ),
+                ToolCallPart(
+                    tool_name="alpha",
+                    args={},
+                    tool_call_id="call_alpha_2",
+                ),
+                ToolCallPart(tool_name="beta", args={}, tool_call_id=""),
+            ]
+        )
+
+        assert _trackable_tool_call_ids(
+            response,
+            ModelRequestParameters(
+                function_tools=[
+                    ToolDefinition(name="alpha"),
+                    ToolDefinition(name="skip"),
+                ],
+                output_tools=[ToolDefinition(name="output_tool")],
+            ),
+            CapturePolicy(
+                tool_capture="metadata",
+                tool_capture_overrides={"skip": None},
+            ),
+        ) == ["call_alpha_1", "call_alpha_2"]
+
+
+class TestEventTrackerToolCallOrdering:
+    def _record_completed_model(self, tracker: Any) -> tuple[str, Any]:
+        event_id, event_context = tracker.start_model_event()
+        tracker.record_model_event(
+            event_id,
+            event_context,
+            status="completed",
+            duration_ms=1.0,
+            artifacts={},
+            model_name="test-model",
+        )
+        return event_id, event_context
+
+    def _record_completed_tool(
+        self,
+        tracker: Any,
+        event_id: str,
+        event_context: Any,
+        *,
+        name: str,
+    ) -> None:
+        tracker.record_tool_event(
+            event_id,
+            event_context,
+            status="completed",
+            name=name,
+            toolset_kind="function",
+            capture_mode="metadata",
+            duration_ms=1.0,
+            hitl=False,
+            artifacts={},
+        )
+
+    def test_reserved_tool_ids_follow_model_order_when_start_order_reverses(
+        self,
+    ) -> None:
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+
+        tracker = EventTracker(agent_name="ordering_agent", run_label="test")
+        model_id, model_context = self._record_completed_model(tracker)
+        tracker.reserve_tool_call_order(
+            parent_model_event_id=model_id,
+            turn_index=model_context.turn_index,
+            tool_call_ids=["call_alpha", "call_beta"],
+        )
+
+        beta_id, beta_context = tracker.start_tool_event(tool_call_id="call_beta")
+        alpha_id, alpha_context = tracker.start_tool_event(tool_call_id="call_alpha")
+
+        assert alpha_context.sequence_index < beta_context.sequence_index
+        assert alpha_id.endswith("_tool_call_2")
+        assert beta_id.endswith("_tool_call_3")
+        assert alpha_context.fan_out_from == model_id
+        assert beta_context.fan_out_from == model_id
+
+    def test_reverse_completion_order_still_sorts_events_and_fan_in(self) -> None:
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+
+        tracker = EventTracker(agent_name="ordering_agent", run_label="test")
+        model_id, model_context = self._record_completed_model(tracker)
+        tracker.reserve_tool_call_order(
+            parent_model_event_id=model_id,
+            turn_index=model_context.turn_index,
+            tool_call_ids=["call_alpha", "call_beta"],
+        )
+        beta_id, beta_context = tracker.start_tool_event(tool_call_id="call_beta")
+        alpha_id, alpha_context = tracker.start_tool_event(tool_call_id="call_alpha")
+
+        self._record_completed_tool(tracker, beta_id, beta_context, name="beta")
+        self._record_completed_tool(tracker, alpha_id, alpha_context, name="alpha")
+
+        assert [event.event_id for event in tracker.events] == [
+            model_id,
+            alpha_id,
+            beta_id,
+        ]
+        next_model_id, next_model_context = tracker.start_model_event()
+        assert next_model_context.fan_in_from == [alpha_id, beta_id]
+        assert next_model_id.endswith("_llm_call_4")
+
+    def test_persisted_events_and_summary_use_reserved_sequence_order(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from kitaru.adapters.pydantic_ai import _tracking
+
+        tracker = _tracking.EventTracker(agent_name="ordering_agent", run_label="test")
+        model_id, model_context = self._record_completed_model(tracker)
+        tracker.reserve_tool_call_order(
+            parent_model_event_id=model_id,
+            turn_index=model_context.turn_index,
+            tool_call_ids=["call_alpha", "call_beta"],
+        )
+        beta_id, beta_context = tracker.start_tool_event(tool_call_id="call_beta")
+        alpha_id, alpha_context = tracker.start_tool_event(tool_call_id="call_alpha")
+        self._record_completed_tool(tracker, beta_id, beta_context, name="beta")
+        self._record_completed_tool(tracker, alpha_id, alpha_context, name="alpha")
+        logged: dict[str, Any] = {}
+        monkeypatch.setattr(
+            _tracking.kitaru,
+            "log",
+            lambda **kwargs: logged.update(kwargs),
+        )
+
+        tracker.persist()
+
+        events_dump = logged["pydantic_ai_events"][tracker.run_label]
+        summary_dump = logged["pydantic_ai_run_summaries"][tracker.run_label]
+        assert [event["event_id"] for event in events_dump] == [
+            model_id,
+            alpha_id,
+            beta_id,
+        ]
+        assert summary_dump["event_ids_in_order"] == [model_id, alpha_id, beta_id]
+        assert summary_dump["total_events"] == 3
+
+    def test_missing_or_unreserved_tool_call_id_keeps_counter_fallback(self) -> None:
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+
+        tracker = EventTracker(agent_name="ordering_agent", run_label="test")
+        model_id, _model_context = self._record_completed_model(tracker)
+
+        event_id, event_context = tracker.start_tool_event(tool_call_id=None)
+
+        assert event_id.endswith("_tool_call_2")
+        assert event_context.sequence_index == 2
+        assert event_context.fan_out_from == model_id
+
+    def test_abandoned_reserved_tool_slot_does_not_count_as_recorded_event(
+        self,
+    ) -> None:
+        from kitaru.adapters.pydantic_ai._tracking import EventTracker
+
+        tracker = EventTracker(agent_name="ordering_agent", run_label="test")
+        model_id, model_context = self._record_completed_model(tracker)
+        tracker.reserve_tool_call_order(
+            parent_model_event_id=model_id,
+            turn_index=model_context.turn_index,
+            tool_call_ids=["call_alpha", "call_beta"],
+        )
+        alpha_id, alpha_context = tracker.start_tool_event(tool_call_id="call_alpha")
+        self._record_completed_tool(
+            tracker,
+            alpha_id,
+            alpha_context,
+            name="alpha",
+        )
+
+        summary = tracker.build_run_summary()
+
+        assert summary.total_events == 2
+        assert summary.event_ids_in_order == [model_id, alpha_id]
+
+        abandoned_beta_id = f"{tracker.agent_name}_{tracker.run_label}_tool_call_3"
+        _next_model_id, next_model_context = tracker.start_model_event()
+        assert next_model_context.fan_in_from == [alpha_id]
+        assert abandoned_beta_id not in tracker._event_sequence_by_id
+
+
 class TestModelMessageCacheSerialization:
     def _messages(self, *, run_id: str, second: int) -> list[Any]:
         from pydantic_ai.messages import (
@@ -1457,6 +1668,143 @@ async def test_wait_metadata_omits_payload_when_capture_not_full(
 
 
 @pytest.mark.anyio
+async def test_toolset_passes_tool_call_id_to_event_tracker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+
+    seen_tool_call_ids: list[str | None] = []
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    @toolset.tool_plain
+    def publish() -> str:
+        return "published"
+
+    class FakeTracker:
+        def start_tool_event(
+            self,
+            *,
+            tool_call_id: str | None = None,
+        ) -> tuple[str, SimpleNamespace]:
+            seen_tool_call_ids.append(tool_call_id)
+            return "event-1", SimpleNamespace(
+                sequence_index=1,
+                turn_index=1,
+                fan_out_from=None,
+            )
+
+        def record_tool_event(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(tool_capture="metadata", correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"publish": False},
+    )
+    ctx = _with_tool_call_id(
+        RunContext(deps=None, model=TestModel(), usage=RunUsage()),
+        "call_publish",
+    )
+    tool = (await wrapped.get_tools(ctx))["publish"]
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.get_current_tracker",
+        lambda: FakeTracker(),
+    )
+
+    assert await wrapped.call_tool("publish", {}, ctx, tool) == "published"
+
+    assert seen_tool_call_ids == ["call_publish"]
+
+
+@pytest.mark.anyio
+async def test_tracked_tool_execution_remains_concurrent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import anyio
+    from pydantic_ai import FunctionToolset
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.tools import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    from kitaru.adapters.pydantic_ai import CapturePolicy
+    from kitaru.adapters.pydantic_ai._toolset import kitaruify_toolset
+
+    started: list[str] = []
+    both_started = anyio.Event()
+    toolset: FunctionToolset[None] = FunctionToolset()
+
+    async def _mark_started(name: str) -> None:
+        started.append(name)
+        if len(started) == 2:
+            both_started.set()
+        await both_started.wait()
+
+    @toolset.tool_plain
+    async def alpha() -> str:
+        await _mark_started("alpha")
+        return "alpha"
+
+    @toolset.tool_plain
+    async def beta() -> str:
+        await _mark_started("beta")
+        return "beta"
+
+    class FakeTracker:
+        def __init__(self) -> None:
+            self._counter = 0
+
+        def start_tool_event(
+            self,
+            *,
+            tool_call_id: str | None = None,
+        ) -> tuple[str, SimpleNamespace]:
+            del tool_call_id
+            self._counter += 1
+            return f"event-{self._counter}", SimpleNamespace(
+                sequence_index=self._counter,
+                turn_index=1,
+                fan_out_from=None,
+            )
+
+        def record_tool_event(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    fake_tracker = FakeTracker()
+    wrapped = kitaruify_toolset(
+        toolset,
+        capture=CapturePolicy(tool_capture="metadata", correlate_otel_spans=False),
+        tool_checkpoint_config_by_name={"alpha": False, "beta": False},
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai._toolset.get_current_tracker",
+        lambda: fake_tracker,
+    )
+    results: dict[str, str] = {}
+
+    async def _run_tool(name: str, tool_call_id: str) -> None:
+        ctx = _with_tool_call_id(
+            RunContext(deps=None, model=TestModel(), usage=RunUsage()),
+            tool_call_id,
+        )
+        tool = (await wrapped.get_tools(ctx))[name]
+        results[name] = await wrapped.call_tool(name, {}, ctx, tool)
+
+    with anyio.fail_after(1):
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(_run_tool, "alpha", "call_alpha")
+            task_group.start_soon(_run_tool, "beta", "call_beta")
+
+    assert set(started) == {"alpha", "beta"}
+    assert results == {"alpha": "alpha", "beta": "beta"}
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("tool_capture", [None, "metadata"])
 async def test_deferred_event_metadata_omits_payload_when_capture_not_full(
     monkeypatch: pytest.MonkeyPatch,
@@ -1475,7 +1823,12 @@ async def test_deferred_event_metadata_omits_payload_when_capture_not_full(
     recorded_deferred_events: list[dict[str, Any]] = []
 
     class FakeTracker:
-        def start_tool_event(self) -> tuple[str, dict[str, Any]]:
+        def start_tool_event(
+            self,
+            *,
+            tool_call_id: str | None = None,
+        ) -> tuple[str, dict[str, Any]]:
+            del tool_call_id
             return "event-1", {}
 
         def record_tool_event(self, *_args: Any, **_kwargs: Any) -> None:
