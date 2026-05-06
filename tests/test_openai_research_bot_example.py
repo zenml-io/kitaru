@@ -1,5 +1,6 @@
 """No-network contract tests for the OpenAI research bot example."""
 
+import argparse
 import importlib
 from types import SimpleNamespace
 from typing import Any
@@ -185,7 +186,7 @@ def test_cli_run_loads_final_report_when_runner_checkpoints_are_terminal(
         lambda *_args, **_kwargs: FakeRunner(),
     )
 
-    args = SimpleNamespace(
+    args = argparse.Namespace(
         query=f"durable agents {uuid4().hex}",
         max_searches=2,
         model="gpt-5-nano",
