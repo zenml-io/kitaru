@@ -369,7 +369,7 @@ elif [[ "${KITARU_SMOKE_RESEARCH_BOT:-}" != "1" ]]; then
 else
     run_test "examples/end_to_end/openai_research_bot/research_bot.py" \
         timed 180 $UV_RUN python examples/end_to_end/openai_research_bot/research_bot.py \
-            "AI agent durability in one paragraph" --max-searches 2 --strategy runner_call \
+            "AI agent durability in one paragraph" --max-searches 2 \
             --fail-on-search-error
 fi
 

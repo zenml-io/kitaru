@@ -1,4 +1,4 @@
-"""OpenAI research bot — planner, parallel searches, writer on Kitaru.
+"""OpenAI research bot — planner, search agents, writer on Kitaru.
 
 Run locally::
 
@@ -10,18 +10,18 @@ Run locally::
 """
 
 import argparse
-import json
 import os
 import re
 import sys
-from typing import Annotated, Any, Literal, TypeVar, cast
+from typing import Annotated, Any, TypeVar
 
 from agents import RunConfig
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 import kitaru
 from kitaru import ImageSettings, checkpoint, flow
 from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
+from kitaru.client import KitaruClient
 from kitaru.config import classify_stack_deployment_type
 from kitaru.errors import KitaruAmbiguousFlowResultError
 
@@ -48,9 +48,6 @@ except ImportError:  # Direct script path used by README commands.
     from prompts import build_search_input, build_writer_input
     from tools import SEARCH_TOOL_MODEL_ENV
 
-CheckpointStrategy = Literal["calls", "runner_call"]
-CHECKPOINT_STRATEGIES: tuple[CheckpointStrategy, ...] = ("calls", "runner_call")
-SEARCH_CHECKPOINT_STRATEGY: CheckpointStrategy = "runner_call"
 DEFAULT_MAX_SEARCHES = 5
 MAX_SEARCHES_LIMIT = 10
 SECRET_NAME = "openai-research-bot-keys"
@@ -64,7 +61,6 @@ _NON_SECRET_ENV_VARS = (
     "OPENAI_RESEARCH_BOT_SEARCH_MODEL",
     "OPENAI_RESEARCH_BOT_WRITER_MODEL",
     "OPENAI_RESEARCH_BOT_MAX_SEARCHES",
-    "OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY",
     SEARCH_TOOL_MODEL_ENV,
 )
 FAIL_AFTER_SEARCHES_ENV = "KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES"
@@ -85,9 +81,8 @@ def clamp_max_searches(value: int) -> int:
     return min(max(value, 1), MAX_SEARCHES_LIMIT)
 
 
-def normalize_search_plan(
+def _normalize_search_plan(
     plan: WebSearchPlan,
-    *,
     original_query: str,
     max_searches: int,
 ) -> WebSearchPlan:
@@ -124,6 +119,16 @@ def normalize_search_plan(
     )
 
 
+@checkpoint
+def normalize_search_plan(
+    plan: WebSearchPlan,
+    original_query: str,
+    max_searches: int,
+) -> Annotated[WebSearchPlan, "research_plan"]:
+    """Publish the normalized research plan as a replayable artifact."""
+    return _normalize_search_plan(plan, original_query, max_searches)
+
+
 def missing_api_key_message(secret_name: str = SECRET_NAME) -> str:
     """Friendly setup text for users who run the example without credentials."""
     return (
@@ -142,20 +147,18 @@ def _env_flag_enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in _TRUTHY_ENV_VALUES
 
 
-def _coerce_model(value: Any, model_type: type[T]) -> T:
-    """Coerce OpenAI Agents SDK structured output into a Pydantic model."""
+def _expect_structured_output(value: Any, model_type: type[T], *, stage: str) -> T:
+    """Validate structured OpenAI output against the model this example expects."""
     if isinstance(value, model_type):
         return value
     if isinstance(value, BaseModel):
         return model_type.model_validate(value.model_dump())
     if isinstance(value, dict):
         return model_type.model_validate(value)
-    if isinstance(value, str):
-        try:
-            return model_type.model_validate_json(value)
-        except ValidationError:
-            return model_type.model_validate(json.loads(value))
-    return model_type.model_validate(value)
+    raise RuntimeError(
+        f"The {stage} agent returned {type(value).__name__}, but this example "
+        f"expects structured {model_type.__name__} output."
+    )
 
 
 def _completed_final_output(result: Any, *, stage: str) -> Any:
@@ -169,72 +172,74 @@ def _completed_final_output(result: Any, *, stage: str) -> Any:
     return result.final_output
 
 
-def _new_runner(agent: Any, *, checkpoint_strategy: CheckpointStrategy) -> KitaruRunner:
+def _load_checkpoint_output(value: Any) -> Any:
+    """Materialize a checkpoint output handle when dynamic execution returns one."""
+    load = getattr(value, "load", None)
+    return load() if callable(load) else value
+
+
+def _new_runner(agent: Any, *, name: str | None = None) -> KitaruRunner:
     """Build a Kitaru-wrapped OpenAI runner with tracing disabled for clarity."""
     return KitaruRunner(
         agent,
-        checkpoint_strategy=checkpoint_strategy,
+        name=name,
+        checkpoint_strategy="runner_call",
         run_config_factory=lambda: RunConfig(tracing_disabled=True),
     )
 
 
-def _slug(value: str, *, max_length: int = 40) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower()).strip("_")
-    return (slug or "search")[:max_length]
+@checkpoint
+def publish_search_summaries(
+    summaries: list[Any],
+) -> Annotated[list[dict[str, Any]], "search_summaries"]:
+    """Save the aggregate search results as a readable dashboard artifact.
+
+    Submitted checkpoints can reload Pydantic objects through a different import
+    path than the direct script uses. Keep the ZenML boundary permissive, then
+    validate each item against this module's `SearchSummary` model inside the
+    checkpoint body.
+    """
+    return [
+        _expect_structured_output(
+            summary, SearchSummary, stage="search summary"
+        ).model_dump(mode="json")
+        for summary in summaries
+    ]
 
 
-@checkpoint(type="context")
-def publish_research_plan(
-    query: str,
-    max_searches: int,
-    planner_model: str,
-    plan: WebSearchPlan,
-) -> Annotated[dict[str, Any], "research_plan"]:
-    """Save the planner output as a readable dashboard artifact."""
-    return {
-        "query": query,
-        "max_searches": max_searches,
-        "planner_model": planner_model,
-        "searches": [item.model_dump(mode="json") for item in plan.searches],
-    }
-
-
-@checkpoint(type="llm_call")
+@checkpoint
 def run_search_item(
     index: int,
     item: WebSearchItem,
     search_model: str,
     search_tool_model: str,
 ) -> SearchSummary:
-    """Run one planned search inside its own durable Kitaru checkpoint.
-
-    This checkpoint already gives the search stage a durable boundary. The
-    OpenAI runner inside it therefore uses ``checkpoint_strategy="runner_call"``;
-    using ``"calls"`` here would try to open nested Kitaru checkpoints.
-    """
+    """Run one planned search as a submitted durable checkpoint."""
     try:
-        agent = new_search_agent(
-            model=search_model,
-            search_tool_model=search_tool_model,
+        searcher = _new_runner(
+            new_search_agent(
+                model=search_model,
+                search_tool_model=search_tool_model,
+            ),
+            name=f"research_searcher_{index + 1:02d}",
         )
-        runner = _new_runner(
-            agent,
-            checkpoint_strategy=SEARCH_CHECKPOINT_STRATEGY,
-        )
-        result = runner.run_sync(
+        search_result = searcher.run_sync(
             OpenAIRunRequest.start(
                 build_search_input(query=item.query, reason=item.reason),
                 metadata={"stage": "search", "search_index": index},
                 max_turns=4,
             )
         )
-        output = _completed_final_output(result, stage=f"search {index + 1}")
+        search_output = _completed_final_output(
+            search_result,
+            stage=f"search {index + 1}",
+        )
         return SearchSummary(
             index=index,
             query=item.query,
             reason=item.reason,
             status="completed",
-            summary=str(output),
+            summary=str(search_output),
         )
     except Exception as error:
         return SearchSummary(
@@ -249,15 +254,7 @@ def run_search_item(
         )
 
 
-@checkpoint(type="context")
-def publish_search_summaries(
-    summaries: list[SearchSummary],
-) -> Annotated[list[dict[str, Any]], "search_summaries"]:
-    """Save the aggregate search results as a readable dashboard artifact."""
-    return [summary.model_dump(mode="json") for summary in summaries]
-
-
-@checkpoint(type="context")
+@checkpoint
 def durability_drill_gate(
     search_summaries_artifact: list[dict[str, Any]],
 ) -> Annotated[dict[str, Any], "durability_drill"]:
@@ -265,11 +262,11 @@ def durability_drill_gate(
     search_count = len(search_summaries_artifact)
     if _env_flag_enabled(FAIL_AFTER_SEARCHES_ENV):
         raise RuntimeError(
-            "Intentional durability drill failure after the search checkpoints. "
+            "Intentional durability drill failure after the search stage. "
             f"Unset {FAIL_AFTER_SEARCHES_ENV} and replay this execution with "
             "`kitaru executions replay <EXECUTION_ID> --from "
             "durability_drill_gate`; Kitaru should reuse the completed "
-            "planner/search checkpoints."
+            "planner/search outputs."
         )
     return {
         "enabled": False,
@@ -278,11 +275,11 @@ def durability_drill_gate(
     }
 
 
-@checkpoint(type="output")
+@checkpoint
 def publish_report(
     report: ReportData,
     metadata: dict[str, Any],
-    research_plan_artifact: dict[str, Any],
+    research_plan_artifact: WebSearchPlan,
     search_summaries_artifact: list[dict[str, Any]],
     durability_drill_artifact: dict[str, Any],
 ) -> Annotated[str, "final_report"]:
@@ -304,26 +301,13 @@ def openai_research_bot(
     search_model: str,
     writer_model: str,
     search_tool_model: str,
-    checkpoint_strategy: CheckpointStrategy,
     fail_on_search_error: bool = False,
 ) -> str:
-    """Run planner → parallel searches → writer, then publish a report artifact."""
+    """Run planner → search agents → writer, then publish a report artifact."""
     max_searches = clamp_max_searches(max_searches)
-    kitaru.log(
-        stage="start",
-        query=query,
-        max_searches=max_searches,
-        planner_model=planner_model,
-        search_model=search_model,
-        writer_model=writer_model,
-        search_tool_model=search_tool_model,
-        checkpoint_strategy=checkpoint_strategy,
-        fail_on_search_error=fail_on_search_error,
-    )
 
     planner = _new_runner(
-        new_planner_agent(model=planner_model, max_searches=max_searches),
-        checkpoint_strategy=checkpoint_strategy,
+        new_planner_agent(model=planner_model, max_searches=max_searches)
     )
     planner_result = planner.run_sync(
         OpenAIRunRequest.start(
@@ -332,35 +316,30 @@ def openai_research_bot(
             max_turns=3,
         )
     )
-    raw_plan = _coerce_model(
+    raw_plan = _expect_structured_output(
         _completed_final_output(planner_result, stage="planner"),
         WebSearchPlan,
+        stage="planner",
     )
-    plan = normalize_search_plan(
+    research_plan_artifact = normalize_search_plan(
         raw_plan,
-        original_query=query,
-        max_searches=max_searches,
-    )
-    research_plan_artifact = publish_research_plan(
         query,
         max_searches,
-        planner_model,
-        plan,
     )
+    plan = research_plan_artifact.load()
 
-    futures = [
+    search_futures = [
         run_search_item.submit(
             index,
             item,
             search_model,
             search_tool_model,
-            id=f"search_{index + 1:02d}_{_slug(item.query)}",
+            id=f"search_{index + 1:02d}",
         )
         for index, item in enumerate(plan.searches)
     ]
-    summary_artifacts = [future.result() for future in futures]
-    search_summaries_artifact = publish_search_summaries(summary_artifacts)
-    summaries = [future.load() for future in futures]
+    summaries = [_load_checkpoint_output(future.result()) for future in search_futures]
+    search_summaries_artifact = publish_search_summaries(summaries)
     durability_drill_artifact = durability_drill_gate(search_summaries_artifact)
 
     failed = [item for item in summaries if item.status == "failed"]
@@ -368,12 +347,9 @@ def openai_research_bot(
         details = "; ".join(
             f"{item.query}: {item.error_message or item.summary}" for item in failed
         )
-        raise RuntimeError(f"{len(failed)} search checkpoint(s) failed: {details}")
+        raise RuntimeError(f"{len(failed)} search agent run(s) failed: {details}")
 
-    writer = _new_runner(
-        new_writer_agent(model=writer_model),
-        checkpoint_strategy=checkpoint_strategy,
-    )
+    writer = _new_runner(new_writer_agent(model=writer_model))
     writer_result = writer.run_sync(
         OpenAIRunRequest.start(
             build_writer_input(original_query=query, summaries=summaries),
@@ -381,9 +357,10 @@ def openai_research_bot(
             max_turns=3,
         )
     )
-    report = _coerce_model(
+    report = _expect_structured_output(
         _completed_final_output(writer_result, stage="writer"),
         ReportData,
+        stage="writer",
     )
 
     metadata = {
@@ -392,7 +369,6 @@ def openai_research_bot(
         "search_model": search_model,
         "writer_model": writer_model,
         "search_tool_model": search_tool_model,
-        "checkpoint_strategy": checkpoint_strategy,
         "planned_search_count": len(plan.searches),
         "completed_search_count": sum(
             1 for item in summaries if item.status == "completed"
@@ -444,16 +420,6 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _checkpoint_strategy_default(parser: argparse.ArgumentParser) -> CheckpointStrategy:
-    raw = os.getenv("OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY", "calls")
-    if raw not in CHECKPOINT_STRATEGIES:
-        parser.error(
-            "OPENAI_RESEARCH_BOT_CHECKPOINT_STRATEGY must be one of: "
-            f"{', '.join(CHECKPOINT_STRATEGIES)}."
-        )
-    return cast(CheckpointStrategy, raw)
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for the research bot example."""
     default_model = os.getenv("OPENAI_RESEARCH_BOT_MODEL", DEFAULT_MODEL)
@@ -499,20 +465,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--strategy",
-        choices=CHECKPOINT_STRATEGIES,
-        default=_checkpoint_strategy_default(parser),
-        help="OpenAI adapter checkpoint strategy for planner/writer (default: calls).",
-    )
-    parser.add_argument(
-        "--compare-runner-call",
-        action="store_true",
-        help="Run a second, more coarse-grained runner_call pass for comparison.",
-    )
-    parser.add_argument(
         "--fail-on-search-error",
         action="store_true",
-        help="Exit non-zero if any parallel search checkpoint fails.",
+        help="Exit non-zero if any search agent run fails.",
     )
     parser.add_argument(
         "--secret-name",
@@ -525,7 +480,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _run_once(
     args: argparse.Namespace,
     *,
-    strategy: CheckpointStrategy,
     image_override: dict[str, Any] | None,
 ) -> str:
     model = args.model
@@ -541,7 +495,6 @@ def _run_once(
         "search_model": search_model,
         "writer_model": writer_model,
         "search_tool_model": search_tool_model,
-        "checkpoint_strategy": strategy,
         "fail_on_search_error": args.fail_on_search_error,
     }
     if image_override is not None:
@@ -550,21 +503,15 @@ def _run_once(
     handle = openai_research_bot.run(**run_kwargs)
     try:
         return str(handle.wait())
-    except KitaruAmbiguousFlowResultError as error:
-        # `--strategy calls` produces per-call peer checkpoints with no single
-        # sink, so `.wait()` cannot pick a single return value. The artifacts
-        # ARE persisted under the execution and visible in the Kitaru UI; the
-        # error message names them and points users at `KitaruClient`. Surface
-        # that here as a friendly summary instead of a stack trace, since
-        # this is the documented characteristic of the `calls` strategy
-        # rather than a real failure.
-        return (
-            f"(strategy={strategy!r}: per-checkpoint artifacts only; "
-            f"`.wait()` raised because there is no single terminal sink. "
-            f"View artifacts at the Kitaru UI URL above, or via "
-            f"`KitaruClient().executions.get('{handle.exec_id}')`.)\n\n"
-            f"Full error message:\n{error}"
+    except KitaruAmbiguousFlowResultError:
+        artifacts = KitaruClient().artifacts.list(
+            handle.exec_id,
+            name="final_report",
+            limit=1,
         )
+        if not artifacts:
+            raise
+        return str(artifacts[0].load())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -583,21 +530,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"Running OpenAI research bot with model={args.model!r}, "
-        f"max_searches={clamp_max_searches(args.max_searches)}, "
-        f"strategy={args.strategy!r}."
+        f"max_searches={clamp_max_searches(args.max_searches)}."
     )
-    report = _run_once(args, strategy=args.strategy, image_override=image_override)
+    report = _run_once(args, image_override=image_override)
     print("\n=== final report ===\n")
     print(report)
-
-    if args.compare_runner_call and args.strategy != "runner_call":
-        print("\n=== runner_call comparison run ===\n")
-        comparison = _run_once(
-            args,
-            strategy="runner_call",
-            image_override=image_override,
-        )
-        print(comparison)
     return 0
 
 
