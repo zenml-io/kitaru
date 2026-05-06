@@ -336,9 +336,7 @@ def test_phase17_default_granular_mode_tracks_at_flow_scope(primed_zenml) -> Non
         for name in artifact_names
     )
     assert any(
-        re.fullmatch(
-            rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name
-        )
+        re.fullmatch(rf"[a-zA-Z0-9_]+_{run_label}_tracker_1_llm_call_1_response", name)
         for name in artifact_names
     )
     _assert_event_artifacts_use_display_names(event_map, artifact_names)

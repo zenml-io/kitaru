@@ -447,9 +447,7 @@ class TestCachedGranularModelCheckpoints:
         )
 
         with _flow_scope(name="cached_flow"):
-            response = await model.request(
-                [], None, self._model_request_parameters()
-            )
+            response = await model.request([], None, self._model_request_parameters())
 
         assert response is cached_response
         assert checkpoint_called is True
