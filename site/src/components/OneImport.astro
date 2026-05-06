@@ -1,15 +1,15 @@
 ---
-// OneImport.astro — One-import swap with OpenAI Agents SDK and Anthropic Agent SDK
+// OneImport.astro — Keep the inner harness, add the outer runtime
 ---
 
 <section id="one-import" class="section-pad-compact one-import-section">
   <div class="section-inner">
     <span class="section-eyebrow" data-reveal>WORKS WITH YOUR AGENT SDK</span>
     <h2 class="section-title" data-reveal data-reveal-delay="1">
-      One import. Any agent SDK.
+      Keep the inner harness. Add the outer runtime.
     </h2>
     <p class="one-import-desc" data-reveal data-reveal-delay="2">
-      Keep your agent, your sandbox, your manifest exactly as they are. Swap one import and get checkpointed execution, artifact tracking, and observability, without changing a line of your agent code.
+      Keep the model loop your team already picked. Wrap the boundaries that matter &mdash; model calls, tool calls, approvals, and long-running phases &mdash; with durable state and replay.
     </p>
 
     <!-- Tabs -->
@@ -50,7 +50,7 @@ result <span class="op">=</span> <span class="kw">await</span> Runner.<span clas
               <span class="one-import-code-label is-after">With Kitaru</span>
               <span class="one-import-code-filename">agent.py</span>
             </div>
-            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru.adapters.openai_agents <span class="kw">import</span> KitaruRunner
+            <pre class="one-import-code-pre code-syntax"><code><span class="kw">from</span> kitaru.adapters.openai_agents <span class="kw">import</span> KitaruRunner, OpenAIRunRequest
 <span class="kw">from</span> agents.sandbox <span class="kw">import</span> SandboxAgent, Manifest
 
 agent <span class="op">=</span> <span class="fn">SandboxAgent</span>(
@@ -59,7 +59,8 @@ agent <span class="op">=</span> <span class="fn">SandboxAgent</span>(
     default_manifest<span class="op">=</span>manifest,
 )
 
-result <span class="op">=</span> <span class="kw">await</span> KitaruRunner.<span class="fn">run</span>(agent, task)</code></pre>
+runner <span class="op">=</span> <span class="fn">KitaruRunner</span>(agent, checkpoint_strategy<span class="op">=</span><span class="str">"calls"</span>)
+result <span class="op">=</span> <span class="kw">await</span> runner.<span class="fn">run</span>(OpenAIRunRequest.<span class="fn">start</span>(task))</code></pre>
           </div>
         </div>
       </div>
