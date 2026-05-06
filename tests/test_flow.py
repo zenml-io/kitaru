@@ -18,7 +18,6 @@ from zenml.models import PipelineRunResponse
 
 from kitaru import memory
 from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
-from kitaru._config._active_context import ActiveConfigSelectionProvenance
 from kitaru._config._core import ExecutionStackSource
 from kitaru.analytics import AnalyticsEvent
 from kitaru.checkpoint import checkpoint
@@ -52,10 +51,12 @@ from kitaru.flow import (
     _extract_run_pipeline_id,
     _guard_implicit_active_stack_fallback,
     _inject_model_registry_env,
+    _is_multiple_terminal_steps_output_error,
     _temporary_active_stack,
     _wrap_flow_entrypoint,
     flow,
 )
+from kitaru.inspection import ActiveConfigSelectionProvenance
 from kitaru.replay import ReplayPlan
 from kitaru.runtime import _get_current_execution_id, _get_current_flow, _is_inside_flow
 
@@ -1925,6 +1926,7 @@ def test_flow_handle_get_raises_on_ambiguous_terminal_fallback() -> None:
         pytest.raises(KitaruAmbiguousFlowResultError) as exc_info,
     ):
         handle.get()
+    assert _is_multiple_terminal_steps_output_error(exc_info.value)
 
     message = str(exc_info.value)
     assert "final_a" in message and "final_b" in message

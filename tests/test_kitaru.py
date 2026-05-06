@@ -259,32 +259,21 @@ class TestPlaceholderBehavior:
         with pytest.raises(kitaru.KitaruContextError, match=r"@flow"):
             kitaru.wait()
 
-    def test_wait_suspends_checkpoint_scope_inside_checkpoint(self) -> None:
-        from kitaru.runtime import (
-            _checkpoint_scope,
-            _flow_scope,
-            _is_inside_checkpoint,
-        )
-
-        inside_checkpoint_at_wait: list[bool] = []
-
-        def fake_zenml_wait(**_kwargs):
-            inside_checkpoint_at_wait.append(_is_inside_checkpoint())
-            return "resolved"
+    def test_wait_rejects_checkpoint_scope_before_creating_wait(self) -> None:
+        from kitaru.runtime import _checkpoint_scope, _flow_scope
 
         with (
             _flow_scope(name="flow_a"),
             _checkpoint_scope(name="checkpoint_a", checkpoint_type=None),
-            patch(
-                "kitaru.wait._resolve_zenml_wait",
-                return_value=fake_zenml_wait,
+            patch("kitaru.wait._resolve_zenml_wait") as resolve_wait,
+            pytest.raises(
+                kitaru.KitaruContextError,
+                match="cannot run inside a @checkpoint",
             ),
         ):
-            result = kitaru.wait(question="ask")
-            assert _is_inside_checkpoint() is True
+            kitaru.wait(question="ask")
 
-        assert result == "resolved"
-        assert inside_checkpoint_at_wait == [False]
+        resolve_wait.assert_not_called()
 
     def test_wait_delegates_to_zenml_wait(self) -> None:
         from kitaru.runtime import _flow_scope
@@ -310,6 +299,29 @@ class TestPlaceholderBehavior:
             question="Approve deploy?",
             timeout=600,
             metadata={"service": "api"},
+            name="approve_deploy",
+        )
+
+    def test_wait_at_flow_scope_delegates_without_checkpoint_scope(self) -> None:
+        from kitaru.runtime import _flow_scope
+
+        mock_zenml_wait = Mock(return_value="resolved")
+
+        with (
+            _flow_scope(name="flow_a"),
+            patch(
+                "kitaru.wait._resolve_zenml_wait",
+                return_value=mock_zenml_wait,
+            ),
+        ):
+            resolved = kitaru.wait(name="approve_deploy")
+
+        assert resolved == "resolved"
+        mock_zenml_wait.assert_called_once_with(
+            schema=None,
+            question=None,
+            timeout=600,
+            metadata=None,
             name="approve_deploy",
         )
 

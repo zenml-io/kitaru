@@ -4,6 +4,10 @@ Demonstrates two wait patterns:
 1. A boolean gate (approve/reject) using ``schema=bool``
 2. A structured input wait using a Pydantic schema
 
+Both waits live in the ``@flow`` body. Checkpoints do the restartable work
+before and after the human decision, but the wait itself is not inside a
+``@checkpoint``.
+
 When running locally, Kitaru prompts for input directly in the terminal.
 When running remotely, use the CLI to provide input and resume:
 

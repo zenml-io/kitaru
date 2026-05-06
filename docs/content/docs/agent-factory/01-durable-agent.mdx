@@ -55,12 +55,9 @@ Without kitaru, step 1's failure would have wasted the first turn's work and you
 
 ## How it composes
 
-`KitaruAgent` has two checkpoint strategies, controlled by `granular_checkpoints`:
+`KitaruAgent` defaults to `granular_checkpoints=True` — every model request and every tool call gets its own checkpoint and its own cache key. The cache-hit story above lands at every individual call: a flow that crashed after the third model request resumes by replaying only the calls after the third, everything before served from cache.
 
-- **`granular_checkpoints=True`** — every model request and every tool call gets its own checkpoint and its own cache key. The cache-hit story above lands at every individual call: a flow that crashed after the third model request resumes by replaying only the calls after the third.
-- **`granular_checkpoints=False`** (today's default) — one aggregating checkpoint per `agent.run_sync()`. Cache hit is at the turn boundary, which is what the FORCE_FAILURE demo above shows.
-
-The pydantic-ai adapter is moving toward granular as the default ([kitaru#280](https://github.com/zenml-io/kitaru/pull/280)) — once that lands, every stage in this tour automatically picks up per-call caching without any code change. Pass the kwarg explicitly today if you want the granular behavior in the meantime.
+Pass `KitaruAgent(agent, granular_checkpoints=False)` to opt in to a single aggregating turn-mode checkpoint per `agent.run_sync()` instead — useful when you want one inspectable artifact per run rather than per-call granularity.
 
 The `Profile` is the per-stage gate: stage 1 says `allowed_tools={"exec"}` and `build_tools(...)` filters out everything else. Later chapters add tools to the set and gain those capabilities; older stage files stay valid because the library grows monotonically.
 

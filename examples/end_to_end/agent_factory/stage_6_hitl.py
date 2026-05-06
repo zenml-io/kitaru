@@ -91,7 +91,14 @@ def agent_factory_flow() -> str:
         DockerSandbox(execution_id=execution_id, proxy=proxy) as sandbox,
     ):
         agent = build_agent(DEFAULT_PROFILE, sandbox=sandbox)
-        agent = KitaruAgent(agent)
+        # `ask_question`'s body calls `wait_for_input(...)`, and as of
+        # kitaru >=0.10 wait paths are flow-scope only. The granular tool
+        # checkpoint wrapper would put the wait *inside* a checkpoint
+        # body, which is forbidden — so opt that tool out of granular
+        # checkpointing. Other tools stay granular by default.
+        agent = KitaruAgent(
+            agent, tool_checkpoint_config_by_name={"ask_question": False}
+        )
         result = agent.run_sync("Carry out your procedure and return the result.")
 
     print(f"\n{result.output}\n")
