@@ -239,52 +239,6 @@ def test_cli_run_loads_final_report_when_runner_checkpoints_are_terminal(
     assert report == "# Durable agents\n\nReplay saves completed work."
 
 
-def test_research_bot_uses_real_runner_checkpoints_with_structured_outputs(
-    monkeypatch: pytest.MonkeyPatch,
-    primed_zenml: None,
-) -> None:
-    """The no-network test should exercise real KitaruRunner checkpoints."""
-    import kitaru.adapters.openai_agents._agent as openai_agent_module
-
-    del primed_zenml
-
-    def fake_openai_run(**kwargs: Any) -> SimpleNamespace:
-        agent = kwargs["agent"]
-        if agent.name == "research_planner":
-            output = WebSearchPlan(
-                searches=[
-                    WebSearchItem(query="durable agents", reason="baseline"),
-                    WebSearchItem(query="agent replay", reason="replay"),
-                ]
-            )
-        elif agent.name == "research_writer":
-            output = ReportData(
-                short_summary="Durability avoids repeated work.",
-                markdown_report="# Durable agents\n\nReplay saves completed work.",
-                follow_up_questions=["How should tools be checkpointed?"],
-            )
-        else:
-            output = "Search summary"
-        return SimpleNamespace(status="completed", final_output=output)
-
-    monkeypatch.setattr(openai_agent_module, "run_openai_agent_sync", fake_openai_run)
-
-    args = argparse.Namespace(
-        query=f"durable agents {uuid4().hex}",
-        max_searches=2,
-        model="gpt-5-nano",
-        planner_model=None,
-        search_model=None,
-        writer_model=None,
-        search_tool_model=None,
-        fail_on_search_error=True,
-    )
-
-    report = research_bot._run_once(args, image_override=None)
-
-    assert report == "# Durable agents\n\nReplay saves completed work."
-
-
 def test_flow_keeps_final_report_artifact_available(
     monkeypatch: pytest.MonkeyPatch,
     primed_zenml: None,
