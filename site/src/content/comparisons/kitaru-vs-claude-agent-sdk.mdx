@@ -4,8 +4,8 @@ competitorLogo: "/compare/claude-agent-sdk.svg"
 competitorTagline: "Build AI agents that autonomously read files, run commands, search the web, edit code, and more."
 title: "Kitaru vs Claude Agent SDK: The lifecycle layer for agents you build with Claude Agent SDK"
 shortTitle: "The lifecycle layer above the Agent SDK"
-description: "Kitaru and the Claude Agent SDK solve different problems. Keep the SDK, add Kitaru underneath for durable execution, artifact lineage, memory, and deployment on your own cloud."
-cardSubtitle: "Keep the SDK. Add durable execution, memory, and cloud-native deployment underneath."
+description: "Kitaru and the Claude Agent SDK solve different problems. Keep the SDK, add Kitaru underneath for durable execution, artifact lineage, replay, and deployment on your own cloud."
+cardSubtitle: "Keep the SDK. Add durable execution, artifact lineage, and cloud-native deployment underneath."
 ctaHeading: "Put the runtime underneath your Agent SDK"
 order: 10
 ---
@@ -16,7 +16,7 @@ import CodeCompare from '../../components/compare/CodeCompare.astro';
 import FeatureWithGraphic from '../../components/compare/FeatureWithGraphic.astro';
 import ComparisonCta from '../../components/compare/ComparisonCta.astro';
 
-Kitaru and the Claude Agent SDK solve different problems. The Agent SDK builds agents that read files, run commands, and solve coding tasks in a session you kick off yourself. Kitaru is the lifecycle layer above your SDK: durable execution, artifact lineage, durable memory, and deployment on your own infrastructure.
+Kitaru and the Claude Agent SDK solve different problems. The Agent SDK builds agents that read files, run commands, and solve coding tasks in a session you kick off yourself. Kitaru is the lifecycle layer above your SDK: durable execution, artifact lineage, replay, and deployment on your own infrastructure.
 
 Keep your SDK, model, and sandbox; for local, one-off use, you don't need Kitaru. But if you're running background services that must survive crashes, wait on humans or agents for inputs, and scale without blowing up your bill, try Kitaru.
 
@@ -64,16 +64,6 @@ Kitaru is opinionated about that layer. The same flow code runs locally first, t
 </FeatureWithGraphic>
 
 <FeatureWithGraphic
-  title="Long-running state and memory"
-  image="https://assets.kitaru.ai/content/compare/kitaru-vs-claude-agent-sdk/83026385/long-running-state-and-memory.avif"
-  imageAlt="Kitaru versioned memory across Python, CLI, and MCP"
->
-Agent SDK sessions resume with prior conversation context. For many local and coding-centric use cases, that's enough. But sessions persist the conversation — not a versioned memory system for production agent state.
-
-Kitaru gives you that: scoped, versioned state accessible across Python, CLI, and MCP. It's useful when an agent needs long-lived operational memory, when teams want an audit trail of what the agent knew and when, or when a reviewer asks "what state existed at this point in the run?" — and you need an answer that doesn't depend on `grep`.
-</FeatureWithGraphic>
-
-<FeatureWithGraphic
   title="Artifact lineage and run tracking"
   image="https://assets.kitaru.ai/content/compare/kitaru-vs-claude-agent-sdk/e21ddc22/artifact-lineage-and-run-tracking.avif"
   imageAlt="Kitaru artifact lineage and run tracking"
@@ -106,12 +96,6 @@ Kitaru captures artifacts from every `@checkpoint` automatically and links them 
       kitaru: "yes",
       competitor: "no",
       note: "wait() suspends a flow for hours or days; the SDK keeps a process alive.",
-    },
-    {
-      feature: "Versioned memory across runs",
-      kitaru: "yes",
-      competitor: "partial",
-      note: "The SDK resumes per-session conversation context. Kitaru exposes scoped, versioned state from Python, CLI, and MCP.",
     },
     {
       feature: "Artifact lineage per checkpoint",

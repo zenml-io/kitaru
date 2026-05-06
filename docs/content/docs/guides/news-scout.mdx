@@ -1,6 +1,6 @@
 ---
 title: News Scout
-description: An agentic news monitor with granular per-tool checkpoints, namespace-scoped memory, and remote deploy via image config
+description: An agentic news monitor with granular per-tool checkpoints, explicit run inputs, and remote deploy via image config
 ---
 
 The `news_scout` example (under `examples/end_to_end/news_scout/`) is a runnable PydanticAI agent that searches news sources, investigates articles, and scores what's worth surfacing. Every model request and every tool call is its own Kitaru checkpoint — individually cached, individually replayable, and visible in the dashboard.
@@ -9,7 +9,7 @@ It's a good reference if you want to see:
 
 - `KitaruAgent(granular_checkpoints=True)` wired end-to-end
 - A final `@checkpoint` that promotes the agent's free-text output to a **named artifact** (`final_report`) readable straight from the dashboard
-- Namespace memory read **detached** (outside the flow) so granular-mode agents see concrete values, not artifact refs
+- Explicit run inputs via `--interests`, passed into the flow as concrete Python values
 - `ImageSettings.secret_environment_from` for provider API keys, injected automatically when the active stack is remote
 
 ## What you get
@@ -70,16 +70,10 @@ The example loads `.env` via a tiny stdlib dotenv parser before any provider SDK
 
 <Step>
 
-Seed your interest profile (once), then run:
+Run once with the built-in interest list, or pass a custom list for that run:
 
 ```bash
-python scout.py --seed-profile
 python scout.py
-```
-
-Override interests per-run without touching memory:
-
-```bash
 python scout.py --interests "robotics,biotech"
 ```
 
@@ -91,23 +85,19 @@ python scout.py --interests "robotics,biotech"
 
 Granular mode can't coexist with an enclosing `@checkpoint` — the adapter falls back to inline execution inside a parent checkpoint, which hides the per-call granularity. To keep each tool call as its own durable step, `scout_agent.run_sync(...)` lives directly in the flow body.
 
-That constraint has a knock-on effect: agent inputs must be concrete Python values, not artifact refs from `kitaru.memory.get()`. So the example reads memory **outside** the flow and passes it in as a flow argument:
+That constraint has a practical consequence: the agent should receive ordinary Python values, not unresolved runtime handles. The example keeps the CLI parsing outside the flow, chooses either `--interests` or the built-in defaults, and passes the resulting list directly into `news_scout.run(...)`:
 
 ```python
 def main() -> int:
-    load_dotenv()
     # ... parse args ...
-
-    # Detached memory reads — namespace scope supports this
-    memory.configure(scope="news_scout", scope_type="namespace")
-    interests_from_memory = memory.get("interests")
-    interests = override or interests_from_memory or DEFAULT_INTERESTS
-
+    interests = _parse_interests(args.interests) or DEFAULT_INTERESTS
     news_scout.run(interests=interests)
 ```
 
 <Callout type="info">
-  Both the user profile and the flow's arguments stay in namespace-scoped memory. Flow-scoped memory is better when each flow needs its own private state — but that scope only works from **inside** a flow, which would put us back at the "inputs are DAG refs" problem.
+  If you want a saved profile, store it in your own database, config file, or
+  service, then load it before calling the flow. Kitaru keeps the execution
+  durable once the concrete values are passed in.
 </Callout>
 
 ## The `final_report` artifact
@@ -193,6 +183,5 @@ The agent config also retries automatically: `model_checkpoint_config={"retries"
 
 <Cards>
   <Card title="PydanticAI Adapter" href="/guides/pydantic-ai-adapter" description="Turn-mode, granular-mode, CapturePolicy, HITL wiring, and message history" />
-  <Card title="Memory" href="/guides/memory" description="Namespace / flow / execution scopes, detached reads, and compaction" />
   <Card title="Containerization" href="/guides/containerization" description="ImageSettings, remote stacks, and building the flow's container image" />
 </Cards>
