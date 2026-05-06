@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- PydanticAI adapter parallel tool-call events now keep assistant-emitted order in event logs, summaries, and fan-in metadata, even when tools start or finish out of order. (#306)
 - PydanticAI adapter checkpoint configs now accept `cache`, and granular model checkpoint cache keys ignore PydanticAI-generated per-run message metadata so identical logical prompts can cache across runs. (#279)
 
 ## [0.9.0] - 2026-05-05

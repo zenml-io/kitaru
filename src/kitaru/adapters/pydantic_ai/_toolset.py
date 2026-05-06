@@ -168,7 +168,9 @@ class KitaruToolset(WrapperToolset[AgentDepsT]):
                 capture_mode=capture_mode,
             )
 
-        event_id, event_context = tracker.start_tool_event()
+        event_id, event_context = tracker.start_tool_event(
+            tool_call_id=ctx.tool_call_id,
+        )
         if self.capture.correlate_otel_spans:
             attach_tool_correlation(event_id, event_context)
 

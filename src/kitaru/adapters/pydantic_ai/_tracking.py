@@ -189,6 +189,15 @@ class ToolEventContext:
     fan_out_from: str | None
 
 
+@dataclass(frozen=True)
+class _ReservedToolEvent:
+    tool_call_id: str
+    event_id: str
+    sequence_index: int
+    turn_index: int
+    fan_out_from: str | None
+
+
 @dataclass
 class EventTracker:
     agent_name: str
@@ -209,6 +218,15 @@ class EventTracker:
     _event_stream_handler_call_count: int = 0
     _event_stream_handler_duration_ms: float = 0.0
     _started_at: float = field(default_factory=time.perf_counter)
+    _lock: threading.RLock = field(
+        default_factory=threading.RLock, init=False, repr=False
+    )
+    _reserved_tool_events_by_call_id: dict[str, list[_ReservedToolEvent]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _event_sequence_by_id: dict[str, int] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.agent_name = normalize_agent_name(self.agent_name)
@@ -223,7 +241,8 @@ class EventTracker:
 
     @property
     def events(self) -> Sequence[AgentEvent]:
-        return tuple(self._events)
+        with self._lock:
+            return tuple(self._ordered_events())
 
     @property
     def event_log_artifact_name(self) -> str:
@@ -243,23 +262,63 @@ class EventTracker:
     def _next_event_id(self, event_kind: str) -> tuple[str, int]:
         self._counter += 1
         event_id = f'{self.agent_name}_{self.run_label}_{event_kind}_{self._counter}'
+        self._event_sequence_by_id[event_id] = self._counter
         return event_id, self._counter
 
+    def _ordered_events(self) -> list[AgentEvent]:
+        return sorted(self._events, key=lambda event: event.sequence_index)
+
+    def _event_sequence_index(self, event_id: str) -> int:
+        return self._event_sequence_by_id.get(event_id, self._counter + 1)
+
+    def _clear_reserved_tool_events_unlocked(self) -> None:
+        for reservations in self._reserved_tool_events_by_call_id.values():
+            for reservation in reservations:
+                self._event_sequence_by_id.pop(reservation.event_id, None)
+        self._reserved_tool_events_by_call_id.clear()
+
     def set_run_error(self, error: BaseException) -> None:
-        self._status = 'failed'
-        self._error = error_from_exception(error)
+        with self._lock:
+            self._status = 'failed'
+            self._error = error_from_exception(error)
 
     def start_model_event(self) -> tuple[str, ModelEventContext]:
-        event_id, sequence_index = self._next_event_id('llm_call')
-        self._model_call_count += 1
-        self._turn_index += 1
-        fan_in_from = list(self._pending_tool_event_ids)
-        self._pending_tool_event_ids.clear()
-        return event_id, ModelEventContext(
-            sequence_index=sequence_index,
-            turn_index=self._turn_index,
-            fan_in_from=fan_in_from,
-        )
+        with self._lock:
+            fan_in_from = sorted(
+                self._pending_tool_event_ids,
+                key=self._event_sequence_index,
+            )
+            self._pending_tool_event_ids.clear()
+            self._clear_reserved_tool_events_unlocked()
+            event_id, sequence_index = self._next_event_id('llm_call')
+            self._model_call_count += 1
+            self._turn_index += 1
+            return event_id, ModelEventContext(
+                sequence_index=sequence_index,
+                turn_index=self._turn_index,
+                fan_in_from=fan_in_from,
+            )
+
+    def reserve_tool_call_order(
+        self,
+        *,
+        parent_model_event_id: str,
+        turn_index: int,
+        tool_call_ids: Sequence[str],
+    ) -> None:
+        with self._lock:
+            for tool_call_id in tool_call_ids:
+                event_id, sequence_index = self._next_event_id('tool_call')
+                reserved = _ReservedToolEvent(
+                    tool_call_id=tool_call_id,
+                    event_id=event_id,
+                    sequence_index=sequence_index,
+                    turn_index=turn_index,
+                    fan_out_from=parent_model_event_id,
+                )
+                self._reserved_tool_events_by_call_id.setdefault(
+                    tool_call_id, []
+                ).append(reserved)
 
     def record_model_event(
         self,
@@ -274,36 +333,59 @@ class EventTracker:
         stream_event_count: int | None = None,
         error: BaseException | None = None,
     ) -> None:
-        if status == 'completed':
-            self._current_model_event_id = event_id
-        elif self._current_model_event_id == event_id:
-            self._current_model_event_id = None
+        with self._lock:
+            if status == 'completed':
+                self._current_model_event_id = event_id
+            elif self._current_model_event_id == event_id:
+                self._current_model_event_id = None
 
-        self._events.append(
-            ModelEvent(
-                event_id=event_id,
-                status=status,
-                sequence_index=event_context.sequence_index,
-                turn_index=event_context.turn_index,
-                parent_event_ids=event_context.fan_in_from,
-                fan_in_from=event_context.fan_in_from,
-                duration_ms=duration_ms,
-                artifacts=artifacts,
-                model_name=model_name,
-                usage=usage,
-                stream_event_count=stream_event_count,
-                error=error_from_exception(error) if error is not None else None,
+            self._events.append(
+                ModelEvent(
+                    event_id=event_id,
+                    status=status,
+                    sequence_index=event_context.sequence_index,
+                    turn_index=event_context.turn_index,
+                    parent_event_ids=event_context.fan_in_from,
+                    fan_in_from=event_context.fan_in_from,
+                    duration_ms=duration_ms,
+                    artifacts=artifacts,
+                    model_name=model_name,
+                    usage=usage,
+                    stream_event_count=stream_event_count,
+                    error=error_from_exception(error) if error is not None else None,
+                )
             )
-        )
 
-    def start_tool_event(self) -> tuple[str, ToolEventContext]:
-        event_id, sequence_index = self._next_event_id('tool_call')
-        self._tool_call_count += 1
-        return event_id, ToolEventContext(
-            sequence_index=sequence_index,
-            turn_index=self._turn_index,
-            fan_out_from=self._current_model_event_id,
-        )
+    def start_tool_event(
+        self,
+        *,
+        tool_call_id: str | None = None,
+    ) -> tuple[str, ToolEventContext]:
+        with self._lock:
+            reservation: _ReservedToolEvent | None = None
+            if isinstance(tool_call_id, str) and tool_call_id:
+                reservations = self._reserved_tool_events_by_call_id.get(tool_call_id)
+                if reservations:
+                    reservation = reservations.pop(0)
+                    if not reservations:
+                        self._reserved_tool_events_by_call_id.pop(tool_call_id, None)
+
+            if reservation is None:
+                event_id, sequence_index = self._next_event_id('tool_call')
+                turn_index = self._turn_index
+                fan_out_from = self._current_model_event_id
+            else:
+                event_id = reservation.event_id
+                sequence_index = reservation.sequence_index
+                turn_index = reservation.turn_index
+                fan_out_from = reservation.fan_out_from
+
+            self._tool_call_count += 1
+            return event_id, ToolEventContext(
+                sequence_index=sequence_index,
+                turn_index=turn_index,
+                fan_out_from=fan_out_from,
+            )
 
     def record_tool_event(
         self,
@@ -319,29 +401,30 @@ class EventTracker:
         artifacts: dict[str, str],
         error: BaseException | None = None,
     ) -> None:
-        if status == 'completed':
-            self._pending_tool_event_ids.append(event_id)
-        elif event_id in self._pending_tool_event_ids:
-            self._pending_tool_event_ids.remove(event_id)
+        with self._lock:
+            if status == 'completed':
+                self._pending_tool_event_ids.append(event_id)
+            elif event_id in self._pending_tool_event_ids:
+                self._pending_tool_event_ids.remove(event_id)
 
-        parent_event_ids = [event_context.fan_out_from] if event_context.fan_out_from is not None else []
-        self._events.append(
-            ToolEvent(
-                event_id=event_id,
-                status=status,
-                sequence_index=event_context.sequence_index,
-                turn_index=event_context.turn_index,
-                parent_event_ids=parent_event_ids,
-                tool_name=name,
-                toolset_kind=toolset_kind,
-                hitl=hitl,
-                capture_mode=capture_mode,
-                fan_out_from=event_context.fan_out_from,
-                duration_ms=duration_ms,
-                artifacts=artifacts,
-                error=error_from_exception(error) if error is not None else None,
+            parent_event_ids = [event_context.fan_out_from] if event_context.fan_out_from is not None else []
+            self._events.append(
+                ToolEvent(
+                    event_id=event_id,
+                    status=status,
+                    sequence_index=event_context.sequence_index,
+                    turn_index=event_context.turn_index,
+                    parent_event_ids=parent_event_ids,
+                    tool_name=name,
+                    toolset_kind=toolset_kind,
+                    hitl=hitl,
+                    capture_mode=capture_mode,
+                    fan_out_from=event_context.fan_out_from,
+                    duration_ms=duration_ms,
+                    artifacts=artifacts,
+                    error=error_from_exception(error) if error is not None else None,
+                )
             )
-        )
 
     def record_deferred_event(
         self,
@@ -352,42 +435,48 @@ class EventTracker:
         metadata: dict[str, object] | None,
         approved: bool | None = None,
     ) -> None:
-        event_id, sequence_index = self._next_event_id('deferred')
-        parent_event_ids = [self._current_model_event_id] if self._current_model_event_id else []
-        self._events.append(
-            DeferredEvent(
-                event_id=event_id,
-                status='completed',
-                sequence_index=sequence_index,
-                turn_index=self._turn_index,
-                parent_event_ids=parent_event_ids,
-                tool_name=tool_name,
-                deferred_kind=deferred_kind,
-                wait_name=wait_name,
-                metadata=metadata,
-                approved=approved,
+        with self._lock:
+            event_id, sequence_index = self._next_event_id('deferred')
+            parent_event_ids = [self._current_model_event_id] if self._current_model_event_id else []
+            self._events.append(
+                DeferredEvent(
+                    event_id=event_id,
+                    status='completed',
+                    sequence_index=sequence_index,
+                    turn_index=self._turn_index,
+                    parent_event_ids=parent_event_ids,
+                    tool_name=tool_name,
+                    deferred_kind=deferred_kind,
+                    wait_name=wait_name,
+                    metadata=metadata,
+                    approved=approved,
+                )
             )
-        )
 
     def record_stream_event(self, *, duration_ms: float, error: BaseException | None) -> None:
-        self._event_stream_handler_call_count += 1
-        self._event_stream_handler_duration_ms = round(self._event_stream_handler_duration_ms + duration_ms, 3)
-        event_id, sequence_index = self._next_event_id('event_stream')
-        self._events.append(
-            StreamEvent(
-                event_id=event_id,
-                status='failed' if error is not None else 'completed',
-                sequence_index=sequence_index,
-                turn_index=self._turn_index,
-                parent_event_ids=[],
-                index=self._event_stream_handler_call_count,
-                duration_ms=duration_ms,
-                error=error_from_exception(error) if error is not None else None,
+        with self._lock:
+            self._event_stream_handler_call_count += 1
+            self._event_stream_handler_duration_ms = round(
+                self._event_stream_handler_duration_ms + duration_ms, 3
             )
-        )
+            event_id, sequence_index = self._next_event_id('event_stream')
+            self._events.append(
+                StreamEvent(
+                    event_id=event_id,
+                    status='failed' if error is not None else 'completed',
+                    sequence_index=sequence_index,
+                    turn_index=self._turn_index,
+                    parent_event_ids=[],
+                    index=self._event_stream_handler_call_count,
+                    duration_ms=duration_ms,
+                    error=error_from_exception(error) if error is not None else None,
+                )
+            )
 
-    def build_run_summary(self) -> RunSummary:
-        ordered_events = sorted(self._events, key=lambda event: event.sequence_index)
+    def _build_run_summary_unlocked(
+        self,
+        ordered_events: list[AgentEvent],
+    ) -> RunSummary:
         event_stream_handler = None
         if self._event_stream_handler_call_count:
             event_stream_handler = EventStreamHandlerSummary(
@@ -400,7 +489,7 @@ class EventTracker:
             status=self._status,
             model_call_count=self._model_call_count,
             tool_call_count=self._tool_call_count,
-            total_events=self._counter,
+            total_events=len(ordered_events),
             turn_count=self._turn_index,
             event_ids_in_order=[event.event_id for event in ordered_events],
             duration_ms=round((time.perf_counter() - self._started_at) * 1000, 3),
@@ -411,20 +500,33 @@ class EventTracker:
             error=self._error,
         )
 
+    def build_run_summary(self) -> RunSummary:
+        with self._lock:
+            return self._build_run_summary_unlocked(self._ordered_events())
+
     def persist(self) -> None:
-        events_dump = dump_agent_events(self._events)
-        summary_dump = self.build_run_summary().model_dump(mode='json')
+        with self._lock:
+            ordered_events = self._ordered_events()
+            events_dump = dump_agent_events(ordered_events)
+            summary_dump = self._build_run_summary_unlocked(ordered_events).model_dump(
+                mode='json'
+            )
+            event_log_artifact_name = self.event_log_artifact_name
+            run_summary_artifact_name = self.run_summary_artifact_name
+            run_label = self.run_label
+            agent_name = self.agent_name
+
         if is_inside_checkpoint():
-            kitaru.save(self.event_log_artifact_name, events_dump, type='context')
-            kitaru.save(self.run_summary_artifact_name, summary_dump, type='context')
+            kitaru.save(event_log_artifact_name, events_dump, type='context')
+            kitaru.save(run_summary_artifact_name, summary_dump, type='context')
         else:
             logger.debug(
                 'Persisting PydanticAI tracker outside a checkpoint; emitting flow-level metadata only.',
-                extra={'agent_name': self.agent_name, 'run_label': self.run_label},
+                extra={'agent_name': agent_name, 'run_label': run_label},
             )
         kitaru.log(
-            pydantic_ai_events={self.run_label: events_dump},
-            pydantic_ai_run_summaries={self.run_label: summary_dump},
+            pydantic_ai_events={run_label: events_dump},
+            pydantic_ai_run_summaries={run_label: summary_dump},
         )
 
 

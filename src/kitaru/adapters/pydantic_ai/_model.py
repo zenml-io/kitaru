@@ -33,7 +33,7 @@ from ._kitaru_internal import is_inside_checkpoint, is_inside_flow
 from ._logging import logger
 from ._otel import attach_model_correlation
 from ._policy import CapturePolicy
-from ._tracking import get_current_tracker
+from ._tracking import EventTracker, ModelEventContext, get_current_tracker
 from ._utils import (
     CheckpointConfig,
     checkpoint_cache_key,
@@ -89,6 +89,28 @@ def _serialize_model_response(response: ModelResponse) -> dict[str, Any]:
     return cast(
         dict[str, Any], _MODEL_RESPONSE_ADAPTER.dump_python(response, mode="json")
     )
+
+
+def _trackable_tool_call_ids(
+    response: ModelResponse,
+    model_request_parameters: ModelRequestParameters,
+    capture: CapturePolicy,
+) -> list[str]:
+    """Return executable response tool-call ids that will produce Kitaru events."""
+    function_tool_names = {
+        tool.name for tool in model_request_parameters.function_tools
+    }
+    tool_call_ids: list[str] = []
+    for tool_call in response.tool_calls:
+        tool_call_id = tool_call.tool_call_id
+        if (
+            tool_call.tool_name in function_tool_names
+            and isinstance(tool_call_id, str)
+            and tool_call_id
+            and capture.capture_mode_for_tool(tool_call.tool_name) is not None
+        ):
+            tool_call_ids.append(tool_call_id)
+    return tool_call_ids
 
 
 def _serialize_stream_event(event: Any) -> dict[str, Any]:
@@ -167,6 +189,25 @@ class KitaruModel(WrapperModel):
 
     def _should_track(self) -> bool:
         return self._capture.emit_child_events and is_inside_checkpoint()
+
+    def _reserve_tool_call_order(
+        self,
+        *,
+        tracker: EventTracker,
+        event_id: str,
+        event_context: ModelEventContext,
+        response: ModelResponse,
+        model_request_parameters: ModelRequestParameters,
+    ) -> None:
+        tracker.reserve_tool_call_order(
+            parent_model_event_id=event_id,
+            turn_index=event_context.turn_index,
+            tool_call_ids=_trackable_tool_call_ids(
+                response,
+                model_request_parameters,
+                self._capture,
+            ),
+        )
 
     async def request(
         self,
@@ -261,6 +302,13 @@ class KitaruModel(WrapperModel):
             model_name=response.model_name,
             usage=response.usage,
         )
+        self._reserve_tool_call_order(
+            tracker=tracker,
+            event_id=event_id,
+            event_context=event_context,
+            response=response,
+            model_request_parameters=model_request_parameters,
+        )
         return response
 
     @asynccontextmanager
@@ -353,4 +401,14 @@ class KitaruModel(WrapperModel):
             model_name=response.model_name,
             usage=response.usage,
             stream_event_count=stream_event_count,
+        )
+        # Pydantic AI only builds the CallToolsNode after this stream context
+        # closes and the final ModelResponse is returned, so this reservation is
+        # still made before any corresponding KitaruToolset calls can start.
+        self._reserve_tool_call_order(
+            tracker=tracker,
+            event_id=event_id,
+            event_context=event_context,
+            response=response,
+            model_request_parameters=model_request_parameters,
         )
