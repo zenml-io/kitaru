@@ -17,6 +17,7 @@ export default defineConfig({
     '/get-started': { status: 301, destination: '/book-a-demo' },
     '/docs/concepts/memory': { status: 301, destination: '/docs/concepts/checkpoints' },
     '/docs/guides/memory': { status: 301, destination: '/docs/guides/artifacts' },
+    '/blog/kitaru-agents-now-have-memory': { status: 301, destination: '/blog' },
   },
   integrations: [sitemap(), mdx()],
   markdown: {

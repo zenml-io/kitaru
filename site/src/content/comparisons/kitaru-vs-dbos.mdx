@@ -3,7 +3,7 @@ competitor: "DBOS"
 competitorLogo: "/compare/dbos.svg"
 title: "Kitaru vs DBOS: Durable execution, shaped around Python agents"
 description: "DBOS and Kitaru both make code durable. DBOS is polyglot, Postgres-backed, and built for general app workflows. Kitaru is Python-first and shaped for agent loops: LLM calls, wait/resume, artifact lineage, and stack retargeting are primitives."
-cardSubtitle: "Durable execution, shaped around Python agents. LLM calls, memory, and artifacts in the box."
+cardSubtitle: "Durable execution, shaped around Python agents. LLM calls, waits, and artifacts in the box."
 ctaHeading: "Durable execution, shaped for your Python agent"
 order: 30
 ogImage: "https://assets.kitaru.ai/compare/9abe6a89/og-card.avif"
@@ -130,7 +130,7 @@ We built Kitaru around a different shape of work. An agent loop has expensive LL
 | State backend | Postgres, alongside your OLTP data | Your own S3 / GCS / Azure Blob |
 | LLM call | Inside a `@DBOS.step`; OTel-compatible traces and logs if you wire up provider instrumentation | `kitaru.llm()` with alias-resolved keys and per-checkpoint cost |
 | Pause / resume | `DBOS.send` / `DBOS.recv` messaging | `kitaru.wait()` with schema-validated input |
-| Cross-run state | Bring your own store | `kitaru.memory` with scopes |
+| Cross-run state | Bring your own store | Bring your own store; artifacts for replayable run outputs |
 | Scheduling | `@DBOS.scheduled()` (cron) + `Queue` with concurrency + dedup | Stack scheduler, or periodic invocation at the call site |
 | Deployment | Library embedded in whatever Python app you already ship | Named, versioned deployments with tag routing |
 <CodeCompare
@@ -203,5 +203,5 @@ def review_flow(topic: str) -> str:
 />
 
 <ComparisonCta headline={frontmatter.ctaHeading}>
-If your durability problem is polyglot services against Postgres with a SOC 2 or HIPAA control plane on day one, DBOS is better-shaped for that workload — be honest about which side you're on. If it's shaped like a Python agent loop (LLM calls, memory, artifacts, human/agent approval gates), Kitaru removes the glue layer you'd otherwise write on top of a general-purpose workflow engine.
+If your durability problem is polyglot services against Postgres with a SOC 2 or HIPAA control plane on day one, DBOS is better-shaped for that workload — be honest about which side you're on. If it's shaped like a Python agent loop (LLM calls, artifacts, human/agent approval gates), Kitaru removes the glue layer you'd otherwise write on top of a general-purpose workflow engine.
 </ComparisonCta>
