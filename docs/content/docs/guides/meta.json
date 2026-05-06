@@ -17,6 +17,7 @@
     "secrets-and-model-registration",
     "secrets",
     "pydantic-ai-adapter",
+    "openai-agents-adapter",
     "news-scout"
   ]
 }

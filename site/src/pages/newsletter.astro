@@ -1,0 +1,231 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+---
+
+<Base
+  title="Newsletter | Kitaru"
+  description="Get occasional updates from the Kitaru team — release notes, tutorials, and writing on durable execution for AI agents."
+>
+  <Nav />
+  <main id="main-content">
+    <section class="nl-hero">
+      <div class="nl-card" data-reveal>
+        <span class="pill-badge">
+          <span class="pulse-dot"></span>
+          Kitaru newsletter
+        </span>
+        <h1 class="nl-headline">
+          Updates from the team building <span class="accent-shimmer">durable agents</span>.
+        </h1>
+        <p class="nl-subtitle">
+          We&rsquo;ll send the occasional release note, tutorial, and writing on durable execution. No spam.
+        </p>
+
+        <form id="newsletterForm" class="nl-form" novalidate>
+          <label for="nl-email" class="sr-only">Email</label>
+          <div class="nl-field-row">
+            <input
+              type="email"
+              id="nl-email"
+              name="email"
+              required
+              autocomplete="email"
+              placeholder="you@company.com"
+            />
+            <button type="submit" class="btn-accent nl-submit">Sign me up</button>
+          </div>
+          <p class="nl-error" id="newsletterError" aria-live="polite"></p>
+        </form>
+
+        <div id="newsletterSuccess" class="nl-success" role="status" aria-live="polite" hidden>
+          <h2 id="newsletterSuccessHeadline">You&rsquo;re on the list.</h2>
+          <p id="newsletterSuccessBody">We&rsquo;ll be in touch.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .nl-hero {
+    min-height: 70vh;
+    padding: 140px clamp(24px, 5vw, 80px) 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nl-card {
+    max-width: 560px;
+    width: 100%;
+    text-align: center;
+  }
+
+  .nl-headline {
+    font-size: clamp(2rem, 4.5vw, 3rem);
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    margin: 24px 0 16px;
+    color: var(--color-primary);
+  }
+
+  .nl-subtitle {
+    font-size: 1.05rem;
+    line-height: 1.6;
+    color: var(--color-secondary);
+    margin: 0 auto 32px;
+    max-width: 480px;
+  }
+
+  .nl-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .nl-field-row {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .nl-field-row input {
+    flex: 1;
+    padding: 14px 16px;
+    font-size: 0.95rem;
+    font-family: var(--font-ui);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-surface);
+    color: var(--color-primary);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .nl-field-row input::placeholder {
+    color: var(--color-muted);
+  }
+
+  .nl-field-row input:focus {
+    border-color: var(--color-accent-darker);
+    box-shadow: 0 0 0 3px oklch(0.60 0.17 45 / 0.1);
+    outline: none;
+  }
+
+  .nl-submit {
+    flex-shrink: 0;
+  }
+
+  .nl-submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .nl-error {
+    font-size: 0.85rem;
+    color: var(--color-error);
+    margin: 0;
+    min-height: 1.2em;
+    text-align: left;
+  }
+
+  .nl-success {
+    margin-top: 8px;
+    padding: 32px 24px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+    animation: nl-fade-up 0.45s ease both;
+  }
+
+  .nl-success h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    margin: 0 0 8px;
+  }
+
+  .nl-success p {
+    font-size: 0.95rem;
+    color: var(--color-secondary);
+    margin: 0;
+  }
+
+  @keyframes nl-fade-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (max-width: 540px) {
+    .nl-hero { padding: 120px 20px 60px; }
+    .nl-field-row {
+      flex-direction: column;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nl-success {
+      animation: none;
+    }
+  }
+</style>
+
+<script>
+  const form = document.getElementById('newsletterForm') as HTMLFormElement | null;
+  const errorEl = document.getElementById('newsletterError');
+  const successEl = document.getElementById('newsletterSuccess');
+  const headlineEl = document.getElementById('newsletterSuccessHeadline');
+  const bodyEl = document.getElementById('newsletterSuccessBody');
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (errorEl) errorEl.textContent = '';
+
+    const emailInput = form.querySelector('#nl-email') as HTMLInputElement;
+    const email = emailInput.value.trim();
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (errorEl) errorEl.textContent = 'Please enter a valid email address.';
+      return;
+    }
+
+    const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting…';
+
+    try {
+      const resp = await fetch('/api/newsletter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const result = await resp.json() as { ok?: boolean; alreadySubscribed?: boolean; error?: string };
+
+      if (!resp.ok || !result.ok) {
+        if (errorEl) errorEl.textContent = result.error || 'Something went wrong. Please try again.';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Sign me up';
+        return;
+      }
+
+      if (result.alreadySubscribed && headlineEl && bodyEl) {
+        headlineEl.textContent = 'You’re already on the list.';
+        bodyEl.textContent = 'No need to sign up again — we’ll be in touch.';
+      }
+
+      form.hidden = true;
+      if (successEl) successEl.hidden = false;
+
+      const eventName = result.alreadySubscribed ? 'Newsletter Already Subscribed' : 'Newsletter Signup Confirmed';
+      window.analytics?.track?.(eventName, { source: 'newsletter' });
+      window.plausible?.(eventName, { props: { source: 'newsletter' } });
+    } catch {
+      if (errorEl) errorEl.textContent = 'Network error. Please try again.';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Sign me up';
+    }
+  });
+</script>

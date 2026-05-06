@@ -7,12 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-05-05
+
 ### Added
-- OSS-first auth management for service accounts and API keys via `KitaruClient.auth`, `kitaru auth service-accounts`, and `kitaru auth api-keys`. Raw API-key values are only returned on create/rotate so they can be stored immediately; list/show/update responses stay metadata-only.
+- OpenAI Agents SDK adapter (`kitaru.adapters.openai_agents`) — wrap an `Agent`/`Runner` with `KitaruRunner` to make OpenAI Agents SDK runs durable, replayable, and observable under a Kitaru flow. Supports two tracking strategies via `checkpoint_strategy="runner_call"` (one checkpoint per `Runner.run`, recommended when you want a clean `.wait()` return value) or `checkpoint_strategy="calls"` (per-tool/per-model checkpoints for finer replay units, with per-checkpoint artifacts visible in the Kitaru UI / `KitaruClient`). The guide at `/guides/openai-agents-adapter` walks through the trade-offs. (#295)
+- OpenAI Agents integration example (`examples/integrations/openai_agents_agent/`) and an end-to-end `openai_research_bot` example (planner/writer runner checkpoints, submitted search fan-out, and final report artifacts, with remote secret guidance and Kitaru UI artifacts). Both are exercised by the smoke test. (#295)
+- Markdown exports for every docs page at `kitaru.ai/docs/<slug>.md`, plus a substantially expanded `/llms.txt` index — making the docs friendlier for LLMs and agents that consume them programmatically. (#303)
+
+### Changed
+- `flow.run(...).wait()` now raises a new dedicated `KitaruAmbiguousFlowResultError` (subclass of `KitaruRuntimeError`) when the flow has multiple terminal checkpoints with no single sink (common with the OpenAI Agents adapter's `checkpoint_strategy="calls"`). The error names the terminal checkpoints, points at the execution's artifacts in the Kitaru UI, and suggests `KitaruClient` retrieval and the `runner_call` strategy as alternatives. Catching this specific subclass lets callers handle the ambiguity case without accidentally swallowing real execution failures.
+
+## [0.8.0] - 2026-05-04
+
+### Added
+- OSS-first auth management for service accounts and API keys via `KitaruClient.auth`, `kitaru auth service-accounts`, and `kitaru auth api-keys`. Raw API-key values are only returned on create/rotate so they can be stored immediately; list/show/update responses stay metadata-only. (#230)
+- Synthetic memory operations now register as `StepType.MEMORY_CALL` checkpoints (instead of generic `tool_call`), so memory reads/writes surface distinctly in execution graphs and `@checkpoint(type="memory_call")` is supported. (#239)
+
+### Changed
+- Pydantic AI adapter now supports `pydantic-ai-slim>=1.86.0,<2`: per-run `capabilities` and `spec` are forwarded to Pydantic AI and included in turn-checkpoint cache keys to avoid stale cached turns. (#270)
+- `examples/` is reorganized into `features/`, `integrations/`, and `end_to_end/` subdirectories. Existing example paths (e.g. `examples/basic_flow/...`) move under one of these categories — update any pinned references. (#242)
 
 ### Fixed
-- Checkpoint output handles now display Kitaru guidance to call `.load()` instead of leaking raw ZenML artifact metadata when stringified in flow bodies. (#127)
-- Pydantic AI adapter now supports `pydantic-ai-slim>=1.86.0,<2`: per-run `capabilities` and `spec` are forwarded to Pydantic AI and included in turn-checkpoint cache keys to avoid stale cached turns. (#248)
+- Checkpoint output handles now display Kitaru guidance to call `.load()` instead of leaking raw ZenML artifact metadata when stringified in flow bodies. (#252)
+- `kitaru executions replay` now resolves project-local modules correctly when invoked from a project directory, instead of falling back to the CLI bootstrap module via `__main__` and producing a misleading replay. (#218)
+- Runtime log retrieval (`KitaruClient.executions.logs(...)`, `kitaru executions logs`) now tolerates server/client version skew on log payload schemas instead of erroring out. (#251)
+- Active-stack resolution no longer silently falls back to a deleted or unavailable stack — flow submission, MCP, and `kitaru status` now surface a clear error when the configured active stack is gone. (#263)
+- `KitaruAgent` auto-checkpointing of agents that use `@hitl_tool(schema=...)` no longer crashes with `PydanticSerializationError: Unable to serialize unknown type: <class 'type'>` under `pydantic-ai-slim>=1.86`, which now surfaces per-tool metadata through the `AgentRunResult` tree. (#292)
 
 ## [0.7.0] - 2026-04-24
 

@@ -79,6 +79,7 @@ class TestPublicExports:
             "FailureOrigin",
             "FlowHandle",
             "ImageSettings",
+            "KitaruAmbiguousFlowResultError",
             "KitaruBackendError",
             "KitaruClient",
             "KitaruConfig",
