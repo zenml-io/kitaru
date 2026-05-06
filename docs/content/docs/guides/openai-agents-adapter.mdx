@@ -1,0 +1,147 @@
+---
+title: OpenAI Agents Adapter
+description: Wrap an OpenAI Agents SDK Agent with KitaruRunner so calls are durable and replayable inside Kitaru flows
+---
+
+Kitaru's OpenAI Agents adapter lets you keep your existing OpenAI Agents SDK
+agent logic while adding Kitaru durability around it.
+
+```python
+from agents import Agent
+from kitaru.adapters.openai_agents import KitaruRunner
+
+agent = Agent(name="researcher", model=your_model)
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+```
+
+The runtime default is `checkpoint_strategy="calls"` (per-call checkpoints —
+see below); pass `"runner_call"` whenever you want a single terminal
+checkpoint so `flow.run(...).wait()` returns the run result directly.
+
+You run the agent through `runner.run(...)` or `runner.run_sync(...)` with an
+`OpenAIRunRequest`.
+
+## Install
+
+```bash
+uv add "kitaru[openai-agents,local]"
+```
+
+Then initialize/login as usual:
+
+```bash
+kitaru init
+kitaru login
+kitaru status
+```
+
+## Minimal flow
+
+```python
+from kitaru import flow
+from kitaru.adapters.openai_agents import KitaruRunner, OpenAIRunRequest
+
+runner = KitaruRunner(agent, checkpoint_strategy="runner_call")
+
+@flow
+def research(prompt: str) -> str:
+    result = runner.run_sync(OpenAIRunRequest.start(prompt))
+    return str(result.final_output)
+```
+
+## Checkpoint strategy choices
+
+You choose how Kitaru places checkpoints with `checkpoint_strategy=`.
+
+### `checkpoint_strategy="runner_call"` (recommended for `.wait()`)
+
+Kitaru places one checkpoint around the outer `Runner.run(...)` call. That
+single checkpoint becomes the flow's terminal artifact, so
+`flow.run(...).wait()` returns the run result cleanly.
+
+Use this when you want one coarse replay boundary for the whole agent run, or
+whenever you want a clean Python value back from `.wait()`.
+
+### `checkpoint_strategy="calls"` (default)
+
+Kitaru catches supported model/tool calls individually as separate peer
+checkpoints under the flow.
+
+Use this when you want finer replay units (for example: if call 6 fails, calls
+1–5 can come from cache).
+
+Because the per-call checkpoints are siblings under the flow with no single
+sink, `flow.run(...).wait()` cannot pick one as "the" return value and raises
+`KitaruAmbiguousFlowResultError`. The per-checkpoint artifacts are still
+fully visible in the Kitaru UI and retrievable via `KitaruClient` — the
+error message points at them. If you need a clean `.wait()` return value,
+switch to `checkpoint_strategy="runner_call"`. Wrapping the `runner.run_sync()`
+call in your own `@checkpoint` is **not** a workaround here — the adapter
+guards against it and will raise, because per-call checkpoints cannot be
+nested inside another Kitaru checkpoint.
+
+## Important guardrail
+
+`checkpoint_strategy="calls"` must run from flow scope (not from inside another
+`@checkpoint`), because the adapter needs room to open inner checkpoints for
+model/tool calls.
+
+## Runnable example
+
+This example uses the real OpenAI API (not a stub model), so set your key:
+
+```bash
+uv sync --extra local --extra openai-agents
+export OPENAI_API_KEY='sk-...'
+# default model in the example is gpt-5-nano
+# optional override: any OpenAI model you have access to
+# export OPENAI_AGENTS_MODEL='<another-openai-model>'
+uv run examples/integrations/openai_agents_agent/openai_agents_adapter.py
+```
+
+## End-to-end research bot example
+
+For a larger example, run the OpenAI research bot:
+
+```bash
+cd examples/end_to_end/openai_research_bot
+uv sync --extra local --extra openai-agents
+uv run kitaru init
+export OPENAI_API_KEY='sk-...'
+uv run python research_bot.py "AI agent durability" --max-searches 2
+```
+
+The workflow keeps the original research-bot shape:
+
+```text
+planner → submitted search fan-out → writer report
+```
+
+The planner and writer run at flow scope through `KitaruRunner` with
+`checkpoint_strategy="runner_call"`. The planned searches fan out with
+`run_search_item.submit(...)`, so each search is its own durable checkpoint.
+Ordinary Kitaru checkpoints publish stable dashboard artifacts such as the
+normalized research plan, search summaries, and final report.
+
+The example also uses a local OpenAI Agents SDK `@function_tool` named
+`search_web` instead of the hosted `WebSearchTool`. The local tool calls the
+OpenAI Responses API with `web_search`, which makes the checkpoint trace clearer
+with the adapter's current public behavior.
+
+Look for these artifacts in the Kitaru UI:
+
+- `research_plan`
+- `search_summaries`
+- `durability_drill`
+- `final_report`
+- `research_report_metadata`
+
+To test the durable-retry story directly, set
+`KITARU_RESEARCH_BOT_FAIL_AFTER_SEARCHES=1` before running the example. It will
+fail after the submitted searches complete. Unset the flag and run
+`kitaru executions replay <EXECUTION_ID> --from durability_drill_gate`; the
+replay should reuse the completed planner/search checkpoints and continue into
+the writer. `retry` tries to restart the same failed execution and may be
+unavailable on server-backed stacks after a run has concluded.
+
+See also: [Replay and overrides](/guides/replay-and-overrides).

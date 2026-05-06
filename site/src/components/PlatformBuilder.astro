@@ -5,12 +5,12 @@
 <section id="platform-builder" class="pb-section section-pad">
   <div class="section-inner">
     <div class="pb-header" data-reveal>
-      <span class="section-eyebrow">FOR PLATFORM BUILDERS</span>
+      <span class="section-eyebrow">THE MISSING LAYER</span>
       <h2 class="section-title">
-        Runtime primitives, under what you already run.
+        Most enterprises already own platform and infrastructure. Runtime is the gap.
       </h2>
       <p class="pb-desc">
-        Agent tooling really lives in four layers. Kitaru owns one of them &mdash; the runtime &mdash; and leaves the other three to the tools your teams already picked.
+        Keep your SSO, RBAC, cloud accounts, buckets, clusters, and agent SDKs. Kitaru fills the layer between them: how agent work survives, waits, recovers, and moves across execution targets.
       </p>
     </div>
 
@@ -19,7 +19,7 @@
       <div class="pb-layer pb-layer-model" data-reveal="fade-up" data-reveal-delay="1">
         <div class="pb-layer-head">
           <span class="pb-layer-label">Model layer</span>
-          <span class="pb-layer-role">the LLM itself</span>
+          <span class="pb-layer-role">reasoning and native tool-use behavior</span>
         </div>
         <div class="pb-layer-tags">
           <span class="pb-tag">OpenAI</span>
@@ -36,7 +36,7 @@
       <div class="pb-layer pb-layer-harness" data-reveal="fade-up" data-reveal-delay="2">
         <div class="pb-layer-head">
           <span class="pb-layer-label">Harness layer</span>
-          <span class="pb-layer-role">the loop around the model</span>
+          <span class="pb-layer-role">the inner loop around the model</span>
         </div>
         <div class="pb-layer-tags">
           <span class="pb-tag">Pydantic AI / Harness</span>
@@ -53,17 +53,17 @@
       <div class="pb-layer pb-layer-kitaru" data-reveal="fade-up" data-reveal-delay="3">
         <div class="pb-layer-head">
           <span class="pb-layer-label">Runtime layer</span>
-          <span class="pb-layer-role"><strong>Kitaru</strong> &mdash; how the agent survives</span>
+          <span class="pb-layer-role"><strong>Kitaru</strong> &mdash; the outer runtime</span>
         </div>
         <div class="pb-layer-tags">
           <span class="pb-tag pb-tag-accent">checkpoints</span>
           <span class="pb-tag pb-tag-accent">replay</span>
           <span class="pb-tag pb-tag-accent">resume</span>
           <span class="pb-tag pb-tag-accent">wait()</span>
+          <span class="pb-tag pb-tag-accent">isolated execution</span>
           <span class="pb-tag pb-tag-accent">versions + tag routing</span>
           <span class="pb-tag pb-tag-accent">invocation</span>
           <span class="pb-tag pb-tag-accent">artifacts + state</span>
-          <span class="pb-tag pb-tag-accent">isolated execution</span>
         </div>
       </div>
 
@@ -72,7 +72,7 @@
       <div class="pb-layer pb-layer-platform" data-reveal="fade-up" data-reveal-delay="4">
         <div class="pb-layer-head">
           <span class="pb-layer-label">Platform layer</span>
-          <span class="pb-layer-role">how the org governs</span>
+          <span class="pb-layer-role">how the org governs and exposes agents</span>
         </div>
         <div class="pb-layer-tags">
           <span class="pb-tag">auth</span>
@@ -89,13 +89,13 @@
 
     <div class="pb-callout" data-reveal data-reveal-delay="4">
       <p class="pb-callout-line">
-        Kitaru isn&rsquo;t an agent platform. It&rsquo;s the runtime layer underneath one.
+        Kitaru isn&rsquo;t an agent platform. It&rsquo;s the runtime layer your platform runs agents on.
       </p>
       <p class="pb-callout-sub">
-        Checkpoints, replay, resume, versioned deployments. The layer platform teams keep rebuilding from scratch.
+        Kubernetes can restart a pod. It cannot replay an agent from checkpoint 10 or wait three days for a human approval without burning compute.
       </p>
       <p class="pb-callout-sub">
-        Open source. Self-hosted. No lock-in to a harness or a platform.
+        Open source. Self-hosted. No lock-in to a model, harness, or platform.
       </p>
     </div>
   </div>

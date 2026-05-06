@@ -1,4 +1,4 @@
-import { getPageImage, source } from '@/lib/source';
+import { getMarkdownUrl, getPageImage, source } from '@/lib/source';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/mdx-components';
@@ -13,7 +13,7 @@ export default async function Page(props: PageProps<'/[[...slug]]'>) {
   if (!page) notFound();
 
   const MDX = page.data.body;
-  const markdownUrl = `/docs/llms.mdx/docs/${[...page.slugs, 'index.mdx'].join('/')}`;
+  const markdownUrl = getMarkdownUrl(page);
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
