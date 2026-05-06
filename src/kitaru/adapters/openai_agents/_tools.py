@@ -149,7 +149,7 @@ async def _tracked_tool_call(
         return await callback(context, input_json)
 
     assert tracker is not None
-    event_id, event_context = tracker.start_tool_event()
+    event_id, event_context = tracker.start_tool_event(tool_call_id=tool_call_id)
     artifacts: dict[str, str] = {}
     parsed_args = _parse_json(input_json)
     if capture.save_input:
