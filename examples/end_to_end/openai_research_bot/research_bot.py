@@ -190,10 +190,21 @@ def _new_runner(agent: Any, *, name: str | None = None) -> KitaruRunner:
 
 @checkpoint
 def publish_search_summaries(
-    summaries: list[SearchSummary],
+    summaries: list[Any],
 ) -> Annotated[list[dict[str, Any]], "search_summaries"]:
-    """Save the aggregate search results as a readable dashboard artifact."""
-    return [summary.model_dump(mode="json") for summary in summaries]
+    """Save the aggregate search results as a readable dashboard artifact.
+
+    Submitted checkpoints can reload Pydantic objects through a different import
+    path than the direct script uses. Keep the ZenML boundary permissive, then
+    validate each item against this module's `SearchSummary` model inside the
+    checkpoint body.
+    """
+    return [
+        _expect_structured_output(
+            summary, SearchSummary, stage="search summary"
+        ).model_dump(mode="json")
+        for summary in summaries
+    ]
 
 
 @checkpoint

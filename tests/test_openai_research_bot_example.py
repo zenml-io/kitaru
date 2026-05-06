@@ -3,7 +3,7 @@
 import argparse
 import importlib
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, get_type_hints
 from uuid import uuid4
 
 import pytest
@@ -25,6 +25,7 @@ from examples.end_to_end.openai_research_bot.research_bot import (
     parse_args,
 )
 from examples.end_to_end.openai_research_bot.tools import _safe_error_message
+from pydantic import BaseModel
 
 from kitaru.client import KitaruClient
 from kitaru.errors import KitaruAmbiguousFlowResultError
@@ -78,6 +79,41 @@ def test_normalize_search_plan_adds_fallback_for_empty_plan() -> None:
     assert len(normalized.searches) == 1
     assert normalized.searches[0].query == "Why does replay help agents?"
     assert "Fallback" in normalized.searches[0].reason
+
+
+class SearchSummaryFromOtherImportPath(BaseModel):
+    index: int
+    query: str
+    reason: str
+    status: str
+    summary: str
+    error_message: str | None = None
+
+
+def test_publish_search_summaries_accepts_cross_import_model_instances() -> None:
+    """Submitted checkpoints can reload models through a different import path."""
+    foreign_summary = SearchSummaryFromOtherImportPath(
+        index=0,
+        query="durable agents",
+        reason="baseline",
+        status="completed",
+        summary="Checkpointing avoids duplicate calls.",
+    )
+
+    summary_annotation = get_type_hints(research_bot.publish_search_summaries._func)[
+        "summaries"
+    ]
+    assert summary_annotation == list[Any]
+    assert research_bot.publish_search_summaries._func([foreign_summary]) == [
+        {
+            "index": 0,
+            "query": "durable agents",
+            "reason": "baseline",
+            "status": "completed",
+            "summary": "Checkpointing avoids duplicate calls.",
+            "error_message": None,
+        }
+    ]
 
 
 def test_writer_input_includes_completed_and_failed_summaries() -> None:
@@ -186,6 +222,52 @@ def test_cli_run_loads_final_report_when_runner_checkpoints_are_terminal(
         "_new_runner",
         lambda *_args, **_kwargs: FakeRunner(),
     )
+
+    args = argparse.Namespace(
+        query=f"durable agents {uuid4().hex}",
+        max_searches=2,
+        model="gpt-5-nano",
+        planner_model=None,
+        search_model=None,
+        writer_model=None,
+        search_tool_model=None,
+        fail_on_search_error=True,
+    )
+
+    report = research_bot._run_once(args, image_override=None)
+
+    assert report == "# Durable agents\n\nReplay saves completed work."
+
+
+def test_research_bot_uses_real_runner_checkpoints_with_structured_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+    primed_zenml: None,
+) -> None:
+    """The no-network test should exercise real KitaruRunner checkpoints."""
+    import kitaru.adapters.openai_agents._agent as openai_agent_module
+
+    del primed_zenml
+
+    def fake_openai_run(**kwargs: Any) -> SimpleNamespace:
+        agent = kwargs["agent"]
+        if agent.name == "research_planner":
+            output = WebSearchPlan(
+                searches=[
+                    WebSearchItem(query="durable agents", reason="baseline"),
+                    WebSearchItem(query="agent replay", reason="replay"),
+                ]
+            )
+        elif agent.name == "research_writer":
+            output = ReportData(
+                short_summary="Durability avoids repeated work.",
+                markdown_report="# Durable agents\n\nReplay saves completed work.",
+                follow_up_questions=["How should tools be checkpointed?"],
+            )
+        else:
+            output = "Search summary"
+        return SimpleNamespace(status="completed", final_output=output)
+
+    monkeypatch.setattr(openai_agent_module, "run_openai_agent_sync", fake_openai_run)
 
     args = argparse.Namespace(
         query=f"durable agents {uuid4().hex}",
