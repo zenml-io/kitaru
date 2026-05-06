@@ -480,6 +480,13 @@ def _list_stack_entries() -> list[_StackListEntry]:
     return _config_stacks._list_stack_entries(client_factory=Client)
 
 
+def classify_stack_model_deployment_type(
+    stack_model: object,
+) -> _config_stacks._StackShowType:
+    """Classify an already-hydrated stack into Kitaru's deployment taxonomy."""
+    return _config_stacks.classify_stack_model_deployment_type(stack_model)
+
+
 def classify_stack_deployment_type(
     name_or_id: str | None = None,
 ) -> _config_stacks._StackShowType:

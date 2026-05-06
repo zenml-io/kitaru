@@ -50,6 +50,9 @@ from kitaru._source_aliases import (
     build_pipeline_source_alias,
     callable_name,
 )
+from kitaru._telemetry import (
+    deployment_metadata_for_stack as _deployment_metadata_for_stack,
+)
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
@@ -61,7 +64,6 @@ from kitaru.config import (
     _read_env_model_registry,
     _read_model_registry_config,
     build_frozen_execution_spec,
-    classify_stack_deployment_type,
     image_settings_to_docker_settings,
     persist_frozen_execution_spec,
     resolve_connection_config,
@@ -69,6 +71,7 @@ from kitaru.config import (
 )
 from kitaru.errors import (
     FailureOrigin,
+    KitaruAmbiguousFlowResultError,
     KitaruBackendError,
     KitaruDeploymentInputValuesError,
     KitaruRuntimeError,
@@ -580,13 +583,47 @@ def _extract_values_from_output_specs(run: PipelineRunResponse) -> list[Any]:
     return values
 
 
-class _MultipleTerminalStepsOutputError(KitaruRuntimeError):
-    """Raised when fallback result extraction sees several terminal steps."""
+class _MultipleTerminalStepsOutputError(KitaruAmbiguousFlowResultError):
+    """Raised when fallback result extraction sees several terminal steps.
+
+    Subclasses :class:`KitaruAmbiguousFlowResultError` so external callers can
+    catch the public ambiguity error, while internal adapters (e.g. the
+    Pydantic AI auto-flow path) can detect this specific subtype to recover
+    via in-memory results instead of re-raising.
+    """
 
 
 def _is_multiple_terminal_steps_output_error(error: BaseException) -> bool:
     """Return whether ``error`` came from ambiguous terminal-step extraction."""
     return isinstance(error, _MultipleTerminalStepsOutputError)
+
+
+def _ambiguous_terminal_message(execution_id: str, *, reason: str) -> str:
+    """Build a discoverable message when terminal-step extraction can't pick.
+
+    Common in agent-style flows where each model/tool call produces its own
+    checkpoint with no DAG sink — there is no single artifact that represents
+    "the" flow result, but the per-checkpoint artifacts are still visible in
+    the Kitaru UI and retrievable via ``KitaruClient``.
+    """
+    lines = [
+        f"This flow's return value cannot be extracted automatically because {reason}.",
+        "",
+        "This typically happens when a flow uses an agent adapter that "
+        "creates per-call checkpoints (e.g. `checkpoint_strategy='calls'`) "
+        "without a single sink. The per-checkpoint artifacts ARE persisted "
+        "and visible:",
+        f"  - View artifacts in the Kitaru UI for execution {execution_id}",
+        f"  - Retrieve via the client: "
+        f"`KitaruClient().executions.get('{execution_id}')` and inspect "
+        "checkpoint outputs",
+        "",
+        "To get a clean `.wait()` return value, either return a single "
+        "checkpoint's output from your flow, or use a coarser strategy "
+        "(e.g. `checkpoint_strategy='runner_call'` for the OpenAI Agents "
+        "adapter).",
+    ]
+    return "\n".join(lines)
 
 
 def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
@@ -612,23 +649,37 @@ def _extract_values_from_terminal_steps(run: PipelineRunResponse) -> list[Any]:
     )
     if not terminal_step_names:
         return []
+    execution_id = str(hydrated_run.id)
     if len(terminal_step_names) > 1:
         raise _MultipleTerminalStepsOutputError(
-            "Execution output metadata is missing and fallback extraction is "
-            "ambiguous because multiple terminal steps were found."
+            _ambiguous_terminal_message(
+                execution_id,
+                reason=(
+                    f"multiple terminal checkpoints were found "
+                    f"({len(terminal_step_names)}): "
+                    f"{', '.join(terminal_step_names)}"
+                ),
+            )
         )
 
     terminal_step_name = terminal_step_names[0]
     terminal_step = step_runs[terminal_step_name]
     if not terminal_step.regular_outputs:
         raise KitaruRuntimeError(
-            f"Execution {hydrated_run.id} has no regular outputs on terminal "
+            f"Execution {execution_id} has no regular outputs on terminal "
             f"step '{terminal_step_name}'."
         )
     if len(terminal_step.regular_outputs) > 1:
-        raise KitaruRuntimeError(
-            "Execution output metadata is missing and fallback extraction is "
-            "ambiguous because the terminal step has multiple outputs."
+        output_names = ", ".join(sorted(terminal_step.regular_outputs))
+        raise KitaruAmbiguousFlowResultError(
+            _ambiguous_terminal_message(
+                execution_id,
+                reason=(
+                    f"terminal checkpoint '{terminal_step_name}' has "
+                    f"{len(terminal_step.regular_outputs)} outputs: "
+                    f"{output_names}"
+                ),
+            )
         )
 
     output_name = next(iter(terminal_step.regular_outputs))
@@ -699,32 +750,6 @@ def _safe_classify_run_failure(run: PipelineRunResponse) -> FailureOrigin:
             exc_info=True,
         )
         return FailureOrigin.UNKNOWN
-
-
-def _deployment_metadata_for_stack(stack_name_or_id: str | None) -> dict[str, str]:
-    """Return privacy-safe flow analytics deployment metadata.
-
-    The metadata deliberately contains only the coarse Kitaru-owned deployment
-    class and a diagnostic source. It never includes stack names, stack IDs,
-    project names, server URLs, or other user-controlled selectors.
-    """
-    try:
-        deployment_type = classify_stack_deployment_type(stack_name_or_id)
-    except Exception:
-        logger.debug(
-            "Failed to classify stack deployment type for analytics (selector=%r).",
-            stack_name_or_id,
-            exc_info=True,
-        )
-        return {
-            "kitaru_deployment_type": "unknown",
-            "deployment_type_source": "kitaru_stack_inference_failed",
-        }
-
-    return {
-        "kitaru_deployment_type": deployment_type,
-        "deployment_type_source": "kitaru_stack_inference",
-    }
 
 
 def _duration_metadata_from_run(
@@ -808,6 +833,7 @@ class FlowHandle:
         *,
         observed_started_at: float | None = None,
         analytics_metadata: dict[str, Any] | None = None,
+        track_terminal_if_finished: bool = False,
     ) -> None:
         """Initialize a flow handle.
 
@@ -815,6 +841,8 @@ class FlowHandle:
             run: Initial pipeline run response.
             observed_started_at: SDK-observed start time from ``time.perf_counter``.
             analytics_metadata: Privacy-safe metadata captured at submission time.
+            track_terminal_if_finished: Emit terminal analytics immediately when
+                the initial run is already terminal.
         """
         self._run = run
         self._run_id = run.id
@@ -825,6 +853,13 @@ class FlowHandle:
             else time.perf_counter()
         )
         self._analytics_metadata = dict(analytics_metadata or {})
+
+        if track_terminal_if_finished and run.status.is_finished:
+            if not run.status.is_successful:
+                origin = _safe_classify_run_failure(run)
+                self._track_terminal_once(run, failure_origin=origin)
+            else:
+                self._track_terminal_once(run)
 
     @property
     def exec_id(self) -> str:
@@ -1310,6 +1345,7 @@ class _FlowDefinition:
             replayed_run,
             observed_started_at=observed_started_at,
             analytics_metadata=deployment_metadata,
+            track_terminal_if_finished=True,
         )
 
     def _submit(
@@ -1380,6 +1416,7 @@ class _FlowDefinition:
             run,
             observed_started_at=observed_started_at,
             analytics_metadata=deployment_metadata,
+            track_terminal_if_finished=True,
         )
 
 

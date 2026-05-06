@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.7.0"
+version = "0.9.0"
 description = "Durable execution for AI agents, built on ZenML"
 readme = "README.md"
 license = "Apache-2.0"
@@ -63,6 +63,9 @@ pydantic-ai = [
     "pydantic-ai-slim>=1.86.0,<2",
     "typing_extensions>=4.12",
 ]
+openai-agents = [
+    "openai-agents>=0.15.0,<0.16.0",
+]
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.58,<0.2",
 ]
@@ -111,6 +114,7 @@ dev = [
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
     "pydantic-ai-slim>=1.86.0,<2",
+    "openai-agents>=0.15.0,<0.16.0",
     "openai>=2.29.0,<3",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",

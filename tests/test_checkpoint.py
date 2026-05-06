@@ -213,6 +213,12 @@ def test_well_known_types_map_to_step_type() -> None:
         "kitaru": {"boundary": "checkpoint", "type": "tool_call"}
     }
 
+    _, memory_captured = _build_checkpoint(lambda: "ok", checkpoint_type="memory_call")
+    assert memory_captured["step_type"] == StepType.MEMORY_CALL
+    assert memory_captured["extra"] == {
+        "kitaru": {"boundary": "checkpoint", "type": "memory_call"}
+    }
+
 
 def test_custom_type_stays_in_extra_only() -> None:
     _, captured = _build_checkpoint(lambda: "ok", checkpoint_type="retrieval")
