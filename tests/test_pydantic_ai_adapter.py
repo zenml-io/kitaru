@@ -446,12 +446,8 @@ class TestEventTrackerToolCallOrdering:
         beta_id, beta_context = tracker.start_tool_event(tool_call_id="call_beta")
         alpha_id, alpha_context = tracker.start_tool_event(tool_call_id="call_alpha")
 
-        self._record_completed_tool(
-            tracker, beta_id, beta_context, name="beta"
-        )
-        self._record_completed_tool(
-            tracker, alpha_id, alpha_context, name="alpha"
-        )
+        self._record_completed_tool(tracker, beta_id, beta_context, name="beta")
+        self._record_completed_tool(tracker, alpha_id, alpha_context, name="alpha")
 
         assert [event.event_id for event in tracker.events] == [
             model_id,
@@ -477,12 +473,8 @@ class TestEventTrackerToolCallOrdering:
         )
         beta_id, beta_context = tracker.start_tool_event(tool_call_id="call_beta")
         alpha_id, alpha_context = tracker.start_tool_event(tool_call_id="call_alpha")
-        self._record_completed_tool(
-            tracker, beta_id, beta_context, name="beta"
-        )
-        self._record_completed_tool(
-            tracker, alpha_id, alpha_context, name="alpha"
-        )
+        self._record_completed_tool(tracker, beta_id, beta_context, name="beta")
+        self._record_completed_tool(tracker, alpha_id, alpha_context, name="alpha")
         logged: dict[str, Any] = {}
         monkeypatch.setattr(
             _tracking.kitaru,
